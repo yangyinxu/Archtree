@@ -1,0 +1,16 @@
+{
+  "actor": "5f1a0000000000000000f002",
+  "body": {
+    "operationId": "7c2d9e40-1b6a-4f83-a5d2-5f1a0000c0de",
+    "manifest": {
+      "rootLabel": "Synthetic Artist - Synthetic Album",
+      "files": [
+        { "slotId": "0B1E5C2A-6D3F-4A71-9E28-5F1A00000001", "filename": "01 - Opening.mp3", "relativePath": "Disc 1/01 - Opening.mp3", "byteLength": 1048576 },
+        { "slotId": "0B1E5C2A-6D3F-4A71-9E28-5F1A00000002", "filename": "02 - Interlude.mp3", "relativePath": "Disc 1/02 - Interlude.mp3", "byteLength": null },
+        { "slotId": "0B1E5C2A-6D3F-4A71-9E28-5F1A00000003", "filename": "01 - Reprise.mp3", "relativePath": "Disc 2/01 - Reprise.mp3", "byteLength": 2097152 }
+      ]
+    }
+  },
+  "importId": "de8e406fae87cfe79a7e6783",
+  "createReceiptHash": "7766699e942f96f54840a7d208a4b44d8e47b00dbe5f3e90e159a13bcf695998"
+}

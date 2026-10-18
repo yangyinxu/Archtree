@@ -1,0 +1,537 @@
+{
+  "_id": {
+    "$oid": "ca4de4084a58480a9d3175d1"
+  },
+  "actorId": "0000000000000000000000a1",
+  "revision": 14,
+  "createdAt": {
+    "$date": "2026-01-19T09:01:00Z"
+  },
+  "updatedAt": {
+    "$date": "2026-01-19T09:14:00Z"
+  },
+  "manifest": {
+    "rootLabel": "Synthetic Artist - Synthetic Album",
+    "files": [
+      {
+        "slotId": "00000005-0000-4000-a000-000000000001",
+        "filename": "01 - Dolor Finale.mp3",
+        "relativePath": "Disc 2/01 - Dolor Finale.mp3",
+        "byteLength": 6144
+      },
+      {
+        "slotId": "00000005-0000-4000-a000-000000000002",
+        "filename": "01 - Lorem Opening.mp3",
+        "relativePath": "Disc 1/01 - Lorem Opening.mp3",
+        "byteLength": 4096
+      },
+      {
+        "slotId": "00000005-0000-4000-a000-000000000003",
+        "filename": "02 - Ipsum Interlude.mp3",
+        "relativePath": "Disc 1/02 - Ipsum Interlude.mp3",
+        "byteLength": null
+      }
+    ]
+  },
+  "draft": {
+    "album": {
+      "title": "Synthetic Album",
+      "artistName": "Synthetic Artist",
+      "releaseDate": {
+        "year": 2025,
+        "month": 6,
+        "day": 20
+      },
+      "visibility": "public"
+    },
+    "tracks": [
+      {
+        "slotId": "00000005-0000-4000-a000-000000000001",
+        "title": "Dolor Finale",
+        "trackNumber": 3
+      },
+      {
+        "slotId": "00000005-0000-4000-a000-000000000002",
+        "title": "Lorem Opening",
+        "trackNumber": 1
+      },
+      {
+        "slotId": "00000005-0000-4000-a000-000000000003",
+        "title": "Ipsum Interlude",
+        "trackNumber": 2
+      }
+    ]
+  },
+  "analysis": {
+    "state": "idle",
+    "generation": 0,
+    "operationId": null,
+    "actorId": null,
+    "grantExpiresAt": null,
+    "baseline": null,
+    "chunks": [],
+    "issue": null,
+    "leaseOwner": null,
+    "leaseUntil": null
+  },
+  "analysisHistory": [],
+  "attemptsUsed": 0,
+  "suggestions": [],
+  "decisions": [
+    {
+      "scope": "artist",
+      "slotId": null,
+      "action": "create-distinct",
+      "candidateId": null,
+      "candidateRevision": null
+    },
+    {
+      "scope": "album",
+      "slotId": null,
+      "action": "create-distinct",
+      "candidateId": null,
+      "candidateRevision": null
+    },
+    {
+      "scope": "track",
+      "slotId": "00000005-0000-4000-a000-000000000001",
+      "action": "create-distinct",
+      "candidateId": null,
+      "candidateRevision": null
+    },
+    {
+      "scope": "track",
+      "slotId": "00000005-0000-4000-a000-000000000002",
+      "action": "create-distinct",
+      "candidateId": null,
+      "candidateRevision": null
+    },
+    {
+      "scope": "track",
+      "slotId": "00000005-0000-4000-a000-000000000003",
+      "action": "create-distinct",
+      "candidateId": null,
+      "candidateRevision": null
+    }
+  ],
+  "receipts": [
+    {
+      "operationId": "00000005-0000-4000-8000-000000000001",
+      "kind": "create",
+      "revision": 1,
+      "hash": "25130126cd4ecc23450f4db7fdcf72212c4bc3d64b4bd16e1a4a06fca1ba5d72",
+      "actorId": "0000000000000000000000a1",
+      "at": {
+        "$date": "2026-01-19T09:01:00Z"
+      }
+    },
+    {
+      "operationId": "00000005-0000-4000-8000-000000000002",
+      "kind": "upload",
+      "revision": 2,
+      "actorId": "0000000000000000000000a1",
+      "hash": "025b029b26967bd763bba4086bbcfff1659113d9827f06ed481100df45746023",
+      "at": {
+        "$date": "2026-01-19T09:02:00Z"
+      }
+    },
+    {
+      "operationId": "5b96bc78-d1cc-4b74-846c-4bb2061cb673",
+      "kind": "upload",
+      "revision": 4,
+      "actorId": "0000000000000000000000a1",
+      "hash": "523abb5bf271f5387ab3b2e02f7a9f74cfa89b137f238bd2409a92d25c85b000",
+      "at": {
+        "$date": "2026-01-19T09:04:00Z"
+      }
+    },
+    {
+      "operationId": "00000005-0000-4000-8000-000000000003",
+      "kind": "upload",
+      "revision": 6,
+      "actorId": "0000000000000000000000a1",
+      "hash": "76ffe2dd41004bc6d15b2c8f44d5fd41bf8faf9d7be987f9fc3cef5386f477b0",
+      "at": {
+        "$date": "2026-01-19T09:06:00Z"
+      }
+    },
+    {
+      "operationId": "493d210b-50bf-4534-8af7-d26aa2aac1c0",
+      "kind": "upload",
+      "revision": 8,
+      "actorId": "0000000000000000000000a1",
+      "hash": "95fdaf251591fe8eee31038c7200653ce10a462d31574d327c80cc021cfd4432",
+      "at": {
+        "$date": "2026-01-19T09:08:00Z"
+      }
+    },
+    {
+      "operationId": "00000005-0000-4000-8000-000000000004",
+      "kind": "upload",
+      "revision": 10,
+      "actorId": "0000000000000000000000a1",
+      "hash": "b772f691eee06c118f2a6ef222d67ead52891aca9ceda212d15e1dba1c136a3a",
+      "at": {
+        "$date": "2026-01-19T09:10:00Z"
+      }
+    },
+    {
+      "operationId": "00000005-0000-4000-8000-000000000005",
+      "kind": "select-cover",
+      "revision": 12,
+      "actorId": "0000000000000000000000a1",
+      "hash": "bfe9ac29d23a1c5945213452ca2c14d57299ba9edbae282073d9849e31d2e256",
+      "at": {
+        "$date": "2026-01-19T09:12:00Z"
+      }
+    },
+    {
+      "operationId": "00000005-0000-4000-8000-000000000006",
+      "kind": "decisions",
+      "revision": 13,
+      "actorId": "0000000000000000000000a1",
+      "hash": "8b8b5627d1663769733b0f8686e33608363c09893aeebc91f545ab60a2b15fd3",
+      "at": {
+        "$date": "2026-01-19T09:13:00Z"
+      }
+    },
+    {
+      "operationId": "00000005-0000-4000-8000-000000000007",
+      "kind": "publish",
+      "revision": 14,
+      "actorId": "0000000000000000000000a1",
+      "hash": "f4f8466217fc0ccf28578bf32e7b9d1ee3456f5fbd4de1910f5a1001d34aaf7d",
+      "at": {
+        "$date": "2026-01-19T09:14:00Z"
+      }
+    }
+  ],
+  "media": {
+    "assets": [
+      {
+        "slotId": "00000005-0000-4000-a000-000000000001",
+        "operationId": "00000005-0000-4000-8000-000000000002",
+        "actorId": "0000000000000000000000a1",
+        "bucket": "synthetic-private-imports",
+        "key": "imports/ca4de4084a58480a9d3175d1/00000005-0000-4000-a000-000000000001/00000005-0000-4000-8000-000000000002",
+        "sha256": "dae866d266d5b9d15cdc4178364a942bb8ed3a95c628dc378cbafacf39f26bcb",
+        "byteLength": 6144,
+        "contentType": "audio/mpeg",
+        "filename": "01 - Dolor Finale.mp3",
+        "state": "ready",
+        "versionId": "stage-version-1",
+        "etag": "\"stage-etag-1\"",
+        "updatedAt": {
+          "$date": "2026-01-19T09:03:00Z"
+        },
+        "leaseOwner": null,
+        "leaseUntil": null,
+        "duration": "04:11",
+        "format": "MP3",
+        "representation": {
+          "revision": "mr_00000000000000050000000000000001",
+          "objectKey": "imports/ca4de4084a58480a9d3175d1/00000005-0000-4000-a000-000000000001/00000005-0000-4000-8000-000000000002",
+          "byteLength": 6144,
+          "durationMs": 251000,
+          "seekable": true,
+          "format": "mp3",
+          "etag": null,
+          "versionId": null,
+          "analysisVersion": 2
+        },
+        "tags": {
+          "title": "Dolor Finale",
+          "album": "Synthetic Album",
+          "artists": [
+            "Synthetic Artist"
+          ],
+          "year": 2025,
+          "trackNumber": 1
+        },
+        "recovery": {
+          "operationId": "00000005-0000-4000-8000-000000000002",
+          "expectedRevision": 1,
+          "kind": "upload",
+          "actorId": "0000000000000000000000a1"
+        }
+      },
+      {
+        "slotId": "embedded-00000005-0000-4000-a000-000000000001",
+        "operationId": "5b96bc78-d1cc-4b74-846c-4bb2061cb673",
+        "actorId": "0000000000000000000000a1",
+        "bucket": "synthetic-private-imports",
+        "key": "imports/ca4de4084a58480a9d3175d1/embedded-00000005-0000-4000-a000-000000000001/5b96bc78-d1cc-4b74-846c-4bb2061cb673",
+        "sha256": "9f8f9ce198f0a6e562742f60d170c006f03bd7dd3499750239b06bfd1594f95e",
+        "byteLength": 3073,
+        "contentType": "image/jpeg",
+        "filename": "embedded.jpeg",
+        "state": "ready",
+        "versionId": "stage-version-2",
+        "etag": "\"stage-etag-2\"",
+        "updatedAt": {
+          "$date": "2026-01-19T09:05:00Z"
+        },
+        "leaseOwner": null,
+        "leaseUntil": null,
+        "duration": null,
+        "format": null,
+        "representation": null,
+        "tags": null,
+        "recovery": {
+          "operationId": "5b96bc78-d1cc-4b74-846c-4bb2061cb673",
+          "expectedRevision": 3,
+          "kind": "upload",
+          "actorId": "0000000000000000000000a1"
+        }
+      },
+      {
+        "slotId": "00000005-0000-4000-a000-000000000002",
+        "operationId": "00000005-0000-4000-8000-000000000003",
+        "actorId": "0000000000000000000000a1",
+        "bucket": "synthetic-private-imports",
+        "key": "imports/ca4de4084a58480a9d3175d1/00000005-0000-4000-a000-000000000002/00000005-0000-4000-8000-000000000003",
+        "sha256": "5a662382c43365ea716c3d5fbaebb8a0adaa81be81a7551164431d38450ddafc",
+        "byteLength": 4096,
+        "contentType": "audio/mpeg",
+        "filename": "01 - Lorem Opening.mp3",
+        "state": "ready",
+        "versionId": "stage-version-3",
+        "etag": "\"stage-etag-3\"",
+        "updatedAt": {
+          "$date": "2026-01-19T09:07:00Z"
+        },
+        "leaseOwner": null,
+        "leaseUntil": null,
+        "duration": "03:25",
+        "format": "MP3",
+        "representation": {
+          "revision": "mr_00000000000000050000000000000003",
+          "objectKey": "imports/ca4de4084a58480a9d3175d1/00000005-0000-4000-a000-000000000002/00000005-0000-4000-8000-000000000003",
+          "byteLength": 4096,
+          "durationMs": 205000,
+          "seekable": true,
+          "format": "mp3",
+          "etag": null,
+          "versionId": null,
+          "analysisVersion": 2
+        },
+        "tags": {
+          "title": "Lorem Opening",
+          "album": "Synthetic Album",
+          "artists": [
+            "Synthetic Artist"
+          ],
+          "year": 2025,
+          "trackNumber": 1
+        },
+        "recovery": {
+          "operationId": "00000005-0000-4000-8000-000000000003",
+          "expectedRevision": 5,
+          "kind": "upload",
+          "actorId": "0000000000000000000000a1"
+        }
+      },
+      {
+        "slotId": "embedded-00000005-0000-4000-a000-000000000002",
+        "operationId": "493d210b-50bf-4534-8af7-d26aa2aac1c0",
+        "actorId": "0000000000000000000000a1",
+        "bucket": "synthetic-private-imports",
+        "key": "imports/ca4de4084a58480a9d3175d1/embedded-00000005-0000-4000-a000-000000000002/493d210b-50bf-4534-8af7-d26aa2aac1c0",
+        "sha256": "b7fef3484ce6028fe33494a3c62276eb64e77804bab6beba663a441e47cfef63",
+        "byteLength": 3075,
+        "contentType": "image/jpeg",
+        "filename": "embedded.jpeg",
+        "state": "ready",
+        "versionId": "stage-version-4",
+        "etag": "\"stage-etag-4\"",
+        "updatedAt": {
+          "$date": "2026-01-19T09:09:00Z"
+        },
+        "leaseOwner": null,
+        "leaseUntil": null,
+        "duration": null,
+        "format": null,
+        "representation": null,
+        "tags": null,
+        "recovery": {
+          "operationId": "493d210b-50bf-4534-8af7-d26aa2aac1c0",
+          "expectedRevision": 7,
+          "kind": "upload",
+          "actorId": "0000000000000000000000a1"
+        }
+      },
+      {
+        "slotId": "00000005-0000-4000-a000-000000000003",
+        "operationId": "00000005-0000-4000-8000-000000000004",
+        "actorId": "0000000000000000000000a1",
+        "bucket": "synthetic-private-imports",
+        "key": "imports/ca4de4084a58480a9d3175d1/00000005-0000-4000-a000-000000000003/00000005-0000-4000-8000-000000000004",
+        "sha256": "e8682aac1d45b8e38c888dcdbc5506542c7c6dd1970e9f4323e16bfc9f01d07c",
+        "byteLength": 3076,
+        "contentType": "audio/mpeg",
+        "filename": "02 - Ipsum Interlude.mp3",
+        "state": "ready",
+        "versionId": "stage-version-5",
+        "etag": "\"stage-etag-5\"",
+        "updatedAt": {
+          "$date": "2026-01-19T09:11:00Z"
+        },
+        "leaseOwner": null,
+        "leaseUntil": null,
+        "duration": "01:38",
+        "format": "MP3",
+        "representation": {
+          "revision": "mr_00000000000000050000000000000005",
+          "objectKey": "imports/ca4de4084a58480a9d3175d1/00000005-0000-4000-a000-000000000003/00000005-0000-4000-8000-000000000004",
+          "byteLength": 3076,
+          "durationMs": 98000,
+          "seekable": true,
+          "format": "mp3",
+          "etag": null,
+          "versionId": null,
+          "analysisVersion": 2
+        },
+        "tags": {
+          "title": "Ipsum Interlude",
+          "album": "Synthetic Album",
+          "artists": [
+            "Synthetic Artist"
+          ],
+          "year": 2025,
+          "trackNumber": 2
+        },
+        "recovery": {
+          "operationId": "00000005-0000-4000-8000-000000000004",
+          "expectedRevision": 9,
+          "kind": "upload",
+          "actorId": "0000000000000000000000a1"
+        }
+      }
+    ],
+    "selectedCoverSlotId": "embedded-00000005-0000-4000-a000-000000000002",
+    "publication": {
+      "operationId": "00000005-0000-4000-8000-000000000007",
+      "actorId": "0000000000000000000000a1",
+      "approvedRevision": 13,
+      "snapshot": {
+        "album": {
+          "title": "Synthetic Album",
+          "artistName": "Synthetic Artist",
+          "releaseDate": {
+            "year": 2025,
+            "month": 6,
+            "day": 20
+          },
+          "visibility": "public"
+        },
+        "tracks": [
+          {
+            "slotId": "00000005-0000-4000-a000-000000000001",
+            "title": "Dolor Finale",
+            "trackNumber": 3
+          },
+          {
+            "slotId": "00000005-0000-4000-a000-000000000002",
+            "title": "Lorem Opening",
+            "trackNumber": 1
+          },
+          {
+            "slotId": "00000005-0000-4000-a000-000000000003",
+            "title": "Ipsum Interlude",
+            "trackNumber": 2
+          }
+        ]
+      },
+      "decisions": [
+        {
+          "scope": "artist",
+          "slotId": null,
+          "action": "create-distinct",
+          "candidateId": null,
+          "candidateRevision": null
+        },
+        {
+          "scope": "album",
+          "slotId": null,
+          "action": "create-distinct",
+          "candidateId": null,
+          "candidateRevision": null
+        },
+        {
+          "scope": "track",
+          "slotId": "00000005-0000-4000-a000-000000000001",
+          "action": "create-distinct",
+          "candidateId": null,
+          "candidateRevision": null
+        },
+        {
+          "scope": "track",
+          "slotId": "00000005-0000-4000-a000-000000000002",
+          "action": "create-distinct",
+          "candidateId": null,
+          "candidateRevision": null
+        },
+        {
+          "scope": "track",
+          "slotId": "00000005-0000-4000-a000-000000000003",
+          "action": "create-distinct",
+          "candidateId": null,
+          "candidateRevision": null
+        }
+      ],
+      "state": "preparing",
+      "issue": null,
+      "grantExpiresAt": {
+        "$date": "2026-01-20T09:14:00Z"
+      },
+      "artistId": "000000000005000000000001",
+      "newArtist": true,
+      "albumId": "000000000005000000000009",
+      "newAlbum": true,
+      "albumRevision": null,
+      "coverId": "000000000005000000000008",
+      "tracks": [
+        {
+          "slotId": "00000005-0000-4000-a000-000000000002",
+          "id": "000000000005000000000004",
+          "key": "audio/000000000005000000000004/000000000005000000000005",
+          "reused": false,
+          "candidateRevision": null,
+          "state": "pending",
+          "versionId": null,
+          "etag": null
+        },
+        {
+          "slotId": "00000005-0000-4000-a000-000000000003",
+          "id": "000000000005000000000006",
+          "key": "audio/000000000005000000000006/000000000005000000000007",
+          "reused": false,
+          "candidateRevision": null,
+          "state": "pending",
+          "versionId": null,
+          "etag": null
+        },
+        {
+          "slotId": "00000005-0000-4000-a000-000000000001",
+          "id": "000000000005000000000002",
+          "key": "audio/000000000005000000000002/000000000005000000000003",
+          "reused": false,
+          "candidateRevision": null,
+          "state": "pending",
+          "versionId": null,
+          "etag": null
+        }
+      ],
+      "cover": {
+        "slotId": "embedded-00000005-0000-4000-a000-000000000002",
+        "key": "images/000000000005000000000008",
+        "state": "pending",
+        "versionId": null,
+        "etag": null
+      },
+      "bucket": "synthetic-catalog",
+      "leaseOwner": null,
+      "leaseUntil": null
+    }
+  }
+}

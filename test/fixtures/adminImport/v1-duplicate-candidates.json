@@ -1,0 +1,90 @@
+{
+  "artists": [
+    {
+      "_id": {
+        "$oid": "0000000000000000000000c1"
+      },
+      "name": "Synthetic Artist",
+      "coverArtUrl": "",
+      "visibility": "public",
+      "lifecycleStatus": "ready"
+    }
+  ],
+  "albums": [
+    {
+      "_id": {
+        "$oid": "0000000000000000000000c2"
+      },
+      "title": "Synthetic Album",
+      "coverArtId": "0000000000000000000000c4",
+      "coverArtUrl": "/content/images/0000000000000000000000c4",
+      "creditRevision": 1,
+      "audioTrackIds": [
+        "0000000000000000000000c3"
+      ],
+      "releaseDate": {
+        "year": 2025,
+        "month": 6
+      },
+      "credits": [
+        {
+          "creditId": "import_primary_0000000000000000000000c1",
+          "subjectType": "artist",
+          "subjectId": "0000000000000000000000c1",
+          "role": "primary",
+          "order": 0
+        }
+      ],
+      "visibility": "public",
+      "lifecycleStatus": "ready"
+    }
+  ],
+  "audioTracks": [
+    {
+      "_id": {
+        "$oid": "0000000000000000000000c3"
+      },
+      "title": "Lorem Opening",
+      "coverArtUrl": "",
+      "creditRevision": 1,
+      "albumId": "0000000000000000000000c2",
+      "releaseDate": {
+        "year": 2025,
+        "month": 6
+      },
+      "credits": [
+        {
+          "creditId": "import_primary_0000000000000000000000c1",
+          "subjectType": "artist",
+          "subjectId": "0000000000000000000000c1",
+          "role": "primary",
+          "order": 0
+        }
+      ],
+      "visibility": "public",
+      "uploadStatus": "ready",
+      "publicationStatus": "ready",
+      "mediaType": "audio",
+      "s3Key": "audio/0000000000000000000000c3/0000000000000000000000c5",
+      "mediaRepresentation": {
+        "revision": "mr_000000000000000000000000000000c3",
+        "objectKey": "audio/0000000000000000000000c3/0000000000000000000000c5",
+        "byteLength": 4096,
+        "durationMs": 205000,
+        "seekable": true,
+        "format": "mp3",
+        "etag": "\"catalog-etag-c3\"",
+        "versionId": "catalog-version-c3",
+        "analysisVersion": 2
+      },
+      "mediaByteHash": {
+        "algorithm": "sha256",
+        "value": "1adfb897aa7899e64e0ca5c167ed83220a8e0da532b73e1d781bcdb57b33b544",
+        "byteLength": 4096,
+        "objectKey": "audio/0000000000000000000000c3/0000000000000000000000c5",
+        "etag": "\"catalog-etag-c3\"",
+        "versionId": "catalog-version-c3"
+      }
+    }
+  ]
+}
