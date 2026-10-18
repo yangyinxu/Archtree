@@ -9,12 +9,14 @@
  *   - extensionless FLAC and renamed WAV decode and download with consistent MP3 filenames
  *   - an empty existing Album displays a clear explanation without a schema error
  *   - lost upload response reconciles the same operation and deletes only the confirmed local MP3
+ *   - a conversion-created import uploads its MP3s through the same one-approval queue
  * @end-catalog */
 
 import { expect, test, type Page } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { capabilities, session, viewer } from '../src/features/admin/adminFixtures.testSupport';
+import { capabilities, detail, session, viewer } from '../src/features/admin/adminFixtures.testSupport';
 
 /** An original synthetic tone fixture exercises the full decoder without music rights or external services. */
 function wave(seconds = 2) {
@@ -209,4 +211,37 @@ test('lost upload response reconciles the same operation and deletes only the co
   await expect(page.getByText('MP3 confirmed online; local MP3 cache removed', { exact: true })).toBeVisible();
   await expect(page.getByText('Lossless source retained on this device', { exact: true })).toBeVisible();
   expect(uploadCount).toBe(1); expect(reads).toBeGreaterThan(0);
+});
+
+test('a conversion-created import uploads its MP3s through the same one-approval queue', async ({ page }) => {
+  const created: Array<Record<string, any>> = [], uploads: Array<{ slot: string; byteLength: number }> = [];
+  let item = detail(), active = 0, max = 0, dialogs = 0; page.on('dialog', () => { dialogs++; });
+  await setup(page, async (path, route) => {
+    const request = route.request();
+    if (request.method() === 'POST' && path === '/api/admin/v1/imports') {
+      const body = request.postDataJSON(); created.push(body);
+      item = { ...detail(), manifest: body.manifest, suggestions: [], publication: 'notStarted', capabilities: { analysis: true, upload: true, publish: false }, upload: { ready: 0, total: body.manifest.files.length, available: true },
+        draft: { album: detail().draft.album, tracks: body.manifest.files.map((file: { slotId: string }) => ({ slotId: file.slotId, title: '', trackNumber: null })) } };
+      return route.fulfill({ status: 201, json: { item, receipt: { operationId: body.operationId, kind: 'create', revision: 1 } }, headers });
+    }
+    if (request.method() === 'POST' && path.includes('/assets/')) {
+      active++; max = Math.max(max, active); await new Promise(resolve => setTimeout(resolve, 50));
+      const raw = request.postDataBuffer()!, bytes = raw.subarray(raw.indexOf('\r\n\r\n') + 4, raw.lastIndexOf('\r\n--'));
+      const slot = decodeURIComponent(path.split('/').at(-1)!), operationId = request.headers()['idempotency-key']; uploads.push({ slot, byteLength: bytes.length });
+      item = { ...item, revision: item.revision + 1, assets: [...item.assets, { slotId: slot, state: 'ready', byteLength: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex'), contentType: 'audio/mpeg', tags: null, recovery: { operationId, expectedRevision: Number(request.headers()['if-match']), kind: 'upload', startedByMe: true } }] };
+      active--; return route.fulfill({ json: { item, receipt: { operationId, kind: 'upload', revision: item.revision } }, headers });
+    }
+    if (path.startsWith('/api/admin/v1/imports/')) return route.fulfill({ json: { item, receipt: null }, headers });
+    return route.fulfill({ status: 503, json: { code: 'synthetic_unavailable' }, headers });
+  });
+  await open(page); await requireConversionStorage(page);
+  await select(page, [{ name: '01-Tone.wav', mimeType: 'audio/wav', buffer: wave() }, { name: '02-Tone.wav', mimeType: 'audio/wav', buffer: wave(1) }]);
+  await page.getByRole('button', { name: 'Convert / resume Album' }).click();
+  await expect(page.getByText('MP3 ready locally', { exact: true })).toHaveCount(2);
+  await page.getByRole('button', { name: 'Create import draft from MP3s' }).click();
+  await expect.poll(() => uploads.length).toBe(2);
+  expect(created).toHaveLength(1);
+  expect(uploads).toEqual(created[0].manifest.files.map((file: { slotId: string; byteLength: number }) => ({ slot: file.slotId, byteLength: file.byteLength })));
+  expect(max).toBe(1); expect(dialogs).toBe(0); await expect(page.getByRole('dialog')).toHaveCount(0);
+  await page.getByRole('tab', { name: 'Files', exact: true }).click(); await expect(page.getByText('2 of 2 files uploaded')).toBeVisible();
 });

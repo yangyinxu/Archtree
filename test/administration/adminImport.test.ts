@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { randomUUID } from 'node:crypto';
 import { AdminImportError, defaultDraft, parseDraft, parseImportDate, parseManifest } from '../../src/administration/import/adminImportContract';
-import { ImportProviderError, OpenAiImportAnalysisProvider, parseImportJson, validateAnalysisSuggestions, type AnalysisInput } from '../../src/administration/import/adminImportProvider';
+import { ImportProviderError, OpenAiImportAnalysisProvider, analysisContext, parseImportJson, validateAnalysisSuggestions, type AnalysisInput } from '../../src/administration/import/adminImportProvider';
 
 const slotId = randomUUID();
 const manifest = { rootLabel: 'Synthetic Artist - Album', files: [{ slotId, filename: '01 - Song.mp3', relativePath: 'Disc 1/01 - Song.mp3', byteLength: 123 }] };
@@ -65,5 +65,29 @@ test('a successful HTTP status with interrupted response bytes remains an uncert
     try {
         const body = new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(new TextEncoder().encode('{"status":')); }, pull(controller) { controller.error(new Error('private transport failure')); } });
         await assert.rejects(new OpenAiImportAnalysisProvider(async () => new Response(body)).analyze(input()), (error: ImportProviderError) => error.issue === 'providerOutcomeUnknown' && !error.message.includes('private'));
+    } finally { if (previous === undefined) delete process.env.OPENAI_API_KEY; else process.env.OPENAI_API_KEY = previous; }
+});
+test('naming manifest accepts an empty rootLabel only when no relative path has a folder', () => {
+    const flat = { rootLabel: '', files: [{ slotId, filename: '01 - Song.mp3', relativePath: '01 - Song.mp3', byteLength: 123 }] };
+    assert.deepEqual(parseManifest(flat), flat);
+    assert.deepEqual(parseManifest({ ...flat, rootLabel: '  ' }), flat);
+    invalid(() => parseManifest({ ...manifest, rootLabel: '' }));
+    invalid(() => parseManifest({ ...manifest, rootLabel: '   ' }));
+});
+test('folderless import analysis sends no folder name to Luna and rejects folder-sourced suggestions', async () => {
+    const previous = process.env.OPENAI_API_KEY; process.env.OPENAI_API_KEY = 'synthetic-key'; const sent: Record<string, any>[] = [];
+    const flat = { rootLabel: '', files: [{ slotId, filename: '01 - Song.mp3', relativePath: '01 - Song.mp3', byteLength: 123 }] };
+    const folderless = (): AnalysisInput => ({ ...input(), manifest: flat, baseline: defaultDraft(flat) });
+    const review: AnalysisInput = { ...folderless(), purpose: 'catalogReview' };
+    try {
+        const provider = new OpenAiImportAnalysisProvider(async (_url, init) => { sent.push(JSON.parse(JSON.parse(init!.body as string).input)); return new Response(JSON.stringify(output(JSON.stringify({ suggestions: [] })))); });
+        for (const value of [folderless(), input(), review]) await provider.analyze(value);
+        assert.deepEqual(Object.keys(sent[0].manifest), ['files']); assert.deepEqual(sent[0].manifest.files, flat.files);
+        assert.equal(sent[1].manifest.rootLabel, manifest.rootLabel); assert.equal(sent[2].manifest.rootLabel, '');
+        assert.deepEqual(analysisContext(input()), input()); assert.deepEqual(analysisContext(review), review);
+        const track = { ...suggestion(), source: 'filename', evidence: '01 - Song.mp3' };
+        assert.equal(validateAnalysisSuggestions({ suggestions: [track] }, folderless()).length, 1);
+        assert.throws(() => validateAnalysisSuggestions({ suggestions: [suggestion()] }, folderless()), ImportProviderError);
+        assert.equal(validateAnalysisSuggestions({ suggestions: [suggestion()] }, input()).length, 1);
     } finally { if (previous === undefined) delete process.env.OPENAI_API_KEY; else process.env.OPENAI_API_KEY = previous; }
 });

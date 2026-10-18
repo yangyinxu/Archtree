@@ -3,18 +3,20 @@
  *   Functions: AdminViewLabel, useAdminText, useAdminAccess, AdminControls, AdminGate, enterAdminView,
  *              revokeOnAdminFailure
  * Internal
+ *   Functions: readCapabilities
  *   Constants: styles
  * @end-catalog */
 
 import { useEffect, useLayoutEffect, useState, type ReactNode } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useLocation, useNavigate } from 'react-router';
+import { z } from 'zod';
 import { ApiError, apiRequest } from '../../api/client';
 import { browserSessionQuery, browserSessionResolvingQuery } from '../../api/session';
 import { captureAccountOperation, isAccountOperationCurrent } from '../../api/accountEpoch';
 import { useLocalization } from '../../localization/LocalizationProvider';
 import type { MessageKey, MessageVariables } from '../../localization/contract';
-import { adminWorkspace, useAdminWorkspace } from './adminWorkspace';
+import { ADMIN_RELOAD_REQUIRED, adminWorkspace, useAdminWorkspace } from './adminWorkspace';
 import { Icon } from '../../components/Icon';
 import page from '../../styles/Pages.module.css';
 const styles: Record<string, string> = { view: page.view, viewButton: page.viewButton, workbenchLink: page.workbenchLink, menu: page.menu, page: page.page, title: page.pageTitle, muted: page.lede, button: `${page.button} ${page.buttonSecondary}`, link: page.secondaryLink };
@@ -41,6 +43,16 @@ export const useAdminAccess = () => {
   return { ...state, available, active: Boolean(available && state.mode === 'admin') };
 };
 
+/** An outdated strict capability schema requests a page reload instead of an ordinary retry. */
+async function readCapabilities(viewerId: string, signal?: AbortSignal) {
+  const { capabilitySchema } = await import('./adminCapabilities');
+  signal?.throwIfAborted();
+  const raw = await apiRequest('/api/admin/v1/capabilities', z.unknown(), { accountViewer: viewerId, signal, cache: 'no-store' });
+  const parsed = capabilitySchema.safeParse(raw);
+  if (!parsed.success) { adminWorkspace.requireReload(); throw new ApiError('The administrator workbench needs a reload.', 'invalid-response', 200, ADMIN_RELOAD_REQUIRED); }
+  return parsed.data;
+}
+
 /** The shell owns capability refresh; view changes never replace the player or account session. */
 export const AdminControls = ({ hideWorkbenchLink = false }: { hideWorkbenchLink?: boolean }) => {
   const t = useAdminText();
@@ -57,12 +69,11 @@ export const AdminControls = ({ hideWorkbenchLink = false }: { hideWorkbenchLink
     queryKey: ['admin-capabilities', viewerId, epoch], enabled: Boolean(viewerId),
     queryFn: async ({ signal }) => {
       const authority = adminWorkspace.getSnapshot().authority;
-      const { capabilitySchema } = await import('./adminCapabilities');
-      signal.throwIfAborted();
-      const data = await apiRequest('/api/admin/v1/capabilities', capabilitySchema, { accountViewer: viewerId, signal, cache: 'no-store' });
+      const data = await readCapabilities(viewerId, signal);
       return { ...data, authority };
     },
-    retry: false, staleTime: 30_000, gcTime: 0, refetchOnWindowFocus: false
+    // A refetch suspends the workspace, which would stop a running upload queue; reconnecting is not a reason to recheck.
+    retry: false, staleTime: 30_000, gcTime: 0, refetchOnWindowFocus: false, refetchOnReconnect: false
   });
   useLayoutEffect(() => {
     if (!viewerId) { adminWorkspace.reset(); return; }
@@ -92,6 +103,7 @@ export const AdminControls = ({ hideWorkbenchLink = false }: { hideWorkbenchLink
     adminWorkspace.retain('lastRoute', location.pathname, state);
   } }, [location.pathname, state.mode, state.authorized]);
   if (!viewerId || capabilities.isFetching) return null;
+  if (state.reloadRequired && !state.authorized) return <button className={styles.button} type="button" title={t('common.reload')} onClick={() => window.location.reload()}>{t('common.reload_action')}</button>;
   if (!state.authorized || state.viewerId !== viewerId || state.epoch !== epoch) return <button className={styles.button} type="button" title={t('view.required')} onClick={() => void capabilities.refetch()}>{t('common.retry')}</button>;
   const viewLabel = t(state.mode === 'admin' ? 'view.current_admin' : 'view.current_user');
   return <div className={styles.view}>
@@ -122,9 +134,9 @@ export async function enterAdminView() {
   if (!previous.authorized || !isAccountOperationCurrent(previous)) return;
   adminWorkspace.suspend();
   try {
-    const { capabilitySchema } = await import('./adminCapabilities');
+    await import('./adminCapabilities');
     if (!adminWorkspace.current(previous, false)) return;
-    const result = await apiRequest('/api/admin/v1/capabilities', capabilitySchema, { accountViewer: previous.viewerId, cache: 'no-store' });
+    const result = await readCapabilities(previous.viewerId);
     adminWorkspace.authorize(previous, result.albumImports.enabled, result.albumImports.analysisAvailable, previous.authority, result.catalog, Boolean(result.localMp3Conversion?.enabled));
     if (adminWorkspace.getSnapshot().authority === previous.authority) adminWorkspace.select('admin');
   } catch (error) { revokeOnAdminFailure(error); }

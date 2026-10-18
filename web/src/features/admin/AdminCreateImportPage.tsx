@@ -1,13 +1,30 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
+import type { ImportDetail } from './adminApi';
 import { AdminGate, useAdminAccess, useAdminText } from './AdminAccess';
 import { adminWorkspace } from './adminWorkspace';
+import type { AdminGuard } from './adminTransport';
+import { importUploadQueue } from './importUploadQueue';
 import { namingManifest, type NamingManifest } from './manifest';
-import { useAdminMutation } from './useAdminMutation';
+import { useAdminMutation, type AdminMutation } from './useAdminMutation';
 import { MutationStatus, useOnline } from './AdminShared';
 import { AdminNav } from './AdminNav';
 import styles from './adminStyles';
 
+/** How many New import pages are mounted; a create confirmed while none is shows a fresh form on the next visit. */
+let openPages = 0;
+/**
+ * Runs when Create is confirmed, mounted or not: the selected files move to the new import and its queue starts once,
+ * under the Create click's guard, so a view changed since then stops it before any file is sent.
+ */
+function handOff(item: ImportDetail, approval: AdminGuard) {
+  const sources = adminWorkspace.buffer<Record<string, File>>('create-files');
+  if (sources) { adminWorkspace.retain(`files:${item.id}`, sources, approval); importUploadQueue(item.id, approval).start(item, sources, approval); }
+  adminWorkspace.forget('create-files'); adminWorkspace.forget('create-manifest');
+  if (!openPages) adminWorkspace.forget('mutation:create');
+}
+
+/** Creating the import is the one approval that uploads every selected file; files chosen without a folder need no folder name. */
 function CreateImport() {
   const t = useAdminText();
   const access = useAdminAccess();
@@ -19,13 +36,12 @@ function CreateImport() {
   const [invalid, setInvalid] = useState(false);
   const mutation = useAdminMutation('create');
   const locked = mutation.running || Boolean(mutation.intent);
+  const needsFolder = Boolean(manifest?.files.some(file => file.relativePath.includes('/')));
   useEffect(() => { folder.current?.setAttribute('webkitdirectory', ''); }, []);
   useEffect(() => { if (manifest) adminWorkspace.retain('create-manifest', manifest, access); }, [manifest]);
+  // The upload hand-off already ran at confirmation; a mounted page only opens the new import.
   useEffect(() => { if (mutation.result) {
-    const sources = adminWorkspace.buffer<Record<string, File>>('create-files');
-    if (sources) adminWorkspace.retain(`files:${mutation.result.item.id}`, sources, access);
-    adminWorkspace.forget('create-files');
-    adminWorkspace.forget('create-manifest'); adminWorkspace.forget('mutation:create'); navigate(`/admin/imports/${mutation.result.item.id}`, { replace: true });
+    adminWorkspace.forget('mutation:create'); navigate(`/admin/imports/${mutation.result.item.id}`, { replace: true });
   } }, [mutation.result, navigate]);
   const select = (list: FileList | null) => {
     if (!list || locked) return;
@@ -34,11 +50,16 @@ function CreateImport() {
       setManifest(next); setInvalid(false);
     } catch { setInvalid(true); }
   };
+  const submit = () => {
+    if (!manifest || !access.imports || needsFolder && !manifest.rootLabel.trim()) return;
+    const approval = adminWorkspace.capture();
+    mutation.operation.run('', 'POST', { manifest: needsFolder ? manifest : { ...manifest, rootLabel: '' } }, result => handOff(result.item, approval));
+  };
   return <section className={styles.page}><AdminNav />
     <Link className={styles.back} to="/admin/imports">{t('common.back')}</Link>
     <h1 className={styles.title}>{t('workbench.new')}</h1><p className={styles.muted}>{t('import.intro')}</p>
     <p className={styles.panel}>{t('import.manifest_only')}</p>
-    <form className={styles.form} onSubmit={event => { event.preventDefault(); if (manifest && access.imports) mutation.operation.run('', 'POST', { manifest }); }}>
+    <form className={styles.form} onSubmit={event => { event.preventDefault(); submit(); }}>
       <div className={styles.actions}>
         <button className={styles.button} type="button" disabled={locked || !access.imports} onClick={() => folder.current?.click()}>{t('import.folder')}</button>
         <button className={styles.button} type="button" disabled={locked || !access.imports} onClick={() => files.current?.click()}>{t('import.files')}</button>
@@ -47,15 +68,28 @@ function CreateImport() {
       </div>
       {invalid && <p role="alert">{t('import.invalid_files')}</p>}
       {manifest && <>
-        <label className={styles.field}>{t('import.root')}<input className={styles.input} required maxLength={200} pattern="[^/\\\\]+" value={manifest.rootLabel} disabled={locked} onChange={event => setManifest({ ...manifest, rootLabel: event.target.value })} /></label>
-        <p className={styles.muted}>{t('import.root_help')}</p>
+        {needsFolder && <>
+          <label className={styles.field}>{t('import.root')}<input className={styles.input} required maxLength={200} pattern="[^/\\\\]+" value={manifest.rootLabel} disabled={locked} onChange={event => setManifest({ ...manifest, rootLabel: event.target.value })} /></label>
+          <p className={styles.muted}>{t('import.root_help')}</p>
+        </>}
         <p>{t('import.file_count', { count: manifest.files.length })}</p>
         <ul className={styles.files}>{manifest.files.map(file => <li key={file.slotId}>{file.relativePath}</li>)}</ul>
       </>}
       {!online && <p role="status">{t('common.offline')}</p>}
       <MutationStatus mutation={mutation} />
-      <div><button className={`${styles.button} ${styles.primary}`} type="submit" disabled={!manifest?.rootLabel.trim() || locked || !online || !access.imports}>{t('import.create')}</button></div>
+      <div><button className={`${styles.button} ${styles.primary}`} type="submit" disabled={!manifest || needsFolder && !manifest.rootLabel.trim() || locked || !online || !access.imports}>{t('import.create')}</button></div>
     </form>
   </section>;
 }
-export const AdminCreateImportPage = () => <AdminGate><CreateImport /></AdminGate>;
+/** Leaving the page (not a view switch, which keeps it mounted) means a later visit starts a new import. */
+export function AdminCreateImportPage() {
+  useEffect(() => {
+    openPages++;
+    return () => {
+      openPages--;
+      const finished = adminWorkspace.buffer<AdminMutation>('mutation:create')?.getSnapshot();
+      if (!openPages && finished?.result) adminWorkspace.forget('mutation:create');
+    };
+  }, []);
+  return <AdminGate><CreateImport /></AdminGate>;
+}

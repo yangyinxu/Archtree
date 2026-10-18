@@ -13,8 +13,8 @@
  *   Types: Receipt, Chunk, Analysis
  *   Functions: notFound, conflict, isActive, admit, idValue, response, valueAt, candidate, readyCandidate,
  *              boundedTags, reserveDailyAnalysisAttempt
- *   Constants: collection, digest, occupiedAnalysis, touchAdmin, withAdmin, importPolicy, mutation, mutate,
- *              filters, candidateProjection, candidateCollection
+ *   Constants: collection, digest, occupiedAnalysis, touchAdmin, withAdmin, importPolicy, mutation,
+ *              slotBoundKinds, mutate, filters, candidateProjection, candidateCollection
  * @end-catalog */
 
 import { startAdminWorker, type AdminWorkTracker } from '../adminWorkerLifecycle';
@@ -34,7 +34,7 @@ export type ProjectReceipt = Omit<ImportReceipt, 'kind'> & { kind: ImportReceipt
 type Receipt = ProjectReceipt;
 type Chunk = { index: number; slots: string[]; album: boolean; hash: string; state: 'pending' | 'inflight' | 'complete' | 'failed' | 'unknown'; attemptId: string | null; startedAt: Date | null; completedAt: Date | null };
 type Analysis = { state: ImportAnalysisState; generation: number; operationId: string | null; actorId: string | null; grantExpiresAt: Date | null; baseline: ImportDraft | null; tags?: { slotId: string; tags: ImportEmbeddedTags }[]; chunks: Chunk[]; issue: ImportIssue; leaseOwner: string | null; leaseUntil: Date | null };
-export type AdminImportDocument = { purpose?: 'import' | 'catalogReview' | null; catalogSource?: CatalogReviewSource; catalogEvidence?: Record<string, string>; catalogApplied?: CatalogReviewApplied; _id: ObjectId; actorId: string; revision: number; createdAt: Date; updatedAt: Date; manifest: ImportManifest; draft: ImportDraft; analysis: Analysis; analysisHistory: Analysis[]; attemptsUsed: number; suggestions: ImportSuggestion[]; decisions: ImportDuplicateDecision[]; receipts: Receipt[]; recoveryReceipts?: Receipt[]; media?: ImportMedia };
+export type AdminImportDocument = { purpose?: 'import' | 'catalogReview' | null; catalogSource?: CatalogReviewSource; catalogEvidence?: Record<string, string>; catalogApplied?: CatalogReviewApplied; _id: ObjectId; actorId: string; revision: number; createdAt: Date; updatedAt: Date; manifest: ImportManifest; draft: ImportDraft; analysis: Analysis; analysisHistory: Analysis[]; attemptsUsed: number; suggestions: ImportSuggestion[]; decisions: ImportDuplicateDecision[]; receipts: Receipt[]; recoveryReceipts?: Receipt[]; automaticReceipts?: Receipt[]; media?: ImportMedia };
 export const importCollection = () => getDb()!.collection<AdminImportDocument>('adminAlbumImports');
 const collection = importCollection;
 /** Legacy documents have no purpose; explicit review projects never enter old import surfaces. */
@@ -99,15 +99,21 @@ const importPolicy: AdminProjectPolicy<AdminImportResponse> = { purpose: 'import
 export function parseAdminProjectMutation(raw: unknown, extra: string[]) { const body = record(raw); exact(body, ['operationId', 'expectedRevision', ...extra]); if (!uuid(body.operationId) || !Number.isSafeInteger(body.expectedRevision) || (body.expectedRevision as number) < 1) return invalidImport(); return body as typeof body & { operationId: string; expectedRevision: number }; }
 
 const mutation = parseAdminProjectMutation;
+/** Kinds admitted against slot/lifecycle state, not the whole-project revision; S8 widens this set. */
+const slotBoundKinds: ReadonlySet<Receipt['kind']> = new Set(['upload']);
 
-/** Receipt lookup precedes revision checks: an uncertain acknowledgement must replay the original intent. */
+/**
+ * Receipt lookup precedes revision checks: an uncertain acknowledgement must replay the original intent.
+ * Uploads bind slot state and intent; If-Match stays in the hash. Automatic lifecycle receipts share the
+ * UUID space, so a collision with one is an operation conflict.
+ */
 export async function mutateAdminProject<T>(actor: string, id: string, body: Record<string, unknown> & { operationId: string; expectedRevision: number }, kind: Receipt['kind'], change: (doc: AdminImportDocument, session: ClientSession) => Promise<void>, policy: AdminProjectPolicy<T>): Promise<T> {
     const _id = idValue(id), hash = digest({ kind, body });
     return withAdmin(actor, async session => {
         const doc = await collection().findOne({ _id, ...(policy.purpose === 'import' ? importPurposeFilter : { purpose: policy.purpose }) }, { session }); if (!doc) throw notFound();
-        const prior = [...doc.receipts, ...(doc.recoveryReceipts ?? [])].find(receipt => receipt.operationId === body.operationId);
+        const prior = [...doc.receipts, ...(doc.recoveryReceipts ?? []), ...(doc.automaticReceipts ?? [])].find(receipt => receipt.operationId === body.operationId);
         if (prior) { if (prior.hash !== hash || (prior.actorId !== actor && kind !== 'cleanup')) throw conflict('ADMIN_IMPORT_OPERATION_CONFLICT'); return policy.response(doc, actor, prior, session); }
-        if (doc.revision !== body.expectedRevision) throw conflict();
+        if (!slotBoundKinds.has(kind) && doc.revision !== body.expectedRevision) throw conflict();
         if (doc.catalogApplied) throw conflict('ADMIN_CATALOG_REVIEW_APPLIED');
         const publication = doc.media?.publication;
         if (publication && !['cleanup', 'cancel-publication'].includes(kind)
@@ -115,9 +121,11 @@ export async function mutateAdminProject<T>(actor: string, id: string, body: Rec
         // Recovery admits one intent per previously admitted asset/approval; cleanup never consumes new-work capacity.
         const recovery = kind === 'cleanup' || kind === 'cancel-publication';
         if ((recovery ? doc.recoveryReceipts?.length ?? 0 : doc.receipts.length) >= LIMITS.receipts) throw conflict('ADMIN_IMPORT_OPERATION_LIMIT');
+        const observed = doc.revision;
         await change(doc, session); doc.revision++; doc.updatedAt = new Date();
         const receipt: Receipt = { operationId: body.operationId, kind, revision: doc.revision, actorId: actor, hash, at: doc.updatedAt }; if (kind === 'adopt') receipt.selection = { generation: body.generation as number, acceptedIds: [...body.selectedIds as string[]], rejectedIds: [...body.rejectIds as string[]] }; if (recovery) (doc.recoveryReceipts ??= []).push(receipt); else doc.receipts.push(receipt);
-        const update = await collection().replaceOne({ _id, revision: body.expectedRevision }, doc, { session }); if (update.matchedCount !== 1) throw conflict();
+        // A concurrent writer is a transaction WriteConflict, which withTransaction retries against fresh state.
+        const update = await collection().replaceOne({ _id, revision: observed }, doc, { session }); if (update.matchedCount !== 1) throw conflict();
         return policy.response(doc, actor, receipt, session);
     });
 }

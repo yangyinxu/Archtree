@@ -5,6 +5,8 @@ import { test } from 'node:test';
 import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { getS3 } from '../../src/infrastructure/s3';
 import { defaultImportObjectStorage, type ImportObjectTarget } from '../../src/administration/import/adminImportStorage';
+import { importSourcesLocked, importUploadSettled, type ImportAsset, type ImportMedia } from '../../src/administration/import/adminImportMediaTypes';
+import { ADMIN_IMPORT_LIMITS } from '../../src/administration/import/adminImportContract';
 
 test('canonical copy uses one SDK PUT attempt so a late retry cannot recreate a cancelled key', async t => {
     const bytes = Buffer.from('Synthetic bounded audio bytes'); let puts = 0;
@@ -42,4 +44,22 @@ test('canonical copy uses one SDK PUT attempt so a late retry cannot recreate a 
         shared.config.endpoint = previousEndpoint;
         await new Promise<void>(resolve => server.close(() => resolve()));
     }
+});
+
+test('a missing upload settles only after its lease ends and its transfer deadline passes', () => {
+    const now = new Date('2026-10-18T12:00:00.000Z'), at = (ms: number) => new Date(now.getTime() + ms);
+    const asset = (fields: Partial<ImportAsset>) => ({ updatedAt: at(-1_000), leaseUntil: null, transferDeadline: at(-1), ...fields }) as ImportAsset;
+    assert.equal(importUploadSettled(asset({ leaseUntil: at(1) }), now), false, 'an active lease may still PUT');
+    assert.equal(importUploadSettled(asset({ transferDeadline: at(1) }), now), false, 'before the transfer deadline');
+    assert.equal(importUploadSettled(asset({ leaseUntil: at(-1) }), now), true, 'after an expired lease and the deadline');
+    assert.equal(importUploadSettled(asset({ transferDeadline: now }), now), true, 'at the deadline');
+    assert.equal(importUploadSettled(asset({ transferDeadline: undefined, updatedAt: at(-ADMIN_IMPORT_LIMITS.uploadSettleMs + 1) }), now), false, 'legacy record inside updatedAt fallback');
+    assert.equal(importUploadSettled(asset({ transferDeadline: null, updatedAt: at(-ADMIN_IMPORT_LIMITS.uploadSettleMs) }), now), true, 'legacy record after updatedAt fallback');
+});
+test('sources stay locked during an active publication or pending cancelled cleanup', () => {
+    const media = (publication?: Partial<ImportMedia['publication']>) => ({ assets: [], ...(publication ? { publication } : {}) }) as ImportMedia;
+    assert.equal(importSourcesLocked(undefined), false); assert.equal(importSourcesLocked(media()), false);
+    for (const state of ['preparing', 'needsAttention', 'complete'] as const) assert.equal(importSourcesLocked(media({ state })), true, state);
+    assert.equal(importSourcesLocked(media({ state: 'cancelled', cleanupPending: true })), true);
+    assert.equal(importSourcesLocked(media({ state: 'cancelled', cleanupPending: false })), false);
 });

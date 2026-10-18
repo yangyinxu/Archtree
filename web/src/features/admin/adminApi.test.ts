@@ -7,12 +7,16 @@
  *   - admitted mutation completes into retained state in User view, but not after A-B-A
  *   - confirmed revision conflict permits corrected intent; unknown response can reconcile with server receipt
  *   - an unknown publication cancellation retries its immutable intent and retains the original publication approval
+ *   - an outdated strict schema asks for a reload, while a receipt mismatch stays an unconfirmed retryable intent
+ *   - AdminMutation and AdminCommand show a reload state with no retryable intent for an outdated response
  * @end-catalog */
 
 import { z } from 'zod';
 import { advanceAccountEpoch, captureAccountOperation } from '../../api/accountEpoch';
 import { adminWorkspace } from './adminWorkspace';
 import { adminRequest, detailSchema, responseSchema } from './adminApi';
+import { ADMIN_RELOAD_REQUIRED } from './adminTransport';
+import { AdminCommand } from './useAdminCommand';
 import { AdminMutation } from './useAdminMutation';
 import { deferred, detail, json, viewer } from './adminFixtures.testSupport';
 
@@ -111,4 +115,25 @@ test('an unknown publication cancellation retries its immutable intent and retai
   expect(bodies[0]).toBe(bodies[1]);
   expect(JSON.parse(bodies[1])).toMatchObject({ operationId: cancelOperationId, publicationOperationId: originalOperationId, expectedRevision: 1 });
   expect(operation.getSnapshot().result?.item.publicationRecovery).toMatchObject({ operationId: originalOperationId, cleanupPending: true });
+});
+
+test('an outdated strict schema asks for a reload, while a receipt mismatch stays an unconfirmed retryable intent', async () => {
+  vi.stubGlobal('fetch', vi.fn(async () => json({ item: { ...detail(), futureField: true }, receipt: null })));
+  await expect(adminRequest('/item', responseSchema)).rejects.toMatchObject({ kind: 'invalid-response', code: ADMIN_RELOAD_REQUIRED });
+  expect(adminWorkspace.getSnapshot().reloadRequired).toBe(true);
+  adminWorkspace.reset(); adminWorkspace.authorize(captureAccountOperation(viewer), true, true); adminWorkspace.select('admin');
+  vi.stubGlobal('fetch', vi.fn(async () => json({ item: detail(), receipt: { operationId: '40000000-0000-4000-8000-000000000004', kind: 'edit', revision: 2 } })));
+  const operation = new AdminMutation(); operation.run('/item', 'PATCH', { expectedRevision: 1 });
+  await vi.waitFor(() => expect(operation.getSnapshot().error).toBe('unknown'));
+  expect(operation.getSnapshot().intent).not.toBeNull(); expect(adminWorkspace.getSnapshot().reloadRequired).toBe(false);
+});
+
+test('AdminMutation and AdminCommand show a reload state with no retryable intent for an outdated response', async () => {
+  vi.stubGlobal('fetch', vi.fn(async (_path: string, init: RequestInit) => json({ item: { ...detail(), futureField: true }, receipt: { operationId: JSON.parse(String(init.body)).operationId, kind: 'edit', revision: 2 } })));
+  const operation = new AdminMutation(); operation.run('/item', 'PATCH', { expectedRevision: 1 });
+  await vi.waitFor(() => expect(operation.getSnapshot().error).toBe('reload'));
+  expect(operation.getSnapshot().intent).toBeNull(); expect(operation.getSnapshot().running).toBe(false);
+  const command = new AdminCommand(z.object({ receipt: z.object({ operationId: z.string() }).strict() }).strict()); command.run('/catalog/album/item', { fields: {} });
+  await vi.waitFor(() => expect(command.getSnapshot().error).toBe('reload'));
+  expect(command.getSnapshot().intent).toBeNull(); expect(adminWorkspace.getSnapshot().reloadRequired).toBe(true);
 });

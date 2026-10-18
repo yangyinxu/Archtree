@@ -3,10 +3,10 @@ import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import type { z } from 'zod';
 import { ApiError } from '../../api/client';
 import { adminEndpointRequest } from './adminTransport';
-import { adminWorkspace } from './adminWorkspace';
+import { ADMIN_RELOAD_REQUIRED, adminWorkspace } from './adminWorkspace';
 
 interface Intent { path: string; body: string; operationId: string; method: string }
-interface CommandState<T> { running: boolean; intent: Intent | null; result: T | null; error: 'unknown' | 'conflict' | 'error' | null }
+interface CommandState<T> { running: boolean; intent: Intent | null; result: T | null; error: 'unknown' | 'conflict' | 'error' | 'reload' | null }
 /** Clears catalog projections after a confirmed global edit, while retaining identity and Save membership facts. */
 export function clearCatalogProjections(client: QueryClient) {
   const filter = { predicate: (query: { queryKey: readonly unknown[] }) => query.queryKey[0] === 'listener'
@@ -44,6 +44,8 @@ export class AdminCommand<T extends { receipt: { operationId: string } }> {
       this.update({ running: false, intent: null, result, error: null });
     } catch (error) {
       if (!adminWorkspace.current(this.owner, false)) return;
+      // An outdated bundle cannot read the result, so it offers a reload instead of resending the intent.
+      if (error instanceof ApiError && error.code === ADMIN_RELOAD_REQUIRED) { this.update({ running: false, intent: null, result: null, error: 'reload' }); return; }
       const definite = error instanceof ApiError && error.kind === 'http' && [400, 401, 403, 404, 409, 422].includes(error.status ?? 0);
       this.update({ running: false, intent: definite ? null : intent, result: null, error: definite ? (error instanceof ApiError && error.status === 409 ? 'conflict' : 'error') : 'unknown' });
     }

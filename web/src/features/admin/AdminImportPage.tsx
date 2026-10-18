@@ -3,17 +3,18 @@
  *   Functions: AdminImportPage
  * Internal
  *   Types: EditorBuffer
- *   Functions: ImportProject
+ *   Functions: saved, ImportProject
  *   Constants: ImportMedia, ImportReview, ImportDuplicates
  * @end-catalog */
 
-import { lazy, Suspense, useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router';
 import { AdminGate, useAdminAccess, useAdminText } from './AdminAccess';
 import { adminRequest, importPath, responseSchema, type ImportDetail, type ImportDraft } from './adminApi';
 import { adminWorkspace } from './adminWorkspace';
 import { useAdminMutation } from './useAdminMutation';
+import { useImportUploadQueue } from './importUploadQueue';
 import { ImportStages, MutationStatus, useOnline } from './AdminShared';
 import { ImportDraftEditor } from './ImportDraftEditor';
 import { AdminNav } from './AdminNav';
@@ -22,7 +23,9 @@ const ImportMedia = lazy(() => import('./ImportMedia').then(module => ({ default
 const ImportReview = lazy(() => import('./ImportReview').then(module => ({ default: module.ImportReview })));
 const ImportDuplicates = lazy(() => import('./ImportDuplicates').then(module => ({ default: module.ImportDuplicates })));
 
-interface EditorBuffer { draft: ImportDraft; revision: number; dirty: boolean; selected: string[] }
+/** `base` is the saved draft the unsaved edits started from; a newer revision with the same draft only rebases. */
+interface EditorBuffer { draft: ImportDraft; base: ImportDraft; revision: number; dirty: boolean; selected: string[] }
+const saved = (item: ImportDetail, selected: string[] = []): EditorBuffer => ({ draft: item.draft, base: item.draft, revision: item.revision, dirty: false, selected });
 function ImportProject({ id }: { id: string }) {
   const t = useAdminText();
   const access = useAdminAccess();
@@ -35,23 +38,35 @@ function ImportProject({ id }: { id: string }) {
   const [reviewVisited, setReviewVisited] = useState(stage === 'review');
   const [, refreshLocalFiles] = useState(0);
   const mutation = useAdminMutation(id);
+  const uploads = useImportUploadQueue(id);
+  const opened = useRef(false);
   const query = useQuery({
     queryKey: ['admin-imports', access.viewerId, access.epoch, access.generation, id],
     queryFn: ({ signal }) => adminRequest(path, responseSchema, { signal }), retry: false, gcTime: 0,
     refetchOnWindowFocus: 'always', refetchInterval: query => online && (['running', 'queued'].includes(query.state.data?.item.analysis.state ?? '') || query.state.data?.item.publication === 'preparing') ? 3000 : false
   });
+  // Upload confirmations bump the revision without changing the draft, so they never raise an editing conflict.
+  const accept = (item: ImportDetail) => {
+    setConfirmed(previous => !previous || item.revision >= previous.revision ? item : previous);
+    setEditor(previous => {
+      if (previous?.dirty && item.revision > previous.revision && previous.base && JSON.stringify(item.draft) === JSON.stringify(previous.base)) return { ...previous, revision: item.revision };
+      return previous && (previous.dirty || previous.revision > item.revision) ? previous : saved(item, previous?.selected);
+    });
+    mutation.operation.reconcile(item);
+  };
   useEffect(() => {
     const item = query.data?.item;
     if (!item) return;
-    setConfirmed(previous => !previous || item.revision >= previous.revision ? item : previous);
-    setEditor(previous => previous && (previous.dirty || previous.revision > item.revision) ? previous : { draft: item.draft, revision: item.revision, dirty: false, selected: previous?.selected ?? [] });
-    mutation.operation.reconcile(item);
+    accept(item); uploads.queue.observe(item);
+    // Reopening reconciles uploads of unknown outcome once, without bytes.
+    if (!opened.current) { opened.current = true; void uploads.queue.reconcileOnOpen(item, adminWorkspace.capture()); }
   }, [query.data]);
+  useEffect(() => { if (uploads.latest) accept(uploads.latest); }, [uploads.latest]);
   useEffect(() => {
     if (!mutation.result) return;
     const item = mutation.result.item;
     setConfirmed(previous => !previous || item.revision >= previous.revision ? item : previous);
-    setEditor({ draft: item.draft, revision: item.revision, dirty: false, selected: [] });
+    setEditor(saved(item));
     if (mutation.result.receipt?.kind === 'decisions') adminWorkspace.forget(`duplicate-edits:${id}`);
     mutation.operation.acknowledge();
     void query.refetch();
@@ -92,7 +107,7 @@ function ImportProject({ id }: { id: string }) {
       <div role="tablist" aria-label={t('workbench.title')} className={styles.filters}>{(['draft', 'review', 'files', 'publication'] as const).map(value => <button key={value} id={`import-tab-${value}`} role="tab" type="button" className={styles.filter} aria-selected={stage === value} tabIndex={stage === value ? 0 : -1} onKeyDown={event => { const stages = ['draft', 'review', 'files', 'publication'] as const; const index = stages.indexOf(value); const next = event.key === 'ArrowRight' ? stages[(index + 1) % stages.length] : event.key === 'ArrowLeft' ? stages[(index + stages.length - 1) % stages.length] : event.key === 'Home' ? stages[0] : event.key === 'End' ? stages[3] : null; if (next) { event.preventDefault(); setStage(next); document.getElementById(`import-tab-${next}`)?.focus(); } }} aria-controls={`import-panel-${value}`} onClick={() => setStage(value)}>{t(`section.${value}`)}</button>)}</div>
       {conflict && <section role="alert" className={styles.error}><p>{t('common.conflict')}</p>
         <details><summary>{t('review.saved_version')}</summary><pre className={styles.rawDraft}>{JSON.stringify(item.draft, null, 2)}</pre></details>
-        <button className={styles.button} onClick={() => setEditor({ draft: item.draft, revision: item.revision, dirty: false, selected: [] })}>{t('review.load_saved')}</button>
+        <button className={styles.button} onClick={() => setEditor(saved(item))}>{t('review.load_saved')}</button>
       </section>}
       <div hidden={stage !== 'draft'} role="tabpanel" id="import-panel-draft" aria-labelledby="import-tab-draft">
       <form className={styles.panel} onSubmit={event => { event.preventDefault(); if (!locked && !conflict) mutation.operation.run(path, 'PATCH', { expectedRevision: editor.revision, draft: editor.draft }); }}>

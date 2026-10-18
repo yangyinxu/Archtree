@@ -1,5 +1,5 @@
 /** Allowlisted admin-only naming, review, asset and publication contract. */
-export const ADMIN_IMPORT_LIMITS = Object.freeze({ files: 100, page: 25, receipts: 256, publications: 16, generations: 2, tracksPerChunk: 10, attempts: 22, dailyAttempts: 220, outputTokens: 4000, inputBytes: 48_000, responseBytes: 256_000, grantMs: 24 * 60 * 60 * 1000, leaseMs: 120_000 });
+export const ADMIN_IMPORT_LIMITS = Object.freeze({ files: 100, page: 25, receipts: 256, publications: 16, generations: 2, tracksPerChunk: 10, attempts: 22, dailyAttempts: 220, outputTokens: 4000, inputBytes: 48_000, responseBytes: 256_000, grantMs: 24 * 60 * 60 * 1000, leaseMs: 120_000, embeddedCovers: 16, uploadSettleMs: 180_000 });
 export type ImportDate = { year: number; month: number | null; day: number | null };
 export type ImportManifest = { rootLabel: string; files: { slotId: string; filename: string; relativePath: string; byteLength: number | null }[] };
 export type ImportDraft = { album: { title: string; artistName: string; releaseDate: ImportDate | null; visibility: 'public' | 'hidden' }; tracks: { slotId: string; title: string; trackNumber: number | null }[] };
@@ -51,8 +51,9 @@ export function parseImportDate(value: unknown): ImportDate | null {
     if (day !== null) { const leap = (year as number) % 4 === 0 && ((year as number) % 100 !== 0 || (year as number) % 400 === 0); if ((day as number) > [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][(month as number) - 1]) return invalidImport(); }
     return { year: year as number, month: month as number | null, day: day as number | null };
 }
+/** An empty rootLabel is valid only for files chosen without a folder. */
 export function parseManifest(value: unknown): ImportManifest {
-    const input = record(value); exact(input, ['rootLabel', 'files']); const rootLabel = cleanText(input.rootLabel, 200);
+    const input = record(value); exact(input, ['rootLabel', 'files']); const rootLabel = cleanText(input.rootLabel, 200, true);
     if (/[\\/]/.test(rootLabel) || !Array.isArray(input.files) || input.files.length < 1 || input.files.length > ADMIN_IMPORT_LIMITS.files) return invalidImport();
     const ids = new Set<string>(), paths = new Set<string>();
     const files = input.files.map(raw => {
@@ -64,6 +65,7 @@ export function parseManifest(value: unknown): ImportManifest {
         if (file.byteLength !== null && (!Number.isSafeInteger(file.byteLength) || (file.byteLength as number) < 1 || (file.byteLength as number) > 8 * 1024 ** 3)) return invalidImport();
         ids.add(slotId); paths.add(relativePath); return { slotId, filename, relativePath, byteLength: file.byteLength as number | null };
     });
+    if (!rootLabel && files.some(file => file.relativePath.includes('/'))) return invalidImport();
     const result = { rootLabel, files }; if (Buffer.byteLength(JSON.stringify(result)) > 24_000) return invalidImport(); return result;
 }
 export function parseDraft(value: unknown, manifest: ImportManifest): ImportDraft {

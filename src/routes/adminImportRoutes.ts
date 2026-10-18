@@ -10,7 +10,7 @@ import { createAdminImport, getAdminImport, listAdminImports, editAdminImport, a
 import { requireAdmin, requireAuth, requireCurrentAccountViewer, type AuthenticatedRequest } from '../middleware/authMiddleware';
 import { runRequestWork, onRequestWorkComplete } from '../services/platform/serverLifecycleService';
 import { maxAudioUploadMb, requireUploadSize } from '../middleware/audioUpload';
-import { cleanupAdminImportAsset, importMediaMutationHeaders, uploadAdminImportAsset, selectAdminImportCover, previewAdminImportAsset, defaultImportObjectStorage, type ImportObjectStorage } from '../administration/import/adminImportStorage';
+import { cleanupAdminImportAsset, importMediaMutationHeaders, uploadAdminImportAsset, reconcileAdminImportAsset, selectAdminImportCover, previewAdminImportAsset, defaultImportObjectStorage, type ImportObjectStorage } from '../administration/import/adminImportStorage';
 import { asyncHandler } from '../middleware/requestProtectionMiddleware';
 import { limitMediaConcurrencyFor } from '../middleware/mediaDeliveryMiddleware';
 import { publishAdminImport, resumeAdminImportPublication, cancelAdminImportPublication } from '../administration/import/adminImportPublisher';
@@ -58,6 +58,8 @@ export function createAdminImportRouter(storage: ImportObjectStorage = defaultIm
         onRequestWorkComplete(req, res, () => { const paths = temporary.get(req) ?? []; temporary.delete(req); void Promise.all(paths.map(file => fs.unlink(file).catch(() => undefined))); });
         void runRequestWork(req, () => new Promise<void>((resolve, reject) => { const aborted = () => reject(new Error('Aborted')); req.once('aborted', aborted); upload(req, res, error => { req.off('aborted', aborted); error ? reject(error) : resolve(); }); })).then(() => next()).catch(() => { if (!res.destroyed) res.status(400).json({ code: 'ADMIN_IMPORT_INVALID_FILE' }); });
     }, asyncHandler(run((actor, req) => uploadAdminImportAsset(actor, req.params.id, req.params.slotId, importMediaMutationHeaders(req.get('Idempotency-Key'), req.get('If-Match')), req.file!, storage))));
+    // HEAD-only recovery of an upload of unknown outcome; JSON body {operationId}, no bytes.
+    router.post('/imports/:id/assets/:slotId/reconcile', asyncHandler(run((actor, req) => reconcileAdminImportAsset(actor, req.params.id, req.params.slotId, req.body, storage))));
     router.delete('/imports/:id/assets/:slotId', asyncHandler(run((actor, req) => cleanupAdminImportAsset(actor, req.params.id, req.params.slotId, importMediaMutationHeaders(req.get('Idempotency-Key'), req.get('If-Match')), storage))));
     router.post('/imports/:id/select-cover', asyncHandler(run((actor, req) => selectAdminImportCover(actor, req.params.id, req.body))));
     router.get('/imports/:id/assets/:slotId/preview', limitMediaConcurrencyFor('artwork'), asyncHandler(async (req, res) => {

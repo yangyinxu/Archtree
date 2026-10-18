@@ -1420,6 +1420,21 @@ The wire protocol and operational bounds are documented in
   device paths are not sent to analysis. Source bytes remain in S3; the database
   retains bounded metadata, hashes, object identities, drafts, jobs and receipts.
   Private staged uploads do not create playable catalog MediaTracks.
+- Creating an import, or resuming it after reselecting its files, is the one
+  approval for uploading every selected file; no file needs its own
+  confirmation. The browser uploads the files sequentially as one file per
+  request, so each keeps its own lifecycle outcome, progress, failure and retry.
+  An upload whose outcome is unknown is retried only with its original intent,
+  by the administrator who started it; only a definite refusal before the upload
+  was accepted, or a failure that reconciliation confirms, may be retried as a
+  new upload. Reselection resumes incomplete files matched by relative path and
+  size and refuses a file whose content changed. Reopening reconciles an upload
+  of unknown outcome against storage without its bytes: it becomes ready only on
+  an exact identity match, and only a confirmed failure asks for the file again.
+  Leaving Admin view, losing the role, or a publication that locks the import's
+  sources stops the queue after the current file, and navigation never restarts
+  it. Files chosen without a folder need no typed folder name, and no folder
+  name is then sent to Luna.
 - Luna proposes supported values with source evidence. Unknown facts stay empty
   and partial release dates retain their precision. Analysis never publishes,
   edits existing catalog records, or silently overwrites manual draft changes.
@@ -1440,6 +1455,9 @@ The wire protocol and operational bounds are documented in
   skip, append missing members, or create a distinct entry. No automatic merge,
   deletion, media replacement, or reassignment of a Track to a different Album
   is permitted. Unhashed historical assets remain unverified.
+- Embedded images are validated and completely decoded like other covers and
+  staged under the same staged-upload lifecycle; identical ones are staged
+  once, and each import stages a bounded number of them.
 - Publication is a separate explicit approval of the reviewed draft and duplicate
   decisions. It freezes the approval snapshot, rechecks current role, revisions,
   memberships, visibility and asset readiness, and reports confirmed per-item

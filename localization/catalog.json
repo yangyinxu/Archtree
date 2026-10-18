@@ -1961,6 +1961,20 @@
       ],
       "variables": {}
     },
+    "admin.common.reload": {
+      "description": "An administrator response no longer matches this page version.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.common.reload_action": {
+      "description": "Action that reloads the page.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.common.retry": {
       "description": "Administrator workbench: common retry.",
       "delivery": [
@@ -2799,7 +2813,7 @@
       "variables": {}
     },
     "admin.import.manifest_only": {
-      "description": "This step saves file and folder names. Select original files again in the saved project to upload them.",
+      "description": "Administrator workbench: import naming context and upload guidance.",
       "delivery": [
         "runtime"
       ],
@@ -2960,7 +2974,7 @@
       "variables": {}
     },
     "admin.media.copy": {
-      "description": "Select the original file for each row. Uploads remain private until you explicitly publish the reviewed Album.",
+      "description": "Administrator workbench: import Files section guidance.",
       "delivery": [
         "runtime"
       ],
@@ -2995,7 +3009,7 @@
       "variables": {}
     },
     "admin.media.other_owner": {
-      "description": "This upload belongs to another administrator’s operation. They can retry it; you can explicitly remove the staged file before starting a new upload.",
+      "description": "This upload belongs to another administrator’s operation. They can retry it. Once a check confirms it failed, any administrator can upload the file again.",
       "delivery": [
         "runtime"
       ],
@@ -3625,6 +3639,13 @@
       ],
       "variables": {}
     },
+    "admin.upload.check_again": {
+      "description": "Checks an upload of unknown outcome against storage without sending bytes.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.upload.cleanup": {
       "description": "Remove staged file",
       "delivery": [
@@ -3632,8 +3653,90 @@
       ],
       "variables": {}
     },
+    "admin.upload.current": {
+      "description": "Live status naming the file being uploaded.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "name": "string"
+      }
+    },
+    "admin.upload.needs_file": {
+      "description": "A file must be selected again before it can upload.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.upload.progress": {
+      "description": "Count of uploaded files out of the import total.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "completed": "number",
+        "total": "number"
+      }
+    },
+    "admin.upload.queued": {
+      "description": "Row badge for a file waiting in the upload queue.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.upload.refused_changed": {
+      "description": "A file differs from the bytes already admitted for its upload.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.upload.refused_cleanup": {
+      "description": "A file cannot upload while its staged copy is being removed.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.upload.refused_mismatch": {
+      "description": "Some reselected files matched no incomplete file.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.upload.reselect_files": {
+      "description": "Action to choose individual import files again.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.upload.reselect_folder": {
+      "description": "Action to choose the import folder again.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.upload.reselect_help": {
+      "description": "Explains how reselected files are matched.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.upload.resume": {
+      "description": "Primary action that uploads the incomplete files with local copies.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.upload.retry": {
-      "description": "Retry the same upload",
+      "description": "Explicit retry of one file upload.",
       "delivery": [
         "runtime"
       ],
@@ -3646,8 +3749,64 @@
       ],
       "variables": {}
     },
+    "admin.upload.stopped_interrupted": {
+      "description": "Queue stopped because a lost response or server failure left the last file’s outcome unknown.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.upload.stopped_limit": {
+      "description": "Queue stopped because the import reached its operation limit.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.upload.stopped_permission": {
+      "description": "Queue stopped because administrator permission is unavailable.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.upload.stopped_publication": {
+      "description": "Queue stopped because a publication locks the import files.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.upload.stopped_unavailable": {
+      "description": "Queue stopped because private upload storage is unavailable.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.upload.stopped_view": {
+      "description": "Queue stopped because the administrator left Admin view.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.upload.title": {
+      "description": "Upload queue title on the import Files section.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.upload.upload": {
       "description": "Upload",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.upload.uploading": {
+      "description": "Row badge for the file currently uploading.",
       "delivery": [
         "runtime"
       ],

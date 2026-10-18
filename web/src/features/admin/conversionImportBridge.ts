@@ -23,7 +23,9 @@ async function createLockedImport(batch: ConversionBatch, guard: AdminGuard) {
     const files = await Promise.all(batch.tasks.map(task => conversionStore.getOutputFile(task)));
     const manifest = namingManifest(files.map((file, index) => ({ name: file.name, size: file.size,
       webkitRelativePath: conversionOutputRelativePath(batch.tasks[index]) })));
-    manifest.rootLabel = batch.rootLabel;
+    // The batch name is a folder label only when the outputs sit in a folder; folderless MP3s send no folder name to
+    // Luna and keep the name as their local batch label. A persisted intent replays unchanged.
+    manifest.rootLabel = manifest.files.some(file => file.relativePath.includes('/')) ? batch.rootLabel : '';
     intent = { operationId: crypto.randomUUID(), manifest, projectId: null,
       slots: manifest.files.map((file, index) => ({ taskId: batch.tasks[index].id, slotId: file.slotId })) };
     // A lost response can only replay this same manifest and operation identifier.
@@ -36,6 +38,9 @@ async function createLockedImport(batch: ConversionBatch, guard: AdminGuard) {
     || intent.slots.some(slot => !item.manifest.files.some(file => file.slotId === slot.slotId))) throw new Error('CONVERSION_IMPORT_UNCONFIRMED');
   await conversionStore.updateBatch(batch.ownerId, batch.id, { importIntent: { ...intent, projectId: item.id } }, guard);
   await hydrateConversionImport(item.id, guard);
+  // Creating the draft is the upload approval: its MP3s use the same sequential queue. Hydration alone never starts it.
+  const { importUploadQueue } = await import('./importUploadQueue');
+  importUploadQueue(item.id, guard).start(item, adminWorkspace.buffer<Record<string, File>>(`files:${item.id}`) ?? {}, guard);
   return item.id;
 }
 

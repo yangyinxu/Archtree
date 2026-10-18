@@ -4,6 +4,7 @@
  * Internal
  *   Types: AssetRecovery, ReviewedMedia, MediaConfirmation
  *   Functions: assetStamp
+ *   Constants: refusal
  * @end-catalog */
 
 import { useRef, useState } from 'react';
@@ -13,47 +14,64 @@ import type { ImportDetail } from './adminApi';
 import { importPath } from './adminApi';
 import { useAdminAccess, useAdminText } from './AdminAccess';
 import { adminWorkspace } from './adminWorkspace';
+import { useOnline } from './useAdminOnline';
+import { reconcileImportUpload, uploadPublicationLocked, useImportUploadQueue, type UploadFileStatus } from './importUploadQueue';
+import { ImportUploads } from './ImportUploads';
 import type { AdminMutation } from './useAdminMutation';
 import styles from './adminStyles';
 
 type AssetRecovery = NonNullable<ImportDetail['assets'][number]['recovery']>;
 interface ReviewedMedia { importId: string; revision: number; label: string }
-type MediaConfirmation = (ReviewedMedia & { kind: 'upload'; slotId: string; file: File; assetStamp: string | null; recovery?: AssetRecovery })
-  | (ReviewedMedia & { kind: 'remove'; slotId: string; assetStamp: string | null; recovery?: AssetRecovery })
+type MediaConfirmation = (ReviewedMedia & { kind: 'remove'; slotId: string; assetStamp: string | null; recovery?: AssetRecovery })
   | (ReviewedMedia & { kind: 'publish' })
   | (ReviewedMedia & { kind: 'cancelPublication'; publicationOperationId: string });
 /** Binds confirmation to the observed source and recovery intent even during asynchronous storage progress. */
 const assetStamp = (asset: ImportDetail['assets'][number] | undefined) => asset ? JSON.stringify({
   state: asset.state, byteLength: asset.byteLength, sha256: asset.sha256, contentType: asset.contentType, recovery: asset.recovery
 }) : null;
+/** A refusal names its reason on the row; its badge keeps the server state. */
+const refusal: Record<string, string> = { content_changed: 'upload.refused_changed', file_changed: 'media.invalid', cleanup_pending: 'upload.refused_cleanup' };
 
-/** File handles are ephemeral; each explicit upload owns its original file and immutable retry key. */
+/** Uploads run in the one-approval queue; this section shows each file's outcome and its explicit recovery actions. */
 export function ImportMedia({ item, operation, disabled, view, active = true }: { item: ImportDetail; operation: AdminMutation; disabled: boolean; view?: 'files' | 'publication'; active?: boolean }) {
-  const t = useAdminText(), access = useAdminAccess();
+  const t = useAdminText(), access = useAdminAccess(), online = useOnline(), uploads = useImportUploadQueue(item.id);
   const [confirmation, setConfirmation] = useState<MediaConfirmation | null>(null);
   const [invalid, setInvalid] = useState(false);
+  const [checking, setChecking] = useState<string | null>(null);
+  // Reselected File handles live in the workspace buffer, so rows re-read it after each selection.
+  const [, refreshLocalFiles] = useState(0);
   const focus = useRef<HTMLButtonElement>(null);
   const path = importPath(item.id);
   const publicationCleanup = item.publication === 'cancelled' && Boolean(item.publicationRecovery?.cleanupPending);
-  const publicationLocked = ['preparing', 'needsAttention', 'complete'].includes(item.publication) || publicationCleanup;
+  const publicationLocked = uploadPublicationLocked(item);
   const deletionLocked = disabled || ['preparing', 'needsAttention'].includes(item.publication) || publicationCleanup;
-  const uploadLocked = disabled || publicationLocked || !item.capabilities.upload;
-  const choose = (slotId: string, file?: File) => {
+  // Uploads are independent of draft editing and analysis; only storage, publication and access gate them.
+  const uploadLocked = publicationLocked || !item.capabilities.upload || !online || !access.imports;
+  const bufferKey = `files:${item.id}`, local = adminWorkspace.buffer<Record<string, File>>(bufferKey) ?? {};
+  const chooseCover = (file?: File) => {
     if (!file) return;
-    const entry = item.manifest.files.find(entry => entry.slotId === slotId);
-    if (slotId !== 'cover' && (!entry || file.name !== entry.filename || entry.byteLength !== null && file.size !== entry.byteLength)) { setInvalid(true); return; }
     if (!file.size) { setInvalid(true); return; }
-    const asset = item.assets.find(asset => asset.slotId === slotId && asset.state !== 'deleted');
-    const recovery = asset?.recovery?.startedByMe && asset.recovery.kind === 'upload' ? { ...asset.recovery } : undefined;
-    setInvalid(false); setConfirmation({ kind: 'upload', importId: item.id, revision: item.revision, label: file.name, slotId, file, assetStamp: assetStamp(asset), recovery });
+    setInvalid(false); adminWorkspace.retain(bufferKey, { ...adminWorkspace.buffer<Record<string, File>>(bufferKey), cover: file }, access);
+    uploads.queue.enqueue('cover', file, item, adminWorkspace.capture());
+  };
+  // Removing a staged file also forgets its chosen File, so neither Resume nor a queued retry sends it again.
+  const forgetSource = (slotId: string) => {
+    const { [slotId]: _removed, ...rest } = adminWorkspace.buffer<Record<string, File>>(bufferKey) ?? {};
+    adminWorkspace.retain(bufferKey, rest, access); uploads.queue.discard(slotId); refreshLocalFiles(value => value + 1);
+  };
+  const checkAgain = async (slotId: string, operationId: string) => {
+    setChecking(slotId);
+    try { uploads.queue.observe((await reconcileImportUpload(item.id, slotId, operationId, adminWorkspace.capture())).item); }
+    catch { /* The row keeps its unknown state; permission and reload failures are handled by the transport. */ }
+    finally { setChecking(null); }
   };
   const covers = item.assets.filter(asset => asset.contentType.startsWith('image/') && asset.state === 'ready');
   // Extracted images have their own lifecycle and remain removable even after preview readiness is lost.
   const mediaRows = [
-    ...item.manifest.files.map(file => ({ slotId: file.slotId, label: file.relativePath, uploadable: true })),
-    { slotId: 'cover', label: t('media.manual_cover'), uploadable: true },
+    ...item.manifest.files.map(file => ({ slotId: file.slotId, label: file.relativePath, kind: 'audio' as const })),
+    { slotId: 'cover', label: t('media.manual_cover'), kind: 'cover' as const },
     ...item.assets.filter(asset => asset.slotId.startsWith('embedded-') && asset.state !== 'deleted').map(asset => ({
-      slotId: asset.slotId, label: `${t('media.cover_candidate')} · ${item.manifest.files.find(file => `embedded-${file.slotId}` === asset.slotId)?.filename || t('common.untitled')}`, uploadable: false
+      slotId: asset.slotId, label: `${t('media.cover_candidate')} · ${item.manifest.files.find(file => `embedded-${file.slotId}` === asset.slotId)?.filename || t('common.untitled')}`, kind: 'embedded' as const
     }))
   ];
   const publishOperation = item.publicationRecovery?.operationId ?? [...item.receipts].reverse().find(receipt => receipt.kind === 'publish')?.operationId;
@@ -62,20 +80,37 @@ export function ImportMedia({ item, operation, disabled, view, active = true }: 
   const confirmationStale = Boolean(confirmation && (confirmation.importId !== item.id || confirmation.revision !== item.revision
     || ('assetStamp' in confirmation && confirmation.assetStamp !== assetStamp(item.assets.find(asset => asset.slotId === confirmation.slotId && asset.state !== 'deleted')))
     || (confirmation.kind === 'cancelPublication' && confirmation.publicationOperationId !== publishOperation)));
-  const confirmationLocked = confirmationStale || (confirmation?.kind === 'upload' ? uploadLocked : confirmation?.kind === 'remove' ? deletionLocked : confirmation?.kind === 'cancelPublication' ? disabled || !canCancelPublication : disabled || publicationLocked || !item.capabilities.publish);
+  const confirmationLocked = confirmationStale || (confirmation?.kind === 'remove' ? deletionLocked : confirmation?.kind === 'cancelPublication' ? disabled || !canCancelPublication : disabled || publicationLocked || !item.capabilities.publish);
+  const label = item.draft.album.title || item.manifest.rootLabel || t('common.untitled');
+  const badge = (queued: UploadFileStatus | undefined, asset: ImportDetail['assets'][number] | undefined) => queued && ['queued', 'uploading'].includes(queued.state) ? t(`upload.${queued.state}`)
+    : asset ? t(`asset.${asset.state}`) : queued && ['ready', 'unknown', 'failed'].includes(queued.state) ? t(`asset.${queued.state}`) : t('asset.not_started');
   return <section className={styles.panel}>
     <header className={styles.sectionHeader}><div><h2>{t(view ? `section.${view}` : 'media.title')}</h2>{view !== 'publication' && <p className={styles.muted}>{t(item.capabilities.upload ? 'media.copy' : 'import.no_upload')}</p>}</div></header>
     {view !== 'publication' && <>
+    <ImportUploads item={item} uploads={uploads} onReselect={() => refreshLocalFiles(value => value + 1)} />
     {invalid && <p role="alert">{t('media.invalid')}</p>}
     <ul className={styles.cards}>{mediaRows.map(row => {
       const asset = item.assets.find(asset => asset.slotId === row.slotId && asset.state !== 'deleted');
-      const source = adminWorkspace.buffer<Record<string, File>>(`files:${item.id}`)?.[row.slotId];
-      return <li key={row.slotId} className={styles.card}><div className={styles.row}><strong className={styles.filename}>{row.label}</strong><span className={styles.badge}>{t(`asset.${asset?.state ?? 'not_started'}`)}</span></div>
+      const queued = uploads.files[row.slotId], source = row.kind === 'embedded' ? undefined : local[row.slotId];
+      const busy = uploads.current === row.slotId || queued?.state === 'queued';
+      const uploadRecovery = asset?.recovery?.kind === 'upload' ? asset.recovery : null;
+      const unresolved = Boolean(uploadRecovery && asset && ['pending', 'unknown'].includes(asset.state));
+      // An unknown outcome is retried only by its starter with the original intent; a confirmed or definite failure may be replaced.
+      // A request whose outcome only this browser saw as unknown is resent by the queue under its original intent.
+      const retryable = Boolean(source) && !busy && row.kind !== 'embedded' && (unresolved && uploadRecovery!.startedByMe || asset?.state === 'failed'
+        || !asset && Boolean(queued && ['failed', 'refused', 'unknown'].includes(queued.state)));
+      const code = queued?.code && refusal[queued.code];
+      return <li key={row.slotId} className={styles.card}><div className={styles.row}><strong className={styles.filename}>{row.label}</strong><span className={styles.badge}>{badge(queued, asset)}</span></div>
         {asset?.tags && <details><summary>{t('layout.evidence')}</summary><pre className={styles.rawDraft}>{JSON.stringify(asset.tags, null, 2)}</pre></details>}
-        {source && !asset && <button className={styles.button} disabled={uploadLocked} onClick={() => choose(row.slotId, source)}>{t('action.upload')}</button>}
-        {asset?.recovery?.kind === 'upload' && !asset.recovery.startedByMe && !['ready', 'deleted'].includes(asset.state) && <p>{t('media.other_owner')}</p>}
-        {row.uploadable && <label className={styles.field}>{t('media.select_file')}<input type="file" disabled={uploadLocked || Boolean(asset && (asset.state === 'ready' || !asset.recovery?.startedByMe || asset.recovery.kind !== 'upload'))} accept={row.slotId === 'cover' ? 'image/jpeg,image/png,image/webp' : '.mp3,.m4a,.aac,.wav,.flac,.ogg,.opus,.aif,.aiff'} onChange={event => { choose(row.slotId, event.target.files?.[0]); event.target.value = ''; }} /></label>}
-        {asset && <button className={styles.button} disabled={deletionLocked} onClick={() => setConfirmation({ kind: 'remove', importId: item.id, revision: item.revision, label: row.label, slotId: row.slotId, assetStamp: assetStamp(asset), recovery: asset.recovery?.kind === 'cleanup' ? { ...asset.recovery } : undefined })}>{t('action.cleanup')}</button>}
+        {code && <p role="status">{t(code)}</p>}
+        {uploadRecovery && !uploadRecovery.startedByMe && unresolved && <p>{t('media.other_owner')}</p>}
+        {row.kind === 'audio' && !source && (!asset || asset.state === 'failed') && <p className={styles.muted}>{t('upload.needs_file')}</p>}
+        <div className={styles.actions}>
+          {retryable && <button type="button" className={styles.button} disabled={uploadLocked} onClick={() => uploads.queue.enqueue(row.slotId, source!, item, adminWorkspace.capture())}>{t('upload.retry')}</button>}
+          {unresolved && !busy && <button type="button" className={styles.button} disabled={publicationLocked || !online || uploads.running || checking !== null} onClick={() => void checkAgain(row.slotId, uploadRecovery!.operationId)}>{t('upload.check_again')}</button>}
+          {asset && <button type="button" className={styles.button} disabled={deletionLocked} onClick={() => setConfirmation({ kind: 'remove', importId: item.id, revision: item.revision, label: row.label, slotId: row.slotId, assetStamp: assetStamp(asset), recovery: asset.recovery?.kind === 'cleanup' ? { ...asset.recovery } : undefined })}>{t('action.cleanup')}</button>}
+        </div>
+        {row.kind === 'cover' && <label className={styles.field}>{t('media.choose_cover')}<input type="file" disabled={uploadLocked || busy || Boolean(asset && (asset.state === 'ready' || !asset.recovery?.startedByMe || asset.recovery.kind !== 'upload'))} accept="image/jpeg,image/png,image/webp" onChange={event => { chooseCover(event.target.files?.[0]); event.target.value = ''; }} /></label>}
       </li>;
     })}</ul>
     {covers.length > 0 && <fieldset disabled={disabled || publicationLocked} className={styles.editor}><legend>{t('layout.selected_cover')}</legend>
@@ -95,24 +130,23 @@ export function ImportMedia({ item, operation, disabled, view, active = true }: 
       <Link className={styles.link} to={`/admin/catalog/album/${item.published.albumId}`}>{t('published.edit_album')}</Link>
       <Link className={styles.link} to={`/admin/catalog/artist/${item.published.artistId}`}>{t('published.edit_artist')}</Link>
     </>}
-    {!publicationLocked && <button className={`${styles.button} ${styles.primary}`} disabled={disabled || !item.capabilities.publish} onClick={() => setConfirmation({ kind: 'publish', importId: item.id, revision: item.revision, label: item.draft.album.title || item.manifest.rootLabel })}>{t('action.publish')}</button>}
+    {!publicationLocked && <button className={`${styles.button} ${styles.primary}`} disabled={disabled || !item.capabilities.publish} onClick={() => setConfirmation({ kind: 'publish', importId: item.id, revision: item.revision, label })}>{t('action.publish')}</button>}
     {!publicationLocked && !item.capabilities.publish && <p role="status">{t('publication.unavailable')}</p>}
     {item.publication === 'needsAttention' && publishOperation && <button className={styles.button} disabled={disabled} onClick={() => operation.resume(`${path}/resume-publication`, publishOperation)}>{t('action.resume')}</button>}
-    {canCancelPublication && <button className={styles.button} disabled={disabled} onClick={() => { if (publishOperation) setConfirmation({ kind: 'cancelPublication', importId: item.id, revision: item.revision, label: item.draft.album.title || item.manifest.rootLabel, publicationOperationId: publishOperation }); }}>{t('action.cancel_approval')}</button>}
+    {canCancelPublication && <button className={styles.button} disabled={disabled} onClick={() => { if (publishOperation) setConfirmation({ kind: 'cancelPublication', importId: item.id, revision: item.revision, label, publicationOperationId: publishOperation }); }}>{t('action.cancel_approval')}</button>}
     {publicationCleanup && publishOperation && <button className={styles.button} disabled={disabled} onClick={() => operation.resume(`${path}/resume-publication`, publishOperation)}>{t('action.recover')}</button>}
     </div></div>}
-    {confirmation && <ModalDialog title={t(confirmation.kind === 'cancelPublication' ? 'publication.cancel_confirm' : confirmation.kind === 'upload' ? 'media.confirm_upload' : confirmation.kind === 'remove' ? 'media.confirm_remove' : 'media.confirm_publish')} description={t(confirmation.kind === 'cancelPublication' ? 'publication.cancel_confirm_copy' : confirmation.kind === 'publish' ? 'media.confirm_publish_copy' : 'media.confirm_copy')} headerContent={<div className={styles.target}><strong>{confirmation.label}</strong></div>} initialFocusRef={focus} onClose={closeConfirmation}>
+    {confirmation && <ModalDialog title={t(confirmation.kind === 'cancelPublication' ? 'publication.cancel_confirm' : confirmation.kind === 'remove' ? 'media.confirm_remove' : 'media.confirm_publish')} description={t(confirmation.kind === 'cancelPublication' ? 'publication.cancel_confirm_copy' : confirmation.kind === 'publish' ? 'media.confirm_publish_copy' : 'media.confirm_copy')} headerContent={<div className={styles.target}><strong>{confirmation.label}</strong></div>} initialFocusRef={focus} onClose={closeConfirmation}>
       {confirmationStale && <p role="alert">{t('common.conflict')}</p>}
       <div className={styles.dialogActions}><button ref={focus} className={styles.button} onClick={closeConfirmation}>{t(confirmation.kind === 'cancelPublication' ? 'action.keep_reviewing' : 'common.cancel')}</button>
         <button className={`${styles.button} ${styles.primary}`} disabled={confirmationLocked} onClick={() => {
           if (confirmationLocked) return;
           const reviewedPath = importPath(confirmation.importId);
-          if (confirmation.kind === 'upload') operation.asset(`${reviewedPath}/assets/${encodeURIComponent(confirmation.slotId)}`, confirmation.revision, confirmation.file, confirmation.recovery);
-          else if (confirmation.kind === 'remove') operation.asset(`${reviewedPath}/assets/${encodeURIComponent(confirmation.slotId)}`, confirmation.revision, undefined, confirmation.recovery);
+          if (confirmation.kind === 'remove') { forgetSource(confirmation.slotId); operation.cleanup(`${reviewedPath}/assets/${encodeURIComponent(confirmation.slotId)}`, confirmation.revision, confirmation.recovery); }
           else if (confirmation.kind === 'cancelPublication') operation.run(`${reviewedPath}/cancel-publication`, 'POST', { expectedRevision: confirmation.revision, publicationOperationId: confirmation.publicationOperationId });
           else operation.run(`${reviewedPath}/publish`, 'POST', { expectedRevision: confirmation.revision });
           closeConfirmation();
-        }}>{t(confirmation.kind === 'cancelPublication' ? 'action.cancel_approval' : confirmation.kind === 'upload' ? 'action.upload' : confirmation.kind === 'remove' ? 'action.cleanup' : 'action.publish')}</button></div>
+        }}>{t(confirmation.kind === 'cancelPublication' ? 'action.cancel_approval' : confirmation.kind === 'remove' ? 'action.cleanup' : 'action.publish')}</button></div>
     </ModalDialog>}
   </section>;
 }

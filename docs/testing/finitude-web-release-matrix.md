@@ -55,6 +55,15 @@ Run `npm run build` before the browser gate; the guide build validates its curat
 source references and internal links. The preview verifies document presentation,
 not production account access or deployment.
 
+The administrator workbench spec covers the one-approval import upload queue:
+creating an import uploads every selected file one request at a time with no
+per-file dialog, and Resume after reselection reports each file's own result.
+An unknown outcome is reconciled without bytes and then retried with its
+original operation, and switching to User view during an upload stops the queue
+after that file without restarting it on return. Files chosen without a folder
+show no folder field. The local MP3 conversion spec verifies that an import
+created from converted MP3s uploads through the same queue.
+
 The historical 2026-08-19 MediaTrack amendment passed
 304/304 server tests, 214/214 Web unit/component tests, 148/148 integration
 tests, both production builds, and E2E TypeScript. The focused Audio/Video
@@ -337,6 +346,16 @@ player control still works.
   and retry states with a screen reader.
 - On mobile, open and close the expanded player, use every visible transport
   control, and confirm queue swipes have equivalent buttons.
+- As an administrator, create an import from a folder of several audio files
+  and confirm they upload one at a time, each with its own progress and result,
+  without a per-file confirmation. Switch to User view during an upload and
+  confirm that file finishes and no other file starts. Reload during an upload
+  and confirm reopening shows each interrupted file as ready, of unknown
+  outcome (reconciled without bytes) or not uploaded, and never resends bytes
+  on its own. Reselect the folder and resume: only incomplete files upload, an
+  unconfirmed file is resent only under its original operation, and a file
+  whose content changed is refused. Repeat at 320 CSS px with a screen reader
+  and confirm progress and per-file results are announced.
 
 ## Media Session observations
 

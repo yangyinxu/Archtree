@@ -119,8 +119,11 @@ Closing a page/process pauses conversion. An unfinished track starts again from
 its retained source; verified MP3s are reused. Source downloads resume only under
 the same strong ETag and exact range. A changed source is never appended.
 
-New local files create an import draft after all selected tracks finish; metadata,
-duplicate review, upload and publication retain the existing import workflow.
+New local files create an import draft after all selected tracks finish. That
+creation is their upload approval: the MP3s join the import's upload queue, and
+metadata, duplicate review and publication retain the existing import workflow.
+The batch name becomes the import's folder label only when the selection has
+folders; MP3s chosen without a folder send no folder name to Luna.
 Existing tracks use a frozen operation and preserve Track identity and relations.
 Unknown uploads reconcile the original operation before resending bytes. Local
 MP3 deletion requires exact current S3 and ready-publication proof. Failed or
@@ -163,16 +166,46 @@ Import routes (relative to `/api/admin/v1`):
 - `GET /imports`: bounded workbench inventory/counts, filters and opaque cursor.
 - `POST /imports`: `{operationId, manifest, draft?}`; names and relative paths,
   at most 100 files, never client S3 locations or absolute filesystem paths.
+  `manifest.rootLabel` may be empty only when no `relativePath` contains a
+  folder; Luna input then carries no folder name, and a suggestion citing
+  folder evidence is rejected. Rolling back below this release keeps every
+  staged record readable, but analysis of a folderless import then sends an
+  empty folder label and no longer rejects folder-sourced suggestions; re-run
+  such an analysis after rolling forward.
 - `GET /imports/:id`, `PATCH /imports/:id`: read/save a private draft.
 - `POST /imports/:id/analyze`, `/adopt`, `/decisions`, `/cancel-analysis`:
   persisted analysis and selective review with `{operationId, expectedRevision}`.
 - `GET /imports/:id/duplicate-candidates`: bounded candidates; a name match is
   never verified identity or automatic reuse.
 - `POST /imports/:id/assets/:slotId`: one multipart `file`; `Idempotency-Key`
-  and numeric `If-Match` reserve its private object identity before S3 work.
-  `slotId=cover` is the independent manual cover slot.
+  and numeric `If-Match` form the upload intent, which reserves its private
+  object identity before S3 work. Admission binds slot state and that intent,
+  not the project revision: the slot must hold no asset other than a deleted
+  or confirmed-failed one, which moves to the slot's history, and no
+  publication may lock the sources. `If-Match` stays in the intent hash, so a
+  replay of the original intent still matches its receipt, and only the
+  administrator who started an upload may replay it. Analysis checkpoints,
+  draft saves, completed uploads and embedded staging never make a queued
+  upload stale. A transfer error leaves the asset unknown; only reconciliation
+  confirms a failure. `slotId=cover` is the independent manual cover slot.
+- `POST /imports/:id/assets/:slotId/reconcile`: a JSON body `{operationId}`
+  naming the original upload intent, with no bytes. It writes no receipt and
+  returns the original upload receipt when one exists, otherwise `null`; any
+  current administrator may call it, and a publication that locks the sources
+  refuses reconciling an unresolved upload. It sends only a storage `HEAD`,
+  and leaves alone an admitted upload whose transfer has not started. An
+  object whose length, type and `importid`, `slotid`, `operationid` and
+  `sha256` metadata all match exactly makes the asset ready. A missing object
+  is a confirmed failure only once the last attempt's upload lease is released
+  or expired and its 180-second transfer deadline, which bounds the 15-second
+  `HEAD` and the 90-second `PUT` abort, has passed. Anything else, including
+  a binding mismatch or a storage error, leaves the asset unknown with its
+  evidence intact.
 - `DELETE /imports/:id/assets/:slotId`: explicit staged cleanup with the same
-  operation headers; unknown/failed cleanup retains lifecycle evidence.
+  operation headers; unknown/failed cleanup retains lifecycle evidence. An
+  unresolved upload (pending, unknown, or a failure reconciliation has not
+  confirmed) can be removed only after its transfer deadline, so no late
+  `PUT` can leave an untracked object.
 - `POST /imports/:id/select-cover`: explicitly select a ready manual or embedded
   artwork slot; uploading artwork alone never selects it.
 - `GET /imports/:id/assets/:slotId/preview`: protected staged artwork preview.
@@ -195,12 +228,43 @@ Import routes (relative to `/api/admin/v1`):
   complete historical snapshots; `capabilities.publish` closes at that limit.
   Cancellation and cleanup remain admitted independently of this new-work limit.
 
-Ordinary import mutations retain their 256-receipt admission limit. Required
-asset cleanup and publication cancellation use separate lifecycle receipts tied
-to each admitted asset version or approved publication, preserving exact replay
-and UUID-collision checks without consuming the ordinary mutation allowance.
+Ordinary import mutations retain their 256-receipt admission limit. Each
+admitted file upload takes one ordinary receipt and its replays take none, so a
+100-file import leaves room for re-uploads after confirmed failures, draft
+edits, decisions and the approval. Required asset cleanup and publication
+cancellation use separate lifecycle receipts tied to each admitted asset version
+or approved publication, preserving exact replay and UUID-collision checks
+without consuming the ordinary mutation allowance. Automatic embedded-cover
+staging, which follows a ready audio upload, likewise has its own bounded
+lifecycle receipts. An embedded image whose SHA-256 matches one that is ready,
+pending or of unknown outcome is not staged again, and each import makes at
+most 16 automatic embedded stagings. Embedded assets staged before this release
+keep their ordinary receipts and existing lifecycle.
 The client receives a bounded recent receipt projection; the original publication
 UUID remains available through `publicationRecovery` for durable reconciliation.
+
+The Web upload queue starts when the create action succeeds, or when an
+administrator resumes an import after reselecting its files; no file asks for
+its own confirmation. It sends one file per request in manifest order, with a
+manual cover last, and each row shows its own status and result. Reselection
+matches incomplete slots by relative path and size and refuses, without sending
+bytes, a file whose SHA-256 differs from its slot's unfinished upload. Leaving
+Admin view, losing the administrator role (a `401` or `403`), a publication
+lock, unavailable storage or the receipt limit stops the queue after the
+current file; changing section or page never restarts it. A lost response or a
+server failure leaves that file unknown, rereads the import and also stops the
+queue; Resume then resends that file only under its original intent, unless
+the reread shows it admitted. Removing a staged file forgets its chosen copy,
+so Resume never sends it again. A create confirmed after its page was left
+still starts the queue, and New import then opens a fresh form. Reopening an
+import reconciles each unknown upload against storage, and only a confirmed
+failure asks for that file again. Any current administrator may check an
+unknown upload again without its bytes, but only the administrator who started
+it is offered its original-intent retry, which reconciles first and then
+resends the original key, `If-Match` and bytes. A selection without folders
+hides the folder field. An administrator response that fails the Web bundle's
+strict schema, as after a deployment, shows a reload-required state instead of
+an error or an automatic retry.
 
 The analysis worker admits two active projects globally and one per initiating
 admin, uses 24-hour grants and 120-second leases, and checkpoints every provider
