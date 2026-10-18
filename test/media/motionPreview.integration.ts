@@ -120,7 +120,13 @@ after(async () => {
 test('motion preview management is administrator-only, viewer-bound, and hidden while disabled', async () => {
     assert.equal((await request('GET', '')).status, 401);
     assert.equal((await request('GET', userToken, String(listener))).status, 403);
-    assert.equal((await request('GET', adminToken, String(listener))).status, 409);
+    // A browser cookie session is fenced to the current viewer; a Bearer request is bound by its token.
+    const cookieRead = (viewer: string) => fetch(base + path, {
+        headers: { Cookie: `session_token=${encodeURIComponent(adminToken)}`, 'X-Finitude-Account-Viewer': viewer }
+    });
+    assert.equal((await cookieRead(String(listener))).status, 409);
+    assert.equal((await cookieRead(String(admin))).status, 200);
+    assert.equal((await request('GET', adminToken, String(listener))).status, 200);
     process.env.FINITUDE_MOTION_PREVIEWS_ENABLED = 'false';
     const disabled = await request('GET');
     assert.equal(disabled.status, 404);
