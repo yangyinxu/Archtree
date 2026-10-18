@@ -221,7 +221,7 @@ test('a conversion-created import uploads its MP3s through the same one-approval
     if (request.method() === 'POST' && path === '/api/admin/v1/imports') {
       const body = request.postDataJSON(); created.push(body);
       item = { ...detail(), manifest: body.manifest, suggestions: [], publication: 'notStarted', capabilities: { analysis: true, upload: true, publish: false }, upload: { ready: 0, total: body.manifest.files.length, available: true },
-        draft: { album: detail().draft.album, tracks: body.manifest.files.map((file: { slotId: string }) => ({ slotId: file.slotId, title: '', trackNumber: null })) } };
+        draft: { album: detail().draft.album, tracks: body.manifest.files.map((file: { slotId: string }) => ({ slotId: file.slotId, title: '', discNumber: null, trackNumber: null })) } };
       return route.fulfill({ status: 201, json: { item, receipt: { operationId: body.operationId, kind: 'create', revision: 1 } }, headers });
     }
     if (request.method() === 'POST' && path.includes('/assets/')) {

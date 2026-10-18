@@ -34,7 +34,7 @@
 .field input[type=file] { width:100%;font-size:.75rem; }
 .field input[type=file]::file-selector-button { background:var(--color-surface-raised);border:1px solid var(--color-border-control);border-radius:.3rem;color:inherit;padding:.5rem; }
 .track { align-items:end;border-top:1px solid var(--color-border);padding-top:1rem; }
-.track>label:last-child { flex:0 0 5.5rem; }
+.track>label+label { flex:0 0 5.5rem; }
 .diff { display:grid;grid-template-columns:repeat(auto-fit,minmax(10rem,1fr));gap:.75rem;margin:.8rem 0; }
 .diff>div { background:var(--color-surface-low);border-radius:.35rem;padding:.65rem; }
 .diff pre { font:inherit;margin:.4rem 0 0; }
@@ -61,5 +61,5 @@
 .dialogActions { display:grid;grid-template-columns:auto minmax(0,1fr); }
 .dialogActions .button { min-height:2.75rem; }
 .track { flex-wrap:wrap; }
-.track>label:last-child { flex-basis:100%; }
+.track>label+label { flex-basis:100%; }
 }

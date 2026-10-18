@@ -811,7 +811,7 @@ The wire protocol and operational bounds are documented in
 - Audio MediaTrack creation persists a valid positive whole-number Track
   Number from embedded file metadata, including single and bulk uploads, and a
   valid positive whole-number Disc Number when the file carries one.
-  Existing catalog edits may also set a Disc Number.
+  Administrator imports and existing catalog edits may also set a Disc Number.
   Every Album membership write derives the complete persisted
   `Album.audioTrackIds` order by Disc Number, then Track Number; administrators
   cannot manually order Album MediaTracks. A missing Disc Number orders as
@@ -1435,6 +1435,32 @@ The wire protocol and operational bounds are documented in
   sources stops the queue after the current file, and navigation never restarts
   it. Files chosen without a folder need no typed folder name, and no folder
   name is then sent to Luna.
+- The import draft holds the Album title, ordered Artist entries, an optional
+  label, the release date and visibility, and each track's title, Disc Number
+  and Track Number. Each Artist entry has a name, a role of primary or
+  featured, and an optional join phrase connecting it to the next entry. Every
+  primary entry precedes every featured entry, and two entries cannot share a
+  name compared case-insensitively. A role changes only by an administrator
+  edit or an accepted suggestion; editing a join phrase never changes it. An
+  empty label adds no label Credit, and unknown Disc and Track Numbers stay
+  empty.
+- A project saved before Artist entries, labels and Disc Numbers existed opens
+  with its Artist name as one primary entry, no label and unknown Disc
+  Numbers. Its existing values count as the administrator's own, and its staged
+  files contribute no newly read tags. Its saved Artist decision applies to that
+  entry while the name is unchanged. A pending Artist-name suggestion becomes a
+  one-entry Artist suggestion that can still be rejected; accepting it after the
+  entries changed reports a conflict instead of replacing them. This conversion
+  alone never starts analysis. A save from an editor that predates these fields
+  is refused with a reload request and never removes Artist entries, the label
+  or Disc Numbers.
+- An approval made before these fields existed keeps its frozen snapshot. It
+  commits that snapshot unchanged while its captured revisions still verify;
+  otherwise it becomes needs attention without minting identities or changing
+  catalog content. Saved duplicate decisions and open existing-Album reviews
+  captured earlier may need one fresh review and are never silently rebased.
+  Retrying an import creation with its original operation intent still
+  resolves to the original project.
 - Luna proposes supported values with source evidence. Unknown facts stay empty
   and partial release dates retain their precision. Analysis never publishes,
   edits existing catalog records, or silently overwrites manual draft changes.

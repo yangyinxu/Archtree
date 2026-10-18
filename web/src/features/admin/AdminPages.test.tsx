@@ -24,6 +24,14 @@
  *   - catalog review Unfinished filtering preserves the private queue contract without suggesting creation on no matches
  *   - completed catalog reviews describe applied changes rather than an import publication
  *   - the project edit action opens Draft even after a prior Review visit and sends no mutation
+ *   - a typed Artist name saves one primary entry as the only change, and a rename keeps its key
+ *   - several Artist entries show their byline read-only in the editor and the header
+ *   - a save refused because another administrator changed that value loads the saved version for comparison, with no retry
+ *   - a track edit keeps its saved Disc Number and sends only the changed title, and edits reverted to the saved values leave nothing to save
+ *   - an unsaved buffer of the earlier v1 editor is never read as the Draft v2 draft
+ *   - clearing the Artist name and retyping the saved name leaves nothing to save, and a new name keeps the saved entry
+ *   - another administrator saving a different value rebases unsaved edits: Save stays available and sends only this editor's value
+ *   - a Disc Number typed in the import editor is saved as the only change
  * @end-catalog */
 
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
@@ -34,7 +42,7 @@ import { adminWorkspace } from './adminWorkspace';
 import { AdminWorkbenchPage } from './AdminWorkbenchPage';
 import { AdminImportPage } from './AdminImportPage';
 import { AdminCreateImportPage } from './AdminCreateImportPage';
-import { capabilities, deferred, detail, json, projectId, session, viewer } from './adminFixtures.testSupport';
+import { capabilities, deferred, detail, json, projectId, session, slotTwo, viewer, applyDraftChanges, artistEntry } from './adminFixtures.testSupport';
 
 function mount(route: string) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -65,7 +73,7 @@ test('workbench distinguishes confirmed empty from failed load and does not quer
 test('manual edits save only the private draft and never start analysis or publication', async () => {
   let item = detail(); const writes: Array<{ path: string; body: Record<string, unknown> }> = [];
   vi.stubGlobal('fetch', vi.fn(async (path: string, init: RequestInit) => {
-    if (init.method === 'PATCH') { const body = JSON.parse(String(init.body)); writes.push({ path, body }); item = { ...item, revision: 2, draft: body.draft }; return json({ item, receipt: { operationId: body.operationId, revision: 2, kind: 'edit' } }); }
+    if (init.method === 'PATCH') { const body = JSON.parse(String(init.body)); writes.push({ path, body }); item = { ...item, revision: 2, draft: applyDraftChanges(item.draft, body.changes) }; return json({ item, receipt: { operationId: body.operationId, revision: 2, kind: 'edit' } }); }
     return json({ item, receipt: null });
   }));
   mount(`/admin/imports/${projectId}`);
@@ -74,7 +82,8 @@ test('manual edits save only the private draft and never start analysis or publi
   fireEvent.click(screen.getByRole('button', { name: 'Save' }));
   await waitFor(() => expect(screen.getByText('Saved to private draft')).toBeVisible());
   expect(writes).toHaveLength(1); expect(writes[0].path).toBe(`/api/admin/v1/imports/${projectId}`);
-  expect(writes[0].body).toMatchObject({ expectedRevision: 1, draft: { album: { title: 'Human title', visibility: 'public' } } });
+  // Only the changed value is sent, with the saved value it replaces; the rest of the draft never travels.
+  expect(writes[0].body).toEqual({ operationId: expect.any(String), expectedRevision: 1, changes: [{ path: 'album.title', base: '', value: 'Human title' }] });
 });
 
 test('refresh retains unsaved changes until explicitly loading a newer saved version', async () => {
@@ -110,7 +119,7 @@ function createServer(hold?: Promise<void>) {
     if (init.method === 'POST' && path.endsWith('/imports')) {
       const body = JSON.parse(String(init.body)); created.push(body); await hold;
       item = { ...detail(), manifest: body.manifest, suggestions: [], capabilities: { analysis: true, upload: true, publish: false }, upload: { ready: 0, total: body.manifest.files.length, available: true }, publication: 'notStarted',
-        draft: { album: detail().draft.album, tracks: body.manifest.files.map((file: { slotId: string }) => ({ slotId: file.slotId, title: '', trackNumber: null })) } };
+        draft: { album: detail().draft.album, tracks: body.manifest.files.map((file: { slotId: string }) => ({ slotId: file.slotId, title: '', discNumber: null, trackNumber: null })) } };
       return json({ item, receipt: { kind: 'create', revision: 1, operationId: body.operationId } }, 201);
     }
     if (init.method === 'POST' && path.includes('/assets/')) {
@@ -162,7 +171,7 @@ test('folder intake keeps the editable folder name', async () => {
 test('an upload that bumps the revision keeps unsaved edits without a conflict', async () => {
   let item = detail(); item.capabilities.upload = true; item.upload.available = true; item.publication = 'notStarted'; const patches: Record<string, unknown>[] = [];
   vi.stubGlobal('fetch', vi.fn(async (path: string, init: RequestInit) => {
-    if (init.method === 'PATCH') { const body = JSON.parse(String(init.body)); patches.push(body); item = { ...item, revision: item.revision + 1, draft: body.draft }; return json({ item, receipt: { operationId: body.operationId, kind: 'edit', revision: item.revision } }); }
+    if (init.method === 'PATCH') { const body = JSON.parse(String(init.body)); patches.push(body); item = { ...item, revision: item.revision + 1, draft: applyDraftChanges(item.draft, body.changes) }; return json({ item, receipt: { operationId: body.operationId, kind: 'edit', revision: item.revision } }); }
     if (init.method === 'POST' && path.includes('/assets/')) {
       const slot = path.split('/').at(-1)!, operationId = new Headers(init.headers).get('Idempotency-Key')!;
       item = { ...item, revision: item.revision + 1, assets: [...item.assets, { slotId: slot, state: 'ready', byteLength: 100, sha256: 'a'.repeat(64), contentType: 'audio/mpeg', tags: null, recovery: { operationId, expectedRevision: 1, kind: 'upload', startedByMe: true } }] };
@@ -179,7 +188,7 @@ test('an upload that bumps the revision keeps unsaved edits without a conflict',
   expect(screen.getByRole('textbox', { name: 'Title' })).toHaveValue('My unsaved edit');
   expect(screen.queryByText('This project changed elsewhere. Refresh its saved version and compare your changes before trying again.')).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-  await waitFor(() => expect(patches).toHaveLength(1)); expect(patches[0]).toMatchObject({ expectedRevision: 2, draft: { album: { title: 'My unsaved edit' } } });
+  await waitFor(() => expect(patches).toHaveLength(1)); expect(patches[0]).toMatchObject({ expectedRevision: 2, changes: [{ path: 'album.title', base: '', value: 'My unsaved edit' }] }); expect(patches[0]).not.toHaveProperty('draft');
 });
 test('a view change between Create and its confirmation stops the queue before any file is sent, and Resume uploads them', async () => {
   const gate = deferred<void>(), server = createServer(gate.promise); mount('/admin/imports/new');
@@ -216,7 +225,7 @@ test('an outdated save response asks for a page reload and offers no retry of th
   vi.stubGlobal('fetch', vi.fn(async (_path: string, init: RequestInit) => {
     if (init.method !== 'PATCH') return json({ item, receipt: null });
     const body = JSON.parse(String(init.body)); patches.push(body.operationId);
-    return json({ item: { ...item, revision: 2, draft: body.draft, futureField: true }, receipt: { operationId: body.operationId, kind: 'edit', revision: 2 } });
+    return json({ item: { ...item, revision: 2, draft: applyDraftChanges(item.draft, body.changes), futureField: true }, receipt: { operationId: body.operationId, kind: 'edit', revision: 2 } });
   }));
   mount(`/admin/imports/${projectId}`);
   fireEvent.change(await screen.findByRole('textbox', { name: 'Title' }), { target: { value: 'Human title' } });
@@ -435,7 +444,7 @@ test('completed catalog reviews describe applied changes rather than an import p
 
 test('the project edit action opens Draft even after a prior Review visit and sends no mutation', async () => {
   const item = detail(), writes: string[] = [];
-  const summary = { id: item.id, revision: item.revision, createdAt: item.createdAt, updatedAt: item.updatedAt, startedByMe: item.startedByMe, analysis: item.analysis, upload: item.upload, publication: item.publication, title: 'Existing import project', rootLabel: item.manifest.rootLabel, artistName: item.draft.album.artistName, visibility: item.draft.album.visibility, pendingSuggestions: item.suggestions.length };
+  const summary = { id: item.id, revision: item.revision, createdAt: item.createdAt, updatedAt: item.updatedAt, startedByMe: item.startedByMe, analysis: item.analysis, upload: item.upload, publication: item.publication, title: 'Existing import project', rootLabel: item.manifest.rootLabel, artistName: item.draft.album.artists[0]?.name ?? '', visibility: item.draft.album.visibility, pendingSuggestions: item.suggestions.length };
   adminWorkspace.retain(`stage:${projectId}`, 'review', adminWorkspace.capture());
   vi.stubGlobal('fetch', vi.fn(async (path: string, init: RequestInit) => {
     if (init.method && init.method !== 'GET') writes.push(path);
@@ -446,4 +455,134 @@ test('the project edit action opens Draft even after a prior Review visit and se
   await screen.findByRole('textbox', { name: 'Title' });
   expect(screen.getByRole('tab', { name: 'Draft' })).toHaveAttribute('aria-selected', 'true');
   expect(writes).toEqual([]);
+});
+
+test('a typed Artist name saves one primary entry as the only change, and a rename keeps its key', async () => {
+  let item = detail(); const writes: Record<string, any>[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (_path: string, init: RequestInit) => {
+    if (init.method === 'PATCH') { const body = JSON.parse(String(init.body)); writes.push(body); item = { ...item, revision: item.revision + 1, draft: applyDraftChanges(item.draft, body.changes) }; return json({ item, receipt: { operationId: body.operationId, revision: item.revision, kind: 'edit' } }); }
+    return json({ item, receipt: null });
+  }));
+  mount(`/admin/imports/${projectId}`);
+  fireEvent.change(await screen.findByRole('textbox', { name: 'Artist name' }), { target: { value: 'Lorem Ensemble' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+  await waitFor(() => expect(writes).toHaveLength(1));
+  expect(writes[0].changes).toEqual([{ path: 'album.artists', base: [], value: [{ key: expect.stringMatching(/^[0-9a-f-]{36}$/), name: 'Lorem Ensemble', role: 'primary', joinPhrase: null, musicBrainzId: null }] }]);
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled());
+  fireEvent.change(screen.getByRole('textbox', { name: 'Artist name' }), { target: { value: 'Lorem Quartet' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+  await waitFor(() => expect(writes).toHaveLength(2));
+  expect(writes[1].changes).toEqual([{ path: 'album.artists', base: writes[0].changes[0].value, value: [{ ...writes[0].changes[0].value[0], name: 'Lorem Quartet' }] }]);
+});
+
+test('several Artist entries show their byline read-only in the editor and the header', async () => {
+  const item = detail(); vi.stubGlobal('fetch', vi.fn(async () => json({ item, receipt: null })));
+  item.draft.album.artists = [{ ...artistEntry('Lorem'), joinPhrase: ' & ' }, { ...artistEntry('Ipsum', '30000000-0000-4000-8000-000000000002'), role: 'featured' }];
+  mount(`/admin/imports/${projectId}`);
+  const field = await screen.findByRole('textbox', { name: 'Artist name' });
+  expect(field).toHaveValue('Lorem & Ipsum'); expect(field).toHaveAttribute('readonly');
+  expect(screen.getAllByText('Lorem & Ipsum').some(element => element.tagName === 'P')).toBe(true);
+});
+
+test('a save refused because another administrator changed that value loads the saved version for comparison, with no retry', async () => {
+  let item = detail(); const patches: Record<string, any>[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (_path: string, init: RequestInit) => {
+    if (init.method !== 'PATCH') return json({ item, receipt: null });
+    patches.push(JSON.parse(String(init.body)));
+    item = { ...item, revision: 2, draft: { ...item.draft, album: { ...item.draft.album, title: 'Other admin edit' } } };
+    return json({ code: 'ADMIN_IMPORT_FIELD_CONFLICT' }, 409);
+  }));
+  mount(`/admin/imports/${projectId}`);
+  fireEvent.change(await screen.findByRole('textbox', { name: 'Title' }), { target: { value: 'My edit' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+  await screen.findByRole('button', { name: 'Discard local edits and load saved version' });
+  expect(screen.queryByRole('button', { name: 'Retry original operation' })).not.toBeInTheDocument(); expect(patches).toHaveLength(1);
+  expect(screen.getByRole('textbox', { name: 'Title' })).toHaveValue('My edit');
+  fireEvent.click(screen.getByRole('button', { name: 'Discard local edits and load saved version' }));
+  expect(screen.getByRole('textbox', { name: 'Title' })).toHaveValue('Other admin edit');
+});
+
+test('a track edit keeps its saved Disc Number and sends only the changed title, and edits reverted to the saved values leave nothing to save', async () => {
+  let item = detail(); item.draft.tracks[1] = { ...item.draft.tracks[1], discNumber: 2, trackNumber: 1 }; const writes: Record<string, any>[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (_path: string, init: RequestInit) => {
+    if (init.method === 'PATCH') { const body = JSON.parse(String(init.body)); writes.push(body); item = { ...item, revision: item.revision + 1, draft: applyDraftChanges(item.draft, body.changes) }; return json({ item, receipt: { operationId: body.operationId, revision: item.revision, kind: 'edit' } }); }
+    return json({ item, receipt: null });
+  }));
+  mount(`/admin/imports/${projectId}`);
+  const title = await screen.findByRole('textbox', { name: '2 · Title' });
+  fireEvent.change(title, { target: { value: 'Second' } }); fireEvent.change(title, { target: { value: '' } });
+  // Back to the saved value: nothing differs from the saved draft, so there is nothing to send.
+  expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+  fireEvent.change(title, { target: { value: 'Second' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+  await waitFor(() => expect(writes).toHaveLength(1));
+  expect(writes[0].changes).toEqual([{ path: `tracks.${slotTwo}.title`, base: '', value: 'Second' }]);
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled());
+  expect(item.draft.tracks[1]).toEqual({ slotId: slotTwo, title: 'Second', discNumber: 2, trackNumber: 1 });
+});
+
+test('an unsaved buffer of the earlier v1 editor is never read as the Draft v2 draft', async () => {
+  const item = detail(), v1 = { album: { title: 'Unsaved v1 title', artistName: 'Unsaved v1 Artist', releaseDate: null, visibility: 'public' }, tracks: [] };
+  vi.stubGlobal('fetch', vi.fn(async () => json({ item, receipt: null })));
+  adminWorkspace.retain(`editor:${projectId}`, { draft: v1, base: v1, revision: 1, dirty: true, selected: [] }, adminWorkspace.capture());
+  mount(`/admin/imports/${projectId}`);
+  expect(await screen.findByRole('textbox', { name: 'Title' })).toHaveValue('');
+  expect(screen.getByRole('textbox', { name: 'Artist name' })).toHaveValue('');
+  expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+});
+
+test('clearing the Artist name and retyping the saved name leaves nothing to save, and a new name keeps the saved entry', async () => {
+  let item = detail(); item.draft.album.artists = [{ ...artistEntry('Synthetic Artist'), joinPhrase: ' & ' }]; const writes: Record<string, any>[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (_path: string, init: RequestInit) => {
+    if (init.method === 'PATCH') { const body = JSON.parse(String(init.body)); writes.push(body); item = { ...item, revision: item.revision + 1, draft: applyDraftChanges(item.draft, body.changes) }; return json({ item, receipt: { operationId: body.operationId, revision: item.revision, kind: 'edit' } }); }
+    return json({ item, receipt: null });
+  }));
+  mount(`/admin/imports/${projectId}`);
+  const field = await screen.findByRole('textbox', { name: 'Artist name' });
+  fireEvent.change(field, { target: { value: '' } }); fireEvent.change(field, { target: { value: 'S' } }); fireEvent.change(field, { target: { value: 'Synthetic Artist' } });
+  // The saved entry comes back with its key and phrase, so its saved Artist decision still applies and nothing is sent.
+  expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: 'Save' })); expect(writes).toEqual([]);
+  fireEvent.change(field, { target: { value: '' } }); fireEvent.change(field, { target: { value: 'Renamed Artist' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+  await waitFor(() => expect(writes).toHaveLength(1));
+  expect(writes[0].changes).toEqual([{ path: 'album.artists', base: [{ ...artistEntry('Synthetic Artist'), joinPhrase: ' & ' }], value: [{ ...artistEntry('Renamed Artist'), joinPhrase: ' & ' }] }]);
+});
+
+test('another administrator saving a different value rebases unsaved edits: Save stays available and sends only this editor\'s value', async () => {
+  let item = detail(); const writes: Record<string, any>[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (_path: string, init: RequestInit) => {
+    if (init.method === 'PATCH') { const body = JSON.parse(String(init.body)); writes.push(body); item = { ...item, revision: item.revision + 1, draft: applyDraftChanges(item.draft, body.changes) }; return json({ item, receipt: { operationId: body.operationId, revision: item.revision, kind: 'edit' } }); }
+    return json({ item, receipt: null });
+  }));
+  mount(`/admin/imports/${projectId}`);
+  fireEvent.change(await screen.findByRole('textbox', { name: 'Title' }), { target: { value: 'My edit' } });
+  item = { ...item, revision: 2, draft: applyDraftChanges(item.draft, [{ path: `tracks.${slotTwo}.title`, value: 'Their track title' }]) };
+  fireEvent.click(screen.getByRole('button', { name: 'Refresh status' }));
+  await waitFor(() => expect(screen.getByRole('textbox', { name: '2 · Title' })).toHaveValue('Their track title'));
+  expect(screen.queryByRole('button', { name: 'Discard local edits and load saved version' })).not.toBeInTheDocument();
+  expect(screen.getByRole('textbox', { name: 'Title' })).toHaveValue('My edit'); expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled();
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+  await waitFor(() => expect(writes).toHaveLength(1));
+  expect(writes[0]).toMatchObject({ expectedRevision: 2, changes: [{ path: 'album.title', base: '', value: 'My edit' }] });
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled());
+  expect([item.draft.album.title, item.draft.tracks[1].title]).toEqual(['My edit', 'Their track title']);
+});
+
+test('a Disc Number typed in the import editor is saved as the only change', async () => {
+  let item = detail(); const writes: Record<string, any>[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (_path: string, init: RequestInit) => {
+    if (init.method === 'PATCH') { const body = JSON.parse(String(init.body)); writes.push(body); item = { ...item, revision: item.revision + 1, draft: applyDraftChanges(item.draft, body.changes) }; return json({ item, receipt: { operationId: body.operationId, revision: item.revision, kind: 'edit' } }); }
+    return json({ item, receipt: null });
+  }));
+  mount(`/admin/imports/${projectId}`);
+  fireEvent.change(await screen.findByRole('spinbutton', { name: '2 · Disc number' }), { target: { value: '2' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+  await waitFor(() => expect(writes).toHaveLength(1));
+  expect(writes[0].changes).toEqual([{ path: `tracks.${slotTwo}.discNumber`, base: null, value: 2 }]);
+  await waitFor(() => expect(screen.getByRole('spinbutton', { name: '2 · Disc number' })).toHaveValue(2));
+  fireEvent.change(screen.getByRole('spinbutton', { name: '2 · Disc number' }), { target: { value: '' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+  await waitFor(() => expect(writes).toHaveLength(2));
+  expect(writes[1].changes).toEqual([{ path: `tracks.${slotTwo}.discNumber`, base: 2, value: null }]);
 });

@@ -13,7 +13,7 @@ import { Link, useParams } from 'react-router';
 import { AdminGate, useAdminAccess, useAdminText } from './AdminAccess';
 import { AdminNav } from './AdminNav';
 import { adminEndpointRequest } from './adminTransport';
-import type { ImportDraft } from './adminNamingSchema';
+import type { ImportDraft } from './reviewNamingSchema';
 import { adminWorkspace } from './adminWorkspace';
 import { ImportDraftEditor } from './ImportDraftEditor';
 import { reviewValueText } from './reviewValueText';

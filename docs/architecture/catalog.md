@@ -423,9 +423,10 @@ revisions stay unchanged.
   missing, non-integer or out-of-range value is ignored for that file only,
   and the upload continues without a Disc Number. The number is stored with
   the upload record, so a publication retry keeps it.
-- Import drafts carry no Disc Number yet, so import publication stores none.
-  An append to an existing Album re-derives the whole order from the stored
-  numbers of every member.
+- Import publication stores each new MediaTrack's reviewed draft Disc Number
+  with `discNumberSource: 'admin-import'`; an unknown one, and every track of
+  a format-1 approval, stores neither key. An append to an existing Album
+  re-derives the whole order from the stored numbers of every member.
 - Replacing a MediaTrack's media keeps its stored Disc and Track Numbers.
 - Listener v1, including Search, and legacy public responses never carry
   `discNumber`, `discNumberSource` or `trackNumber`. Clients see disc order
@@ -446,8 +447,8 @@ persisted `Album.audioTrackIds` order:
 `orderedAlbumTrackIds` reads `discNumber` and `trackNumber` inside the
 membership transaction for Album creation, membership links and replacements,
 and applied existing-Album reviews. Import publication orders a new Album by
-its draft Track Numbers and an append by the stored numbers it reads, both
-with the same comparator, and outcome-unknown confirmation of an Album
+its draft Disc and Track Numbers and an append by the stored numbers it reads,
+both with the same comparator, and outcome-unknown confirmation of an Album
 replacement compares the stored list with that exact order. Because a missing
 Disc Number counts as disc 1, an Album without Disc Numbers keeps its earlier
 Track Number order; `sortTrackIdsByEmbeddedTrackNumber` remains as the
@@ -465,6 +466,6 @@ Track Numbers at the end of their disc and duplicate request IDs.
 legacy uploads, ignored tags and publication retry. The MongoDB suites
 `test/catalog/albumLifecycle.integration.ts` and
 `test/administration/adminImportMedia.integration.ts` cover multi-disc
-membership writes, outcome-unknown confirmation and an import append, and
-`test/listener/listenerDtoShape.test.ts` keeps both numbers out of listener
-and legacy public responses.
+membership writes, outcome-unknown confirmation, an import append and a
+Draft v2 import's Disc Numbers, and `test/listener/listenerDtoShape.test.ts`
+keeps both numbers out of listener and legacy public responses.

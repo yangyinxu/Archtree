@@ -1,5 +1,6 @@
 import type { MediaRepresentation } from '../../models/mediaRepresentation';
 import { ADMIN_IMPORT_LIMITS, type ImportDraft, type ImportDuplicateDecision, type ImportEmbeddedTags } from './adminImportContract';
+import type { ImportDecisionV2, ImportDraftV2 } from './adminImportDraft';
 
 /** Stage objects are never AudioTrack rows, so ordinary publication recovery cannot expose a draft. */
 export interface ImportAsset {
@@ -16,9 +17,9 @@ export interface ImportAsset {
     recovery: { operationId: string; expectedRevision: number; kind: 'upload' | 'cleanup'; actorId: string };
 }
 export interface ImportPublication {
-    /** Frozen approval format; absent means 1, the only format this release copies, commits or cleans. */
+    /** Frozen approval format: absent means 1 (a v1 snapshot); 2 freezes a Draft v2 snapshot and entry-bound decisions. */
     schemaVersion?: number;
-    operationId: string; actorId: string; approvedRevision: number; snapshot: ImportDraft; decisions: ImportDuplicateDecision[];
+    operationId: string; actorId: string; approvedRevision: number; snapshot: ImportDraft | ImportDraftV2; decisions: ImportDuplicateDecision[] | ImportDecisionV2[];
     state: 'preparing' | 'needsAttention' | 'complete' | 'cancelled'; issue: 'storageUnknown' | 'permissionLost' | 'catalogConflict' | 'configurationUnavailable' | 'unsupportedVersion' | null;
     cleanupPending?: boolean;
     cancellation?: { operationId: string; actorId: string };
@@ -33,16 +34,23 @@ export const importFormatVersion = (value: unknown): number | null => value === 
 export const importPublicationVersion = (publication: { schemaVersion?: unknown }): number | null => importFormatVersion(publication.schemaVersion);
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 /**
- * Only a format-1 approval may be copied, committed or cleaned by this release; any other stays needs attention.
- * It fails closed on shape too: the snapshot must be a v1 draft (a string artistName, no artist entries, no Disc
- * Numbers), so an approval a later release froze without recording its format is never misread as format 1.
+ * The approval format this release copies, commits and cleans, or null (it stays needs attention). Each format fails closed
+ * on shape too. Format 1 needs a v1 snapshot (a string artistName, no artist entries, no Disc Numbers), so an approval a later
+ * release froze without recording its format is never misread as format 1. Format 2 needs a Draft v2 snapshot with exactly one
+ * primary Artist entry, no label and a `discNumber` field (a Disc Number or null) on every track. Any other shape needs a higher
+ * schemaVersion, so S7a writes 3 for several entries or a label.
  */
-export const importPublicationSupported = (publication: { schemaVersion?: unknown; snapshot?: unknown }) => {
-    if (importPublicationVersion(publication) !== 1 || !isRecord(publication.snapshot)) return false;
+export const importPublicationFormat = (publication: { schemaVersion?: unknown; snapshot?: unknown }): 1 | 2 | null => {
+    const version = importPublicationVersion(publication);
+    if ((version !== 1 && version !== 2) || !isRecord(publication.snapshot)) return null;
     const { album, tracks } = publication.snapshot;
-    return isRecord(album) && typeof album.artistName === 'string' && !('artists' in album)
-        && Array.isArray(tracks) && tracks.every(track => isRecord(track) && !('discNumber' in track));
+    if (!isRecord(album) || !Array.isArray(tracks) || !tracks.every(isRecord)) return null;
+    if (version === 1) return typeof album.artistName === 'string' && !('artists' in album) && tracks.every(track => !('discNumber' in track)) ? 1 : null;
+    const artists = album.artists;
+    return !('artistName' in album) && Array.isArray(artists) && artists.length === 1 && isRecord(artists[0]) && artists[0].role === 'primary' && typeof artists[0].name === 'string'
+        && album.label === null && tracks.every(track => 'discNumber' in track) ? 2 : null;
 };
+export const importPublicationSupported = (publication: { schemaVersion?: unknown; snapshot?: unknown }) => importPublicationFormat(publication) !== null;
 /** A missing object proves failure only once no PUT can still land: lease released/expired and transfer deadline passed. */
 export const importUploadSettled = (asset: ImportAsset, now: Date) =>
     (!asset.leaseUntil || asset.leaseUntil <= now) &&

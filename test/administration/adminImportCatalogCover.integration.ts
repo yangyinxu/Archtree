@@ -65,6 +65,8 @@ const cleanup = async (id: string) => { await getDb()!.collection('imageAssets')
 test('versioned replacement atomically attaches copied asset and old cleanup failure remains explicitly retryable', async () => {
     const storage = new Storage(), body = await ready(storage); let fail = true;
     const deps = { storage, cleanup: async (id: string) => { if (fail) throw new Error(); await cleanup(id); } };
+    // Every project this release creates is a Draft v2 import project, so it is a valid cover source.
+    assert.equal((await getDb()!.collection('adminAlbumImports').findOne({ _id: new ObjectId(body.importId) }))!.draftVersion, 2);
     const result = await replaceAdminCatalogCover(actor.toHexString(), 'artist', artist.toHexString(), body, deps);
     assert.equal(result.coverOperation.state, 'complete'); assert.equal(result.coverOperation.cleanupPending, true); assert.notEqual(result.item!.revision, body.expectedRevision); assert.equal(await getDb()!.collection('imageAssets').countDocuments(), 2);
     fail = false; const retried = await reconcileAdminCatalogCover(actor.toHexString(), 'artist', artist.toHexString(), body.operationId, deps);
@@ -288,18 +290,18 @@ test('cover grant is rechecked after HEAD and before dispatch; reserved cancella
 
 test('a source import saved in a newer draft format admits no new cover pin or copy, while an existing pin is still released', async () => {
     const storage = new Storage(), body = await ready(storage), importId = new ObjectId(body.importId), imports = getDb()!.collection('adminAlbumImports');
-    await imports.updateOne({ _id: importId }, { $set: { draftVersion: 2 } });
+    await imports.updateOne({ _id: importId }, { $set: { draftVersion: 3 } });
     const before = await imports.findOne({ _id: importId }), owner = await ownerRecord();
     await assert.rejects(replaceAdminCatalogCover(actor.toHexString(), 'artist', artist.toHexString(), body, { storage, cleanup }), (error: any) => error.code === 'ADMIN_IMPORT_RELOAD_REQUIRED');
     assert.equal(storage.copies, 0); assert.equal(await coverOps().countDocuments(), 0);
     assert.deepEqual(await imports.findOne({ _id: importId }), before); assert.deepEqual(await ownerRecord(), owner);
     // A pin taken before a newer release saved its source is released when its operation is cancelled.
     const original = await staleCopy(storage), source = new ObjectId(original.importId);
-    await imports.updateOne({ _id: source }, { $set: { draftVersion: 2 } });
+    await imports.updateOne({ _id: source }, { $set: { draftVersion: 3 } });
     const pinned = await imports.findOne({ _id: source }); assert.equal(pinned!.media.assets[0].coverConsumers.length, 1);
     const cancelled = await cancelAdminCatalogCover(actor.toHexString(), 'artist', artist.toHexString(), original.operationId, await cancellation(), { storage });
     assert.deepEqual(cancelled.coverOperation, { state: 'cancelled', cleanupPending: false });
     const released = await imports.findOne({ _id: source });
-    assert.deepEqual(released!.media.assets[0].coverConsumers, []); assert.equal(released!.revision, pinned!.revision + 1); assert.equal(released!.draftVersion, 2);
+    assert.deepEqual(released!.media.assets[0].coverConsumers, []); assert.equal(released!.revision, pinned!.revision + 1); assert.equal(released!.draftVersion, 3);
     assert.equal(storage.copies, 1); assert.equal((await ownerRecord())!.coverArtId, oldImage.toHexString());
 });

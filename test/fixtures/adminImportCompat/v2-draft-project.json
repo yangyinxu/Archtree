@@ -75,17 +75,17 @@
     ]
   },
   "draftOrigins": {
-    "album.title": "administrator",
-    "album.artists": "automatic",
-    "album.label": "automatic",
-    "album.releaseDate": "automatic",
-    "album.visibility": "administrator",
-    "tracks.00000009-0000-4000-a000-000000000001.title": "automatic",
-    "tracks.00000009-0000-4000-a000-000000000001.discNumber": "automatic",
-    "tracks.00000009-0000-4000-a000-000000000001.trackNumber": "automatic",
-    "tracks.00000009-0000-4000-a000-000000000002.title": "administrator",
-    "tracks.00000009-0000-4000-a000-000000000002.discNumber": "automatic",
-    "tracks.00000009-0000-4000-a000-000000000002.trackNumber": "automatic"
+    "album:title": "administrator",
+    "album:artists": "automatic",
+    "album:label": "automatic",
+    "album:releaseDate": "automatic",
+    "album:visibility": "administrator",
+    "tracks:00000009-0000-4000-a000-000000000001:title": "automatic",
+    "tracks:00000009-0000-4000-a000-000000000001:discNumber": "automatic",
+    "tracks:00000009-0000-4000-a000-000000000001:trackNumber": "automatic",
+    "tracks:00000009-0000-4000-a000-000000000002:title": "administrator",
+    "tracks:00000009-0000-4000-a000-000000000002:discNumber": "automatic",
+    "tracks:00000009-0000-4000-a000-000000000002:trackNumber": "automatic"
   },
   "analysis": {
     "state": "queued",

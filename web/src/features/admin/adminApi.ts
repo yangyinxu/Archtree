@@ -1,7 +1,9 @@
 import { z } from 'zod';
-import { draftSchema, suggestionSchema, analysisSchema } from './adminNamingSchema';
-export { importDateSchema, draftSchema, suggestionSchema, analysisSchema } from './adminNamingSchema';
-export type { ImportDraft, ImportSuggestion } from './adminNamingSchema';
+import { importDraftV2Schema, importSuggestionV2Schema, analysisSchema } from './adminNamingSchema';
+export { importDateSchema, analysisSchema, artistEntrySchema, labelEntrySchema, importDraftV2Schema, importSuggestionV2Schema } from './adminNamingSchema';
+export type { ImportDraftV2, ImportSuggestionV2, ImportArtistEntry } from './adminNamingSchema';
+// Catalog reviews keep the v1 draft; its runtime schemas are imported from reviewNamingSchema.ts directly.
+export type { ImportDraft, ImportSuggestion } from './reviewNamingSchema';
 export { ADMIN_IMPORT_APPEND_VISIBILITY_MISMATCH, ADMIN_IMPORT_RELOAD_REQUIRED, adminEndpointRequest, adminRequest, importPath } from './adminTransport';
 export type { AdminGuard } from './adminTransport';
 
@@ -14,9 +16,10 @@ export const decisionSchema = z.object({ scope: z.enum(['artist', 'album', 'trac
 const upload = z.object({ ready: integer, total: integer, available: z.boolean() }).strict();
 export const assetRecoverySchema = z.object({ operationId: uuid, expectedRevision: integer, kind: z.enum(['upload', 'cleanup']), startedByMe: z.boolean() }).strict();
 const common = { id, revision: integer, createdAt: z.string(), updatedAt: z.string(), startedByMe: z.boolean(), analysis: analysisSchema, upload, publication: z.enum(['notAvailable', 'notStarted', 'preparing', 'needsAttention', 'cancelled', 'complete']) };
-export const detailSchema = z.object({ ...common, manifest: manifestSchema, draft: draftSchema,
+// An import project carries Draft v2: ordered Artist entries, an optional label and per-track Disc Numbers.
+export const detailSchema = z.object({ ...common, manifest: manifestSchema, draft: importDraftV2Schema,
   publicationRecovery: z.object({ operationId: uuid, cleanupPending: z.boolean(), startedByMe: z.boolean() }).strict().nullable().default(null),
-  suggestions: z.array(suggestionSchema).max(1000), decisions: z.array(decisionSchema).max(102),
+  suggestions: z.array(importSuggestionV2Schema).max(1000), decisions: z.array(decisionSchema).max(102),
   assets: z.array(z.object({ slotId: z.string(), state: z.enum(['pending', 'ready', 'failed', 'unknown', 'deleting', 'cleanupFailed', 'deleted']), byteLength: integer, sha256: z.string().regex(/^[a-f0-9]{64}$/), contentType: z.string(), recovery: assetRecoverySchema.nullable().default(null), tags: z.object({ title: z.string().nullable(), album: z.string().nullable(), artists: z.array(z.string()).max(50), year: integer.nullable(), trackNumber: integer.nullable() }).strict().nullable().default(null) }).strict()).max(201).default([]),
   selectedCoverSlotId: z.string().nullable().default(null),
   published: z.object({ albumId: id, artistId: id, trackIds: z.array(id).max(100) }).strict().nullable().default(null),

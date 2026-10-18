@@ -70,10 +70,18 @@ not satisfy the separate historical-URL migration requirement for hiding content
 
 The Web import editor uses Draft, Review, Files and Publish sections.
 Section navigation retains account-fenced local work and does not dispatch a
-mutation. Compact value comparisons keep source evidence expandable; publication
-recovery has its own status and actions. Confirmation windows show the frozen
-named target and proposed change before secondary explanations. Technical IDs
-remain available in Details rather than leading normal catalog and Page rows.
+mutation. Saving sends only the values the administrator changed, each with
+the saved value the edit started from. A newer saved version that changed only
+other values carries the unsaved edits over; one that changed an edited value,
+or a refused stale save, loads the saved version for comparison. The Artist
+name field edits a draft's single Artist entry, keeping its key and role, and
+clearing it then typing again brings that saved entry back. Several entries
+show their byline read-only, each track edits its Disc Number, and the label
+is not edited here yet. Compact value comparisons keep source evidence
+expandable; publication recovery has its own status and actions. Confirmation
+windows show the frozen named target and proposed change before secondary
+explanations. Technical IDs remain available in Details rather than leading
+normal catalog and Page rows.
 
 The workbench is Web-only. Finitude iOS and Android expose listener features even
 for administrator accounts; they do not load administrator capabilities, private
@@ -168,6 +176,9 @@ budgets are unchanged. `npm run build:web` checks all three budgets.
 Import routes (relative to `/api/admin/v1`):
 
 - `GET /imports`: bounded workbench inventory/counts, filters and opaque cursor.
+  `q` matches the folder label, the Album title and every Artist entry name, or
+  the Artist name of a project still in format 1; a row's `artistName` is the
+  first primary entry.
 - `POST /imports`: `{operationId, manifest, draft?}`; names and relative paths,
   at most 100 files, never client S3 locations or absolute filesystem paths.
   `manifest.rootLabel` may be empty only when no `relativePath` contains a
@@ -183,15 +194,87 @@ Import routes (relative to `/api/admin/v1`):
   An explicit draft identical to the frozen hidden empty draft has the same
   create fingerprint as a body without `draft`; a retry that switches between
   the two replays the stored project rather than failing with
-  `ADMIN_IMPORT_OPERATION_CONFLICT`.
-- `GET /imports/:id`, `PATCH /imports/:id`: read/save a private draft. A project
-  saved in a newer draft format is read-only here: every change except staged
-  cleanup, reconciliation of an admitted upload, `/cancel-publication`,
+  `ADMIN_IMPORT_OPERATION_CONFLICT`. `draft` keeps the v1 shape and its frozen
+  parser and fingerprint, so every earlier create receipt still replays; the
+  new project is stored as Draft v2 (`draftVersion` 2), and a supplied v1
+  `draft` converts with every value the administrator's own.
+- `GET /imports/:id`: the private project with a Draft v2 `draft`. `album`
+  holds `title`, `artists`, `label`, `releaseDate` and `visibility`, and each
+  track holds `slotId`, `title`, `discNumber` and `trackNumber`. An Artist
+  entry is `{key, name, role, joinPhrase, musicBrainzId}` with a UUID `key`
+  unique in the draft and a `role` of `primary` or `featured`; the label is
+  `null` or `{name, musicBrainzId}`. Suggestions are Draft v2, where an
+  `artists` suggestion proposes the whole entry list; decisions keep their v1
+  fields and include an Artist decision only while the entry it was made for
+  keeps its key and name. A project still stored in format 1 reads as its
+  Draft v2 view. Value origins (`draftOrigins`) are stored, not returned; each
+  is keyed by its value path with `:` in place of `.` (`album:title`,
+  `tracks:<slotId>:discNumber`), because MongoDB before 5.0 refuses dotted
+  field names.
+- `PATCH /imports/:id`: `{operationId, expectedRevision, changes}` saves only
+  the values the administrator changed, under one ordinary receipt. Each change
+  is `{path, base, value}`, at most one per path: `path` is `album.title`,
+  `album.artists`, `album.label`, `album.releaseDate`, `album.visibility`, or
+  `tracks.<slotId>.title`, `.discNumber` or `.trackNumber` for a manifest slot;
+  `base` is the value the editor read there; and `value` replaces it whole, so
+  the Artist entries are one value. Before the intent is fingerprinted, the
+  body may hold at most 305 changes, a `path` at most 80 characters, and a
+  `base` or `value` nested at most two containers deep and at most 48 KB
+  serialized; anything else is `400 ADMIN_IMPORT_INVALID_INPUT`. The save is
+  admitted at any project revision. A path is stale only when its stored value
+  differs from both `base` and `value` and is the administrator's own (a stored
+  value without an origin counts as the administrator's own): then the whole
+  save is refused with `409 ADMIN_IMPORT_FIELD_CONFLICT`, nothing is written,
+  and the Web loads the saved version for comparison, which is its reload
+  request. Staleness is decided per path by value, not by a stored per-path
+  revision, so a value changed and then changed back is not stale. A `base`
+  equal to what the editor shows for a stored value it cannot display (a
+  format-1 value over a bound after NFC, shown as empty) is current too, so
+  that value stays replaceable. A value automation wrote is overwritten. Every
+  saved path becomes the administrator's own. The
+  saved draft must stay valid, or the save is
+  `400 ADMIN_IMPORT_INVALID_INPUT`: at most 20 entries with unique keys, every
+  primary before every featured entry, Artist and label names of 1 to 200
+  characters without control or format characters that differ
+  case-insensitively, titles of at most 300 characters (both bounds hold
+  before and after NFC normalization), join phrases valid as Credit phrases,
+  Disc Numbers from 1 to 999 and at most 48 KB unless the save does not grow
+  the draft. A `musicBrainzId` must equal the one stored for that unrenamed
+  entry or label; none is stored yet, so it is always `null`. Renaming or
+  removing an entry drops its Artist decision. A whole-draft body (`draft`,
+  nested at most four containers deep) from an editor that predates Draft v2
+  is refused with `409 ADMIN_IMPORT_RELOAD_REQUIRED` right after receipt
+  lookup, before the publication lock and the operation limit are checked, so
+  a lost response of an earlier save still replays and an outdated editor is
+  always asked to reload. The JSON limit is 160 KB for this route and 96 KB
+  for the other import routes.
+- The first admitted change of a format-1 project, other than staged cleanup,
+  publication cancellation and analysis cancellation, stores it as Draft v2:
+  its draft, analysis baseline, suggestions and the decisions still bound to
+  an entry. Its frozen approval, histories and asset records are untouched,
+  and conversion starts no analysis; a receipt replay converts nothing. A
+  project saved in a newer draft format is read-only here: every change except
+  staged cleanup, reconciliation of an admitted upload, `/cancel-publication`,
   `/resume-publication` and `/cancel-analysis` returns
   `409 ADMIN_IMPORT_RELOAD_REQUIRED` before admission and writes nothing, while
   a replay of a stored receipt still returns that receipt.
 - `POST /imports/:id/analyze`, `/adopt`, `/decisions`, `/cancel-analysis`:
   persisted analysis and selective review with `{operationId, expectedRevision}`.
+  Luna still reads the v1 view of the Draft v2 baseline, whose first primary
+  entry is `artistName`, and its Artist name becomes a one-entry primary
+  `artists` suggestion; a name with control or format characters is dropped.
+  An accepted suggestion becomes the administrator's own; accepting one whose
+  baseline is no longer the current value returns
+  `409 ADMIN_IMPORT_FIELD_CONFLICT`, so an Artist suggestion never replaces
+  entries that changed. An Artist decision binds the draft's single Artist
+  entry and its name, and a reuse or create-distinct decision makes the
+  entries the administrator's own: without an entry it is
+  `400 ADMIN_IMPORT_DRAFT_INCOMPLETE`, and with several entries or a label
+  `409 ADMIN_IMPORT_PUBLICATION_UNSUPPORTED`. Each decision must be one flat
+  record of at most 1 KB before the intent is fingerprinted. Publishing needs a
+  reuse or create-distinct Artist decision still bound to that entry under that
+  name, so renaming or removing the entry makes publishing return
+  `409 ADMIN_IMPORT_REVIEW_REQUIRED` until the Artist is decided again.
 - `GET /imports/:id/duplicate-candidates`: bounded candidates; a name match is
   never verified identity or automatic reuse.
 - `POST /imports/:id/assets/:slotId`: one multipart `file`; `Idempotency-Key`
@@ -234,7 +317,16 @@ Import routes (relative to `/api/admin/v1`):
   or revision; a stale Album reports `ADMIN_IMPORT_DUPLICATE_STALE` first.
   The Web then asks the administrator to match that Album's visibility, save
   and approve again. Rolled back below this release, the same mismatch reports
-  `409 ADMIN_IMPORT_DUPLICATE_STALE` instead.
+  `409 ADMIN_IMPORT_DUPLICATE_STALE` instead. This release publishes one
+  primary Artist entry and no label: a draft without a title or Artist entry, or
+  whose only entry is featured, is `400 ADMIN_IMPORT_DRAFT_INCOMPLETE`, and
+  several entries or a label are `409 ADMIN_IMPORT_PUBLICATION_UNSUPPORTED`,
+  both before an approval is frozen. A stored value the editor cannot show
+  (it reads as empty there) is also `400 ADMIN_IMPORT_DRAFT_INCOMPLETE`, so it
+  is never frozen, and only pending suggestions the editor shows hold the
+  approval with `409 ADMIN_IMPORT_REVIEW_REQUIRED`. The approval freezes the Draft v2
+  snapshot with `schemaVersion` 2 and makes every draft value the
+  administrator's own; the entry's join phrase is kept on its Credits.
 - `POST /imports/:id/cancel-publication`: explicit cancellation with
   `{operationId, expectedRevision, publicationOperationId}`. The new operation
   UUID binds the exact original publication UUID. An active worker lease or a
@@ -374,10 +466,11 @@ Stopping the server stops new steps and awaits admitted worker work before
 closing MongoDB. Required indexes and the global admission record initialize
 with normal server startup.
 Imported Album order follows the catalog rule: Disc Number, then Track Number,
-then MediaTrack ID. Import drafts carry no Disc Number yet, so imported
-MediaTracks store none and order as disc 1. Appending to an existing Album
-re-derives its whole order from the stored numbers of all its MediaTracks, so
-existing disc groupings are kept.
+then MediaTrack ID. A new imported MediaTrack stores its reviewed Disc Number
+with `discNumberSource: 'admin-import'`. A track whose Disc Number is unknown,
+including every track of a format-1 approval, stores none and orders as disc 1.
+Appending to an existing Album re-derives its whole order from the stored
+numbers of all its MediaTracks, so existing disc groupings are kept.
 Audio/artwork reconciliation includes unresolved canonical copy reservations
 from import and cover operations before reporting orphan candidates. Completed
 history does not mask later unreferenced objects; unresolved cleanup evidence
@@ -441,13 +534,16 @@ what a later release wrote and never acts on a format it does not know. The
 reads live in `src/administration/import/adminImportDraftCompat.ts`.
 
 - **Format numbers.** A project's `draftVersion` and a publication approval's
-  `schemaVersion` are absent, `null` or `1` for the format this release
-  writes, and this release writes neither field. Any other value is a newer or
-  unrecognized format. An approval whose snapshot is not a v1 draft (a string
-  `artistName`, no artist entries and no Disc Numbers) is also treated as a
-  newer format. A later release must write `schemaVersion` 2 or higher for any
-  approval whose snapshot is not a v1 draft, and `draftVersion` 2 or higher for
-  any draft that is not a v1 draft.
+  `schemaVersion` are absent, `null` or `1` for the original format. This
+  release writes `draftVersion` 2 for import projects and `schemaVersion` 2 for
+  their approvals, reads formats 1 and 2, and treats 3 and higher, or any value
+  that is not a positive whole number, as newer. Catalog reviews stay format 1,
+  so a format-2 review is newer here. An approval is format 1 only with a v1
+  snapshot (a string `artistName`, no artist entries and no Disc Numbers), and
+  format 2 only with a Draft v2 snapshot of one primary Artist entry, no label
+  and a `discNumber` field (a Disc Number or null) on every track; anything
+  else is treated as newer. A later release must write a higher number for any
+  other shape.
 - **Read-only newer drafts.** A project saved in a newer draft format admits
   only staged cleanup and upload reconciliation, publication recovery and
   cancellation, and analysis cancellation, plus replays of stored receipts.
@@ -469,27 +565,35 @@ reads live in `src/administration/import/adminImportDraftCompat.ts`.
   approval is unresolved, in any state but complete or cancelled with confirmed
   cleanup, audio and image storage reconciliation fails closed instead of
   classifying objects.
-- **Allowlisted DTOs.** Import and review responses copy only the v1 fields at
-  every level: drafts, suggestions, decisions, assets and their tags,
-  publication state and receipts. Fields and values a later release adds are
-  dropped. A newer draft shows as its v1 projection, with its first primary
-  Artist as `artistName` and no label or Disc Numbers; an unknown state reads
-  as needs attention; and `capabilities` are all `false`. An open v1 tab
-  therefore keeps parsing instead of asking for a reload.
-- **Draft v2 view.** The same module presents a v1 project as the Draft v2 view
-  later stages adopt: `artistName` becomes one primary entry with a
-  deterministic per-project key, label and Disc Numbers are unknown, and every
-  value counts as the administrator's own. The view is computed on read and
-  never written back.
+- **Allowlisted DTOs.** Import responses copy only the Draft v2 fields of the
+  draft and suggestions and the v1 fields everywhere else: decisions, assets
+  and their tags, publication state and receipts. Review responses and the
+  workbench inventory copy only v1 fields, so a Draft v2 project's row shows
+  its first primary Artist as `artistName`. Fields and values a later release
+  adds are dropped; an unknown state reads as needs attention; and a newer
+  format offers no `capabilities`. An open tab of this release therefore keeps
+  parsing a newer format instead of asking for a reload, while a tab opened
+  before this release fails its strict schema on a Draft v2 response and shows
+  the reload-required state.
+- **Draft v2 view.** The same module presents a v1 project as Draft v2:
+  `artistName` becomes one primary entry with a deterministic per-project key,
+  label and Disc Numbers are unknown, and every value counts as the
+  administrator's own. The view is computed on read; the first admitted change
+  stores it (see `PATCH /imports/:id`).
 
 ### Rollback floors
 
 Later stages raise the oldest release that is safe to roll back to:
 
-- After Draft v2 projects or multi-artist and label approvals are saved, never
-  roll back below this release. It is the first that keeps such projects
+- This release saves Draft v2 projects and format-2 approvals, so never roll
+  back below the release before it, the first that keeps such projects
   read-only and holds their approvals in needs attention instead of misreading
-  them.
+  them. That release reads `discNumberSource: 'admin-import'` without issue.
+  Every project this release creates is stored as Draft v2 at creation, so
+  after a rollback it is read-only even if it was never edited. The release
+  before refuses this release's field saves as invalid input and never replays
+  them, so after a rollback reload open workbench tabs before retrying a save
+  whose response was lost.
 - After extended tag evidence is stored, never roll back below this release:
   its allowlist drops the added tag fields.
 - After metadata lookup jobs run, never roll back below the release before

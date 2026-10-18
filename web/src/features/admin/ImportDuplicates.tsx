@@ -19,8 +19,10 @@ export function ImportDuplicates({ item, disabled, onSave }: { item: ImportDetai
     queryFn: ({ signal }) => adminRequest(`${importPath(item.id)}/duplicate-candidates`, candidatesSchema, { signal }),
     enabled: requested, retry: false, gcTime: 0
   });
-  const decisions = edits?.decisions ?? item.decisions;
-  const scopes = [{ scope: 'artist' as const, slotId: null, label: item.draft.album.artistName }, { scope: 'album' as const, slotId: null, label: item.draft.album.title }, ...item.draft.tracks.map(track => ({ scope: 'track' as const, slotId: track.slotId, label: track.title }))];
+  // This release decides one primary Artist entry without a label; other drafts publish only after S7a, so they show no Artist row.
+  const artist = item.draft.album.artists.length === 1 && !item.draft.album.label ? item.draft.album.artists[0] : null;
+  const decisions = (edits?.decisions ?? item.decisions).filter(decision => artist || decision.scope !== 'artist');
+  const scopes = [...(artist ? [{ scope: 'artist' as const, slotId: null, label: artist.name }] : []), { scope: 'album' as const, slotId: null, label: item.draft.album.title }, ...item.draft.tracks.map(track => ({ scope: 'track' as const, slotId: track.slotId, label: track.title }))];
   return <section className={styles.panel}>
     <header className={styles.sectionHeader}><div><h2>{t('duplicates.title')}</h2><p className={styles.muted}>{t('duplicates.copy')}</p></div></header>
     <button className={styles.button} type="button" disabled={disabled || query.isFetching} onClick={() => { setRequested(true); if (requested) void query.refetch(); }}>{t('action.find_matches')}</button>

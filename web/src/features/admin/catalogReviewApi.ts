@@ -1,5 +1,6 @@
 import { z } from 'zod';
-import { draftSchema, importDateSchema, suggestionSchema, analysisSchema } from './adminNamingSchema';
+import { importDateSchema, analysisSchema } from './adminNamingSchema';
+import { draftSchema, suggestionSchema } from './reviewNamingSchema';
 
 const id = z.string().regex(/^[a-f0-9]{24}$/);
 const uuid = z.string().uuid();

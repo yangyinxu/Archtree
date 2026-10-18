@@ -11,13 +11,15 @@
  *   - a v1 artist decision binds to the legacy entry and its name; other decisions carry no entry
  *   - publication snapshots map into the view while the stored v1 snapshot stays unchanged
  *   - the v1 draft projection is a deep copy of every v1 draft and keeps stored track order
- *   - draft and publication format versions accept only absent, null or a positive safe integer, and only format 1 is writable
+ *   - draft and publication format versions accept only absent, null or a positive safe integer; format 1 is writable, and format 2 for imports only
  *   - an approval is format 1 only with a v1 snapshot, so a newer snapshot without a recorded format fails closed
  *   - a Draft v2 project projects onto only v1 DTO fields and offers no analysis, upload or publication
  *   - unknown publication and analysis states degrade to needs attention without inventing recovery or identities
  *   - an unrecognized draft format still projects one valid v1 draft per manifest slot
  *   - assets outside the v1 slots, states, lifecycles or identities are hidden from a v1 client
  *   - catalog review sources and applied evidence keep only v1 fields, and applied evidence is never dropped
+ *   - the Draft v2 editor view keeps only readable entries, label and values, one track per slot in stored order, and never throws
+ *   - the Draft v2 suggestion view maps legacy Artist names, keeps readable album Artist suggestions whole and drops any other
  * @end-catalog */
 
 /**
@@ -33,8 +35,8 @@ import { uuid } from '../../src/administration/import/adminImportContract';
 import { importPublicationSupported, importPublicationVersion } from '../../src/administration/import/adminImportMediaTypes';
 import { adminImportDto, importDigest, type AdminImportDocument } from '../../src/administration/import/adminImportService';
 import {
-    importDraftV2FromV1, importDraftVersion, importDraftWritable, importProjectV2View, legacyArtistEntryKey, legacyAssetVisible, legacyCatalogAppliedView,
-    legacyCatalogSourceView, legacyDraftView, legacyPublicationView, writableDraftFilter, type ImportProjectV2View
+    importDraftV2FromV1, importDraftV2View, importDraftVersion, importDraftWritable, importProjectV2View, importSuggestionsV2View, legacyArtistEntryKey, legacyAssetVisible,
+    legacyCatalogAppliedView, legacyCatalogSourceView, legacyDraftView, legacyPublicationView, writableDraftFilter, type ImportProjectV2View
 } from '../../src/administration/import/adminImportDraftCompat';
 import type { CatalogReviewApplied, CatalogReviewSource } from '../../src/administration/catalog/adminCatalogReviewContract';
 import { loadImportFixture } from '../support/adminImportFixtures';
@@ -116,8 +118,8 @@ test('an empty artistName has no entry, and its pending suggestion becomes a pen
 test('every value of a v1 project is the administrator\'s own, over exactly the Draft v2 value paths', () => {
     for (const name of v1Fixtures) {
         const doc = load(name), { draftOrigins } = importProjectV2View(doc)!;
-        const expected = [...['title', 'artists', 'label', 'releaseDate', 'visibility'].map(field => `album.${field}`),
-            ...doc.manifest.files.flatMap(file => ['title', 'discNumber', 'trackNumber'].map(field => `tracks.${file.slotId}.${field}`))];
+        const expected = [...['title', 'artists', 'label', 'releaseDate', 'visibility'].map(field => `album:${field}`),
+            ...doc.manifest.files.flatMap(file => ['title', 'discNumber', 'trackNumber'].map(field => `tracks:${file.slotId}:${field}`))];
         assert.deepEqual(Object.keys(draftOrigins).sort(), expected.sort(), name);
         assert.ok(Object.values(draftOrigins).every(origin => origin === 'administrator'), name);
     }
@@ -173,17 +175,21 @@ test('the v1 draft projection is a deep copy of every v1 draft and keeps stored 
     assert.deepEqual([artists([{ name: 'Guest', role: 'featured' }, { name: 'Primary', role: 'primary' }]), artists([{ name: 'Guest', role: 'featured' }]), artists([])], ['Primary', 'Guest', '']);
 });
 
-test('draft and publication format versions accept only absent, null or a positive safe integer, and only format 1 is writable', () => {
+test('draft and publication format versions accept only absent, null or a positive safe integer; format 1 is writable, and format 2 for imports only', () => {
     const cases: [unknown, number | null][] = [[undefined, 1], [null, 1], [1, 1], [2, 2], [3, 3], ['1', null], [0, null], [-1, null], [1.5, null], [Number.NaN, null]];
     const { snapshot } = load('v1-publication-preparing.json').media!.publication!;
     for (const [value, expected] of cases) {
         const doc = value === undefined ? {} : { draftVersion: value }, publication = value === undefined ? { snapshot } : { schemaVersion: value, snapshot };
-        assert.equal(importDraftVersion(doc), expected, String(value)); assert.equal(importDraftWritable(doc), expected === 1, String(value));
+        assert.equal(importDraftVersion(doc), expected, String(value)); assert.equal(importDraftWritable(doc), expected === 1 || expected === 2, String(value));
+        // Catalog reviews stay format 1 in this release; a Draft v2 review was written by a newer release.
+        assert.equal(importDraftWritable({ ...doc, purpose: 'catalogReview' }), expected === 1, String(value));
+        for (const purpose of ['import', null]) assert.equal(importDraftWritable({ ...doc, purpose }), expected === 1 || expected === 2, `${String(value)} ${purpose}`);
+        // A v1 snapshot is format 1 only: a format-2 approval must freeze a Draft v2 snapshot.
         assert.equal(importPublicationVersion(publication), expected, String(value)); assert.equal(importPublicationSupported(publication), expected === 1, String(value));
         const view = importProjectV2View({ ...load('v1-draft.json'), ...doc } as AdminImportDocument);
         assert.equal(view === null, expected === null || expected > 2, String(value));
     }
-    assert.deepEqual(writableDraftFilter, { draftVersion: { $in: [null, 1] } });
+    assert.deepEqual(writableDraftFilter, { $or: [{ draftVersion: { $in: [null, 1] } }, { draftVersion: 2, purpose: { $ne: 'catalogReview' } }] });
 });
 
 test('an approval is format 1 only with a v1 snapshot, so a newer snapshot without a recorded format fails closed', () => {
@@ -262,4 +268,64 @@ test('catalog review sources and applied evidence keep only v1 fields, and appli
     assert.deepEqual(legacyCatalogAppliedView(applied, new Set([slot, slotTwo])), { operationId: applied.operationId, at: applied.at, fields: [{ scope: 'album', slotId: null, field: 'title' }, { scope: 'track', slotId: slot, field: 'trackNumber' }] });
     assert.deepEqual(legacyCatalogAppliedView({ ...applied, fields: 'x' } as unknown as CatalogReviewApplied), { operationId: applied.operationId, at: applied.at, fields: [] });
     assert.equal(legacyCatalogAppliedView(undefined), null);
+});
+
+test('the Draft v2 editor view keeps only readable entries, label and values, one track per slot in stored order, and never throws', () => {
+    const importId = '0000000000000000000000c1', slotA = '00000009-0000-4000-a000-0000000000c1', slotB = '00000009-0000-4000-a000-0000000000c2';
+    const manifest = { rootLabel: '', files: [slotA, slotB].map(slotId => ({ slotId, filename: 'Synthetic.mp3', relativePath: 'Synthetic.mp3', byteLength: null })) };
+    const key = (n: number) => `00000009-0000-4000-8000-${String(n).padStart(12, '0')}`, guest = (n: number) => ({ key: key(100 + n), name: `Guest ${n}`, role: 'featured', joinPhrase: '', musicBrainzId: null });
+    const stored = {
+        album: { title: 'Synthetic Album', futureAlbumField: 1, label: { name: 'Synthetic Label', musicBrainzId: '00000009-0000-4000-9000-0000000000AB', futureLabelField: 1 }, releaseDate: { year: 2026, month: 3, day: null }, visibility: 'public',
+            artists: [
+                { key: key(1), name: 'Kept', role: 'primary', joinPhrase: ' & ', musicBrainzId: '00000009-0000-4000-9000-0000000000AA', futureEntryField: true },
+                { key: key(1), name: 'Duplicate key', role: 'primary', joinPhrase: null, musicBrainzId: null }, { key: 'not-a-key', name: 'Invalid key', role: 'primary', joinPhrase: null, musicBrainzId: null },
+                { key: key(2), name: '', role: 'featured', joinPhrase: null, musicBrainzId: null }, { key: key(3), name: 'x'.repeat(201), role: 'featured', joinPhrase: null, musicBrainzId: null },
+                { key: key(4), name: 'Unknown role', role: 'performer', joinPhrase: null, musicBrainzId: null }, 'not an entry',
+                { key: key(5), name: 'Long phrase', role: 'featured', joinPhrase: 'x'.repeat(17), musicBrainzId: 'not-an-id' },
+                ...Array.from({ length: 25 }, (_, index) => guest(index))
+            ] },
+        tracks: [{ slotId: slotB, title: 'Second', discNumber: 2, trackNumber: 1, futureTrackField: 1 }, { slotId: slotB, title: 'Duplicate slot', discNumber: 1, trackNumber: 1 },
+            { slotId: '00000009-0000-4000-a000-0000000000ff', title: 'Unknown slot', discNumber: 1, trackNumber: 1 }],
+        futureTopLevel: 1
+    };
+    const copy = JSON.stringify(stored), view = importDraftV2View(stored, manifest, importId);
+    assert.equal(JSON.stringify(stored), copy, 'the stored draft is never changed');
+    // At most 20 readable entries in stored order; an unreadable phrase or ID becomes empty, never another value.
+    assert.deepEqual(view.album.artists, [
+        { key: key(1), name: 'Kept', role: 'primary', joinPhrase: ' & ', musicBrainzId: '00000009-0000-4000-9000-0000000000aa' },
+        { key: key(5), name: 'Long phrase', role: 'featured', joinPhrase: null, musicBrainzId: null },
+        ...Array.from({ length: 18 }, (_, index) => ({ ...guest(index), joinPhrase: null }))
+    ]);
+    assert.deepEqual({ ...view.album, artists: [] }, { title: 'Synthetic Album', artists: [], label: { name: 'Synthetic Label', musicBrainzId: '00000009-0000-4000-9000-0000000000ab' }, releaseDate: { year: 2026, month: 3, day: null }, visibility: 'public' });
+    // Stored track order first, then each missing manifest slot; unknown and repeated slots are dropped.
+    assert.deepEqual(view.tracks, [{ slotId: slotB, title: 'Second', discNumber: 2, trackNumber: 1 }, { slotId: slotA, title: '', discNumber: null, trackNumber: null }]);
+    // Out-of-range values become empty; unknown visibility is hidden, the safer reading.
+    const bounded = importDraftV2View({ album: { title: 't'.repeat(301), artists: 'x', label: { name: '' }, releaseDate: { year: 2026, month: 13, day: null }, visibility: 'unlisted' },
+        tracks: [{ slotId: slotA, title: 't'.repeat(301), discNumber: 1000, trackNumber: 10000 }, { slotId: slotB, title: 'Kept', discNumber: 1.5, trackNumber: 0 }] }, manifest, importId);
+    assert.deepEqual(bounded, { album: { title: '', artists: [], label: null, releaseDate: null, visibility: 'hidden' },
+        tracks: [{ slotId: slotA, title: '', discNumber: null, trackNumber: null }, { slotId: slotB, title: 'Kept', discNumber: null, trackNumber: null }] });
+    for (const raw of [null, 'x', [], { album: null, tracks: null }, { album: [], tracks: [null, 1] }]) assert.deepEqual(importDraftV2View(raw, manifest, importId).tracks.map(track => track.slotId), [slotA, slotB], JSON.stringify(raw));
+    // A v1 draft is the converted view, keyed by the project.
+    const v1 = { album: { title: 'Synthetic Album', artistName: ' Lorem ', releaseDate: null, visibility: 'hidden' }, tracks: [{ slotId: slotA, title: 'One', trackNumber: 1 }] };
+    assert.deepEqual(importDraftV2View(v1, manifest, importId), { album: { title: 'Synthetic Album', artists: [{ key: legacyArtistEntryKey(importId), name: 'Lorem', role: 'primary', joinPhrase: null, musicBrainzId: null }], label: null, releaseDate: null, visibility: 'hidden' },
+        tracks: [{ slotId: slotA, title: 'One', discNumber: null, trackNumber: 1 }, { slotId: slotB, title: '', discNumber: null, trackNumber: null }] });
+});
+
+test('the Draft v2 suggestion view maps legacy Artist names, keeps readable album Artist suggestions whole and drops any other', () => {
+    const importId = '0000000000000000000000c2', slot = '00000009-0000-4000-a000-0000000000c3', slots = new Set([slot]), generation = 2;
+    const lorem = { key: '00000009-0000-4000-8000-0000000000c1', name: 'Lorem', role: 'primary', joinPhrase: null, musicBrainzId: null };
+    const artists = { scope: 'album', slotId: null, field: 'artists', baseline: [], value: [lorem], source: 'folder', evidence: 'Synthetic Folder', id: 'a'.repeat(24), generation, decision: 'pending' };
+    const legacy = { ...artists, id: 'b'.repeat(24), field: 'artistName', baseline: '', value: ' Ipsum ' }, title = { ...artists, id: 'c'.repeat(24), field: 'title', baseline: '', value: 'Album' };
+    const view = (raw: unknown[]) => importSuggestionsV2View(raw, generation, slots, importId);
+    const dropped = [
+        { ...artists, id: '1'.repeat(24), value: [{ ...lorem, name: '' }] }, { ...artists, id: '2'.repeat(24), value: [{ ...lorem, role: 'performer' }] },
+        { ...artists, id: '3'.repeat(24), baseline: 'Lorem' }, { ...artists, id: '4'.repeat(24), value: Array.from({ length: 21 }, (_, index) => ({ ...lorem, key: `00000009-0000-4000-8000-${String(index).padStart(12, '0')}`, name: `N${index}` })) },
+        { ...artists, id: '5'.repeat(24), scope: 'track', slotId: slot }, { ...artists, id: '6'.repeat(24), generation: 1 }, { ...artists, id: '7'.repeat(24), source: 'lookup-musicbrainz' },
+        { ...artists, id: '8'.repeat(24), value: [lorem, { ...lorem, name: 'Same key' }] }, { ...title, id: '9'.repeat(24), field: 'label' }, null, 'x'
+    ];
+    assert.deepEqual(view([artists, ...dropped, legacy, title]).map(suggestion => suggestion.id), [artists.id, legacy.id, title.id]);
+    // Unknown entry fields are dropped, never echoed.
+    assert.deepEqual(view([{ ...artists, value: [{ ...lorem, futureEntryField: true }] }]), [artists]);
+    assert.deepEqual(view([legacy]), [{ ...legacy, field: 'artists', baseline: [], value: [{ key: legacyArtistEntryKey(importId), name: 'Ipsum', role: 'primary', joinPhrase: null, musicBrainzId: null }] }]);
+    assert.equal(view(Array.from({ length: 1001 }, (_, index) => ({ ...title, id: String(index).padStart(24, '0') }))).length, 1000);
 });

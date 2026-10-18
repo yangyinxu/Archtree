@@ -64,7 +64,7 @@ after that file without restarting it on return. Files chosen without a folder
 show no folder field. The local MP3 conversion spec verifies that an import
 created from converted MP3s uploads through the same queue. The administrator
 workbench spec also checks that a new import's draft opens with Public
-visibility.
+visibility and that saving the draft sends only the changed fields.
 
 The historical 2026-08-19 MediaTrack amendment passed
 304/304 server tests, 214/214 Web unit/component tests, 148/148 integration

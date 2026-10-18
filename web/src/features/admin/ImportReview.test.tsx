@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { ImportReview } from './ImportReview';
-import { detail } from './adminFixtures.testSupport';
+import { artistEntry, detail } from './adminFixtures.testSupport';
 afterEach(cleanup);
 
 test('partial adoption contains only selected typed suggestions and never publishes or starts analysis', () => {
@@ -43,4 +43,14 @@ test('an empty catalog review uses its workflow guidance without adopting or rej
   fireEvent.click(screen.getByRole('button', { name: 'Edit the review draft' }));
   expect(navigate).toHaveBeenCalledOnce();
   expect(onAdopt).not.toHaveBeenCalled(); expect(onReject).not.toHaveBeenCalled();
+});
+
+test('an Artist entries suggestion is labelled as the Artist name and compares bylines', () => {
+  const item = detail(), onAdopt = vi.fn(); item.draft.album.artists = [artistEntry('Lorem')];
+  const suggestion = { ...item.suggestions[0], id: 'eeeeeeeeeeeeeeeeeeeeeeee', field: 'artists' as const, baseline: [artistEntry('Lorem')],
+    value: [{ ...artistEntry('Lorem'), joinPhrase: ' & ' }, { ...artistEntry('Ipsum', '30000000-0000-4000-8000-000000000002'), role: 'featured' as const }] };
+  render(<ImportReview draft={item.draft} suggestions={[suggestion]} selected={[suggestion.id]} onSelect={vi.fn()} onAdopt={onAdopt} onReject={vi.fn()} disabled={false} />);
+  expect(screen.getByRole('checkbox', { name: 'Artist name' })).toBeEnabled();
+  expect(screen.getAllByText('Lorem')).toHaveLength(2); expect(screen.getByText('Lorem & Ipsum')).toBeVisible();
+  fireEvent.click(screen.getByRole('button', { name: 'Apply selected' })); expect(onAdopt).toHaveBeenCalledExactlyOnceWith([suggestion.id]);
 });

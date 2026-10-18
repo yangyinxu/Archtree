@@ -11,7 +11,7 @@
  *   - AdminMutation and AdminCommand show a reload state with no retryable intent for an outdated response
  *   - a server refusal of a newer-format project asks for a reload of that action only, with no retryable intent
  *   - an append visibility mismatch is its own definite refusal, distinct from a revision conflict
- *   - a project saved by a newer release reaches this bundle as a valid v1 projection, and its refusal codes are distinct
+ *   - the server Draft v2 projection parses strictly, while v1 drafts, unknown entry keys, track Artist suggestions and Disc Number 1000 are refused
  * @end-catalog */
 
 import { z } from 'zod';
@@ -162,30 +162,39 @@ test('an append visibility mismatch is its own definite refusal, distinct from a
   await vi.waitFor(() => expect(other.getSnapshot().error).toBe('conflict'));
 });
 
-test('a project saved by a newer release reaches this bundle as a valid v1 projection, and its refusal codes are distinct', () => {
-  // The server's projection of the synthetic Draft v2 fixture (test/fixtures/adminImportCompat/v2-draft-project.json).
-  const degraded = {
+test('the server Draft v2 projection parses strictly, while v1 drafts, unknown entry keys, track Artist suggestions and Disc Number 1000 are refused', () => {
+  // The server's Draft v2 projection of the synthetic fixture (test/fixtures/adminImportCompat/v2-draft-project.json).
+  const projected = {
     id: "b8fe89a0a6b4501d5db35e13",
     revision: 6,
     createdAt: "2026-11-01T09:01:00.000Z",
     updatedAt: "2026-11-01T09:06:00.000Z",
     startedByMe: true,
-    manifest: {"rootLabel":"Synthetic Primary - Synthetic Compat Album","files":[{"slotId":"00000009-0000-4000-a000-000000000001","filename":"01 - Synthetic Opening.mp3","relativePath":"Disc 1/01 - Synthetic Opening.mp3","byteLength":4096},{"slotId":"00000009-0000-4000-a000-000000000002","filename":"01 - Synthetic Reprise.mp3","relativePath":"Disc 2/01 - Synthetic Reprise.mp3","byteLength":null}]},
-    draft: {"album":{"title":"Synthetic Compat Album","artistName":"Synthetic Primary","releaseDate":{"year":2026,"month":3,"day":null},"visibility":"public"},"tracks":[{"slotId":"00000009-0000-4000-a000-000000000001","title":"Synthetic Opening","trackNumber":1},{"slotId":"00000009-0000-4000-a000-000000000002","title":"Synthetic Reprise","trackNumber":1}]},
-    analysis: {"state":"queued","generation":1,"operationId":"00000009-0000-4000-8000-000000000004","completedChunks":1,"totalChunks":2,"attemptsUsed":1,"maxAttempts":22,"issue":null},
-    suggestions: [{"scope":"album","slotId":null,"field":"title","baseline":"Synthetic Compat Album","value":"Synthetic Compat Album (Deluxe)","source":"folder","evidence":"Selected root: Synthetic Primary - Synthetic Compat Album","id":"6d91973d95b005647626d360","generation":1,"decision":"pending"}],
-    decisions: [{"scope":"artist","slotId":null,"action":"create-distinct","candidateId":null,"candidateRevision":null},{"scope":"album","slotId":null,"action":"create-distinct","candidateId":null,"candidateRevision":null},{"scope":"track","slotId":"00000009-0000-4000-a000-000000000001","action":"create-distinct","candidateId":null,"candidateRevision":null},{"scope":"track","slotId":"00000009-0000-4000-a000-000000000002","action":"create-distinct","candidateId":null,"candidateRevision":null}],
-    upload: {"ready":1,"total":2,"available":true},
+    manifest: {"rootLabel": "Synthetic Primary - Synthetic Compat Album", "files": [{"slotId": "00000009-0000-4000-a000-000000000001", "filename": "01 - Synthetic Opening.mp3", "relativePath": "Disc 1/01 - Synthetic Opening.mp3", "byteLength": 4096}, {"slotId": "00000009-0000-4000-a000-000000000002", "filename": "01 - Synthetic Reprise.mp3", "relativePath": "Disc 2/01 - Synthetic Reprise.mp3", "byteLength": null}]},
+    analysis: {"state": "queued", "generation": 1, "operationId": "00000009-0000-4000-8000-000000000004", "completedChunks": 1, "totalChunks": 2, "attemptsUsed": 1, "maxAttempts": 22, "issue": null},
+    decisions: [{"scope": "artist", "slotId": null, "action": "create-distinct", "candidateId": null, "candidateRevision": null}, {"scope": "album", "slotId": null, "action": "create-distinct", "candidateId": null, "candidateRevision": null}, {"scope": "track", "slotId": "00000009-0000-4000-a000-000000000001", "action": "create-distinct", "candidateId": null, "candidateRevision": null}, {"scope": "track", "slotId": "00000009-0000-4000-a000-000000000002", "action": "create-distinct", "candidateId": null, "candidateRevision": null}],
+    upload: {"ready": 1, "total": 2, "available": true},
     publication: "notStarted",
     publicationRecovery: null,
     published: null,
-    assets: [{"slotId":"00000009-0000-4000-a000-000000000001","state":"ready","byteLength":4096,"sha256":"719b383821e6441a28fd740b613e025e2e8cae1240f47297cef590f888c1cb31","contentType":"audio/mpeg","tags":{"title":"Synthetic Opening","album":"Synthetic Compat Album","artists":["Synthetic Primary","Synthetic Guest"],"year":2026,"trackNumber":1},"recovery":{"operationId":"00000009-0000-4000-8000-000000000003","expectedRevision":2,"kind":"upload","startedByMe":true}},{"slotId":"embedded-00000009-0000-4000-a000-000000000001","state":"ready","byteLength":3073,"sha256":"59353ff2c987657686b1510ce52d67a888c1704ffc9c4185ddf33dd1caeae2b4","contentType":"image/jpeg","tags":null,"recovery":{"operationId":"00000009-0000-4000-8000-000000000030","expectedRevision":4,"kind":"upload","startedByMe":true}}],
+    assets: [{"slotId": "00000009-0000-4000-a000-000000000001", "state": "ready", "byteLength": 4096, "sha256": "719b383821e6441a28fd740b613e025e2e8cae1240f47297cef590f888c1cb31", "contentType": "audio/mpeg", "tags": {"title": "Synthetic Opening", "album": "Synthetic Compat Album", "artists": ["Synthetic Primary", "Synthetic Guest"], "year": 2026, "trackNumber": 1}, "recovery": {"operationId": "00000009-0000-4000-8000-000000000003", "expectedRevision": 2, "kind": "upload", "startedByMe": true}}, {"slotId": "embedded-00000009-0000-4000-a000-000000000001", "state": "ready", "byteLength": 3073, "sha256": "59353ff2c987657686b1510ce52d67a888c1704ffc9c4185ddf33dd1caeae2b4", "contentType": "image/jpeg", "tags": null, "recovery": {"operationId": "00000009-0000-4000-8000-000000000030", "expectedRevision": 4, "kind": "upload", "startedByMe": true}}],
     selectedCoverSlotId: null,
-    capabilities: {"analysis":false,"upload":false,"publish":false},
-    receipts: [{"operationId":"00000009-0000-4000-8000-000000000001","kind":"create","revision":1},{"operationId":"00000009-0000-4000-8000-000000000002","kind":"edit","revision":2},{"operationId":"00000009-0000-4000-8000-000000000003","kind":"upload","revision":3},{"operationId":"00000009-0000-4000-8000-000000000004","kind":"analyze","revision":4}]
+    capabilities: {"analysis": true, "upload": true, "publish": true},
+    receipts: [{"operationId": "00000009-0000-4000-8000-000000000001", "kind": "create", "revision": 1}, {"operationId": "00000009-0000-4000-8000-000000000002", "kind": "edit", "revision": 2}, {"operationId": "00000009-0000-4000-8000-000000000003", "kind": "upload", "revision": 3}, {"operationId": "00000009-0000-4000-8000-000000000004", "kind": "analyze", "revision": 4}],
+    draft: {"album": {"title": "Synthetic Compat Album", "artists": [{"key": "00000009-0000-4000-8000-0000000000e1", "name": "Synthetic Primary", "role": "primary", "joinPhrase": " feat. ", "musicBrainzId": "00000009-0000-4000-8000-0000000000f1"}, {"key": "00000009-0000-4000-8000-0000000000e2", "name": "Synthetic Guest", "role": "featured", "joinPhrase": null, "musicBrainzId": null}], "label": {"name": "Synthetic Label", "musicBrainzId": null}, "releaseDate": {"year": 2026, "month": 3, "day": null}, "visibility": "public"}, "tracks": [{"slotId": "00000009-0000-4000-a000-000000000001", "title": "Synthetic Opening", "discNumber": 1, "trackNumber": 1}, {"slotId": "00000009-0000-4000-a000-000000000002", "title": "Synthetic Reprise", "discNumber": 2, "trackNumber": 1}]},
+    suggestions: [{"scope": "album", "slotId": null, "field": "artists", "baseline": [{"key": "00000009-0000-4000-8000-0000000000e1", "name": "Synthetic Primary", "role": "primary", "joinPhrase": " feat. ", "musicBrainzId": "00000009-0000-4000-8000-0000000000f1"}], "value": [{"key": "00000009-0000-4000-8000-0000000000e1", "name": "Synthetic Primary", "role": "primary", "joinPhrase": " feat. ", "musicBrainzId": "00000009-0000-4000-8000-0000000000f1"}, {"key": "00000009-0000-4000-8000-0000000000e2", "name": "Synthetic Guest", "role": "featured", "joinPhrase": null, "musicBrainzId": null}], "source": "context", "evidence": "Selected root: Synthetic Primary - Synthetic Compat Album", "id": "1841aae643a83f45acba69f4", "generation": 1, "decision": "pending"}, {"scope": "album", "slotId": null, "field": "title", "baseline": "Synthetic Compat Album", "value": "Synthetic Compat Album (Deluxe)", "source": "folder", "evidence": "Selected root: Synthetic Primary - Synthetic Compat Album", "id": "6d91973d95b005647626d360", "generation": 1, "decision": "pending"}]
   };
-  expect(detailSchema.safeParse(degraded).success).toBe(true);
-  expect(responseSchema.safeParse({ item: degraded, receipt: null }).success).toBe(true);
+  expect(detailSchema.safeParse(projected).success).toBe(true);
+  expect(responseSchema.safeParse({ item: projected, receipt: null }).success).toBe(true);
+  const { album, tracks } = projected.draft, [artists] = projected.suggestions;
+  for (const changed of [
+    { ...projected, draft: { album: { title: album.title, artistName: 'Synthetic Primary', releaseDate: album.releaseDate, visibility: album.visibility }, tracks: tracks.map(({ discNumber: _disc, ...track }) => track) } },
+    { ...projected, draft: { ...projected.draft, album: { ...album, artists: [{ ...album.artists[0], extra: true }, album.artists[1]] } } },
+    { ...projected, draft: { ...projected.draft, album: { ...album, label: { name: 'Synthetic Label', musicBrainzId: 'not-an-id' } } } },
+    { ...projected, draft: { ...projected.draft, tracks: [{ ...tracks[0], discNumber: 1000 }, tracks[1]] } },
+    { ...projected, suggestions: [{ ...artists, scope: 'track', slotId: tracks[0].slotId }] },
+    { ...projected, suggestions: [{ ...artists, value: 'Synthetic Primary' }] }
+  ]) expect(detailSchema.safeParse(changed).success).toBe(false);
   expect([ADMIN_IMPORT_RELOAD_REQUIRED, ADMIN_IMPORT_APPEND_VISIBILITY_MISMATCH]).toEqual(['ADMIN_IMPORT_RELOAD_REQUIRED', 'ADMIN_IMPORT_APPEND_VISIBILITY_MISMATCH']);
   expect(ADMIN_IMPORT_RELOAD_REQUIRED).not.toBe(ADMIN_RELOAD_REQUIRED);
 });

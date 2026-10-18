@@ -1,5 +1,6 @@
 import { catalogItemSchema, catalogPatch } from './catalogApi';
-import { suggestionSchema, detailSchema } from './adminApi';
+import { detailSchema } from './adminApi';
+import { suggestionSchema } from './reviewNamingSchema';
 import { detail, slotId } from './adminFixtures.testSupport';
 export const catalogAlbum = () => ({ kind: 'album' as const, id: '111111111111111111111111', revision: `cr_${'a'.repeat(43)}`, visibility: 'public' as const, effectiveVisibility: 'public' as const, coverUrl: null, mediaUrl: null, capabilities: { editing: true, visibility: true }, fields: { title: 'Synthetic catalog Album', releaseDate: null, credits: null, attributionStatus: 'unknown' as const } });
 test('catalog edits preserve unrelated fields and Credits plus attribution are an atomic group', () => {

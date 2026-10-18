@@ -39,10 +39,11 @@ const collectionId = 'audioTracks';
 export type AudioUploadStatus = 'pending' | 'ready' | 'failed' | 'deleting' | 'deleteFailed';
 export type AudioPublicationStatus = 'pending' | 'ready' | 'failed';
 export type AudioReferenceCleanupStatus = 'pending' | 'complete' | 'failed';
-/** Who set a stored Disc Number: the uploaded file's tag or an administrator catalog edit. */
+/** Who set a stored Disc Number: the uploaded file's tag, an administrator catalog edit or a reviewed administrator import. */
 export type AudioDiscNumberSource =
     | 'embedded'
-    | 'admin-catalog';
+    | 'admin-catalog'
+    | 'admin-import';
 
 /** Signals that a MediaTrack has crossed its deletion fence and can no longer be edited. */
 export class AudioTrackMutationUnavailableError extends Error {

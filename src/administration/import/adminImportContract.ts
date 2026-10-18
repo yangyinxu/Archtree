@@ -1,4 +1,5 @@
 /** Allowlisted admin-only naming, review, asset and publication contract. */
+import type { ImportDraftV2, ImportSuggestionV2 } from './adminImportDraft';
 export const ADMIN_IMPORT_LIMITS = Object.freeze({ files: 100, page: 25, receipts: 256, publications: 16, generations: 2, tracksPerChunk: 10, attempts: 22, dailyAttempts: 220, outputTokens: 4000, inputBytes: 48_000, responseBytes: 256_000, grantMs: 24 * 60 * 60 * 1000, leaseMs: 120_000, embeddedCovers: 16, uploadSettleMs: 180_000 });
 export type ImportDate = { year: number; month: number | null; day: number | null };
 export type ImportManifest = { rootLabel: string; files: { slotId: string; filename: string; relativePath: string; byteLength: number | null }[] };
@@ -24,7 +25,9 @@ export type AdminImportDetail = {
     published: { albumId: string; artistId: string; trackIds: string[] } | null;
     capabilities: { analysis: boolean; upload: boolean; publish: boolean }; receipts: ImportReceipt[];
 };
-export type AdminImportResponse = { item: AdminImportDetail; receipt: ImportReceipt | null };
+/** The import editor's DTO: the frozen v1 detail with a Draft v2 draft and suggestions; decisions keep their v1 fields. */
+export type AdminImportDetailV2 = Omit<AdminImportDetail, 'draft' | 'suggestions'> & { draft: ImportDraftV2; suggestions: ImportSuggestionV2[] };
+export type AdminImportResponse = { item: AdminImportDetailV2; receipt: ImportReceipt | null };
 export type ImportWorkbenchFilter = 'all' | 'analyzing' | 'awaitingReview' | 'needsAttention' | 'completed';
 export type ImportWorkbenchItem = Pick<AdminImportDetail, 'id' | 'revision' | 'createdAt' | 'updatedAt' | 'startedByMe' | 'analysis' | 'upload' | 'publication'> & { title: string; rootLabel: string; artistName: string; visibility: 'public' | 'hidden'; pendingSuggestions: number };
 export type ImportWorkbenchResponse = { items: ImportWorkbenchItem[]; counts: Record<ImportWorkbenchFilter, number>; nextCursor: string | null };

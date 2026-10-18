@@ -3,12 +3,15 @@ import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { z } from 'zod';
 import { ModalDialog } from '../../components/ModalDialog';
 import { useAdminAccess, useAdminText } from './AdminAccess';
-import { adminEndpointRequest, adminRequest, importPath, responseSchema, workbenchSchema } from './adminApi';
+import { adminEndpointRequest, adminRequest, importPath } from './adminTransport';
 import { catalogItemSchema, type CatalogItem, type CatalogKind } from './catalogApi';
 import { useAdminCommand } from './useAdminCommand';
 import { useOnline } from './useAdminOnline';
 import { adminWorkspace } from './adminWorkspace';
 import styles from './adminStyles';
+
+// Import schemas load with the first source search, as conversionImportBridge loads them, keeping this route in its JavaScript budget.
+const importSchemas = () => import('./adminApi');
 const operationSchema = z.object({ state: z.enum(['copying','needsAttention','complete','cancelled']), cleanupPending: z.boolean() }).strict();
 const resultSchema = z.object({ item: catalogItemSchema.nullable(), receipt: z.object({operationId:z.string()}).strict(), coverOperation: operationSchema }).strict().refine(value=>value.item!==null||value.coverOperation.state==='cancelled');
 const listSchema = z.object({ items: z.array(operationSchema.extend({operationId:z.string().regex(/^[a-f0-9-]{36}$/i),startedByMe:z.boolean()}).strict()).max(256) }).strict();
@@ -23,8 +26,8 @@ export function CatalogCover({item,kind,id,disabled,approvalDisabled=false,onCon
   const pendingApproval = useRef<string | null>(null);
   const mutation=useAdminCommand(`cover:${kind}:${id}`,resultSchema.refine(value=>value.item===null||value.item.kind===kind&&value.item.id===id));
   const operations=useQuery({queryKey:['admin-imports',access.viewerId,access.epoch,access.generation,'cover-operations',kind,id],queryFn:({signal})=>adminEndpointRequest(`${path}/cover-operations`,listSchema,{signal}),enabled:access.active,retry:false,gcTime:0});
-  const imports=useInfiniteQuery({queryKey:['admin-imports',access.viewerId,access.epoch,access.generation,'cover-sources',queryText],initialPageParam:null as string|null,queryFn:({signal,pageParam})=>adminRequest(`?${new URLSearchParams({limit:'25',q:queryText,...(pageParam?{cursor:pageParam}:{})})}`,workbenchSchema,{signal}),enabled:access.active&&choosing,getNextPageParam:page=>page.nextCursor??undefined,retry:false,gcTime:0});
-  const source=useQuery({queryKey:['admin-imports',access.viewerId,access.epoch,access.generation,'cover-source',project],queryFn:({signal})=>adminRequest(importPath(project!),responseSchema.refine(value=>value.item.id===project),{signal}),enabled:access.active&&choosing&&Boolean(project),retry:false,gcTime:0});
+  const imports=useInfiniteQuery({queryKey:['admin-imports',access.viewerId,access.epoch,access.generation,'cover-sources',queryText],initialPageParam:null as string|null,queryFn:async({signal,pageParam})=>adminRequest(`?${new URLSearchParams({limit:'25',q:queryText,...(pageParam?{cursor:pageParam}:{})})}`,(await importSchemas()).workbenchSchema,{signal}),enabled:access.active&&choosing,getNextPageParam:page=>page.nextCursor??undefined,retry:false,gcTime:0});
+  const source=useQuery({queryKey:['admin-imports',access.viewerId,access.epoch,access.generation,'cover-source',project],queryFn:async({signal})=>adminRequest(importPath(project!),(await importSchemas()).responseSchema.refine(value=>value.item.id===project),{signal}),enabled:access.active&&choosing&&Boolean(project),retry:false,gcTime:0});
   const recoveryDisabled=disabled||!access.active||!online||mutation.running;
   const locked=recoveryDisabled||Boolean(mutation.intent);
   // A new approval needs current editing authority; old exact-identity cleanup and cancellation do not.

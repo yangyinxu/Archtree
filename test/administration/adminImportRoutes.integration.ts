@@ -11,6 +11,8 @@
  *   - publication cancellation uses the guarded private route and a new immutable approval-bound receipt
  *   - reconcile route requires authentication and current admin before JSON parsing and is no-store
  *   - a project saved in a newer draft format answers a change with the bounded reload code and still admits stopping work
+ *   - a field save accepts a body up to 160 KB while other import bodies keep the 96 KB limit
+ *   - a field save bounds each base and value to a draft value before its intent is fingerprinted, writing nothing
  * @end-catalog */
 
 import assert from 'node:assert/strict';
@@ -63,7 +65,13 @@ test('cookie-owned import reads require exact viewer and create/replay uses top-
     assert.equal((await request('/api/admin/v1/imports', 'GET', undefined, '', { Cookie: `session_token=${token}`, 'X-Finitude-Account-Viewer': actor.toHexString() })).status, 200);
     const value = body(), first = await request('/api/admin/v1/imports', 'POST', value); assert.equal(first.status, 201); const result = await first.json();
     const replay = await request('/api/admin/v1/imports', 'POST', value); assert.equal(replay.status, 201); assert.equal((await replay.json()).item.id, result.item.id);
-    const invalid = await request(`/api/admin/v1/imports/${result.item.id}`, 'PATCH', { operationId: randomUUID(), expectedRevision: 9, draft: result.item.draft }); assert.equal(invalid.status, 409); assert.deepEqual(await invalid.json(), { code: 'ADMIN_IMPORT_REVISION_CONFLICT' });
+    // A whole-draft save from an editor that predates Draft v2 asks for a reload, at any revision.
+    const outdated = await request(`/api/admin/v1/imports/${result.item.id}`, 'PATCH', { operationId: randomUUID(), expectedRevision: 9, draft: result.item.draft }); assert.equal(outdated.status, 409); assert.deepEqual(await outdated.json(), { code: 'ADMIN_IMPORT_RELOAD_REQUIRED' });
+    // A field save binds each path's base value: another administrator's newer value is a bounded field conflict.
+    const path = `/api/admin/v1/imports/${result.item.id}`, saved = await request(path, 'PATCH', { operationId: randomUUID(), expectedRevision: 9, changes: [{ path: 'album.title', base: '', value: 'Saved first' }] });
+    assert.equal(saved.status, 200); assert.equal((await saved.json()).item.draft.album.title, 'Saved first');
+    const stale = await request(path, 'PATCH', { operationId: randomUUID(), expectedRevision: 1, changes: [{ path: 'album.title', base: '', value: 'Saved later' }] });
+    assert.equal(stale.status, 409); assert.deepEqual(await stale.json(), { code: 'ADMIN_IMPORT_FIELD_CONFLICT' });
 });
 test('unconfigured provider and private storage reject admission without provider/S3 dispatch', async () => {
     const created = await (await request('/api/admin/v1/imports', 'POST', body())).json();
@@ -90,7 +98,7 @@ test('multipart Unicode filename and image preview remain bounded behind exact c
 test('publication cancellation uses the guarded private route and a new immutable approval-bound receipt', async () => {
     const created = await (await request('/api/admin/v1/imports', 'POST', body())).json(), publicationOperationId = randomUUID();
     await getDb()!.collection('adminAlbumImports').updateOne({ _id: new ObjectId(created.item.id) }, { $set: { 'media.publication': {
-        operationId: publicationOperationId, actorId: actor.toHexString(), state: 'needsAttention', snapshot: created.item.draft, tracks: [], cover: null,
+        operationId: publicationOperationId, actorId: actor.toHexString(), state: 'needsAttention', snapshot: { album: { title: '', artistName: '', releaseDate: null, visibility: 'public' }, tracks: [] }, tracks: [], cover: null,
         leaseOwner: null, leaseUntil: new Date(Date.now() + 60_000), grantExpiresAt: new Date(0)
     } } });
     const path = `/api/admin/v1/imports/${created.item.id}/cancel-publication`, intent = { operationId: randomUUID(), expectedRevision: 1, publicationOperationId };
@@ -129,11 +137,34 @@ test('reconcile route requires authentication and current admin before JSON pars
 
 test('a project saved in a newer draft format answers a change with the bounded reload code and still admits stopping work', async () => {
     const created = await (await request('/api/admin/v1/imports', 'POST', body())).json(), path = `/api/admin/v1/imports/${created.item.id}`;
-    await getDb()!.collection('adminAlbumImports').updateOne({ _id: new ObjectId(created.item.id) }, { $set: { draftVersion: 2 } });
-    const refused = await request(path, 'PATCH', { operationId: randomUUID(), expectedRevision: 1, draft: created.item.draft });
+    await getDb()!.collection('adminAlbumImports').updateOne({ _id: new ObjectId(created.item.id) }, { $set: { draftVersion: 3 } });
+    const refused = await request(path, 'PATCH', { operationId: randomUUID(), expectedRevision: 1, changes: [{ path: 'album.title', base: '', value: 'Refused' }] });
     assert.equal(refused.status, 409); assert.equal(refused.headers.get('cache-control'), 'no-store'); assert.deepEqual(await refused.json(), { code: 'ADMIN_IMPORT_RELOAD_REQUIRED' });
     const read = await request(path); assert.equal(read.status, 200); assert.equal((await read.json()).item.revision, 1);
     const stopped = await request(`${path}/cancel-analysis`, 'POST', { operationId: randomUUID(), expectedRevision: 1 });
     assert.equal(stopped.status, 200); const result = await stopped.json(); assert.equal(result.receipt.kind, 'cancel-analysis'); assert.equal(result.item.revision, 2);
     assert.equal(JSON.stringify(result).includes('draftVersion'), false);
+});
+
+test('a field save accepts a body up to 160 KB while other import bodies keep the 96 KB limit', async () => {
+    const created = await (await request('/api/admin/v1/imports', 'POST', body())).json(), path = `/api/admin/v1/imports/${created.item.id}`;
+    // A save of several values whose bases together pass 96 KB is parsed and compared: these bases are stale.
+    const stale = 'b'.repeat(40_000), large = { operationId: randomUUID(), expectedRevision: 1, changes: [{ path: 'album.title', base: stale, value: 'Within limits' }, { path: 'album.visibility', base: stale, value: 'hidden' }, { path: 'album.releaseDate', base: stale, value: null }] };
+    assert.ok(JSON.stringify(large).length > 96_000);
+    const accepted = await request(path, 'PATCH', large); assert.equal(accepted.status, 409); assert.deepEqual(await accepted.json(), { code: 'ADMIN_IMPORT_FIELD_CONFLICT' });
+    assert.equal((await request(path, 'PATCH', { ...large, changes: [{ path: 'album.title', base: 'b'.repeat(170_000), value: '' }] })).status, 413);
+    assert.equal((await request(`${path}/analyze`, 'POST', { operationId: randomUUID(), expectedRevision: 1, padding: 'p'.repeat(100_000) })).status, 413);
+    assert.equal((await (await request(path)).json()).item.revision, 1);
+});
+test('a field save bounds each base and value to a draft value before its intent is fingerprinted, writing nothing', async () => {
+    const created = await (await request('/api/admin/v1/imports', 'POST', body())).json(), path = `/api/admin/v1/imports/${created.item.id}`, before = await getDb()!.collection('adminAlbumImports').findOne({ _id: new ObjectId(created.item.id) });
+    const intent = () => ({ operationId: randomUUID(), expectedRevision: 1 }), change = (base: string) => `{"path":"album.title","base":${base},"value":"Within limits"}`;
+    const invalid = async (raw: string, route = path, method = 'PATCH') => { const response = await request(route, method, raw); assert.equal(response.status, 400, raw.slice(0, 40)); assert.deepEqual(await response.json(), { code: 'ADMIN_IMPORT_INVALID_INPUT' }); };
+    // Larger than a whole draft, or nested deeper than any draft value: deep arrays would overflow a recursive fingerprint.
+    await invalid(JSON.stringify({ ...intent(), changes: [{ path: 'album.title', base: 'b'.repeat(60_000), value: 'v'.repeat(60_000) }] }));
+    await invalid(JSON.stringify({ ...intent(), changes: [{ path: 'album.title', base: 'b'.repeat(120_000), value: 'Within limits' }] }));
+    await invalid(`{"operationId":"${randomUUID()}","expectedRevision":1,"changes":[${change(`${'['.repeat(60_000)}${']'.repeat(60_000)}`)}]}`);
+    await invalid(JSON.stringify({ ...intent(), changes: [{ path: 'album.title', base: [[['too deep']]], value: 'Within limits' }] }));    // A whole-draft body and a decision are bounded the same way before their fingerprint.
+    await invalid(`{"operationId":"${randomUUID()}","expectedRevision":1,"draft":${'['.repeat(60_000)}${']'.repeat(60_000)}}`);
+    await invalid(`{"operationId":"${randomUUID()}","expectedRevision":1,"decisions":[${'['.repeat(40_000)}${']'.repeat(40_000)}]}`, `${path}/decisions`, 'POST');    assert.deepEqual(await getDb()!.collection('adminAlbumImports').findOne({ _id: new ObjectId(created.item.id) }), before);
 });

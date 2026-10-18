@@ -20,6 +20,7 @@
  *   - permission loss and expired analysis grants prevent new provider calls and catalog writes
  *   - separate review inventory supports scoped pagination/counts and terminal applied filtering
  *   - a review saved in a newer draft format reads through the v1 allowlist and admits only stopping its analysis
+ *   - catalog reviews keep their v1 draft through edit, analysis and adoption, and review edits stay bound to the project revision
  * @end-catalog */
 
 import assert from 'node:assert/strict';
@@ -270,4 +271,27 @@ test('a review saved in a newer draft format reads through the v1 allowlist and 
     const cancelled = await cancelCatalogReviewAnalysis(String(other), id, mutation(revision));
     assert.deepEqual([cancelled.item.analysis.state, cancelled.receipt!.kind, cancelled.item.revision], ['cancelled', 'cancel-analysis', revision + 1]);
     const after = await importCollection().findOne({ _id }); assert.equal(after!.draftVersion, 2); assert.deepEqual(after!.draft, before!.draft); assert.deepEqual(after!.catalogSource, before!.catalogSource);
+});
+
+test('catalog reviews keep their v1 draft through edit, analysis and adoption, and review edits stay bound to the project revision', async () => {
+    let review = await create(); const id = review.item.id, _id = new ObjectId(id);
+    review = await edit(review, draft => { draft.album.title = 'Edited title'; });
+    review = await analyzeCatalogReview(String(actor), id, mutation(review.item.revision), provider);
+    await runAdminImportWorkerOnce(provider); await runAdminImportWorkerOnce(provider);
+    review = await current(id); const [suggestion] = review.item.suggestions;
+    review = await adoptCatalogReview(String(actor), id, { ...mutation(review.item.revision), generation: 1, selectedIds: [suggestion.id], rejectIds: [] });
+    assert.equal(review.item.draft.album.title, 'Proposed Album');
+    // Import projects store Draft v2 in this release; a review is never converted and records no value origins.
+    const doc = await importCollection().findOne({ _id });
+    assert.deepEqual(['draftVersion' in doc!, 'draftOrigins' in doc!], [false, false]);
+    for (const draft of [doc!.draft, doc!.analysis.baseline!]) {
+        assert.deepEqual(Object.keys(draft.album).sort(), ['artistName', 'releaseDate', 'title', 'visibility']);
+        assert.equal(draft.tracks.every(track => !('discNumber' in track)), true);
+    }
+    assert.deepEqual(doc!.suggestions.map(value => value.field), ['title']);
+    // An edit from an older revision is refused even though it changes another value, and a field-patch body is not a review edit.
+    const stale = { ...review.item.draft, tracks: review.item.draft.tracks.map((track, index) => index ? track : { ...track, title: 'Another value' }) };
+    await assert.rejects(editCatalogReview(String(actor), id, { ...mutation(review.item.revision - 1), draft: stale }), code('ADMIN_IMPORT_REVISION_CONFLICT'));
+    await assert.rejects(async () => editCatalogReview(String(actor), id, { ...mutation(review.item.revision), changes: [{ path: 'album.title', base: 'Proposed Album', value: 'Patched' }] }), code('ADMIN_IMPORT_INVALID_INPUT'));
+    assert.deepEqual(await importCollection().findOne({ _id }), doc);
 });

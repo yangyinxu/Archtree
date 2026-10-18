@@ -23,7 +23,7 @@ import AxeBuilder from '@axe-core/playwright';
 import { createHash } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { capabilities, detail, projectId, session, slotId, slotTwo, viewer } from '../src/features/admin/adminFixtures.testSupport';
+import { applyDraftChanges, artistEntry, capabilities, detail, projectId, session, slotId, slotTwo, viewer } from '../src/features/admin/adminFixtures.testSupport';
 
 /** The file part of one queued multipart upload, so mocked assets carry the real length and SHA-256. */
 function uploadedFile(request: Request) {
@@ -83,7 +83,7 @@ async function setup(page: Page, admin = true, media = false, publication?: Publ
   let publicationComplete = false;
   void publication?.completion.then(() => { publicationComplete = true; });
   if (media) {
-    item.capabilities = { analysis: true, upload: true, publish: true }; item.upload.available = true; item.publication = 'notStarted'; item.draft.album.title = 'Reviewed Album'; item.draft.album.artistName = 'Synthetic artist'; item.draft.tracks.forEach((track, index) => { track.title = `Song ${index + 1}`; track.trackNumber = index + 1; });
+    item.capabilities = { analysis: true, upload: true, publish: true }; item.upload.available = true; item.publication = 'notStarted'; item.draft.album.title = 'Reviewed Album'; item.draft.album.artists = [artistEntry('Synthetic artist')]; item.draft.tracks.forEach((track, index) => { track.title = `Song ${index + 1}`; track.trackNumber = index + 1; });
     // A folderless project, so its files are reselected individually by name and size.
     item.manifest = { rootLabel: '', files: item.manifest.files.map(file => ({ ...file, relativePath: file.filename })) };
   }
@@ -124,7 +124,7 @@ async function setup(page: Page, admin = true, media = false, publication?: Publ
     }
     if (path === '/api/admin/v1/imports') {
       const { manifest, draft, suggestions, decisions: _decisions, capabilities: _capabilities, receipts: _receipts, assets: _assets, published: _published, publicationRecovery: _recovery, selectedCoverSlotId: _selectedCover, ...common } = item;
-      return route.fulfill({ json: { items: [{ ...common, title: draft.album.title, rootLabel: manifest.rootLabel, artistName: draft.album.artistName, visibility: draft.album.visibility, pendingSuggestions: suggestions.filter(s => s.decision === 'pending').length }], counts: { all: 1, analyzing: 0, awaitingReview: 1, needsAttention: 0, completed: 0 }, nextCursor: null }, headers });
+      return route.fulfill({ json: { items: [{ ...common, title: draft.album.title, rootLabel: manifest.rootLabel, artistName: draft.album.artists[0]?.name ?? '', visibility: draft.album.visibility, pendingSuggestions: suggestions.filter(s => s.decision === 'pending').length }], counts: { all: 1, analyzing: 0, awaitingReview: 1, needsAttention: 0, completed: 0 }, nextCursor: null }, headers });
     }
     if (item.publication === 'preparing' && (publication ? publicationComplete : ++publicationReads > 1)) { item.publication = 'complete'; item.published = { albumId: '111111111111111111111111', artistId: '222222222222222222222222', trackIds: ['333333333333333333333333'] }; item.revision++; }
     return route.fulfill({ json: { item, receipt: null }, headers });
@@ -262,7 +262,7 @@ test('an unconfirmed publication can be cancelled and reviewed while exact clean
   item.revision = 7; item.publication = 'needsAttention';
   item.capabilities = { analysis: true, upload: true, publish: true };
   item.publicationRecovery = { operationId: originalOperationId, cleanupPending: false, startedByMe: false };
-  item.draft.album.title = 'Failed publication draft'; item.draft.album.artistName = 'Synthetic artist';
+  item.draft.album.title = 'Failed publication draft'; item.draft.album.artists = [artistEntry('Synthetic artist')];
   item.assets = item.draft.tracks.map(track => ({ slotId: track.slotId, state: 'ready', byteLength: 100, sha256: 'a'.repeat(64), contentType: 'audio/mpeg', tags: null, recovery: null }));
   item.upload = { ready: 2, total: 2, available: true };
   item.receipts = [{ operationId: originalOperationId, kind: 'publish', revision: 7 }];
@@ -279,7 +279,7 @@ test('an unconfirmed publication can be cancelled and reviewed while exact clean
       kind = 'cancel-publication';
     } else if (method === 'PATCH') {
       expect(body.expectedRevision).toBe(item.revision);
-      item = { ...item, draft: body.draft }; kind = 'edit';
+      item = { ...item, draft: applyDraftChanges(item.draft, body.changes) }; kind = 'edit';
     } else if (path.endsWith('/resume-publication')) {
       expect(body).toEqual({ operationId: originalOperationId });
       item = { ...item, publicationRecovery: { ...item.publicationRecovery!, cleanupPending: false } };
@@ -315,7 +315,7 @@ test('an unconfirmed publication can be cancelled and reviewed while exact clean
   await page.getByRole('textbox', { name: 'Title', exact: true }).fill('Manually reviewed draft');
   await page.getByRole('button', { name: 'Save' }).click();
   await expect(page.getByRole('button', { name: 'Save' })).toBeDisabled();
-  expect(writes[1].body.draft).toMatchObject({ album: { title: 'Manually reviewed draft' } });
+  expect(writes[1].body.changes).toEqual([{ path: 'album.title', base: 'Failed publication draft', value: 'Manually reviewed draft' }]); expect(writes[1].body).not.toHaveProperty('draft');
   await page.getByRole('tab', { name: 'Publish', exact: true }).click();
   await page.getByRole('button', { name: 'Retry cleanup' }).click();
   await expect(page.getByText('Approval cancelled. Review the draft before publishing again.')).toBeVisible();
@@ -447,7 +447,7 @@ async function createRoutes(page: Page, hold?: Promise<void>) {
     if (request.method() === 'POST' && path === '/api/admin/v1/imports') {
       const body = request.postDataJSON(); created.push(body);
       item = { ...detail(), manifest: body.manifest, suggestions: [], publication: 'notStarted', capabilities: { analysis: true, upload: true, publish: false }, upload: { ready: 0, total: body.manifest.files.length, available: true },
-        draft: { album: detail().draft.album, tracks: body.manifest.files.map((file: { slotId: string }) => ({ slotId: file.slotId, title: '', trackNumber: null })) } };
+        draft: { album: detail().draft.album, tracks: body.manifest.files.map((file: { slotId: string }) => ({ slotId: file.slotId, title: '', discNumber: null, trackNumber: null })) } };
       return route.fulfill({ status: 201, json: { item, receipt: { operationId: body.operationId, kind: 'create', revision: 1 } }, headers });
     }
     if (request.method() === 'POST' && path.includes('/assets/')) {

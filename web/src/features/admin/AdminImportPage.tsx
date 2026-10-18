@@ -3,35 +3,39 @@
  *   Functions: AdminImportPage
  * Internal
  *   Types: EditorBuffer
- *   Functions: saved, ImportProject
- *   Constants: ImportMedia, ImportReview, ImportDuplicates
+ *   Functions: loadDraftEditor, saved, ImportProject
+ *   Constants: ImportDraftEditor, ImportMedia, ImportReview, ImportDuplicates
  * @end-catalog */
 
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router';
 import { AdminGate, useAdminAccess, useAdminText } from './AdminAccess';
-import { adminRequest, importPath, responseSchema, type ImportDetail, type ImportDraft } from './adminApi';
+import { adminRequest, importPath, responseSchema, type ImportDetail, type ImportDraftV2 } from './adminApi';
+import { artistByline, draftChanges, primaryArtistField, rebaseDraft, withPrimaryArtistName } from './importDraftPatch';
 import { adminWorkspace } from './adminWorkspace';
 import { useAdminMutation } from './useAdminMutation';
 import { useImportUploadQueue } from './useImportUploadQueue';
 import { ImportStages, MutationStatus, useOnline } from './AdminShared';
-import { ImportDraftEditor } from './ImportDraftEditor';
 import { AdminNav } from './AdminNav';
 import styles from './adminStyles';
+// The editor loads beside the project read (see ImportProject), keeping this route inside the initial JavaScript budget.
+const loadDraftEditor = () => import('./ImportDraftEditor');
+const ImportDraftEditor = lazy(() => loadDraftEditor().then(module => ({ default: module.ImportDraftEditor })));
 const ImportMedia = lazy(() => import('./ImportMedia').then(module => ({ default: module.ImportMedia })));
 const ImportReview = lazy(() => import('./ImportReview').then(module => ({ default: module.ImportReview })));
 const ImportDuplicates = lazy(() => import('./ImportDuplicates').then(module => ({ default: module.ImportDuplicates })));
 
-/** `base` is the saved draft the unsaved edits started from; a newer revision with the same draft only rebases. */
-interface EditorBuffer { draft: ImportDraft; base: ImportDraft; revision: number; dirty: boolean; selected: string[] }
+/** `base` is the saved draft the unsaved edits started from; a newer revision rebases them path by path (rebaseDraft). A save sends only the paths that differ from `base`. */
+interface EditorBuffer { draft: ImportDraftV2; base: ImportDraftV2; revision: number; dirty: boolean; selected: string[] }
 const saved = (item: ImportDetail, selected: string[] = []): EditorBuffer => ({ draft: item.draft, base: item.draft, revision: item.revision, dirty: false, selected });
 function ImportProject({ id }: { id: string }) {
   const t = useAdminText();
   const access = useAdminAccess();
   const online = useOnline();
   const path = importPath(id);
-  const bufferKey = `editor:${id}`;
+  // Draft v2 buffers use their own key, so an in-memory buffer of the v1 editor is never read as Draft v2.
+  const bufferKey = `editor-v2:${id}`;
   const [editor, setEditor] = useState<EditorBuffer | null>(() => adminWorkspace.buffer(bufferKey) ?? null);
   const [confirmed, setConfirmed] = useState<ImportDetail | null>(null);
   const [stage, setStage] = useState<'draft' | 'review' | 'files' | 'publication'>(() => adminWorkspace.buffer(`stage:${id}`) ?? 'draft');
@@ -40,16 +44,19 @@ function ImportProject({ id }: { id: string }) {
   const mutation = useAdminMutation(id);
   const uploads = useImportUploadQueue(id);
   const opened = useRef(false);
+  useEffect(() => { void loadDraftEditor(); }, []);
   const query = useQuery({
     queryKey: ['admin-imports', access.viewerId, access.epoch, access.generation, id],
     queryFn: ({ signal }) => adminRequest(path, responseSchema, { signal }), retry: false, gcTime: 0,
     refetchOnWindowFocus: 'always', refetchInterval: query => online && (['running', 'queued'].includes(query.state.data?.item.analysis.state ?? '') || query.state.data?.item.publication === 'preparing') ? 3000 : false
   });
-  // Upload confirmations bump the revision without changing the draft, so they never raise an editing conflict.
+  // A newer saved draft raises an editing conflict only when it changed a path this editor edited: upload confirmations and
+  // other administrators' saves of other paths rebase the unsaved edits, as the server would admit them.
   const accept = (item: ImportDetail) => {
     setConfirmed(previous => !previous || item.revision >= previous.revision ? item : previous);
     setEditor(previous => {
-      if (previous?.dirty && item.revision > previous.revision && previous.base && JSON.stringify(item.draft) === JSON.stringify(previous.base)) return { ...previous, revision: item.revision };
+      const rebased = previous?.dirty && item.revision > previous.revision ? rebaseDraft(previous.base, previous.draft, item.draft) : null;
+      if (previous && rebased) return { ...previous, base: item.draft, draft: rebased, revision: item.revision, dirty: draftChanges(item.draft, rebased).length > 0 };
       return previous && (previous.dirty || previous.revision > item.revision) ? previous : saved(item, previous?.selected);
     });
     mutation.operation.reconcile(item);
@@ -71,6 +78,8 @@ function ImportProject({ id }: { id: string }) {
     mutation.operation.acknowledge();
     void query.refetch();
   }, [mutation.result]);
+  // A refused save (another administrator changed a saved path) loads the newer saved draft, so the conflict panel offers it.
+  useEffect(() => { if (mutation.error === 'conflict') void query.refetch(); }, [mutation.error]);
   useEffect(() => { if (editor) adminWorkspace.retain(bufferKey, editor, access); }, [editor]);
   useEffect(() => { adminWorkspace.retain(`stage:${id}`, stage, access); }, [stage]);
   // Keep candidate search state mounted after its first visit while deferring the initial review bundle.
@@ -89,13 +98,14 @@ function ImportProject({ id }: { id: string }) {
   const locked = mutation.running || Boolean(mutation.intent) || !online;
   const publicationLocked = Boolean(confirmed && ['preparing', 'needsAttention', 'complete'].includes(confirmed.publication));
   const conflict = Boolean(editor && item && editor.dirty && editor.revision !== item.revision);
+  const changes = editor ? draftChanges(editor.base, editor.draft) : [];
   const savedOnly = locked || publicationLocked || Boolean(editor?.dirty) || conflict;
   const active = item && ['queued', 'running'].includes(item.analysis.state);
   const publicationCleanup = item?.publication === 'cancelled' && Boolean(item.publicationRecovery?.cleanupPending);
   const mutate = (action: string, payload: object) => { if (item) mutation.operation.run(`${path}/${action}`, 'POST', { expectedRevision: item.revision, ...payload }); };
   return <section className={styles.page}><AdminNav />
     <Link className={styles.back} to="/admin/imports">{t('common.back')}</Link>
-    <header className={styles.header}><div><h1 className={styles.title}>{item?.draft.album.title || item?.manifest.rootLabel || t('common.untitled')}</h1>{item?.draft.album.artistName && <p className={styles.meta}>{item.draft.album.artistName}</p>}</div>
+    <header className={styles.header}><div><h1 className={styles.title}>{item?.draft.album.title || item?.manifest.rootLabel || t('common.untitled')}</h1>{item && item.draft.album.artists.length > 0 && <p className={styles.meta}>{artistByline(item.draft)}</p>}</div>
       <button className={styles.button} type="button" disabled={query.isFetching || !online} onClick={() => void query.refetch()}>{t('common.refresh')}</button></header>
     {!online && <p className={styles.error} role="status">{t('common.offline')}</p>}
     {query.isPending && <p role="status">{t('common.loading')}</p>}
@@ -110,10 +120,12 @@ function ImportProject({ id }: { id: string }) {
         <button className={styles.button} onClick={() => setEditor(saved(item))}>{t('review.load_saved')}</button>
       </section>}
       <div hidden={stage !== 'draft'} role="tabpanel" id="import-panel-draft" aria-labelledby="import-tab-draft">
-      <form className={styles.panel} onSubmit={event => { event.preventDefault(); if (!locked && !conflict) mutation.operation.run(path, 'PATCH', { expectedRevision: editor.revision, draft: editor.draft }); }}>
+      <form className={styles.panel} onSubmit={event => { event.preventDefault(); if (!locked && !conflict && changes.length) mutation.operation.run(path, 'PATCH', { expectedRevision: editor.revision, changes }); }}>
         <header className={styles.sectionHeader}><h2>{t('layout.metadata')}</h2></header>
-        <ImportDraftEditor draft={editor.draft} filenames={item.manifest.files} disabled={locked || publicationLocked} onChange={draft => setEditor({ ...editor, draft, dirty: true })} />
-        <div className={styles.actions}><button className={`${styles.button} ${styles.primary}`} type="submit" disabled={locked || publicationLocked || !editor.dirty || conflict}>{t('action.save')}</button><span role="status">{t(editor.dirty ? 'common.unsaved' : 'common.saved')}</span></div>
+        <Suspense fallback={<p role="status">{t('common.loading')}</p>}><ImportDraftEditor draft={editor.draft} filenames={item.manifest.files} disabled={locked || publicationLocked}
+          artist={{ ...primaryArtistField(editor.draft), onChange: value => setEditor({ ...editor, draft: withPrimaryArtistName(editor.draft, value, editor.base.album.artists.length === 1 ? editor.base.album.artists[0] : undefined), dirty: true }) }}
+          onChange={draft => setEditor({ ...editor, draft: draft as ImportDraftV2, dirty: true })} /></Suspense>
+        <div className={styles.actions}><button className={`${styles.button} ${styles.primary}`} type="submit" disabled={locked || publicationLocked || !editor.dirty || conflict || !changes.length}>{t('action.save')}</button><span role="status">{t(editor.dirty ? 'common.unsaved' : 'common.saved')}</span></div>
       </form>
       <section className={styles.panel}>
         <header className={styles.sectionHeader}><h2>{t('stage.analysis')}</h2></header>
