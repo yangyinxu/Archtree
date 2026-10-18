@@ -6,7 +6,7 @@
  *   Re-exports: isAudioObjectKeyForTrack
  * Internal
  *   Functions: errorMessage, storageMutationConflict, uploadLifecycleFailure, encodeMetadataValue,
- *              validatedMediaObjectKey, validatedAudioObjectKey
+ *              validatedMediaObjectKey, validatedAudioObjectKey, replaceActiveMediaObject
  *   Constants: defaultAudioUploadDependencies, defaultAudioTrackDeletionDependencies
  * @end-catalog */
 
@@ -21,6 +21,8 @@ import { cleanupDeletedContentReferences } from '../content/contentReferenceServ
 import { normalizeUtf8Text } from '../../utils/textEncoding';
 import { prepareMediaRepresentation } from '../media/mediaRepresentationService';
 import { updateMediaTrackStorageState } from '../media/mediaRepresentationLifecycleService';
+import { retireStaleMotionPreview } from '../media/motionPreviewLifecycleService';
+import { motionPreviewLifecycleKeys } from '../../utils/motionPreviewStorageKey';
 import { isAudioObjectKeyForTrack } from '../../utils/audioStorageKey';
 import { readyVideoObjectKey, videoObjectKeysForTrack } from '../../utils/videoStorageKey';
 import {
@@ -120,6 +122,8 @@ export interface AudioUploadDependencies {
     ) => Promise<{ ETag?: string; VersionId?: string } | void>;
     deleteObject: (s3Key: string, versionId?: string | null) => Promise<void>;
     createObjectKey: (audioTrackId: string, mediaType?: MediaType) => string;
+    /** Best-effort retirement of a motion preview made for the replaced source; never fails an upload. */
+    retireMotionPreview?: (audioTrackId: string) => Promise<unknown>;
 }
 
 const defaultAudioUploadDependencies: AudioUploadDependencies = {
@@ -215,15 +219,14 @@ const defaultAudioTrackDeletionDependencies: AudioTrackDeletionDependencies = {
     }
 };
 
-export const uploadMediaObject = async (
+const replaceActiveMediaObject = async (
     audioTrackId: string,
     uploadFile: Express.Multer.File,
     ownerId: string,
     mediaType: MediaType,
-    abortSignal?: AbortSignal,
-    dependencies: Partial<AudioUploadDependencies> = {}
+    abortSignal: AbortSignal | undefined,
+    upload: AudioUploadDependencies
 ) => {
-    const upload = { ...defaultAudioUploadDependencies, ...dependencies };
     const declaredContentType = String(uploadFile?.mimetype ?? '').trim().toLowerCase();
     if (!Number.isSafeInteger(uploadFile?.size) || uploadFile.size <= 0) {
         throw new AudioStorageLifecycleError(
@@ -739,6 +742,30 @@ export const uploadMediaObject = async (
     }
 };
 
+/**
+ * Replaces the one active media object, then retires any motion preview made for the previous
+ * source. The public gate already hides such a preview once the new key is active; retirement only
+ * deletes it and is best effort, so a preview never changes an upload's outcome.
+ */
+export const uploadMediaObject = async (
+    audioTrackId: string,
+    uploadFile: Express.Multer.File,
+    ownerId: string,
+    mediaType: MediaType,
+    abortSignal?: AbortSignal,
+    dependencies: Partial<AudioUploadDependencies> = {}
+) => {
+    const upload = { ...defaultAudioUploadDependencies, ...dependencies };
+    const result = await replaceActiveMediaObject(audioTrackId, uploadFile, ownerId, mediaType, abortSignal, upload);
+    const retire = upload.retireMotionPreview ?? ((id: string) => retireStaleMotionPreview(id, {
+        findTrack: upload.findTrack,
+        updateTrackWhere: upload.updateTrackWhere,
+        deleteObject: (key, versionId) => upload.deleteObject(key, versionId)
+    }));
+    await retire(audioTrackId).catch(() => undefined);
+    return result;
+};
+
 /** Preserves the legacy audio upload API while storing it as the one active media kind. */
 export const uploadAudioObject = async (
     audioTrackId: string,
@@ -798,6 +825,13 @@ export const deleteAudioObjectAndTrack = async (
     if (track.videoAsset?.pending?.status === 'uploading') {
         throw storageMutationConflict(`MediaTrack ${audioTrackId} has a legacy video upload in progress.`);
     }
+    const previewPending = track.motionPreview?.pending;
+    if (previewPending?.status === 'uploading' && new Date(previewPending.leaseUntil).getTime() > Date.now()) {
+        throw storageMutationConflict(`MediaTrack ${audioTrackId} has a motion preview upload in progress.`);
+    }
+    if (previewPending?.outcomeUnknown === true) {
+        throw uploadLifecycleFailure(new Error('The motion preview upload requires explicit S3 version reconciliation before deletion.'), true, true);
+    }
     const storageIdentity = {
         s3Key: track.s3Key,
         mediaType: track.mediaType ?? null,
@@ -810,10 +844,13 @@ export const deleteAudioObjectAndTrack = async (
         storageCleanupS3VersionId: track.storageCleanupS3VersionId ?? null,
         mediaRepresentation: track.mediaRepresentation ?? null,
         storageCleanupMediaType: track.storageCleanupMediaType ?? null,
-        videoAsset: track.videoAsset ?? null
+        videoAsset: track.videoAsset ?? null,
+        // Any concurrent preview write changes this record, so the deletion fence misses instead of racing it.
+        motionPreview: track.motionPreview ?? null
     };
     let mediaObjectKeys: string[];
     let videoObjectKeys: string[];
+    let previewObjects: Array<{ key: string; versionId: string | null }>;
     try {
         mediaObjectKeys = [...new Set(
             topLevelMediaLifecycleKeys(track, audioTrackId).map(({ key }) => key)
@@ -825,6 +862,7 @@ export const deleteAudioObjectAndTrack = async (
             track.videoAsset,
             audioTrackId
         );
+        previewObjects = motionPreviewLifecycleKeys(track.motionPreview, audioTrackId);
     } catch (error) {
         await deletion.updateTrackWhere(audioTrackId, {
             ...storageIdentity,
@@ -890,6 +928,9 @@ export const deleteAudioObjectAndTrack = async (
         }
         for (const s3Key of videoObjectKeys.filter((key) => !mediaObjectKeys.includes(key))) {
             await deletion.deleteAudioObject(s3Key);
+        }
+        for (const preview of previewObjects) {
+            await deletion.deleteAudioObject(preview.key, preview.versionId);
         }
     } catch (error) {
         await deletion.updateTrackWhere(audioTrackId, {

@@ -15,14 +15,18 @@
  *   - only one card previews at a time
  *   - a media error stops the preview and that source is not retried
  *   - hiding the page stops a running preview and prevents a pending one
+ *   - with dedicated motion previews enabled, the card reads the preview clip and never the full stream
  * @end-catalog */
 
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import type { ReactNode } from 'react';
 import { MemoryRouter } from 'react-router';
 
 import type { AudioTrackSummary } from '../api/contentSchemas';
 import { playerStore } from '../player';
-import { listenerCapabilitiesWrapper } from '../test/listenerCapabilities';
+import { presentationCapabilitiesQueryKey } from '../api/presentationCapabilities';
+import { seedListenerCapabilities } from '../test/listenerCapabilities';
 import { ContentCard } from './ContentCard';
 
 const videoTrack: AudioTrackSummary = {
@@ -87,12 +91,18 @@ const configure = ({
   return { media, fetchMock };
 };
 
-const renderCards = (items: AudioTrackSummary[]) => render(
-  <MemoryRouter>
-    {items.map((item) => <ContentCard item={item} key={item.id} onPlay={vi.fn()} />)}
-  </MemoryRouter>,
-  { wrapper: listenerCapabilitiesWrapper() }
-);
+/** Renders cards with seeded rollout flags and the server's motion-preview presentation flag. */
+const renderCards = (items: AudioTrackSummary[], motionPreviews = false) => {
+  const client = seedListenerCapabilities(new QueryClient({ defaultOptions: { queries: { retry: false } } }));
+  client.setQueryData(presentationCapabilitiesQueryKey, { contractVersion: 1, motionPreviews });
+  const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+  return render(
+    <MemoryRouter>
+      {items.map((item) => <ContentCard item={item} key={item.id} onPlay={vi.fn()} />)}
+    </MemoryRouter>,
+    { wrapper }
+  );
+};
 
 const card = (title: string) => screen.getByRole('button', { name: new RegExp(`Play ${title}`) }).closest('article')!;
 const hover = (element: Element, pointerType = 'mouse') => fireEvent.pointerEnter(element, { pointerType });
@@ -317,4 +327,23 @@ test('hiding the page stops a running preview and prevents a pending one', async
   Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });
   await restPastIntent();
   expect(previewIn(pending)).toBeNull();
+});
+
+test('with dedicated motion previews enabled, the card reads the preview clip and never the full stream', async () => {
+  configure();
+  renderCards([trackWithSource('clip', 'Clip Light')], true);
+  const target = card('Clip Light');
+
+  hover(target);
+  await restPastIntent();
+  const video = await previewMounted(target);
+  expect(video.getAttribute('src')).toBe('/content/mediaTrack/motion-preview/clip');
+
+  // A track without a preview answers 404: the card keeps its artwork and does not fall back.
+  fireEvent(video, new Event('error'));
+  expect(previewIn(target)).toBeNull();
+  fireEvent.pointerLeave(target);
+  hover(target);
+  await restPastIntent();
+  expect(previewIn(target)).toBeNull();
 });

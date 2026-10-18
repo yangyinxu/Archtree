@@ -44,6 +44,7 @@ export const renderAudioStorageAuditPage = (
     const incompleteVideos = Array.isArray(videoStorage.incompleteTracks)
         ? videoStorage.incompleteTracks
         : [];
+    const previewSummary = report.motionPreviewStorage?.summary ?? {};
 
     return `<!DOCTYPE html>
 <html lang="en">
@@ -186,6 +187,15 @@ export const renderAudioStorageAuditPage = (
       <div class="card"><i class="ph ph-link-break" aria-hidden="true"></i><p class="eyebrow">Orphaned</p><h2>${Number(videoStorage.summary?.orphanedObjectCount ?? 0)}</h2><p>Unreferenced video objects</p></div>
       <div class="card"><i class="ph ph-file-x" aria-hidden="true"></i><p class="eyebrow">Missing</p><h2>${Number(videoStorage.summary?.missingObjectCount ?? 0)}</h2><p>Recorded keys absent from S3</p></div>
       <div class="card"><i class="ph ph-warning" aria-hidden="true"></i><p class="eyebrow">Incomplete</p><h2>${Number(videoStorage.summary?.incompleteTrackCount ?? 0)}</h2><p>Pending video lifecycles</p></div>
+    </section>
+
+    <div class="section-heading"><div><p class="eyebrow">Media namespace</p><h2>Motion preview storage</h2></div></div>
+    <section class="grid audit-metrics" aria-label="Motion preview storage summary">
+      <div class="card"><i class="ph ph-database" aria-hidden="true"></i><p class="eyebrow">MongoDB</p><h2>${Number(previewSummary.databasePreviewTrackCount ?? 0)}</h2><p>Video MediaTracks with a preview</p></div>
+      <div class="card"><i class="ph ph-cloud" aria-hidden="true"></i><p class="eyebrow">S3</p><h2>${Number(previewSummary.s3ObjectCount ?? 0)}</h2><p>Objects under <code>motion-preview/</code></p></div>
+      <div class="card"><i class="ph ph-link-break" aria-hidden="true"></i><p class="eyebrow">Orphaned</p><h2>${Number(previewSummary.orphanedObjectCount ?? 0)}</h2><p>Unreferenced preview objects</p></div>
+      <div class="card"><i class="ph ph-file-x" aria-hidden="true"></i><p class="eyebrow">Missing</p><h2>${Number(previewSummary.missingObjectCount ?? 0)}</h2><p>Recorded keys absent from S3</p></div>
+      <div class="card"><i class="ph ph-warning" aria-hidden="true"></i><p class="eyebrow">Incomplete or stale</p><h2>${Number(previewSummary.incompleteTrackCount ?? 0) + Number(previewSummary.staleTrackCount ?? 0)}</h2><p>Use the MediaTrack's motion preview Reconcile action</p></div>
     </section>
 
     <section class="card" aria-labelledby="video-orphans-heading">

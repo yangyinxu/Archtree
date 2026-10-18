@@ -84,7 +84,7 @@ export const ContentCard = ({
         <Artwork alt="" kind={item.contentType} sizes={artworkSizes} src={item.artworkUrl} />
         {preview.active && previewSource ? (
           <Suspense fallback={null}>
-            <CardVideoPreview onFailed={preview.onFailed} source={previewSource} />
+            <CardVideoPreview mediaTrackId={item.id} onFailed={preview.onFailed} streamUrl={previewSource} />
           </Suspense>
         ) : null}
         {showPlayReveal ? (

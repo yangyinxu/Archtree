@@ -27,7 +27,9 @@ export const mediaResourceClasses = [
     'download',
     'artwork',
     'avatar',
-    'video'
+    'video',
+    // Decorative hover previews: never queued, never in the playback reserve.
+    'motionPreview'
 ] as const;
 export type MediaResourceClass = typeof mediaResourceClasses[number];
 export type MediaRejectionReason = 'global' | 'perIp' | 'playbackReserved';

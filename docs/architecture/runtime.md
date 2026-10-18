@@ -226,8 +226,11 @@ timer/response hooks; expiration or queue overflow retains 429 with Retry-After.
 Source and lifecycle validation happen after waiting, before storage access.
 An admitted slot releases only after transport completion and all tracked handler
 or storage work settle, so an aborted stream cannot free capacity prematurely.
-A Web card hover preview of a Video MediaTrack reads the same public stream and
-is admitted as playback. A tab runs at most one preview, and clearing its source
+While motion previews are disabled, a Web card hover preview of a Video
+MediaTrack reads the same public stream and is admitted as playback. Once they
+are enabled it reads `/content/mediaTrack/motion-preview/:id`, admitted as the
+`motionPreview` class: rejected at once when full, never queued, and never
+given the playback reserve. A tab runs at most one preview, and clearing its source
 when the preview stops aborts the request, so it holds at most one slot.
 
 Catalog substring searches now share a dedicated per-process limit of eight active

@@ -199,6 +199,10 @@ async function setup(page: Page, administrator = true, initialReleaseDate: { yea
         applied: { operationId: body.operationId, at: '2026-10-14T00:00:00.000Z', fields: body.fields } };
       return route.fulfill({ json: receipt(body, 'apply'), headers });
     }
+    if (method === 'GET' && /^\/api\/admin\/v1\/catalog\/audioTrack\/[0-9a-f]{24}\/motion-preview$/.test(path)) {
+      // Motion previews default off, so the editor's preview panel renders nothing.
+      return route.fulfill({ status: 404, json: { code: 'ADMIN_MOTION_PREVIEW_DISABLED' }, headers });
+    }
     throw new Error(`Unexpected synthetic administrator request: ${method} ${path}`);
   });
   return { reads, writes, album: () => album, review: () => review, finish: () => { finishAnalysis = true; }, revoke: () => { denied = true; }, recoverArtwork: () => { artworkFailed = false; },

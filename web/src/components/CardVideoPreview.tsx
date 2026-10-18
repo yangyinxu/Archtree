@@ -3,12 +3,14 @@
  *   Types: CardVideoPreviewProps
  *   Functions: CardVideoPreview
  * Internal
- *   Functions: isMediaFailure
+ *   Functions: isMediaFailure, PreviewVideo
  *   Constants: previewStartFraction, previewMaximumStartSeconds, previewWindowSeconds, loopLeadSeconds
  * @end-catalog */
 
+import { useQuery } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 
+import { motionPreviewUrl, presentationCapabilitiesQuery } from '../api/presentationCapabilities';
 import styles from './CardVideoPreview.module.css';
 
 // Previews loop a short window from a little way into the video, where openings are rarely blank.
@@ -19,8 +21,21 @@ const previewWindowSeconds = 8;
 const loopLeadSeconds = 0.1;
 
 export interface CardVideoPreviewProps {
-  source: string;
+  mediaTrackId: string;
+  /** The public stream, used only while dedicated motion previews are disabled. */
+  streamUrl: string;
   onFailed: () => void;
+}
+
+/**
+ * Chooses the preview source: the dedicated muted clip when the server serves motion previews (a
+ * track without one simply shows its artwork), otherwise the MediaTrack's public stream.
+ */
+export default function CardVideoPreview({ mediaTrackId, streamUrl, onFailed }: CardVideoPreviewProps) {
+  const capabilities = useQuery(presentationCapabilitiesQuery());
+  if (capabilities.isPending) return null;
+  const source = capabilities.data?.motionPreviews ? motionPreviewUrl(mediaTrackId) : streamUrl;
+  return <PreviewVideo key={source} onFailed={onFailed} source={source} />;
 }
 
 /** Only failures of the media itself count; an interrupted play() after teardown is not a failure. */
@@ -33,7 +48,7 @@ const isMediaFailure = (error: unknown) => {
  * A decorative, muted preview drawn over a Video card's artwork. It owns its own media element,
  * separate from the shared player, loops a bounded window, and releases its request on unmount.
  */
-export default function CardVideoPreview({ source, onFailed }: CardVideoPreviewProps) {
+function PreviewVideo({ source, onFailed }: { source: string; onFailed: () => void }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [ready, setReady] = useState(false);
 
