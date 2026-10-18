@@ -29,6 +29,7 @@ import {
 } from '../../api/playlists';
 import { browserSessionQuery } from '../../api/session';
 import { focusMainContent } from '../../app/focusMainContent';
+import { neutralArtworkTone, useArtworkTone, useMainPaneTone } from '../../artwork/useArtworkTone';
 import { Artwork } from '../../components/Artwork';
 import { launchPlaylistPlayback } from '../playback/launchPlayback';
 import {
@@ -242,6 +243,8 @@ export const PlaylistDetailPage = () => {
   }, [playlistId, viewerId]);
 
   const playlist = playlistQuery.data;
+  const tone = useArtworkTone(playlist?.artworkUrl) ?? neutralArtworkTone;
+  useMainPaneTone(tone.pane);
   const readyTracks = useMemo(() => playlist?.items.flatMap((item) => (
     item.availability === 'ready' && item.audioTrack ? [item.audioTrack] : []
   )) ?? [], [playlist]);

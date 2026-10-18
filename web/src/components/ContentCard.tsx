@@ -88,6 +88,8 @@ export const ContentCard = ({
   return (
     <article
       className={`${styles.card} ${reason ? styles.withReason : ''}`}
+      // Lets a page tint itself with the hovered card's artwork tone.
+      data-artwork-src={item.artworkUrl || undefined}
       data-playback-state={isPlaying ? 'playing' : undefined}
     >
       {item.contentType === 'audioTrack' ? (

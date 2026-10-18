@@ -320,7 +320,9 @@
   --now-playing-column: clamp(19rem, 23vw, 24rem);
 }
 
+/* Pages tint the top gradient by setting --tone-color here; it scrolls with the content. */
 .main {
+  background: linear-gradient(var(--tone-color), var(--color-surface)) 0 0 / 100% 20.5rem no-repeat local;
   container-type: inline-size;
   flex: 1;
   min-height: 0;
@@ -330,6 +332,7 @@
   overscroll-behavior: contain;
   scroll-behavior: smooth;
   scrollbar-gutter: stable;
+  transition: --tone-color var(--motion-tone) var(--ease-standard);
 }
 
 .nowPlayingSlot {
@@ -564,6 +567,7 @@
 @media (prefers-reduced-motion: reduce) {
   .main {
     scroll-behavior: auto;
+    transition: none;
   }
 
   .skipLink,
