@@ -13,13 +13,13 @@
  *                    --radius-pill, --shadow-sm, --shadow-lg, --shadow-artwork, --shadow-card-artwork,
  *                    --shadow-hero-artwork, --shadow-form-card, --shadow-player, --shadow-control,
  *                    --shadow-expanded-artwork, --shadow-floating-control, --shadow-thumb, --shadow-divider,
- *                    --motion-fast, --motion-medium, --motion-reveal, --ease-standard, --ease-emphasized,
- *                    --space-1, --space-2, --space-3, --space-4, --space-5, --space-6, --space-7, --space-8,
- *                    --layer-player, --layer-topbar, --layer-menu, --layer-modal, --layer-skip-link,
- *                    --layer-expanded-player, --layer-confirmation, --layer-help, --shell-gap, --panel-radius,
- *                    --main-pane-min, --now-playing-width, --control-min-size, --card-padding, --card-inset,
- *                    --sidebar-width, --topbar-height, --player-height, --mobile-player-height,
- *                    --mobile-nav-height
+ *                    --motion-fast, --motion-medium, --motion-reveal, --motion-tone, --ease-standard,
+ *                    --ease-emphasized, --space-1, --space-2, --space-3, --space-4, --space-5, --space-6,
+ *                    --space-7, --space-8, --layer-player, --layer-topbar, --layer-menu, --layer-modal,
+ *                    --layer-skip-link, --layer-expanded-player, --layer-confirmation, --layer-help,
+ *                    --shell-gap, --panel-radius, --main-pane-min, --now-playing-width, --control-min-size,
+ *                    --card-padding, --card-inset, --sidebar-width, --topbar-height, --player-height,
+ *                    --mobile-player-height, --mobile-nav-height
  * Media queries: (min-width: 768px) and (max-width: 1007px)
  * @end-catalog */
 
@@ -100,6 +100,7 @@
   --motion-fast: 120ms;
   --motion-medium: 200ms;
   --motion-reveal: 300ms;
+  --motion-tone: 600ms;
   --ease-standard: cubic-bezier(0.2, 0, 0, 1);
   --ease-emphasized: cubic-bezier(0.3, 0, 0, 1);
   --space-1: 0.25rem;
@@ -131,6 +132,17 @@
   --player-height: 5.1rem;
   --mobile-player-height: 3.55rem;
   --mobile-nav-height: 3.7rem;
+}
+
+/*
+ * Artwork tone of a surface (set inline by the page). Registered so a new tone interpolates;
+ * non-inheriting so animating it never restyles the surface's descendants. The initial panel
+ * color makes an untoned main-pane gradient invisible.
+ */
+@property --tone-color {
+  syntax: "<color>";
+  inherits: false;
+  initial-value: #121212;
 }
 
 @media (min-width: 768px) and (max-width: 1007px) {

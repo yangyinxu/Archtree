@@ -15,6 +15,7 @@
   - [Compact tablet, 768–799 px](#compact-tablet-768799-px)
   - [Mobile, 767 px and below](#mobile-767-px-and-below)
 - [Component language](#component-language)
+  - [Artwork tone](#artwork-tone)
 - [Motion](#motion)
 - [Route guidance](#route-guidance)
 - [Visual acceptance](#visual-acceptance)
@@ -63,6 +64,7 @@ friends, device handoff, lyrics, Smart Shuffle, or editable queue behavior.
 | Hover surface | `#2a2a2a` |
 | Strong hover surface | `#333333` |
 | Media-card hover / pressed | `rgb(255 255 255 / 0.07)` / `rgb(255 255 255 / 0.04)`, translucent so the highlight stays correct over any tinted surface |
+| Artwork tone | Derived per artwork (see [Artwork tone](#artwork-tone)); neutral hero `#535353`, neutral pane `#333333` |
 | Primary text | `#ffffff` |
 | Muted text | `#b3b3b3` |
 | Subtle text | `#8f8f8f` |
@@ -143,7 +145,8 @@ The implemented semantic roles are:
 The normal transition tokens are 120 ms for direct hover/control feedback and
 200 ms for panes, dialogs, and player presentation changes, using
 `cubic-bezier(0.2, 0, 0, 1)`. Media-card Play reveals use the 300 ms reveal
-token with the emphasized `cubic-bezier(0.3, 0, 0, 1)` curve.
+token with the emphasized `cubic-bezier(0.3, 0, 0, 1)` curve. Artwork tones
+interpolate over the 600 ms `--motion-tone` token with the standard curve.
 
 Section titles stay compact so the media, not the heading, carries a shelf.
 They sit 8 px above the card surface, which places them about 19 px above the
@@ -193,8 +196,9 @@ artwork.
 - Panels use the canvas/panel contrast instead of large borders. An
   artwork-derived tonal gradient may tint the top of the central pane and
   catalog headers, fading into the panel color. It is never a decorative
-  full-page wash, it keeps primary text at WCAG AA contrast, and it is shared in
-  spirit with the native clients' artwork-led backgrounds.
+  full-page wash, it keeps text at WCAG AA contrast under the rules in
+  [Artwork tone](#artwork-tone), and it is shared in spirit with the native
+  clients' artwork-led backgrounds.
 - Media cards are transparent at rest. On hover or focus their whole padded
   surface highlights with the translucent card-hover color, while the artwork
   keeps its own soft drop shadow. The card does not lift, its artwork and text
@@ -222,12 +226,66 @@ artwork.
 - Loading, empty, unavailable, buffering, success, and error states remain
   understandable without color or animation.
 
+### Artwork tone
+
+- Derivation: the client decodes the managed, same-origin 96 px WebP variant,
+  picks the most prominent color family (vivid hues outweigh a slightly larger
+  grey field), and adjusts it in OKLCH. Color families are scored as sliding
+  30° hue windows, so a shaded color is never split across a bin edge and
+  outvoted by a smaller one. Chroma is capped at 0.16, lightness is floored at
+  0.28 so dark artwork still shows, and only lightness is lowered, keeping hue,
+  until the contrast rule holds. Tones are cached per image id for the 200 most
+  recently sampled images.
+- Fallback: missing, failed, transparent, cross-origin, and non-managed
+  artwork use the neutral tone, never an error state.
+- Contrast: each artwork yields two tones. The hero tone keeps primary white
+  text at 4.5:1 or more; the darker pane tone also keeps muted `#b3b3b3` text at
+  4.5:1 or more. Hero-tone surfaces carry only primary white text and accent
+  controls. Pane-tone surfaces carry only primary, muted, and accent text;
+  subtle `#8f8f8f` text falls to about 3:1 there and appears only on the plain
+  panel or darker. Darkening veils may only lower a tone's lightness.
+- Main pane: the top 20.5 rem (about 330 px) of the central pane is a gradient
+  from the pane tone into the `#121212` panel that scrolls with the content.
+  The color is a registered, non-inheriting `--tone-color` property, so tone
+  changes interpolate over 600 ms (immediately with reduced motion) without
+  restyling the page. Routes that set no tone keep the panel color, which makes
+  the gradient invisible. Artist and Playlist use their artwork's tone and
+  Organization uses the neutral tone. Album leaves the main pane untinted
+  because its opaque header paints the tone itself; a pane gradient taller than
+  a short header would show as a band below it.
+- Home: the pane starts at the neutral tone and follows the hovered or
+  keyboard-focused (`:focus-visible`) media card; the hovered card wins. A card
+  whose tone is not yet known is sampled only after the pointer or focus rests
+  on it for 150 ms, so sweeping across a shelf samples just the card it stops
+  on. The tone returns to the focused card or the neutral tone 150 ms after
+  the pointer leaves the cards. Touch pointers, and focus from a tap or click,
+  do not change it.
+- Album header: the hero tone sits under a black veil that deepens to 45% and
+  then fades into the panel below the actions. Its eyebrow and metadata are
+  primary white. The title fits its column: it starts at a size estimated from
+  its length (CJK and full-width characters count double) and steps down until
+  it fits within three lines at the current width, fitting again when the
+  central pane resizes. The smallest step never clamps, so the complete title
+  is always readable without the `title` tooltip.
+- Compact header: once the Album header has scrolled under the top of the
+  central pane, a sticky 4 rem bar on the pane tone fades in with the title and
+  a Play control named "Play album {title}" (with the byline when there is
+  one), so it never shares a name with a title track's Play. While the bar
+  shows, the central pane reserves its height as scroll padding, so keyboard
+  focus never scrolls under it (WCAG 2.4.11). While hidden it is inert and
+  removed from the accessibility tree; if it hides while its Play has focus,
+  focus moves to the header's Play first. Its title is presentational because
+  the hero heading names the page. In forced colors the bar keeps a
+  `CanvasText` bottom border.
+
 ## Motion
 
 | Surface | Normal | Reduced Motion |
 | --- | --- | --- |
 | Hover/focus | 100–150 ms color/opacity; small icon/action transform only | Immediate state |
 | Media-card hover | 300 ms surface highlight and Play reveal: opacity and an 8 px rise; 1.04× hover and 0.96× press scale on the control | Immediate highlight and reveal with no rise or scale |
+| Artwork tone | 600 ms `--tone-color` interpolation on the main pane, Album header, and compact header | Immediate color change |
+| Compact header | 200 ms opacity fade | Immediate show/hide |
 | Menu/dialog | 180–240 ms opacity and 4–8 px transform | Immediate open/close |
 | Right pane | 200–300 ms opacity/transform | Immediate layout change |
 | Player expansion | 220–300 ms rigid surface transition | Immediate presentation change |
@@ -246,7 +304,8 @@ announced even when its spinner is static.
 - Library remains the complete server-backed Saved Album/Soundtrack union with
   existing filters, sorts, pagination, and signed-out behavior.
 - Album and Artist use artwork-led tonal headers and dense release/track
-  layouts without changing readiness or Recently Played policy.
+  layouts without changing readiness or Recently Played policy. The Album
+  compact header's Play starts the same canonical Album queue as the hero Play.
 - Playlist retains owner-only access, limits, membership order, accessible move
   controls, unavailable-member positions, and queue-copy behavior.
 - Account and authentication reuse the same tokens without changing capability
@@ -265,7 +324,8 @@ announced even when its spinner is static.
   px, plus 1280 × 800, 1440 × 900, 1920 × 1080, 390 × 844, 320 × 568, and
   mobile landscape.
 - Verify default, hover, focus-visible, pressed, selected, disabled, loading,
-  empty, error, missing-artwork, long-text, and reduced-motion states.
+  empty, error, missing-artwork, long-text, and reduced-motion states, plus the
+  neutral and artwork tones and the Album compact header.
 
 The deterministic artwork used during local visual QA is original generated
 test material and is not shipped by the application. Production cards continue

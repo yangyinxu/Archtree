@@ -581,9 +581,10 @@
   white-space: nowrap;
 }
 
+/* A dark veil, not an opaque surface, so the main pane's artwork tone shows through. */
 .detailHeader {
   align-items: end;
-  background: var(--color-surface-raised);
+  background: rgb(0 0 0 / 0.2);
   border-radius: var(--radius-md);
   display: grid;
   gap: clamp(1.2rem, 3vw, 2rem);
