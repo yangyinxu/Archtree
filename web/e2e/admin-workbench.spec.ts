@@ -1011,8 +1011,9 @@ test('an image every file shares is chosen automatically until the administrator
   await expect(choice.getByRole('radio', { name: /01 First\.mp3/ })).toBeChecked(); await expect(note).toBeVisible();
   await expect(choice.getByRole('radio', { name: 'No cover selected', exact: true })).not.toBeChecked();
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
-  // Choosing No cover is the administrator's explicit choice; the automatic note and mark go away.
-  await choice.getByRole('radio', { name: 'No cover selected', exact: true }).check();
+  // Choosing No cover is the administrator's explicit choice; the automatic note and mark go away. The radio is
+  // controlled by the saved choice, so it shows checked only after select-cover answers.
+  await choice.getByRole('radio', { name: 'No cover selected', exact: true }).click();
   await expect.poll(() => server.writes.map(write => write.action)).toEqual(['select-cover']);
   await expect(note).toHaveCount(0); await expect(choice.getByRole('radio', { name: 'No cover selected', exact: true })).toBeChecked();
   await expect(summaryRegion(page).getByText('No cover selected', { exact: true })).toBeAttached();
