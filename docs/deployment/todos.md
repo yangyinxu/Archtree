@@ -20,8 +20,9 @@ be completed solely through application code.
 
 ## Administrator Metadata Lookup Rollout
 
-Status: The metadata source layer is a dark launch; no route, capability or
-worker uses it yet.
+Status: Lookup jobs run on the server once an import's uploads complete, but no
+route, capability or Web control exposes them yet. Without the contact below,
+they send nothing.
 
 - [ ] Set `FINITUDE_ADMIN_METADATA_LOOKUP_CONTACT` in production to an operator
       email address or https URL before metadata lookup is enabled for

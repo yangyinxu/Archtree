@@ -22,6 +22,10 @@ test('startup provisions deletion receipts and repeated initialization preserves
   await verifyRequiredDatabaseIndexes(db);
   assert.deepEqual(await receipts.findOne({ _id: sentinel._id }), sentinel);
   assert.equal(await receipts.countDocuments(), 1);
+  // The metadata lookup worker's claim index also provisions its collection, so no transaction ever creates it.
+  assert.equal((await db.listCollections({ name: 'adminImportLookups' }).toArray()).length, 1);
+  const lookupWorker = (await db.collection('adminImportLookups').listIndexes().toArray()).find(index => index.name === 'admin_import_lookup_worker');
+  assert.deepEqual([lookupWorker?.key, lookupWorker?.unique], [{ state: 1, leaseUntil: 1, retryAt: 1 }, undefined]);
 });
 
 test('real Mongo indexes are verified, missing uniqueness fails closed, and duplicates are never deleted', async () => {
@@ -30,6 +34,7 @@ test('real Mongo indexes are verified, missing uniqueness fails closed, and dupl
   const receipt = await db.collection<{ _id: string }>('schemaMigrations')
     .findOne({ _id: requiredIndexRevision });
   assert.ok(receipt);
+  assert.equal(requiredIndexRevision, 'required-indexes-v10-metadata-lookups');
   const linkIndexes = await db.collection('emailLinkTokens').listIndexes().toArray();
   const byKey = (key: Record<string, number>) => linkIndexes.find(index => JSON.stringify(index.key) === JSON.stringify(key));
   assert.ok(byKey({ email: 1, purpose: 1 }), 'link cleanup within registration transactions is indexed');

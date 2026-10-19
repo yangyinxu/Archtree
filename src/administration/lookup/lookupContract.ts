@@ -6,7 +6,8 @@
  *          CoverArtListing, LookupSourceFailure, LookupInputProblem
  *   Classes: MetadataLookupSourceError, MetadataLookupInputError
  *   Constants: metadataLookupSources, METADATA_LOOKUP_RATES, METADATA_LOOKUP_LIMITS, METADATA_LOOKUP_RETRY,
- *              METADATA_LOOKUP_HOSTS, ITUNES_STOREFRONTS
+ *              METADATA_LOOKUP_HOSTS, ITUNES_STOREFRONTS, ADMIN_IMPORT_LOOKUP_COLLECTION,
+ *              METADATA_LOOKUP_JOB_LIMITS, metadataLookupIndexes
  * Internal
  *   Constants: failureCodes
  * @end-catalog */
@@ -14,9 +15,10 @@
 import type { ImportDate } from '../import/adminImportContract';
 
 /**
- * Fixed sources, hosts, bounds and evidence types of administrator metadata lookup (dark launch:
- * nothing in production calls these clients yet). Every value here is server-chosen; no
- * administrator input can change a host, a rate or a size bound.
+ * Fixed sources, hosts, bounds and evidence types of administrator metadata lookup. The lookup
+ * worker (metadataLookupService.ts) calls the MusicBrainz client; the iTunes and Cover Art Archive
+ * clients wait for later stages. Every value here is server-chosen; no administrator input can
+ * change a host, a rate or a size bound.
  */
 export const metadataLookupSources = ['musicbrainz', 'itunes', 'coverartarchive'] as const;
 export type MetadataLookupSource = typeof metadataLookupSources[number];
@@ -135,3 +137,21 @@ export class MetadataLookupInputError extends Error {
         this.name = 'MetadataLookupInputError';
     }
 }
+
+/** One record per import project; its `_id` is the project's `_id` (metadataLookupService.ts). */
+export const ADMIN_IMPORT_LOOKUP_COLLECTION = 'adminImportLookups';
+/**
+ * Fixed job bounds: the grant, the worker lease and the per-request step deadline (shorter than the lease, and shorter than
+ * a wait-mode request with its gate waits and in-call retries, which the deadline then aborts as unavailable), the candidate
+ * bounds, the JSON budget of candidates plus ranking (well under MongoDB's 16 MiB document limit), the automatic runs per
+ * project, and the automatic retries per run with the longest Retry-After they honour.
+ */
+export const METADATA_LOOKUP_JOB_LIMITS = Object.freeze({
+    grantMs: 60 * 60 * 1000, leaseMs: 180_000, stepDeadlineMs: 120_000, workerIntervalMs: 2_000,
+    candidates: 25, candidateBytes: 4 * 1024 * 1024, recordBytes: 12 * 1024 * 1024, automaticRuns: 3,
+    retryDelaysMs: Object.freeze([30_000, 120_000, 300_000]), retryAfterMaximumMs: 60_000
+});
+/** Required: the worker's claim index also creates the collection before any transaction writes it. */
+export const metadataLookupIndexes = [
+    { collection: ADMIN_IMPORT_LOOKUP_COLLECTION, keys: { state: 1, leaseUntil: 1, retryAt: 1 }, options: { name: 'admin_import_lookup_worker' }, required: true }
+] as const;

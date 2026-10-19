@@ -32,6 +32,7 @@ import { importDraftV2FromV1, importDraftV2View, importDraftVersion, importDraft
 import { DRAFT_V2, DRAFT_V2_LIMITS, defaultDraftV2, draftBytes, draftV2Suggestion, hasOwn, importApprovalDigest, isDraftV2, retainBoundDecisions, sameDraftValue, type ImportDecisionV2, type ImportDraftOrigins, type ImportDraftV2, type ImportSuggestionV2 } from './adminImportDraft';
 import { applyAdministratorChanges, boundDraftChanges, boundedJson, convertLegacyImportProject, draftValueAt, draftWithinSizeLimit, importAutomationMarkers, markAdministratorValues, originOf, parseDraftChanges, parseDraftValue, setDraftValue, storedDraftV2, type ImportDraftPath } from './adminImportValueState';
 import { importTagsV2View } from './adminImportTags';
+import type { ImportLookupGate } from '../lookup/metadataLookupRecord';
 import { IMPORT_CANDIDATE_COLLECTIONS, IMPORT_IDENTITY_FENCE_ID, importCandidateProjection, importCandidateRevision, importCandidateRow, importIdentityCandidates, readyImportCandidate } from './adminImportIdentity';
 
 export type ProjectReceipt = Omit<ImportReceipt, 'kind'> & { kind: ImportReceipt['kind'] | 'apply' } & { actorId: string; hash: string; at: Date; selection?: { generation: number; acceptedIds: string[]; rejectedIds: string[] } };
@@ -46,6 +47,8 @@ export type AdminImportDocument = {
     valueRevision?: number;
     /** `albumAt` is set once the album step of tag automation ran, so it never runs again; other keys belong to later releases. */
     automation?: { albumAt?: Date } & Record<string, unknown>;
+    /** Metadata lookup fence (metadataLookupRecord.ts): written with every run started and every state change, never bumping `revision`; never projected. */
+    lookupGate?: ImportLookupGate;
     _id: ObjectId; actorId: string; revision: number; createdAt: Date; updatedAt: Date; manifest: ImportManifest; draft: ImportDraft | ImportDraftV2; analysis: Analysis; analysisHistory: Analysis[]; attemptsUsed: number;
     suggestions: (ImportSuggestion | ImportSuggestionV2)[]; decisions: (ImportDuplicateDecision | ImportDecisionV2)[]; receipts: Receipt[]; recoveryReceipts?: Receipt[]; automaticReceipts?: Receipt[]; media?: ImportMedia };
 /** A Draft v2 document: an import project or catalog review written by this release, or converted at its first admitted change. */

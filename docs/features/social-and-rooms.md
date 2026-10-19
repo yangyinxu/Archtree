@@ -23,8 +23,9 @@ The existing server-only `JWT_SECRET` signs domain-separated 24-hour mutation
 scopes and 15-minute pagination cursors; scope tokens belong in JSON bodies and
 must never be logged or placed in URLs. Key rotation invalidates old scopes and
 cursors; clients must not automatically resubmit an uncertain command under a
-new scope after rotation. Startup verifies the `required-indexes-v9-administrator-conversions` constraints before
-admission; these are additive schema changes even when the feature is disabled.
+new scope after rotation. Startup verifies the
+`required-indexes-v10-metadata-lookups` constraints before admission; these are
+additive schema changes even when the feature is disabled.
 
 See [the social API contract](../architecture/social.md)
 for exact routes, envelopes, limits, retention and recovery behavior. Narrow

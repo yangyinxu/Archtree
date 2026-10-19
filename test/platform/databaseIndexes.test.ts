@@ -5,6 +5,7 @@
  *   - index migration is additive, repeatable, and records its verified revision
  *   - receipt collection creation accepts only NamespaceExists code and fails safely before index writes
  *   - mandatory index failure prevents migration success without disclosing database errors
+ *   - the metadata lookup worker index is required
  *   - essential social cleanup indexes must exist before startup can complete
  *   - the email-link cleanup index must exist before startup can complete
  *   - social cleanup indexes reject unique, sparse, partial, hidden and expiring substitutes
@@ -93,6 +94,17 @@ test('mandatory index failure prevents migration success without disclosing data
     assert.ok(error instanceof DatabaseIndexInitializationError);
     assert.equal(error.indexId, 'users:email');
     assert.equal(String(error).includes('private-email'), false);
+    return true;
+  });
+  assert.deepEqual(fake.receipts, []);
+});
+
+test('the metadata lookup worker index is required', async () => {
+  const fake = databaseDouble();
+  fake.fail('adminImportLookups');
+  await assert.rejects(initializeDatabaseIndexes(fake.db), (error: unknown) => {
+    assert.ok(error instanceof DatabaseIndexInitializationError);
+    assert.equal(error.indexId, 'adminImportLookups:state,leaseUntil,retryAt');
     return true;
   });
   assert.deepEqual(fake.receipts, []);

@@ -204,6 +204,9 @@ previews, import/catalog/Page editors or upload controls.
 - [Import format compatibility](#import-format-compatibility)
   - [Rollback floors](#rollback-floors)
 - [Metadata lookup](#metadata-lookup)
+  - [Lookup runs](#lookup-runs)
+  - [Triggers and grants](#triggers-and-grants)
+  - [What lookup sends](#what-lookup-sends)
 <!-- @end-catalog -->
 
 ## Device-local MP3 conversion
@@ -488,7 +491,8 @@ Import routes (relative to `/api/admin/v1`):
   draft saves, automatic values, completed uploads and embedded staging never
   make a queued upload stale. A transfer error leaves the asset unknown; only
   reconciliation confirms a failure. A confirmed audio upload, including a
-  replay of an intent already confirmed, then runs tag automation.
+  replay of an intent already confirmed, then runs tag automation and the
+  metadata lookup trigger (see [Triggers and grants](#triggers-and-grants)).
   `slotId=cover` is the independent manual cover slot.
 - `POST /imports/:id/assets/:slotId/reconcile`: a JSON body `{operationId}`
   naming the original upload intent, with no bytes. It writes no receipt and
@@ -503,7 +507,8 @@ Import routes (relative to `/api/admin/v1`):
   `HEAD` and the 90-second `PUT` abort, has passed. Anything else, including
   a binding mismatch or a storage error, leaves the asset unknown with its
   evidence intact. A ready result, found now or earlier, runs tag automation
-  as the reconciling administrator.
+  as the reconciling administrator; an audio upload that this reconciliation
+  itself confirms also runs the metadata lookup trigger as that administrator.
 - `DELETE /imports/:id/assets/:slotId`: explicit staged cleanup with the same
   operation headers; unknown/failed cleanup retains lifecycle evidence. An
   unresolved upload (pending, unknown, or a failure reconciliation has not
@@ -511,7 +516,10 @@ Import routes (relative to `/api/admin/v1`):
   `PUT` can leave an untracked object. `If-Match` must not predate the last
   administrator receipt, so a removal confirmed before another
   administrator's upload, removal or other change is refused, while upload
-  transfers, Luna and publication progress never refuse it.
+  transfers, Luna and publication progress never refuse it. Admitting the
+  removal of a file that a lookup run bound lists its slot in `staleSlotIds`
+  and supersedes that run while it is active (see
+  [Triggers and grants](#triggers-and-grants)).
 - `POST /imports/:id/select-cover`: explicitly select a ready manual or embedded
   artwork slot; uploading artwork alone never selects it. It binds the cover
   state the administrator saw: `expectedRevision` must not predate the last
@@ -669,9 +677,9 @@ has its own bounded lifecycle receipts. An embedded image whose SHA-256 matches
 one that is ready, pending or of unknown outcome is not staged again, and each
 import makes at most 16 automatic embedded stagings. Embedded assets that an
 earlier release staged under ordinary receipts keep them and their existing
-lifecycle. Automatic values written from file tags take no receipt of either
-kind, so they use neither the 256 ordinary receipts nor the 16 automatic
-embedded stagings.
+lifecycle. Automatic values written from file tags and automatic metadata
+lookup runs take no receipt of either kind, so they use neither the 256
+ordinary receipts nor the 16 automatic embedded stagings.
 The client receives a bounded recent receipt projection; the original publication
 UUID remains available through `publicationRecovery` for durable reconciliation.
 
@@ -951,6 +959,8 @@ read by `src/administration/import/adminImportTags.ts`.
   malformed draft or while a publication locks the sources. A concurrent
   writer is a transaction conflict that is retried against fresh state, so an
   administrator's save made meanwhile is kept and only that value is skipped.
+  The same confirmation then evaluates the automatic metadata lookup trigger
+  (see [Triggers and grants](#triggers-and-grants)).
   A file removed and uploaded again runs its per-file step again, replacing its
   automatic values and keeping the administrator's own. A new upload to a
   converted format-1 project fills only that track's empty values, and no
@@ -1081,7 +1091,10 @@ Later stages raise the oldest release that is safe to roll back to:
   approvals as invalid input, so reload open workbench tabs after deploying or
   rolling back across them.
 - After metadata lookup jobs run, never roll back below the release before
-  them, which ignores their records.
+  them, which ignores `adminImportLookups` and keeps each import document's
+  `lookupGate` as it is, because it replaces documents as it read them. Its
+  index revision is older, so it verifies its own indexes and leaves
+  `admin_import_lookup_worker` in place.
 - After MusicBrainz IDs are stored, never roll back below the release before
   them; its index stays, and listener DTOs already drop unknown fields.
 - Credit join phrases and Disc Numbers have their own floor in the
@@ -1089,9 +1102,10 @@ Later stages raise the oldest release that is safe to roll back to:
 
 ## Metadata lookup
 
-The metadata source layer is a dark launch: no route, capability, worker or Web
-control uses it yet, so nothing is sent to any service. It lives in
-`src/administration/lookup/`.
+A server worker runs MusicBrainz lookups for import projects automatically (see
+[Lookup runs](#lookup-runs)). No route, capability or Web control exposes them
+yet, and iTunes and Cover Art Archive are not queried yet. The source layer and
+the jobs live in `src/administration/lookup/`.
 
 - **Sources and hosts.** MusicBrainz (`https://musicbrainz.org/ws/2/` only), the
   iTunes Search API (`https://itunes.apple.com/search` and `/lookup`, in the
@@ -1180,3 +1194,158 @@ control uses it yet, so nothing is sent to any service. It lives in
   an operator runs it; tests and CI never do. Lookup tests install
   `test/support/networkGuard.ts`, which fails any non-loopback DNS query,
   socket or `fetch`.
+
+### Lookup runs
+
+`src/administration/lookup/metadataLookupService.ts` runs the jobs, and
+`metadataLookupRecord.ts` beside it holds their pure model.
+
+- **Record.** `adminImportLookups` keeps one record per import project (its
+  `_id` is the project's): the run number, state, issue and outcome, the grant,
+  the bound file set (`fileSetDigest` and each manifest slot's confirmed upload
+  intent and SHA-256), the input (`tags`, `folder` or `submitted`), at most six
+  planned queries with their progress, the MusicBrainz attempts, at most 25
+  candidates, the ranking with its groups, the values applied from it (written
+  once value application exists), stale slots, the automatic-run count and
+  whether a folder-name query was handed to the worker. A new run (an automatic rerun, a submitted
+  name or a manual retry) replaces the previous run's results; only the
+  automatic-run count, the folder use and the applied values carry over. No
+  history is kept, and records are never deleted.
+- **States.** `queued`, `running` and `retrying` are active; `complete`,
+  `unavailable`, `stopped` and `superseded` end a run. A stopped run's issue is
+  `permissionLost` or `grantExpired`, an unavailable one's `sourceUnavailable`,
+  `sourceBusy` or `notConfigured`, and a superseded one's `fileSetChanged` or
+  `projectClosed`. A completed run's outcome is `candidates`, `noRelease` or
+  `noQuery` (nothing to look up, so nothing was sent); an unavailable run has
+  no outcome and is never reported as no release.
+- **Steps.** The worker polls every 2 seconds, claims a due run with a
+  180-second lease and advances it one MusicBrainz request per stored step: the
+  planned queries in order until 25 distinct releases are known, then each
+  candidate's release lookup, then ranking. Each step's transaction first
+  rechecks the lease, the grant, the granting administrator's current role,
+  that the project still accepts lookup and that no bound file changed. Requests
+  run outside any transaction, each bounded by a 120-second step deadline. A
+  worker whose lease was taken over writes nothing, and search progress
+  survives retries, takeovers and restarts. Stopping the server aborts the
+  request in flight and releases the lease; the next claim resumes at the
+  stored step.
+- **Retries.** A busy, rate-limited, unavailable or invalid answer, or the step
+  deadline, schedules an automatic retry of the run after 30 seconds, 2 minutes
+  and 5 minutes, or after a longer Retry-After of at most 60 seconds. Automatic
+  runs, automatic reruns (also of submitted text) and manual retries wait for
+  the source gate; a submitted run uses busy mode until its first failed
+  attempt, then waits. When the third retry fails too, or the next retry would
+  come after the run's grant expires, a search ends `unavailable` with no
+  ranking, while during release lookups the remaining candidates become
+  incomplete and the run completes with `sourceUnavailable`. A manual retry
+  starts a new run with the same queries.
+- **Candidates.** Releases are stored without ISRCs, within 4 MiB of JSON for
+  all candidates together, and candidates plus ranking stay within 12 MiB: while
+  over it, the largest fetched releases are omitted and the rest ranked again. A
+  release-ID query is stored under the ID MusicBrainz returns, so a release
+  merged into another is ranked under its current ID. A 404 is `missing`, an
+  exhausted lookup `failed` and a release over a budget `omitted`; all three
+  are incomplete and unranked. The
+  front-artwork flag comes from the release lookup. Ranking compares each
+  file's known duration (version-2 milliseconds, else a stored `mm:ss` with
+  1-second precision), the draft's Disc and Track Numbers, the version-2 artist
+  and album-artist tags and the identifiers every file shares.
+- **Limit.** A project runs at most three automatic lookups: the first and two
+  reruns after file-set changes. Submitted names and manual retries do not
+  count.
+- **Fence.** Starting a run (including one that completes at once as
+  `noQuery`) and every state change write `lookupGate`
+  `{ fence, run, state, blocking }` on the import document in the same
+  transaction, the gate before the record, with `fence` incremented so the
+  write always conflicts with a concurrent transaction that also writes the
+  document (the publish gate will read and write it). A transaction that only
+  reads the document does not conflict. A trigger that starts nothing, stale
+  marking of a finished run and progress steps do not write it. It never
+  changes `revision`, `valueRevision`, `updatedAt`, receipts or the editing
+  allowance, and it is never projected. `blocking` is true while a run is
+  active; the publish gate and value application will read it.
+
+### Triggers and grants
+
+- **Automatic runs.** The confirmation that completes the file set queues a
+  run: the upload of the last selected audio file (or a replay of its intent),
+  or a reconciliation ("Check again") that itself confirms the last upload.
+  Creating an import queues nothing, because none of its files is confirmed
+  yet. A reconciliation that finds the file already ready, cover and
+  embedded-artwork slots, typing, saving, reading, listing, decisions,
+  candidates, adoption, cover selection, analysis and navigation never run
+  lookup, and a format-1 project's conversion never does either. Catalog
+  reviews never accept lookup.
+- **Input.** Several files are looked up by the album and album-artist tags
+  they all share (album-artist names joined by ` / `), never by per-file
+  artists, and one file by its title and artist tags, together with the
+  identifiers every file shares (release MBID, barcode, catalogue number, and
+  an ISRC for one file). Only version-2 tag evidence counts. Without usable
+  tags, the cleaned name of the chosen folder is used, only when the files were
+  chosen with a folder and only by one automatic run per project: the
+  allowance is spent when the worker hands out a folder-name query, before it
+  is sent, so a folder run superseded or stopped before sending leaves it to
+  the next automatic run. A manual retry of a folder run repeats its queries. A
+  rerun after a submitted run repeats the submitted text.
+- **File set.** A run binds each manifest slot's confirmed upload. Once the set
+  is complete again after a change, the next completing confirmation reruns,
+  within the limit. Removing or replacing a bound file supersedes an active run
+  (in the staged-cleanup transaction) or lists the file in a finished run's
+  `staleSlotIds`, without reverting values. A file confirmed after a run
+  started is newly known, not stale.
+- **Grants.** Each run holds a one-hour grant:
+
+  | Granted by | Source | Administrator |
+  |---|---|---|
+  | The last upload or its replay | `upload` | the uploader |
+  | A reconcile confirming it | `reopen` | the reconciler |
+  | A submitted name | `submit` | the submitter |
+  | A manual retry | `retry` | the one retrying |
+  | Choosing a candidate (later) | `choose` | the one choosing |
+
+  Admitting a submitted or retried run rechecks that administrator's role in
+  the same transaction, and every stored step rechecks the grant and that
+  administrator's current role.
+  A role loss, a deleted account or an expired grant stores nothing from that
+  step and ends the run as `stopped`; earlier candidates stay as evidence and
+  are never ranked or applied. A project that no longer accepts lookup (a
+  publication lock, completion, a newer format or a malformed draft) ends it as
+  `superseded` (`projectClosed`).
+- **Refusals.** Submitted and retried runs are admitted inside the caller's
+  administrator transaction, which later routes provide. They are refused with
+  503 `ADMIN_IMPORT_LOOKUP_UNAVAILABLE` while lookup is not configured, 400
+  `ADMIN_IMPORT_INVALID_INPUT` for an unknown request kind or a malformed
+  account or intent, 403 `ADMIN_IMPORT_ADMIN_REQUIRED` when the granting
+  account is not a current administrator, 409 `ADMIN_IMPORT_LOOKUP_REFUSED`
+  for a project that does not accept lookup, 400
+  `ADMIN_IMPORT_LOOKUP_INVALID_NAME` for a link or an empty, over-long or
+  invisible-character name, 409 `ADMIN_IMPORT_LOOKUP_ACTIVE` for a retry while
+  a run is queued or running, and 409 `ADMIN_IMPORT_LOOKUP_NOTHING_TO_RETRY`
+  without an earlier run's queries or with a stored input this release cannot
+  read. A manual retry while a run waits for an automatic retry replaces that
+  run at once, so the free retry is available while Publish waits.
+- **Independence.** A trigger never changes the confirmation's result: lookup
+  not configured, a role loss, a closed project, an incomplete or unchanged
+  file set, the limit or a database failure writes nothing beyond stale
+  marking. Lookup never blocks saves, uploads, Luna analysis or review and
+  never uses Luna's budget, and starting or stopping Luna keeps its record.
+  While lookup is not configured the worker ends a queued run as `unavailable`
+  (`notConfigured`) without a request; while imports are disabled it is idle.
+
+### What lookup sends
+
+- Only the planner's MusicBrainz URLs under `https://musicbrainz.org/ws/2/`:
+  the shared album text and album-artist names, or a one-file import's title
+  and artist; shared identifiers that pass their format checks; a submitted
+  name; the cleaned folder name only when no usable tags exist, only for
+  folder-chosen imports and automatically only once per project (a manual
+  retry of that run repeats it); and release MBIDs from earlier results of the
+  same run.
+- Never file names, relative path segments, account data (including any
+  account's email address) or audio. The only contact sent is the operator
+  contact configured in `FINITUDE_ADMIN_METADATA_LOOKUP_CONTACT`, in the
+  User-Agent.
+- Requests carry only `Accept`, `Accept-Encoding: identity` and
+  `User-Agent: Finitude/1.0 ( <contact> )`: no cookie, authorization or
+  referrer.
+- Stored records contain no URL.

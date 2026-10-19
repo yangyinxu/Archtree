@@ -29,6 +29,7 @@ import { extractImportArtwork } from './adminImportArtwork';
 import { importDraftWritable } from './adminImportDraftCompat';
 import { runImportAutomation } from './adminImportAutomation';
 import { readImportEmbeddedTags } from './adminImportTags';
+import { noteMetadataLookupFiles, requestAutomaticMetadataLookup } from '../lookup/metadataLookupService';
 
 export type ImportObjectIdentity = { etag: string; versionId: string | null };
 export interface ImportObjectTarget { bucket: string; key: string; sha256: string; byteLength: number; contentType: string; importId: string; slotId: string; operationId: string }
@@ -103,8 +104,8 @@ async function fileDigest(file: Express.Multer.File) {
 
 /**
  * Reserves the only object identity before PUT; admission binds slot state and intent, never the project revision. A confirmed
- * audio file (including a replay of an intent already confirmed) then runs tag automation, so a crash between confirmation and
- * automation is caught up by the original intent's replay.
+ * audio file (including a replay of an intent already confirmed) then runs tag automation and the automatic metadata lookup
+ * trigger, so a crash between confirmation and either is caught up by the original intent's replay.
  */
 export async function uploadAdminImportAsset(actor: string, id: string, slotId: string, intent: { operationId: string; expectedRevision: number }, file: Express.Multer.File, storage: ImportObjectStorage = defaultImportObjectStorage): Promise<AdminImportResponse> {
     storageReady();
@@ -135,7 +136,11 @@ export async function uploadAdminImportAsset(actor: string, id: string, slotId: 
         doc.media.assets.push({ slotId, operationId: intent.operationId, actorId: actor, bucket: process.env.ADMIN_IMPORT_S3_BUCKET_NAME!.trim(), key: `imports/${id}/${slotId}/${intent.operationId}`, sha256, byteLength: file.size, contentType: file.mimetype, filename: normalizeUtf8Text(file.originalname), state: 'pending', versionId: null, etag: null, updatedAt: new Date(), leaseOwner: null, leaseUntil: null, transferDeadline: null, failureConfirmedAt: null, duration, format, representation, tags, recovery: { ...intent, kind: 'upload', actorId: actor } });
     });
     const state = await transferImportAsset(actor, id, slotId, intent.operationId, sha256, file, storage);
-    if (state === 'ready' && !imageSlot) { await runImportAutomation(actor, id); await stageEmbeddedArtwork(actor, id, slotId, intent.operationId, file, storage); }
+    if (state === 'ready' && !imageSlot) {
+        await runImportAutomation(actor, id);
+        await requestAutomaticMetadataLookup(actor, id, 'upload');
+        await stageEmbeddedArtwork(actor, id, slotId, intent.operationId, file, storage);
+    }
     return { ...(await getAdminImport(actor, id)), receipt: admitted.receipt };
 }
 
@@ -204,7 +209,9 @@ async function stageEmbeddedArtwork(actor: string, id: string, audioSlotId: stri
 
 /**
  * Reconciles an upload of unknown outcome against storage without bytes; only the original intent; any current admin. A ready
- * result (found now or earlier) runs tag automation as the reconciling administrator, so a missed run is caught up here.
+ * result (found now or earlier) runs tag automation as the reconciling administrator, so a missed run is caught up here. Only a
+ * reconcile that confirms an audio file itself evaluates the automatic metadata lookup trigger (reopening grants it); one that
+ * finds the file already ready never runs lookup.
  */
 export async function reconcileAdminImportAsset(actor: string, id: string, slotId: string, raw: unknown, storage: ImportObjectStorage = defaultImportObjectStorage, now = new Date()): Promise<AdminImportResponse> {
     const body = record(raw); exact(body, ['operationId']);
@@ -229,7 +236,7 @@ export async function reconcileAdminImportAsset(actor: string, id: string, slotI
         await importCollection().replaceOne({ _id: doc._id, revision: doc.revision }, doc, { session });
         return { receipt, asset: { ...asset }, settled, previous };
     });
-    let ready = 'ready' in claim && claim.ready === true;
+    let ready = 'ready' in claim && claim.ready === true, confirmedNow = false;
     if (claim.asset) {
         let confirmed: ImportObjectIdentity | null = null, state: ImportAsset['state'] = 'unknown', failureConfirmedAt: Date | null = null;
         // Only an exact identity is ready; a binding mismatch or storage error stays unknown with all evidence kept.
@@ -240,15 +247,16 @@ export async function reconcileAdminImportAsset(actor: string, id: string, slotI
         if (changed) Object.assign(set, { 'media.assets.$.state': state, 'media.assets.$.failureConfirmedAt': failureConfirmedAt, 'media.assets.$.updatedAt': now, updatedAt: now });
         if (confirmed) Object.assign(set, { 'media.assets.$.etag': confirmed.etag, 'media.assets.$.versionId': confirmed.versionId });
         await importCollection().updateOne({ _id: new ObjectId(id), 'media.assets': { $elemMatch: { slotId, operationId: claim.asset.operationId, leaseOwner: worker } } }, { $set: set, ...(changed ? { $inc: { revision: 1 } } : {}) });
-        ready = state === 'ready';
+        ready = state === 'ready'; confirmedNow = ready;
     }
     if (ready) await runImportAutomation(actor, id);
+    if (confirmedNow && uuid(slotId)) await requestAutomaticMetadataLookup(actor, id, 'reopen');
     return { item: (await getAdminImport(actor, id)).item, receipt: claim.receipt };
 }
 
 /** Explicit stage cleanup preserves the record until the exact inventoried object version is removed. */
 export async function cleanupAdminImportAsset(actor: string, id: string, slotId: string, intent: { operationId: string; expectedRevision: number }, storage: ImportObjectStorage = defaultImportObjectStorage) {
-    const admitted = await mutateAdminImport(actor, id, { ...intent, slotId }, 'cleanup', async doc => {
+    const admitted = await mutateAdminImport(actor, id, { ...intent, slotId }, 'cleanup', async (doc, session) => {
         const asset = doc.media?.assets.find(asset => asset.slotId === slotId); if (!asset) throw new AdminImportError(404, 'ADMIN_IMPORT_ASSET_NOT_FOUND');
         if (asset.coverConsumers?.length) throw new AdminImportError(409, 'ADMIN_IMPORT_ASSET_IN_USE');
         if (doc.media?.publication && doc.media.publication.state !== 'complete' && !(doc.media.publication.state === 'cancelled' && !doc.media.publication.cleanupPending)) throw new AdminImportError(409, 'ADMIN_IMPORT_PUBLICATION_LOCKED');
@@ -259,6 +267,8 @@ export async function cleanupAdminImportAsset(actor: string, id: string, slotId:
         if (asset.state !== 'deleted') asset.state = 'deleting';
         asset.recovery = { ...intent, kind: 'cleanup', actorId: actor };
         if (doc.media?.selectedCoverSlotId === slotId) doc.media.selectedCoverSlotId = null;
+        // A removed file makes its lookup evidence stale, and supersedes a run still bound to it, in this transaction.
+        await noteMetadataLookupFiles(doc, session);
     });
     const doc = await importCollection().findOne({ ...importPurposeFilter, _id: new ObjectId(id) }); const asset = doc?.media?.assets.find(asset => asset.slotId === slotId && asset.recovery?.operationId === intent.operationId);
     if (!asset) { if (doc?.media?.assetHistory?.some(asset => asset.slotId === slotId && asset.recovery?.operationId === intent.operationId && asset.state === 'deleted')) return { ...(await getAdminImport(actor, id)), receipt: admitted.receipt }; throw new AdminImportError(409, 'ADMIN_IMPORT_ASSET_CONFLICT'); }

@@ -43,7 +43,8 @@ uniqueness, and rejects sparse, partial, or incompatible-collation substitutes.
 An existing correct index is reused. Indexes and duplicate records are never
 automatically dropped or rewritten.
 
-After verification, startup upserts the static `required-indexes-v1` receipt in
+After verification, startup upserts the static receipt named by
+`requiredIndexRevision` (now `required-indexes-v10-metadata-lookups`) in
 `schemaMigrations`. It records only the revision and application time. A new
 required constraint must receive a new reviewed revision. A partially failed
 attempt is retried using the same additive definitions; a prior receipt is never
@@ -159,6 +160,14 @@ transport completion, without logging a false server failure or writing another
 response. Actual service failures and shutdown admission failures retain their
 normal error handling; already-admitted business work remains tracked until it settles.
 
+After the listener opens, startup starts the administrator background workers:
+Luna analysis, import publication, existing-catalog covers and metadata lookup.
+Each polls every two seconds and runs at most one pass at a time through the
+lifecycle tracker, so that pass counts as admitted business work. Draining
+aborts each worker's signal, which cancels an in-flight metadata lookup
+request, stops new passes, and waits for the admitted pass before MongoDB
+closes. Tests replace each worker through the `startServer` dependencies.
+
 - `SERVER_SHUTDOWN_GRACE_MS`: default 30000, maximum 120000.
 - `SERVER_SHUTDOWN_CLEANUP_MS`: default 5000, maximum 30000.
 - A maximum additional 100 ms allows socket-close hooks to run after a forced
@@ -217,17 +226,41 @@ introduced, explicitly design shared abuse limits and measure the aggregate medi
 and provider budget. A shared cache, queue, CDN, or worker service is not introduced
 without a measured requirement and a compatible ready/deletion/revocation contract.
 
-Administrator metadata lookup is the one deployment-wide bound that the confirmed
-rules require: each source's request spacing and concurrency apply across every
-instance. The gates live in the MongoDB collection `adminMetadataLookupGates`, one
-`_id`-keyed document per source (`musicbrainz`, `itunes`, `coverartarchive`) with
-its next allowed start and expiring leases, decided on the database clock and
-written outside transactions. The collection holds no account data and needs no
-secondary index, so `requiredIndexRevision` is unchanged; a lease that is never
-released expires after 30 seconds. Startup does not create
-`adminMetadataLookupGates`; the first acquisition upserts each source document by
-`_id`, so the application account needs insert/update on that collection. The
-lookup response cache stays process-local.
+Administrator metadata lookup is the one deployment-wide bound that the
+confirmed rules require: each source's request spacing and concurrency apply
+across every instance. The gates live in the MongoDB collection
+`adminMetadataLookupGates`, one `_id`-keyed document per source (`musicbrainz`,
+`itunes`, `coverartarchive`) with its next allowed start and expiring leases,
+decided on the database clock and written outside transactions. The gate
+collection holds no account data and needs no secondary index; a lease that is
+never released expires after 30 seconds. Startup does not create
+`adminMetadataLookupGates`; the first acquisition upserts each source document
+by `_id`, so the application account needs insert/update on that collection. The
+lookup response cache stays process-local: each lookup worker keeps its own.
+
+Metadata lookup jobs live in `adminImportLookups`, one record per import project
+(`_id` is the project's `_id`; a new run replaces the previous one). A record
+holds its run number, state (`queued`, `running`, `retrying`, `complete`,
+`unavailable`, `stopped` or `superseded`), the granting administrator and a
+one-hour grant, the bound file set, the planned queries and progress, at most 25
+candidates (4 MiB of JSON together), the ranking (candidates plus ranking stay
+within 12 MiB, well under MongoDB's 16 MiB document limit) and a 180-second
+worker lease. The lookup worker
+(`startMetadataLookupWorker` in
+`src/administration/lookup/metadataLookupService.ts`) starts after listen with
+the other administrator workers, polls every 2 seconds, is tracked by the server
+lifecycle and is stopped before database teardown; a stop aborts the request in
+flight and releases the lease, so the next claim resumes at the stored step. It
+is idle while imports are disabled. The required index
+`admin_import_lookup_worker` (`{ state: 1, leaseUntil: 1, retryAt: 1 }`) also
+creates the collection at startup, so no transaction ever creates it, and
+`requiredIndexRevision` is now `required-indexes-v10-metadata-lookups`. The
+application account needs insert/update on `adminImportLookups`. Import
+documents gain `lookupGate`, a never-projected fence written in the same
+transaction as every lookup run started and every lookup state change, which
+never changes the project's `revision`. It conflicts only with transactions
+that also write the import document, so a reader that must be fenced (the
+publish gate) also writes it.
 
 Playback Audio/Video GETs that briefly overlap an older stream may wait up to two
 seconds for an existing admission slot. The pending pool is bounded to 32 per
