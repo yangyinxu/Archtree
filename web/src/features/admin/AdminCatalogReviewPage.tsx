@@ -3,8 +3,9 @@
  *   Functions: AdminCatalogReviewPage
  * Internal
  *   Types: ReviewBuffer, Stage
- *   Functions: entriesText, ReviewProject
- *   Constants: ImportReview, CatalogReviewEmptyState, CatalogReviewApply, CatalogReviewConfirmation
+ *   Functions: hint, ReviewProject
+ *   Constants: ImportReview, CatalogReviewHints, CatalogReviewEmptyState, CatalogReviewApply,
+ *              CatalogReviewConfirmation
  * @end-catalog */
 
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
@@ -13,11 +14,9 @@ import { Link, useParams } from 'react-router';
 import { AdminGate, useAdminAccess, useAdminText } from './AdminAccess';
 import { AdminNav } from './AdminNav';
 import { adminEndpointRequest } from './adminTransport';
-import type { ImportArtistEntry, ImportDraftV2 } from './adminNamingSchema';
+import type { ImportDraftV2 } from './adminNamingSchema';
 import { adminWorkspace } from './adminWorkspace';
 import { CatalogReviewDraftEditor } from './CatalogReviewDraftEditor';
-import { entriesByline } from './artistEntriesByline';
-import { reviewValueText } from './reviewValueText';
 import { reviewChanges, reviewFieldKey, reviewResponseSchema, type CatalogReview } from './catalogReviewApi';
 import type { Confirmation } from './CatalogReviewConfirmation';
 import { useCatalogReviewCommand } from './useCatalogReviewCommand';
@@ -25,11 +24,12 @@ import { useOnline } from './useAdminOnline';
 import styles from './adminStyles';
 
 interface ReviewBuffer { draft: ImportDraftV2; revision: number; dirty: boolean; suggestions: string[]; fields: string[] }
+/** Artist-entries and label suggestions are identity hints (CatalogReviewHints), never Review checklist items. */
+const hint = (field: string) => field === 'artists' || field === 'label';
 type Stage = 'draft' | 'review' | 'apply';
-/** Artist entries read as their byline; an empty list reads as no value. */
-const entriesText = (value: unknown) => Array.isArray(value) && value.length ? entriesByline(value as ImportArtistEntry[]) : reviewValueText(null);
 // Review is loaded only when requested; its selections remain in the parent account-fenced buffer.
 const ImportReview = lazy(() => import('./ImportReview').then(module => ({ default: module.ImportReview })));
+const CatalogReviewHints = lazy(() => import('./CatalogReviewHints').then(module => ({ default: module.CatalogReviewHints })));
 const CatalogReviewEmptyState = lazy(() => import('./CatalogReviewEmptyState').then(module => ({ default: module.CatalogReviewEmptyState })));
 const CatalogReviewApply = lazy(() => import('./CatalogReviewApply').then(module => ({ default: module.CatalogReviewApply })));
 const CatalogReviewConfirmation = lazy(() => import('./CatalogReviewConfirmation').then(module => ({ default: module.CatalogReviewConfirmation })));
@@ -147,20 +147,14 @@ function ReviewProject({ id }: { id: string }) {
         </form>
       </div>
       <div hidden={stage !== 'review'} role="tabpanel" id="catalog-review-panel-review" aria-labelledby="catalog-review-tab-review">
-        {stage === 'review' && <Suspense fallback={<p role="status">{t('common.loading')}</p>}><ImportReview draft={editor.draft} filenames={filenames} suggestions={item.suggestions.filter(value => value.field !== 'artists')}
+        {stage === 'review' && <Suspense fallback={<p role="status">{t('common.loading')}</p>}><ImportReview draft={editor.draft} filenames={filenames} suggestions={item.suggestions.filter(value => !hint(value.field))}
           selected={editor.suggestions} onSelect={suggestions => setEditor({ ...editor, suggestions })} disabled={savedOnly} draftCopy={t('catalog_review.review_copy')}
           emptyContent={<CatalogReviewEmptyState item={item} changeCount={changes.length} onNavigate={selectStage} />}
           onAdopt={selectedIds => mutate('adopt', { generation: item.analysis.generation, selectedIds, rejectIds: [] })}
           onReject={rejectIds => mutate('adopt', { generation: item.analysis.generation, selectedIds: [], rejectIds })} /></Suspense>}
-        {/* Artist suggestions are identity hints for the original Album's Credits: they can be kept, never adopted. */}
-        {item.suggestions.some(value => value.field === 'artists') && <section className={styles.panel}><h2>{t('field.artistName')}</h2><p>{t('catalog_review.artist_hint')}</p>
-          {item.suggestions.filter(value => value.field === 'artists').map(value => <article key={value.id} className={styles.card}>
-            <div className={styles.diff}><div><strong>{t('review.baseline')}</strong><pre>{entriesText(value.baseline)}</pre></div>
-              <div><strong>{t('review.current')}</strong><pre>{entriesText(editor.draft.album.artists)}</pre></div>
-              <div><strong>{t('review.suggested')}</strong><pre>{entriesText(value.value)}</pre></div></div>
-            {value.decision === 'pending' && <button className={styles.button} type="button" disabled={savedOnly}
-              onClick={() => mutate('adopt', { generation: item.analysis.generation, selectedIds: [], rejectIds: [value.id] })}>{t('action.keep')}</button>}
-          </article>)}</section>}
+        {/* Artist-entries and label suggestions are identity hints for the original Album's Credits: they can be kept, never adopted. */}
+        {stage === 'review' && item.suggestions.some(value => hint(value.field)) && <Suspense fallback={null}><CatalogReviewHints suggestions={item.suggestions.filter(value => hint(value.field))}
+          album={editor.draft.album} disabled={savedOnly} onKeep={id => mutate('adopt', { generation: item.analysis.generation, selectedIds: [], rejectIds: [id] })} /></Suspense>}
       </div>
       <div hidden={stage !== 'apply'} role="tabpanel" id="catalog-review-panel-apply" aria-labelledby="catalog-review-tab-apply">
         {stage === 'apply' && <Suspense fallback={<p role="status">{t('common.loading')}</p>}><CatalogReviewApply item={item} changes={changes}

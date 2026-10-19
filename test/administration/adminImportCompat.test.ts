@@ -21,6 +21,7 @@
  *   - the Draft v2 editor view keeps only readable entries, label and values, one track per slot in stored order, and never throws
  *   - the Draft v2 suggestion view maps legacy Artist names, keeps readable album Artist suggestions whole and drops any other
  *   - the Draft v2 suggestion view hides an Artist suggestion that proposes a placeholder such as Various Artists
+ *   - the Draft v2 suggestion view shows readable label and Disc Number suggestions, hides malformed ones and never projects lookup context
  *   - the Draft v2 decision view keeps one readable decision per entry, label, Album and track, each naming its entry or none and its bound name
  *   - the editor asset view allowlists version-2 tag evidence and reads evidence stored before it as version 1; the v1 DTO keeps five tag fields
  *   - the published view lists every credited Artist and the label of a format-3 approval, maps a legacy Artist to one entry, and is null when malformed
@@ -41,7 +42,7 @@ import { importPublicationSupported, importPublicationVersion } from '../../src/
 import { adminImportDetail, adminImportDto, importDigest, type AdminImportDocument } from '../../src/administration/import/adminImportService';
 import {
     catalogReviewAppliedView, catalogReviewSourceDisc, catalogReviewSourceView, importDecisionsV2View, importDraftV2FromV1, importDraftV2View, importDraftVersion, importDraftWritable, importProjectV2View,
-    importPublishedV2View, importSuggestionsV2View, legacyArtistEntryKey, legacyAssetsView, legacyAssetVisible, legacyDecisionsView, legacyDraftView, legacyPublicationView, writableDraftFilter, type ImportProjectV2View
+    importPublishedV2View, importSuggestionsV2View, legacyArtistEntryKey, legacyAssetsView, legacyAssetVisible, legacyDecisionsView, legacyDraftView, legacyPublicationView, legacySuggestionsView, writableDraftFilter, type ImportProjectV2View
 } from '../../src/administration/import/adminImportDraftCompat';
 import { importTagsV2View } from '../../src/administration/import/adminImportTags';
 import type { CatalogReviewApplied, CatalogReviewSource } from '../../src/administration/catalog/adminCatalogReviewContract';
@@ -366,6 +367,31 @@ test('the Draft v2 suggestion view hides an Artist suggestion that proposes a pl
     assert.deepEqual(importSuggestionsV2View([artists, ...hidden], generation, slots, importId).map(suggestion => suggestion.id), [artists.id]);
     // A placeholder in the baseline (the current value) does not hide a suggestion that replaces it.
     assert.deepEqual(importSuggestionsV2View([{ ...artists, baseline: [{ ...lorem, name: 'Various Artists' }] }], generation, slots, importId).length, 1);
+});
+
+test('the Draft v2 suggestion view shows readable label and Disc Number suggestions, hides malformed ones and never projects lookup context', () => {
+    const importId = '0000000000000000000000c2', slot = '00000009-0000-4000-a000-0000000000c3', slots = new Set([slot]), generation = 1, mbid = '0383dadf-2a4e-4d10-a46a-e9e041da8eb3';
+    const shell = { source: 'context', evidence: 'Applied release label', generation, decision: 'pending', lookupContext: { source: 'musicbrainz', releaseId: mbid, digest: 'f'.repeat(64), truncated: false } };
+    const label = { ...shell, id: 'a'.repeat(24), scope: 'album', slotId: null, field: 'label', baseline: { name: 'Old Records', musicBrainzId: mbid }, value: { name: 'Amet Records', musicBrainzId: null } };
+    const disc = { ...shell, id: 'b'.repeat(24), scope: 'track', slotId: slot, field: 'discNumber', baseline: null, value: 2 };
+    const view = (raw: unknown[]) => importSuggestionsV2View(raw, generation, slots, importId);
+    const { lookupContext: _context, ...projected } = label, { lookupContext: _discContext, ...projectedDisc } = disc;
+    assert.deepEqual(view([label, disc]), [projected, projectedDisc]);
+    assert.deepEqual(view([{ ...label, baseline: null }, { ...disc, baseline: 999, value: 1 }]).map(item => [item.baseline, item.value]), [[null, label.value], [999, 1]]);
+    const hidden = [
+        { ...label, value: { name: '', musicBrainzId: null } }, { ...label, value: { name: 'x'.repeat(201), musicBrainzId: null } }, { ...label, value: { name: 'Amet' } },
+        { ...label, value: { name: 'Amet', musicBrainzId: 'not-an-id' } }, { ...label, value: { name: 'Amet', musicBrainzId: null, extra: true } }, { ...label, value: 'Amet' }, { ...label, value: null },
+        { ...label, baseline: 'Old Records' }, { ...label, value: { name: '[no label]', musicBrainzId: null } }, { ...label, scope: 'track', slotId: slot },
+        { ...disc, value: 0 }, { ...disc, value: 1000 }, { ...disc, value: null }, { ...disc, baseline: 0 }, { ...disc, scope: 'album', slotId: null }, { ...disc, slotId: '00000009-0000-4000-a000-0000000000ff' }
+    ];
+    for (const value of hidden) assert.deepEqual(view([value]), [], JSON.stringify(value));
+    // The frozen v1 DTO hides labels, Disc Numbers and Artist entries; a stored v1 artistName still reads as one entry in Draft v2.
+    const entries = { ...shell, id: 'c'.repeat(24), scope: 'album', slotId: null, field: 'artists', baseline: [], value: [{ key: '00000009-0000-4000-8000-0000000000c1', name: 'Lorem', role: 'primary', joinPhrase: ' & ', musicBrainzId: null },
+        { key: '00000009-0000-4000-8000-0000000000c2', name: 'Ipsum', role: 'featured', joinPhrase: null, musicBrainzId: null }] };
+    const legacy = { ...shell, id: 'd'.repeat(24), scope: 'album', slotId: null, field: 'artistName', baseline: '', value: 'Lorem' };
+    assert.deepEqual(legacySuggestionsView([label, disc, entries, legacy], generation, slots).map(item => item.id), [legacy.id]);
+    assert.deepEqual(view([legacy])[0].value, [{ key: legacyArtistEntryKey(importId), name: 'Lorem', role: 'primary', joinPhrase: null, musicBrainzId: null }]);
+    assert.ok(!JSON.stringify(view([label, disc, entries, legacy])).includes('lookupContext'));
 });
 
 test('the Draft v2 decision view keeps one readable decision per entry, label, Album and track, each naming its entry or none and its bound name', () => {

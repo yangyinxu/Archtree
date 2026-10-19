@@ -767,9 +767,9 @@ The wire protocol and operational bounds are documented in
   Selected metadata changes, automatic Album order and the operation receipt
   commit atomically; retries use the original intent. Artist identity/Credits,
   artwork, visibility, membership and stored media are preserved. Artist-name
-  suggestions are identity hints for a separate explicit catalog Credit edit.
-  Applied reviews remain read-only; further corrections use the current Web
-  catalog editor or a new Web review.
+  and label suggestions are identity hints for a separate explicit catalog
+  Credit edit. Applied reviews remain read-only; further corrections use the
+  current Web catalog editor or a new Web review.
 - Administrator confirmations bind the item and revision displayed when opened.
   A refresh that changes the draft, publication approval or staged file requires
   a fresh review; confirmation never silently rebases onto a newer target.
@@ -1505,14 +1505,16 @@ The wire protocol and operational bounds are documented in
   captured earlier may need one fresh review and are never silently rebased.
   Retrying an import creation with its original operation intent still
   resolves to the original project.
-- Luna proposes supported draft values with source evidence; metadata lookup
-  applies values as described in Administrator Metadata Lookup. Unknown facts
-  stay empty and partial release dates retain their precision. Analysis never
-  publishes, edits existing catalog records, or silently overwrites manual draft
-  changes, and metadata lookup likewise never does. Administrators see
-  baseline/current/proposed values and can accept or reject individual
-  suggestions; a suggestion that equals the current value is resolved
-  automatically. Adoption changes only the saved private draft.
+- Luna proposes supported draft values with source evidence, including Disc
+  Numbers, the label and the complete ordered Artist entries, with their roles
+  and join phrases, as one value; metadata lookup applies values as described in
+  Administrator Metadata Lookup. Unknown facts stay empty and partial release
+  dates retain their precision. Analysis never publishes, edits existing catalog
+  records, or silently overwrites manual draft changes, and metadata lookup
+  likewise never does. Administrators see baseline/current/proposed values and
+  can accept or reject individual suggestions; a suggestion that equals the
+  current value is resolved automatically. Adoption changes only the saved
+  private draft.
 - Accepted analysis runs on the server after a browser closes or changes page.
   Reopening observes existing status and results; it does not start another
   paid generation. Local file transfer may require reselection of incomplete
@@ -1788,9 +1790,15 @@ The wire protocol and operational bounds are documented in
   never collapsed: those for empty values or values from file tags arrive
   ticked, the others arrive unticked and keep the current value unless ticked,
   unticking rejects one, and none is applied until the administrator accepts it
-  or approves the publication with it ticked. Luna receives the current draft
-  values whatever their source. Luna never chooses an identity, supplies a
-  MusicBrainz ID, selects a release or presents its values as lookup evidence.
+  or approves the publication with it ticked. A ticked suggestion for the Album
+  title, a track title, the Artist entries or the label gets identity candidates
+  and preselections as if it were applied, and the approval includes their
+  decisions. Luna receives the current draft values whatever their source. Only
+  the MusicBrainz release applied to the import, if any, is given to Luna, as
+  untrusted context labelled with its source, and each Luna suggestion records
+  it. Other candidates and all iTunes evidence and identifiers are never sent to
+  Luna. Luna never chooses an identity, supplies a MusicBrainz ID, selects a
+  release or presents its values as lookup evidence.
 - Metadata lookup results and evidence are bounded private project data that
   only current administrators can read.
 

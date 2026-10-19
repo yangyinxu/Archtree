@@ -5,7 +5,7 @@
  *   Functions: originKey, defaultDraftV2, foldImportName, sameDraftValue, importApprovalDigest, isDraftV2,
  *              draftBytes, hasOwn, parseImportName, parseArtistEntries, parseLabelEntry, parseDraftTitle,
  *              parseDraftVisibility, parseDraftV2, derivedEntryKey, retainBoundDecisions, boundArtistDecision,
- *              boundLabelDecision, draftV2Suggestion
+ *              boundLabelDecision
  *   Constants: DRAFT_V2, DRAFT_V2_LIMITS, parseDiscNumber, parseTrackNumber
  * Internal
  *   Types: Bindable
@@ -17,9 +17,7 @@
 import { createHash } from 'node:crypto';
 import { cleanText, exact, invalidImport, parseImportDate, record, uuid, type ImportDate, type ImportDecisionScopeV2, type ImportDuplicateDecision, type ImportManifest, type ImportSuggestion, type ImportValue } from './adminImportContract';
 import { normalizeJoinPhrase } from '../../models/catalogCredit';
-import { isPlaceholderCredit } from '../lookup/lookupIdentifiers';
 import { keepableMusicBrainzId } from '../../utils/musicBrainzId';
-import type { AnalysisSuggestion } from './adminImportProvider';
 
 export type ImportArtistEntry = { key: string; name: string; role: 'primary' | 'featured'; joinPhrase: string | null; musicBrainzId: string | null };
 export type ImportLabelEntry = { name: string; musicBrainzId: string | null };
@@ -35,7 +33,12 @@ export type ImportDraftOrigins = Record<string, ImportValueOrigin>;
  * before 5.0 refuses dotted field names in a replaced document, and the supported floor is 4.2.
  */
 export const originKey = (path: string) => path.split('.').join(':');
-export type ImportSuggestionV2 = Omit<ImportSuggestion, 'field' | 'baseline' | 'value'> & { field: 'title' | 'artists' | 'releaseDate' | 'trackNumber'; baseline: ImportValue | ImportArtistEntry[]; value: ImportValue | ImportArtistEntry[] };
+/**
+ * A Draft v2 suggestion: one value per path, complete ordered Artist entries and the label as an entry (Luna never supplies its
+ * MusicBrainz ID). Stored Luna suggestions may also carry `lookupContext` (adminImportLuna.ts), which is never projected.
+ */
+export type ImportSuggestionV2 = Omit<ImportSuggestion, 'field' | 'baseline' | 'value'> & { field: 'title' | 'artists' | 'label' | 'releaseDate' | 'discNumber' | 'trackNumber';
+    baseline: ImportValue | ImportArtistEntry[] | ImportLabelEntry | null; value: ImportValue | ImportArtistEntry[] | ImportLabelEntry | null };
 /**
  * An Artist decision binds one entry by key, the name it was decided for and that entry's MusicBrainz ID; a label decision binds
  * the label's name and ID (entryKey null); Album and track decisions bind neither. `replace` (reuse the record and replace its
@@ -201,27 +204,3 @@ export const boundArtistDecision = <T extends Bindable>(decisions: readonly T[],
 /** The label decision bound to this label under its current name and MusicBrainz ID, if any. */
 export const boundLabelDecision = <T extends Bindable>(decisions: readonly T[], label: ImportLabelEntry | null): T | undefined =>
     decisions.find(decision => decision.scope === 'label' && bindsLabel(decision, label));
-
-/**
- * Maps one Luna suggestion onto Draft v2 until Luna proposes Draft v2 values (S15). Its baseline is the v2 baseline value at
- * the path. An artistName becomes a one-entry primary Artist suggestion that reuses the baseline's single entry key, or a
- * key derived from the seed; a name that fails the name rules, or a placeholder such as Various Artists (imports never suggest a
- * stand-in Artist), yields null (dropped).
- */
-export function draftV2Suggestion(raw: AnalysisSuggestion, baseline: ImportDraftV2, seed: unknown): Omit<ImportSuggestionV2, 'id' | 'generation' | 'decision'> | null {
-    const { scope, slotId, source, evidence } = raw;
-    if (raw.field === 'artistName') {
-        if (scope !== 'album') return null;
-        let name: string; try { name = parseImportName(raw.value); } catch { return null; }
-        if (isPlaceholderCredit(name)) return null;
-        const current = baseline.album.artists, key = current.length === 1 ? current[0].key : derivedEntryKey(seed);
-        return { scope, slotId, field: 'artists', baseline: structuredClone(current), value: [{ key, name, role: 'primary', joinPhrase: null, musicBrainzId: null }], source, evidence };
-    }
-    if (scope === 'album') {
-        if (raw.field !== 'title' && raw.field !== 'releaseDate') return null;
-        return { scope, slotId, field: raw.field, baseline: structuredClone(baseline.album[raw.field]), value: raw.value, source, evidence };
-    }
-    const track = baseline.tracks.find(item => item.slotId === slotId);
-    if (!track || (raw.field !== 'title' && raw.field !== 'trackNumber')) return null;
-    return { scope, slotId, field: raw.field, baseline: track[raw.field], value: raw.value, source, evidence };
-}

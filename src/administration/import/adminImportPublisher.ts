@@ -47,7 +47,8 @@ const lookupGateProjection = { run: 1, state: 1, 'ranking.preselection': 1, 'ran
  * confirmation showed) any other set of preselections, is ADMIN_IMPORT_REVIEW_REQUIRED, writing nothing. A body without
  * the one-step fields or with decisions lacking bound names replays its stored receipt, or otherwise is refused with
  * ADMIN_IMPORT_RELOAD_REQUIRED (importPolicy). The raw body is fingerprinted as sent, so an earlier receipt still matches.
- * The Luna tick state the confirmation showed is applied right after the shown changes (applySuggestionTicks): pending
+ * The Luna tick state the confirmation showed is applied right after the shown changes (applySuggestionTicks), before candidates
+ * are read, so a ticked title, entry or label is preselected as if it were applied and its decision frozen with the others: pending
  * suggestions never hold the approval, while a queued or running analysis still does (ADMIN_IMPORT_REVIEW_REQUIRED). An upload
  * still in flight, or a file a published track needs without a confirmed upload, is ADMIN_IMPORT_UPLOAD_INCOMPLETE
  * (importUploadsWaiting, the summary's own upload wait).
@@ -75,7 +76,8 @@ export async function publishAdminImport(actor: string, id: string, raw: unknown
         // The lookup record is read in this transaction; the gate written below fences a run started concurrently.
         const lookup = await importLookupRecord(doc._id, session, lookupGateProjection);
         const draft = await saveImportApproval(doc, body, actor, session, lookup);
-        // Ticked Luna suggestions apply after the shown changes, so identities below are read for the values they write.
+        // Ticked suggestions apply first, so identity candidates and preselections are read for the values they write, as
+        // /duplicate-candidates read them for the confirmation.
         applySuggestionTicks(doc, draft, hasOwn(body, 'suggestionTicks') ? body.suggestionTicks : undefined);
         if (['queued', 'running'].includes(doc.analysis.state)) throw new AdminImportError(409, 'ADMIN_IMPORT_REVIEW_REQUIRED');
         // A stopped, unavailable, superseded or completed run never holds the approval as active; a tie of the current run or an

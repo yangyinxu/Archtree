@@ -14,10 +14,10 @@ import { useAdminAccess, useAdminText } from './AdminAccess';
 import { adminRequest, duplicateEditsKey, importPath, type DecisionEdits, type ImportDecision, type ImportDetail, type ImportDraftV2 } from './adminApi';
 import { candidatesSchema, identityPreselections, musicBrainzIdWrites, type MusicBrainzIdWrite } from './importIdentity';
 import { adminWorkspace } from './adminWorkspace';
-import { approvalBody, approvalChecklist, shownDecisions, type ApprovalBody, type ApprovalIdentity } from './importApproval';
+import { approvalBody, approvalChecklist, boundDecisions, shownDecisions, type ApprovalBody, type ApprovalIdentity } from './importApproval';
 import { entriesByline } from './artistEntriesByline';
 import type { ImportDraftChange } from './importDraftPatch';
-import { lunaTicksKey, suggestionPath, suggestionTicks, tickedDraft } from './importLunaTicks';
+import { lunaProposals, lunaTicksKey, suggestionPath, suggestionTicks, tickedDraft } from './importLunaTicks';
 import { importSummaryQuery } from './importSummaryQuery';
 import { reviewValueText } from './reviewValueText';
 import styles from './adminStyles';
@@ -35,11 +35,12 @@ const identityKeys = { new: 'publication.new_record', needsDecision: 'publicatio
  * its unsaved changes as they were when Publish was chosen, with the ticked Luna suggestions written in (the summary's toggles
  * over the server's tick state, read once as the dialog opens). It always reads the duplicate candidates, since the rows Review
  * preselects depend on them, and reports the publish body, carrying the preselections and Luna ticks it shows, to the dialog,
- * which approves it only once those reads settled and every shown identity is answered or preselected, and current. A name a
- * ticked suggestion changes has no candidate read yet, so its row needs a decision, as an unsaved rename does; when such rows
- * hold the approval, it offers to apply the ticked suggestions to the saved draft now (`onAdopt`, the summary's same adopt
- * body), after which a new confirmation reads candidates, and preselects, for the saved names. Loaded on demand with the
- * confirmation.
+ * which approves it only once those reads settled and every shown identity is answered or preselected, and current. The candidate
+ * read also covers every pending Luna proposal, so a title, entry or label a ticked suggestion writes is preselected as if it were
+ * applied, while an unsaved rename still needs a decision. The checklist reads only the decisions still bound once the ticks are
+ * written (as the approval keeps them), and the body sends the shown decisions unchanged. A ticked row can still need an explicit
+ * answer when its name matches an existing record; only then it offers to apply the ticked suggestions to the saved draft now
+ * (`onAdopt`, the summary's same adopt body), after which Review answers it. Loaded on demand with the confirmation.
  */
 export function ImportApprovalChecklist({ item, draft, changes, onChange, onAdopt }: {
   item: ImportDetail; draft: ImportDraftV2; changes: ImportDraftChange[]; onChange: (approval: ApprovalState | null) => void;
@@ -58,24 +59,28 @@ export function ImportApprovalChecklist({ item, draft, changes, onChange, onAdop
   const ticks = new Map(summary.data?.summary.luna.map(entry => [entry.id, entry.tick]));
   const luna = suggestionTicks(item, ticks, toggles, new Set(changes.map(change => change.path)));
   const lunaReady = !pending.length || summary.isSuccess;
-  const shown = tickedDraft(draft, item.suggestions, luna.ticked);
+  const shown = tickedDraft(draft, item.suggestions, luna.ticked), read = [item.draft, lunaProposals(item)];
+  const bound = body ? boundDecisions(body.decisions, shown) : [];
   // The same candidate read Review uses (and shares while Review keeps it): reuses are shown by name and visibility from it, and
-  // the preselections are computed from it; a row renamed in the unsaved draft is never preselected (its candidates are stale).
+  // the preselections are computed from it for rows holding a saved or proposed value; a row renamed in the unsaved draft is never
+  // preselected (its candidates were not read).
   const candidates = useQuery({
     queryKey: ['admin-imports', access.viewerId, access.epoch, access.generation, item.id, 'duplicates', item.revision, item.valueRevision],
     queryFn: ({ signal }) => adminRequest(`${importPath(item.id)}/duplicate-candidates`, candidatesSchema, { signal }),
     enabled: Boolean(body), retry: false, gcTime: 0
   });
-  const preselections = body && candidates.isSuccess && lunaReady ? identityPreselections(shown, item.draft, body.decisions, candidates.data) : [];
+  const preselections = body && candidates.isSuccess && lunaReady ? identityPreselections(shown, read, bound, candidates.data) : [];
   // Every MusicBrainz ID the publication records or replaces is listed, and sent: the approval refuses any other set.
-  const writes = body && candidates.isSuccess && lunaReady ? musicBrainzIdWrites(shown, body.decisions, preselections, candidates.data) : [];
+  const writes = body && candidates.isSuccess && lunaReady ? musicBrainzIdWrites(shown, bound, preselections, candidates.data) : [];
   const ticked = new Set(luna.ticked.map(id => suggestionPath(item.suggestions.find(suggestion => suggestion.id === id)!)));
-  const checklist = body && candidates.isSuccess && lunaReady ? approvalChecklist(shown, body.decisions, candidates.data.items,
+  const checklist = body && candidates.isSuccess && lunaReady ? approvalChecklist(shown, bound, candidates.data.items,
     { automaticPaths: item.automaticPaths, lookupPaths: item.lookupPaths, possibleLabelEntryKeys: item.possibleLabelEntryKeys, changedPaths: [...changes.map(change => change.path), ...ticked] }, preselections, writes) : null;
   const ready = Boolean(checklist && checklist.blocked === 0 && !candidates.isFetching && !summary.isFetching);
-  // Rows held only because a ticked suggestion renamed them: the same checklist without the ticks blocks fewer rows.
-  const renamed = Boolean(checklist && luna.ticked.length && checklist.blocked > approvalChecklist(draft, body!.decisions, candidates.data!.items, undefined,
-    identityPreselections(draft, item.draft, body!.decisions, candidates.data!)).blocked);
+  // Rows a ticked suggestion introduces that still need an explicit answer (a same-name record and no preselection): the same
+  // checklist without the ticks blocks fewer rows.
+  const untickedDecisions = body ? boundDecisions(body.decisions, draft) : [];
+  const lunaRows = Boolean(checklist && luna.ticked.length && checklist.blocked > approvalChecklist(draft, untickedDecisions, candidates.data!.items, undefined,
+    identityPreselections(draft, read, untickedDecisions, candidates.data!)).blocked);
   // Reported again only when what it shows changes, so the dialog's state update never loops back here.
   const reported = JSON.stringify([preselections, luna, writes]);
   useEffect(() => {
@@ -100,7 +105,7 @@ export function ImportApprovalChecklist({ item, draft, changes, onChange, onAdop
     {body && (candidates.isError || summary.isError) && <p role="alert">{t('common.error')}</p>}
     {checklist && <>
       {checklist.append && <p role="note">{t('publication.append_not_applied')}</p>}
-      {renamed && <><p role="note">{t('publication.luna_names')}</p><div className={styles.actions}><button type="button" className={styles.button}
+      {lunaRows && <><p role="note">{t('publication.luna_names')}</p><div className={styles.actions}><button type="button" className={styles.button}
         onClick={() => onAdopt({ generation: luna.generation, selectedIds: luna.ticked, rejectIds: luna.unticked.filter(id => ticks.get(id) !== 'resolved') })}>{t('summary.luna_apply')}</button></div></>}
       <dl>
         <div><dt>{t('field.title')}</dt><dd>{applied(shown.album.title || t('common.untitled'))}</dd></div>

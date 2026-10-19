@@ -10,7 +10,7 @@ export function CatalogReviewEmptyState({ item, changeCount, onNavigate }: {
   const active = ['queued', 'running'].includes(item.analysis.state);
   const key = item.state === 'applied' ? 'catalog_review.applied_copy' : active ? 'catalog_review.analysis_running'
     : item.analysis.state === 'needsAttention' ? 'catalog_review.empty_attention'
-      : item.suggestions.some(value => value.field === 'artists' && value.decision === 'pending') ? 'catalog_review.empty_artist'
+      : item.suggestions.some(value => (value.field === 'artists' || value.field === 'label') && value.decision === 'pending') ? 'catalog_review.empty_artist'
         : changeCount ? 'catalog_review.empty_ready' : item.analysis.state === 'cancelled' ? 'catalog_review.empty_cancelled'
           : item.analysis.state !== 'complete' ? 'catalog_review.empty_idle'
             : item.suggestions.length ? 'catalog_review.empty_handled' : 'catalog_review.empty_no_suggestions';

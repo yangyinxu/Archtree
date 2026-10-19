@@ -39,3 +39,10 @@ export function tickedDraft(draft: ImportDraftV2, suggestions: readonly ImportSu
   }
   return next;
 }
+
+/**
+ * The saved draft with every pending suggestion's value written in: the server reads identity candidates for these too
+ * (/duplicate-candidates), so the confirmation preselects a ticked title, entry or label as if it were applied.
+ */
+export const lunaProposals = (item: { draft: ImportDraftV2; suggestions: readonly ImportSuggestionV2[] }) =>
+  tickedDraft(item.draft, item.suggestions, item.suggestions.filter(suggestion => suggestion.decision === 'pending').map(suggestion => suggestion.id));

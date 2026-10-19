@@ -4,10 +4,11 @@
  *   Constants: target, otherAlbum
  *   Variables: next
  * Tests
- *   - the candidates schema accepts 1301 items and 22 unavailable names, defaulting an absent member flag to incomplete and absent names to none, and refuses more, unknown keys and automatic reuse
+ *   - the candidates schema accepts 1761 items and 44 unavailable names, defaulting an absent member flag to incomplete and absent names to none, and refuses more, unknown keys and automatic reuse
  *   - a same-name record too malformed to be a candidate holds its row, and names compare as the server does whatever the browser locale
  *   - with no candidates every saved row is preselected as new, an explicit decision wins, and a name candidate holds only its own row
  *   - a row shown under another name than the saved one is never preselected: a renamed entry or label, a changed title or a new unsaved entry
+ *   - a row equal to a pending Luna proposal was read too and is preselected, while a row equal to neither the saved draft nor a proposal is not
  *   - when appending, identical bytes on the target preselect reuse, a title-only member needs a choice, ambiguity and incomplete matches preselect nothing
  *   - identical bytes outside the append target flag their files, and a byte match on the target flags nothing
  *   - an untitled file is never matched by title when appending, so an untitled member holds only the file its bytes match
@@ -37,18 +38,18 @@ const appendTo = (...tracks: ImportDecision[]) => [decision('album', { action: '
 /** Each preselection as `scope:slot-or-entry:action[:candidate]`. */
 const rows = (decisions: readonly ImportDecision[]) => decisions.map(value => [value.scope, value.slotId ?? value.entryKey ?? '-', value.action, ...(value.candidateId ? [value.candidateId] : [])].join(':'));
 
-test('the candidates schema accepts 1301 items and 22 unavailable names, defaulting an absent member flag to incomplete and absent names to none, and refuses more, unknown keys and automatic reuse', () => {
+test('the candidates schema accepts 1761 items and 44 unavailable names, defaulting an absent member flag to incomplete and absent names to none, and refuses more, unknown keys and automatic reuse', () => {
   const item = candidate('organization', 'Sit Records', { visibility: 'hidden' }), name = { kind: 'artist', label: 'Lorem' };
   expect(candidatesSchema.parse({ items: [item] })).toEqual({ items: [item], memberMatchesComplete: false, unavailable: [] });
-  expect(candidatesSchema.safeParse({ items: Array(1301).fill(item), memberMatchesComplete: true, unavailable: Array(22).fill(name) }).success).toBe(true);
-  for (const body of [{ items: Array(1302).fill(item) }, { items: [{ ...item, match: 'other' }] }, { items: [{ ...item, musicBrainzId: 'not-an-id' }] }, { items: [{ ...item, aliasOf: 'X0000000-0000-4000-8000-000000000001' }] }, { items: [{ ...item, kind: 'label' }] }, { items: [{ ...item, automaticReuse: true }] }, { items: [], memberMatchesComplete: true, extra: 1 }, { items: [{ ...item, extra: 1 }] },
-    { items: [], unavailable: Array(23).fill(name) }, { items: [], unavailable: [{ ...name, kind: 'track' }] }, { items: [], unavailable: [{ ...name, id: item.id }] }])
+  expect(candidatesSchema.safeParse({ items: Array(1761).fill(item), memberMatchesComplete: true, unavailable: Array(44).fill(name) }).success).toBe(true);
+  for (const body of [{ items: Array(1762).fill(item) }, { items: [{ ...item, match: 'other' }] }, { items: [{ ...item, musicBrainzId: 'not-an-id' }] }, { items: [{ ...item, aliasOf: 'X0000000-0000-4000-8000-000000000001' }] }, { items: [{ ...item, kind: 'label' }] }, { items: [{ ...item, automaticReuse: true }] }, { items: [], memberMatchesComplete: true, extra: 1 }, { items: [{ ...item, extra: 1 }] },
+    { items: [], unavailable: Array(45).fill(name) }, { items: [], unavailable: [{ ...name, kind: 'track' }] }, { items: [], unavailable: [{ ...name, id: item.id }] }])
     expect(candidatesSchema.safeParse(body).success).toBe(false);
 });
 
 test('a same-name record too malformed to be a candidate holds its row, and names compare as the server does whatever the browser locale', () => {
   const draft = saved();
-  expect(rows(identityPreselections(draft, draft, [], listing([], true, [{ kind: 'artist', label: 'LOREM' }, { kind: 'album', label: 'synthetic album' }]))))
+  expect(rows(identityPreselections(draft, [draft], [], listing([], true, [{ kind: 'artist', label: 'LOREM' }, { kind: 'album', label: 'synthetic album' }]))))
     .toEqual([`artist:${entryKey(2)}:create-distinct`, 'label:-:create-distinct']);
   // Under a Turkish locale 'I' lowers to a dotless i; the comparison never uses the locale.
   const lower = String.prototype.toLocaleLowerCase, turkish = vi.spyOn(String.prototype, 'toLocaleLowerCase').mockImplementation(function (this: string) { return lower.call(this, 'tr'); });
@@ -56,46 +57,67 @@ test('a same-name record too malformed to be a candidate holds its row, and name
     expect('IPSUM'.toLocaleLowerCase()).not.toBe('ipsum'.toLocaleLowerCase());
     expect(sameName('IPSUM', 'ipsum')).toBe(true);
     const lowered = saved(); lowered.album.artists[1].name = 'ipsum';
-    expect(rows(identityPreselections(lowered, lowered, [], listing([candidate('artist', 'IPSUM')]))).filter(row => row.startsWith('artist'))).toEqual([`artist:${entryKey(1)}:create-distinct`]);
+    expect(rows(identityPreselections(lowered, [lowered], [], listing([candidate('artist', 'IPSUM')]))).filter(row => row.startsWith('artist'))).toEqual([`artist:${entryKey(1)}:create-distinct`]);
   } finally { turkish.mockRestore(); }
 });
 
 test('with no candidates every saved row is preselected as new, an explicit decision wins, and a name candidate holds only its own row', () => {
   const draft = saved();
-  expect(rows(identityPreselections(draft, draft, [], listing([])))).toEqual([`artist:${entryKey(1)}:create-distinct`, `artist:${entryKey(2)}:create-distinct`, 'label:-:create-distinct',
+  expect(rows(identityPreselections(draft, [draft], [], listing([])))).toEqual([`artist:${entryKey(1)}:create-distinct`, `artist:${entryKey(2)}:create-distinct`, 'label:-:create-distinct',
     'album:-:create-distinct', `track:${slotId}:create-distinct`, `track:${slotTwo}:create-distinct`]);
-  expect(identityPreselections(draft, draft, [], listing([]))[0]).toEqual(decision('artist', { entryKey: entryKey(1), boundName: 'Lorem' }));
-  expect(rows(identityPreselections(draft, draft, [decision('artist', { entryKey: entryKey(1), boundName: 'Lorem', action: 'skip' }), decision('label', { boundName: 'Sit Records' }), decision('track', { slotId, action: 'skip' })], listing([]))))
+  expect(identityPreselections(draft, [draft], [], listing([]))[0]).toEqual(decision('artist', { entryKey: entryKey(1), boundName: 'Lorem' }));
+  expect(rows(identityPreselections(draft, [draft], [decision('artist', { entryKey: entryKey(1), boundName: 'Lorem', action: 'skip' }), decision('label', { boundName: 'Sit Records' }), decision('track', { slotId, action: 'skip' })], listing([]))))
     .toEqual([`artist:${entryKey(2)}:create-distinct`, 'album:-:create-distinct', `track:${slotTwo}:create-distinct`]);
   // Case-insensitive names of the same kind only: an Artist named like the label holds nothing.
-  expect(rows(identityPreselections(draft, draft, [], listing([candidate('artist', 'LOREM'), candidate('artist', 'sit records')]))).slice(0, 2)).toEqual([`artist:${entryKey(2)}:create-distinct`, 'label:-:create-distinct']);
+  expect(rows(identityPreselections(draft, [draft], [], listing([candidate('artist', 'LOREM'), candidate('artist', 'sit records')]))).slice(0, 2)).toEqual([`artist:${entryKey(2)}:create-distinct`, 'label:-:create-distinct']);
   // An Album candidate holds the Album and its tracks; an explicit create preselects the tracks, a skip none.
   const album = candidate('album', 'synthetic album');
-  expect(rows(identityPreselections(draft, draft, [], listing([album])))).toEqual([`artist:${entryKey(1)}:create-distinct`, `artist:${entryKey(2)}:create-distinct`, 'label:-:create-distinct']);
-  expect(rows(identityPreselections(draft, draft, [decision('album')], listing([album]))).slice(3)).toEqual([`track:${slotId}:create-distinct`, `track:${slotTwo}:create-distinct`]);
-  expect(identityPreselections(draft, draft, [decision('album', { action: 'skip' })], listing([])).some(value => value.scope === 'track')).toBe(false);
+  expect(rows(identityPreselections(draft, [draft], [], listing([album])))).toEqual([`artist:${entryKey(1)}:create-distinct`, `artist:${entryKey(2)}:create-distinct`, 'label:-:create-distinct']);
+  expect(rows(identityPreselections(draft, [draft], [decision('album')], listing([album]))).slice(3)).toEqual([`track:${slotId}:create-distinct`, `track:${slotTwo}:create-distinct`]);
+  expect(identityPreselections(draft, [draft], [decision('album', { action: 'skip' })], listing([])).some(value => value.scope === 'track')).toBe(false);
 });
 
 test('a row shown under another name than the saved one is never preselected: a renamed entry or label, a changed title or a new unsaved entry', () => {
   const draft = saved(), shown = structuredClone(draft);
   shown.album.artists = [{ ...draft.album.artists[0], name: 'Lorem Renamed' }, draft.album.artists[1], artistEntry('Dolor', entryKey(3))];
   shown.album.label = labelEntry('Sit Records Ltd'); shown.album.title = 'Retitled Album';
-  expect(rows(identityPreselections(shown, draft, [], listing([])))).toEqual([`artist:${entryKey(2)}:create-distinct`]);
+  expect(rows(identityPreselections(shown, [draft], [], listing([])))).toEqual([`artist:${entryKey(2)}:create-distinct`]);
   // In an append, a changed track title is not preselected either.
   const retitled = structuredClone(draft); retitled.tracks[0].title = 'Retitled';
-  expect(rows(identityPreselections(retitled, draft, appendTo(), listing([])))).toEqual([`track:${slotTwo}:create-distinct`]);
+  expect(rows(identityPreselections(retitled, [draft], appendTo(), listing([])))).toEqual([`track:${slotTwo}:create-distinct`]);
+});
+
+test('a row equal to a pending Luna proposal was read too and is preselected, while a row equal to neither the saved draft nor a proposal is not', () => {
+  const draft = saved(), proposed = structuredClone(draft), luna = artistEntry('Dolor', '00000000-0000-4000-8000-0000000000d1');
+  // The proposals: Artist entries with a derived key for a new name, a label without an ID, a title and track titles.
+  proposed.album.artists = [draft.album.artists[0], luna]; proposed.album.label = labelEntry('Amet Records'); proposed.album.title = 'Luna Album';
+  proposed.tracks[0].title = 'Luna Song';
+  const shown = structuredClone(proposed);
+  expect(rows(identityPreselections(shown, [draft, proposed], [], listing([])))).toEqual([`artist:${entryKey(1)}:create-distinct`, `artist:${luna.key}:create-distinct`, 'label:-:create-distinct',
+    'album:-:create-distinct', `track:${slotId}:create-distinct`, `track:${slotTwo}:create-distinct`]);
+  expect(identityPreselections(shown, [draft, proposed], [], listing([])).find(value => value.scope === 'label')).toEqual(decision('label', { boundName: 'Amet Records' }));
+  // Read for the saved draft only, the proposed rows are not preselected.
+  expect(rows(identityPreselections(shown, [draft], [], listing([])))).toEqual([`artist:${entryKey(1)}:create-distinct`]);
+  // A row equal to neither (an unsaved rename of a proposal, an ID the proposal never carried) is not preselected.
+  const renamed = structuredClone(proposed); renamed.album.artists[1] = { ...luna, name: 'Dolor Renamed' }; renamed.album.label = { name: 'Amet Records', musicBrainzId: '00000000-0000-4000-8000-000000000009' }; renamed.album.title = 'Other';
+  expect(rows(identityPreselections(renamed, [draft, proposed], [], listing([])))).toEqual([`artist:${entryKey(1)}:create-distinct`]);
+  // A same-name candidate of a proposed value holds its row, as for a saved one.
+  expect(rows(identityPreselections(shown, [draft, proposed], [], listing([candidate('organization', 'AMET RECORDS'), candidate('album', 'luna album')])))).toEqual([`artist:${entryKey(1)}:create-distinct`, `artist:${luna.key}:create-distinct`]);
+  // In an append, a track shown with its proposed title is preselected from the members read for it.
+  expect(rows(identityPreselections(shown, [draft, proposed], appendTo(), listing([])))).toEqual([`track:${slotId}:create-distinct`, `track:${slotTwo}:create-distinct`]);
+  expect(rows(identityPreselections(shown, [draft], appendTo(), listing([])))).toEqual([`track:${slotTwo}:create-distinct`]);
 });
 
 test('when appending, identical bytes on the target preselect reuse, a title-only member needs a choice, ambiguity and incomplete matches preselect nothing', () => {
   const draft = saved(), member = candidate('track', 'Stored', { albumId: target, match: 'sha256', matchedSlotIds: [slotId] });
-  expect(identityPreselections(draft, draft, appendTo(), listing([member]))).toEqual([decision('track', { slotId, action: 'reuse', candidateId: member.id, candidateRevision: member.revision }), decision('track', { slotId: slotTwo })]);
-  expect(rows(identityPreselections(draft, draft, appendTo(), listing([candidate('track', 'SECOND', { albumId: target })])))).toEqual([`track:${slotId}:create-distinct`]);
+  expect(identityPreselections(draft, [draft], appendTo(), listing([member]))).toEqual([decision('track', { slotId, action: 'reuse', candidateId: member.id, candidateRevision: member.revision }), decision('track', { slotId: slotTwo })]);
+  expect(rows(identityPreselections(draft, [draft], appendTo(), listing([candidate('track', 'SECOND', { albumId: target })])))).toEqual([`track:${slotId}:create-distinct`]);
   // Bytes on another Album are only a flag.
-  expect(rows(identityPreselections(draft, draft, appendTo(), listing([candidate('track', 'First', { albumId: otherAlbum, match: 'sha256', matchedSlotIds: [slotId] })])))).toEqual([`track:${slotId}:create-distinct`, `track:${slotTwo}:create-distinct`]);
-  expect(identityPreselections(draft, draft, appendTo(), listing([{ ...member, matchedSlotIds: [slotId, slotTwo] }]))).toEqual([]);
-  expect(rows(identityPreselections(draft, draft, appendTo(), listing([member, { ...member, id: '7'.repeat(24) }])))).toEqual([`track:${slotTwo}:create-distinct`]);
-  expect(identityPreselections(draft, draft, appendTo(decision('track', { slotId: slotTwo, action: 'reuse', candidateId: member.id, candidateRevision: member.revision })), listing([member]))).toEqual([]);
-  expect(identityPreselections(draft, draft, appendTo(), listing([member], false))).toEqual([]);
+  expect(rows(identityPreselections(draft, [draft], appendTo(), listing([candidate('track', 'First', { albumId: otherAlbum, match: 'sha256', matchedSlotIds: [slotId] })])))).toEqual([`track:${slotId}:create-distinct`, `track:${slotTwo}:create-distinct`]);
+  expect(identityPreselections(draft, [draft], appendTo(), listing([{ ...member, matchedSlotIds: [slotId, slotTwo] }]))).toEqual([]);
+  expect(rows(identityPreselections(draft, [draft], appendTo(), listing([member, { ...member, id: '7'.repeat(24) }])))).toEqual([`track:${slotTwo}:create-distinct`]);
+  expect(identityPreselections(draft, [draft], appendTo(decision('track', { slotId: slotTwo, action: 'reuse', candidateId: member.id, candidateRevision: member.revision })), listing([member]))).toEqual([]);
+  expect(identityPreselections(draft, [draft], appendTo(), listing([member], false))).toEqual([]);
 });
 
 test('identical bytes outside the append target flag their files, and a byte match on the target flags nothing', () => {
@@ -109,7 +131,7 @@ test('identical bytes outside the append target flag their files, and a byte mat
 test('an untitled file is never matched by title when appending, so an untitled member holds only the file its bytes match', () => {
   const draft = saved(); draft.tracks[0].title = '';
   const untitled = candidate('track', '', { albumId: target, match: 'sha256', matchedSlotIds: [slotTwo] });
-  expect(rows(identityPreselections(draft, draft, appendTo(), listing([untitled])))).toEqual([`track:${slotId}:create-distinct`, `track:${slotTwo}:reuse:${untitled.id}`]);
+  expect(rows(identityPreselections(draft, [draft], appendTo(), listing([untitled])))).toEqual([`track:${slotId}:create-distinct`, `track:${slotTwo}:reuse:${untitled.id}`]);
 });
 
 const mbid = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
@@ -121,12 +143,12 @@ function identified(): ImportDraftV2 {
 
 test('the record holding an entry\'s MusicBrainz ID is preselected as reuse, and an alias or ID candidate holds a row from a preselected create', () => {
   const draft = identified(), holder = candidate('artist', 'Lorem (JP)', { match: 'musicBrainzId', musicBrainzId: mbid(1) }), alias = candidate('organization', 'シット', { match: 'alias', aliasOf: mbid(9) });
-  expect(rows(identityPreselections(draft, draft, [], listing([holder, alias])).filter(value => value.scope !== 'track'))).toEqual([`artist:${entryKey(1)}:reuse:${holder.id}`, `artist:${entryKey(2)}:create-distinct`, 'album:-:create-distinct']);
+  expect(rows(identityPreselections(draft, [draft], [], listing([holder, alias])).filter(value => value.scope !== 'track'))).toEqual([`artist:${entryKey(1)}:reuse:${holder.id}`, `artist:${entryKey(2)}:create-distinct`, 'album:-:create-distinct']);
   // Another row's reuse or replace of the holder, or an ID shown unsaved, preselects nothing for that entry.
   const taken = [decision('artist', { entryKey: entryKey(2), boundName: 'Ipsum', action: 'replace', candidateId: holder.id, candidateRevision: holder.revision })];
-  expect(identityPreselections(draft, draft, taken, listing([holder])).some(value => value.entryKey === entryKey(1))).toBe(false);
+  expect(identityPreselections(draft, [draft], taken, listing([holder])).some(value => value.entryKey === entryKey(1))).toBe(false);
   const unsaved = saved();
-  expect(identityPreselections(draft, unsaved, [], listing([holder])).some(value => value.entryKey === entryKey(1))).toBe(false);
+  expect(identityPreselections(draft, [unsaved], [], listing([holder])).some(value => value.entryKey === entryKey(1))).toBe(false);
   // Candidates of a row: its name, the record holding its ID and the records named as lookup found for it.
   expect(rowCandidates('organization', 'Sit Records', mbid(9), [alias, candidate('organization', 'Other')]).map(item => item.label)).toEqual(['シット']);
   expect(rowCandidates('organization', 'Sit Records', null, [alias])).toEqual([]);
@@ -145,6 +167,6 @@ test('the MusicBrainz ID writes mirror the server: new records keep their ID unl
   expect(musicBrainzIdWrites(draft, [reuse('artist', entryKey(1), plain)], [], listing([plain]))).toEqual([{ scope: 'artist', entryKey: entryKey(1), musicBrainzId: mbid(1), replaces: null }]);
   expect(musicBrainzIdWrites(draft, [reuse('label', null, holding, 'replace')], [], listing([holding]))).toEqual([{ scope: 'label', entryKey: null, musicBrainzId: mbid(9), replaces: mbid(5) }]);
   // A preselected exact-ID reuse writes nothing (the record already holds the ID); an append writes nothing.
-  expect(musicBrainzIdWrites(draft, [], identityPreselections(draft, draft, [], listing([holder])), listing([holder])).filter(write => write.scope === 'artist')).toEqual([]);
+  expect(musicBrainzIdWrites(draft, [], identityPreselections(draft, [draft], [], listing([holder])), listing([holder])).filter(write => write.scope === 'artist')).toEqual([]);
   expect(musicBrainzIdWrites(draft, appendTo(), [], listing([]))).toEqual([]);
 });

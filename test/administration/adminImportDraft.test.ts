@@ -21,7 +21,6 @@
  *   - automation writes only empty or automatic values it still sees, never administrator values, and skips invalid ones
  *   - an Artist decision stays bound while its entry keeps its key and name; reordering, roles and phrases keep it
  *   - each Artist entry and the label keep their own decision: reordering, roles and phrases keep it; renaming or removing clears only it
- *   - a Luna Artist name becomes a one-entry primary Artist suggestion against the Draft v2 baseline
  *   - a legacy project converts to its Draft v2 view without touching its approval, histories, assets or analysis progress
  *   - the import detail shows Draft v2 values, entry- and label-bound decisions and every published identity, and offers work for format 1 and 2 projects only
  *   - an approval is format 2 only with one primary Artist entry, no label and a discNumber field (a Disc Number or null) on every track
@@ -45,9 +44,9 @@ import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 // The database module loads first; importing adminImportService before it trips the index import cycle.
 import '../../src/infrastructure/database';
-import { AdminImportError, uuid, type ImportManifest } from '../../src/administration/import/adminImportContract';
+import { AdminImportError, type ImportManifest } from '../../src/administration/import/adminImportContract';
 import {
-    boundArtistDecision, boundLabelDecision, defaultDraftV2, derivedEntryKey, draftV2Suggestion, foldImportName, isDraftV2, originKey, parseArtistEntries, parseDraftV2, parseImportName, parseLabelEntry,
+    boundArtistDecision, boundLabelDecision, defaultDraftV2, foldImportName, isDraftV2, originKey, parseArtistEntries, parseDraftV2, parseImportName, parseLabelEntry,
     importApprovalDigest, retainBoundDecisions, sameDraftValue, type ImportArtistEntry, type ImportDecisionV2, type ImportDraftOrigins, type ImportDraftV2
 } from '../../src/administration/import/adminImportDraft';
 import {
@@ -326,27 +325,6 @@ test('each Artist entry and the label keep their own decision: reordering, roles
     assert.equal(boundLabelDecision(decisions, label), decisions[3]);
     assert.equal(boundLabelDecision(decisions, { name: 'Other', musicBrainzId: null }), undefined); assert.equal(boundLabelDecision(decisions, null), undefined);
     assert.equal(boundArtistDecision(decisions, entry(2, 'B')), decisions[1]);
-});
-
-test('a Luna Artist name becomes a one-entry primary Artist suggestion against the Draft v2 baseline', () => {
-    const raw = { scope: 'album' as const, slotId: null, field: 'artistName' as const, baseline: 'ignored v1 baseline', value: 'Ipsum Quartet', source: 'folder' as const, evidence: 'Synthetic Folder' };
-    const single = draftV2Suggestion(raw, draft(), { importId: 'a', suggestionId: 'b' })!;
-    assert.deepEqual(single, { scope: 'album', slotId: null, field: 'artists', baseline: draft().album.artists, value: [{ key: key(1), name: 'Ipsum Quartet', role: 'primary', joinPhrase: null, musicBrainzId: null }], source: 'folder', evidence: 'Synthetic Folder' });
-    // Without exactly one baseline entry the key is derived from the seed: deterministic, UUID-shaped and distinct per seed.
-    for (const artists of [[], [entry(1, 'A'), entry(2, 'B', 'featured')]]) {
-        const value = (seed: object) => (draftV2Suggestion(raw, withAlbum({ artists }), seed)!.value as ImportArtistEntry[])[0].key;
-        const derived = value({ importId: 'a', suggestionId: 'b' });
-        assert.equal(derived, derivedEntryKey({ importId: 'a', suggestionId: 'b' })); assert.equal(uuid(derived), true); assert.match(derived, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-8[0-9a-f]{3}-[0-9a-f]{12}$/);
-        assert.notEqual(derived, value({ importId: 'a', suggestionId: 'c' }));
-    }
-    assert.equal(draftV2Suggestion({ ...raw, value: 'Ipsum\u200BQuartet' }, draft(), {}), null, 'a format character drops the suggestion');
-    // Imports never suggest a stand-in Artist: a placeholder credit is dropped, whatever its case or spacing.
-    for (const value of ['Various Artists', 'VA', '[unknown]', '  various   artists ']) assert.equal(draftV2Suggestion({ ...raw, value }, draft(), {}), null, value);
-    // Other fields keep their value and read their baseline from the Draft v2 baseline.
-    assert.deepEqual(draftV2Suggestion({ ...raw, field: 'title', baseline: 'stale', value: 'Retitled' }, draft(), {}), { ...raw, field: 'title', baseline: 'Synthetic Album', value: 'Retitled' });
-    assert.deepEqual(draftV2Suggestion({ ...raw, field: 'releaseDate', value: { year: 2020, month: null, day: null } }, draft(), {})!.baseline, draft().album.releaseDate);
-    assert.deepEqual(draftV2Suggestion({ ...raw, scope: 'track', slotId: slotA, field: 'trackNumber', baseline: 9, value: 3 }, draft(), {}), { ...raw, scope: 'track', slotId: slotA, field: 'trackNumber', baseline: 1, value: 3 });
-    assert.equal(draftV2Suggestion({ ...raw, scope: 'track', slotId: '00000009-0000-4000-a000-0000000000ff', field: 'title', value: 'x' }, draft(), {}), null);
 });
 
 test('a legacy project converts to its Draft v2 view without touching its approval, histories, assets or analysis progress', () => {

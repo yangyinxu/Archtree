@@ -9,6 +9,8 @@
  *   - Luna analysis requires its own confirmation and a lost acknowledgement never retries automatically
  *   - a durable unknown provider outcome prevents another paid generation while retaining manual review
  *   - Artist-only suggestions explain separate attribution management without offering identity adoption
+ *   - a label suggestion is an identity hint beside the Artist hints that can only be kept, while a Disc Number suggestion is a Review item
+ *   - a label-only review points Review at its hint, reads a missing label as no value, and a kept hint offers nothing more
  *   - an Artist hint for an Album without Credits context reads the empty baseline and current values as no value
  *   - an applied historical review remains read-only on every stage and never starts work when reopened
  *   - selected suggestion adoption and independent rejection preserve manual values and exclude Artist identity hints
@@ -203,13 +205,63 @@ test('Artist-only suggestions explain separate attribution management without of
   mountPage(); await screen.findByRole('textbox', { name: 'Title' });
   fireEvent.click(screen.getByRole('tab', { name: 'Review Luna suggestions' }));
   const panel = within(screen.getByRole('tabpanel', { name: 'Review Luna suggestions' }));
-  expect(await panel.findByText('Artist identity suggestions are shown below. Confirm attribution in the original Album.')).toBeVisible();
+  expect(await panel.findByText('Artist and label suggestions are shown below as identity hints. Confirm attribution and the label in the original Album.')).toBeVisible();
   // Entries read as their byline: the baseline and current context, and the suggested names joined by their phrases.
-  expect(panel.getByText('A synthetic identity clue & A second clue')).toBeVisible();
+  expect(await panel.findByText('A synthetic identity clue & A second clue')).toBeVisible();
   expect(panel.getAllByText('Synthetic catalog Artist')).toHaveLength(2);
   expect(panel.queryByRole('checkbox')).not.toBeInTheDocument();
   expect(panel.queryByRole('button', { name: 'Apply selected' })).not.toBeInTheDocument();
   expect(fetch.mock.calls).toHaveLength(1);
+});
+
+test('a label suggestion is an identity hint beside the Artist hints that can only be kept, while a Disc Number suggestion is a Review item', async () => {
+  const item = catalogReview(), [title, track] = item.suggestions;
+  item.draft.album.label = { name: 'Synthetic Label', musicBrainzId: null };
+  const label = { ...title, id: '666666666666666666666666', field: 'label' as const, baseline: { name: 'Synthetic Label', musicBrainzId: null }, value: { name: 'A synthetic label hint', musicBrainzId: null } };
+  const disc = { ...track, id: '777777777777777777777777', field: 'discNumber' as const, baseline: null, value: 2 };
+  item.suggestions = [label, disc];
+  const writes: Record<string, unknown>[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (_path: string, init: RequestInit) => {
+    if (init.method === 'POST') { const body = JSON.parse(String(init.body)); writes.push(body); return reviewJson({ item: { ...item, revision: 2, receipts: [{ operationId: body.operationId, revision: 2, kind: 'adopt' }] }, receipt: { operationId: body.operationId, revision: 2, kind: 'adopt' } }); }
+    return reviewJson({ item, receipt: null });
+  }));
+  mountPage(); await screen.findByRole('textbox', { name: 'Title' });
+  fireEvent.click(screen.getByRole('tab', { name: 'Review Luna suggestions' }));
+  const panel = within(screen.getByRole('tabpanel', { name: 'Review Luna suggestions' }));
+  // The Disc Number is an ordinary Review item; the label is never one.
+  expect(await panel.findByRole('checkbox', { name: '1 · Disc number' })).toBeInTheDocument();
+  expect(panel.getAllByRole('checkbox')).toHaveLength(1);
+  const hints = (await panel.findByRole('heading', { name: 'Artist and label hints' })).closest('section')!;
+  expect(within(hints).getByText(/^Artist and label suggestions are identity clues/)).toBeVisible();
+  const hint = within(hints).getByText('A synthetic label hint').closest('article')!;
+  expect(within(hint as HTMLElement).getAllByText('Synthetic Label')).toHaveLength(2);
+  fireEvent.click(within(hint as HTMLElement).getByRole('button', { name: 'Keep current' }));
+  await waitFor(() => expect(writes).toHaveLength(1));
+  expect(writes[0]).toMatchObject({ generation: 1, selectedIds: [], rejectIds: [label.id] });
+});
+
+test('a label-only review points Review at its hint, reads a missing label as no value, and a kept hint offers nothing more', async () => {
+  const item = catalogReview(), [title] = item.suggestions;
+  item.suggestions = [{ ...title, id: '666666666666666666666666', field: 'label' as const, baseline: null, value: { name: 'A synthetic label hint', musicBrainzId: null } }];
+  vi.stubGlobal('fetch', vi.fn(async () => reviewJson({ item, receipt: null })));
+  mountPage(); await screen.findByRole('textbox', { name: 'Title' });
+  fireEvent.click(screen.getByRole('tab', { name: 'Review Luna suggestions' }));
+  let panel = within(screen.getByRole('tabpanel', { name: 'Review Luna suggestions' }));
+  // Nothing is left to adopt, yet the pending hint is not "handled": the empty state points at it.
+  expect(await panel.findByText('Artist and label suggestions are shown below as identity hints. Confirm attribution and the label in the original Album.')).toBeVisible();
+  expect(panel.queryByRole('checkbox')).not.toBeInTheDocument();
+  let hint = (await panel.findByText('A synthetic label hint')).closest('article') as HTMLElement;
+  expect(within(hint).getByText('Label')).toBeVisible();
+  expect(within(hint).getAllByText('—')).toHaveLength(2);
+  expect(within(hint).getByRole('button', { name: 'Keep current' })).toBeEnabled();
+  cleanup();
+  // Kept, the hint stays readable without an action, and Review reads as handled.
+  item.suggestions = [{ ...item.suggestions[0], decision: 'rejected' }];
+  mountPage(); fireEvent.click(await screen.findByRole('tab', { name: 'Review Luna suggestions' }));
+  panel = within(screen.getByRole('tabpanel', { name: 'Review Luna suggestions' }));
+  expect(await panel.findByText('Suggestions have been handled. The saved review draft has no changes to apply.')).toBeVisible();
+  hint = (await panel.findByText('A synthetic label hint')).closest('article') as HTMLElement;
+  expect(within(hint).queryByRole('button', { name: 'Keep current' })).not.toBeInTheDocument();
 });
 
 test('an Artist hint for an Album without Credits context reads the empty baseline and current values as no value', async () => {
@@ -279,7 +331,7 @@ test('selected suggestion adoption and independent rejection preserve manual val
   const conflict = await screen.findByRole('checkbox', { name: 'Title' });
   expect(conflict).toBeDisabled();
   expect(screen.queryByRole('checkbox', { name: 'Artist name' })).not.toBeInTheDocument();
-  expect(screen.getByText('Another synthetic Artist identity hint')).toBeVisible();
+  expect(await screen.findByText('Another synthetic Artist identity hint')).toBeVisible();
   fireEvent.click(screen.getByRole('checkbox', { name: '1 · Title' }));
   fireEvent.click(screen.getByRole('tab', { name: 'Edit draft' }));
   fireEvent.click(screen.getByRole('tab', { name: 'Review Luna suggestions' }));

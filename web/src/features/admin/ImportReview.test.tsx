@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { ImportReview } from './ImportReview';
-import { artistEntry, detail, entryKey } from './adminFixtures.testSupport';
+import { artistEntry, detail, entryKey, labelEntry } from './adminFixtures.testSupport';
 afterEach(cleanup);
 
 test('partial adoption contains only selected typed suggestions and never publishes or starts analysis', () => {
@@ -69,4 +69,30 @@ test('a role-only Artist suggestion shows the role difference although the bylin
   expect(panes('Lorem, Ipsum\n1. Lorem · Primary\n2. Ipsum · Featured')).toHaveLength(1);
   expect(screen.queryByText('Already matches the current draft')).not.toBeInTheDocument();
   expect(screen.getByRole('checkbox', { name: 'Artists' })).toBeEnabled();
+});
+
+test('a label suggestion naming the current label already matches though the label carries a MusicBrainz ID, and Artist entries match by name, role and join phrase', () => {
+  const item = detail(), onAdopt = vi.fn(), [title] = item.suggestions;
+  item.draft.album.label = { name: 'Amet Records', musicBrainzId: '55555555-6666-4777-8888-999999999999' };
+  item.draft.album.artists = [{ ...artistEntry('Lorem'), musicBrainzId: '33333333-4444-4555-8666-777777777777' }];
+  // Lookup applied the label after analysis, so its baseline was empty; the server accepts it without writing and keeps the ID.
+  const label = { ...title, id: 'aaaaaaaaaaaaaaaaaaaaaaaa', field: 'label' as const, baseline: null, value: labelEntry('Amet Records') };
+  const artists = { ...title, id: 'bbbbbbbbbbbbbbbbbbbbbbbb', field: 'artists' as const, baseline: item.draft.album.artists, value: [artistEntry('Lorem', entryKey(2))] };
+  render(<ImportReview draft={item.draft} suggestions={[label, artists]} selected={[label.id]} onSelect={vi.fn()} onAdopt={onAdopt} onReject={vi.fn()} disabled={false} />);
+  expect(screen.getAllByText('Already matches the current draft')).toHaveLength(2);
+  expect(screen.getByRole('checkbox', { name: 'Label' })).toBeEnabled();
+  expect(screen.queryByText(/changed after analysis/)).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Apply selected' })); expect(onAdopt).toHaveBeenCalledExactlyOnceWith([label.id]);
+});
+
+test('a label suggestion reads as names and a Disc Number suggestion as its track\'s Disc number, and both adopt like any other value', () => {
+  const item = detail(), onAdopt = vi.fn(), [title, number] = item.suggestions;
+  const label = { ...title, id: 'aaaaaaaaaaaaaaaaaaaaaaaa', field: 'label' as const, baseline: null, value: labelEntry('Amet Records') };
+  const disc = { ...number, id: 'bbbbbbbbbbbbbbbbbbbbbbbb', field: 'discNumber' as const, baseline: null, value: 2 };
+  render(<ImportReview draft={item.draft} suggestions={[label, disc]} selected={[label.id, disc.id]} onSelect={vi.fn()} onAdopt={onAdopt} onReject={vi.fn()} disabled={false} />);
+  expect(screen.getByRole('checkbox', { name: 'Label' })).toBeEnabled();
+  expect(screen.getByRole('checkbox', { name: '1 · Disc number' })).toBeEnabled();
+  // No saved or current value reads as the shared empty text; the label reads as its name.
+  expect(panes('—')).toHaveLength(4); expect(panes('Amet Records')).toHaveLength(1); expect(panes('2')).toHaveLength(1);
+  fireEvent.click(screen.getByRole('button', { name: 'Apply selected' })); expect(onAdopt).toHaveBeenCalledExactlyOnceWith([label.id, disc.id]);
 });

@@ -48,7 +48,8 @@ export const detailSchema = z.object({ ...common, manifest: manifestSchema, draf
   const slots = new Set(item.manifest.files.map(file => file.slotId));
   if (slots.size !== item.manifest.files.length || item.draft.tracks.length !== slots.size || new Set(item.draft.tracks.map(track => track.slotId)).size !== slots.size || item.draft.tracks.some(track => !slots.has(track.slotId))) ctx.addIssue({ code: 'custom', message: 'Invalid file mapping' });
   for (const suggestion of item.suggestions) {
-    if (suggestion.generation !== item.analysis.generation || (suggestion.scope === 'album' ? suggestion.slotId !== null || suggestion.field === 'trackNumber' : !slots.has(suggestion.slotId ?? '') || !['title', 'trackNumber'].includes(suggestion.field))) ctx.addIssue({ code: 'custom', message: 'Invalid suggestion path' });
+    // Each field's scope is checked by the suggestion schema; here the slot and generation.
+    if (suggestion.generation !== item.analysis.generation || (suggestion.scope === 'album' ? suggestion.slotId !== null : !slots.has(suggestion.slotId ?? ''))) ctx.addIssue({ code: 'custom', message: 'Invalid suggestion path' });
   }
   const assets = new Set(item.assets.map(asset => asset.slotId));
   if (assets.size !== item.assets.length || item.assets.some(asset => asset.slotId !== 'cover' && !slots.has(asset.slotId) && !(asset.slotId.startsWith('embedded-') && slots.has(asset.slotId.slice(9)))) || item.selectedCoverSlotId !== null && !item.assets.some(asset => asset.slotId === item.selectedCoverSlotId && asset.state === 'ready' && asset.contentType.startsWith('image/'))) ctx.addIssue({ code: 'custom', message: 'Invalid asset mapping' });

@@ -12,6 +12,7 @@
  *   - AdminMutation and AdminCommand show a reload state with no retryable intent for an outdated response
  *   - a server refusal of a newer-format project asks for a reload of that action only, with no retryable intent
  *   - the server Draft v2 projection parses strictly with its approval digest, bound names, tag view and automatic markers, while v1 drafts, unknown entry keys, track Artist suggestions, Disc Number 1000 and a missing digest are refused
+ *   - the detail parses Luna label and Disc Number suggestions, and refuses a label on a track, a Disc Number on the Album, Disc Number 1000 or an extra label key
  *   - a newer saved state is a later revision, or the same revision with later automatic writes
  *   - a saved replace decision parses, and a catalog edit refused for an ID another record keeps shows that, with no retryable intent
  * @end-catalog */
@@ -242,6 +243,19 @@ test('the server Draft v2 projection parses strictly with its approval digest, b
   ]) expect(detailSchema.safeParse(changed).success).toBe(false);
   expect(ADMIN_IMPORT_RELOAD_REQUIRED).toBe('ADMIN_IMPORT_RELOAD_REQUIRED');
   expect(ADMIN_IMPORT_RELOAD_REQUIRED).not.toBe(ADMIN_RELOAD_REQUIRED);
+});
+
+test('the detail parses Luna label and Disc Number suggestions, and refuses a label on a track, a Disc Number on the Album, Disc Number 1000 or an extra label key', () => {
+  const item = detail(), [title, number] = item.suggestions;
+  const label = { ...title, id: 'a'.repeat(24), field: 'label', baseline: null, value: { name: 'Amet Records', musicBrainzId: null } };
+  const disc = { ...number, id: 'b'.repeat(24), field: 'discNumber', baseline: null, value: 2 };
+  expect(detailSchema.parse({ ...item, suggestions: [label, disc, { ...disc, id: 'e'.repeat(24), baseline: 1, value: 999, slotId: item.manifest.files[1].slotId }] }).suggestions.map(value => [value.field, value.value]))
+    .toEqual([['label', { name: 'Amet Records', musicBrainzId: null }], ['discNumber', 2], ['discNumber', 999]]);
+  expect(detailSchema.safeParse({ ...item, suggestions: [{ ...label, baseline: { name: 'Old Records', musicBrainzId: '00000009-0000-4000-8000-0000000000f1' } }] }).success).toBe(true);
+  for (const suggestions of [[{ ...label, scope: 'track', slotId: number.slotId }], [{ ...disc, scope: 'album', slotId: null }], [{ ...disc, value: 1000 }], [{ ...disc, value: 0 }],
+    [{ ...label, value: { name: 'Amet Records', musicBrainzId: null, extra: true } }], [{ ...label, value: 'Amet Records' }], [{ ...label, value: { name: '', musicBrainzId: null } }],
+    [{ ...title, field: 'releaseDate', scope: 'track', slotId: number.slotId, baseline: null, value: null }], [{ ...number, scope: 'album', slotId: null }]])
+    expect(detailSchema.safeParse({ ...item, suggestions }).success).toBe(false);
 });
 
 test('a newer saved state is a later revision, or the same revision with later automatic writes', () => {

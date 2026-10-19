@@ -28,6 +28,7 @@
  *   - a lookup value that differs from the administrator's own is answered from the keyboard, and the summary reflows at 320, 768 and 1440 px
  *   - an unavailable lookup offers Luna first beside a free retry, a retry that stays unavailable keeps them, and Luna runs only after its confirmation shows the budget
  *   - without a folder or usable tags the summary offers Luna beside an empty name box, which looks up a typed name from the keyboard
+ *   - after a lookup finds no release Luna is offered, and its ticked entries, label and Disc Number are preselected and approved in one confirmation
  *   - an image every file shares is chosen automatically until the administrator chooses, and the summary and confirmation show the choice
  * @end-catalog */
 
@@ -987,6 +988,48 @@ test('without a folder or usable tags the summary offers Luna beside an empty na
   // The name box keeps no history: nothing is stored by the lookup.
   expect(await storage()).toEqual(before);
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+});
+
+test('after a lookup finds no release Luna is offered, and its ticked entries, label and Disc Number are preselected and approved in one confirmation', async ({ page }) => {
+  await setup(page);
+  const item = uploadedProject(); Object.assign(item.draft.album, { artists: [], label: null }); item.decisions = [];
+  const shell = { generation: 2, source: 'folder' as const, evidence: 'Synthetic Album', decision: 'pending' as const };
+  const lorem = { ...artistEntry('Lorem Ensemble', entryKey(7)) }, ipsum = artistEntry('Ipsum Quartet', entryKey(8), 'featured');
+  const suggestions = [{ ...shell, id: 'a'.repeat(24), scope: 'album' as const, slotId: null, field: 'artists' as const, baseline: [], value: [lorem, ipsum] },
+    { ...shell, id: 'b'.repeat(24), scope: 'album' as const, slotId: null, field: 'label' as const, baseline: null, value: labelEntry('Amet Records') },
+    { ...shell, id: 'c'.repeat(24), scope: 'track' as const, slotId, field: 'discNumber' as const, baseline: 1, value: 2 }];
+  const server = await summaryProject(page, item, (state, action) => {
+    if (action === 'publish') return 'publish';
+    expect(action).toBe('analyze');
+    // Luna completes with the complete Artist entries, a label and a Disc Number; each fills an empty value and arrives ticked.
+    state.item = { ...state.item, analysis: { ...state.item.analysis, generation: 2, state: 'complete', attemptsUsed: 4 }, suggestions };
+    state.summary = { luna: suggestions.map(suggestion => ({ id: suggestion.id, tick: 'ticked' })) };
+    return 'analyze';
+  });
+  server.lookup = lookupView({ state: 'complete', outcome: 'noRelease' });
+  await page.goto(`/finitude/admin/imports/${projectId}`); await page.getByRole('button', { name: 'Switch to Admin view' }).click();
+  await expect(summaryRegion(page).getByText('No release was found. Try another name, or analyze with Luna.', { exact: true })).toBeVisible();
+  await expect(summaryRegion(page).getByRole('button', { name: /^(Retry lookup|Analyze with Luna)$/ })).toHaveText(['Analyze with Luna']);
+  await summaryRegion(page).getByRole('button', { name: 'Analyze with Luna', exact: true }).click();
+  await page.getByRole('dialog', { name: 'Analyze with Luna?', exact: true }).getByRole('button', { name: 'Start Luna analysis', exact: true }).click();
+  await expect.poll(() => server.writes.map(write => write.action)).toEqual(['analyze']);
+  const luna = summaryRegion(page).getByRole('group', { name: 'Luna suggestions', exact: true }), boxes = luna.getByRole('checkbox');
+  await expect(boxes).toHaveCount(3);
+  for (const box of await boxes.all()) await expect(box).toBeChecked();
+  await publishFromSummary(page).click();
+  // The ticked values are shown as applied, and each new name is preselected as a new record: nothing needs a decision.
+  const dialog = page.getByRole('dialog'), checklist = dialog.getByRole('region', { name: 'What becomes catalog content', exact: true });
+  await expect(checklist.getByRole('listitem')).toHaveText(['Lorem Ensemble · Primary · New', 'Ipsum Quartet · Featured · New', 'Disc 1 · Track 2 · Second · New', 'Disc 2 · Track 1 · First · New']);
+  await expect(checklist.getByText('Amet Records · New', { exact: true })).toBeVisible();
+  await expect(dialog.getByRole('button', { name: 'Apply ticked suggestions now', exact: true })).toHaveCount(0);
+  expect((await new AxeBuilder({ page }).include('[role=dialog]').analyze()).violations).toEqual([]);
+  await dialog.getByRole('button', { name: 'Publish Album', exact: true }).click();
+  await expect.poll(() => server.writes.filter(write => write.action === 'publish').length).toBe(1);
+  const approval = server.writes.find(write => write.action === 'publish')!.body, created = { action: 'create-distinct', candidateId: null, candidateRevision: null };
+  expect([approval.decisions, approval.suggestionTicks]).toEqual([[], { generation: 2, ticked: suggestions.map(suggestion => suggestion.id), unticked: [] }]);
+  expect(approval.preselections).toEqual([{ scope: 'artist', slotId: null, entryKey: lorem.key, boundName: 'Lorem Ensemble', ...created }, { scope: 'artist', slotId: null, entryKey: ipsum.key, boundName: 'Ipsum Quartet', ...created },
+    { scope: 'label', slotId: null, entryKey: null, boundName: 'Amet Records', ...created }, { scope: 'album', slotId: null, entryKey: null, boundName: null, ...created },
+    ...[slotId, slotTwo].map(slot => ({ scope: 'track', slotId: slot, entryKey: null, boundName: null, ...created }))]);
 });
 
 test('an image every file shares is chosen automatically until the administrator chooses, and the summary and confirmation show the choice', async ({ page }) => {

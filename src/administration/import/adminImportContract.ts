@@ -44,10 +44,11 @@ export type ImportTagsView = Omit<ImportEmbeddedTagsV2, 'version'> & { version: 
 export type ImportDuplicateCandidate = { kind: 'artist' | 'organization' | 'album' | 'track'; id: string; label: string; revision: string; albumId: string | null; visibility: 'public' | 'hidden';
     match: 'name' | 'sha256' | 'musicBrainzId' | 'alias'; matchedSlotIds: string[]; automaticReuse: false; musicBrainzId?: string; aliasOf?: string };
 /**
- * The duplicate candidates of one import: at most 460 name candidates, one verified byte match per staged hash (at most 100),
- * 300 Album-member matches, one exact MusicBrainz ID match per entry and the label (21) and 20 alias matches each (420): at most
- * 1301 items. `unavailable` names each Artist entry, label or Album title (at most 22) whose same-name, same-ID or alias record is
- * malformed: it is no selectable candidate, yet it keeps that row from being preselected.
+ * The duplicate candidates of one import: at most 920 name candidates (the saved draft's names and those pending Luna proposals
+ * would write), one verified byte match per staged hash (at most 100), 300 Album-member matches, one exact MusicBrainz ID match per
+ * entry and the label (21) and 20 alias matches each (420): at most 1761 items. `unavailable` names each Artist name, label or
+ * Album title (at most 44) whose same-name, same-ID or alias record is malformed: it is no selectable candidate, yet it keeps that
+ * row from being preselected.
  */
 export type ImportCandidatesResponse = { items: ImportDuplicateCandidate[]; memberMatchesComplete: boolean; unavailable: { kind: 'artist' | 'organization' | 'album'; label: string }[] };
 export type ImportDuplicateDecision = { scope: 'artist' | 'album' | 'track'; slotId: string | null; action: 'reuse' | 'skip' | 'create-distinct'; candidateId: string | null; candidateRevision: string | null };

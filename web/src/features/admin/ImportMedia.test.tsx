@@ -37,7 +37,9 @@
  *   - a file whose tags had values left out says how many fields beside its evidence, and one without says nothing
  *   - the confirmation marks Artist entries and the label resting only on file tags and an entry that looks like a label
  *   - the confirmation shows and sends the Luna ticks: the summary's toggles over the server's state, a ticked value in the list, and a path the unsaved changes write left unticked
- *   - a ticked suggestion that renames the Album does not dead-end the confirmation: it offers to apply the ticked suggestions to the saved draft first, then closes
+ *   - a ticked title is preselected as if it were applied: the confirmation approves in one step and sends the Album and track preselections with the ticks
+ *   - a ticked label named like an existing record needs a decision, and only then the confirmation offers to apply the ticked suggestions first
+ *   - a ticked Artist-entries value keeps the decision of an entry under its exact name and preselects its new entry
  *   - the confirmation lists each MusicBrainz ID the publication records or replaces, and sends exactly those
  * @end-catalog */
 
@@ -645,9 +647,8 @@ test('the confirmation shows and sends the Luna ticks: the summary\'s toggles ov
   expect(run).toHaveBeenLastCalledWith(`/${item.id}/publish`, 'POST', expect.objectContaining({ suggestionTicks: { generation: 1, ticked: [], unticked: ['c'.repeat(24), 'd'.repeat(24)] } }));
 });
 
-test('a ticked suggestion that renames the Album does not dead-end the confirmation: it offers to apply the ticked suggestions to the saved draft first, then closes', async () => {
-  // Nothing is decided and no record shares a name, so the saved draft preselects every row; the ticked title is a name no
-  // candidate read has checked, so the Album and its tracks need a decision while it is shown.
+test('a ticked title is preselected as if it were applied: the confirmation approves in one step and sends the Album and track preselections with the ticks', async () => {
+  // Nothing is decided and no record shares a name with the saved or the proposed values, so every row is preselected as new.
   const item = detail(); item.capabilities.publish = true; item.publication = 'notStarted';
   const luna = lookupResponse({ summary: { ...lookupResponse().summary, luna: [{ id: 'c'.repeat(24), tick: 'ticked' }, { id: 'd'.repeat(24), tick: 'unticked' }] } });
   vi.stubGlobal('fetch', withLookup(async () => json({ items: [], memberMatchesComplete: true }), () => luna));
@@ -655,19 +656,57 @@ test('a ticked suggestion that renames the Album does not dead-end the confirmat
   mount(item, operation, 'publication');
   fireEvent.click(screen.getByRole('button', { name: 'Publish Album' }));
   const dialog = screen.getByRole('dialog');
-  expect(await within(dialog).findByText(/^Ticked Luna suggestions change names that were not checked against existing records/)).toHaveAttribute('role', 'note');
-  expect(within(dialog).getByText('Suggested Album')).toBeInTheDocument();
+  expect(await within(dialog).findByText('Suggested Album')).toBeInTheDocument();
+  const button = await approve();
+  expect(within(dialog).queryByRole('button', { name: 'Apply ticked suggestions now' })).not.toBeInTheDocument();
+  expect(within(dialog).queryByText(/match existing records/)).not.toBeInTheDocument();
+  fireEvent.click(button);
+  const create = (scope: ImportDecision['scope'], slot: string | null = null) => ({ scope, slotId: slot, entryKey: null, boundName: null, action: 'create-distinct', candidateId: null, candidateRevision: null });
+  expect(run).toHaveBeenLastCalledWith(`/${item.id}/publish`, 'POST', expect.objectContaining({ decisions: [], preselections: [create('album'), create('track', slotId), create('track', slotTwo)],
+    suggestionTicks: { generation: 1, ticked: ['c'.repeat(24)], unticked: ['d'.repeat(24)] } }));
+});
+
+test('a ticked label named like an existing record needs a decision, and only then the confirmation offers to apply the ticked suggestions first', async () => {
+  const item = detail(); item.capabilities.publish = true; item.publication = 'notStarted';
+  const label = { id: 'a'.repeat(24), generation: 1, scope: 'album' as const, slotId: null, field: 'label' as const, baseline: null, value: labelEntry('Amet Records'), source: 'folder' as const, evidence: 'Synthetic Album', decision: 'pending' as const };
+  item.suggestions = [...item.suggestions, label];
+  const luna = lookupResponse({ summary: { ...lookupResponse().summary, luna: [{ id: 'c'.repeat(24), tick: 'ticked' }, { id: 'd'.repeat(24), tick: 'unticked' }, { id: label.id, tick: 'ticked' }] } });
+  const amet: ImportCandidate = { kind: 'organization', id: '2'.repeat(24), label: 'AMET RECORDS', revision: 'r-amet', albumId: null, visibility: 'public', match: 'name', matchedSlotIds: [], automaticReuse: false };
+  vi.stubGlobal('fetch', withLookup(async () => json({ items: [amet], memberMatchesComplete: true }), () => luna));
+  const operation = new AdminMutation(), run = vi.spyOn(operation, 'run').mockImplementation(() => {});
+  mount(item, operation, 'publication');
+  fireEvent.click(screen.getByRole('button', { name: 'Publish Album' }));
+  const dialog = screen.getByRole('dialog');
+  expect(await within(dialog).findByText(/^Ticked Luna suggestions add names that match existing records/)).toHaveAttribute('role', 'note');
+  expect(within(dialog).getByText('Amet Records · Needs a decision in Review')).toBeInTheDocument();
   expect(within(dialog).getByRole('button', { name: 'Publish Album' })).toBeDisabled();
   fireEvent.click(within(dialog).getByRole('button', { name: 'Apply ticked suggestions now' }));
-  expect(run).toHaveBeenLastCalledWith(`/${item.id}/adopt`, 'POST', { expectedRevision: 1, generation: 1, selectedIds: ['c'.repeat(24)], rejectIds: ['d'.repeat(24)] });
+  expect(run).toHaveBeenLastCalledWith(`/${item.id}/adopt`, 'POST', { expectedRevision: 1, generation: 1, selectedIds: ['c'.repeat(24), label.id], rejectIds: ['d'.repeat(24)] });
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   cleanup();
-  // Unticked, the saved names are shown, every row is preselected and nothing is offered beside the approval.
-  adminWorkspace.retain(lunaTicksKey(item.id), { ['c'.repeat(24)]: false }, captureAccountOperation(viewer));
+  // Unticked, the saved draft has no label: nothing needs an answer and nothing is offered beside the approval.
+  adminWorkspace.retain(lunaTicksKey(item.id), { [label.id]: false }, captureAccountOperation(viewer));
   mount(item, operation, 'publication');
   fireEvent.click(screen.getByRole('button', { name: 'Publish Album' }));
   await approve();
   expect(screen.queryByRole('button', { name: 'Apply ticked suggestions now' })).not.toBeInTheDocument();
+});
+
+test('a ticked Artist-entries value keeps the decision of an entry under its exact name and preselects its new entry', async () => {
+  const { item } = reviewed(), [lorem] = item.draft.album.artists, sit = artistEntry('Sit', '00000000-0000-4000-8000-0000000000e9', 'featured');
+  const artists = { id: 'a'.repeat(24), generation: 1, scope: 'album' as const, slotId: null, field: 'artists' as const, baseline: item.draft.album.artists, value: [lorem, sit], source: 'folder' as const, evidence: 'Synthetic Album', decision: 'pending' as const };
+  item.suggestions = [artists];
+  const luna = lookupResponse({ summary: { ...lookupResponse().summary, luna: [{ id: artists.id, tick: 'ticked' }] } });
+  vi.stubGlobal('fetch', withLookup(async () => json({ items: [], memberMatchesComplete: true }), () => luna));
+  const operation = new AdminMutation(), run = vi.spyOn(operation, 'run').mockImplementation(() => {});
+  mount(item, operation, 'publication');
+  fireEvent.click(screen.getByRole('button', { name: 'Publish Album' }));
+  const dialog = screen.getByRole('dialog');
+  fireEvent.click(await approve());
+  expect(within(dialog).queryByText(/Ipsum/)).not.toBeInTheDocument();
+  // The body sends the shown decisions unchanged (the approval drops the one bound to the replaced entry), and only Sit is preselected.
+  expect(run).toHaveBeenLastCalledWith(`/${item.id}/publish`, 'POST', expect.objectContaining({ decisions: item.decisions,
+    preselections: [{ scope: 'artist', slotId: null, entryKey: sit.key, boundName: 'Sit', action: 'create-distinct', candidateId: null, candidateRevision: null }], suggestionTicks: { generation: 1, ticked: [artists.id], unticked: [] } }));
 });
 
 test('the confirmation lists each MusicBrainz ID the publication records or replaces, and sends exactly those', async () => {

@@ -65,14 +65,14 @@ export function ImportDuplicates({ item, disabled, onSave }: { item: ImportDetai
   const decisions = (edits?.decisions ?? item.decisions).filter(decision => rows.some(row => sameRow(decision, row)));
   const append = decisions.find(decision => decision.scope === 'album')?.action === 'reuse';
   // Review shows the saved draft, so every row's candidates were read for its shown name.
-  const preselected = query.data ? identityPreselections(item.draft, item.draft, decisions, query.data) : [], flagged = query.data ? duplicateFileSlots(decisions, query.data) : new Set<string>();
+  const preselected = query.data ? identityPreselections(item.draft, [item.draft], decisions, query.data) : [], flagged = query.data ? duplicateFileSlots(decisions, query.data) : new Set<string>();
   // The preselection an answered row returns to once its answer is cleared. A row's preselection depends on the decisions but on
   // no other draft row, so it is read from the draft narrowed to that row, keeping this linear in the rows.
   const fallbackOf = (row: DecisionRow) => {
     if (!query.data) return undefined;
     const only: ImportDraftV2 = { album: { ...item.draft.album, artists: item.draft.album.artists.filter(entry => entry.key === row.entryKey), label: row.scope === 'label' ? item.draft.album.label : null },
       tracks: item.draft.tracks.filter(track => track.slotId === row.slotId) };
-    return identityPreselections(only, only, decisions.filter(decision => !sameRow(decision, row)), query.data).find(decision => sameRow(decision, row));
+    return identityPreselections(only, [only], decisions.filter(decision => !sameRow(decision, row)), query.data).find(decision => sameRow(decision, row));
   };
   const decide = (row: DecisionRow, value: string, candidates: ImportCandidate[], collapses: boolean) => {
     if (!decisions.some(decision => sameRow(decision, row)) || (!value && collapses)) refocus.current = rowKey(row);

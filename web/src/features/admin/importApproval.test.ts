@@ -7,6 +7,7 @@
  *   - shown decisions are the unsaved Review edits whatever the revision, else the saved ones, and none once the edits are stale
  *   - buffered decisions are stale when a decided entry is gone or renamed or the decided label changed, never for Album or track decisions
  *   - a renamed or removed entry or label in the shown draft drops its decision, while reordering, roles, phrases, Album and track decisions keep theirs
+ *   - decisions stay bound to the draft the ticks write as on the server: an entry by key and name, the label by name, Album and tracks always
  *   - the checklist names each identity as new, reused (marking a hidden record), needing a decision or changed, and counts what blocks approval
  *   - an append applies no entry or label, orders only the tracks it adds, and lists existing members after them in draft order
  *   - the confirmation marks Artist entries and the label resting only on file tags and automatic entries named like a label, unless appended, changed or decided
@@ -19,7 +20,7 @@
 
 import type { ImportDecision } from './adminApi';
 import type { ImportCandidate } from './importIdentity';
-import { approvalBody, approvalChecklist, approvalTrackOrder, shownDecisions, staleDecisionEdits, staleDecisions } from './importApproval';
+import { approvalBody, approvalChecklist, approvalTrackOrder, boundDecisions, shownDecisions, staleDecisionEdits, staleDecisions } from './importApproval';
 import { artistEntry, detail, entryKey, labelEntry, slotId, slotTwo } from './adminFixtures.testSupport';
 
 const fresh = { action: 'create-distinct', candidateId: null, candidateRevision: null } as const;
@@ -83,6 +84,16 @@ test('a renamed or removed entry or label in the shown draft drops its decision,
   expect(shownDecisions(item, { ...item.draft, album: { ...item.draft.album, label: null } }, null)?.map(value => value.scope)).toEqual(['artist', 'artist', 'artist', 'album', 'track', 'track']);
   // A decision on a slot the project does not have is never shown.
   expect(shownDecisions(item, item.draft, { revision: item.revision, decisions: [track('10000000-0000-4000-8000-000000000009'), album()] })).toEqual([album()]);
+});
+
+test('decisions stay bound to the draft the ticks write as on the server: an entry by key and name, the label by name, Album and tracks always', () => {
+  const item = saved(), decisions = [artist(1), artist(2), artist(3), label(), album(), track(slotId)];
+  const [lorem, ipsum] = item.draft.album.artists;
+  expect(boundDecisions(decisions, item.draft)).toEqual(decisions);
+  // Ticked Artist entries keep an exact-name entry's key (and its decision); a case-only rename or a new name is a new entry.
+  const ticked = { ...item.draft, album: { ...item.draft.album, artists: [{ ...lorem, joinPhrase: ' & ' }, { ...ipsum, key: entryKey(9), name: 'IPSUM' }], label: labelEntry('Amet Records') } };
+  expect(boundDecisions(decisions, ticked)).toEqual([artist(1), album(), track(slotId)]);
+  expect(boundDecisions(decisions, { ...item.draft, album: { ...item.draft.album, label: null } }).map(value => value.scope)).toEqual(['artist', 'artist', 'artist', 'album', 'track']);
 });
 
 test('the checklist names each identity as new, reused (marking a hidden record), needing a decision or changed, and counts what blocks approval', () => {

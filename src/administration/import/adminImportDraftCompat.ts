@@ -16,7 +16,7 @@
  *   Types: Loose
  *   Functions: isRecord, list, text, count, position, date, oneOf, legacyEntries, v1Shaped, draftV2,
  *              decisionV2, suggestionV2, entryName, suggestionValue, entriesView, labelView, discView,
- *              validFilename, reviewField
+ *              strictLabel, validFilename, reviewField
  *   Constants: analysisStates, analysisIssues, publicationStates, assetStates
  * @end-catalog */
 
@@ -197,13 +197,33 @@ export function importDraftV2View(raw: unknown, manifest: ImportManifest, import
     return { album: { title: text(album.title, 300), artists: entriesView(album.artists, false) ?? [], label: labelView(album.label), releaseDate: date(album.releaseDate),
         visibility: oneOf(album.visibility, ['public', 'hidden'] as const) ? album.visibility : 'hidden' }, tracks };
 }
+/** A label exactly as Draft v2 stores it (a 1 to 200 character name and a valid MusicBrainz ID or null), or undefined. */
+const strictLabel = (raw: unknown): ImportLabelEntry | undefined => {
+    if (!isRecord(raw) || Object.keys(raw).length !== 2 || !hasOwn(raw, 'musicBrainzId') || typeof raw.name !== 'string' || raw.name.length < 1 || raw.name.length > 200) return undefined;
+    const musicBrainzId = normalizeMusicBrainzId(raw.musicBrainzId);
+    return raw.musicBrainzId === null || (musicBrainzId !== null && musicBrainzId === raw.musicBrainzId) ? { name: raw.name, musicBrainzId } : undefined;
+};
 /**
- * A Draft v2 suggestion of the current generation on a valid path; an Artist suggestion is album-scoped and every entry readable.
- * An Artist suggestion that proposes a placeholder such as Various Artists is hidden: imports never suggest a stand-in Artist.
+ * A Draft v2 suggestion of the current generation on a valid path. An Artist suggestion is album-scoped with every entry readable,
+ * a label suggestion album-scoped with a readable label (its baseline a label or none), and a Disc Number suggestion track-scoped
+ * with a value of 1 to 999 (its baseline one or unknown). An Artist or label suggestion that proposes a placeholder such as Various
+ * Artists is hidden: imports never suggest a stand-in. The shared fields are checked as a v1 suggestion's would be, so a stored
+ * `lookupContext` is never projected.
  */
 export function importSuggestionV2View(raw: unknown, generation: number, slots: ReadonlySet<string>, importId: string): ImportSuggestionV2 | null {
     const value: unknown = suggestionV2(raw, legacyArtistEntryKey(importId));
-    if (!isRecord(value) || value.field !== 'artists') return legacySuggestionView(value, generation, slots) as ImportSuggestionV2 | null;
+    if (!isRecord(value)) return null;
+    if (value.field === 'label') {
+        const baseline = value.baseline === null ? null : strictLabel(value.baseline), label = strictLabel(value.value);
+        const shell = value.scope === 'album' ? legacySuggestionView({ ...value, field: 'title', baseline: '', value: '' }, generation, slots) : null;
+        return shell && baseline !== undefined && label && !isPlaceholderCredit(label.name) ? { ...shell, field: 'label', baseline, value: label } : null;
+    }
+    if (value.field === 'discNumber') {
+        const baseline = value.baseline === null ? null : discView(value.baseline) ?? undefined, disc = discView(value.value);
+        const shell = value.scope === 'track' ? legacySuggestionView({ ...value, field: 'trackNumber', baseline: null, value: null }, generation, slots) : null;
+        return shell && baseline !== undefined && disc !== null ? { ...shell, field: 'discNumber', baseline, value: disc } : null;
+    }
+    if (value.field !== 'artists') return legacySuggestionView(value, generation, slots) as ImportSuggestionV2 | null;
     const baseline = entriesView(value.baseline, true), entries = entriesView(value.value, true);
     if (entries?.some(entry => isPlaceholderCredit(entry.name))) return null;
     // The shared fields are checked as a v1 album title suggestion would be.

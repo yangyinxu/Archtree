@@ -1,5 +1,5 @@
-import { suggestionPath, suggestionTicks, ticked, tickedDraft, type LunaTick } from './importLunaTicks';
-import { artistEntry, detail, slotId } from './adminFixtures.testSupport';
+import { lunaProposals, suggestionPath, suggestionTicks, ticked, tickedDraft, type LunaTick } from './importLunaTicks';
+import { artistEntry, detail, labelEntry, slotId } from './adminFixtures.testSupport';
 import type { ImportSuggestionV2 } from './adminApi';
 
 /** The fixture's pending Album title and first-track number suggestions, plus an Artist suggestion. */
@@ -27,4 +27,16 @@ test('the approval lists every pending suggestion once, ticked or unticked, for 
   // The editor's draft itself is never changed.
   expect([item.draft.album.title, item.draft.album.artists]).toEqual(['', []]);
   expect(tickedDraft(item.draft, item.suggestions, [])).toEqual(item.draft);
+});
+
+test('the proposals the confirmation reads candidates for write every pending suggestion: artists, a label and a Disc Number', () => {
+  const shell = { generation: 1, source: 'context' as const, evidence: 'Synthetic', decision: 'pending' as const };
+  const item = { ...detail(), suggestions: [...suggestions(),
+    { ...shell, id: 'a'.repeat(24), scope: 'album' as const, slotId: null, field: 'label' as const, baseline: null, value: labelEntry('Amet Records') },
+    { ...shell, id: 'b'.repeat(24), scope: 'track' as const, slotId, field: 'discNumber' as const, baseline: null, value: 2 },
+    { ...shell, id: 'f'.repeat(24), scope: 'album' as const, slotId: null, field: 'title' as const, baseline: '', value: 'Rejected', decision: 'rejected' as const }] };
+  const proposed = lunaProposals(item);
+  expect([proposed.album.title, proposed.album.artists.map(entry => entry.name), proposed.album.label, proposed.tracks[0].discNumber, proposed.tracks[0].trackNumber])
+    .toEqual(['Suggested Album', ['Luna Lead'], labelEntry('Amet Records'), 2, 1]);
+  expect([item.draft.album.label, item.draft.tracks[0].discNumber]).toEqual([null, null]);
 });

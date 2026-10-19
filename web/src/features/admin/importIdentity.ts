@@ -19,18 +19,19 @@ import type { ImportDecision, ImportDraftV2 } from './adminApi';
 const id = z.string().regex(/^[a-f0-9]{24}$/), uuid = z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
 const mbid = z.string().regex(/^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/);
 /**
- * At most 20 candidates per Artist entry name (20 entries) and 20 each for the label, the Album and the track titles, one verified
- * byte match per staged file (100), at most 300 byte or title matches among Album members, one record holding each entry's or the
- * label's MusicBrainz ID (21) and 20 records named as lookup found for each such ID (420): 1301. `musicBrainzId` names the ID an
- * Artist or Organization holds; `aliasOf` the ID whose found name matched. A response without `memberMatchesComplete` counts as
- * incomplete, so no append file is preselected from it. `unavailable` names the entries, the label or the Album title (at most 22)
- * whose same-name, same-ID or alias record is malformed: never a candidate, yet never preselected over.
+ * At most 20 candidates per Artist name (the saved entries' and those pending Luna proposals would write, 40 names), per label
+ * name and per Album title (the saved one and one proposed each), 20 for the saved and 20 for the proposed track titles, one
+ * verified byte match per staged file (100), at most 300 byte or title matches among Album members, one record holding each
+ * entry's or the label's MusicBrainz ID (21) and 20 records named as lookup found for each such ID (420): 1761. `musicBrainzId`
+ * names the ID an Artist or Organization holds; `aliasOf` the ID whose found name matched. A response without
+ * `memberMatchesComplete` counts as incomplete, so no append file is preselected from it. `unavailable` names the Artist names, labels or Album titles (at most 44) whose same-name, same-ID or alias record is
+ * malformed: never a candidate, yet never preselected over.
  */
 export const candidatesSchema = z.object({
   items: z.array(z.object({ kind: z.enum(['artist', 'organization', 'album', 'track']), id, label: z.string(), revision: z.string(), albumId: id.nullable(), visibility: z.enum(['public', 'hidden']),
-    match: z.enum(['name', 'sha256', 'musicBrainzId', 'alias']), matchedSlotIds: z.array(uuid).max(100), automaticReuse: z.literal(false), musicBrainzId: mbid.optional(), aliasOf: mbid.optional() }).strict()).max(1301),
+    match: z.enum(['name', 'sha256', 'musicBrainzId', 'alias']), matchedSlotIds: z.array(uuid).max(100), automaticReuse: z.literal(false), musicBrainzId: mbid.optional(), aliasOf: mbid.optional() }).strict()).max(1761),
   memberMatchesComplete: z.boolean().default(false),
-  unavailable: z.array(z.object({ kind: z.enum(['artist', 'organization', 'album']), label: z.string() }).strict()).max(22).default([])
+  unavailable: z.array(z.object({ kind: z.enum(['artist', 'organization', 'album']), label: z.string() }).strict()).max(44).default([])
 }).strict();
 export type ImportCandidates = z.infer<typeof candidatesSchema>;
 export type ImportCandidate = ImportCandidates['items'][number];
@@ -47,9 +48,10 @@ const choice = (scope: ImportDecision['scope'], slotId: string | null, entryKey:
   ({ scope, slotId, entryKey, boundName, action: reused ? 'reuse' : 'create-distinct', candidateId: reused?.id ?? null, candidateRevision: reused?.revision ?? null });
 
 /**
- * The decisions preselected for rows of `draft` without an explicit decision in `decisions`, from `candidates` read for the saved
- * draft `saved`. A row whose shown name or MusicBrainz ID differs from its saved one (an entry by key, the label, the Album title
- * and, in an append, a track title) is never preselected: its candidates were not read for it. Otherwise as on the server:
+ * The decisions preselected for rows of `draft` without an explicit decision in `decisions`, from `candidates` read for the drafts
+ * in `read` (the saved draft and, for the confirmation, the saved draft with every pending Luna proposal written in). A row whose
+ * shown value no read draft holds (an entry by key, name and MusicBrainz ID, the label by name and ID, the Album title and, in an
+ * append, a track title) is never preselected: its candidates were not read for it. Otherwise as on the server:
  * without an explicit Album reuse, an entry or the label whose ID a listed record holds reuses it unless another row's reuse (or
  * replace) or an earlier preselection names it; an entry, the label and the Album with no name, alias or same-ID candidate of
  * their kind are created, and once the
@@ -57,7 +59,7 @@ const choice = (scope: ImportDecision['scope'], slotId: string | null, entryKey:
  * bytes match exactly one member, matched by no other file and reused by no other decision, reuses it, all only while the member
  * matches are complete. A name listed as `unavailable` counts as a candidate. Any other row needs an explicit choice.
  */
-export function identityPreselections(draft: ImportDraftV2, saved: ImportDraftV2, decisions: readonly ImportDecision[], candidates: ImportCandidates): ImportDecision[] {
+export function identityPreselections(draft: ImportDraftV2, read: readonly ImportDraftV2[], decisions: readonly ImportDecision[], candidates: ImportCandidates): ImportDecision[] {
   const { items, unavailable } = candidates, result: ImportDecision[] = [], album = decisions.find(decision => decision.scope === 'album');
   const listed = (kind: ImportCandidate['kind'], name: string) => items.some(item => item.kind === kind && sameName(item.label, name)) || unavailable.some(entry => entry.kind === kind && sameName(entry.label, name));
   const decided = (slotId: string) => decisions.some(decision => decision.scope === 'track' && decision.slotId === slotId);
@@ -65,7 +67,7 @@ export function identityPreselections(draft: ImportDraftV2, saved: ImportDraftV2
     if (!candidates.memberMatchesComplete) return result;
     const reused = new Set(decisions.filter(decision => decision.scope === 'track' && decision.action === 'reuse').map(decision => decision.candidateId));
     for (const track of draft.tracks) {
-      if (decided(track.slotId) || saved.tracks.find(item => item.slotId === track.slotId)?.title !== track.title) continue;
+      if (decided(track.slotId) || !read.some(saved => saved.tracks.find(item => item.slotId === track.slotId)?.title === track.title)) continue;
       const bytes = (item: ImportCandidate) => item.match === 'sha256' && item.matchedSlotIds.includes(track.slotId);
       const members = items.filter(item => item.kind === 'track' && item.albumId === album.candidateId && (bytes(item) || (track.title !== '' && sameName(item.label, track.title))));
       const identical = members.filter(bytes);
@@ -81,14 +83,14 @@ export function identityPreselections(draft: ImportDraftV2, saved: ImportDraftV2
     else if (!listed(kind, name) && !rowCandidates(kind, name, musicBrainzId, items).length) result.push(choice(scope, null, entryKey, name));
   };
   for (const entry of draft.album.artists) {
-    const stored = saved.album.artists.find(item => item.key === entry.key);
-    if (!decisions.some(decision => decision.scope === 'artist' && decision.entryKey === entry.key) && stored?.name === entry.name && stored.musicBrainzId === entry.musicBrainzId)
+    if (!decisions.some(decision => decision.scope === 'artist' && decision.entryKey === entry.key)
+      && read.some(saved => saved.album.artists.some(item => item.key === entry.key && item.name === entry.name && item.musicBrainzId === entry.musicBrainzId)))
       preselect('artist', 'artist', entry.key, entry.name, entry.musicBrainzId);
   }
   const label = draft.album.label;
-  if (label && !decisions.some(decision => decision.scope === 'label') && saved.album.label?.name === label.name && saved.album.label.musicBrainzId === label.musicBrainzId)
+  if (label && !decisions.some(decision => decision.scope === 'label') && read.some(saved => saved.album.label?.name === label.name && saved.album.label.musicBrainzId === label.musicBrainzId))
     preselect('label', 'organization', null, label.name, label.musicBrainzId);
-  const created = album ? album.action === 'create-distinct' : draft.album.title === saved.album.title && !listed('album', draft.album.title);
+  const created = album ? album.action === 'create-distinct' : read.some(saved => saved.album.title === draft.album.title) && !listed('album', draft.album.title);
   if (!album && created) result.push(choice('album', null, null, null));
   if (created) for (const track of draft.tracks) if (!decided(track.slotId)) result.push(choice('track', track.slotId, null, null));
   return result;

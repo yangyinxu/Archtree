@@ -7,6 +7,7 @@
  *   - Publish stays unavailable while the server says it waits or needs answers, a placeholder-only credit says so at once, and otherwise it opens the confirmation
  *   - a lookup conflict only in MusicBrainz IDs is headed as one and shows each side's IDs beside the names
  *   - a conflict with the administrator's value offers Keep mine or Use lookup value bound to the saved value, and an append shows Album values as not applied
+ *   - Luna label and Disc Number suggestions arrive as ticked rows of their own, and an append marks the label not applied
  *   - a tie lists the values that differ with each release's barcode, catalogue number, country and medium, and allows one release or none
  *   - the next step follows the lookup: a free retry first while busy or stopped, Luna first once unavailable or when nothing matches, and nothing while it runs or after it applied
  *   - the retry and the Luna next step act only on request, and Luna opens the Analyze confirmation with the project and daily budget
@@ -170,6 +171,21 @@ test('a conflict with the administrator\'s value offers Keep mine or Use lookup 
   mount(item, lookupResponse({ summary: summary({ append: true, luna: [{ id: 'c'.repeat(24), tick: 'ticked' }, { id: 'd'.repeat(24), tick: 'unticked' }] }) }));
   const luna = await screen.findByRole('group', { name: 'Luna suggestions' });
   expect(within(luna).getAllByRole('checkbox').map(box => box.parentElement!.textContent)).toEqual(['Title: — → Suggested Album · Suggested by Luna · Not applied', 'Track 1 · Track number: — → 1 · Suggested by Luna']);
+});
+
+test('Luna label and Disc Number suggestions arrive as ticked rows of their own, and an append marks the label not applied', async () => {
+  const item = detail(), [title, number] = item.suggestions;
+  item.suggestions = [...item.suggestions, { ...title, id: 'a'.repeat(24), field: 'label', baseline: null, value: labelEntry('Amet Records') }, { ...number, id: 'b'.repeat(24), field: 'discNumber', baseline: null, value: 2 }];
+  const ticks = [title, number, ...item.suggestions.slice(2)].map(value => ({ id: value.id, tick: 'ticked' }));
+  mount(item, lookupResponse({ summary: summary({ luna: ticks }) }));
+  let luna = await screen.findByRole('group', { name: 'Luna suggestions' });
+  const rows = () => within(luna).getAllByRole('checkbox').map(box => [box.parentElement!.textContent, (box as HTMLInputElement).checked]);
+  expect(rows()).toEqual([['Title: — → Suggested Album · Suggested by Luna', true], ['Track 1 · Track number: — → 1 · Suggested by Luna', true],
+    ['Label: — → Amet Records · Suggested by Luna', true], ['Track 1 · Disc number: — → 2 · Suggested by Luna', true]]);
+  cleanup();
+  mount(item, lookupResponse({ summary: summary({ append: true, luna: ticks }) }));
+  luna = await screen.findByRole('group', { name: 'Luna suggestions' });
+  expect(rows().map(([text]) => text).slice(2)).toEqual(['Label: — → Amet Records · Suggested by Luna · Not applied', 'Track 1 · Disc number: — → 2 · Suggested by Luna']);
 });
 
 test('a tie lists the values that differ with each release\'s barcode, catalogue number, country and medium, and allows one release or none', async () => {

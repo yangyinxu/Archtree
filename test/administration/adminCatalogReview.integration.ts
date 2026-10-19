@@ -23,6 +23,8 @@
  *   - a review saved in a newer draft format reads through the Draft v2 allowlist and admits only stopping its analysis
  *   - reviews store Draft v2 with read-only context through edit, analysis and adoption, and review edits bind to the last administrator change
  *   - review context comes from ordered Credits with phrases and the first ready label; it is read-only and Artist suggestions stay hints
+ *   - a Luna Disc Number is kept only for a track whose source captured one, and adopting and applying it re-derives the Album order
+ *   - a review never reads, sends or records lookup context, even with an applied MusicBrainz release stored under its id
  *   - applying a captured Disc Number writes it as a catalog edit, re-derives the order and commits with the receipt; null clears both keys
  *   - an external Disc Number change makes the source changed and prevents apply
  *   - an oversized review draft is refused at creation and nothing is inserted; the read-only Credits context never counts toward the cap
@@ -51,7 +53,7 @@ import { ADMIN_IMPORT_LIMITS } from '../../src/administration/import/adminImport
 import { runImportAutomation } from '../../src/administration/import/adminImportAutomation';
 import { derivedEntryKey, draftBytes } from '../../src/administration/import/adminImportDraft';
 import { legacyArtistEntryKey } from '../../src/administration/import/adminImportDraftCompat';
-import { ImportProviderError, type ImportAnalysisProvider } from '../../src/administration/import/adminImportProvider';
+import { ImportProviderError, type AnalysisInput, type ImportAnalysisProvider } from '../../src/administration/import/adminImportProvider';
 import type { CatalogReviewField, CatalogReviewResponse } from '../../src/administration/catalog/adminCatalogReviewContract';
 import { startMongoReplicaSet, type MongoReplicaSetHarness } from '../support/mongoReplicaSet';
 
@@ -390,23 +392,65 @@ test('review context comes from ordered Credits with phrases and the first ready
         (draft: CatalogReviewResponse['item']['draft']) => { draft.album.visibility = 'public'; }
     ]) await assert.rejects(edit(review, change), code('ADMIN_IMPORT_INVALID_INPUT'));
     assert.deepEqual(await importCollection().findOne({ _id }), before);
-    // Luna's Artist name becomes an entries suggestion against the multi-entry context; it can be kept but never adopted.
-    const artistProvider: ImportAnalysisProvider = { configured: () => true, analyze: async input => input.album ? [{ scope: 'album', slotId: null, field: 'artistName', baseline: input.baseline.album.artistName, value: 'Synthetic Luna Artist', source: 'context', evidence: 'Existing title' }] : [] };
+    // Luna's Artist entries and label are identity hints against the multi-entry context: they can be kept but never adopted.
+    const artistProvider: ImportAnalysisProvider = { configured: () => true, analyze: async input => input.album ? [
+        { scope: 'album', slotId: null, field: 'artists', value: [{ name: 'Synthetic Luna Artist', role: 'primary', joinPhrase: ' & ' }, { name: 'Synthetic Guest', role: 'featured', joinPhrase: null }], source: 'context', evidence: 'Existing title' },
+        { scope: 'album', slotId: null, field: 'label', value: 'Synthetic Luna Label', source: 'context', evidence: 'Existing title' }] : [] };
     review = await analyzeCatalogReview(String(actor), id, mutation(review.item.revision), artistProvider);
     await runAdminImportWorkerOnce(artistProvider); await runAdminImportWorkerOnce(artistProvider);
-    review = await current(id); const [suggestion] = review.item.suggestions;
+    review = await current(id); const [suggestion, labelHint] = review.item.suggestions;
     assert.deepEqual([suggestion.field, suggestion.baseline], ['artists', review.item.draft.album.artists]);
-    assert.deepEqual((suggestion.value as { name: string; role: string }[]).map(({ name, role }) => [name, role]), [['Synthetic Luna Artist', 'primary']]);
-    assert.equal((await listCatalogReviews(String(actor), {})).items[0].pendingSuggestions, 1);
+    assert.deepEqual((suggestion.value as { name: string; role: string }[]).map(({ name, role }) => [name, role]), [['Synthetic Luna Artist', 'primary'], ['Synthetic Guest', 'featured']]);
+    // The guest keeps its context key under its exact name.
+    assert.equal((suggestion.value as { key: string }[])[1].key, key('guest_artist'));
+    assert.deepEqual([labelHint.field, labelHint.baseline, labelHint.value], ['label', { name: 'Synthetic Label', musicBrainzId: null }, { name: 'Synthetic Luna Label', musicBrainzId: null }]);
+    assert.equal((await listCatalogReviews(String(actor), {})).items[0].pendingSuggestions, 2);
     const analyzed = await importCollection().findOne({ _id });
-    await assert.rejects(adoptCatalogReview(String(actor), id, { ...mutation(review.item.revision), generation: 1, selectedIds: [suggestion.id], rejectIds: [] }), code('ADMIN_IMPORT_INVALID_INPUT'));
-    assert.deepEqual(await importCollection().findOne({ _id }), analyzed);
-    review = await adoptCatalogReview(String(actor), id, { ...mutation(review.item.revision), generation: 1, selectedIds: [], rejectIds: [suggestion.id] });
-    assert.equal(review.item.suggestions[0].decision, 'rejected'); assert.deepEqual(review.item.draft.album.artists, (before!.draft as typeof review.item.draft).album.artists);
+    for (const selected of [suggestion, labelHint]) {
+        await assert.rejects(adoptCatalogReview(String(actor), id, { ...mutation(review.item.revision), generation: 1, selectedIds: [selected.id], rejectIds: [] }), code('ADMIN_IMPORT_INVALID_INPUT'));
+        assert.deepEqual(await importCollection().findOne({ _id }), analyzed);
+    }
+    review = await adoptCatalogReview(String(actor), id, { ...mutation(review.item.revision), generation: 1, selectedIds: [], rejectIds: [suggestion.id, labelHint.id] });
+    assert.deepEqual(review.item.suggestions.map(value => value.decision), ['rejected', 'rejected']);
+    assert.deepEqual([review.item.draft.album.artists, review.item.draft.album.label], [(before!.draft as typeof review.item.draft).album.artists, (before!.draft as typeof review.item.draft).album.label]);
     // Applying never touches Credits.
     review = await edit(review, draft => { draft.album.title = 'Context kept'; });
     assert.equal((await apply(review)).item.state, 'applied');
     assert.deepEqual((await db().collection('albums').findOne({ _id: album }))!.credits, credits);
+});
+
+test('a Luna Disc Number is kept only for a track whose source captured one, and adopting and applying it re-derives the Album order', async () => {
+    let review = await create(); const id = review.item.id, _id = new ObjectId(id), [one, two] = review.item.source.tracks;
+    // The second track's source predates captured Disc Numbers: it can never apply one, so Luna's is dropped.
+    await importCollection().updateOne({ _id }, { $unset: { 'catalogSource.tracks.1.discNumber': '' } });
+    const discProvider: ImportAnalysisProvider = { configured: () => true, analyze: async input => input.album ? [] : [
+        { scope: 'track', slotId: one.slotId, field: 'discNumber', value: 2, source: 'filename', evidence: '01 - Original.mp3' },
+        { scope: 'track', slotId: two.slotId, field: 'discNumber', value: 1, source: 'filename', evidence: 'none' }] };
+    review = await analyzeCatalogReview(String(actor), id, mutation((await current(id)).item.revision), discProvider);
+    for (let tick = 0; tick < 4 && (await importCollection().findOne({ _id }))!.analysis.state !== 'complete'; tick++) await runAdminImportWorkerOnce(discProvider);
+    review = await current(id);
+    assert.deepEqual(review.item.suggestions.map(value => [value.slotId, value.field, value.baseline, value.value]), [[one.slotId, 'discNumber', null, 2]]);
+    review = await adoptCatalogReview(String(actor), id, { ...mutation(review.item.revision), generation: 1, selectedIds: [review.item.suggestions[0].id], rejectIds: [] });
+    assert.deepEqual(review.item.draft.tracks.map(track => track.discNumber), [2, null]);
+    const result = await apply(review, [{ scope: 'track', slotId: one.slotId, field: 'discNumber' }]);
+    assert.equal(result.item.state, 'applied');
+    assert.deepEqual([(await db().collection('audioTracks').findOne({ _id: first }))!.discNumber, (await db().collection('albums').findOne({ _id: album }))!.audioTrackIds], [2, [String(second), String(first)]]);
+});
+
+test('a review never reads, sends or records lookup context, even with an applied MusicBrainz release stored under its id', async () => {
+    let review = await create(); const id = review.item.id, _id = new ObjectId(id), inputs: AnalysisInput[] = [], releaseId = '0383dadf-2a4e-4d10-a46a-e9e041da8eb3';
+    const candidate = { key: `musicbrainz:${releaseId}`, source: 'musicbrainz', releaseId, basis: 'title', summary: null, details: 'fetched',
+        release: { releaseId, title: 'Synthetic Applied Release', artistCredit: [{ name: 'Synthetic Credit', joinPhrase: '' }], labels: [{ name: 'Synthetic Release Label', labelId: null, catalogNumber: null }], date: null, groupFirstReleaseDate: null, media: [] } };
+    await db().collection('adminImportLookups').insertOne({ _id, run: 1, state: 'complete', candidates: [candidate], applied: { run: 1, candidateKey: candidate.key, releaseId, choice: 'chosen', basis: 'chosen', values: [], flagged: [], conflicts: [] } } as never);
+    try {
+        const luna: ImportAnalysisProvider = { configured: () => true, analyze: async input => { inputs.push(input); return input.album ? [{ scope: 'album', slotId: null, field: 'title', value: 'Proposed Album', source: 'context', evidence: 'Existing title' }] : []; } };
+        review = await analyzeCatalogReview(String(actor), id, mutation(review.item.revision), luna);
+        for (let tick = 0; tick < 4 && (await importCollection().findOne({ _id }))!.analysis.state !== 'complete'; tick++) await runAdminImportWorkerOnce(luna);
+        const stored = (await importCollection().findOne({ _id }))!;
+        assert.deepEqual([stored.analysis.state, 'lookupContext' in stored.analysis, inputs.map(input => [input.purpose, input.lookupContext])], ['complete', false, [['catalogReview', null], ['catalogReview', null]]]);
+        assert.deepEqual(stored.suggestions.map(value => [value.field, 'lookupContext' in value]), [['title', false]]);
+        assert.ok(!JSON.stringify(inputs).includes('Synthetic Applied Release') && !JSON.stringify(inputs).includes('Synthetic Release Label'));
+    } finally { await db().collection('adminImportLookups').deleteOne({ _id }); }
 });
 
 test('applying a captured Disc Number writes it as a catalog edit, re-derives the order and commits with the receipt; null clears both keys', async () => {
@@ -569,7 +613,7 @@ test('an edit that grows a review draft past 48 KB is refused and writes nothing
 });
 
 test('a pre-Draft v2 review refuses label and visibility edits unconverted, converts once under concurrent edits, and converts when analysis or apply is its first change', async () => {
-    const artistProvider: ImportAnalysisProvider = { configured: () => true, analyze: async input => input.album ? [{ scope: 'album', slotId: null, field: 'artistName', baseline: input.baseline.album.artistName, value: 'Synthetic Luna Artist', source: 'context', evidence: 'Existing title' }] : [] };
+    const artistProvider: ImportAnalysisProvider = { configured: () => true, analyze: async input => input.album ? [{ scope: 'album', slotId: null, field: 'artists', value: [{ name: 'Synthetic Luna Artist', role: 'primary', joinPhrase: null }], source: 'context', evidence: 'Existing title' }] : [] };
     const entry = (id: string) => ({ key: legacyArtistEntryKey(id), name: 'Existing Artist', role: 'primary', joinPhrase: null, musicBrainzId: null });
     const a = await create(), { _id } = await downgrade(a), stored = await importCollection().findOne({ _id });
     let review = await current(a.item.id);
@@ -584,7 +628,7 @@ test('a pre-Draft v2 review refuses label and visibility edits unconverted, conv
     const converted = await importCollection().findOne({ _id });
     assert.deepEqual([converted!.draftVersion, converted!.revision, converted!.receipts.length], [2, stored!.revision + 1, stored!.receipts.length + 1]);
     assert.deepEqual([(converted!.draft as typeof review.item.draft).album.artists, converted!.suggestions.map(value => value.field)], [[entry(a.item.id)], ['artists']]);
-    // Analysis as the first change converts before its baseline is frozen; Luna's Artist name is then compared with the legacy entry.
+    // Analysis as the first change converts before its baseline is frozen; Luna's Artist entries are then compared with the legacy entry.
     const b = await create(), { _id: bId } = await downgrade(b);
     await analyzeCatalogReview(String(actor), b.item.id, mutation(b.item.revision), artistProvider);
     const analyzed = await importCollection().findOne({ _id: bId });
@@ -614,14 +658,16 @@ test('a pre-Draft v2 review whose analysis was queued before deploy converts at 
     review = await edit(await current(id), value => { value.tracks[1].title = 'Edited before dispatch'; });
     const converted = (await importCollection().findOne({ _id }))!, legacyEntry = { key: legacyArtistEntryKey(id), name: 'Existing Artist', role: 'primary', joinPhrase: null, musicBrainzId: null };
     assert.deepEqual([converted.draftVersion, converted.analysis.state, (converted.analysis.baseline as typeof review.item.draft).album.artists], [2, 'queued', [legacyEntry]]);
-    // The worker dispatches the converted baseline as its v1 view and maps Luna's Artist name onto an entries suggestion.
-    const lunaProvider: ImportAnalysisProvider = { configured: () => true, analyze: async input => input.album ? [
-        { scope: 'album', slotId: null, field: 'artistName', baseline: input.baseline.album.artistName, value: 'Synthetic Luna Artist', source: 'context', evidence: 'Existing title' },
-        { scope: 'album', slotId: null, field: 'title', baseline: input.baseline.album.title, value: 'Proposed Album', source: 'context', evidence: 'Existing title' }] : [] };
+    // The worker dispatches the converted Draft v2 baseline (names only) and stores Luna's Artist entries as an entries suggestion.
+    const inputs: AnalysisInput[] = [];
+    const lunaProvider: ImportAnalysisProvider = { configured: () => true, analyze: async input => { inputs.push(input); return input.album ? [
+        { scope: 'album', slotId: null, field: 'artists', value: [{ name: 'Synthetic Luna Artist', role: 'primary', joinPhrase: null }], source: 'context', evidence: 'Existing title' },
+        { scope: 'album', slotId: null, field: 'title', value: 'Proposed Album', source: 'context', evidence: 'Existing title' }] : []; } };
     for (let tick = 0; tick < 5 && (await importCollection().findOne({ _id }))!.analysis.state !== 'complete'; tick++) await runAdminImportWorkerOnce(lunaProvider);
     const analyzed = (await importCollection().findOne({ _id }))!;
     assert.deepEqual([analyzed.draftVersion, analyzed.analysis.state, analyzed.suggestions.map(value => value.field)], [2, 'complete', ['artists', 'title']]);
     assert.deepEqual(analyzed.suggestions[0].baseline, [legacyEntry]);
+    assert.deepEqual([inputs[0].purpose, inputs[0].baseline.album.artists, inputs[0].lookupContext], ['catalogReview', [{ name: 'Existing Artist', role: 'primary', joinPhrase: null }], null]);
     review = await current(id);
     const title = review.item.suggestions.find(value => value.field === 'title')!;
     review = await adoptCatalogReview(String(actor), id, { ...mutation(review.item.revision), generation: review.item.analysis.generation, selectedIds: [title.id], rejectIds: [] });

@@ -13,8 +13,20 @@ type ReviewDraft = ImportDraft | ImportDraftV2;
 type ReviewSuggestion = ImportSuggestion | ImportSuggestionV2;
 export const suggestionValue = (draft: ReviewDraft, suggestion: ReviewSuggestion): unknown => suggestion.scope === 'album'
   ? (draft.album as Record<string, unknown>)[suggestion.field]
-  : draft.tracks.find(track => track.slotId === suggestion.slotId)?.[suggestion.field as 'title' | 'trackNumber'];
+  : (draft.tracks.find(track => track.slotId === suggestion.slotId) as Record<string, unknown> | undefined)?.[suggestion.field];
 export const sameValue = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+const nameOf = (value: unknown) => (value as { name?: string } | null)?.name ?? null;
+/**
+ * Whether a suggestion already holds the current value as the server resolves it (adminImportLunaTicks.ts sameSuggestedValue): a
+ * label by name, IDs aside; Artist entries by name, role and join phrase in order; any other value exactly.
+ */
+const matches = (field: string, current: unknown, value: unknown) => {
+  if (field === 'label') return nameOf(current) !== null && nameOf(current) === nameOf(value);
+  if (field !== 'artists' || !Array.isArray(current) || !Array.isArray(value)) return sameValue(current, value);
+  return current.length === value.length && current.every((entry: ImportArtistEntry, index) => entry.name === value[index].name && entry.role === value[index].role && (entry.joinPhrase ?? null) === (value[index].joinPhrase ?? null));
+};
+/** As acceptance does: the baseline must still be current, except that a label suggestion naming the current label is that value. */
+const adoptable = (current: unknown, suggestion: ReviewSuggestion) => sameValue(current, suggestion.baseline) || (suggestion.field === 'label' && matches('label', current, suggestion.value));
 /**
  * Artist entries read as their byline, then one numbered line per entry with its role, so a role change alone stays visible;
  * a label reads as its name and other values as the shared review text.
@@ -36,14 +48,14 @@ export function ImportReview({ draft, suggestions, selected, onSelect, onAdopt, 
   const role = (value: string) => shared(`catalog.credit.${value}` as MessageKey);
   const contextId = useId();
   const pending = suggestions.filter(item => item.decision === 'pending');
-  const eligible = pending.filter(item => sameValue(suggestionValue(draft, item), item.baseline));
+  const eligible = pending.filter(item => adoptable(suggestionValue(draft, item), item));
   const allowed = selected.filter(id => eligible.some(item => item.id === id));
   return <section className={styles.panel}>
     <header className={styles.sectionHeader}><div><h2>{t('review.title')}</h2><p className={styles.muted}>{draftCopy ?? t('review.draft_only')}</p></div></header>
     {pending.length === 0 && (emptyContent ?? <p>{t('review.empty')}</p>)}
     {pending.map((suggestion, index) => {
       const current = suggestionValue(draft, suggestion);
-      const conflict = !sameValue(current, suggestion.baseline);
+      const conflict = !adoptable(current, suggestion);
       const trackIndex = draft.tracks.findIndex(track => track.slotId === suggestion.slotId);
       const filename = suggestion.scope === 'track' ? filenames?.find(file => file.slotId === suggestion.slotId)?.relativePath : undefined;
       const label = `${trackIndex >= 0 ? `${trackIndex + 1} · ` : ''}${t(`field.${suggestion.field}`)}`;
@@ -57,7 +69,7 @@ export function ImportReview({ draft, suggestions, selected, onSelect, onAdopt, 
         </div>
         <details className={styles.details}><summary>{t('layout.evidence')}</summary><p>{t('review.source', { source: t(`source.${suggestion.source}`) })} · {suggestion.evidence}</p></details>
         {conflict && <p>{t('review.conflict')}</p>}
-        {sameValue(current, suggestion.value) && <p>{t('review.already_matches')}</p>}
+        {matches(suggestion.field, current, suggestion.value) && <p>{t('review.already_matches')}</p>}
       </article>;
     })}
     {pending.length > 0 && <div className={styles.actions}>

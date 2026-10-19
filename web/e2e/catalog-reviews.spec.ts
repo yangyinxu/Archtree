@@ -10,6 +10,7 @@
  *   Variables: locale
  * Tests
  *   - private Album covers disappear on User view or role loss and make no later private image reads
+ *   - a Luna label suggestion is only an identity hint: it is never a Review item, and Keep current rejects it without changing the label
  *   - a long direct catalog confirmation starts at the first old/new field and keeps its actions reachable at 390px
  *   - reverting catalog edits restores review and cover actions without issuing a catalog mutation
  *   - reverting an old catalog draft retains the recovery entry for a newer saved revision
@@ -183,6 +184,11 @@ async function setup(page: Page, administrator = true, initialReleaseDate: { yea
       if (path.endsWith('/analyze')) {
         review = { ...review, revision: review.revision + 1, analysis: { ...review.analysis, state: 'queued', generation: 1, operationId: body.operationId } };
         return route.fulfill({ status: 202, json: receipt(body, 'analyze'), headers });
+      }
+      if (path.endsWith('/adopt') && !(body.selectedIds as string[]).length) {
+        // Keep current rejects the listed suggestions and changes no value.
+        review = { ...review, revision: review.revision + 1, suggestions: review.suggestions.map(value => (body.rejectIds as string[]).includes(value.id) ? { ...value, decision: 'rejected' } : value) };
+        return route.fulfill({ json: receipt(body, 'adopt'), headers });
       }
       if (path.endsWith('/adopt')) {
         expect(body.selectedIds).toEqual([titleSuggestionId]); expect(body.rejectIds).toEqual([]);
@@ -828,6 +834,25 @@ for (const variant of localizedViewports) {
     } });
   });
 }
+
+test('a Luna label suggestion is only an identity hint: it is never a Review item, and Keep current rejects it without changing the label', async ({ page }) => {
+  const api = await setup(page); api.ready();
+  const item = api.review(), [title] = item.suggestions;
+  item.draft.album.label = { name: 'Synthetic Label', musicBrainzId: null };
+  const hint = { ...title, id: '6'.repeat(24), field: 'label' as const, baseline: { name: 'Synthetic Label', musicBrainzId: null }, value: { name: 'Synthetic label hint', musicBrainzId: null } };
+  item.suggestions = [hint];
+  await enter(page, `/finitude/admin/catalog-reviews/${reviewId}`);
+  await page.getByRole('tab', { name: label('admin.catalog_review.review_tab') }).click();
+  const panel = page.getByRole('tabpanel', { name: label('admin.catalog_review.review_tab') });
+  await expect(panel.getByRole('heading', { name: label('admin.catalog_review.hints_title'), exact: true })).toBeVisible();
+  await expect(panel.getByText('Synthetic label hint', { exact: true })).toBeVisible();
+  await expect(panel.getByRole('checkbox')).toHaveCount(0);
+  expect((await new AxeBuilder({ page }).include('[role=tabpanel]:not([hidden])').analyze()).violations).toEqual([]);
+  await panel.getByRole('button', { name: label('admin.action.keep'), exact: true }).click();
+  await expect.poll(() => api.writes.filter(write => write.path.endsWith('/adopt')).map(write => [write.body.selectedIds, write.body.rejectIds])).toEqual([[[], [hint.id]]]);
+  await expect(panel.getByRole('button', { name: label('admin.action.keep'), exact: true })).toHaveCount(0);
+  expect(api.review().draft.album.label).toEqual({ name: 'Synthetic Label', musicBrainzId: null });
+});
 
 test('a long direct catalog confirmation starts at the first old/new field and keeps its actions reachable at 390px', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });

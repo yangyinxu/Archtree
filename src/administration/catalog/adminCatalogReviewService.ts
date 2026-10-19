@@ -138,6 +138,10 @@ export function convertLegacyCatalogReview(doc: AdminImportDocument): void {
 }
 /** The part of a review draft the 48 KB cap measures: the read-only Credits context is never edited, so it never counts. */
 const cappedReviewDraft = (draft: ImportDraftV2): ImportDraftV2 => ({ ...draft, album: { ...draft.album, artists: [], label: null } });
+/**
+ * Existing-Album reviews: Artist-entries and label suggestions are identity hints and never change Credits, so adopting one is
+ * invalid input (rejecting, Keep current, stays allowed); visibility is never suggested.
+ */
 const policy: AdminProjectPolicy<CatalogReviewResponse> = {
     purpose: 'catalogReview', response,
     reloadRequired: (kind, body) => kind === 'edit' && isLegacyCatalogReviewDraft(body.draft),
@@ -247,7 +251,10 @@ export const cancelCatalogReviewAnalysis = (actor: string, id: string, raw: unkn
     if (['queued', 'running'].includes(doc.analysis.state)) doc.analysis.state = 'cancelled';
 }, policy);
 
-/** Apply selection is separate from suggestion adoption and excludes identity/association/storage fields, Credits and labels. */
+/**
+ * Apply selection is separate from suggestion adoption and excludes identity/association/storage fields, Credits and labels.
+ * Artist-entries and label suggestions are identity hints and never change Credits.
+ */
 export function parseCatalogReviewFields(raw: unknown): CatalogReviewField[] {
     if (!Array.isArray(raw) || !raw.length || raw.length > CATALOG_REVIEW_MAX_FIELDS) return invalidImport();
     const seen = new Set<string>();

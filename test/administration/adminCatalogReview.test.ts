@@ -5,7 +5,7 @@
  * Tests
  *   - review naming evidence accepts only actual bounded basenames and preserves missing evidence
  *   - apply selection cannot mutate Artist identity, Credits, label, visibility, files or another scope
- *   - catalog analysis cannot claim nonexistent folder or missing filename evidence
+ *   - catalog analysis cannot claim nonexistent folder or missing filename evidence, and its Disc and Track Numbers need a filename
  *   - apply selection holds at most the two Album fields and three per Track
  *   - review context keeps stored Credit order, primary and featured Artists only, each name once, adjacent join phrases and the first named label
  *   - only a draft with an own Album artistName is a v1 review draft
@@ -18,7 +18,7 @@ import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
 import { ObjectId } from 'mongodb';
 import { catalogReviewCredits, catalogReviewOriginalFilename, convertLegacyCatalogReview, isLegacyCatalogReviewDraft, parseCatalogReviewDraft, parseCatalogReviewFields } from '../../src/administration/catalog/adminCatalogReviewService';
-import { validateAnalysisSuggestions, type AnalysisInput } from '../../src/administration/import/adminImportProvider';
+import { validateLunaSuggestions, type AnalysisInput } from '../../src/administration/import/adminImportProvider';
 import { uuid } from '../../src/administration/import/adminImportContract';
 import { legacyArtistEntryKey } from '../../src/administration/import/adminImportDraftCompat';
 import type { ImportArtistEntry, ImportDraftV2 } from '../../src/administration/import/adminImportDraft';
@@ -60,20 +60,26 @@ test('apply selection cannot mutate Artist identity, Credits, label, visibility,
     for (const input of [[], [{ scope: 'artist', slotId: null, field: 'title' }], [{ scope: 'track', slotId, field: 'releaseDate' }], [{ scope: 'album', slotId, field: 'title' }], [{ scope: 'album', slotId: null, field: 'title', value: 'Not saved' }]]) assert.throws(() => parseCatalogReviewFields(input));
     const repeated = { scope: 'album', slotId: null, field: 'title' }; assert.throws(() => parseCatalogReviewFields([repeated, repeated]));
 });
-test('catalog analysis cannot claim nonexistent folder or missing filename evidence', () => {
+test('catalog analysis cannot claim nonexistent folder or missing filename evidence, and its Disc and Track Numbers need a filename', () => {
     const slotId = randomUUID();
-    const input: AnalysisInput = { purpose: 'catalogReview', generation: 1, chunk: 0, album: true, slots: [], manifest: { rootLabel: '', files: [{ slotId, filename: '', relativePath: '', byteLength: null }] }, baseline: { album: { title: 'Existing title', artistName: '', releaseDate: null, visibility: 'public' }, tracks: [] } };
-    const suggestion = { scope: 'album', slotId: null, field: 'title', text: 'Correction', number: null, date: null, source: 'context', evidence: 'Existing title context' };
-    assert.equal(validateAnalysisSuggestions({ suggestions: [suggestion] }, input)[0].source, 'context');
-    for (const source of ['filename', 'folder']) assert.throws(() => validateAnalysisSuggestions({ suggestions: [{ ...suggestion, source }] }, input));
+    const input: AnalysisInput = { purpose: 'catalogReview', generation: 1, chunk: 0, album: true, slots: [], lookupContext: null, manifest: { rootLabel: '', files: [{ slotId, filename: '', relativePath: '', byteLength: null }] },
+        baseline: { album: { title: 'Existing title', artists: [{ name: 'Existing Artist', role: 'primary', joinPhrase: null }], label: null, releaseDate: null }, tracks: [] } };
+    const suggestion = { scope: 'album', slotId: null, field: 'title', text: 'Correction', number: null, date: null, artists: null, source: 'context', evidence: 'Existing title context' };
+    assert.equal(validateLunaSuggestions({ suggestions: [suggestion] }, input)[0].source, 'context');
+    for (const source of ['filename', 'folder']) assert.throws(() => validateLunaSuggestions({ suggestions: [{ ...suggestion, source }] }, input));
+    // Artist entries and the label are identity hints that may rest on context alone.
+    const hints = [{ ...suggestion, field: 'artists', text: null, artists: [{ name: 'Lorem Ensemble', role: 'primary', joinPhrase: null }] }, { ...suggestion, field: 'label', text: 'Amet Records' }];
+    assert.deepEqual(validateLunaSuggestions({ suggestions: hints }, input).map(value => value.field), ['artists', 'label']);
     input.manifest.files[0].filename = '01 - Real.mp3';
-    assert.equal(validateAnalysisSuggestions({ suggestions: [{ ...suggestion, source: 'filename' }] }, input)[0].source, 'filename');
-    const trackInput: AnalysisInput = { ...input, album: false, slots: [slotId], baseline: { ...input.baseline, tracks: [{ slotId, title: 'Existing', trackNumber: null }] } };
-    const trackNumber = { ...suggestion, scope: 'track', slotId, field: 'trackNumber', text: null, number: 3 };
-    assert.throws(() => validateAnalysisSuggestions({ suggestions: [trackNumber] }, trackInput));
-    assert.equal(validateAnalysisSuggestions({ suggestions: [{ ...trackNumber, source: 'filename' }] }, trackInput)[0].value, 3);
+    assert.equal(validateLunaSuggestions({ suggestions: [{ ...suggestion, source: 'filename' }] }, input)[0].source, 'filename');
+    const trackInput: AnalysisInput = { ...input, album: false, slots: [slotId], baseline: { ...input.baseline, tracks: [{ slotId, title: 'Existing', discNumber: null, trackNumber: null }] } };
+    for (const field of ['trackNumber', 'discNumber']) {
+        const number = { ...suggestion, scope: 'track', slotId, field, text: null, number: 3 };
+        for (const source of ['context', 'folder']) assert.throws(() => validateLunaSuggestions({ suggestions: [{ ...number, source }] }, trackInput), `${field} from ${source}`);
+        assert.equal(validateLunaSuggestions({ suggestions: [{ ...number, source: 'filename' }] }, trackInput)[0].value, 3);
+    }
     trackInput.manifest.files[0].filename = '';
-    assert.throws(() => validateAnalysisSuggestions({ suggestions: [{ ...trackNumber, source: 'filename' }] }, trackInput));
+    for (const field of ['trackNumber', 'discNumber']) assert.throws(() => validateLunaSuggestions({ suggestions: [{ ...suggestion, scope: 'track', slotId, field, text: null, number: 3, source: 'filename' }] }, trackInput));
 });
 test('apply selection holds at most the two Album fields and three per Track', () => {
     const tracks = (count: number) => Array.from({ length: count }, () => randomUUID()).flatMap(slotId => ['title', 'discNumber', 'trackNumber'].map(field => ({ scope: 'track', slotId, field })));

@@ -2,7 +2,7 @@
  * Exports
  *   Types: ProjectReceipt, AdminImportDocument, AdminProjectPolicy
  *   Functions: isDraftV2Document, importCollection, isImportProject, importDigest, importCreateHash,
- *              idleAnalysis, touchImportAdmin, withImportAdmin, importLookupRecord,
+ *              idleAnalysis, touchImportAdmin, withImportAdmin, importLookupRecord, importAppliedLookupRelease,
  *              initializeAdminImportStorage, adminImportDto, adminImportDetail, parseAdminProjectMutation,
  *              mutateAdminProject, mutateAdminImport, createAdminImport, getAdminImport, editAdminImport,
  *              listAdminImports, analyzeAdminImport, analyzeAdminProject, cancelAdminImportAnalysis,
@@ -13,9 +13,9 @@
  *   Constants: importPurposeFilter, adminImportIndexes
  *   Re-exports: importCandidateProjection, importCandidateRevision
  * Internal
- *   Types: Receipt, Chunk, Analysis
+ *   Types: Receipt, Analysis, StoredSuggestion
  *   Functions: notFound, conflict, isActive, admit, idValue, importCapabilities, response, outdatedDecisions,
- *              revisionFloor, boundedTags, dailyAnalysisSlot, reserveDailyAnalysisAttempt
+ *              revisionFloor, dailyAnalysisSlot, reserveDailyAnalysisAttempt
  *   Constants: collection, digest, occupiedAnalysis, touchAdmin, withAdmin, IMPORT_V2_RECEIPT_KINDS,
  *              importPolicy, mutation, slotBoundKinds, importRevisionFloors, readOnlyProjectKinds, mutate,
  *              filters, LIST_ROW_COVER
@@ -27,24 +27,31 @@ import { ObjectId, type ClientSession, type Db, type Filter } from 'mongodb';
 import { getDatabaseClient, getDb } from '../../infrastructure/database';
 import { ADMIN_IMPORT_LIMITS as LIMITS, AdminImportError, IMPORT_APPROVAL_FIELDS, cleanText, exact, importEnabled, invalidImport, legacyDefaultDraftV1, objectId, parseDraft, parseManifest, record, uuid, type AdminImportDetail, type AdminImportDetailV2, type AdminImportResponse, type ImportAnalysisState, type ImportDraft, type ImportDuplicateDecision, type ImportEmbeddedTags, type ImportIssue, type ImportManifest, type ImportReceipt, type ImportSuggestion, type ImportWorkbenchFilter, type ImportWorkbenchResponse } from './adminImportContract';
 import { type AnalysisInput, type ImportAnalysisProvider, ImportProviderError, OpenAiImportAnalysisProvider } from './adminImportProvider';
+import { LUNA_SUGGESTION_LIMIT, lunaAnalysisChunks, lunaAnalysisInput, lunaContextRecord, lunaDispatchIssue, lunaIdentityProposals, lunaLookupContextFor, lunaSuggestionV1, lunaSuggestionV2, type AnalysisChunk, type LunaContextRecord, type StoredLunaLookupContext } from './adminImportLuna';
 import type { CatalogReviewSource, CatalogReviewApplied } from '../catalog/adminCatalogReviewContract';
 import type { ImportMedia } from './adminImportMediaTypes';
 import { importPrivateStorageReady } from './adminImportMediaTypes';
-import { importDraftV2FromV1, importDraftV2View, importDraftVersion, importDraftWritable, importSuggestionsV2View, LEGACY_IMPORT_RECEIPT_KINDS, legacyAdministratorOrigins, importDecisionsV2View, importPublishedV2View, legacyAnalysisView, legacyAssetsView, legacyDecisionsView, legacyDraftView, legacyManifestView, legacyPublicationView, legacyReceiptsView, legacySelectedCover, legacySuggestionsView, legacyTagsView, importProjectV2View, writableDraftFilter } from './adminImportDraftCompat';
-import { DRAFT_V2, DRAFT_V2_LIMITS, defaultDraftV2, draftBytes, draftV2Suggestion, hasOwn, importApprovalDigest, isDraftV2, retainBoundDecisions, sameDraftValue, type ImportDecisionV2, type ImportDraftOrigins, type ImportDraftV2, type ImportSuggestionV2 } from './adminImportDraft';
+import { catalogReviewSourceDisc, importDraftV2FromV1, importDraftV2View, importDraftVersion, importDraftWritable, importSuggestionsV2View, LEGACY_IMPORT_RECEIPT_KINDS, legacyAdministratorOrigins, importDecisionsV2View, importPublishedV2View, legacyAnalysisView, legacyAssetsView, legacyDecisionsView, legacyDraftView, legacyManifestView, legacyPublicationView, legacyReceiptsView, legacySelectedCover, legacySuggestionsView, legacyTagsView, importProjectV2View, writableDraftFilter } from './adminImportDraftCompat';
+import { DRAFT_V2, DRAFT_V2_LIMITS, defaultDraftV2, draftBytes, hasOwn, importApprovalDigest, isDraftV2, retainBoundDecisions, sameDraftValue, type ImportDecisionV2, type ImportDraftOrigins, type ImportDraftV2, type ImportSuggestionV2 } from './adminImportDraft';
 import { applyAdministratorChanges, boundDraftChanges, boundedJson, convertLegacyImportProject, draftValueAt, draftWithinSizeLimit, importAutomationMarkers, markAdministratorValues, originOf, parseDraftChanges, parseDraftValue, setDraftValue, storedDraftV2, type ImportDraftPath } from './adminImportValueState';
 import { importTagsV2View } from './adminImportTags';
 import { importCoverChoice, type ImportCoverChoice } from './adminImportCoverAutomation';
 import { ADMIN_IMPORT_LOOKUP_COLLECTION } from '../lookup/lookupContract';
-import type { ImportLookupGate, MetadataLookupRecord } from '../lookup/metadataLookupRecord';
+import type { ImportLookupGate, LookupApplication, MetadataLookupRecord, StoredLookupCandidate } from '../lookup/metadataLookupRecord';
 import { IMPORT_CANDIDATE_COLLECTIONS, IMPORT_IDENTITY_FENCE_ID, importCandidateProjection, importCandidateRevision, importCandidateRow, importIdentityCandidates, readyImportCandidate } from './adminImportIdentity';
 import { importMusicBrainzNameMap, type ImportMusicBrainzNames } from './adminImportMusicBrainzIds';
 import { keepableMusicBrainzId } from '../../utils/musicBrainzId';
 
 export type ProjectReceipt = Omit<ImportReceipt, 'kind'> & { kind: ImportReceipt['kind'] | 'apply' } & { actorId: string; hash: string; at: Date; selection?: { generation: number; acceptedIds: string[]; rejectedIds: string[] } };
 type Receipt = ProjectReceipt;
-type Chunk = { index: number; slots: string[]; album: boolean; hash: string; state: 'pending' | 'inflight' | 'complete' | 'failed' | 'unknown'; attemptId: string | null; startedAt: Date | null; completedAt: Date | null };
-type Analysis = { state: ImportAnalysisState; generation: number; operationId: string | null; actorId: string | null; grantExpiresAt: Date | null; baseline: ImportDraft | ImportDraftV2 | null; tags?: { slotId: string; tags: ImportEmbeddedTags }[]; chunks: Chunk[]; issue: ImportIssue; leaseOwner: string | null; leaseUntil: Date | null };
+/**
+ * One analysis generation. `lookupContext` is the applied MusicBrainz release captured at admission (adminImportLuna.ts); absent
+ * when none was applied, for a catalog review and for an analysis admitted by an earlier release. It is never projected.
+ */
+type Analysis = { state: ImportAnalysisState; generation: number; operationId: string | null; actorId: string | null; grantExpiresAt: Date | null; baseline: ImportDraft | ImportDraftV2 | null; tags?: { slotId: string; tags: ImportEmbeddedTags }[]; chunks: AnalysisChunk[]; issue: ImportIssue; leaseOwner: string | null; leaseUntil: Date | null;
+    lookupContext?: StoredLunaLookupContext };
+/** A stored suggestion: v1 or Draft v2, a Luna one with the context its chunk sent (`lookupContext`, server-only). */
+type StoredSuggestion = (ImportSuggestion | ImportSuggestionV2) & { lookupContext?: LunaContextRecord };
 export type AdminImportDocument = {
     purpose?: 'import' | 'catalogReview' | null; catalogSource?: CatalogReviewSource; catalogEvidence?: Record<string, string>; catalogApplied?: CatalogReviewApplied;
     /** Absent, null or 1 is a v1 draft; 2 is Draft v2 (imports and catalog reviews); any other value is read-only here. */
@@ -61,7 +68,7 @@ export type AdminImportDocument = {
      */
     musicBrainzNames?: ImportMusicBrainzNames;
     _id: ObjectId; actorId: string; revision: number; createdAt: Date; updatedAt: Date; manifest: ImportManifest; draft: ImportDraft | ImportDraftV2; analysis: Analysis; analysisHistory: Analysis[]; attemptsUsed: number;
-    suggestions: (ImportSuggestion | ImportSuggestionV2)[]; decisions: (ImportDuplicateDecision | ImportDecisionV2)[]; receipts: Receipt[]; recoveryReceipts?: Receipt[]; automaticReceipts?: Receipt[]; media?: ImportMedia };
+    suggestions: StoredSuggestion[]; decisions: (ImportDuplicateDecision | ImportDecisionV2)[]; receipts: Receipt[]; recoveryReceipts?: Receipt[]; automaticReceipts?: Receipt[]; media?: ImportMedia };
 /** A Draft v2 document: an import project or catalog review written by this release, or converted at its first admitted change. */
 export const isDraftV2Document = (doc: AdminImportDocument) => doc.draftVersion === DRAFT_V2;
 export const importCollection = () => getDb()!.collection<AdminImportDocument>('adminAlbumImports');
@@ -118,8 +125,19 @@ const withAdmin = withImportAdmin;
  * The import's metadata lookup record, read in the caller's transaction (only the given fields when a projection is passed). It
  * names the collection directly, so this module never loads the lookup service.
  */
-export const importLookupRecord = (id: ObjectId, session: ClientSession, projection?: Record<string, 1>) =>
+export const importLookupRecord = (id: ObjectId, session: ClientSession, projection?: Record<string, unknown>) =>
     getDb()!.collection<MetadataLookupRecord>(ADMIN_IMPORT_LOOKUP_COLLECTION).findOne({ _id: id }, projection ? { session, projection } : { session }) as Promise<MetadataLookupRecord | null>;
+/**
+ * The MusicBrainz release applied to the import and its stored candidate, read in the caller's transaction (the application,
+ * then only that candidate): null unless a candidate other than none is applied and still holds fetched details of that release.
+ */
+export async function importAppliedLookupRelease(id: ObjectId, session: ClientSession): Promise<{ applied: LookupApplication; candidate: StoredLookupCandidate } | null> {
+    const applied = (await importLookupRecord(id, session, { applied: 1 }))?.applied;
+    if (!applied || typeof applied !== 'object' || applied.choice === 'none' || typeof applied.candidateKey !== 'string' || typeof applied.releaseId !== 'string') return null;
+    const found = await importLookupRecord(id, session, { candidates: { $elemMatch: { key: applied.candidateKey } } });
+    const candidate = Array.isArray(found?.candidates) ? found!.candidates[0] : undefined;
+    return candidate && candidate.key === applied.candidateKey && candidate.details === 'fetched' && candidate.release && candidate.releaseId === applied.releaseId ? { applied, candidate } : null;
+}
 /** Receipt kinds the Draft v2 detail lists: the frozen v1 kinds and the metadata lookup kinds. */
 const IMPORT_V2_RECEIPT_KINDS: ReadonlySet<string> = new Set([...LEGACY_IMPORT_RECEIPT_KINDS, 'lookup', 'lookup-retry', 'lookup-choose', 'lookup-resolve']);
 
@@ -355,33 +373,42 @@ export function analyzeAdminProject<T>(actor: string, id: string, raw: unknown, 
         // A newer-format project is never dispatched by this release, so it holds none of its capacity, even with a chunk left in flight.
         if (await collection().countDocuments({ $and: [{ 'analysis.actorId': actor }, occupiedAnalysis, writableDraftFilter] }, { session, limit: 1 })) throw new AdminImportError(429, 'ADMIN_IMPORT_ACTOR_BUSY');
         if (await collection().countDocuments({ $and: [occupiedAnalysis, writableDraftFilter] }, { session, limit: 2 }) >= 2) throw new AdminImportError(429, 'ADMIN_IMPORT_CAPACITY');
-        const generation = doc.analysis.generation + 1, chunks: Chunk[] = [];
-        // Luna keeps the v1 prompt until S15: version-2 evidence is sent as its five v1 fields.
+        const generation = doc.analysis.generation + 1;
+        // Luna receives version-2 evidence as its five v1 fields; identifiers never.
         const tags = (doc.media?.assets ?? []).filter(asset => asset.state === 'ready' && asset.tags && doc.manifest.files.some(file => file.slotId === asset.slotId)).map(asset => ({ slotId: asset.slotId, tags: legacyTagsView(asset.tags)! }));
-        const addChunk = (slots: string[], album: boolean) => { const index = chunks.length; chunks.push({ index, slots, album, hash: digest({ generation, manifest: doc.manifest, baseline: doc.draft, tags, slots, album }), state: 'pending', attemptId: null, startedAt: null, completedAt: null }); };
-        addChunk([], true); for (let offset = 0; offset < doc.manifest.files.length; offset += LIMITS.tracksPerChunk) addChunk(doc.manifest.files.slice(offset, offset + LIMITS.tracksPerChunk).map(file => file.slotId), false);
+        const chunks = lunaAnalysisChunks(generation, doc.manifest, doc.draft, tags);
         if (doc.attemptsUsed + chunks.length > LIMITS.attempts) throw conflict('ADMIN_IMPORT_BUDGET_EXHAUSTED');
+        // The applied release is captured once for the whole generation, read in this transaction; a read failure admits nothing.
+        const context = policy.purpose === 'import' ? lunaLookupContextFor(await importAppliedLookupRelease(doc._id, session)) : null;
         if (doc.analysis.generation) doc.analysisHistory.push(structuredClone(doc.analysis));
-        doc.analysis = { state: 'queued', generation, operationId: body.operationId, actorId: actor, grantExpiresAt: new Date(Date.now() + LIMITS.grantMs), baseline: structuredClone(doc.draft), tags, chunks, issue: null, leaseOwner: null, leaseUntil: null };
+        doc.analysis = { state: 'queued', generation, operationId: body.operationId, actorId: actor, grantExpiresAt: new Date(Date.now() + LIMITS.grantMs), baseline: structuredClone(doc.draft), tags, chunks, issue: null, leaseOwner: null, leaseUntil: null,
+            ...(context ? { lookupContext: context } : {}) };
     }, policy);
 }
 /** Stops the active analysis; a stop from before the current generation's analysis receipt conflicts (revisionFloor). */
 export const cancelAdminImportAnalysis = (actor: string, id: string, raw: unknown) => mutate(actor, id, mutation(raw, []), 'cancel-analysis', async doc => { if (isActive(doc)) doc.analysis.state = 'cancelled'; });
 
-/** The Draft v2 path a suggestion proposes a value for, or null for a field Draft v2 does not suggest. */
+/** The Draft v2 path a suggestion proposes a value for, or null for a field Draft v2 does not suggest (such as a v1 artistName). */
 export function suggestionPath(suggestion: ImportSuggestion | ImportSuggestionV2): ImportDraftPath | null {
-    if (suggestion.scope === 'album') return ['title', 'artists', 'releaseDate'].includes(suggestion.field) ? `album.${suggestion.field as 'title' | 'artists' | 'releaseDate'}` : null;
-    return typeof suggestion.slotId === 'string' && ['title', 'trackNumber'].includes(suggestion.field) ? `tracks.${suggestion.slotId}.${suggestion.field as 'title' | 'trackNumber'}` : null;
+    if (suggestion.scope === 'album') return ['title', 'artists', 'label', 'releaseDate'].includes(suggestion.field) ? `album.${suggestion.field as 'title' | 'artists' | 'label' | 'releaseDate'}` : null;
+    return typeof suggestion.slotId === 'string' && ['title', 'discNumber', 'trackNumber'].includes(suggestion.field) ? `tracks.${suggestion.slotId}.${suggestion.field as 'title' | 'discNumber' | 'trackNumber'}` : null;
 }
 /**
  * Accepts one suggestion into a Draft v2 project: its baseline must still be the current value, unless the import's current value
  * is automatic (written from file tags after that baseline), which acceptance replaces as a field save would. Artist entries are
  * the exception: an Artist suggestion never replaces entries that changed since its baseline, automatic ones included (the
- * legacy-project rule). In an import the value becomes the administrator's own; a catalog review records no value origins
- * (automation never writes its draft).
+ * legacy-project rule). A label is a scalar path like the title, so an automatic label written after the baseline is replaced too;
+ * a label suggestion naming the current label already is that value and writes nothing, so the label keeps its MusicBrainz ID.
+ * In an import the value becomes the administrator's own either way, so later automation never replaces the accepted label; a
+ * catalog review records no value origins (automation never writes its draft).
  */
 export function acceptDraftV2Suggestion(doc: AdminImportDocument, draft: ImportDraftV2, suggestion: ImportSuggestion | ImportSuggestionV2) {
     const path = suggestionPath(suggestion); if (!path) throw conflict('ADMIN_IMPORT_SUGGESTION_STALE');
+    const suggested = suggestion.value as { name?: unknown } | null;
+    if (path === 'album.label' && draft.album.label && suggested && typeof suggested === 'object' && suggested.name === draft.album.label.name) {
+        if (isImportProject(doc)) markAdministratorValues(doc.draftOrigins ??= {}, [path]);
+        return;
+    }
     const automatic = isImportProject(doc) && path !== 'album.artists' && originOf(doc.draftOrigins, path) === 'automatic';
     if (!sameDraftValue(draftValueAt(draft, path), suggestion.baseline) && !automatic) throw conflict('ADMIN_IMPORT_FIELD_CONFLICT');
     let value: unknown; try { value = parseDraftValue(path, suggestion.value, draft); } catch { throw conflict('ADMIN_IMPORT_SUGGESTION_STALE'); }
@@ -390,7 +417,7 @@ export function acceptDraftV2Suggestion(doc: AdminImportDocument, draft: ImportD
 export const adoptAdminImportSuggestions = (actor: string, id: string, raw: unknown) => adoptAdminProjectSuggestions(actor, id, raw, importPolicy);
 export function adoptAdminProjectSuggestions<T>(actor: string, id: string, raw: unknown, policy: AdminProjectPolicy<T>) {
     const body = mutation(raw, ['generation', 'selectedIds', 'rejectIds']);
-    if (!Number.isInteger(body.generation) || !Array.isArray(body.selectedIds) || !Array.isArray(body.rejectIds) || body.selectedIds.length + body.rejectIds.length < 1 || body.selectedIds.length + body.rejectIds.length > 203 || [...body.selectedIds, ...body.rejectIds].some(value => typeof value !== 'string' || !/^[a-f0-9]{24}$/.test(value)) || new Set([...body.selectedIds, ...body.rejectIds]).size !== body.selectedIds.length + body.rejectIds.length) return invalidImport();
+    if (!Number.isInteger(body.generation) || !Array.isArray(body.selectedIds) || !Array.isArray(body.rejectIds) || body.selectedIds.length + body.rejectIds.length < 1 || body.selectedIds.length + body.rejectIds.length > LUNA_SUGGESTION_LIMIT || [...body.selectedIds, ...body.rejectIds].some(value => typeof value !== 'string' || !/^[a-f0-9]{24}$/.test(value)) || new Set([...body.selectedIds, ...body.rejectIds]).size !== body.selectedIds.length + body.rejectIds.length) return invalidImport();
     const selected = body.selectedIds as string[], rejected = body.rejectIds as string[];
     return mutateAdminProject(actor, id, body, 'adopt', async doc => {
         if (doc.analysis.generation !== body.generation) throw conflict('ADMIN_IMPORT_SUGGESTION_STALE');
@@ -420,28 +447,32 @@ export function adoptAdminProjectSuggestions<T>(actor: string, id: string, raw: 
 export { importCandidateProjection, importCandidateRevision };
 /**
  * The duplicate candidates the import editor loads automatically on opening Review and the approval confirmation: exact
- * case-insensitive name candidates for each Artist entry, the label, the Album and the tracks, one verified byte candidate per
- * staged hash, and every byte or title match among the members of each Album candidate and of the saved append target
- * (importIdentityCandidates): at most 860 items, with `memberMatchesComplete` false when more member matches exist, and the
+ * case-insensitive name candidates for each Artist entry, the label, the Album and the tracks, also for the names and titles each
+ * pending Luna proposal shown would write (Artist entries, label, Album and track titles), so the confirmation preselects a ticked
+ * suggestion as if it were applied; one verified byte candidate per staged hash; every byte or title match among the members of
+ * each Album candidate and of the saved append target; and the exact-ID and alias candidates of the saved draft
+ * (importIdentityCandidates): at most 1761 items, with `memberMatchesComplete` false when more member matches exist, and the
  * `unavailable` names whose same-name record is malformed. Only the saved Album reuse target is read from the decisions.
  */
 export async function adminImportDuplicateCandidates(actor: string, id: string) {
     return withAdmin(actor, async session => {
         const doc = await collection().findOne({ _id: idValue(id), ...importPurposeFilter }, { session }); if (!doc) throw notFound();
-        return (await importSavedIdentity(doc, session)).candidates;
+        return (await importSavedIdentity(doc, session, { lunaProposals: true })).candidates;
     });
 }
 /**
  * The saved draft as the editor shows it (its Draft v2 view, whatever format stored it), its saved decisions as the editor shows
  * them with the MusicBrainz ID each binds (adminImportDetail; decisions saved before Draft v2 name no entry key) and their identity
  * candidates read in `session`, alias candidates from the names lookup found, for the duplicate-candidates read and the summary's
- * count of identity rows left to answer.
+ * count of identity rows left to answer. With `lunaProposals` (the duplicate-candidates read only) the candidates also cover the
+ * values the shown pending Luna proposals would write; the summary's count reads the saved draft alone.
  */
-export async function importSavedIdentity(doc: AdminImportDocument, session: ClientSession) {
-    const manifest = legacyManifestView(doc.manifest), draft = importDraftV2View(doc.draft, manifest, doc._id.toHexString());
+export async function importSavedIdentity(doc: AdminImportDocument, session: ClientSession, options: { lunaProposals?: boolean } = {}) {
+    const manifest = legacyManifestView(doc.manifest), id = doc._id.toHexString(), draft = importDraftV2View(doc.draft, manifest, id);
     const view = importProjectV2View(doc), slots = new Set(manifest.files.map(file => file.slotId));
     const decisions = (view ? importDecisionsV2View(view.decisions, slots, { binding: true }) : legacyDecisionsView(doc.decisions, slots)) as ImportDecisionV2[];
-    return { draft, decisions, candidates: await importIdentityCandidates({ manifest, draft, assets: doc.media?.assets ?? [], decisions, names: importMusicBrainzNameMap(doc.musicBrainzNames, draft) }, session) };
+    const proposals = options.lunaProposals ? lunaIdentityProposals(importSuggestionsV2View(doc.suggestions, legacyAnalysisView(doc).generation, slots, id).filter(suggestion => suggestion.decision === 'pending')) : undefined;
+    return { draft, decisions, candidates: await importIdentityCandidates({ manifest, draft, assets: doc.media?.assets ?? [], decisions, names: importMusicBrainzNameMap(doc.musicBrainzNames, draft), ...(proposals ? { proposals } : {}) }, session) };
 }
 /** Two Artist entries of one decision set cannot reuse one Artist (a reuse that replaces its ID is a reuse too). */
 export const reusesOneArtistTwice = (raw: readonly unknown[]) => {
@@ -514,9 +545,6 @@ export function decideAdminImportDuplicates(actor: string, id: string, raw: unkn
     return mutate(actor, id, body, 'decisions', async (doc, session) => { doc.decisions = await parseImportDecisions(doc, storedDraftV2(doc), body.decisions, session); });
 }
 
-/** Embedded tags are secondary untrusted evidence and have a separate prompt-size allowance. */
-function boundedTags(tags: NonNullable<Analysis['tags']>, slots: string[]) { let bytes = 0; return tags.filter(item => slots.includes(item.slotId)).filter(item => { bytes += Buffer.byteLength(JSON.stringify(item)); return bytes <= 12_000; }); }
-
 /** The deployment-wide daily allowance document of `now`'s UTC day. */
 const dailyAnalysisSlot = (now: Date) => `daily:${now.toISOString().slice(0, 10)}`;
 /** Provider calls reserved today (UTC) across the deployment; the Analyze confirmation shows what is left of the daily allowance. */
@@ -548,13 +576,10 @@ export async function runAdminImportWorkerOnce(provider: ImportAnalysisProvider 
         await session.withTransaction(async () => {
             input = undefined;
             const doc = await collection().findOne({ _id: claimed._id, 'analysis.leaseOwner': worker }, { session }); if (!doc) return;
-            // A newer draft format is never dispatched to the v1 provider prompt; its queued analysis waits for a release that knows it.
+            // A newer draft format is never dispatched to this release's prompt; its queued analysis waits for a release that knows it.
             if (!importDraftWritable(doc) || (!isActive(doc) && !doc.analysis.chunks.some(chunk => chunk.state === 'inflight'))) { await collection().updateOne({ _id: doc._id, 'analysis.leaseOwner': worker }, { $set: { 'analysis.leaseOwner': null, 'analysis.leaseUntil': null } }, { session }); return; }
-            const analysis = doc.analysis; let issue: ImportIssue = null;
-            if (analysis.chunks.some(chunk => chunk.state === 'inflight')) issue = 'providerOutcomeUnknown';
-            else if (!analysis.grantExpiresAt || analysis.grantExpiresAt <= now) issue = 'grantExpired';
-            else if (doc.attemptsUsed >= LIMITS.attempts) issue = 'budgetExhausted';
-            else { try { await touchAdmin(analysis.actorId!, session); } catch (error) { if (!(error instanceof AdminImportError)) throw error; issue = 'permissionLost'; } }
+            const analysis = doc.analysis; let issue: ImportIssue = lunaDispatchIssue(analysis, doc.attemptsUsed, now);
+            if (!issue) { try { await touchAdmin(analysis.actorId!, session); } catch (error) { if (!(error instanceof AdminImportError)) throw error; issue = 'permissionLost'; } }
             if (!issue && analysis.chunks.some(chunk => chunk.state === 'pending') && !await reserveDailyAnalysisAttempt(now, session)) issue = 'budgetExhausted';
             if (issue) { analysis.state = 'needsAttention'; analysis.issue = issue; for (const chunk of analysis.chunks) if (chunk.state === 'inflight') chunk.state = 'unknown'; analysis.leaseOwner = null; analysis.leaseUntil = null; }
             else {
@@ -562,9 +587,7 @@ export async function runAdminImportWorkerOnce(provider: ImportAnalysisProvider 
                 if (!chunk) { analysis.state = 'complete'; analysis.leaseOwner = null; analysis.leaseUntil = null; }
                 else {
                     analysis.state = 'running'; chunk.state = 'inflight'; chunk.attemptId = attemptId; chunk.startedAt = now; doc.attemptsUsed++;
-                    // Luna keeps the v1 prompt until S15: a Draft v2 baseline is sent as its v1 view (the first primary entry names the Artist).
-                    const baseline = isDraftV2(analysis.baseline) ? legacyDraftView(analysis.baseline, doc.manifest) : analysis.baseline as ImportDraft;
-                    input = { ...(doc.purpose === 'catalogReview' ? { purpose: 'catalogReview' as const } : {}), generation: analysis.generation, chunk: chunk.index, manifest: { rootLabel: doc.manifest.rootLabel, files: chunk.album ? doc.manifest.files : doc.manifest.files.filter(file => chunk.slots.includes(file.slotId)) }, baseline: { album: baseline.album, tracks: chunk.album ? [] : baseline.tracks.filter(track => chunk.slots.includes(track.slotId)) }, slots: chunk.slots, album: chunk.album, tags: boundedTags(analysis.tags ?? [], chunk.album ? doc.manifest.files.slice(0, 10).map(file => file.slotId) : chunk.slots) };
+                    input = lunaAnalysisInput(doc, chunk);
                 }
             }
             doc.revision++; doc.updatedAt = now; await collection().replaceOne({ _id: doc._id, revision: doc.revision - 1, 'analysis.leaseOwner': worker }, doc, { session });
@@ -584,11 +607,18 @@ export async function runAdminImportWorkerOnce(provider: ImportAnalysisProvider 
             chunk.completedAt = new Date(); chunk.state = issue ? (issue === 'providerOutcomeUnknown' ? 'unknown' : 'failed') : 'complete';
             if (!issue) {
                 const importId = doc._id.toHexString(), ids = suggestions.map((_suggestion, index) => digest({ importId, generation: dispatchedInput.generation, chunk: chunk.index, index }).slice(0, 24));
+                const record = lunaContextRecord(doc.analysis.lookupContext, dispatchedInput.lookupContext), generation = dispatchedInput.generation;
                 if (isDraftV2Document(doc)) {
-                    // Suggestions are stored against the Draft v2 baseline; an unusable Artist name drops only itself, and ids keep their indexes.
+                    // Suggestions are stored against the Draft v2 baseline, each with the context its chunk sent; an unusable value (a
+                    // placeholder Artist or label, or a review Disc Number its source never captured) drops only itself, and ids keep their indexes.
                     const stored = doc.analysis.baseline ?? doc.draft, baseline = isDraftV2(stored) ? stored : importDraftV2FromV1(stored as ImportDraft, importId);
-                    suggestions.forEach((suggestion, index) => { const mapped = draftV2Suggestion(suggestion, baseline, { importId, suggestionId: ids[index] }); if (mapped) doc.suggestions.push({ ...mapped, id: ids[index], generation: dispatchedInput.generation, decision: 'pending' }); });
-                } else doc.suggestions.push(...suggestions.map((suggestion, index) => ({ ...suggestion, id: ids[index], generation: dispatchedInput.generation, decision: 'pending' as const })));
+                    const discSlots = doc.purpose === 'catalogReview' ? new Set((doc.catalogSource?.tracks ?? []).filter(track => catalogReviewSourceDisc(track)).map(track => track.slotId)) : null;
+                    suggestions.forEach((suggestion, index) => { const mapped = lunaSuggestionV2(suggestion, baseline, { importId, suggestionId: ids[index] }, discSlots); if (mapped) doc.suggestions.push({ ...mapped, id: ids[index], generation, decision: 'pending', ...(record ? { lookupContext: record } : {}) }); });
+                } else {
+                    // A format-1 project whose analysis an earlier release queued keeps v1 suggestions (adminImportLuna.ts lunaSuggestionV1).
+                    const baseline = (doc.analysis.baseline ?? doc.draft) as ImportDraft;
+                    suggestions.forEach((suggestion, index) => { const mapped = lunaSuggestionV1(suggestion, baseline); if (mapped) doc.suggestions.push({ ...mapped, id: ids[index], generation, decision: 'pending' }); });
+                }
             }
             if (doc.analysis.state !== 'cancelled') { doc.analysis.state = issue ? 'needsAttention' : doc.analysis.chunks.every(chunk => chunk.state === 'complete') ? 'complete' : 'queued'; doc.analysis.issue = issue; }
             else if (issue) doc.analysis.issue = issue;

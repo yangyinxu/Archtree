@@ -242,7 +242,7 @@ test('decisions, cover selection and adoption are admitted at a revision from be
     let input: AnalysisInput | undefined;
     const provider: ImportAnalysisProvider = { configured: () => true, analyze: async value => { input ??= value; return value.album ? [{ scope: 'album', slotId: null, field: 'title', baseline: value.baseline.album.title, value: 'Luna Title', source: 'folder', evidence: 'Synthetic Folder' }] : []; } };
     const analyzing = await analyzeAdminImport(by, opened.id, mutation(done.item.revision), provider); await runAdminImportWorkerOnce(provider);
-    // Luna keeps the v1 prompt: version-2 evidence reaches it as exactly its five v1 tag fields.
+    // Luna receives version-2 evidence as its five v1 tag fields; identifiers never.
     assert.deepEqual(input!.tags!.map(value => Object.keys(value.tags).sort()), [['album', 'artists', 'title', 'trackNumber', 'year'], ['album', 'artists', 'title', 'trackNumber', 'year']]);
     const ticked = (await getAdminImport(by, opened.id)).item, entry = ticked.draft.album.artists[0], suggestion = ticked.suggestions[0];
     assert.ok(ticked.revision > analyzing.item.revision && opened.revision < ticked.revision);

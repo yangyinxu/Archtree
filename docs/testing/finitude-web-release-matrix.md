@@ -104,12 +104,16 @@ conflict with the administrator's label is kept from the keyboard while the
 summary reflows at 320, 768 and 1440 px; that an unavailable lookup offers Luna
 first beside a free retry, that a retry that stays unavailable keeps both, and
 that Luna starts only after its confirmation shows the budget, its suggestion
-for an empty title then arriving ticked; and that an import without a folder or
+for an empty title then arriving ticked; that an import without a folder or
 usable tags offers Luna beside an empty name box that looks up a typed name
-from the keyboard and stores nothing, with axe scans throughout.
+from the keyboard and stores nothing; and that after a lookup finds no release
+Luna is offered, and its ticked Artist entries, label and Disc Number are
+preselected in one confirmation, which offers no Apply ticked suggestions now
+and approves with their preselections and ticks, with axe scans throughout.
 
 The catalog reviews spec checks that an existing-Album review shows the Album's
-Artist Credits and label read-only and applies a Disc Number change.
+Artist Credits and label read-only and applies a Disc Number change, and that a
+Luna label suggestion shows only as an identity hint that Keep current rejects.
 
 The historical 2026-08-19 MediaTrack amendment passed
 304/304 server tests, 214/214 Web unit/component tests, 148/148 integration
@@ -472,13 +476,14 @@ player control still works.
   the project and daily budget and starts nothing until confirmed; confirm
   Luna's suggestions for empty or tag values arrive ticked, others unticked, and
   that unticking keeps the current value at approval. With no tags and no
-  match, let Luna suggest the Album title and confirm the publication
-  confirmation offers Apply ticked suggestions now instead of a dead end, and
-  that the next confirmation preselects the new Album. Confirm the name box
-  refuses a link, keeps no history and that no global search appears. Without
-  an operator contact, confirm the summary says lookup is not configured, offers
-  Luna and shows neither a retry nor the name box. Repeat with a screen reader
-  at 320 CSS px.
+  match, let Luna suggest the Album title, the Artist entries and the label, and
+  confirm the same publication confirmation preselects them as new; then name an
+  existing Organization like the suggested label and confirm its row needs a
+  decision and Apply ticked suggestions now appears only then. Confirm the name
+  box refuses a link, keeps no history and that no global search appears.
+  Without an operator contact, confirm the summary says lookup is not
+  configured, offers Luna and shows neither a retry nor the name box. Repeat
+  with a screen reader at 320 CSS px.
 - As an administrator, with metadata lookup configured against MusicBrainz in a
   development environment, import a popular Album with many editions (for
   example Hotel California by Eagles) whose files match exactly one edition

@@ -14,7 +14,7 @@
  *   - a field save accepts a body up to 160 KB while other import bodies keep the 96 KB limit
  *   - a field save bounds each base and value to a draft value before its intent is fingerprinted, writing nothing
  *   - an approval body up to 192 KB is parsed, its fields are bounded before the fingerprint, and an outdated or stale approval gets a bounded code
- *   - an approval's Luna tick state is bounded before the fingerprint: exact fields, a generation and at most 204 distinct suggestion IDs, writing nothing
+ *   - an approval's Luna tick state is bounded before the fingerprint: exact fields, a generation and at most 304 distinct suggestion IDs, writing nothing
  *   - metadata lookup routes guard authentication and the current admin before parsing, are no-store and bounded, and refuse malformed bodies without writing
  *   - configured lookup routes answer a submission and a retry with 202 receipts that replay, a choice and the view with 200, and refusals with bounded codes
  *   - another current administrator retries a failed automatic cover cleanup through the asset DELETE route with its original intent
@@ -205,19 +205,21 @@ test('an approval body up to 192 KB is parsed, its fields are bounded before the
     const incomplete = await request(publish, 'POST', approval()); assert.equal(incomplete.status, 400); assert.deepEqual(await incomplete.json(), { code: 'ADMIN_IMPORT_DRAFT_INCOMPLETE' });
     assert.deepEqual(await imports.findOne({ _id: new ObjectId(created.item.id) }), before);
 });
-test('an approval\'s Luna tick state is bounded before the fingerprint: exact fields, a generation and at most 204 distinct suggestion IDs, writing nothing', async () => {
+test('an approval\'s Luna tick state is bounded before the fingerprint: exact fields, a generation and at most 304 distinct suggestion IDs, writing nothing', async () => {
     process.env.FINITUDE_ADMIN_IMPORT_PRIVATE_STORAGE_READY = 'true'; process.env.ADMIN_IMPORT_S3_BUCKET_NAME = 'synthetic-private'; process.env.S3_BUCKET_NAME = 'synthetic-catalog';
     const created = await (await request('/api/admin/v1/imports', 'POST', body())).json(), publish = `/api/admin/v1/imports/${created.item.id}/publish`;
     const imports = getDb()!.collection('adminAlbumImports'), before = await imports.findOne({ _id: new ObjectId(created.item.id) });
     const approval = (suggestionTicks: unknown) => ({ operationId: randomUUID(), expectedRevision: 1, changes: [], decisions: [], selectedCoverSlotId: null, approvalDigest: created.item.approvalDigest as string, suggestionTicks });
     const ids = (count: number) => Array.from({ length: count }, (_unused, index) => index.toString(16).padStart(24, '0'));
     for (const ticks of [null, [], { generation: 0, ticked: [] }, { generation: 0, ticked: [], unticked: [], extra: true }, { generation: -1, ticked: [], unticked: [] }, { generation: '0', ticked: [], unticked: [] },
-        { generation: 0, ticked: ['not-an-id'], unticked: [] }, { generation: 0, ticked: ids(1), unticked: ids(1) }, { generation: 0, ticked: ids(100), unticked: ids(205).slice(100) }]) {
+        { generation: 0, ticked: ['not-an-id'], unticked: [] }, { generation: 0, ticked: ids(1), unticked: ids(1) }, { generation: 0, ticked: ids(100), unticked: ids(305).slice(100) }]) {
         const refused = await request(publish, 'POST', approval(ticks)); assert.equal(refused.status, 400, JSON.stringify(ticks).slice(0, 80)); assert.deepEqual(await refused.json(), { code: 'ADMIN_IMPORT_INVALID_INPUT' });
     }
     // A tick state for a project that shows no suggestion is admitted and reaches the draft checks; one naming a suggestion it does not show is stale.
     const empty = await request(publish, 'POST', approval({ generation: 0, ticked: [], unticked: [] })); assert.equal(empty.status, 400); assert.deepEqual(await empty.json(), { code: 'ADMIN_IMPORT_DRAFT_INCOMPLETE' });
     const unknown = await request(publish, 'POST', approval({ generation: 0, ticked: ids(1), unticked: [] })); assert.equal(unknown.status, 409); assert.deepEqual(await unknown.json(), { code: 'ADMIN_IMPORT_SUGGESTION_STALE' });
+    // 304 IDs (four Album values and three per file) pass the bound and are then stale here.
+    const bounded = await request(publish, 'POST', approval({ generation: 0, ticked: ids(100), unticked: ids(304).slice(100) })); assert.equal(bounded.status, 409); assert.deepEqual(await bounded.json(), { code: 'ADMIN_IMPORT_SUGGESTION_STALE' });
     assert.deepEqual(await imports.findOne({ _id: new ObjectId(created.item.id) }), before);
 });
 

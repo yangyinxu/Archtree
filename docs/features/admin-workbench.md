@@ -131,7 +131,8 @@ checked (nothing is checked when no image is); choosing any option, No cover
 and the image already chosen automatically included, makes the choice explicit
 for good.
 Review shows an Artist suggestion as its byline
-followed by each entry with its role. Review's existing-content check has one
+followed by each entry with its role, and a label suggestion by the label's
+name. Review's existing-content check has one
 Artist row per entry, in draft order and named with its role, and a Label row
 when the draft has a label; each row lists only the candidates found for its
 own name and, for an entry or the label carrying a MusicBrainz ID, the record
@@ -249,16 +250,20 @@ summary only presents it:
 - **Luna ticks.** The summary state gives each pending suggestion the editor
   shows a tick state: `ticked` for an empty value or one resting only on file
   tags, `unticked` for any other, `resolved` when it already equals the current
-  value (Artist entries by name, role and join phrase), or `conflict` when its
+  value (Artist entries by name, role and join phrase, a label by name, IDs
+  aside), or `conflict` when its
   value changed since analysis and is the administrator's own (Artist entries
-  whenever they changed), which cannot be ticked. Toggles are kept in the
+  whenever they changed), which cannot be ticked. Label and Disc Number
+  suggestions tick like the others. Toggles are kept in the
   workspace for the confirmation; unticking leaves the current value, and
   **Apply ticked suggestions now** accepts the ticked ones and rejects the rest
-  through `/adopt`. A ticked suggestion that renames the Album or the Artist
-  entries has no candidate read yet, so its rows need a decision in the
-  confirmation; there the confirmation offers the same **Apply ticked
-  suggestions now**, which saves them to the draft and closes it, so the next
-  confirmation reads candidates, and preselects, for the saved names. A
+  through `/adopt`. The confirmation's candidate read also covers every pending
+  Luna proposal (`/duplicate-candidates`), so a ticked title, Artist entry or
+  label is preselected there as if it were applied, and the approval freezes
+  that preselection. Only a ticked row that still needs an explicit answer (a
+  record shares its name and nothing is preselected) holds the confirmation;
+  then it offers the same **Apply ticked suggestions now**, which saves them to
+  the draft and closes it, so Review can answer that row. A
   suggestion equal to the current value is hidden from the summary but stays
   pending in storage, and Review still lists it as already matching, until an
   approval accepts it. **Analyze with Luna** opens the same confirmation as the
@@ -289,8 +294,12 @@ a reused one ("replaces MusicBrainz ID", with the old and new ID), and sends
 that list as `musicBrainzIds`; an append lists none.
 Pending Luna suggestions are written into the shown draft as the summary
 ticks them (a suggestion whose path the unsaved changes also write stays
-unticked), and a row a ticked suggestion renames needs a decision like an
-unsaved rename. A Luna row counts the suggestions applied and kept.
+unticked). A ticked row is preselected as if it were applied, since the
+candidates were read for it too; it says **Needs a decision** only when a
+record shares its name, and then the confirmation offers **Apply ticked
+suggestions now**. Decisions bound to an entry or label a ticked suggestion
+replaces are left out of the checklist, as the approval drops them. A Luna row
+counts the suggestions applied and kept.
 The tracks the approval adds follow in approved order, Disc Number (unknown as
 1), then Track Number (unknown last), then draft order, followed by an existing
 Album's members, named by their catalog title (or draft title while the match
@@ -298,8 +307,9 @@ changed) without a position, which the append leaves unchanged; skipped tracks
 are left out. The confirmation always reads the duplicate candidates, since
 the preselections depend on them, and a row without an explicit decision shows
 its preselection as New or Reuses; a row renamed in the unsaved draft (an entry,
-the label, the Album title or, in an append, a track title) is not preselected,
-because its candidates were read for the saved name. The approval carries the
+the label, the Album title or, in an append, a track title) to a value neither
+saved nor proposed by a pending Luna suggestion is not preselected, because no
+candidates were read for it. The approval carries the
 preselections the confirmation shows, so the server freezes exactly those or
 asks for a fresh review. The Artist entries and the
 label are marked "From file tags only" while they are automatic, not written
@@ -447,8 +457,10 @@ Import routes (relative to `/api/admin/v1`):
   `null` or `{name, musicBrainzId}`. `musicBrainzId` is `null` or the
   lowercase MusicBrainz artist or label ID that metadata lookup supplied;
   `GET /lookup` lists the names lookup found for each (`musicBrainzNames`).
-  Suggestions are Draft v2, where an
-  `artists` suggestion proposes the whole entry list. A decision is
+  Suggestions are Draft v2: `field` is `title`, `artists`, `label`,
+  `releaseDate`, `discNumber` or `trackNumber`; an `artists` suggestion
+  proposes the whole entry list and a `label` suggestion a label
+  `{name, musicBrainzId: null}`. A decision is
   `{scope, slotId, entryKey, boundName, action, candidateId,
   candidateRevision}`, where `scope` is `artist`, `label`, `album` or `track`,
   `slotId` names the track of a `track` decision, `entryKey` the entry of an
@@ -570,9 +582,50 @@ Import routes (relative to `/api/admin/v1`):
   `409 ADMIN_IMPORT_REVISION_CONFLICT` and writes nothing. `expectedRevision`
   stays required and in every intent's fingerprint, and receipt lookup comes
   first, so an earlier intent with a numeric `expectedRevision` still replays.
-  Luna still reads the v1 view of the Draft v2 baseline, whose first primary
-  entry is `artistName`, and its Artist name becomes a one-entry primary
-  `artists` suggestion; a name with control or format characters is dropped.
+  **Luna schema v2** (`adminImportProvider.ts`, `adminImportLuna.ts`). Luna
+  answers with the strict json_schema
+  `album_import_suggestions_v2`: suggestions of `{scope, slotId, field, text,
+  number, date, artists, source, evidence}`, every unused value slot `null`.
+  The Album chunk may suggest `title`, `artists` (the complete ordered entries,
+  each `{name, role, joinPhrase}`, every primary before every featured one),
+  `label` (a name) and `releaseDate`; a track chunk `title`, `discNumber` and
+  `trackNumber`; at most 4 + 3 × files suggestions in all, one per path. It
+  reads the Draft v2 baseline without entry keys, MusicBrainz IDs or visibility
+  (the label as its name) and the file tags as their five v1 fields; never an
+  identifier. An import's analysis captures at admission the MusicBrainz
+  release applied to it, if any (a preselected or chosen candidate whose
+  details were fetched), only while the lookup record still stores that
+  candidate: a later lookup run replaces the candidates, so after one that
+  applies no release the values stay applied but Luna gets no context. It sends
+  the release's title, credited names and join phrases, label
+  names, date, first-release date, media positions and formats and, per track,
+  position, number, title and length, labelled `{source: 'musicbrainz', kind:
+  'appliedRelease', trust: 'untrusted'}` as `lookupContext`. Release,
+  release-group, artist, label and recording IDs, ISRCs, barcode, catalogue
+  number, artwork flags, other candidates and iTunes evidence are never sent,
+  and a catalog review sends none. Each chunk cuts the context
+  deterministically so its whole input stays within 48 KB (the longest track
+  prefix in medium and position order, `truncated: true`, or none when even its
+  header does not fit), and each suggestion of a chunk that sent it stores
+  `lookupContext: {source, releaseId, digest, truncated}` (the SHA-256 of the
+  JSON sent), server-side only. Validation is all or nothing
+  (`providerInvalidResponse`): an unknown or identity key such as
+  `musicBrainzId`, `key` or `candidateId`, identifier-shaped text (a UUID or 24
+  hex digits) in a title, label, name or evidence, entries that break the Draft v2 entry
+  rules (featured before primary, a repeated name, an invalid join phrase,
+  control or invisible formatting characters, more than 20), a value outside its
+  field's range or over-limit counts refuse the whole response. A Luna entry
+  whose name folds to a baseline entry's (equal after NFC and lower-casing)
+  takes that entry's key and MusicBrainz ID, so an unchanged entry's decisions
+  survive and a case-only correction keeps the ID as such a rename does;
+  another gets a key derived from the suggestion and no ID, and a label never
+  carries one. A
+  placeholder Artist or label drops only that suggestion, and in a catalog
+  review so does a Disc Number for a track whose source captured none. An
+  analysis an earlier release queued on a format-1 project stores v1
+  suggestions (one plain primary entry as `artistName`, nothing else new).
+  Stored v1 suggestions are still read. The frozen v1 validator remains only
+  as the reference the v1 golden test replays; no production path calls it.
   An accepted suggestion becomes the administrator's own; accepting one whose
   baseline is no longer the current value returns
   `409 ADMIN_IMPORT_FIELD_CONFLICT`, so an Artist suggestion never replaces
@@ -580,10 +633,13 @@ Import routes (relative to `/api/admin/v1`):
   other current value written automatically (from file tags or metadata lookup)
   after that baseline is replaced, as a field save would replace it. Accepting an `artists`
   suggestion keeps the decisions of the entries whose key and name it leaves
-  unchanged. Imports never suggest
-  a stand-in Artist: a Luna Artist name such as Various Artists or `[unknown]`
-  is dropped, and a stored one is hidden, never holds the approval and is not
-  counted as pending in the workbench list. Accepting a suggestion the editor
+  unchanged. Accepting a label suggestion that names the current label keeps
+  that label, its MusicBrainz ID and its decision, whatever its baseline, and
+  makes it the administrator's own. Imports never suggest
+  a stand-in: Luna Artist entries naming one such as Various Artists or
+  `[unknown]`, or a label such as `[no label]`, are dropped, and a stored one is
+  hidden, never holds the approval and is not counted as pending in the
+  workbench list. Accepting a suggestion the editor
   does not show, such as that hidden one, returns
   `409 ADMIN_IMPORT_SUGGESTION_STALE`; rejecting it is allowed.
   `/decisions` replaces the whole list with at most 122 decisions, at most one
@@ -627,20 +683,33 @@ Import routes (relative to `/api/admin/v1`):
   replace, one Artist. The v1 DTO never shows a `replace`.
 - `GET /imports/:id/duplicate-candidates`: bounded candidates; a name match is
   never verified identity or automatic reuse. Candidates are read from the
-  Draft v2 view, and each distinct Artist entry name and the label's name are
-  matched on their own, exactly and case-insensitively: at most 20 ready
-  Artists per name (kind `artist`) and 20 ready Organizations of any type for
-  the label (kind `organization`, `albumId` `null`), beside at most 20 Album
-  and 20 Track title candidates. Verified byte matches are read on their own:
+  Draft v2 view, and each distinct Artist entry name, label name and Album
+  title is matched on its own, exactly and case-insensitively: at most 20
+  ready Artists per name (kind `artist`), 20 ready Organizations of any type
+  per label name (kind `organization`, `albumId` `null`) and 20 Albums per
+  title, beside at most 20 Track title candidates. Verified byte matches are
+  read on their own:
   for each staged file's hash, the first ready Track outside the saved append
   target whose stored hash is bound to its current object, so at most 100, and
   no number of same-title Tracks hides one. Every ready Track on an Album
   candidate or on the saved append target whose verified bytes or exact title
   match a staged file is then added once (the global Track rows could leave it
-  out), at most 300 of them, so at most 860 items. `memberMatchesComplete` is
-  `false` when more such member matches exist or one of them is malformed; the
-  Web then preselects no append file. `unavailable` lists `{kind, label}` for
-  each entry name, the label or the Album title (at most 22) whose same-name
+  out), at most 300 of them. `/duplicate-candidates` also reads the names and
+  titles the pending Luna proposals the editor shows would write, each on its
+  own so that no number of records sharing the saved value hides a proposal's
+  candidates, or the reverse: Artist entry names (at most 40 in all), one label
+  name and one Album title beside the saved ones, and up to 20 more Track
+  candidates for the proposed track titles no saved title matches. A ticked
+  suggestion is thus preselected as if it were applied; the summary's
+  `identityAnswers` still counts the saved draft only. Proposed track titles
+  share the 300 member matches with the saved ones, so past them Review and
+  the confirmation preselect no append file even for the saved titles, and an
+  approval then asks for each append file's explicit answer
+  (`409 ADMIN_IMPORT_REVIEW_REQUIRED`, writing nothing). That makes at most
+  1320 name, byte and member items. `memberMatchesComplete`
+  is `false` when more such member matches exist or one of them is malformed;
+  the Web then preselects no append file. `unavailable` lists `{kind, label}`
+  for each Artist name, label or Album title (at most 44) whose same-name
   record is malformed (a stored visibility other than public or hidden): it is
   no selectable candidate, but its row is never preselected. Names compare
   after NFC normalization and locale-independent lower-casing. For the entries
@@ -648,7 +717,7 @@ Import routes (relative to `/api/admin/v1`):
   record holding each ID (`match: 'musicBrainzId'`, at most 21, upgrading a
   row already listed by name), and one query per such entry or label adds up to
   20 ready records named as metadata lookup found for its ID (`match: 'alias'`,
-  `aliasOf` the ID, from at most 32 stored names): at most 1301 items. An Artist
+  `aliasOf` the ID, from at most 32 stored names): at most 1761 items. An Artist
   or Organization item names the ID it holds in `musicBrainzId` only when it
   holds a keepable one; a malformed same-ID or alias record makes its entry's or
   label's name `unavailable`. All reads of one
@@ -749,8 +818,9 @@ Import routes (relative to `/api/admin/v1`):
   `create-distinct` or `reuse`), or the body is
   `400 ADMIN_IMPORT_INVALID_INPUT`. The Web always sends `suggestionTicks`
   `{generation, ticked, unticked}`: the analysis generation and every pending
-  suggestion it shows, ticked or unticked, at most 204 distinct suggestion IDs
-  in all, bounded the same way. The Web also sends `musicBrainzIds`: each
+  suggestion it shows, ticked or unticked, at most 304 distinct suggestion IDs
+  (four Album values and three per file) in all, bounded the same way, as
+  `/adopt` takes at most 304 IDs. The Web also sends `musicBrainzIds`: each
   MusicBrainz ID the confirmation lists as recorded or replaced,
   `{scope, entryKey, musicBrainzId, replaces}` (at most 21, bounded the same
   way, each a keepable ID). The approval computes the frozen writes and
@@ -829,11 +899,12 @@ Import routes (relative to `/api/admin/v1`):
   (`409 ADMIN_IMPORT_SUGGESTION_STALE`), and a ticked one whose value changed
   since analysis is `409 ADMIN_IMPORT_FIELD_CONFLICT`. Ticked suggestions are
   accepted as `/adopt` accepts them, unticked ones rejected and resolved ones
-  accepted, in the same transaction, so identities are read for the values
-  they write. A body without `suggestionTicks` comes from an editor that
-  predates ticks: it is admitted only when nothing is left to answer, and
-  otherwise is `409 ADMIN_IMPORT_RELOAD_REQUIRED`. Pending suggestions never
-  hold the approval; a queued or running analysis still does
+  accepted, in the same transaction, so identities are read, and preselected,
+  for the values they write, as `/duplicate-candidates` read and preselected
+  them for the confirmation. A body without `suggestionTicks` comes from an
+  editor that predates ticks: it is admitted only when nothing is left to
+  answer, and otherwise is `409 ADMIN_IMPORT_RELOAD_REQUIRED`. Pending
+  suggestions never hold the approval; a queued or running analysis still does
   (`409 ADMIN_IMPORT_REVIEW_REQUIRED`). A stored value the editor cannot show
   (it reads as empty there) is also `400 ADMIN_IMPORT_DRAFT_INCOMPLETE`, so it
   is never frozen. Metadata lookup holds it too, read in the
@@ -1024,6 +1095,8 @@ responses. `store:false` is sent to the provider; it is not a zero-retention
 promise. Credentials, emails, raw music and absolute paths are not analysis
 context. Potentially paid ambiguous outcomes block automatic replay. Production
 cost/quality measurements and real S3 proof are separate from mocked tests.
+Luna schema v2 changes no budget: two generations, 22 calls, 220/day, ten
+tracks per chunk, 4,000 output tokens, 48 KB input, 24-hour grants.
 Daily reservations are persisted in the same transaction as a chunk checkpoint;
 uncertain outcomes and dispatches stopped after reservation remain counted.
 
@@ -1072,7 +1145,10 @@ filenames and saved metadata; absent historical folder/file evidence stays empty
 No media is uploaded, copied or published by this workflow. Artist attribution,
 artwork and visibility remain separate catalog edits: the review draft shows the
 Album's ordered Artist Credits, their join phrases and its label read-only, and
-offers a Disc Number field only for Tracks whose review captured one.
+offers a Disc Number field only for Tracks whose review captured one. Luna's
+Artist and label suggestions appear only in a hint panel of the Review step,
+which can keep the current values (rejecting a suggestion) but never adopts
+one or changes a Credit; acting on a hint is a separate catalog Credit edit.
 
 Catalog review routes (relative to `/api/admin/v1`):
 
@@ -1115,8 +1191,12 @@ Catalog review routes (relative to `/api/admin/v1`):
   save returns `400 ADMIN_IMPORT_INVALID_INPUT`. The 48 KB cap binds only a
   save or adoption that grows the editable values. A v1 draft body (an Album
   `artistName`) returns `409 ADMIN_IMPORT_RELOAD_REQUIRED` right after receipt
-  lookup, before the revision, applied and limit checks. `/adopt` refuses selecting an Artist
-  suggestion with `400 ADMIN_IMPORT_INVALID_INPUT`; rejecting one is allowed.
+  lookup, before the revision, applied and limit checks. `/adopt` refuses
+  selecting an Artist-entries or label suggestion with
+  `400 ADMIN_IMPORT_INVALID_INPUT`;
+  rejecting one is allowed, and the Web shows both as identity hints that can
+  only be kept. Disc suggestions need filename evidence and exist only for
+  tracks whose source captured a Disc Number.
   Reviews read through the same allowlist and read-only rule as imports: a
   review saved in a newer format offers neither analysis nor apply, and refuses
   edit, analyze, adopt and apply with `409 ADMIN_IMPORT_RELOAD_REQUIRED`, while
@@ -1456,6 +1536,13 @@ Later stages raise the oldest release that is safe to roll back to:
   automatic lifecycle receipts. A Web tab opened before them cannot parse a
   detail that carries `coverChoice`, so reload open workbench tabs after
   deploying or rolling back across them.
+- Luna schema v2 needs no floor of its own. A release before it hides stored
+  `label` and `discNumber` suggestions, which never hold publication there,
+  ignores `analysis.lookupContext` and each suggestion's `lookupContext`, and
+  dispatches a queued analysis with its v1 prompt. A Web tab opened before it
+  cannot parse a detail carrying a label or Disc Number suggestion, or a
+  candidates response over its old bounds, so reload open workbench tabs after
+  deploying or rolling back across it.
 - After MusicBrainz IDs are stored, never roll back below the release before
   them; its index stays, and listener DTOs already drop unknown fields. That
   release ignores `musicBrainzIdWrite` and `musicBrainzNames` on a frozen

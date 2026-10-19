@@ -1031,7 +1031,7 @@
       }
     },
     "admin.analysis.confirm": {
-      "description": "Send the selected filenames and folder context to Luna for analysis? This may incur a provider charge.",
+      "description": "Analyze confirmation: what Luna receives (folder and file names, current draft values, file tags and the applied MusicBrainz release, if any); it only suggests values and may incur a provider charge.",
       "delivery": [
         "runtime"
       ],
@@ -1222,7 +1222,7 @@
       "variables": {}
     },
     "admin.catalog_review.artist_hint": {
-      "description": "Artist suggestions are identity clues. Confirm attribution in the original Album; adopting draft metadata does not change it.",
+      "description": "Artist and label suggestions are identity clues. Confirm attribution and the label in the original Album; adopting draft metadata never changes Credits.",
       "delivery": [
         "runtime"
       ],
@@ -1299,7 +1299,7 @@
       "variables": {}
     },
     "admin.catalog_review.empty_artist": {
-      "description": "Artist identity suggestions are shown below. Confirm attribution in the original Album.",
+      "description": "Administrator catalog review: Review is empty except for Artist and label identity hints, which are shown below and confirmed in the original Album.",
       "delivery": [
         "runtime"
       ],
@@ -1349,6 +1349,13 @@
     },
     "admin.catalog_review.filename_missing": {
       "description": "Original filename not retained",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.hints_title": {
+      "description": "Administrator catalog review: heading of the panel listing Luna's Artist and label suggestions as identity hints.",
       "delivery": [
         "runtime"
       ],
@@ -4091,7 +4098,7 @@
       }
     },
     "admin.publication.luna_names": {
-      "description": "Administrator workbench: publication confirmation, ticked Luna suggestions rename rows that then need a decision; offers to apply them first.",
+      "description": "Administrator workbench: publication confirmation, ticked Luna suggestions add names that match existing records, so those rows need an explicit decision; offers to apply them first and answer them in Review.",
       "delivery": [
         "runtime"
       ],

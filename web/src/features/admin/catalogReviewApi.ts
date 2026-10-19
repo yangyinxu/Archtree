@@ -27,13 +27,12 @@ export const reviewDetailSchema = z.object({ id, revision: integer, createdAt: z
     || item.draft.tracks.some(track => !slots.has(track.slotId)) || item.draft.album.visibility !== item.source.album.visibility
     || (item.state === 'applied') !== (item.applied !== null)) ctx.addIssue({ code: 'custom', message: 'Invalid catalog review source' });
   for (const suggestion of item.suggestions) {
-    if (suggestion.generation !== item.analysis.generation || (suggestion.scope === 'album'
-      ? suggestion.slotId !== null || suggestion.field === 'trackNumber'
-      : !slots.has(suggestion.slotId ?? '') || !['title', 'trackNumber'].includes(suggestion.field))) ctx.addIssue({ code: 'custom', message: 'Invalid catalog review suggestion' });
+    // Each field's scope is checked by the suggestion schema; here the slot and generation.
+    if (suggestion.generation !== item.analysis.generation || (suggestion.scope === 'album' ? suggestion.slotId !== null : !slots.has(suggestion.slotId ?? ''))) ctx.addIssue({ code: 'custom', message: 'Invalid catalog review suggestion' });
     const filename = suggestion.scope === 'track' ? item.source.tracks.find(track => track.slotId === suggestion.slotId)?.originalFileName
       : item.source.tracks.some(track => track.originalFileName !== null);
     if (suggestion.source === 'folder' || suggestion.source === 'filename' && !filename
-      || suggestion.field === 'trackNumber' && (suggestion.source !== 'filename' || !filename)) ctx.addIssue({ code: 'custom', message: 'Missing catalog naming evidence' });
+      || (suggestion.field === 'trackNumber' || suggestion.field === 'discNumber') && (suggestion.source !== 'filename' || !filename)) ctx.addIssue({ code: 'custom', message: 'Missing catalog naming evidence' });
   }
   const paths = new Set<string>();
   for (const value of item.applied?.fields ?? []) {

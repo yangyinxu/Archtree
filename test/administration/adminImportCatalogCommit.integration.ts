@@ -29,6 +29,9 @@
  *   - a ticked Luna suggestion is applied by the approval itself, all or nothing, and a running analysis still holds it
  *   - a ticked suggestion that conflicts with the administrator's value refuses the whole approval writing nothing, and an admitted approval with ticks replays without applying twice
  *   - a ticked Artist-entries suggestion replaces the entries and drops their decisions, so the approval must show the new entry's preselection
+ *   - a ticked label and Album-title suggestion are preselected from the candidates read for them, and the approval freezes those preselections
+ *   - a ticked Album title and an unticked label keep their own candidates beside 20 records sharing the other value, and the approval admits the preselections computed from that read
+ *   - pending Luna track titles share the 300 Album-member matches: past them no append file is preselected, the approval asks for a fresh review writing nothing, and an explicit answer publishes
  *   - a file whose track is explicitly skipped is not waited for: the summary stops waiting for its upload and the approval publishes without it, but not while its upload is in flight
  *   - one approval carries every entry, label, Album and track decision without a separate save, while two entries reusing one Artist are refused writing nothing
  *   - an import with no candidates publishes with no decision: every entry, the label, the Album and the track are frozen as preselected creates
@@ -73,6 +76,7 @@ import { AdminImportError, type AdminImportDetailV2, type ImportDecisionDtoV2, t
 import { adminImportDuplicateCandidates, adoptAdminImportSuggestions, createAdminImport, decideAdminImportDuplicates, getAdminImport, initializeAdminImportStorage, listAdminImports, type AdminImportDocument } from '../../src/administration/import/adminImportService';
 import { selectAdminImportCover, uploadAdminImportAsset, type ImportObjectIdentity, type ImportObjectStorage, type ImportObjectTarget } from '../../src/administration/import/adminImportStorage';
 import { cancelAdminImportPublication, publishAdminImport, resumeAdminImportPublication, runAdminImportPublicationOnce } from '../../src/administration/import/adminImportPublisher';
+import { importIdentityPreselections } from '../../src/administration/import/adminImportIdentity';
 import { getAdminImportLookup } from '../../src/administration/lookup/metadataLookupRequests';
 import { approvalBody } from '../support/adminImportApproval';
 import type { ImportArtistEntry, ImportDecisionV2, ImportDraftV2 } from '../../src/administration/import/adminImportDraft';
@@ -569,6 +573,87 @@ test('a ticked Artist-entries suggestion replaces the entries and drops their de
     assert.deepEqual((publication.decisions as ImportDecisionV2[]).filter(value => value.scope === 'artist').map(value => [value.boundName, value.action, value.preselected]), [['Luna Lead', 'create-distinct', true]]);
     await runAdminImportPublicationOnce(storage, item.id);
     assert.deepEqual((await db().collection('artists').find().toArray()).map(value => value.name), ['Luna Lead']);
+});
+
+test('a ticked label and Album-title suggestion are preselected from the candidates read for them, and the approval freezes those preselections', async () => {
+    const storage = new Storage(), item = await reviewed(storage, draft => { draft.album.title = ''; draft.album.label = null; }), generation = item.analysis.generation;
+    const shell = { generation, scope: 'album', slotId: null, source: 'folder', evidence: 'Synthetic Folder', decision: 'pending' };
+    const title = { ...shell, id: 'a'.repeat(24), field: 'title', baseline: '', value: 'Luna Album' }, label = { ...shell, id: 'b'.repeat(24), field: 'label', baseline: null, value: { name: 'Luna Records', musicBrainzId: null } };
+    await imports().updateOne({ _id: new ObjectId(item.id) }, { $set: { suggestions: [title, label] as unknown as AdminImportDocument['suggestions'] } });
+    const shown = (await getAdminImport(by, item.id)).item;
+    assert.deepEqual((await getAdminImportLookup(by, item.id)).summary.luna, [{ id: title.id, tick: 'ticked' }, { id: label.id, tick: 'ticked' }]);
+    // The confirmation's candidate read covers the ticked values too; none exists, so every row is preselected as a create.
+    assert.deepEqual((await adminImportDuplicateCandidates(by, item.id)).items, []);
+    const create = (scope: string, entryKey: string | null, boundName: string | null, slotId: string | null = null) => ({ scope, slotId, entryKey, boundName, action: 'create-distinct', candidateId: null, candidateRevision: null });
+    const preselections = [...shown.draft.album.artists.map(value => create('artist', value.key, value.name)), create('label', null, 'Luna Records'), create('album', null, null), create('track', null, null, shown.draft.tracks[0].slotId)];
+    const body = approvalBody(shown, { preselections, suggestionTicks: { generation, ticked: [title.id, label.id], unticked: [] } });
+    // An Organization named like the ticked label that appears after the read requires a fresh review, writing nothing.
+    const late = new ObjectId(); await db().collection('organizations').insertOne({ _id: late, name: 'luna records', organizationType: 'label', lifecycleStatus: 'ready', visibility: 'public' });
+    const before = await stored(item.id);
+    await assert.rejects(publishAdminImport(by, item.id, { ...body, operationId: randomUUID() }), code('ADMIN_IMPORT_REVIEW_REQUIRED'));
+    assert.deepEqual(await stored(item.id), before);
+    await db().collection('organizations').deleteOne({ _id: late });
+    const approved = await publishAdminImport(by, item.id, body), publication = (await stored(item.id)).media!.publication!;
+    assert.deepEqual([(publication.snapshot as ImportDraftV2).album.title, (publication.snapshot as ImportDraftV2).album.label], ['Luna Album', { name: 'Luna Records', musicBrainzId: null }]);
+    assert.deepEqual((publication.decisions as ImportDecisionV2[]).filter(value => value.scope !== 'artist').map(value => [value.scope, value.boundName, value.action, value.preselected]),
+        [['label', 'Luna Records', 'create-distinct', true], ['album', null, 'create-distinct', true], ['track', null, 'create-distinct', true]]);
+    // A lost response replays the receipt without applying the ticks twice.
+    const replay = await publishAdminImport(by, item.id, body);
+    assert.deepEqual([replay.receipt, (await stored(item.id)).suggestions.map(value => value.decision)], [approved.receipt, ['accepted', 'accepted']]);
+    await runAdminImportPublicationOnce(storage, item.id);
+    assert.deepEqual([(await db().collection('organizations').find().toArray()).map(value => value.name), (await db().collection('albums').find().toArray()).map(value => value.title)], [['Luna Records'], ['Luna Album']]);
+});
+
+test('a ticked Album title and an unticked label keep their own candidates beside 20 records sharing the other value, and the approval admits the preselections computed from that read', async () => {
+    const storage = new Storage(), item = await reviewed(storage, draft => { draft.album.title = 'Greatest Hits'; }), generation = item.analysis.generation;
+    const shell = { generation, scope: 'album', slotId: null, source: 'folder', evidence: 'Synthetic Folder', decision: 'pending' };
+    const title = { ...shell, id: 'a'.repeat(24), field: 'title', baseline: 'Greatest Hits', value: 'Luna Album' };
+    const label = { ...shell, id: 'b'.repeat(24), field: 'label', baseline: { name: 'Sit Records', musicBrainzId: null }, value: { name: 'Luna Records', musicBrainzId: null } };
+    await imports().updateOne({ _id: new ObjectId(item.id) }, { $set: { suggestions: [title, label] as unknown as AdminImportDocument['suggestions'] } });
+    // Twenty records share the saved title and the proposed label, each sorting before the single record of the other value.
+    const ready = { visibility: 'public', lifecycleStatus: 'ready' };
+    await db().collection('albums').insertMany(Array.from({ length: 20 }, () => ({ _id: new ObjectId(), title: 'Greatest Hits', audioTrackIds: [], ...ready })));
+    await db().collection('organizations').insertMany(Array.from({ length: 20 }, () => ({ _id: new ObjectId(), name: 'Luna Records', organizationType: 'label', ...ready })));
+    const lunaAlbum = await candidateRecord('album', 'Luna Album'), sitRecords = await candidateRecord('organization', 'Sit Records');
+    const shown = (await getAdminImport(by, item.id)).item, read = await adminImportDuplicateCandidates(by, item.id);
+    assert.deepEqual([lunaAlbum, sitRecords].map(id => read.items.filter(value => value.id === id.toHexString()).length), [1, 1]);
+    assert.deepEqual([read.items.filter(value => value.kind === 'album').length, read.items.filter(value => value.kind === 'organization').length], [21, 21]);
+    // The confirmation applies the ticked title: its Album and the saved label each have a record, so neither is preselected.
+    const applied = structuredClone(shown.draft); applied.album.title = 'Luna Album';
+    assert.deepEqual(importIdentityPreselections(applied, [], read).filter(value => value.scope === 'album' || value.scope === 'label'), []);
+    const fresh = { slotId: null, entryKey: null, action: 'create-distinct', candidateId: null, candidateRevision: null } as const;
+    const explicit = [{ scope: 'label', ...fresh, boundName: 'Sit Records' }, { scope: 'album', ...fresh, boundName: null }];
+    const preselections = importIdentityPreselections(applied, explicit as ImportDecisionV2[], read).map(({ scope, slotId, entryKey, boundName, action, candidateId, candidateRevision }) => ({ scope, slotId, entryKey, boundName, action, candidateId, candidateRevision }));
+    assert.deepEqual(preselections.map(value => value.scope), ['artist', 'artist', 'artist', 'track']);
+    await publishAdminImport(by, item.id, approvalBody(shown, { decisions: explicit, preselections, suggestionTicks: { generation, ticked: [title.id], unticked: [label.id] } }));
+    const publication = (await stored(item.id)).media!.publication!, snapshot = publication.snapshot as ImportDraftV2;
+    assert.deepEqual([snapshot.album.title, snapshot.album.label, (await stored(item.id)).suggestions.map(value => value.decision)], ['Luna Album', { name: 'Sit Records', musicBrainzId: null }, ['accepted', 'rejected']]);
+    assert.deepEqual((publication.decisions as ImportDecisionV2[]).map(value => [value.scope, value.action, value.preselected === true]),
+        [['label', 'create-distinct', false], ['album', 'create-distinct', false], ['artist', 'create-distinct', true], ['artist', 'create-distinct', true], ['artist', 'create-distinct', true], ['track', 'create-distinct', true]]);
+});
+
+test('pending Luna track titles share the 300 Album-member matches: past them no append file is preselected, the approval asks for a fresh review writing nothing, and an explicit answer publishes', async () => {
+    const storage = new Storage(), original = await publishNow(storage, await decided(await reviewed(storage))), { albumId } = original.published!;
+    // The target holds more members titled like the pending proposal than the member read lists.
+    await db().collection('audioTracks').insertMany(Array.from({ length: 301 }, () => { const _id = new ObjectId(); return { _id, title: 'Luna Song', albumId, s3Key: _id.toHexString(), uploadStatus: 'ready', publicationStatus: 'ready' }; }));
+    let item = await reviewed(storage, draft => { draft.tracks[0].title = 'Appended'; });
+    const slot = item.draft.tracks[0].slotId;
+    item = await decided(item, { ...Object.fromEntries(item.draft.album.artists.map(value => [value.name, null])), label: null, [slot]: null, album: reuse(await candidate(item, 'album', 'Amet Collection')) });
+    const suggestion = { id: 'c'.repeat(24), generation: item.analysis.generation, scope: 'track', slotId: slot, field: 'title', baseline: 'Appended', value: 'Luna Song', source: 'filename', evidence: 'Synthetic name', decision: 'pending' };
+    await imports().updateOne({ _id: new ObjectId(item.id) }, { $set: { suggestions: [suggestion] as unknown as AdminImportDocument['suggestions'] } });
+    item = (await getAdminImport(by, item.id)).item;
+    const read = await adminImportDuplicateCandidates(by, item.id), ticks = { generation: item.analysis.generation, ticked: [], unticked: [suggestion.id] };
+    assert.equal(read.memberMatchesComplete, false);
+    assert.deepEqual(importIdentityPreselections(item.draft, item.decisions as ImportDecisionV2[], read), []);
+    // The approval reads the saved title alone, completely, and would preselect the file as a new member, which was not shown.
+    const before = await stored(item.id);
+    await assert.rejects(publishAdminImport(by, item.id, approvalBody(item, { preselections: [], suggestionTicks: ticks })), code('ADMIN_IMPORT_REVIEW_REQUIRED'));
+    assert.deepEqual(await stored(item.id), before);
+    const answered = [...item.decisions, { scope: 'track', slotId: slot, entryKey: null, boundName: null, action: 'create-distinct', candidateId: null, candidateRevision: null }];
+    await publishAdminImport(by, item.id, approvalBody(item, { decisions: answered, preselections: [], suggestionTicks: ticks }));
+    await runAdminImportPublicationOnce(storage, item.id);
+    const done = (await getAdminImport(by, item.id)).item;
+    assert.deepEqual([done.publication, done.published!.albumId, (await row('audioTracks', done.published!.trackIds[0]))!.title], ['complete', albumId, 'Appended']);
 });
 
 test('a file whose track is explicitly skipped is not waited for: the summary stops waiting for its upload and the approval publishes without it, but not while its upload is in flight', async () => {

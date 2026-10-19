@@ -5,9 +5,10 @@
  * Tests
  *   - suggestions for empty or file-tag values arrive ticked, lookup and administrator values unticked, equal values resolved and changed values as conflicts
  *   - Artist entries resolve by name, role and join phrase in order, never by key or MusicBrainz ID
+ *   - a label equal by name resolves itself and keeps its MusicBrainz ID, while empty or file-tag labels and Disc Numbers arrive ticked
  *   - an approval applies ticked suggestions, rejects unticked ones and accepts resolved ones, making accepted values the administrator's own
  *   - an approval refuses a missing, stale or conflicting tick and asks an editor without ticks to reload
- *   - the tick body is bounded before fingerprinting: exact fields, a generation and at most 204 distinct suggestion IDs
+ *   - the tick body is bounded before fingerprinting: exact fields, a generation and at most 304 distinct suggestion IDs
  *   - Publish waits for uploads, an active lookup and a queued or running analysis, and the budget shows what is left
  *   - a new Album without a primary entry says at once when its files or the applied release credit only a placeholder, but an append or a primary entry does not
  *   - Publish does not wait for the upload of a file whose track is explicitly skipped or reused, but waits for any other file without a confirmed upload
@@ -97,6 +98,30 @@ test('Artist entries resolve by name, role and join phrase in order, never by ke
     assert.equal(sameSuggestedValue('album.title', 'A', 'A'), true);
 });
 
+test('a label equal by name resolves itself and keeps its MusicBrainz ID, while empty or file-tag labels and Disc Numbers arrive ticked', () => {
+    const mbid = '0000000b-0000-4000-8000-000000000002', label = (name: string, musicBrainzId: string | null = null) => ({ name, musicBrainzId });
+    assert.equal(sameSuggestedValue('album.label', label('Amet Records', mbid), label('Amet Records')), true);
+    assert.equal(sameSuggestedValue('album.label', label('Amet Records'), label('amet records')), false);
+    assert.equal(sameSuggestedValue('album.label', null, label('Amet Records')), false);
+    const doc = project(draft => { draft.album.label = label('Amet Records', mbid); draft.tracks[1].discNumber = 1; }, { [`tracks:${slot(1)}:discNumber`]: 'automatic' });
+    doc.suggestions = [suggestion(1, 'label', label('Amet Records', mbid), label('Amet Records')), suggestion(2, 'discNumber', null, 2, slot(0)), suggestion(3, 'discNumber', null, 2, slot(1))] as AdminImportDocument['suggestions'];
+    ready(doc, [tags([]), { ...tags([]), discNumber: 1 }]);
+    assert.deepEqual(ticks(doc), { [id(1)]: 'resolved', [id(2)]: 'ticked', [id(3)]: 'ticked' });
+    applySuggestionTicks(doc, stored(doc), { generation: 1, ticked: [id(2), id(3)], unticked: [] });
+    assert.deepEqual([stored(doc).album.label, stored(doc).tracks.map(track => track.discNumber)], [label('Amet Records', mbid), [2, 2]]);
+    assert.deepEqual(doc.suggestions.map(item => item.decision), ['accepted', 'accepted', 'accepted']);
+    // An empty label, or one resting only on file tags, arrives ticked; the administrator's own arrives unticked.
+    const empty = project(); empty.suggestions = [suggestion(1, 'label', null, label('Amet Records'))] as AdminImportDocument['suggestions'];
+    assert.equal(ticks(empty)[id(1)], 'ticked');
+    const automatic = project(draft => { draft.album.label = label('Tag Records'); }, { 'album:label': 'automatic' });
+    automatic.suggestions = [suggestion(1, 'label', label('Tag Records'), label('Amet Records'))] as AdminImportDocument['suggestions'];
+    assert.equal(ticks(automatic)[id(1)], 'ticked');
+    applySuggestionTicks(automatic, stored(automatic), { generation: 1, ticked: [id(1)], unticked: [] });
+    assert.deepEqual([stored(automatic).album.label, automatic.draftOrigins?.['album:label']], [label('Amet Records'), 'administrator']);
+    const mine = project(draft => { draft.album.label = label('Mine Records'); }); mine.suggestions = [suggestion(1, 'label', label('Mine Records'), label('Amet Records'))] as AdminImportDocument['suggestions'];
+    assert.equal(ticks(mine)[id(1)], 'unticked');
+});
+
 test('an approval applies ticked suggestions, rejects unticked ones and accepts resolved ones, making accepted values the administrator\'s own', () => {
     const doc = project(draft => { draft.tracks[1].trackNumber = 2; }, {});
     doc.suggestions = [suggestion(1, 'title', '', 'Luna Title'), suggestion(2, 'title', '', 'Luna Song', slot(0)), suggestion(3, 'trackNumber', 2, 2, slot(1))] as AdminImportDocument['suggestions'];
@@ -128,14 +153,14 @@ test('an approval refuses a missing, stale or conflicting tick and asks an edito
     doc = fresh(); assert.throws(() => applySuggestionTicks(doc, stored(doc), { generation: 7, ticked: [], unticked: [] }), code('ADMIN_IMPORT_REVIEW_REQUIRED'));
 });
 
-test('the tick body is bounded before fingerprinting: exact fields, a generation and at most 204 distinct suggestion IDs', () => {
+test('the tick body is bounded before fingerprinting: exact fields, a generation and at most 304 distinct suggestion IDs', () => {
     const invalid = (value: unknown) => assert.throws(() => boundSuggestionTicks(value), code('ADMIN_IMPORT_INVALID_INPUT'));
     boundSuggestionTicks({ generation: 1, ticked: [id(1)], unticked: [id(2)] });
-    boundSuggestionTicks({ generation: 0, ticked: [], unticked: Array.from({ length: 204 }, (_, index) => String(index).padStart(24, '0')) });
+    boundSuggestionTicks({ generation: 0, ticked: Array.from({ length: 4 }, (_, index) => String(index).padStart(24, 'a')), unticked: Array.from({ length: 300 }, (_, index) => String(index).padStart(24, '0')) });
     invalid(null); invalid([]); invalid({ generation: 1, ticked: [] }); invalid({ generation: 1, ticked: [], unticked: [], extra: true });
     invalid({ generation: -1, ticked: [], unticked: [] }); invalid({ generation: 1.5, ticked: [], unticked: [] }); invalid({ generation: 1, ticked: 'x', unticked: [] });
     invalid({ generation: 1, ticked: [id(1)], unticked: [id(1)] }); invalid({ generation: 1, ticked: ['not-an-id'], unticked: [] });
-    invalid({ generation: 1, ticked: [], unticked: Array.from({ length: 205 }, (_, index) => String(index).padStart(24, '0')) });
+    invalid({ generation: 1, ticked: [], unticked: Array.from({ length: 305 }, (_, index) => String(index).padStart(24, '0')) });
 });
 
 test('Publish waits for uploads, an active lookup and a queued or running analysis, and the budget shows what is left', () => {
