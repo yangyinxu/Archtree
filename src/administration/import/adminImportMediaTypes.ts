@@ -72,6 +72,9 @@ export const importPublicationSupported = (publication: PublicationShape) => imp
 export const importUploadSettled = (asset: ImportAsset, now: Date) =>
     (!asset.leaseUntil || asset.leaseUntil <= now) &&
     now.getTime() >= (asset.transferDeadline?.getTime() ?? asset.updatedAt.getTime() + ADMIN_IMPORT_LIMITS.uploadSettleMs);
+/** A cover choice is no cover or a ready staged image (an explicit selection or the one an approval carries). */
+export const importCoverSelectable = (media: ImportMedia | undefined, slotId: unknown): slotId is string | null =>
+    slotId === null || (typeof slotId === 'string' && Boolean(media?.assets.some(asset => asset.slotId === slotId && asset.contentType.startsWith('image/') && asset.state === 'ready')));
 /** Sources stay locked while a publication is active or its cancelled cleanup is pending. */
 export const importSourcesLocked = (media?: ImportMedia) => Boolean(media?.publication && (media.publication.state !== 'cancelled' || media.publication.cleanupPending));
 /** A deployment assertion is mandatory: a private ACL does not override a public bucket/CDN policy. */

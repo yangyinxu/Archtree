@@ -3152,7 +3152,7 @@
       "variables": {}
     },
     "admin.media.confirm_publish_copy": {
-      "description": "This creates the reviewed Album using your saved metadata, duplicate decisions, selected cover and visibility. A request being accepted is not confirmation of publication.",
+      "description": "Administrator workbench: publication confirmation copy. Approving saves the shown draft, identity decisions and cover and publishes exactly what the confirmation lists.",
       "delivery": [
         "runtime"
       ],
@@ -3498,8 +3498,73 @@
       ],
       "variables": {}
     },
+    "admin.publication.checklist": {
+      "description": "Administrator workbench: heading of the publication confirmation list of everything that becomes catalog content.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.publication.confirm": {
       "description": "Confirm publication",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.publication.decision_changed": {
+      "description": "Administrator workbench: publication confirmation, a reused record that changed or is no longer listed since it was reviewed.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.publication.decisions_conflict": {
+      "description": "Administrator workbench: publication confirmation, unsaved identity decisions were made on an older saved version, so approval waits.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.publication.existing_member": {
+      "description": "Administrator workbench: publication confirmation, a track that is already a member of the existing Album an import appends to.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.publication.join_phrase": {
+      "description": "Administrator workbench: publication confirmation, the join phrase after one Artist entry, shown with its spacing.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "phrase": "string"
+      }
+    },
+    "admin.publication.needs_decision": {
+      "description": "Administrator workbench: publication confirmation, an identity that has no decision yet; approval waits for one in Review.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.publication.new_record": {
+      "description": "Administrator workbench: publication confirmation, an Artist, Organization, Album or Track that publishing creates new.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.publication.no_label": {
+      "description": "Administrator workbench: publication confirmation, the draft names no label Organization.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.publication.not_applied": {
+      "description": "Administrator workbench: publication confirmation, a draft value an import that appends to an existing Album does not apply.",
       "delivery": [
         "runtime"
       ],
@@ -3526,8 +3591,34 @@
       ],
       "variables": {}
     },
+    "admin.publication.reused_record": {
+      "description": "Administrator workbench: publication confirmation, the existing catalog record an identity decision reuses, by name.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "name": "string"
+      }
+    },
+    "admin.publication.track_position": {
+      "description": "Administrator workbench: publication confirmation, one track position; an unknown Disc Number shows as 1 and an unknown Track Number as a dash.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "disc": "string",
+        "track": "string"
+      }
+    },
     "admin.publication.unavailable": {
       "description": "Publication is unavailable for this import; review and cleanup remain available.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.publication.unsaved_included": {
+      "description": "Administrator workbench: publication confirmation, the editor has unsaved draft changes, which approving saves together with the approval.",
       "delivery": [
         "runtime"
       ],

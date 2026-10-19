@@ -11,7 +11,7 @@ import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router';
 import { AdminGate, useAdminAccess, useAdminText } from './AdminAccess';
-import { adminRequest, importPath, responseSchema, type ImportDetail, type ImportDraftV2 } from './adminApi';
+import { adminRequest, duplicateEditsKey, importPath, responseSchema, type ImportDetail, type ImportDraftV2 } from './adminApi';
 import { artistByline, draftChanges, rebaseDraft } from './importDraftPatch';
 import { adminWorkspace } from './adminWorkspace';
 import { useAdminMutation } from './useAdminMutation';
@@ -74,7 +74,8 @@ function ImportProject({ id }: { id: string }) {
     const item = mutation.result.item;
     setConfirmed(previous => !previous || item.revision >= previous.revision ? item : previous);
     setEditor(saved(item));
-    if (mutation.result.receipt?.kind === 'decisions') adminWorkspace.forget(`duplicate-edits:${id}`);
+    // Saved decisions, or an approval that saved the shown ones, leave no unsaved Review decisions behind.
+    if (mutation.result.receipt?.kind === 'decisions' || mutation.result.receipt?.kind === 'publish') adminWorkspace.forget(duplicateEditsKey(id));
     mutation.operation.acknowledge();
     void query.refetch();
   }, [mutation.result]);
@@ -144,7 +145,9 @@ function ImportProject({ id }: { id: string }) {
       {reviewVisited && <Suspense fallback={<p role="status">{t('common.loading')}</p>}><ImportDuplicates key={item.revision} item={item} disabled={savedOnly || Boolean(active)} onSave={decisions => mutate('decisions', { decisions })} /></Suspense>}
       </div>
       {(['files', 'publication'] as const).map(value => <div key={value} hidden={stage !== value} role="tabpanel" id={`import-panel-${value}`} aria-labelledby={`import-tab-${value}`}>
-      <Suspense fallback={<p role="status">{t('common.loading')}</p>}><ImportMedia view={value} active={stage === value} item={item} operation={mutation.operation} uploads={uploads} disabled={locked || editor.dirty || conflict || Boolean(active)} /></Suspense>
+      {/* Publishing includes unsaved edits (one-step approval); cover, cleanup and cancellation still act on the saved draft. */}
+      <Suspense fallback={<p role="status">{t('common.loading')}</p>}><ImportMedia view={value} active={stage === value} item={item} operation={mutation.operation} uploads={uploads} disabled={locked || editor.dirty || conflict || Boolean(active)}
+        publishDisabled={locked || conflict || Boolean(active)} approval={{ draft: editor.draft, changes }} /></Suspense>
       </div>)}
     </>}
   </section>;

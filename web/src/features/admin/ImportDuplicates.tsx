@@ -4,7 +4,7 @@ import { Link } from 'react-router';
 import { useLocalization } from '../../localization/LocalizationProvider';
 import type { MessageKey } from '../../localization/contract';
 import { useAdminAccess, useAdminText } from './AdminAccess';
-import { adminRequest, candidatesSchema, importPath, type ImportCandidate, type ImportDecision, type ImportDetail } from './adminApi';
+import { adminRequest, candidatesSchema, duplicateEditsKey, importPath, type DecisionEdits, type ImportCandidate, type ImportDecision, type ImportDetail } from './adminApi';
 import { adminWorkspace } from './adminWorkspace';
 import styles from './adminStyles';
 
@@ -20,8 +20,8 @@ export function ImportDuplicates({ item, disabled, onSave }: { item: ImportDetai
   const t = useAdminText(), { t: sharedText } = useLocalization();
   const access = useAdminAccess();
   const [requested, setRequested] = useState(false);
-  const key = `duplicate-edits:${item.id}`;
-  const [edits, setEdits] = useState<{ revision: number; decisions: ImportDecision[] } | null>(() => adminWorkspace.buffer(key) ?? null);
+  const key = duplicateEditsKey(item.id);
+  const [edits, setEdits] = useState<DecisionEdits | null>(() => adminWorkspace.buffer(key) ?? null);
   const conflict = Boolean(edits && edits.revision !== item.revision);
   const query = useQuery({
     queryKey: ['admin-imports', access.viewerId, access.epoch, access.generation, item.id, 'duplicates', item.revision],

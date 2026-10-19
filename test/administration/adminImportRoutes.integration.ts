@@ -13,6 +13,7 @@
  *   - a project saved in a newer draft format answers a change with the bounded reload code and still admits stopping work
  *   - a field save accepts a body up to 160 KB while other import bodies keep the 96 KB limit
  *   - a field save bounds each base and value to a draft value before its intent is fingerprinted, writing nothing
+ *   - an approval body up to 192 KB is parsed, its fields are bounded before the fingerprint, and an outdated or stale approval gets a bounded code
  * @end-catalog */
 
 import assert from 'node:assert/strict';
@@ -167,4 +168,28 @@ test('a field save bounds each base and value to a draft value before its intent
     await invalid(JSON.stringify({ ...intent(), changes: [{ path: 'album.title', base: [[['too deep']]], value: 'Within limits' }] }));    // A whole-draft body and a decision are bounded the same way before their fingerprint.
     await invalid(`{"operationId":"${randomUUID()}","expectedRevision":1,"draft":${'['.repeat(60_000)}${']'.repeat(60_000)}}`);
     await invalid(`{"operationId":"${randomUUID()}","expectedRevision":1,"decisions":[${'['.repeat(40_000)}${']'.repeat(40_000)}]}`, `${path}/decisions`, 'POST');    assert.deepEqual(await getDb()!.collection('adminAlbumImports').findOne({ _id: new ObjectId(created.item.id) }), before);
+});
+test('an approval body up to 192 KB is parsed, its fields are bounded before the fingerprint, and an outdated or stale approval gets a bounded code', async () => {
+    process.env.FINITUDE_ADMIN_IMPORT_PRIVATE_STORAGE_READY = 'true'; process.env.ADMIN_IMPORT_S3_BUCKET_NAME = 'synthetic-private'; process.env.S3_BUCKET_NAME = 'synthetic-catalog';
+    const created = await (await request('/api/admin/v1/imports', 'POST', body())).json(), path = `/api/admin/v1/imports/${created.item.id}`, publish = `${path}/publish`;
+    const imports = getDb()!.collection('adminAlbumImports'), before = await imports.findOne({ _id: new ObjectId(created.item.id) });
+    const approval = () => ({ operationId: randomUUID(), expectedRevision: 1, changes: [] as unknown[], decisions: [] as unknown[], selectedCoverSlotId: null, approvalDigest: created.item.approvalDigest as string });
+    // Stale bases together pass the field-save limit: the body is still parsed and reaches the revision check.
+    const stale = 'b'.repeat(42_000), large = { ...approval(), expectedRevision: 9, changes: ['title', 'visibility', 'releaseDate', 'label'].map(field => ({ path: `album.${field}`, base: stale, value: null })) };
+    assert.ok(JSON.stringify(large).length > 160 * 1024 && JSON.stringify(large).length < 192 * 1024);
+    const parsed = await request(publish, 'POST', large); assert.equal(parsed.status, 409); assert.deepEqual(await parsed.json(), { code: 'ADMIN_IMPORT_REVISION_CONFLICT' });
+    assert.equal((await request(publish, 'POST', { ...large, changes: [...large.changes, { path: 'album.artists', base: stale, value: null }] })).status, 413);
+    assert.equal((await request(`${path}/decisions`, 'POST', { ...approval(), padding: 'p'.repeat(100_000) })).status, 413);
+    // Nested deeper than a draft value or a flat decision: refused before the fingerprint.
+    const intent = `"operationId":"${randomUUID()}","expectedRevision":1`;
+    for (const raw of [`{${intent},"changes":[{"path":"album.title","base":${'['.repeat(60_000)}${']'.repeat(60_000)},"value":""}]}`, `{${intent},"decisions":[${'['.repeat(40_000)}${']'.repeat(40_000)}]}`, `{${intent},"decisions":[{"scope":["artist"]}]}`]) {
+        const refused = await request(publish, 'POST', raw); assert.equal(refused.status, 400); assert.deepEqual(await refused.json(), { code: 'ADMIN_IMPORT_INVALID_INPUT' });
+    }
+    // A fresh body from an editor before one-step approval asks for a reload; a changed saved basis is stale.
+    const outdated = await request(publish, 'POST', { operationId: randomUUID(), expectedRevision: 1 });
+    assert.equal(outdated.status, 409); assert.equal(outdated.headers.get('cache-control'), 'no-store'); assert.deepEqual(await outdated.json(), { code: 'ADMIN_IMPORT_RELOAD_REQUIRED' });
+    const changed = await request(publish, 'POST', { ...approval(), approvalDigest: 'f'.repeat(64) }); assert.equal(changed.status, 409); assert.deepEqual(await changed.json(), { code: 'ADMIN_IMPORT_APPROVAL_STALE' });
+    // The current basis passes the digest and reaches the draft checks.
+    const incomplete = await request(publish, 'POST', approval()); assert.equal(incomplete.status, 400); assert.deepEqual(await incomplete.json(), { code: 'ADMIN_IMPORT_DRAFT_INCOMPLETE' });
+    assert.deepEqual(await imports.findOne({ _id: new ObjectId(created.item.id) }), before);
 });

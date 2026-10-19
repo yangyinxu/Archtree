@@ -1508,6 +1508,14 @@ The wire protocol and operational bounds are documented in
   as a compilation, and never suggest a stand-in Artist for one.
 - A new import's visibility defaults to public and can be changed before
   publishing.
+- The publication confirmation lists everything that becomes catalog content:
+  the title, the ordered Artist entries with their roles and join phrases, the
+  label, the date, the full disc and track list with titles, the cover, the
+  visibility, and each new or reused Artist, Organization and Album, with each
+  reused record that is hidden marked. Approving it saves the shown draft,
+  identity decisions and cover choice and freezes the approval as one step bound
+  to exactly what was shown; a failed approval leaves at most the saved draft,
+  never a partial approval.
 - Publication is a separate explicit approval of the reviewed draft and duplicate
   decisions. It freezes the approval snapshot, rechecks current role, revisions,
   memberships, visibility and asset readiness, and reports confirmed per-item
@@ -1539,10 +1547,10 @@ The wire protocol and operational bounds are documented in
   and label are shown as not applied and need no identity decision or conflict
   answer, and appending creates no Artist or Organization. Appended MediaTracks
   receive that Album's primary Artist Credits, in its order and with its join
-  phrases, and join its automatic order by their Disc and Track Numbers. A
-  hidden Album continues to hide its Tracks until its own visibility changes; a
-  newly created hidden Artist or Organization is not exposed by publishing a
-  private import.
+  phrases, and join its automatic order by their Disc and Track Numbers, as the
+  confirmation shows. A hidden Album continues to hide its Tracks until its own
+  visibility changes; a newly created hidden Artist or Organization is not
+  exposed by publishing a private import.
 - An unconfirmed existing-catalog cover approval may be explicitly cancelled by
   a current administrator after its active worker lease ends. Cancellation leaves
   the saved cover unchanged and retains the unused object's identity and source

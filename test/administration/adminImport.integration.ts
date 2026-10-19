@@ -61,6 +61,7 @@ import { importDraftV2FromV1, legacyAdministratorOrigins, legacyArtistEntryKey, 
 import { ImportProviderError, type AnalysisInput, type ImportAnalysisProvider } from '../../src/administration/import/adminImportProvider';
 import { createAdminImport, getAdminImport, editAdminImport, idleAnalysis, listAdminImports, analyzeAdminImport, cancelAdminImportAnalysis, adoptAdminImportSuggestions, adminImportDuplicateCandidates, decideAdminImportDuplicates, importCreateHash, importDigest, initializeAdminImportStorage, runAdminImportWorkerOnce, type AdminImportDocument } from '../../src/administration/import/adminImportService';
 import { publishAdminImport } from '../../src/administration/import/adminImportPublisher';
+import { approvalBody } from '../support/adminImportApproval';
 import { selectAdminImportCover } from '../../src/administration/import/adminImportStorage';
 import { loadImportFixture } from '../support/adminImportFixtures';
 import { artistEntries, editImportDraft } from '../support/adminImportDraftChanges';
@@ -303,6 +304,8 @@ test('a project saved in a newer draft format is read-only: edits, analysis, ado
         () => adoptAdminImportSuggestions(by, id, { ...mutation(revision), generation: 1, selectedIds: [item.suggestions[0].id], rejectIds: [] }),
         () => decideAdminImportDuplicates(by, id, { ...mutation(revision), decisions: item.decisions }),
         () => publishAdminImport(by, id, mutation(revision)),
+        // A one-step approval of what the editor showed is refused the same way.
+        () => publishAdminImport(by, id, approvalBody(item)),
         () => selectAdminImportCover(by, id, { ...mutation(revision), slotId: null })
     ]) await assert.rejects(work(), errorCode('ADMIN_IMPORT_RELOAD_REQUIRED'));
     // Refusals precede any change: no receipt, revision, draft or analysis is written.

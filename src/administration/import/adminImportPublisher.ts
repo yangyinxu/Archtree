@@ -14,23 +14,28 @@ import { getDb } from '../../infrastructure/database';
 import { readyAlbumLifecycleFilter } from '../../services/catalog/albumReferenceFenceService';
 import { readyAudioStorageFilter } from '../../utils/audioStorageKey';
 import { sortTrackIdsByDiscAndTrackNumber } from '../../services/catalog/albumTrackLinkService';
-import { ADMIN_IMPORT_LIMITS, AdminImportError, exact, importEnabled, objectId, record, uuid } from './adminImportContract';
+import { ADMIN_IMPORT_LIMITS, AdminImportError, IMPORT_APPROVAL_FIELDS, exact, importEnabled, objectId, record, uuid } from './adminImportContract';
+import { boundImportApproval, saveImportApproval } from './adminImportApproval';
 import { getAdminImport, importCandidateProjection, importCollection, importPurposeFilter, importCandidateRevision, mutateAdminImport, withImportAdmin } from './adminImportService';
 import { importPrivateStorageReady, importPublicationSupported, type ImportAsset, type ImportPublication } from './adminImportMediaTypes';
 import { sameDraftValue, type ImportDecisionV2 } from './adminImportDraft';
 import { importDraftV2View, importSuggestionsV2View } from './adminImportDraftCompat';
-import { draftV2Paths, markAdministratorValues, storedDraftV2 } from './adminImportValueState';
+import { draftV2Paths, markAdministratorValues } from './adminImportValueState';
 import { defaultImportObjectStorage, importAssetTarget, type ImportObjectStorage, type ImportObjectTarget, type ImportObjectIdentity } from './adminImportStorage';
 import { assertImportReusedRecordsReady, commitImportCatalogGraph, freezeImportIdentities, importAlbumCredits, importPublicationConflict as conflict, requireCurrentApproval as currentApproval, requireImportPublicationReady as ready } from './adminImportCatalogCommit';
 
 const candidateProjection = importCandidateProjection;
 
 /**
- * Explicit approval creates one Album or appends only missing tracks to the exact reviewed existing Album. It freezes the
- * reviewed draft, decisions and identities as format 3: every credited Artist and the label are fixed here.
+ * Explicit one-step approval `{operationId, expectedRevision, changes, decisions, selectedCoverSlotId, approvalDigest}` creates one
+ * Album or appends only missing tracks to the exact reviewed existing Album. One transaction and one receipt save what the
+ * confirmation showed (adminImportApproval.ts) and freeze the reviewed draft, decisions and identities as format 3: every credited
+ * Artist and the label are fixed here. A body without the one-step fields replays its stored receipt, or otherwise is refused
+ * with ADMIN_IMPORT_RELOAD_REQUIRED (importPolicy). The raw body is fingerprinted as sent, so an earlier receipt still matches.
  */
 export async function publishAdminImport(actor: string, id: string, raw: unknown) {
-    const body = record(raw); exact(body, ['operationId', 'expectedRevision']); if (!uuid(body.operationId) || !Number.isSafeInteger(body.expectedRevision) || (body.expectedRevision as number) < 1) throw new AdminImportError(400, 'ADMIN_IMPORT_INVALID_INPUT');
+    const body = record(raw); exact(body, ['operationId', 'expectedRevision', ...IMPORT_APPROVAL_FIELDS]); if (!uuid(body.operationId) || !Number.isSafeInteger(body.expectedRevision) || (body.expectedRevision as number) < 1) throw new AdminImportError(400, 'ADMIN_IMPORT_INVALID_INPUT');
+    boundImportApproval(body);
     const result = await mutateAdminImport(actor, id, body as typeof body & { operationId: string; expectedRevision: number }, 'publish', async (doc, session) => {
         ready();
         if ((doc.media?.publicationHistory?.length ?? 0) + (doc.media?.publication ? 1 : 0) >= ADMIN_IMPORT_LIMITS.publications) throw new AdminImportError(409, 'ADMIN_IMPORT_PUBLICATION_APPROVAL_LIMIT');
@@ -40,12 +45,13 @@ export async function publishAdminImport(actor: string, id: string, raw: unknown
             (doc.media.publicationHistory ??= []).push(structuredClone(doc.media.publication));
             delete doc.media.publication;
         }
+        const draft = await saveImportApproval(doc, body, actor, session);
         // Only a pending suggestion the editor shows, and so can decide, holds the approval; one it cannot read never blocks it.
         const slots = new Set(doc.manifest.files.map(file => file.slotId)), shown = importSuggestionsV2View(doc.suggestions, doc.analysis.generation, slots, id);
         if (['queued', 'running'].includes(doc.analysis.state) || shown.some(suggestion => suggestion.decision === 'pending')) throw new AdminImportError(409, 'ADMIN_IMPORT_REVIEW_REQUIRED');
         // The project is Draft v2 here (converted on admission). A stored value the editor cannot show (a v1 value over its bound
         // after NFC reads as empty there) is never frozen.
-        const draft = storedDraftV2(doc), decisions = doc.decisions as ImportDecisionV2[];
+        const decisions = doc.decisions as ImportDecisionV2[];
         if (!draft.album.title || !sameDraftValue(importDraftV2View(draft, doc.manifest, id), draft)) throw new AdminImportError(400, 'ADMIN_IMPORT_DRAFT_INCOMPLETE');
         // A new Album needs a primary Artist entry; an append credits the target Album's own primaries instead.
         const albumDecision = decisions.find(decision => decision.scope === 'album'), append = albumDecision?.action === 'reuse';

@@ -30,6 +30,8 @@
  *   - a stored value the editor view cannot show is replaced by a save from the shown value, while any other base stays stale
  *   - an approval is format 3 with entries of a key, name and primary or featured role, a named label or none, Disc Number fields, and 1 to 50 frozen Artists
  *   - a format-2 approval may leave every Disc Number unknown, as long as each track has the field
+ *   - the approval digest binds the shown draft, decisions, cover and staged bytes in any key order, and nothing an approval does not show
+ *   - converting a project saved before Draft v2 keeps its approval digest, so an approval built on its view stays current
  * @end-catalog */
 
 /**
@@ -44,7 +46,7 @@ import '../../src/infrastructure/database';
 import { AdminImportError, uuid, type ImportManifest } from '../../src/administration/import/adminImportContract';
 import {
     boundArtistDecision, boundLabelDecision, defaultDraftV2, derivedEntryKey, draftV2Suggestion, foldImportName, isDraftV2, originKey, parseArtistEntries, parseDraftV2, parseImportName, parseLabelEntry,
-    retainBoundDecisions, sameDraftValue, type ImportArtistEntry, type ImportDecisionV2, type ImportDraftOrigins, type ImportDraftV2
+    importApprovalDigest, retainBoundDecisions, sameDraftValue, type ImportArtistEntry, type ImportDecisionV2, type ImportDraftOrigins, type ImportDraftV2
 } from '../../src/administration/import/adminImportDraft';
 import {
     applyAdministratorChanges, applyAutomaticValues, boundDraftChanges, boundedJson, convertLegacyImportProject, draftV2Paths, draftValueAt, draftWithinSizeLimit, originOf, parseDraftChanges, parseDraftPath, type ImportDraftPath
@@ -322,7 +324,7 @@ test('a legacy project converts to its Draft v2 view without touching its approv
 test('the import detail shows Draft v2 values, entry- and label-bound decisions and every published identity, and offers work for format 1 and 2 projects only', () => {
     for (const name of v1Fixtures) {
         const doc = load(name), detail = adminImportDetail(doc, actor, true), legacy = adminImportDto(doc, actor, true), view = importProjectV2View(doc)!;
-        const { draft: _a, suggestions: _b, decisions: _c, published, ...shared } = detail, { draft: _d, suggestions: _e, decisions: _f, published: legacyPublished, ...v1 } = legacy;
+        const { draft: _a, suggestions: _b, decisions: _c, published, approvalDigest: _g, ...shared } = detail, { draft: _d, suggestions: _e, decisions: _f, published: legacyPublished, ...v1 } = legacy;
         assert.deepEqual(shared, v1, name);
         assert.deepEqual(detail.draft, view.draft, name);
         assert.deepEqual(detail.suggestions, view.suggestions.filter(suggestion => suggestion.generation === legacy.analysis.generation), name);
@@ -396,6 +398,8 @@ test('name and title bounds hold for the stored NFC form, so a saved value is ne
 test('a field save body is bounded before its fingerprint: item count, exact keys, path length, and each base and value as a draft value', () => {
     const change = { path: 'album.title', base: 'Synthetic Album', value: 'Retitled' };
     boundDraftChanges([change]); boundDraftChanges(Array.from({ length: 305 }, () => change));
+    // An approval may carry no unsaved change (min 0), within the same upper bound; a field save needs one ('none' below).
+    boundDraftChanges([], 0); invalid(() => boundDraftChanges(Array.from({ length: 306 }, () => change), 0), 'too many for an approval');
     boundDraftChanges([{ ...change, base: [entry(1, 'A'), entry(2, 'B', 'featured')] }, { ...change, base: { year: 2026, month: null, day: null }, value: null }]);
     let deep: unknown = []; for (let level = 0; level < 60_000; level++) deep = [deep];
     for (const [label, changes] of [['none', []], ['too many', Array.from({ length: 306 }, () => change)], ['not a list', { 0: change }], ['extra key', [{ ...change, extra: 1 }]], ['no base', [{ path: change.path, value: change.value }]],
@@ -458,4 +462,35 @@ test('an approval is format 3 with entries of a key, name and primary or feature
 test('a format-2 approval may leave every Disc Number unknown, as long as each track has the field', () => {
     const snapshot = draft(); snapshot.tracks = snapshot.tracks.map(track => ({ ...track, discNumber: null }));
     assert.equal(importPublicationFormat({ schemaVersion: 2, snapshot }), 2);
+});
+
+test('the approval digest binds the shown draft, decisions, cover and staged bytes in any key order, and nothing an approval does not show', () => {
+    const decision = { scope: 'album', slotId: null, entryKey: null, action: 'create-distinct', candidateId: null, candidateRevision: null };
+    const shown = { draft: draft(), decisions: [decision], selectedCoverSlotId: 'cover' as string | null, assets: [{ slotId: 'cover', state: 'ready', sha256: 'a'.repeat(64) }] }, base = importApprovalDigest(shown);
+    assert.match(base, /^[a-f0-9]{64}$/);
+    const reverse = <T extends object>(value: T) => Object.fromEntries(Object.entries(value).reverse()) as T;
+    assert.equal(importApprovalDigest(reverse({ ...shown, draft: reverse({ ...shown.draft, album: reverse(shown.draft.album) }), decisions: shown.decisions.map(reverse), assets: shown.assets.map(reverse) })), base);
+    // Asset fields beyond its slot, state and bytes are not shown as approval content.
+    assert.equal(importApprovalDigest({ ...shown, assets: shown.assets.map(asset => ({ ...asset, byteLength: 9, contentType: 'image/png' })) }), base);
+    for (const [label, change] of [
+        ['a draft value', (value: typeof shown) => { value.draft.tracks[1].discNumber = 2; }], ['an Artist entry', (value: typeof shown) => { value.draft.album.artists[0].joinPhrase = ' & '; }],
+        ['a decision', (value: typeof shown) => { value.decisions[0].action = 'skip'; }], ['the cover', (value: typeof shown) => { value.selectedCoverSlotId = null; }],
+        ['an asset state', (value: typeof shown) => { value.assets[0].state = 'deleting'; }], ['asset bytes', (value: typeof shown) => { value.assets[0].sha256 = 'b'.repeat(64); }]
+    ] as const) { const copy = structuredClone(shown); change(copy); assert.notEqual(importApprovalDigest(copy), base, label); }
+    // The detail digests exactly what it shows; actor, receipts, revision, analysis and suggestions leave it unchanged.
+    const detail = adminImportDetail(loadV2(), actor, true), unshown = loadV2();
+    assert.equal(detail.approvalDigest, importApprovalDigest({ draft: detail.draft, decisions: detail.decisions, selectedCoverSlotId: detail.selectedCoverSlotId, assets: detail.assets }));
+    Object.assign(unshown, { revision: unshown.revision + 5, receipts: [], analysis: { ...unshown.analysis, generation: unshown.analysis.generation + 1 }, suggestions: [] });
+    assert.equal(adminImportDetail(unshown, '0000000000000000000000b2', false).approvalDigest, detail.approvalDigest);
+    const retitled = loadV2(); (retitled.draft as ImportDraftV2).album.title = 'Retitled'; assert.notEqual(adminImportDetail(retitled, actor, true).approvalDigest, detail.approvalDigest);
+    // The Web contract fixture (web/src/features/admin/adminApi.test.ts) echoes this value. Changing what the digest covers makes
+    // every open confirmation ADMIN_IMPORT_APPROVAL_STALE across that deploy, so both must be updated deliberately.
+    assert.equal(detail.approvalDigest, 'b220c79b50569d175e0ffd58aa59c16fde9713616937fab9fdd5c1c7b49b5467');
+});
+
+test('converting a project saved before Draft v2 keeps its approval digest, so an approval built on its view stays current', () => {
+    for (const name of v1Fixtures) {
+        const doc = load(name), shown = adminImportDetail(doc, actor, true).approvalDigest; convertLegacyImportProject(doc);
+        assert.equal(adminImportDetail(doc, actor, true).approvalDigest, shown, name);
+    }
 });

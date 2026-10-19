@@ -18,13 +18,14 @@
  *   - a reused featured Artist or label that changes after approval is a catalog conflict that mints nothing; cancel, cleanup and a new review publish fresh identities
  *   - an inherited primary that becomes unavailable after an append approval is a catalog conflict before any copy
  *   - a reused Track that stops being ready after an append approval is a catalog conflict before any copy
- *   - two entries decided to reuse one Artist (a rewritten document) need review at approval, writing nothing
+ *   - two entries decided to reuse one Artist (a rewritten document) are refused at approval, writing nothing
  *   - a format-3 approval missing its frozen Artists is held as an unknown format without any copy, and a format-2 approval commits exactly as before
  *   - a reused entry Artist or label that changes or stops being ready before approval is stale at approval, writing nothing
  *   - a skipped or missing entry or label decision is no identity: publishing a new Album needs one for each, writing nothing
  *   - an append whose target has a primary Artist that is not ready is stale, and one whose Credits cannot be read needs a primary, both writing nothing
  *   - a reused label that stops being ready is refused before any copy, and an approval rewritten to credit one Artist twice is refused at commit, minting nothing
  *   - a stored Various Artists suggestion is hidden and never holds the approval, while a shown pending suggestion still does
+ *   - one approval carries every entry, label, Album and track decision without a separate save, while two entries reusing one Artist are refused writing nothing
  * @end-catalog */
 
 /**
@@ -44,6 +45,7 @@ import { AdminImportError, type AdminImportDetailV2, type ImportDecisionDtoV2, t
 import { adminImportDuplicateCandidates, adoptAdminImportSuggestions, createAdminImport, decideAdminImportDuplicates, getAdminImport, initializeAdminImportStorage, listAdminImports, type AdminImportDocument } from '../../src/administration/import/adminImportService';
 import { selectAdminImportCover, uploadAdminImportAsset, type ImportObjectIdentity, type ImportObjectStorage, type ImportObjectTarget } from '../../src/administration/import/adminImportStorage';
 import { cancelAdminImportPublication, publishAdminImport, resumeAdminImportPublication, runAdminImportPublicationOnce } from '../../src/administration/import/adminImportPublisher';
+import { approvalBody } from '../support/adminImportApproval';
 import type { ImportArtistEntry, ImportDecisionV2, ImportDraftV2 } from '../../src/administration/import/adminImportDraft';
 import { catalogSearchProjection } from '../../src/utils/catalogSearch';
 import { followArtist } from '../../src/services/listener/artistFollowService';
@@ -108,12 +110,12 @@ async function decided(item: AdminImportDetailV2, choose: Record<string, Choice 
 }
 const reuse = (candidate: ImportDuplicateCandidate): Choice => ({ action: 'reuse', candidateId: candidate.id, candidateRevision: candidate.revision });
 const candidate = async (item: AdminImportDetailV2, kind: ImportDuplicateCandidate['kind'], label: string) => (await adminImportDuplicateCandidates(by, item.id)).items.find(value => value.kind === kind && value.label === label)!;
-async function publishNow(storage: Storage, item: AdminImportDetailV2) { await publishAdminImport(by, item.id, mutation(item.revision)); await runAdminImportPublicationOnce(storage, item.id); return (await getAdminImport(by, item.id)).item; }
+async function publishNow(storage: Storage, item: AdminImportDetailV2) { await publishAdminImport(by, item.id, approvalBody(item)); await runAdminImportPublicationOnce(storage, item.id); return (await getAdminImport(by, item.id)).item; }
 /** Replaces real IDs with the fixture's synthetic ones. */
 const substitute = (value: unknown, ids: Record<string, string>) => JSON.parse(Object.entries(ids).reduce((text, [real, synthetic]) => text.split(real).join(synthetic), JSON.stringify(value)));
 
 test('two primaries, a featured entry and a new label publish their Credits in draft order, and listeners see the Album under each', async () => {
-    const storage = new Storage(), item = await decided(await reviewed(storage)), approved = await publishAdminImport(by, item.id, mutation(item.revision)), frozen = (await stored(item.id)).media!.publication!;
+    const storage = new Storage(), item = await decided(await reviewed(storage)), approved = await publishAdminImport(by, item.id, approvalBody(item)), frozen = (await stored(item.id)).media!.publication!;
     assert.equal(approved.item.publication, 'preparing');
     assert.deepEqual([frozen.schemaVersion, frozen.artists!.map(value => [value.entryKey, value.newArtist, value.candidateRevision]), frozen.label!.newOrganization, frozen.artistId], [3, item.draft.album.artists.map(value => [value.key, true, null]), true, frozen.artists![0].artistId]);
     await runAdminImportPublicationOnce(storage, item.id);
@@ -194,7 +196,7 @@ test('entry and label decisions survive reordering, role and phrase edits; a ren
     ] as const) {
         const edited = (await editImportDraft(by, item.id, item, edit)).item, before = await stored(item.id);
         assert.equal(edited.decisions.length, 5, label);
-        await assert.rejects(publishAdminImport(by, item.id, mutation(edited.revision)), code('ADMIN_IMPORT_REVIEW_REQUIRED'), label);
+        await assert.rejects(publishAdminImport(by, item.id, approvalBody(edited)), code('ADMIN_IMPORT_REVIEW_REQUIRED'), label);
         assert.deepEqual(await stored(item.id), before, label);
         item = await decided(edited);
     }
@@ -224,7 +226,7 @@ test('an append keeps the target Album unchanged, gives its Tracks the target\'s
     item = (await selectAdminImportCover(by, item.id, { ...mutation(cover.item.revision), slotId: 'cover' })).item;
     // An append needs no entry or label decision.
     item = await decided(item, { 'Other Artist': null, label: null, album: reuse(await candidate(item, 'album', 'Amet Collection')) });
-    await publishAdminImport(by, item.id, mutation(item.revision)); const frozen = (await stored(item.id)).media!.publication!;
+    await publishAdminImport(by, item.id, approvalBody(item)); const frozen = (await stored(item.id)).media!.publication!;
     assert.deepEqual([frozen.newAlbum, frozen.cover, frozen.coverId, frozen.label, frozen.artists!.map(value => [value.artistId, value.entryKey, value.newArtist])], [false, null, null, null, [[ipsum, null, false], [lorem, null, false]]]);
     const copies = storage.copies; await runAdminImportPublicationOnce(storage, item.id);
     const done = (await getAdminImport(by, item.id)).item; assert.equal(done.publication, 'complete'); assert.equal(storage.copies, copies + 1, 'only the audio is copied, never the cover');
@@ -248,15 +250,15 @@ test('an append to an Album without a primary Artist Credit is refused at approv
     const storage = new Storage(), original = await publishNow(storage, await decided(await reviewed(storage))), { albumId, artistIds, organizationId } = original.published!;
     await db().collection('albums').updateOne({ _id: new ObjectId(albumId) }, { $set: { credits: [{ creditId: 'target_featured_one', subjectType: 'artist', subjectId: artistIds[2], role: 'featured', order: 0 }, { creditId: 'target_label_two', subjectType: 'organization', subjectId: organizationId, role: 'label', order: 1 }] } });
     const item = await reviewed(storage, draft => { draft.album.artists = []; draft.album.label = null; }), appended = await decided(item, { album: reuse(await candidate(item, 'album', 'Amet Collection')) }), before = await stored(item.id);
-    await assert.rejects(publishAdminImport(by, item.id, mutation(appended.revision)), code('ADMIN_IMPORT_APPEND_PRIMARY_REQUIRED'));
+    await assert.rejects(publishAdminImport(by, item.id, approvalBody(appended)), code('ADMIN_IMPORT_APPEND_PRIMARY_REQUIRED'));
     assert.deepEqual(await stored(item.id), before);
     // A new Album without a primary entry is refused too.
     const fresh = await decided(appended);
-    await assert.rejects(publishAdminImport(by, item.id, mutation(fresh.revision)), code('ADMIN_IMPORT_DRAFT_INCOMPLETE'));
+    await assert.rejects(publishAdminImport(by, item.id, approvalBody(fresh)), code('ADMIN_IMPORT_DRAFT_INCOMPLETE'));
 });
 
 test('a same-intent retry replays, and a publication stopped after its copy resumes and commits once with its frozen identities', async () => {
-    const storage = new Storage(), item = await decided(await reviewed(storage)), intent = mutation(item.revision);
+    const storage = new Storage(), item = await decided(await reviewed(storage)), intent = approvalBody(item);
     const first = await publishAdminImport(by, item.id, intent), frozen = structuredClone((await stored(item.id)).media!.publication!);
     const replay = await publishAdminImport(by, item.id, intent); assert.deepEqual([replay.receipt, (await stored(item.id)).media!.publication!.artists], [first.receipt, frozen.artists]);
     const controller = new AbortController(); storage.afterCopy = async () => { controller.abort(); };
@@ -269,11 +271,11 @@ test('a same-intent retry replays, and a publication stopped after its copy resu
 });
 
 test('an unknown copy keeps its evidence and mints nothing, and losing the role after the copy is permission lost', async () => {
-    const storage = new Storage(), item = await decided(await reviewed(storage)); await publishAdminImport(by, item.id, mutation(item.revision)); storage.failCopyBefore = true;
+    const storage = new Storage(), item = await decided(await reviewed(storage)); await publishAdminImport(by, item.id, approvalBody(item)); storage.failCopyBefore = true;
     await runAdminImportPublicationOnce(storage, item.id); let approval = (await stored(item.id)).media!.publication!;
     assert.deepEqual([approval.state, approval.issue, approval.tracks[0].state], ['needsAttention', 'storageUnknown', 'unknown']);
     assert.deepEqual(await counts(), { artists: 0, organizations: 0, albums: 0, audioTracks: 0, imageAssets: 0 });
-    const lost = await decided(await reviewed(storage)); await publishAdminImport(by, lost.id, mutation(lost.revision));
+    const lost = await decided(await reviewed(storage)); await publishAdminImport(by, lost.id, approvalBody(lost));
     storage.failCopyBefore = false; storage.afterCopy = async () => { await db().collection('users').updateOne({ _id: actor }, { $set: { role: 'user' } }); };
     await runAdminImportPublicationOnce(storage, lost.id); approval = (await stored(lost.id)).media!.publication!;
     // The copy's evidence stays recorded for an administrator's recovery, and nothing is minted.
@@ -289,7 +291,7 @@ test('a reused featured Artist or label that changes after approval is a catalog
         await db().collection('organizations').insertOne({ _id: label, name: 'Sit Records', organizationType: 'label', visibility: 'public', lifecycleStatus: 'ready' });
         let item = await reviewed(storage); const all = (await adminImportDuplicateCandidates(by, item.id)).items;
         item = await decided(item, { 'Dolor Soloist': reuse(all.find(value => value.id === dolor.toHexString())!), label: reuse(all.find(value => value.id === label.toHexString())!) });
-        await publishAdminImport(by, item.id, mutation(item.revision)); const first = (await stored(item.id)).media!.publication!;
+        await publishAdminImport(by, item.id, approvalBody(item)); const first = (await stored(item.id)).media!.publication!;
         storage.afterCopy = async () => { await db().collection(changed === 'artist' ? 'artists' : 'organizations').updateOne({ _id: changed === 'artist' ? dolor : label }, { $set: { name: 'Corrected' } }); };
         await runAdminImportPublicationOnce(storage, item.id); storage.afterCopy = undefined;
         const stalled = await stored(item.id);
@@ -312,7 +314,7 @@ test('an inherited primary that becomes unavailable after an append approval is 
     const storage = new Storage(), original = await publishNow(storage, await decided(await reviewed(storage))), [lorem] = original.published!.artistIds;
     const item = await reviewed(storage, draft => { draft.album.artists = []; draft.album.label = null; draft.tracks[0].title = 'Appended'; });
     const appended = await decided(item, { album: reuse(await candidate(item, 'album', 'Amet Collection')) });
-    await publishAdminImport(by, item.id, mutation(appended.revision)); const copies = storage.copies;
+    await publishAdminImport(by, item.id, approvalBody(appended)); const copies = storage.copies;
     await db().collection('artists').updateOne({ _id: new ObjectId(lorem) }, { $set: { lifecycleStatus: 'deleteFailed' } });
     await runAdminImportPublicationOnce(storage, item.id); const approval = (await stored(item.id)).media!.publication!;
     assert.deepEqual([approval.state, approval.issue, storage.copies, await db().collection('audioTracks').countDocuments()], ['needsAttention', 'catalogConflict', copies, 1]);
@@ -330,7 +332,7 @@ test('a reused Track that stops being ready after an append approval is a catalo
         draft.tracks.forEach(track => Object.assign(track, track.slotId === slots[0] ? { title: 'Consectetur', trackNumber: 1 } : { title: 'Appended', trackNumber: 2 }));
     })).item;
     item = await decided(item, { album: reuse(await candidate(item, 'album', 'Amet Collection')), [slots[0]]: reuse(await candidate(item, 'track', 'Consectetur')) });
-    await publishAdminImport(by, item.id, mutation(item.revision));
+    await publishAdminImport(by, item.id, approvalBody(item));
     assert.deepEqual((await stored(item.id)).media!.publication!.tracks.map(track => [track.id === reusedId, track.reused]), [[true, true], [false, false]]);
     const copies = storage.copies, before = await counts();
     await db().collection('audioTracks').updateOne({ _id: new ObjectId(reusedId) }, { $set: { uploadStatus: 'deleting' } });
@@ -338,25 +340,28 @@ test('a reused Track that stops being ready after an append approval is a catalo
     assert.deepEqual([approval.state, approval.issue, approval.tracks[1].state, storage.copies, await counts()], ['needsAttention', 'catalogConflict', 'pending', copies, before]);
 });
 
-test('two entries decided to reuse one Artist (a rewritten document) need review at approval, writing nothing', async () => {
+test('two entries decided to reuse one Artist (a rewritten document) are refused at approval, writing nothing', async () => {
     const storage = new Storage(), existing = new ObjectId(); await db().collection('artists').insertOne({ _id: existing, name: 'Lorem Ensemble', visibility: 'public', lifecycleStatus: 'ready' });
     let item = await reviewed(storage); const lorem = await candidate(item, 'artist', 'Lorem Ensemble');
     item = await decided(item, { 'Lorem Ensemble': reuse(lorem) });
-    // The route refuses such a body; a document rewritten to hold one is still never frozen.
+    // The route refuses such a body; a document rewritten to hold one is still never frozen: the approval saves the decisions it
+    // shows again, and the shown pair is refused as one decision set (freezing would also refuse it).
     await imports().updateOne({ _id: new ObjectId(item.id) }, { $set: { 'decisions.1.action': 'reuse', 'decisions.1.candidateId': lorem.id, 'decisions.1.candidateRevision': lorem.revision } });
-    const before = await stored(item.id);
-    await assert.rejects(publishAdminImport(by, item.id, mutation(item.revision)), code('ADMIN_IMPORT_REVIEW_REQUIRED'));
+    const before = await stored(item.id), shown = (await getAdminImport(by, item.id)).item;
+    assert.equal(shown.decisions.filter(value => value.candidateId === lorem.id).length, 2);
+    await assert.rejects(publishAdminImport(by, item.id, approvalBody(item)), code('ADMIN_IMPORT_APPROVAL_STALE'));
+    await assert.rejects(publishAdminImport(by, item.id, approvalBody(shown)), code('ADMIN_IMPORT_INVALID_INPUT'));
     assert.deepEqual(await stored(item.id), before);
 });
 
 test('a format-3 approval missing its frozen Artists is held as an unknown format without any copy, and a format-2 approval commits exactly as before', async () => {
-    const storage = new Storage(), item = await decided(await reviewed(storage)); await publishAdminImport(by, item.id, mutation(item.revision));
+    const storage = new Storage(), item = await decided(await reviewed(storage)); await publishAdminImport(by, item.id, approvalBody(item));
     await imports().updateOne({ _id: new ObjectId(item.id) }, { $unset: { 'media.publication.artists': '' } });
     await runAdminImportPublicationOnce(storage, item.id); const held = (await stored(item.id)).media!.publication!;
     assert.deepEqual([held.state, held.issue, storage.copies, await db().collection('albums').countDocuments()], ['needsAttention', 'unsupportedVersion', 0, 0]);
     // A single-entry approval rewritten as format 2 commits the format-2 graph: one primary Credit everywhere and public Tracks.
     const single = await decided(await reviewed(storage, draft => { draft.album.artists = [entry('Lorem Ensemble', 'primary', ' & ')]; draft.album.label = null; draft.album.visibility = 'hidden'; }));
-    await publishAdminImport(by, single.id, mutation(single.revision));
+    await publishAdminImport(by, single.id, approvalBody(single));
     await imports().updateOne({ _id: new ObjectId(single.id) }, { $set: { 'media.publication.schemaVersion': 2 }, $unset: { 'media.publication.artists': '', 'media.publication.label': '' } });
     await runAdminImportPublicationOnce(storage, single.id);
     const done = (await getAdminImport(by, single.id)).item, [artistId] = done.published!.artistIds;
@@ -378,7 +383,7 @@ test('a reused entry Artist or label that changes or stops being ready before ap
     ] as const) {
         await db().collection(collection).updateOne({ _id: id }, { $set: change });
         const before = await stored(item.id);
-        await assert.rejects(publishAdminImport(by, item.id, mutation(item.revision)), code('ADMIN_IMPORT_DUPLICATE_STALE'), what);
+        await assert.rejects(publishAdminImport(by, item.id, approvalBody(item)), code('ADMIN_IMPORT_DUPLICATE_STALE'), what);
         assert.deepEqual(await stored(item.id), before, what);
         // Restored to its reviewed values, the record has its reviewed revision again.
         await db().collection(collection).updateOne({ _id: id }, { $set: { visibility: 'public', lifecycleStatus: 'ready' } });
@@ -396,7 +401,7 @@ test('a skipped or missing entry or label decision is no identity: publishing a 
     ] as const) {
         item = await decided(item, choice);
         const before = await stored(item.id);
-        await assert.rejects(publishAdminImport(by, item.id, mutation(item.revision)), code('ADMIN_IMPORT_REVIEW_REQUIRED'), what);
+        await assert.rejects(publishAdminImport(by, item.id, approvalBody(item)), code('ADMIN_IMPORT_REVIEW_REQUIRED'), what);
         assert.deepEqual(await stored(item.id), before, what);
     }
     assert.equal((await publishNow(storage, await decided(item))).publication, 'complete');
@@ -408,14 +413,14 @@ test('an append whose target has a primary Artist that is not ready is stale, an
     let appended = await decided(item, { album: reuse(await candidate(item, 'album', 'Amet Collection')) });
     await db().collection('artists').updateOne({ _id: new ObjectId(lorem) }, { $set: { lifecycleStatus: 'deleting' } });
     let before = await stored(item.id);
-    await assert.rejects(publishAdminImport(by, item.id, mutation(appended.revision)), code('ADMIN_IMPORT_DUPLICATE_STALE'));
+    await assert.rejects(publishAdminImport(by, item.id, approvalBody(appended)), code('ADMIN_IMPORT_DUPLICATE_STALE'));
     assert.deepEqual(await stored(item.id), before);
     await db().collection('artists').updateOne({ _id: new ObjectId(lorem) }, { $set: { lifecycleStatus: 'ready' } });
     // A stored Credit list the Credit rules cannot read offers no primary Artist for the new Tracks to inherit.
     await db().collection('albums').updateOne({ _id: new ObjectId(albumId) }, { $set: { credits: [{ creditId: 'target_primary_one', subjectType: 'artist', role: 'primary', order: 0 }] } });
     appended = await decided(appended, { album: reuse(await candidate(appended, 'album', 'Amet Collection')) });
     before = await stored(item.id);
-    await assert.rejects(publishAdminImport(by, item.id, mutation(appended.revision)), code('ADMIN_IMPORT_APPEND_PRIMARY_REQUIRED'));
+    await assert.rejects(publishAdminImport(by, item.id, approvalBody(appended)), code('ADMIN_IMPORT_APPEND_PRIMARY_REQUIRED'));
     assert.deepEqual(await stored(item.id), before);
     assert.deepEqual(await counts(), { artists: 3, organizations: 1, albums: 1, audioTracks: 1, imageAssets: 0 });
 });
@@ -424,12 +429,12 @@ test('a reused label that stops being ready is refused before any copy, and an a
     const storage = new Storage(), label = new ObjectId();
     await db().collection('organizations').insertOne({ _id: label, name: 'Sit Records', organizationType: 'label', visibility: 'public', lifecycleStatus: 'ready' });
     let item = await reviewed(storage); item = await decided(item, { label: reuse(await candidate(item, 'organization', 'Sit Records')) });
-    await publishAdminImport(by, item.id, mutation(item.revision));
+    await publishAdminImport(by, item.id, approvalBody(item));
     await db().collection('organizations').updateOne({ _id: label }, { $set: { lifecycleStatus: 'deleting' } });
     await runAdminImportPublicationOnce(storage, item.id); let approval = (await stored(item.id)).media!.publication!;
     assert.deepEqual([approval.state, approval.issue, approval.tracks[0].state, storage.copies], ['needsAttention', 'catalogConflict', 'pending', 0]);
     // The route and the approval refuse two entries reusing one Artist; a document rewritten after the copy is refused at commit.
-    const twice = await decided(await reviewed(storage)); await publishAdminImport(by, twice.id, mutation(twice.revision));
+    const twice = await decided(await reviewed(storage)); await publishAdminImport(by, twice.id, approvalBody(twice));
     const [first] = (await stored(twice.id)).media!.publication!.artists!;
     storage.afterCopy = async () => { await imports().updateOne({ _id: new ObjectId(twice.id) }, { $set: { 'media.publication.artists.1.artistId': first.artistId } }); };
     await runAdminImportPublicationOnce(storage, twice.id); storage.afterCopy = undefined; approval = (await stored(twice.id)).media!.publication!;
@@ -447,7 +452,7 @@ test('a stored Various Artists suggestion is hidden and never holds the approval
     const pending = async () => (await listAdminImports(by, {})).items.find(value => value.id === item.id)!.pendingSuggestions;
     assert.equal(await pending(), 1, 'the workbench counts only the shown suggestion');
     const before = await stored(item.id);
-    await assert.rejects(publishAdminImport(by, item.id, mutation(item.revision)), code('ADMIN_IMPORT_REVIEW_REQUIRED'));
+    await assert.rejects(publishAdminImport(by, item.id, approvalBody(item)), code('ADMIN_IMPORT_REVIEW_REQUIRED'));
     assert.deepEqual(await stored(item.id), before);
     // The hidden placeholder cannot be accepted through /adopt (an editor opened before this release might still send it).
     await assert.rejects(adoptAdminImportSuggestions(by, item.id, { ...mutation(item.revision), generation, selectedIds: [placeholder.id], rejectIds: [] }), code('ADMIN_IMPORT_SUGGESTION_STALE'));
@@ -458,4 +463,27 @@ test('a stored Various Artists suggestion is hidden and never holds the approval
     assert.equal(await pending(), 0);
     const done = await publishNow(storage, item);
     assert.equal(done.publication, 'complete'); assert.equal(await db().collection('artists').countDocuments({ name: 'Various Artists' }), 0);
+});
+
+test('one approval carries every entry, label, Album and track decision without a separate save, while two entries reusing one Artist are refused writing nothing', async () => {
+    const storage = new Storage(), item = await reviewed(storage), existing = new ObjectId(), fresh = { action: 'create-distinct', candidateId: null, candidateRevision: null } as const;
+    await db().collection('artists').insertOne({ _id: existing, name: 'Lorem Ensemble', bio: '', albumIds: [], visibility: 'public', lifecycleStatus: 'ready' });
+    const decisions = [...item.draft.album.artists.map(value => ({ scope: 'artist', slotId: null, entryKey: value.key, ...fresh })), { scope: 'label', slotId: null, entryKey: null, ...fresh },
+        { scope: 'album', slotId: null, entryKey: null, ...fresh }, ...item.draft.tracks.map(track => ({ scope: 'track', slotId: track.slotId, entryKey: null, ...fresh }))];
+    assert.deepEqual(item.decisions, []);
+    const artist = await candidate(item, 'artist', 'Lorem Ensemble'), before = await stored(item.id);
+    const twice = decisions.map((value, index) => index < 2 ? { ...value, action: 'reuse', candidateId: artist.id, candidateRevision: artist.revision } : value);
+    await assert.rejects(publishAdminImport(by, item.id, approvalBody(item, { decisions: twice })), code('ADMIN_IMPORT_INVALID_INPUT'));
+    assert.deepEqual(await stored(item.id), before);
+    const approval = approvalBody(item, { decisions }); await publishAdminImport(by, item.id, approval); const frozen = await stored(item.id);
+    assert.deepEqual(frozen.receipts.slice(before.receipts.length).map(receipt => receipt.kind), ['publish']);
+    // The duplicate reuse is bounded before receipt lookup, as /decisions bounds it: under the stored operation ID it is still
+    // invalid input, never an operation conflict, and writes nothing.
+    await assert.rejects(publishAdminImport(by, item.id, { ...approval, decisions: twice }), code('ADMIN_IMPORT_INVALID_INPUT'));
+    assert.deepEqual(await stored(item.id), frozen);
+    assert.deepEqual((frozen.decisions as ImportDecisionV2[]).map(value => [value.scope, value.boundName]), [['artist', 'Lorem Ensemble'], ['artist', 'Ipsum Quartet'], ['artist', 'Dolor Soloist'], ['label', 'Sit Records'], ['album', null], ['track', null]]);
+    await runAdminImportPublicationOnce(storage, item.id);
+    const done = (await getAdminImport(by, item.id)).item, album = await row('albums', done.published!.albumId);
+    assert.deepEqual(album!.credits.map((value: { role: string; joinPhrase?: string }) => [value.role, value.joinPhrase ?? null]), [['primary', ' & '], ['primary', ' feat. '], ['featured', null], ['label', null]]);
+    assert.deepEqual(await counts(), { artists: 4, organizations: 1, albums: 1, audioTracks: 1, imageAssets: 0 });
 });

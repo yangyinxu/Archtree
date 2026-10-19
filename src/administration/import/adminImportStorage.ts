@@ -23,7 +23,7 @@ import { maxAudioUploadMb } from '../../middleware/audioUpload';
 import { normalizeUtf8Text } from '../../utils/textEncoding';
 import { ADMIN_IMPORT_LIMITS as LIMITS, AdminImportError, exact, importEnabled, objectId, record, uuid, type AdminImportResponse, type ImportEmbeddedTags } from './adminImportContract';
 import { getAdminImport, importCollection, importPurposeFilter, importDigest, mutateAdminImport, withImportAdmin } from './adminImportService';
-import { importPrivateStorageReady, importSourcesLocked, importUploadSettled, type ImportAsset } from './adminImportMediaTypes';
+import { importCoverSelectable, importPrivateStorageReady, importSourcesLocked, importUploadSettled, type ImportAsset } from './adminImportMediaTypes';
 import { adminWorkerSignal } from '../adminWorkerLifecycle';
 import { extractImportArtwork } from './adminImportArtwork';
 import { importDraftWritable } from './adminImportDraftCompat';
@@ -274,8 +274,8 @@ export function selectAdminImportCover(actor: string, id: string, raw: unknown) 
     const body = record(raw); exact(body, ['operationId', 'expectedRevision', 'slotId']);
     if (!uuid(body.operationId) || !Number.isSafeInteger(body.expectedRevision) || (body.expectedRevision as number) < 1 || (body.slotId !== null && typeof body.slotId !== 'string')) throw new AdminImportError(400, 'ADMIN_IMPORT_INVALID_INPUT');
     return mutateAdminImport(actor, id, body as typeof body & { operationId: string; expectedRevision: number }, 'select-cover', async doc => {
-        if (body.slotId !== null && !doc.media?.assets.some(asset => asset.slotId === body.slotId && asset.contentType.startsWith('image/') && asset.state === 'ready')) throw new AdminImportError(409, 'ADMIN_IMPORT_ASSET_CONFLICT');
-        doc.media ??= { assets: [] }; doc.media.selectedCoverSlotId = body.slotId as string | null;
+        if (!importCoverSelectable(doc.media, body.slotId)) throw new AdminImportError(409, 'ADMIN_IMPORT_ASSET_CONFLICT');
+        doc.media ??= { assets: [] }; doc.media.selectedCoverSlotId = body.slotId;
     });
 }
 

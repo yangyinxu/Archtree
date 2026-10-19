@@ -80,12 +80,12 @@ export function boundedJson(value: unknown, depth: number, bytes: number): boole
 const boundedValue = (value: unknown) => boundedJson(value, 2, DRAFT_V2_LIMITS.bytes);
 /**
  * Bounds a field save's `changes` before its intent is fingerprinted or compared, so no body can overflow the stack or exceed a
- * whole draft's size: 1 to 5 + 3 per allowed file items, each exactly {path, base, value} with a path of at most 80 characters
- * and a bounded base and value. parseDraftChanges then applies the manifest and value rules; every save this release admits
- * meets both, so a lost-response replay is never refused here.
+ * whole draft's size: `min` (1 for a field save, 0 for an approval with no unsaved edit) to 5 + 3 per allowed file items, each
+ * exactly {path, base, value} with a path of at most 80 characters and a bounded base and value. parseDraftChanges then applies
+ * the manifest and value rules; every save this release admits meets both, so a lost-response replay is never refused here.
  */
-export function boundDraftChanges(raw: unknown): void {
-    if (!Array.isArray(raw) || raw.length < 1 || raw.length > albumFields.length + trackFields.length * ADMIN_IMPORT_LIMITS.files) return invalidImport();
+export function boundDraftChanges(raw: unknown, min = 1): void {
+    if (!Array.isArray(raw) || raw.length < min || raw.length > albumFields.length + trackFields.length * ADMIN_IMPORT_LIMITS.files) return invalidImport();
     for (const item of raw) {
         const change = record(item); exact(change, ['path', 'base', 'value']);
         if (!hasOwn(change, 'base') || !hasOwn(change, 'value') || typeof change.path !== 'string' || change.path.length > 80 || !boundedValue(change.base) || !boundedValue(change.value)) return invalidImport();

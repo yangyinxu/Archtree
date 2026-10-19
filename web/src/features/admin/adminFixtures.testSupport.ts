@@ -1,4 +1,4 @@
-import type { ImportArtistEntry, ImportDetail, ImportDraftV2, ImportLabelEntry } from './adminApi';
+import type { ImportArtistEntry, ImportCandidate, ImportDetail, ImportDraftV2, ImportLabelEntry } from './adminApi';
 export const viewer = 'aaaaaaaaaaaaaaaaaaaaaaaa';
 export const projectId = 'bbbbbbbbbbbbbbbbbbbbbbbb';
 export const slotId = '10000000-0000-4000-8000-000000000001';
@@ -14,7 +14,8 @@ export function detail(): ImportDetail {
     assets: [], selectedCoverSlotId: null, published: null, publicationRecovery: null, suggestions: [
       { id: 'cccccccccccccccccccccccc', generation: 1, scope: 'album', slotId: null, field: 'title', baseline: '', value: 'Suggested Album', source: 'folder', evidence: 'Synthetic Album', decision: 'pending' },
       { id: 'dddddddddddddddddddddddd', generation: 1, scope: 'track', slotId, field: 'trackNumber', baseline: null, value: 1, source: 'filename', evidence: '01 First.mp3', decision: 'pending' }
-    ], decisions: [], upload: { ready: 0, total: 2, available: false }, publication: 'notAvailable', capabilities: { analysis: true, upload: false, publish: false }, receipts: []
+    ], decisions: [], upload: { ready: 0, total: 2, available: false }, publication: 'notAvailable', capabilities: { analysis: true, upload: false, publish: false }, receipts: [],
+    approvalDigest: 'e'.repeat(64)
   };
 }
 /** One synthetic Artist entry, primary by default; a fixed key keeps saved and edited drafts comparable. */
@@ -35,13 +36,15 @@ export function applyDraftChanges(draft: ImportDraftV2, changes: { path: string;
 }
 /**
  * A synthetic import project endpoint: a PATCH records its body, applies its changes as the server writes them and confirms a
- * new revision; any other request reads the current project. `set` replaces the project, as another administrator's save would.
+ * new revision; the duplicate candidates read lists `candidates`; any other request reads the current project. `set` replaces
+ * the project, as another administrator's save would.
  */
-export function fieldSaveEndpoint(initial: ImportDetail) {
+export function fieldSaveEndpoint(initial: ImportDetail, candidates: ImportCandidate[] = []) {
   let item = initial; const writes: Record<string, any>[] = [];
   return {
     writes, current: () => item, set: (next: ImportDetail) => { item = next; },
-    fetch: async (_path: string, init?: RequestInit) => {
+    fetch: async (path: string, init?: RequestInit) => {
+      if (path.endsWith('/duplicate-candidates')) return json({ items: candidates });
       if (init?.method !== 'PATCH') return json({ item, receipt: null });
       const body = JSON.parse(String(init.body)); writes.push(body);
       item = { ...item, revision: item.revision + 1, draft: applyDraftChanges(item.draft, body.changes) };

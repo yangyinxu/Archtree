@@ -120,6 +120,29 @@ new tracks take that Album's primary Artists, track order and visibility. A
 completed import links to its Album, each of its Artists and its label
 Organization.
 
+Publishing is one step. Publish stays available while the draft has unsaved
+edits, while cover selection, file removal and cancelling an approval still wait
+for a save. Review decisions cannot change while the draft has unsaved edits, so
+make them before editing. Its confirmation lists the title, the byline and each
+Artist entry with its role and join phrase, the label or No label, the date, the
+visibility, the cover, and the identity of the Album, each entry and the label:
+New, Reuses a named record (marked Hidden when it is), Needs a decision, Match
+changed (the reused record is not listed at its reviewed revision), or Not
+applied for an append, whose title, date, visibility and cover rows say so too.
+The tracks the approval adds follow in approved order, Disc Number (unknown as
+1), then Track Number (unknown last), then draft order, followed by an existing
+Album's members, named by their catalog title (or draft title while the match
+changed) without a position, which the append leaves unchanged; skipped tracks
+are left out. The confirmation reads the duplicate candidates only when it shows
+a reuse. Approve stays disabled while those load or fail, while any row needs a
+decision or holds a changed match, and while Review's unsaved decisions come
+from an older revision; a newer revision or approval digest makes an open
+confirmation stale. Approving sends the unsaved changes and Review's unsaved
+decisions with the approval; a refused approval keeps both, and a confirmed one
+leaves the editor showing the saved draft. If the Web was updated after the page
+loaded and the confirmation cannot load its checklist, it asks for a reload and
+Approve stays disabled, while the page and its unsaved edits stay open.
+
 The workbench is Web-only. Finitude iOS and Android expose listener features even
 for administrator accounts; they do not load administrator capabilities, private
 previews, import/catalog/Page editors or upload controls.
@@ -256,7 +279,13 @@ Import routes (relative to `/api/admin/v1`):
   Draft v2 view. Value origins (`draftOrigins`) are stored, not returned; each
   is keyed by its value path with `:` in place of `.` (`album:title`,
   `tracks:<slotId>:discNumber`), because MongoDB before 5.0 refuses dotted
-  field names.
+  field names. `approvalDigest` is the SHA-256 hex digest of the key-sorted
+  JSON of what a publication confirmation shows from the saved project: the
+  Draft v2 view, the returned decisions, `selectedCoverSlotId`, and each
+  returned asset's `slotId`, `state` and `sha256`. Actor, capabilities,
+  receipts, revision, analysis and suggestions do not count, and a format-1
+  project digests as its Draft v2 view, so converting it keeps the digest. A
+  publish body echoes it; the Web never computes it.
 - `PATCH /imports/:id`: `{operationId, expectedRevision, changes}` saves only
   the values the administrator changed, under one ordinary receipt. Each change
   is `{path, base, value}`, at most one per path: `path` is `album.title`,
@@ -292,8 +321,8 @@ Import routes (relative to `/api/admin/v1`):
   is refused with `409 ADMIN_IMPORT_RELOAD_REQUIRED` right after receipt
   lookup, before the publication lock and the operation limit are checked, so
   a lost response of an earlier save still replays and an outdated editor is
-  always asked to reload. The JSON limit is 160 KB for this route and 96 KB
-  for the other import routes.
+  always asked to reload. The JSON limit is 160 KB for this route, 192 KB for
+  `POST /imports/:id/publish` and 96 KB for the other import routes.
 - The first admitted change of a format-1 project, other than staged cleanup,
   publication cancellation and analysis cancellation, stores it as Draft v2:
   its draft, analysis baseline, suggestions and the decisions still bound to
@@ -328,7 +357,9 @@ Import routes (relative to `/api/admin/v1`):
   entries reusing one Artist is `400 ADMIN_IMPORT_INVALID_INPUT` and writes
   nothing. A reuse names a ready record at its reviewed revision, for the label
   an Organization of any type, or the save is
-  `409 ADMIN_IMPORT_DUPLICATE_STALE`. A body whose decisions lack `entryKey`
+  `409 ADMIN_IMPORT_DUPLICATE_STALE`; while the Album decision appends, an
+  entry's or the label's reuse is kept without that check, since an append
+  applies neither. A body whose decisions lack `entryKey`
   comes from an editor that predates several entries and returns
   `409 ADMIN_IMPORT_RELOAD_REQUIRED` right after receipt lookup, so a lost
   response of an older body still replays. A reuse or create-distinct decision
@@ -378,9 +409,42 @@ Import routes (relative to `/api/admin/v1`):
 - `GET /imports/:id/assets/:slotId/preview`: protected staged artwork preview.
 - `POST /imports/:id/publish`: explicit reviewed approval, then asynchronous
   fixed-identity publication; `/resume-publication` reconciles that approval's
-  original operation ID rather than creating another Album. A refusal writes
-  no approval, receipt or revision. Every approval needs an Album title, and a
-  new Album also at least one primary Artist entry, or it is
+  original operation ID rather than creating another Album. The body is
+  `{operationId, expectedRevision, changes, decisions, selectedCoverSlotId,
+  approvalDigest}`: the confirmation's unsaved field changes in the `PATCH`
+  shape (possibly none), the whole decision set it shows in the `/decisions`
+  shape, the cover it shows (`null` or a staged slot) and the `approvalDigest`
+  of the saved project it was built on. Before the intent is fingerprinted,
+  `changes` and `decisions` are bounded as `PATCH` and `/decisions` bound them
+  (so two entries reusing one Artist are refused here) and the cover and
+  digest to 64 characters, or the body is `400 ADMIN_IMPORT_INVALID_INPUT`.
+  One transaction under one ordinary `publish` receipt then saves and freezes
+  the approval. After receipt lookup, the revision (`expectedRevision` must
+  equal the current revision), publication-lock, operation-limit,
+  publication-readiness and approval-limit checks, a body missing any of the
+  four fields or whose digest is not 64 lowercase hex characters is
+  `400 ADMIN_IMPORT_INVALID_INPUT`, and a digest that no longer matches the
+  saved project is `409 ADMIN_IMPORT_APPROVAL_STALE`. The decisions are then
+  saved against the saved names exactly as `/decisions` saves them, the
+  changes as `PATCH` saves them, decisions whose entry or label the changes
+  renamed or removed are dropped (so that entry needs a new decision,
+  `409 ADMIN_IMPORT_REVIEW_REQUIRED`), and the cover as `/select-cover` saves
+  it (`409 ADMIN_IMPORT_ASSET_CONFLICT` unless it is no cover or a ready
+  image), before the checks below run and the approval is frozen. A body with
+  none of the four fields comes from an editor that predates one-step
+  approval: a lost response replays its stored receipt, and a new one is
+  `409 ADMIN_IMPORT_RELOAD_REQUIRED` right after receipt lookup, before the
+  revision, lock, limit and format-1 conversion. Rolled back below this
+  release, a one-step body is refused before receipt lookup
+  (`400 ADMIN_IMPORT_INVALID_INPUT`, or `413` when it exceeds that release's
+  96 KB JSON limit) and never replays; what it saved is the same Draft v2
+  draft, decisions, cover and format-3 approval that `PATCH`, `/decisions`,
+  `/select-cover` and the release before write, so it reads there as that
+  release's own and below it as described under
+  [Rollback floors](#rollback-floors). A refusal writes no approval, receipt,
+  revision, draft, origin, decision, cover or conversion, so a failed approval
+  leaves at most the previously saved draft. Every approval needs an Album
+  title, and a new Album also at least one primary Artist entry, or it is
   `400 ADMIN_IMPORT_DRAFT_INCOMPLETE` before anything is frozen. A new Album's
   entries and label need the decisions described under `/decisions`
   (`409 ADMIN_IMPORT_REVIEW_REQUIRED`), and a reused Artist or Organization
@@ -434,15 +498,16 @@ Import routes (relative to `/api/admin/v1`):
 Ordinary import mutations retain their 256-receipt admission limit. Each
 admitted file upload takes one ordinary receipt and its replays take none, so a
 100-file import leaves room for re-uploads after confirmed failures, draft
-edits, decisions and the approval. Required asset cleanup and publication
-cancellation use separate lifecycle receipts tied to each admitted asset version
-or approved publication, preserving exact replay and UUID-collision checks
-without consuming the ordinary mutation allowance. Automatic embedded-cover
-staging, which follows a ready audio upload, likewise has its own bounded
-lifecycle receipts. An embedded image whose SHA-256 matches one that is ready,
-pending or of unknown outcome is not staged again, and each import makes at
-most 16 automatic embedded stagings. Embedded assets staged before this release
-keep their ordinary receipts and existing lifecycle.
+edits, decisions and the approval. An approval takes one ordinary receipt,
+including the draft changes, decisions and cover it saves. Required asset
+cleanup and publication cancellation use separate lifecycle receipts tied to
+each admitted asset version or approved publication, preserving exact replay and
+UUID-collision checks without consuming the ordinary mutation allowance.
+Automatic embedded-cover staging, which follows a ready audio upload, likewise
+has its own bounded lifecycle receipts. An embedded image whose SHA-256 matches
+one that is ready, pending or of unknown outcome is not staged again, and each
+import makes at most 16 automatic embedded stagings. Embedded assets staged
+before this release keep their ordinary receipts and existing lifecycle.
 The client receives a bounded recent receipt projection; the original publication
 UUID remains available through `publicationRecovery` for durable reconciliation.
 
@@ -736,9 +801,10 @@ Later stages raise the oldest release that is safe to roll back to:
   which the approval mirrors as `artistId`.
   Every project this release creates is stored as Draft v2 at creation, so
   after a rollback it is read-only even if it was never edited. The release
-  before refuses this release's field saves as invalid input and never replays
-  them, so after a rollback reload open workbench tabs before retrying a save
-  whose response was lost.
+  before refuses this release's field saves and approvals before receipt
+  lookup (as invalid input, or as too large over its 96 KB JSON limit) and
+  never replays them, so after a rollback reload open workbench tabs before
+  retrying a save or approval whose response was lost.
 - This release stores catalog reviews as Draft v2, at creation or at their
   first admitted change. The oldest release that reads Draft v2 imports (the
   floor above) keeps such reviews read-only: it never dispatches their

@@ -3,15 +3,17 @@
  *   Functions: ImportMedia
  * Internal
  *   Types: AssetRecovery, ReviewedMedia, MediaConfirmation
- *   Functions: assetStamp
- *   Constants: refusal
+ *   Functions: ChecklistUnavailable, assetStamp
+ *   Constants: ImportApprovalChecklist, refusal
  * @end-catalog */
 
-import { useRef, useState } from 'react';
+import { lazy, Suspense, useRef, useState, type ComponentProps, type ComponentType } from 'react';
 import { Link } from 'react-router';
 import { ModalDialog } from '../../components/ModalDialog';
-import type { ImportDetail } from './adminApi';
+import type { ImportDetail, ImportDraftV2 } from './adminApi';
 import { importPath } from './adminApi';
+import type { ImportDraftChange } from './importDraftPatch';
+import type { ApprovalState, ImportApprovalChecklist as ApprovalChecklist } from './ImportApprovalChecklist';
 import { useAdminAccess, useAdminText } from './AdminAccess';
 import { adminWorkspace } from './adminWorkspace';
 import { useOnline } from './useAdminOnline';
@@ -21,11 +23,17 @@ import type { ImportUploadQueueView } from './useImportUploadQueue';
 import { ImportUploads } from './ImportUploads';
 import type { AdminMutation } from './useAdminMutation';
 import styles from './adminStyles';
+/** A checklist chunk that cannot load (a deploy replaced it) asks for a reload; it reports no approval, so Approve stays disabled. */
+function ChecklistUnavailable() { const t = useAdminText(); return <p role="alert">{t('common.reload')}</p>; }
+// The checklist and its candidate read load only with a publication confirmation, keeping this panel inside the initial budget. A
+// failed load stays inside the dialog, so the page and its unsaved edits survive.
+const ImportApprovalChecklist = lazy<ComponentType<ComponentProps<typeof ApprovalChecklist>>>(() => import('./ImportApprovalChecklist')
+  .then(module => ({ default: module.ImportApprovalChecklist }), () => ({ default: ChecklistUnavailable })));
 
 type AssetRecovery = NonNullable<ImportDetail['assets'][number]['recovery']>;
 interface ReviewedMedia { importId: string; revision: number; label: string }
 type MediaConfirmation = (ReviewedMedia & { kind: 'remove'; slotId: string; assetStamp: string | null; recovery?: AssetRecovery })
-  | (ReviewedMedia & { kind: 'publish' })
+  | (ReviewedMedia & { kind: 'publish'; item: ImportDetail; draft: ImportDraftV2; changes: ImportDraftChange[] })
   | (ReviewedMedia & { kind: 'cancelPublication'; publicationOperationId: string });
 /** Binds confirmation to the observed source and recovery intent even during asynchronous storage progress. */
 const assetStamp = (asset: ImportDetail['assets'][number] | undefined) => asset ? JSON.stringify({
@@ -37,10 +45,17 @@ const refusal: Record<string, string> = { content_changed: 'upload.refused_chang
 /**
  * Uploads run in the one-approval queue; this section shows each file's outcome and its explicit recovery actions.
  * The import page owns the queue subscription and passes it in, which keeps the queue engine out of this panel's bundle.
+ * Publishing is one step: the confirmation freezes the project, the editor's draft and its unsaved changes as Publish is chosen,
+ * and approving sends them with the shown decisions and cover (`publishDisabled` gates only this; other actions need a saved draft).
  */
-export function ImportMedia({ item, operation, uploads, disabled, view, active = true }: { item: ImportDetail; operation: AdminMutation; uploads: ImportUploadQueueView; disabled: boolean; view?: 'files' | 'publication'; active?: boolean }) {
+export function ImportMedia({ item, operation, uploads, disabled, publishDisabled = disabled, approval = { draft: item.draft, changes: [] }, view, active = true }: {
+  item: ImportDetail; operation: AdminMutation; uploads: ImportUploadQueueView; disabled: boolean; publishDisabled?: boolean;
+  approval?: { draft: ImportDraftV2; changes: ImportDraftChange[] }; view?: 'files' | 'publication'; active?: boolean;
+}) {
   const t = useAdminText(), access = useAdminAccess(), online = useOnline();
   const [confirmation, setConfirmation] = useState<MediaConfirmation | null>(null);
+  // What the open publication checklist can send; null until it has loaded.
+  const [approved, setApproved] = useState<ApprovalState | null>(null);
   const [invalid, setInvalid] = useState(false);
   const [checking, setChecking] = useState<string | null>(null);
   // Reselected File handles live in the workspace buffer, so rows re-read it after each selection.
@@ -83,12 +98,16 @@ export function ImportMedia({ item, operation, uploads, disabled, view, active =
   ];
   const publishOperation = item.publicationRecovery?.operationId ?? [...item.receipts].reverse().find(receipt => receipt.kind === 'publish')?.operationId;
   const canCancelPublication = Boolean(publishOperation && ['preparing', 'needsAttention'].includes(item.publication));
-  const closeConfirmation = () => setConfirmation(null);
+  const closeConfirmation = () => { setConfirmation(null); setApproved(null); };
+  // An approval binds the saved project it was built on: a newer revision or a changed approvalDigest makes it stale.
   const confirmationStale = Boolean(confirmation && (confirmation.importId !== item.id || confirmation.revision !== item.revision
     || ('assetStamp' in confirmation && confirmation.assetStamp !== assetStamp(item.assets.find(asset => asset.slotId === confirmation.slotId && asset.state !== 'deleted')))
-    || (confirmation.kind === 'cancelPublication' && confirmation.publicationOperationId !== publishOperation)));
-  const confirmationLocked = confirmationStale || (confirmation?.kind === 'remove' ? deletionLocked : confirmation?.kind === 'cancelPublication' ? disabled || !canCancelPublication : disabled || publicationLocked || !item.capabilities.publish);
+    || (confirmation.kind === 'cancelPublication' && confirmation.publicationOperationId !== publishOperation)
+    || (confirmation.kind === 'publish' && confirmation.item.approvalDigest !== item.approvalDigest)));
+  const confirmationLocked = confirmationStale || (confirmation?.kind === 'remove' ? deletionLocked : confirmation?.kind === 'cancelPublication' ? disabled || !canCancelPublication
+    : publishDisabled || publicationLocked || !item.capabilities.publish || !approved?.ready);
   const label = item.draft.album.title || item.manifest.rootLabel || t('common.untitled');
+  const openPublication = () => { setApproved(null); setConfirmation({ kind: 'publish', importId: item.id, revision: item.revision, label: approval.draft.album.title || item.manifest.rootLabel || t('common.untitled'), item, ...approval }); };
   // An append applies none of the draft's Album values, cover, entries or label; the Publish view says so before approval.
   const appendDecided = item.decisions.some(decision => decision.scope === 'album' && decision.action === 'reuse');
   const badge = (queued: UploadFileStatus | undefined, asset: ImportDetail['assets'][number] | undefined) => queued && ['queued', 'uploading'].includes(queued.state) ? t(`upload.${queued.state}`)
@@ -141,13 +160,15 @@ export function ImportMedia({ item, operation, uploads, disabled, view, active =
       {item.published.artistIds.map((artistId, index, all) => <Link key={artistId} className={styles.link} to={`/admin/catalog/artist/${artistId}`}>{all.length === 1 ? t('published.edit_artist') : t('published.edit_artist_numbered', { number: index + 1 })}</Link>)}
       {item.published.organizationId && <Link className={styles.link} to={`/admin/catalog/organization/${item.published.organizationId}`}>{t('published.edit_label')}</Link>}
     </>}
-    {!publicationLocked && <button className={`${styles.button} ${styles.primary}`} disabled={disabled || !item.capabilities.publish} onClick={() => setConfirmation({ kind: 'publish', importId: item.id, revision: item.revision, label })}>{t('action.publish')}</button>}
+    {!publicationLocked && <button className={`${styles.button} ${styles.primary}`} disabled={publishDisabled || !item.capabilities.publish} onClick={openPublication}>{t('action.publish')}</button>}
     {!publicationLocked && !item.capabilities.publish && <p role="status">{t('publication.unavailable')}</p>}
     {item.publication === 'needsAttention' && publishOperation && <button className={styles.button} disabled={disabled} onClick={() => operation.resume(`${path}/resume-publication`, publishOperation)}>{t('action.resume')}</button>}
     {canCancelPublication && <button className={styles.button} disabled={disabled} onClick={() => { if (publishOperation) setConfirmation({ kind: 'cancelPublication', importId: item.id, revision: item.revision, label, publicationOperationId: publishOperation }); }}>{t('action.cancel_approval')}</button>}
     {publicationCleanup && publishOperation && <button className={styles.button} disabled={disabled} onClick={() => operation.resume(`${path}/resume-publication`, publishOperation)}>{t('action.recover')}</button>}
     </div></div>}
     {confirmation && <ModalDialog title={t(confirmation.kind === 'cancelPublication' ? 'publication.cancel_confirm' : confirmation.kind === 'remove' ? 'media.confirm_remove' : 'media.confirm_publish')} description={t(confirmation.kind === 'cancelPublication' ? 'publication.cancel_confirm_copy' : confirmation.kind === 'publish' ? 'media.confirm_publish_copy' : 'media.confirm_copy')} headerContent={<div className={styles.target}><strong>{confirmation.label}</strong></div>} initialFocusRef={focus} onClose={closeConfirmation}>
+      {confirmation.kind === 'publish' && <Suspense fallback={<p role="status">{t('common.loading')}</p>}>
+        <ImportApprovalChecklist item={confirmation.item} draft={confirmation.draft} changes={confirmation.changes} onChange={setApproved} /></Suspense>}
       {confirmationStale && <p role="alert">{t('common.conflict')}</p>}
       <div className={styles.dialogActions}><button ref={focus} className={styles.button} onClick={closeConfirmation}>{t(confirmation.kind === 'cancelPublication' ? 'action.keep_reviewing' : 'common.cancel')}</button>
         <button className={`${styles.button} ${styles.primary}`} disabled={confirmationLocked} onClick={() => {
@@ -155,7 +176,7 @@ export function ImportMedia({ item, operation, uploads, disabled, view, active =
           const reviewedPath = importPath(confirmation.importId);
           if (confirmation.kind === 'remove') { forgetSource(confirmation.slotId); operation.cleanup(`${reviewedPath}/assets/${encodeURIComponent(confirmation.slotId)}`, confirmation.revision, confirmation.recovery); }
           else if (confirmation.kind === 'cancelPublication') operation.run(`${reviewedPath}/cancel-publication`, 'POST', { expectedRevision: confirmation.revision, publicationOperationId: confirmation.publicationOperationId });
-          else operation.run(`${reviewedPath}/publish`, 'POST', { expectedRevision: confirmation.revision });
+          else if (approved) operation.run(`${reviewedPath}/publish`, 'POST', approved.body);
           closeConfirmation();
         }}>{t(confirmation.kind === 'cancelPublication' ? 'action.cancel_approval' : confirmation.kind === 'remove' ? 'action.cleanup' : 'action.publish')}</button></div>
     </ModalDialog>}

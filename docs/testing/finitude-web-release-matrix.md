@@ -72,9 +72,14 @@ moves an Artist entry with the keyboard, checking that the move is announced
 and keeps focus on the moved entry and that the reordered entries and a new
 label save as just `album.artists` and `album.label`, with axe scans and
 reflow at 320, 768 and 1440 px. Another test publishes an import with two
-primary Artists, a featured Artist and a new label, deciding each entry and
-the label on its own row, and checks the links to the Album, each Artist and
-the label Organization, with axe scans.
+primary Artists, a featured Artist and a new label in one step, deciding each
+entry, the label, the Album and each track on its own row without a separate
+save, checks that the confirmation lists the entries with their roles and
+join phrase, the label and the tracks in disc order, that the single publish
+request carries those decisions, and the links to the Album, each Artist and
+the label Organization, with axe scans of the page and the confirmation.
+Another publishes an unsaved title edit without Save and checks that the one
+publish request carries it and the editor then shows it saved.
 
 The catalog reviews spec checks that an existing-Album review shows the Album's
 Artist Credits and label read-only and applies a Disc Number change.
@@ -384,8 +389,17 @@ player control still works.
   the tracks credit only the primary Artists, the Album appears in each
   primary Artist's Discography, the featured Artist's Collaborations and the
   label's Releases. Then append one more file to that Album and confirm the
-  draft's Album values, entries, label and cover are shown as not applied and
-  the new track takes the Album's primary Artists, order and visibility.
+  draft's Album values, entries, label and cover are shown as not applied, the
+  confirmation lists the new track with its Disc and Track Number, and the new
+  track takes the Album's primary Artists, order and visibility.
+- As an administrator, make each Review decision without Save decisions, then
+  edit the import's title without saving and choose Publish. Confirm the
+  confirmation says the unsaved changes are included and lists the title, the
+  entries in order with their roles and join phrases, the label, the date,
+  the visibility, the cover, the tracks by Disc and Track Number, and each
+  identity, with a hidden reused record marked Hidden. Approve, refresh the
+  page and confirm the saved draft holds the edited title and the decisions.
+  Repeat with a screen reader at 320 CSS px.
 
 ## Media Session observations
 

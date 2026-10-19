@@ -27,6 +27,11 @@
 .statusRow { display:grid;grid-template-columns:repeat(auto-fit,minmax(8rem,1fr));gap:.75rem;margin:1rem 0;padding:.8rem 0;border-block:1px solid var(--color-border); }
 .statusRow dt,.details,.diff strong,.back { color:var(--color-text-muted);font-size:.75rem; }
 .statusRow dd { margin:.35rem 0 0;font-weight:650; }
+.checklist dl { display:grid;gap:.6rem;margin:.6rem 0; }
+.checklist dt { color:var(--color-text-muted);font-size:.75rem; }
+.checklist dd { margin:.2rem 0 0;overflow-wrap:anywhere; }
+.checklist ol { margin:.3rem 0 0;padding-inline-start:1.4rem; }
+.checklist h3 { font-size:.95rem;margin:.8rem 0 .2rem; }
 .form,.editor { display:grid;gap:1rem; }
 .editor,.date { border:0;padding:0;min-width:0; }
 .field { display:grid;gap:.4rem; }

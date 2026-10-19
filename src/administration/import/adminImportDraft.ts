@@ -2,10 +2,10 @@
  * Exports
  *   Types: ImportArtistEntry, ImportLabelEntry, ImportDraftV2, ImportValueOrigin, ImportDraftOrigins,
  *          ImportSuggestionV2, ImportDecisionV2
- *   Functions: originKey, defaultDraftV2, foldImportName, sameDraftValue, isDraftV2, draftBytes, hasOwn,
- *              parseImportName, parseArtistEntries, parseLabelEntry, parseDraftTitle, parseDraftVisibility,
- *              parseDraftV2, derivedEntryKey, retainBoundDecisions, boundArtistDecision, boundLabelDecision,
- *              draftV2Suggestion
+ *   Functions: originKey, defaultDraftV2, foldImportName, sameDraftValue, importApprovalDigest, isDraftV2,
+ *              draftBytes, hasOwn, parseImportName, parseArtistEntries, parseLabelEntry, parseDraftTitle,
+ *              parseDraftVisibility, parseDraftV2, derivedEntryKey, retainBoundDecisions, boundArtistDecision,
+ *              boundLabelDecision, draftV2Suggestion
  *   Constants: DRAFT_V2, DRAFT_V2_LIMITS, parseDiscNumber, parseTrackNumber
  * Internal
  *   Types: Bindable
@@ -57,6 +57,14 @@ const canonical = (value: unknown): unknown => Array.isArray(value) ? value.map(
     : value && typeof value === 'object' ? Object.fromEntries(Object.keys(value).sort().map(key => [key, canonical((value as Record<string, unknown>)[key])])) : value;
 /** Value equality independent of key order, as stored values and client bases are compared. */
 export const sameDraftValue = (left: unknown, right: unknown) => JSON.stringify(canonical(left)) === JSON.stringify(canonical(right));
+/**
+ * Digest of what an approval confirmation shows from the saved project: its Draft v2 view, bound decisions, selected cover and each
+ * staged asset's slot, state and bytes. Key order never matters; actor, capabilities, receipts, revision and analysis do not count.
+ */
+export const importApprovalDigest = (shown: { draft: ImportDraftV2; decisions: readonly unknown[]; selectedCoverSlotId: string | null;
+    assets: readonly { slotId: string; state: string; sha256: string }[] }): string =>
+    createHash('sha256').update(JSON.stringify(canonical({ draft: shown.draft, decisions: shown.decisions, selectedCoverSlotId: shown.selectedCoverSlotId,
+        assets: shown.assets.map(({ slotId, state, sha256 }) => ({ slotId, state, sha256 })) }))).digest('hex');
 /** Structural Draft v2 check: an Artist entry list and no v1 artistName. */
 export const isDraftV2 = (value: unknown): value is ImportDraftV2 => {
     const draft = value as { album?: Record<string, unknown> } | null;

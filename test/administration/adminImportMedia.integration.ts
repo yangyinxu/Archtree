@@ -3,7 +3,8 @@
  *   Classes: Storage
  *   Functions: mutation, code, wav, file, stored, taggedWav, hundredTagged, create, prepared, existingProject,
  *              appendProject, cancelPublication, later, unknownUpload, land, reconcile, distinctCovers,
- *              taggedProject, pngOf, legacyApproval, landCopy, markNewer, discProject, fresh
+ *              taggedProject, pngOf, legacyApproval, landCopy, markNewer, discProject, fresh, undecided,
+ *              distinctAll
  *   Constants: actor, other, analysisProvider, fixtureAdmin, catalogCollections
  *   Variables: harness
  * Tests
@@ -23,6 +24,7 @@
  *   - append revalidates reviewed Album after storage copy and refuses concurrent catalog edits
  *   - verified byte candidates bind SHA to current object version and identify only matching manifest slots
  *   - a hidden draft appended to a public Album publishes public tracks: appended tracks take the target Album's visibility
+ *   - an append is never blocked by a saved Artist reuse decision that went stale, while a new Album still refuses that decision
  *   - legacy ready defaults tolerate reference touches, and hidden Artist Album can be appended privately
  *   - embedded cover becomes a private unselected candidate, while its tags never overwrite the saved draft
  *   - shutdown after one bounded copy checkpoints it and admits no next cover copy or final publication
@@ -85,13 +87,28 @@
  *   - a project reviewed before Draft v2 converts at approval and publishes with its saved Artist decision as format 3, without Disc Numbers
  *   - a preparing Draft v2 approval locks the draft against field saves while an outdated whole-draft save asks for a reload; its cancellation is clean and the next approval is format 3 again
  *   - the first upload to a project saved before Draft v2 converts it with that admitted upload, keeping its values as the administrator's own
+ *   - one approval saves the shown draft changes, decisions and cover and freezes exactly them with a single receipt and revision
+ *   - a failure after the approval is saved leaves the project exactly as it was, and the same approval then admits once
+ *   - an approval refused while saving or freezing writes nothing: a renamed reused entry, a stale reused Artist, a cover that is no ready image and an unknown entry
+ *   - an approval of a saved project that changed without a revision is stale and writes nothing, while the current basis at an old revision is a revision conflict
+ *   - an approval whose commit acknowledgement is lost replays its receipt with one publication, and its operation cannot carry another approval
+ *   - a lost-response replay of an approval sent before one-step approval returns its original receipt, on a v1 project or one converted since
+ *   - a fresh approval body from an editor before one-step approval asks for a reload before revision, lock, limit or conversion, writing nothing
+ *   - a partial or malformed approval body is invalid input after receipt lookup, writing nothing
+ *   - values included in an approval become the administrator's own, while a refused approval keeps their origins
+ *   - an append approval saves its Album changes and cover choice to the draft without applying or copying them
+ *   - an approval and all its saves take one ordinary receipt, and at the receipt limit it saves nothing
+ *   - an approval freezes tracks by Disc and Track Number, and tracks without numbers last in draft order
+ *   - an approval refused by a stale change base, a track reused outside its Album or a null decision writes nothing, and a null decision is invalid input for /decisions too
+ *   - a refused approval of a project saved before Draft v2 leaves it unconverted, whether its basis is stale or its review needs a decision
+ *   - an approval showing no cover clears a saved choice, any other body field is refused before receipt lookup, and a replay after completion returns its receipt
  * @end-catalog */
 
 import assert from 'node:assert/strict';
 import sharp from 'sharp';
 import { createHash, randomUUID } from 'node:crypto';
-import { before, beforeEach, after, test } from 'node:test';
-import { ObjectId } from 'mongodb';
+import { before, beforeEach, after, mock, test } from 'node:test';
+import { ClientSession, Collection, MongoError, ObjectId } from 'mongodb';
 import { getDb } from '../../src/infrastructure/database';
 import { startMongoReplicaSet, type MongoReplicaSetHarness } from '../support/mongoReplicaSet';
 import { AdminImportError } from '../../src/administration/import/adminImportContract';
@@ -101,10 +118,11 @@ import { publishAdminImport, resumeAdminImportPublication, runAdminImportPublica
 import { loadAdminCanonicalReservations } from '../../src/administration/adminCanonicalReservationService';
 import { getListenerAlbum } from '../../src/services/listener/listenerContentService';
 import { loadImportFixture } from '../support/adminImportFixtures';
+import { approvalBody, approveImport } from '../support/adminImportApproval';
 import { artistEntries, editImportDraft, withEntryKeys } from '../support/adminImportDraftChanges';
-import { convertLegacyImportProject } from '../../src/administration/import/adminImportValueState';
+import { convertLegacyImportProject, draftV2Paths } from '../../src/administration/import/adminImportValueState';
 import { importDraftV2FromV1, legacyAdministratorOrigins, legacyArtistEntryKey, legacyDraftView } from '../../src/administration/import/adminImportDraftCompat';
-import type { ImportDecisionV2, ImportDraftV2 } from '../../src/administration/import/adminImportDraft';
+import { originKey, type ImportDecisionV2, type ImportDraftV2 } from '../../src/administration/import/adminImportDraft';
 
 let harness: MongoReplicaSetHarness; const actor = new ObjectId(), other = new ObjectId();
 const mutation = (expectedRevision: number) => ({ operationId: randomUUID(), expectedRevision });
@@ -171,7 +189,7 @@ test('failed cleanup retains exact storage evidence and same intent retry comple
     storage.failDelete = false; const done = await cleanupAdminImportAsset(actor.toHexString(), created.item.id, slotId, intent, storage); assert.equal(done.item.assets[0].state, 'deleted'); assert.equal(storage.objects.size, 0); assert.equal(done.item.assets.length, 1);
 });
 test('explicit publish allocates fixed IDs then commits complete catalog graph after copy checkpoint', async () => {
-    const storage = new Storage(), project = await prepared(storage); const intent = mutation(project.item.revision); const admitted = await publishAdminImport(actor.toHexString(), project.item.id, intent);
+    const storage = new Storage(), project = await prepared(storage); const intent = approvalBody(project.item); const admitted = await publishAdminImport(actor.toHexString(), project.item.id, intent);
     assert.equal(admitted.item.publication, 'preparing'); assert.equal(await getDb()!.collection('audioTracks').countDocuments(), 0);
     storage.afterCopy = async () => { assert.equal(await getDb()!.collection('albums').countDocuments(), 0); };
     await runAdminImportPublicationOnce(storage); const done = await getAdminImport(actor.toHexString(), project.item.id); assert.equal(done.item.publication, 'complete'); assert.equal(done.item.published!.trackIds.length, 1); assert.equal(storage.copies, 1);
@@ -180,23 +198,23 @@ test('explicit publish allocates fixed IDs then commits complete catalog graph a
     const replay = await publishAdminImport(actor.toHexString(), project.item.id, intent); assert.equal(replay.item.published!.albumId, done.item.published!.albumId); assert.equal(await runAdminImportPublicationOnce(storage), false);
 });
 test('unknown copied acknowledgement is reconciled at original target with no second object or graph', async () => {
-    const storage = new Storage(), project = await prepared(storage); const intent = mutation(project.item.revision); await publishAdminImport(actor.toHexString(), project.item.id, intent); storage.failCopyAfter = true;
+    const storage = new Storage(), project = await prepared(storage); const intent = approvalBody(project.item); await publishAdminImport(actor.toHexString(), project.item.id, intent); storage.failCopyAfter = true;
     await runAdminImportPublicationOnce(storage); assert.equal((await getAdminImport(actor.toHexString(), project.item.id)).item.publication, 'complete'); assert.equal(storage.copies, 1);
     await resumeAdminImportPublication(actor.toHexString(), project.item.id, intent.operationId, storage); assert.equal(storage.copies, 1); assert.equal(await getDb()!.collection('albums').countDocuments(), 1);
 });
 test('unconfirmed copy retains fixed identities and cannot be silently resent by retry or worker restart', async () => {
-    const storage = new Storage(), project = await prepared(storage); const intent = mutation(project.item.revision); await publishAdminImport(actor.toHexString(), project.item.id, intent); storage.failCopyBefore = true;
+    const storage = new Storage(), project = await prepared(storage); const intent = approvalBody(project.item); await publishAdminImport(actor.toHexString(), project.item.id, intent); storage.failCopyBefore = true;
     await runAdminImportPublicationOnce(storage); const first = await getDb()!.collection('adminAlbumImports').findOne({ _id: new ObjectId(project.item.id) }); assert.equal(first!.media.publication.state, 'needsAttention'); assert.equal(first!.media.publication.tracks[0].state, 'unknown');
     storage.failCopyBefore = false; await resumeAdminImportPublication(actor.toHexString(), project.item.id, intent.operationId, storage); assert.equal(storage.copies, 1); assert.equal(await getDb()!.collection('albums').countDocuments(), 0); const second = await getDb()!.collection('adminAlbumImports').findOne({ _id: first!._id }); assert.equal(second!.media.publication.albumId, first!.media.publication.albumId);
 });
 test('role loss after copied bytes prevents publication and keeps copy evidence for admin recovery', async () => {
-    const storage = new Storage(), project = await prepared(storage); await publishAdminImport(actor.toHexString(), project.item.id, mutation(project.item.revision));
+    const storage = new Storage(), project = await prepared(storage); await publishAdminImport(actor.toHexString(), project.item.id, approvalBody(project.item));
     storage.afterCopy = async () => { await getDb()!.collection('users').updateOne({ _id: actor }, { $set: { role: 'user' } }); };
     await runAdminImportPublicationOnce(storage); assert.equal(await getDb()!.collection('albums').countDocuments(), 0); const retained = await getAdminImport(other.toHexString(), project.item.id); assert.equal(retained.item.publication, 'needsAttention'); assert.equal(storage.objects.size, 2);
 });
 test('hidden publication needs no delivery gate, and the parent hides independently public tracks', async () => {
     const storage = new Storage(), project = await prepared(storage, 'hidden');
-    await publishAdminImport(actor.toHexString(), project.item.id, mutation(project.item.revision)); await runAdminImportPublicationOnce(storage); const done = await getAdminImport(actor.toHexString(), project.item.id); assert.equal(done.item.publication, 'complete');
+    await publishAdminImport(actor.toHexString(), project.item.id, approvalBody(project.item)); await runAdminImportPublicationOnce(storage); const done = await getAdminImport(actor.toHexString(), project.item.id); assert.equal(done.item.publication, 'complete');
     const [artist, album, track] = await Promise.all(['artists', 'albums', 'audioTracks'].map(name => getDb()!.collection(name).findOne({}))); assert.equal(artist!.visibility, 'hidden'); assert.equal(album!.visibility, 'hidden'); assert.equal(track!.visibility, 'public');
 });
 
@@ -227,7 +245,7 @@ test('private artwork rechecks role after bytes arrive, withholding late respons
 });
 /** Publishes one new Album of one primary Artist; artistId is its only published Artist. */
 async function existingProject(storage: Storage) {
-    const original = await prepared(storage); await publishAdminImport(actor.toHexString(), original.item.id, mutation(original.item.revision)); await runAdminImportPublicationOnce(storage);
+    const original = await prepared(storage); await publishAdminImport(actor.toHexString(), original.item.id, approvalBody(original.item)); await runAdminImportPublicationOnce(storage);
     const published = (await getAdminImport(actor.toHexString(), original.item.id)).item.published!; assert.equal(published.artistIds.length, 1); return { ...published, artistId: published.artistIds[0] };
 }
 /** Reviews an append to the existing Album; its Artist decision is saved but an append credits the target Album's own primaries. */
@@ -239,11 +257,11 @@ async function appendProject(storage: Storage, existing: { albumId: string; arti
 test('append adds only new members, preserves existing metadata and protected old tracks, and same-album reuse is no replacement', async () => {
     const storage = new Storage(), existing = await existingProject(storage);
     await getDb()!.collection('albums').updateOne({ _id: new ObjectId(existing.albumId) }, { $set: { description: 'Preserved edition', coverArtUrl: '/existing-cover' } });
-    const project = await appendProject(storage, existing); await publishAdminImport(actor.toHexString(), project.item.id, mutation(project.item.revision)); await runAdminImportPublicationOnce(storage);
+    const project = await appendProject(storage, existing); await publishAdminImport(actor.toHexString(), project.item.id, approvalBody(project.item)); await runAdminImportPublicationOnce(storage);
     const result = (await getAdminImport(actor.toHexString(), project.item.id)).item; assert.equal(result.publication, 'complete'); assert.equal(result.published!.albumId, existing.albumId);
     const album = await getDb()!.collection('albums').findOne({ _id: new ObjectId(existing.albumId) }); assert.equal(album!.description, 'Preserved edition'); assert.equal(album!.coverArtUrl, '/existing-cover'); assert.equal(album!.audioTrackIds.length, 2); assert.ok(album!.audioTrackIds.includes(existing.trackIds[0])); assert.equal(await getDb()!.collection('albums').countDocuments(), 1);
     const reused = await appendProject(storage, existing, true), priorCopies = storage.copies;
-    await publishAdminImport(actor.toHexString(), reused.item.id, mutation(reused.item.revision)); await runAdminImportPublicationOnce(storage);
+    await publishAdminImport(actor.toHexString(), reused.item.id, approvalBody(reused.item)); await runAdminImportPublicationOnce(storage);
     assert.equal((await getAdminImport(actor.toHexString(), reused.item.id)).item.publication, 'complete'); assert.equal(storage.copies, priorCopies); assert.equal(await getDb()!.collection('audioTracks').countDocuments(), 2);
 });
 test('append keeps the target Album disc order and imported tracks store no Disc Number', async () => {
@@ -252,7 +270,7 @@ test('append keeps the target Album disc order and imported tracks store no Disc
     await getDb()!.collection('audioTracks').updateOne({ _id: new ObjectId(existing.trackIds[0]) }, { $set: { discNumber: 1, discNumberSource: 'embedded', trackNumber: 1 } });
     await getDb()!.collection('audioTracks').insertOne({ _id: discTwoId, title: 'Synthetic Disc Two Opener', artistIds: [existing.artistId], albumId: existing.albumId, uploadStatus: 'ready', s3Key: discTwoId.toHexString(), mediaType: 'audio', publicationStatus: 'ready', visibility: 'public', discNumber: 2, discNumberSource: 'embedded', trackNumber: 1 });
     await getDb()!.collection('albums').updateOne({ _id: albumId }, { $push: { audioTrackIds: discTwoId.toHexString() } as any });
-    const project = await appendProject(storage, existing); await publishAdminImport(actor.toHexString(), project.item.id, mutation(project.item.revision)); await runAdminImportPublicationOnce(storage);
+    const project = await appendProject(storage, existing); await publishAdminImport(actor.toHexString(), project.item.id, approvalBody(project.item)); await runAdminImportPublicationOnce(storage);
     const result = (await getAdminImport(actor.toHexString(), project.item.id)).item; assert.equal(result.publication, 'complete');
     const appendedId = result.published!.trackIds[0];
     assert.deepEqual((await getDb()!.collection('albums').findOne({ _id: albumId }))!.audioTrackIds, [existing.trackIds[0], appendedId, discTwoId.toHexString()]);
@@ -260,7 +278,7 @@ test('append keeps the target Album disc order and imported tracks store no Disc
     assert.equal(appended!.trackNumber, 4); assert.equal('discNumber' in appended!, false); assert.equal('discNumberSource' in appended!, false);
 });
 test('append revalidates reviewed Album after storage copy and refuses concurrent catalog edits', async () => {
-    const storage = new Storage(), existing = await existingProject(storage), project = await appendProject(storage, existing); await publishAdminImport(actor.toHexString(), project.item.id, mutation(project.item.revision));
+    const storage = new Storage(), existing = await existingProject(storage), project = await appendProject(storage, existing); await publishAdminImport(actor.toHexString(), project.item.id, approvalBody(project.item));
     storage.afterCopy = async () => { await getDb()!.collection('albums').updateOne({ _id: new ObjectId(existing.albumId) }, { $set: { title: 'Changed by another admin' } }); };
     await runAdminImportPublicationOnce(storage); assert.equal((await getAdminImport(actor.toHexString(), project.item.id)).item.publication, 'needsAttention'); assert.equal(await getDb()!.collection('audioTracks').countDocuments(), 1);
 });
@@ -274,21 +292,40 @@ test('verified byte candidates bind SHA to current object version and identify o
 test('a hidden draft appended to a public Album publishes public tracks: appended tracks take the target Album\'s visibility', async () => {
     const storage = new Storage(), existing = await existingProject(storage), project = await appendProject(storage, existing);
     const edited = await editImportDraft(actor.toHexString(), project.item.id, project.item, draft => { draft.album.visibility = 'hidden'; });
-    await publishAdminImport(actor.toHexString(), project.item.id, mutation(edited.item.revision)); await runAdminImportPublicationOnce(storage);
+    await publishAdminImport(actor.toHexString(), project.item.id, approvalBody(edited.item)); await runAdminImportPublicationOnce(storage);
     const done = (await getAdminImport(actor.toHexString(), project.item.id)).item; assert.equal(done.publication, 'complete'); assert.equal(done.draft.album.visibility, 'hidden');
     const appended = await getDb()!.collection('audioTracks').findOne({ _id: new ObjectId(done.published!.trackIds[0]) }), album = await getDb()!.collection('albums').findOne({ _id: new ObjectId(existing.albumId) });
     assert.deepEqual([appended!.visibility, album!.visibility], ['public', 'public']);
+});
+test('an append is never blocked by a saved Artist reuse decision that went stale, while a new Album still refuses that decision', async () => {
+    const storage = new Storage(), existing = await existingProject(storage), project = await appendProject(storage, existing);
+    // The reused Artist changed after review; an append credits the target Album's primaries and applies no entry.
+    await getDb()!.collection('artists').updateOne({ _id: new ObjectId(existing.artistId) }, { $set: { updatedAt: new Date(Date.now() + 60_000) } });
+    const saved = await decideAdminImportDuplicates(actor.toHexString(), project.item.id, { ...mutation(project.item.revision), decisions: project.item.decisions });
+    assert.deepEqual(saved.item.decisions, project.item.decisions);
+    // Switching the same approval to a new Album applies the entry, so its stale reuse is refused and nothing is written.
+    const before = await stored(project.item.id);
+    const distinctAlbum = saved.item.decisions.map(decision => decision.scope === 'album' ? { ...decision, action: 'create-distinct', candidateId: null, candidateRevision: null } : decision);
+    await assert.rejects(publishAdminImport(actor.toHexString(), project.item.id, approvalBody(saved.item, { decisions: distinctAlbum })), code('ADMIN_IMPORT_DUPLICATE_STALE'));
+    assert.deepEqual(await stored(project.item.id), before);
+    await publishAdminImport(actor.toHexString(), project.item.id, approvalBody(saved.item));
+    const publication = (await stored(project.item.id)).media!.publication!;
+    assert.deepEqual(publication.artists?.map(artist => [artist.artistId, artist.newArtist]), [[existing.artistId, false]]);
+    await runAdminImportPublicationOnce(storage);
+    const done = (await getAdminImport(actor.toHexString(), project.item.id)).item; assert.equal(done.publication, 'complete');
+    const appended = await getDb()!.collection('audioTracks').findOne({ _id: new ObjectId(done.published!.trackIds[0]) });
+    assert.deepEqual(appended!.artistIds, [existing.artistId]); assert.equal(await getDb()!.collection('artists').countDocuments(), 1);
 });
 test('legacy ready defaults tolerate reference touches, and hidden Artist Album can be appended privately', async () => {
     const storage = new Storage(), existing = await existingProject(storage);
     await getDb()!.collection('artists').updateOne({ _id: new ObjectId(existing.artistId) }, { $unset: { lifecycleStatus: '', visibility: '' } });
     await getDb()!.collection('albums').updateOne({ _id: new ObjectId(existing.albumId) }, { $unset: { lifecycleStatus: '', visibility: '' } });
-    const project = await appendProject(storage, existing); await publishAdminImport(actor.toHexString(), project.item.id, mutation(project.item.revision));
+    const project = await appendProject(storage, existing); await publishAdminImport(actor.toHexString(), project.item.id, approvalBody(project.item));
     await getDb()!.collection('artists').updateOne({ _id: new ObjectId(existing.artistId) }, { $set: { lifecycleStatus: 'ready', visibility: 'public' }, $inc: { referenceRevision: 1 } });
     await runAdminImportPublicationOnce(storage); assert.equal((await getAdminImport(actor.toHexString(), project.item.id)).item.publication, 'complete');
     await getDb()!.collection('artists').updateOne({ _id: new ObjectId(existing.artistId) }, { $set: { visibility: 'hidden' } }); await getDb()!.collection('albums').updateOne({ _id: new ObjectId(existing.albumId) }, { $set: { visibility: 'hidden' } });
     const hidden = await appendProject(storage, existing); const edited = await editImportDraft(actor.toHexString(), hidden.item.id, hidden.item, draft => { draft.album.visibility = 'hidden'; });
-    await publishAdminImport(actor.toHexString(), hidden.item.id, mutation(edited.item.revision)); await runAdminImportPublicationOnce(storage); assert.equal((await getAdminImport(actor.toHexString(), hidden.item.id)).item.publication, 'complete');
+    await publishAdminImport(actor.toHexString(), hidden.item.id, approvalBody(edited.item)); await runAdminImportPublicationOnce(storage); assert.equal((await getAdminImport(actor.toHexString(), hidden.item.id)).item.publication, 'complete');
     assert.equal((await getDb()!.collection('artists').findOne({ _id: new ObjectId(existing.artistId) }))!.visibility, 'hidden');
 });
 test('embedded cover becomes a private unselected candidate, while its tags never overwrite the saved draft', async () => {
@@ -308,7 +345,7 @@ test('embedded cover becomes a private unselected candidate, while its tags neve
 test('shutdown after one bounded copy checkpoints it and admits no next cover copy or final publication', async () => {
     const storage = new Storage(), project = await prepared(storage), png = await sharp({ create: { width: 1, height: 1, channels: 3, background: '#f80' } }).png().toBuffer();
     const uploaded = await uploadAdminImportAsset(actor.toHexString(), project.item.id, 'cover', mutation(project.item.revision), { ...file(), buffer: png, size: png.length, originalname: 'cover.png', mimetype: 'image/png' }, storage);
-    const selected = await selectAdminImportCover(actor.toHexString(), project.item.id, { ...mutation(uploaded.item.revision), slotId: 'cover' }); const intent = mutation(selected.item.revision); await publishAdminImport(actor.toHexString(), project.item.id, intent); const controller = new AbortController(); storage.afterCopy = async () => { controller.abort(); };
+    const selected = await selectAdminImportCover(actor.toHexString(), project.item.id, { ...mutation(uploaded.item.revision), slotId: 'cover' }); const intent = approvalBody(selected.item); await publishAdminImport(actor.toHexString(), project.item.id, intent); const controller = new AbortController(); storage.afterCopy = async () => { controller.abort(); };
     await runAdminImportPublicationOnce(storage, undefined, controller.signal); assert.equal(storage.copies, 1); assert.equal(await getDb()!.collection('albums').countDocuments(), 0);
     const stopped = await getAdminImport(actor.toHexString(), project.item.id); assert.equal(stopped.item.publication, 'needsAttention');
     storage.afterCopy = undefined; await resumeAdminImportPublication(actor.toHexString(), project.item.id, intent.operationId, storage); const resumed = await getAdminImport(actor.toHexString(), project.item.id); assert.equal(resumed.item.publication, 'complete'); assert.equal(storage.copies, 2); assert.equal(await getDb()!.collection('imageAssets').countDocuments(), 1);
@@ -323,7 +360,7 @@ test('publication grant expiry after a copy retains its checkpoint and stops lat
                 { ...file(), buffer: png, size: png.length, originalname: 'cover.png', mimetype: 'image/png' }, storage);
             project = await selectAdminImportCover(actor.toHexString(), project.item.id, { ...mutation(uploaded.item.revision), slotId: 'cover' });
         }
-        const intent = mutation(project.item.revision); await publishAdminImport(actor.toHexString(), project.item.id, intent);
+        const intent = approvalBody(project.item); await publishAdminImport(actor.toHexString(), project.item.id, intent);
         storage.afterCopy = async () => { await getDb()!.collection('adminAlbumImports').updateOne({ _id: new ObjectId(project.item.id) },
             { $set: { 'media.publication.grantExpiresAt': new Date(0) } }); };
         await runAdminImportPublicationOnce(storage, project.item.id);
@@ -337,7 +374,7 @@ test('publication grant expiry after a copy retains its checkpoint and stops lat
     }
 });
 test('publication rechecks grant between destination HEAD and new copy dispatch', async () => {
-    const storage = new Storage(), project = await prepared(storage); await publishAdminImport(actor.toHexString(), project.item.id, mutation(project.item.revision));
+    const storage = new Storage(), project = await prepared(storage); await publishAdminImport(actor.toHexString(), project.item.id, approvalBody(project.item));
     const originalHead = storage.head.bind(storage);
     storage.head = async target => {
         const result = await originalHead(target);
@@ -354,7 +391,7 @@ test('publication rechecks grant between destination HEAD and new copy dispatch'
 const cancelPublication = (item: { revision: number; publicationRecovery: { operationId: string } | null }) => ({ ...mutation(item.revision), publicationOperationId: item.publicationRecovery!.operationId });
 
 test('expired publication is explicitly cancelled, cleaned and reapproved without losing the previous identities', async () => {
-    const storage = new Storage(), project = await prepared(storage), approval = mutation(project.item.revision);
+    const storage = new Storage(), project = await prepared(storage), approval = approvalBody(project.item);
     await publishAdminImport(actor.toHexString(), project.item.id, approval);
     storage.afterCopy = async () => { await getDb()!.collection('adminAlbumImports').updateOne({ _id: new ObjectId(project.item.id) }, { $set: { 'media.publication.grantExpiresAt': new Date(0) } }); };
     await runAdminImportPublicationOnce(storage, project.item.id); storage.afterCopy = undefined;
@@ -364,7 +401,7 @@ test('expired publication is explicitly cancelled, cleaned and reapproved withou
     assert.equal(cancelled.item.publicationRecovery!.cleanupPending, false); assert.equal(storage.objects.size, 1);
     assert.equal((await getDb()!.collection('adminAlbumImports').findOne({ _id: new ObjectId(project.item.id) }))!.media.publication.tracks[0].cleanupComplete, true);
     const edited = await editImportDraft(other.toHexString(), project.item.id, cancelled.item, draft => { draft.album.title = 'New reviewed approval'; });
-    const next = await publishAdminImport(other.toHexString(), project.item.id, mutation(edited.item.revision));
+    const next = await publishAdminImport(other.toHexString(), project.item.id, approvalBody(edited.item));
     assert.notEqual(next.item.publicationRecovery!.operationId, approval.operationId);
     await runAdminImportPublicationOnce(storage, project.item.id);
     const done = await getAdminImport(other.toHexString(), project.item.id); assert.equal(done.item.publication, 'complete');
@@ -384,7 +421,7 @@ test('concurrent reused Artist correction returns to manual review and a newly r
     const candidates = await adminImportDuplicateCandidates(actor.toHexString(), project.item.id), candidate = candidates.items.find(item => item.kind === 'artist')!;
     const decisions = project.item.decisions.map(decision => decision.scope === 'artist' ? { ...decision, action: 'reuse', candidateId: candidate.id, candidateRevision: candidate.revision } : decision);
     const reviewed = await decideAdminImportDuplicates(actor.toHexString(), project.item.id, { ...mutation(project.item.revision), decisions });
-    await publishAdminImport(actor.toHexString(), project.item.id, mutation(reviewed.item.revision));
+    await publishAdminImport(actor.toHexString(), project.item.id, approvalBody(reviewed.item));
     storage.afterCopy = async () => { await getDb()!.collection('artists').updateOne({ _id: existingArtist }, { $set: { name: 'Corrected Artist' } }); };
     await runAdminImportPublicationOnce(storage, project.item.id); storage.afterCopy = undefined;
     const stalled = await getAdminImport(actor.toHexString(), project.item.id);
@@ -394,14 +431,14 @@ test('concurrent reused Artist correction returns to manual review and a newly r
     const edited = await editImportDraft(actor.toHexString(), project.item.id, cancelled.item, draft => { draft.album.artists[0].name = 'Corrected Artist'; });
     const latest = (await adminImportDuplicateCandidates(actor.toHexString(), project.item.id)).items.find(item => item.kind === 'artist')!;
     const corrected = await decideAdminImportDuplicates(actor.toHexString(), project.item.id, { ...mutation(edited.item.revision), decisions: decisions.map(decision => decision.scope === 'artist' ? { ...decision, candidateRevision: latest.revision } : decision) });
-    await publishAdminImport(actor.toHexString(), project.item.id, mutation(corrected.item.revision)); await runAdminImportPublicationOnce(storage, project.item.id);
+    await publishAdminImport(actor.toHexString(), project.item.id, approvalBody(corrected.item)); await runAdminImportPublicationOnce(storage, project.item.id);
     assert.equal((await getAdminImport(actor.toHexString(), project.item.id)).item.publication, 'complete');
     assert.equal(await getDb()!.collection('artists').countDocuments(), 1); assert.equal(storage.copies, 2);
 });
 
 test('current administrator can cancel and clean after the initiating admin loses permission and flags roll back', async () => {
     const storage = new Storage(), project = await prepared(storage);
-    await publishAdminImport(actor.toHexString(), project.item.id, mutation(project.item.revision));
+    await publishAdminImport(actor.toHexString(), project.item.id, approvalBody(project.item));
     storage.afterCopy = async () => { await getDb()!.collection('users').updateOne({ _id: actor }, { $set: { role: 'user' } }); };
     await runAdminImportPublicationOnce(storage, project.item.id); storage.afterCopy = undefined;
     process.env.FINITUDE_ADMIN_IMPORTS_ENABLED = 'false'; process.env.FINITUDE_ADMIN_IMPORT_PRIVATE_STORAGE_READY = 'false';
@@ -414,7 +451,7 @@ test('current administrator can cancel and clean after the initiating admin lose
 });
 
 test('unknown sent copy retains cancelled source pins until the exact late object can be cleaned by any current admin', async () => {
-    const storage = new Storage(), project = await prepared(storage), approval = mutation(project.item.revision);
+    const storage = new Storage(), project = await prepared(storage), approval = approvalBody(project.item);
     await publishAdminImport(actor.toHexString(), project.item.id, approval); storage.failCopyBefore = true;
     await runAdminImportPublicationOnce(storage, project.item.id);
     const stalled = await getAdminImport(actor.toHexString(), project.item.id), cancellation = cancelPublication(stalled.item);
@@ -427,7 +464,7 @@ test('unknown sent copy retains cancelled source pins until the exact late objec
     cancelled = await editImportDraft(actor.toHexString(), project.item.id, cancelled.item, draft => { draft.album.title = 'Reviewed while cleanup waits'; });
     cancelled = await decideAdminImportDuplicates(actor.toHexString(), project.item.id, { ...mutation(cancelled.item.revision), decisions: cancelled.item.decisions });
     for (const work of [
-        () => publishAdminImport(actor.toHexString(), project.item.id, mutation(cancelled.item.revision)),
+        () => publishAdminImport(actor.toHexString(), project.item.id, approvalBody(cancelled.item)),
         () => analyzeAdminImport(actor.toHexString(), project.item.id, mutation(cancelled.item.revision), { configured: () => true, analyze: async () => [] }),
         () => selectAdminImportCover(actor.toHexString(), project.item.id, { ...mutation(cancelled.item.revision), slotId: null }),
         () => cleanupAdminImportAsset(actor.toHexString(), project.item.id, cancelled.item.manifest.files[0].slotId, mutation(cancelled.item.revision), storage)
@@ -443,7 +480,7 @@ test('unknown sent copy retains cancelled source pins until the exact late objec
 
 test('cancelled cleanup reconciles failed or lost DELETE responses without copying or deleting another object', async () => {
     const storage = new Storage(), project = await prepared(storage);
-    await publishAdminImport(actor.toHexString(), project.item.id, mutation(project.item.revision));
+    await publishAdminImport(actor.toHexString(), project.item.id, approvalBody(project.item));
     storage.afterCopy = async () => { await getDb()!.collection('adminAlbumImports').updateOne({ _id: new ObjectId(project.item.id) }, { $set: { 'media.publication.grantExpiresAt': new Date(0) } }); };
     await runAdminImportPublicationOnce(storage, project.item.id); storage.afterCopy = undefined; storage.failDelete = true;
     const stalled = await getAdminImport(actor.toHexString(), project.item.id), cancellation = cancelPublication(stalled.item);
@@ -459,7 +496,7 @@ test('cancelled cleanup reconciles failed or lost DELETE responses without copyi
 
 test('publication cancellation rejects stale revisions, another approval, UUID collisions, active leases and committed graphs', async () => {
     const storage = new Storage(), project = await prepared(storage);
-    await publishAdminImport(actor.toHexString(), project.item.id, mutation(project.item.revision));
+    await publishAdminImport(actor.toHexString(), project.item.id, approvalBody(project.item));
     let current = await getAdminImport(actor.toHexString(), project.item.id), cancellation = cancelPublication(current.item);
     await assert.rejects(cancelAdminImportPublication(actor.toHexString(), project.item.id, { ...cancellation, expectedRevision: current.item.revision - 1 }, storage), code('ADMIN_IMPORT_REVISION_CONFLICT'));
     await assert.rejects(cancelAdminImportPublication(actor.toHexString(), project.item.id, { ...cancellation, publicationOperationId: randomUUID() }, storage), code('ADMIN_IMPORT_PUBLICATION_CONFLICT'));
@@ -506,7 +543,7 @@ test('staged cleanup takeover reuses the exact original UUID and revision after 
 test('publication cancellation and staged cleanup remain admissible when ordinary writes have exhausted receipts', async () => {
     const storage = new Storage(); let project = await prepared(storage);
     while (project.item.receipts.length < 255) project = await editImportDraft(actor.toHexString(), project.item.id, project.item);
-    const approved = await publishAdminImport(actor.toHexString(), project.item.id, mutation(project.item.revision));
+    const approved = await publishAdminImport(actor.toHexString(), project.item.id, approvalBody(project.item));
     assert.equal(approved.item.receipts.length, 256);
     const cancelled = await cancelAdminImportPublication(other.toHexString(), project.item.id, cancelPublication(approved.item), storage);
     assert.equal(cancelled.item.publicationRecovery!.cleanupPending, false); assert.equal(storage.copies, 0);
@@ -517,7 +554,7 @@ test('publication cancellation and staged cleanup remain admissible when ordinar
 });
 
 test('an expired-lease worker cannot checkpoint or publish its late result after cancellation and a new approval', async () => {
-    const storage = new Storage(), project = await prepared(storage), approval = mutation(project.item.revision);
+    const storage = new Storage(), project = await prepared(storage), approval = approvalBody(project.item);
     await publishAdminImport(actor.toHexString(), project.item.id, approval);
     let copied!: () => void, release!: () => void;
     const entered = new Promise<void>(resolve => { copied = resolve; }), waiting = new Promise<void>(resolve => { release = resolve; });
@@ -529,7 +566,7 @@ test('an expired-lease worker cannot checkpoint or publish its late result after
         const current = await getAdminImport(other.toHexString(), project.item.id);
         const cancelled = await cancelAdminImportPublication(other.toHexString(), project.item.id, cancelPublication(current.item), storage);
         assert.equal(cancelled.item.publicationRecovery!.cleanupPending, false); assert.equal(storage.objects.size, 1);
-        const next = await publishAdminImport(other.toHexString(), project.item.id, mutation(cancelled.item.revision));
+        const next = await publishAdminImport(other.toHexString(), project.item.id, approvalBody(cancelled.item));
         storage.afterCopy = undefined; release(); await staleWorker;
         const retained = await getAdminImport(other.toHexString(), project.item.id);
         assert.equal(retained.item.publication, 'preparing'); assert.equal(retained.item.publicationRecovery!.operationId, next.item.publicationRecovery!.operationId);
@@ -541,7 +578,7 @@ test('an expired-lease worker cannot checkpoint or publish its late result after
 
 test('cancelled cleanup retains a replaced canonical version without deleting an unapproved identity', async () => {
     const storage = new Storage(), project = await prepared(storage);
-    await publishAdminImport(actor.toHexString(), project.item.id, mutation(project.item.revision));
+    await publishAdminImport(actor.toHexString(), project.item.id, approvalBody(project.item));
     storage.afterCopy = async () => { await getDb()!.collection('adminAlbumImports').updateOne({ _id: new ObjectId(project.item.id) }, { $set: { 'media.publication.grantExpiresAt': new Date(0) } }); };
     await runAdminImportPublicationOnce(storage, project.item.id); storage.afterCopy = undefined;
     const stored = await getDb()!.collection('adminAlbumImports').findOne({ _id: new ObjectId(project.item.id) }), publication = stored!.media.publication;
@@ -555,9 +592,9 @@ test('cancelled cleanup retains a replaced canonical version without deleting an
 
 test('sixteen approvals preserve bounded history and reject the seventeenth before new identity admission while recovery remains available', async () => {
     for (const finalState of ['cancelled', 'complete']) {
-        const storage = new Storage(); let project = await prepared(storage), lastApproval = mutation(project.item.revision);
+        const storage = new Storage(); let project = await prepared(storage), lastApproval = approvalBody(project.item);
         for (let index = 0; index < 16; index++) {
-            lastApproval = mutation(project.item.revision);
+            lastApproval = approvalBody(project.item);
             project = await publishAdminImport(actor.toHexString(), project.item.id, lastApproval);
             assert.equal(project.item.capabilities.publish, index < 15);
             if (index < 15 || finalState === 'cancelled') project = await cancelAdminImportPublication(other.toHexString(), project.item.id, cancelPublication(project.item), storage);
@@ -567,7 +604,7 @@ test('sixteen approvals preserve bounded history and reject the seventeenth befo
         const before = await getDb()!.collection('adminAlbumImports').findOne({ _id: new ObjectId(project.item.id) });
         assert.equal(before!.media.publicationHistory.length, 15);
         if (finalState === 'cancelled') {
-            await assert.rejects(publishAdminImport(actor.toHexString(), project.item.id, mutation(project.item.revision)), code('ADMIN_IMPORT_PUBLICATION_APPROVAL_LIMIT'));
+            await assert.rejects(publishAdminImport(actor.toHexString(), project.item.id, approvalBody(project.item)), code('ADMIN_IMPORT_PUBLICATION_APPROVAL_LIMIT'));
             const after = await getDb()!.collection('adminAlbumImports').findOne({ _id: before!._id });
             assert.deepEqual(after!.media, before!.media); assert.equal(after!.receipts.length, before!.receipts.length); assert.equal(after!.revision, before!.revision);
         }
@@ -582,7 +619,7 @@ test('sixteen approvals preserve bounded history and reject the seventeenth befo
         assert.equal(storage.objects.size, finalState === 'complete' ? 1 : 0);
     }
     // The bound is per import: a new import of the same files stages and approves independently.
-    const storage = new Storage(), again = await prepared(storage), approved = await publishAdminImport(actor.toHexString(), again.item.id, mutation(again.item.revision));
+    const storage = new Storage(), again = await prepared(storage), approved = await publishAdminImport(actor.toHexString(), again.item.id, approvalBody(again.item));
     assert.deepEqual([approved.item.publication, approved.item.capabilities.publish], ['preparing', true]);
 });
 const analysisProvider = { configured: () => true, analyze: async () => [] };
@@ -736,7 +773,7 @@ test('a publication lock refuses new uploads, original-intent retries and reconc
     const cover = { ...file(), buffer: png, size: png.length, originalname: 'cover.png', mimetype: 'image/png' }, intent = mutation(project.item.revision);
     storage.failHead = true; const staged = await uploadAdminImportAsset(actor.toHexString(), id, 'cover', intent, cover, storage); storage.failHead = false;
     assert.equal(staged.item.assets.find(asset => asset.slotId === 'cover')!.state, 'unknown');
-    await publishAdminImport(actor.toHexString(), id, mutation(staged.item.revision)); const before = await stored(id), puts = storage.puts;
+    await publishAdminImport(actor.toHexString(), id, approvalBody(staged.item)); const before = await stored(id), puts = storage.puts;
     await assert.rejects(uploadAdminImportAsset(actor.toHexString(), id, 'cover', mutation(1), cover, storage), code('ADMIN_IMPORT_PUBLICATION_LOCKED'));
     await assert.rejects(uploadAdminImportAsset(actor.toHexString(), id, 'cover', intent, cover, storage), code('ADMIN_IMPORT_ASSET_CONFLICT'));
     await assert.rejects(reconcile(id, 'cover', intent.operationId, storage, later()), code('ADMIN_IMPORT_PUBLICATION_LOCKED'));
@@ -785,7 +822,7 @@ test('receipt budget: 100 files with shared or distinct covers, re-uploads after
         }
         const fresh = (scope: 'artist' | 'album' | 'track', slotId: string | null = null) => ({ scope, slotId, action: 'create-distinct', candidateId: null, candidateRevision: null });
         project = await decideAdminImportDuplicates(actor.toHexString(), id, { ...mutation(project.item.revision), decisions: withEntryKeys(project.item.draft, [fresh('artist'), fresh('album'), ...project.item.manifest.files.map(file => fresh('track', file.slotId))]) });
-        project = await publishAdminImport(actor.toHexString(), id, mutation(project.item.revision)); assert.equal(project.item.publication, 'preparing');
+        project = await publishAdminImport(actor.toHexString(), id, approvalBody(project.item)); assert.equal(project.item.publication, 'preparing');
         const doc = await stored(id);
         assert.equal(doc.receipts.length, 1 + 100 + failing.size + 10 + 1 + 1); assert.ok(doc.receipts.length < 256);
         assert.equal(doc.receipts.filter(receipt => receipt.kind === 'upload').length, 103); assert.equal(doc.automaticReceipts!.length, embedded);
@@ -894,7 +931,7 @@ test('an append that keeps the public default into a hidden Album publishes trac
     const reuse = (scope: 'artist' | 'album', candidateId: string) => ({ scope, slotId: null, action: 'reuse', candidateId, candidateRevision: candidates.find(item => item.kind === scope && item.id === candidateId)!.revision });
     const reviewed = await decideAdminImportDuplicates(actor.toHexString(), id, { ...mutation(edited.item.revision), decisions: withEntryKeys(edited.item.draft, [reuse('artist', existing.artistId), reuse('album', existing.albumId), { scope: 'track', slotId, action: 'create-distinct', candidateId: null, candidateRevision: null }]) });
     // A stale Album is refused inside the approval transaction, writing nothing.
-    const before = await stored(id), approval = mutation(reviewed.item.revision);
+    const before = await stored(id), approval = approvalBody(reviewed.item);
     await getDb()!.collection('albums').updateOne({ _id: albumId }, { $set: { title: 'Changed by another admin' } });
     await assert.rejects(publishAdminImport(actor.toHexString(), id, approval), code('ADMIN_IMPORT_DUPLICATE_STALE'));
     assert.deepEqual(await stored(id), before); assert.equal(storage.copies, 1);
@@ -1008,7 +1045,7 @@ test('cancelling an approval of an unknown format keeps its cleanup pending and 
     // Its cleanup waits for a release that knows the format: resuming deletes nothing and records nothing new.
     await resumeAdminImportPublication(fixtureAdmin.toHexString(), id, publication.operationId, storage);
     assert.equal(storage.deletes, 0); assert.equal(storage.heads, 0); assert.equal((await stored(id)).revision, after.revision);
-    await assert.rejects(publishAdminImport(fixtureAdmin.toHexString(), id, mutation(cancelled.item.revision)), code('ADMIN_IMPORT_PUBLICATION_LOCKED'));
+    await assert.rejects(publishAdminImport(fixtureAdmin.toHexString(), id, approvalBody(cancelled.item)), code('ADMIN_IMPORT_PUBLICATION_LOCKED'));
     await assert.rejects(cleanupAdminImportAsset(fixtureAdmin.toHexString(), id, publication.tracks[0].slotId, mutation(cancelled.item.revision), storage), code('ADMIN_IMPORT_PUBLICATION_LOCKED'));
     assert.deepEqual((await stored(id)).media, after.media); assert.equal(storage.deletes, 0);
 });
@@ -1155,7 +1192,7 @@ test('a Draft v2 approval of one primary entry publishes in reviewed Disc order 
         draft.tracks.forEach((track, index) => Object.assign(track, { title: `Recording ${index}`, discNumber: [2, 1, 1][index], trackNumber: [1, 2, 1][index] }));
     });
     const decided = await decideAdminImportDuplicates(actor.toHexString(), id, { ...mutation(reviewed.item.revision), decisions: withEntryKeys(reviewed.item.draft, [fresh('artist'), fresh('album'), ...slots.map(slot => fresh('track', slot))]) });
-    const approved = await publishAdminImport(actor.toHexString(), id, mutation(decided.item.revision)), frozen = (await stored(id)), publication = frozen.media!.publication!;
+    const approved = await publishAdminImport(actor.toHexString(), id, approvalBody(decided.item)), frozen = (await stored(id)), publication = frozen.media!.publication!;
     assert.equal(approved.item.publication, 'preparing');
     assert.deepEqual([publication.schemaVersion, publication.snapshot], [3, reviewed.item.draft]);
     // The single new Artist is frozen for its entry and mirrored as the approval's Artist; there is no label.
@@ -1182,7 +1219,7 @@ test('an unknown Disc Number writes no Disc Number, and an append with a reviewe
     const original = await getDb()!.collection('audioTracks').findOne({ _id: new ObjectId(existing.trackIds[0]) });
     assert.deepEqual(['discNumber' in original!, 'discNumberSource' in original!], [false, false]);
     const project = await appendProject(storage, existing), edited = await editImportDraft(actor.toHexString(), project.item.id, project.item, draft => { draft.tracks[0].discNumber = 2; draft.tracks[0].trackNumber = 1; });
-    await publishAdminImport(actor.toHexString(), project.item.id, mutation(edited.item.revision)); await runAdminImportPublicationOnce(storage);
+    await publishAdminImport(actor.toHexString(), project.item.id, approvalBody(edited.item)); await runAdminImportPublicationOnce(storage);
     const appendedId = (await getAdminImport(actor.toHexString(), project.item.id)).item.published!.trackIds[0];
     // The existing track (no disc, Track 4) orders as disc 1, before the appended (disc 2, Track 1).
     assert.deepEqual((await getDb()!.collection('albums').findOne({ _id: albumId }))!.audioTrackIds, [existing.trackIds[0], appendedId]);
@@ -1196,14 +1233,14 @@ test('a new Album without a primary Artist entry is refused before freezing, wri
         ['no entry', (draft: typeof project.item.draft) => { draft.album.artists = []; }, 'ADMIN_IMPORT_DRAFT_INCOMPLETE']
     ] as const) {
         const changed = await editImportDraft(actor.toHexString(), id, project.item, edit), before = await stored(id);
-        await assert.rejects(publishAdminImport(actor.toHexString(), id, mutation(changed.item.revision)), code(expected), label);
+        await assert.rejects(publishAdminImport(actor.toHexString(), id, approvalBody(changed.item)), code(expected), label);
         assert.deepEqual(await stored(id), before, label); assert.equal(storage.copies, 0, label);
         project = await editImportDraft(actor.toHexString(), id, changed.item, draft => { draft.album.artists = project.item.draft.album.artists; draft.album.label = null; });
     }
     // Removing the entry dropped its Artist decision; decided again for the restored entry, the draft publishes.
-    await assert.rejects(publishAdminImport(actor.toHexString(), id, mutation(project.item.revision)), code('ADMIN_IMPORT_REVIEW_REQUIRED'));
+    await assert.rejects(publishAdminImport(actor.toHexString(), id, approvalBody(project.item)), code('ADMIN_IMPORT_REVIEW_REQUIRED'));
     project = await decideAdminImportDuplicates(actor.toHexString(), id, { ...mutation(project.item.revision), decisions: withEntryKeys(project.item.draft, [fresh('artist'), fresh('album'), fresh('track', project.item.manifest.files[0].slotId)]) });
-    await publishAdminImport(actor.toHexString(), id, mutation(project.item.revision)); await runAdminImportPublicationOnce(storage);
+    await publishAdminImport(actor.toHexString(), id, approvalBody(project.item)); await runAdminImportPublicationOnce(storage);
     assert.equal((await getAdminImport(actor.toHexString(), id)).item.publication, 'complete');
 });
 test('a stored value the editor cannot show is never frozen, and only a pending suggestion the editor shows holds the approval', async () => {
@@ -1212,17 +1249,17 @@ test('a stored value the editor cannot show is never frozen, and only a pending 
     const nukta = String.fromCodePoint(0x958), set = (fields: Record<string, unknown>) => projects.updateOne({ _id: new ObjectId(id) }, { $set: fields });
     await set({ 'draft.tracks.0.title': nukta.repeat(200).normalize('NFC') });
     const hidden = await stored(id); assert.equal((await getAdminImport(actor.toHexString(), id)).item.draft.tracks[0].title, '');
-    await assert.rejects(publishAdminImport(actor.toHexString(), id, mutation(hidden.revision)), code('ADMIN_IMPORT_DRAFT_INCOMPLETE'));
+    await assert.rejects(approveImport(actor.toHexString(), id), code('ADMIN_IMPORT_DRAFT_INCOMPLETE'));
     assert.deepEqual(await stored(id), hidden);
     const suggestion = (name: string) => ({ id: 'f'.repeat(24), generation: 0, scope: 'album', slotId: null, field: 'artists', baseline: [], value: [{ key: randomUUID(), name, role: 'primary', joinPhrase: null, musicBrainzId: null }], source: 'folder', evidence: 'Synthetic Album', decision: 'pending' });
     await set({ 'draft.tracks.0.title': 'Synthetic Recording', suggestions: [suggestion('Readable Artist')] });
     const shown = await stored(id); assert.equal((await getAdminImport(actor.toHexString(), id)).item.suggestions.length, 1);
-    await assert.rejects(publishAdminImport(actor.toHexString(), id, mutation(shown.revision)), code('ADMIN_IMPORT_REVIEW_REQUIRED'));
+    await assert.rejects(approveImport(actor.toHexString(), id), code('ADMIN_IMPORT_REVIEW_REQUIRED'));
     assert.deepEqual(await stored(id), shown);
     // An unreadable pending suggestion is not shown, so it can never be decided and does not hold the approval.
     await set({ suggestions: [suggestion(nukta.repeat(150).normalize('NFC'))] });
     assert.deepEqual((await getAdminImport(actor.toHexString(), id)).item.suggestions, []);
-    const approved = await publishAdminImport(actor.toHexString(), id, mutation(shown.revision));
+    const approved = await approveImport(actor.toHexString(), id);
     assert.equal(approved.item.publication, 'preparing'); assert.equal((await stored(id)).suggestions[0].decision, 'pending');
 });
 test('a legacy approval commits its frozen v1 snapshot unchanged on a project already converted to Draft v2', async () => {
@@ -1236,7 +1273,7 @@ test('a legacy approval commits its frozen v1 snapshot unchanged on a project al
     const after = await stored(id); assert.deepEqual([after.media!.publication!.snapshot, after.draft, after.draftOrigins], [publication.snapshot, before.draft, before.draftOrigins]);
 });
 test('reconciliation reserves the copies of unresolved format-3 approvals, including several Artist entries and a label', async () => {
-    const storage = new Storage(), project = await prepared(storage); await publishAdminImport(actor.toHexString(), project.item.id, mutation(project.item.revision)); storage.failCopyBefore = true;
+    const storage = new Storage(), project = await prepared(storage); await publishAdminImport(actor.toHexString(), project.item.id, approvalBody(project.item)); storage.failCopyBefore = true;
     await runAdminImportPublicationOnce(storage); const approval = (await stored(project.item.id)).media!.publication!;
     assert.deepEqual([approval.schemaVersion, approval.state], [3, 'needsAttention']);
     assert.deepEqual(await loadAdminCanonicalReservations('synthetic-catalog'), new Set([approval.tracks[0].key]));
@@ -1244,7 +1281,7 @@ test('reconciliation reserves the copies of unresolved format-3 approvals, inclu
     const several = await prepared(storage), entries = [...several.item.draft.album.artists, { key: randomUUID(), name: 'Synthetic Second', role: 'primary' as const, joinPhrase: null, musicBrainzId: null }, { key: randomUUID(), name: 'Synthetic Guest', role: 'featured' as const, joinPhrase: null, musicBrainzId: null }];
     const edited = await editImportDraft(actor.toHexString(), several.item.id, several.item, draft => { draft.album.artists = entries; draft.album.label = { name: 'Synthetic Label', musicBrainzId: null }; });
     const decided = await decideAdminImportDuplicates(actor.toHexString(), several.item.id, { ...mutation(edited.item.revision), decisions: [...entries.map(entry => ({ ...fresh('artist'), entryKey: entry.key })), { ...fresh('album'), entryKey: null }, { scope: 'label', slotId: null, entryKey: null, action: 'create-distinct', candidateId: null, candidateRevision: null }, { ...fresh('track', several.item.manifest.files[0].slotId), entryKey: null }] });
-    await publishAdminImport(actor.toHexString(), several.item.id, mutation(decided.item.revision)); const preparing = (await stored(several.item.id)).media!.publication!;
+    await publishAdminImport(actor.toHexString(), several.item.id, approvalBody(decided.item)); const preparing = (await stored(several.item.id)).media!.publication!;
     assert.deepEqual([preparing.schemaVersion, preparing.state, preparing.artists!.length, preparing.label!.newOrganization], [3, 'preparing', 3, true]);
     assert.deepEqual(await loadAdminCanonicalReservations('synthetic-catalog'), new Set([approval.tracks[0].key, preparing.tracks[0].key]));
 });
@@ -1254,7 +1291,7 @@ test('a project reviewed before Draft v2 converts at approval and publishes with
     const storage = new Storage(), doc = loadImportFixture('adminImport', 'v1-assets-reviewed.json'), id = doc._id.toHexString();
     for (const asset of doc.media!.assets) storage.objects.set(`${asset.bucket}/${asset.key}`, { target: importAssetTarget(id, asset), identity: { etag: asset.etag!, versionId: asset.versionId } });
     await getDb()!.collection<AdminImportDocument>('adminAlbumImports').insertOne(doc);
-    const approved = await publishAdminImport(fixtureAdmin.toHexString(), id, mutation(doc.revision)), frozen = await stored(id), publication = frozen.media!.publication!;
+    const approved = await approveImport(fixtureAdmin.toHexString(), id), frozen = await stored(id), publication = frozen.media!.publication!;
     const entryKey = legacyArtistEntryKey(id), entry = { key: entryKey, name: 'Synthetic Artist', role: 'primary', joinPhrase: null, musicBrainzId: null };
     assert.deepEqual([approved.item.publication, frozen.draftVersion, publication.schemaVersion], ['preparing', 2, 3]);
     assert.deepEqual([(publication.snapshot as ImportDraftV2).album.artists, (publication.snapshot as ImportDraftV2).tracks.map(track => track.discNumber)], [[entry], [null, null, null]]);
@@ -1271,7 +1308,7 @@ test('a project reviewed before Draft v2 converts at approval and publishes with
 
 test('a preparing Draft v2 approval locks the draft against field saves while an outdated whole-draft save asks for a reload; its cancellation is clean and the next approval is format 3 again', async () => {
     const storage = new Storage(), project = await prepared(storage), id = project.item.id;
-    const approved = await publishAdminImport(actor.toHexString(), id, mutation(project.item.revision)), frozen = await stored(id);
+    const approved = await publishAdminImport(actor.toHexString(), id, approvalBody(project.item)), frozen = await stored(id);
     assert.equal(frozen.media!.publication!.schemaVersion, 3);
     // The lock refuses a field save; an editor that predates Draft v2 is asked to reload before the lock is checked. Neither writes.
     await assert.rejects(editAdminImport(actor.toHexString(), id, { ...mutation(approved.item.revision), changes: [{ path: 'album.title', base: 'Synthetic Album', value: 'Changed while approved' }] }), code('ADMIN_IMPORT_PUBLICATION_LOCKED'));
@@ -1280,7 +1317,7 @@ test('a preparing Draft v2 approval locks the draft against field saves while an
     const cancelled = await cancelAdminImportPublication(other.toHexString(), id, cancelPublication(approved.item), storage), held = await stored(id);
     assert.deepEqual([cancelled.item.publication, cancelled.item.publicationRecovery!.cleanupPending, held.media!.publication!.schemaVersion, storage.copies], ['cancelled', false, 3, 0]);
     const edited = await editImportDraft(other.toHexString(), id, cancelled.item, draft => { draft.album.title = 'Reviewed again'; });
-    const next = await publishAdminImport(other.toHexString(), id, mutation(edited.item.revision)), reapproved = await stored(id);
+    const next = await publishAdminImport(other.toHexString(), id, approvalBody(edited.item)), reapproved = await stored(id);
     assert.notEqual(next.item.publicationRecovery!.operationId, approved.item.publicationRecovery!.operationId);
     assert.deepEqual([reapproved.media!.publication!.schemaVersion, (reapproved.media!.publication!.snapshot as ImportDraftV2).album.title, reapproved.media!.publicationHistory!.map(value => value.schemaVersion)], [3, 'Reviewed again', [3]]);
     await runAdminImportPublicationOnce(storage, id);
@@ -1299,4 +1336,222 @@ test('the first upload to a project saved before Draft v2 converts it with that 
     assert.deepEqual([uploaded.item.assets.find(asset => asset.slotId === slot.slotId)!.state, converted.draftVersion, converted.draft, converted.draftOrigins], ['ready', 2, draft, legacyAdministratorOrigins(draft)]);
     assert.deepEqual([uploaded.item.draft, converted.analysis, converted.analysisHistory, converted.suggestions], [draft, doc.analysis, doc.analysisHistory, doc.suggestions]);
     assert.equal(converted.receipts.at(-1)!.kind, 'upload'); assert.equal(storage.puts, 1);
+});
+
+/** One uploaded file and a staged manual cover; the draft is saved without any identity decision or cover choice. */
+async function undecided(storage: Storage) {
+    const created = await create(), id = created.item.id, slotId = created.item.manifest.files[0].slotId, png = await pngOf('#4a8');
+    const uploaded = await uploadAdminImportAsset(actor.toHexString(), id, slotId, mutation(1), file(), storage);
+    const covered = await uploadAdminImportAsset(actor.toHexString(), id, 'cover', mutation(uploaded.item.revision), { ...file(), buffer: png, size: png.length, originalname: 'cover.png', mimetype: 'image/png' }, storage);
+    const edited = await editImportDraft(actor.toHexString(), id, covered.item, draft => { Object.assign(draft.album, { title: 'Synthetic Album', artists: artistEntries('Synthetic Artist') }); draft.tracks[0].title = 'Synthetic Recording'; });
+    return { id, slotId, item: edited.item };
+}
+/** A distinct identity for every entry, the Album and each track, as the confirmation's decision rows send it. */
+const distinctAll = (item: { draft: ImportDraftV2 }) => [...item.draft.album.artists.map(entry => ({ ...fresh('artist'), entryKey: entry.key })), { ...fresh('album'), entryKey: null },
+    ...item.draft.tracks.map(track => ({ ...fresh('track', track.slotId), entryKey: null }))];
+
+test('one approval saves the shown draft changes, decisions and cover and freezes exactly them with a single receipt and revision', async () => {
+    const storage = new Storage(), { id, item } = await undecided(storage), before = await stored(id);
+    assert.deepEqual([item.decisions, item.selectedCoverSlotId], [[], null]);
+    const approved = await publishAdminImport(actor.toHexString(), id, approvalBody(item, { edit: draft => { draft.album.title = 'Approved Title'; draft.tracks[0].discNumber = 2; }, decisions: distinctAll(item), selectedCoverSlotId: 'cover' }));
+    const frozen = await stored(id), publication = frozen.media!.publication!, draft = frozen.draft as ImportDraftV2;
+    assert.deepEqual([frozen.receipts.slice(before.receipts.length).map(receipt => receipt.kind), frozen.revision, approved.receipt!.revision], [['publish'], before.revision + 1, before.revision + 1]);
+    assert.deepEqual([draft.album.title, draft.tracks[0].discNumber, frozen.media!.selectedCoverSlotId], ['Approved Title', 2, 'cover']);
+    assert.deepEqual((frozen.decisions as ImportDecisionV2[]).map(decision => [decision.scope, decision.boundName]), [['artist', 'Synthetic Artist'], ['album', null], ['track', null]]);
+    assert.deepEqual([publication.snapshot, publication.decisions, publication.cover?.slotId, approved.item.draft.album.title], [frozen.draft, frozen.decisions, 'cover', 'Approved Title']);
+    await runAdminImportPublicationOnce(storage, id);
+    const done = (await getAdminImport(actor.toHexString(), id)).item, album = await getDb()!.collection('albums').findOne({ _id: new ObjectId(done.published!.albumId) });
+    assert.deepEqual([done.publication, album!.title, await getDb()!.collection('imageAssets').countDocuments()], ['complete', 'Approved Title', 1]);
+});
+test('a failure after the approval is saved leaves the project exactly as it was, and the same approval then admits once', async () => {
+    const storage = new Storage(), { id, item } = await undecided(storage), before = await stored(id), original = Collection.prototype.replaceOne;
+    const body = approvalBody(item, { edit: draft => { draft.album.title = 'Approved Title'; }, decisions: distinctAll(item), selectedCoverSlotId: 'cover' });
+    // The approval is written inside the transaction, then the transaction fails before it commits.
+    const failing = mock.method(Collection.prototype, 'replaceOne', async function (this: Collection, ...args: Parameters<Collection['replaceOne']>) {
+        if (this.collectionName !== 'adminAlbumImports') return original.apply(this, args);
+        failing.mock.restore(); await original.apply(this, args); throw new Error('synthetic failure after the approval was written');
+    });
+    await assert.rejects(publishAdminImport(actor.toHexString(), id, body), /synthetic failure/);
+    assert.deepEqual(await stored(id), before); assert.equal(await runAdminImportPublicationOnce(storage, id), false); assert.equal(storage.copies, 0);
+    const approved = await publishAdminImport(actor.toHexString(), id, body), admitted = await stored(id);
+    assert.deepEqual([approved.item.publication, admitted.receipts.filter(receipt => receipt.kind === 'publish').length, admitted.draft.album.title], ['preparing', 1, 'Approved Title']);
+});
+test('an approval refused while saving or freezing writes nothing: a renamed reused entry, a stale reused Artist, a cover that is no ready image and an unknown entry', async () => {
+    const storage = new Storage(), existing = await existingProject(storage), copies = storage.copies, { id, item } = await undecided(storage);
+    const artist = (await adminImportDuplicateCandidates(actor.toHexString(), id)).items.find(value => value.kind === 'artist' && value.id === existing.artistId)!;
+    const reuse = [{ scope: 'artist', slotId: null, entryKey: item.draft.album.artists[0].key, action: 'reuse', candidateId: artist.id, candidateRevision: artist.revision }, ...distinctAll(item).slice(1)];
+    const before = await stored(id);
+    for (const [label, options, expected] of [
+        // The rename drops the decision made for the saved name, so the entry needs a new one.
+        ['a renamed reused entry', { decisions: reuse, edit: (draft: ImportDraftV2) => { draft.album.artists[0].name = 'Renamed Artist'; } }, 'ADMIN_IMPORT_REVIEW_REQUIRED'],
+        ['a cover that is no ready image', { decisions: reuse, selectedCoverSlotId: item.manifest.files[0].slotId }, 'ADMIN_IMPORT_ASSET_CONFLICT'],
+        ['an unknown entry', { decisions: [{ ...reuse[0], entryKey: randomUUID() }, ...reuse.slice(1)] }, 'ADMIN_IMPORT_INVALID_INPUT']
+    ] as const) {
+        await assert.rejects(publishAdminImport(actor.toHexString(), id, approvalBody(item, { ...options, decisions: [...options.decisions] })), code(expected), label);
+        assert.deepEqual(await stored(id), before, label);
+    }
+    await getDb()!.collection('artists').updateOne({ _id: new ObjectId(existing.artistId) }, { $inc: { adminRevision: 1 } });
+    await assert.rejects(publishAdminImport(actor.toHexString(), id, approvalBody(item, { decisions: reuse })), code('ADMIN_IMPORT_DUPLICATE_STALE'));
+    assert.deepEqual(await stored(id), before); assert.equal(storage.copies, copies);
+});
+test('an approval of a saved project that changed without a revision is stale and writes nothing, while the current basis at an old revision is a revision conflict', async () => {
+    const storage = new Storage(), { id, item } = await undecided(storage), projects = getDb()!.collection<AdminImportDocument>('adminAlbumImports');
+    const decided = (await decideAdminImportDuplicates(actor.toHexString(), id, { ...mutation(item.revision), decisions: distinctAll(item) })).item;
+    for (const [label, change] of [['a draft value', { 'draft.album.title': 'Changed meanwhile' }], ['a decision', { 'decisions.2.action': 'skip' }], ['the cover', { 'media.selectedCoverSlotId': 'cover' }]] as const) {
+        const before = await stored(id); await projects.updateOne({ _id: before._id }, { $set: change }); const changed = await stored(id);
+        await assert.rejects(publishAdminImport(actor.toHexString(), id, approvalBody(decided)), code('ADMIN_IMPORT_APPROVAL_STALE'), label);
+        assert.deepEqual(await stored(id), changed, label); await projects.replaceOne({ _id: before._id }, before);
+    }
+    const edited = await editImportDraft(actor.toHexString(), id, decided, draft => { draft.album.title = 'Saved Again'; }), before = await stored(id);
+    await assert.rejects(publishAdminImport(actor.toHexString(), id, approvalBody(edited.item, { expectedRevision: decided.revision })), code('ADMIN_IMPORT_REVISION_CONFLICT'));
+    assert.deepEqual(await stored(id), before);
+    assert.equal((await publishAdminImport(actor.toHexString(), id, approvalBody(edited.item))).item.publication, 'preparing');
+});
+test('an approval whose commit acknowledgement is lost replays its receipt with one publication, and its operation cannot carry another approval', async () => {
+    const storage = new Storage(), project = await prepared(storage), id = project.item.id, body = approvalBody(project.item, { edit: draft => { draft.album.title = 'Approved Title'; } });
+    const lost = new MongoError('synthetic lost commit acknowledgement'); lost.addErrorLabel('UnknownTransactionCommitResult');
+    const original = ClientSession.prototype.withTransaction;
+    const committed = mock.method(ClientSession.prototype, 'withTransaction', async function (this: ClientSession, ...args: Parameters<ClientSession['withTransaction']>) {
+        committed.mock.restore(); await original.apply(this, args); throw lost;
+    });
+    await assert.rejects(publishAdminImport(actor.toHexString(), id, body), error => error === lost);
+    const after = await stored(id), receipt = after.receipts.at(-1)!;
+    assert.deepEqual([receipt.kind, receipt.operationId, after.draft.album.title, after.media!.publication!.state], ['publish', body.operationId, 'Approved Title', 'preparing']);
+    const replay = await publishAdminImport(actor.toHexString(), id, body);
+    assert.deepEqual(replay.receipt, { operationId: body.operationId, kind: 'publish', revision: receipt.revision }); assert.deepEqual(await stored(id), after);
+    await assert.rejects(publishAdminImport(actor.toHexString(), id, { ...body, changes: [] }), code('ADMIN_IMPORT_OPERATION_CONFLICT'));
+    await runAdminImportPublicationOnce(storage, id);
+    assert.deepEqual([(await getAdminImport(actor.toHexString(), id)).item.publication, await getDb()!.collection('albums').countDocuments(), await getDb()!.collection('artists').countDocuments()], ['complete', 1, 1]);
+});
+test('a lost-response replay of an approval sent before one-step approval returns its original receipt, on a v1 project or one converted since', async () => {
+    for (const convert of [false, true]) {
+        const storage = new Storage(), { id } = await legacyApproval(storage, 'v1-publication-preparing.json', convert ? doc => convertLegacyImportProject(doc) : undefined), before = await stored(id);
+        const receipt = before.receipts.find(value => value.kind === 'publish')!;
+        const replay = await publishAdminImport(fixtureAdmin.toHexString(), id, { operationId: receipt.operationId, expectedRevision: receipt.revision - 1 });
+        assert.deepEqual(replay.receipt, { operationId: receipt.operationId, kind: 'publish', revision: receipt.revision }, `converted: ${convert}`); assert.deepEqual(await stored(id), before);
+        // A one-step body under the same operation is another intent.
+        await assert.rejects(publishAdminImport(fixtureAdmin.toHexString(), id, approvalBody(replay.item, { operationId: receipt.operationId })), code('ADMIN_IMPORT_OPERATION_CONFLICT'));
+        await getDb()!.collection('adminAlbumImports').deleteOne({ _id: before._id });
+    }
+});
+test('a fresh approval body from an editor before one-step approval asks for a reload before revision, lock, limit or conversion, writing nothing', async () => {
+    const storage = new Storage(), v1 = (doc: { revision: number }) => ({ operationId: randomUUID(), expectedRevision: doc.revision });
+    const project = await prepared(storage), locked = await prepared(storage), limited = await prepared(storage);
+    await publishAdminImport(actor.toHexString(), locked.item.id, approvalBody(locked.item));
+    await getDb()!.collection('adminAlbumImports').updateOne({ _id: new ObjectId(limited.item.id) }, { $set: { 'media.publicationHistory': Array.from({ length: 16 }, () => ({ state: 'cancelled' })) } });
+    for (const [label, id] of [['a Draft v2 project', project.item.id], ['a locked publication', locked.item.id], ['the approval limit', limited.item.id]]) {
+        const before = await stored(id);
+        await assert.rejects(publishAdminImport(actor.toHexString(), id, v1(before)), code('ADMIN_IMPORT_RELOAD_REQUIRED'), label);
+        assert.deepEqual(await stored(id), before, label);
+    }
+    // A project saved before Draft v2 stays unconverted.
+    await getDb()!.collection('users').updateOne({ _id: fixtureAdmin }, { $set: { email: 'fixture-admin@example.test', role: 'admin' } }, { upsert: true });
+    const doc = loadImportFixture('adminImport', 'v1-assets-reviewed.json'), id = doc._id.toHexString(); await getDb()!.collection<AdminImportDocument>('adminAlbumImports').insertOne(doc);
+    const before = await stored(id);
+    await assert.rejects(publishAdminImport(fixtureAdmin.toHexString(), id, v1(before)), code('ADMIN_IMPORT_RELOAD_REQUIRED'));
+    assert.deepEqual(await stored(id), before); assert.equal(before.draftVersion, undefined);
+});
+test('a partial or malformed approval body is invalid input after receipt lookup, writing nothing', async () => {
+    const storage = new Storage(), project = await prepared(storage), id = project.item.id, before = await stored(id), body = approvalBody(project.item);
+    const { approvalDigest: _digest, ...partial } = body;
+    for (const value of [{ operationId: randomUUID(), expectedRevision: body.expectedRevision, changes: [] }, partial, { ...body, approvalDigest: 'Z'.repeat(64) }, { ...body, approvalDigest: 'a'.repeat(63) }]) {
+        await assert.rejects(publishAdminImport(actor.toHexString(), id, value), code('ADMIN_IMPORT_INVALID_INPUT'), JSON.stringify(Object.keys(value)));
+    }
+    assert.deepEqual(await stored(id), before);
+    // The stored receipt of that operation is found first, so a partial body never replaces its intent.
+    await assert.rejects(publishAdminImport(actor.toHexString(), id, { ...partial, operationId: before.receipts.at(-1)!.operationId }), code('ADMIN_IMPORT_OPERATION_CONFLICT'));
+    assert.deepEqual(await stored(id), before);
+});
+test('values included in an approval become the administrator\'s own, while a refused approval keeps their origins', async () => {
+    const storage = new Storage(), project = await prepared(storage), id = project.item.id, slotId = project.item.manifest.files[0].slotId, projects = getDb()!.collection('adminAlbumImports');
+    await projects.updateOne({ _id: new ObjectId(id) }, { $set: { 'draftOrigins.album:title': 'automatic', [`draftOrigins.tracks:${slotId}:discNumber`]: 'automatic' } });
+    const automatic = (await stored(id)).draftOrigins;
+    // Refused before and after the approval's own saves: a stale basis, and an Album decision left out.
+    await assert.rejects(publishAdminImport(actor.toHexString(), id, approvalBody(project.item, { approvalDigest: 'f'.repeat(64) })), code('ADMIN_IMPORT_APPROVAL_STALE'));
+    await assert.rejects(publishAdminImport(actor.toHexString(), id, approvalBody(project.item, { decisions: project.item.decisions.filter(decision => decision.scope !== 'album') })), code('ADMIN_IMPORT_REVIEW_REQUIRED'));
+    assert.deepEqual((await stored(id)).draftOrigins, automatic);
+    await publishAdminImport(actor.toHexString(), id, approvalBody(project.item));
+    const origins = (await stored(id)).draftOrigins!, paths = draftV2Paths(project.item.draft);
+    assert.deepEqual(paths.map(path => origins[originKey(path)]), paths.map(() => 'administrator'));
+});
+test('an append approval saves its Album changes and cover choice to the draft without applying or copying them', async () => {
+    const storage = new Storage(), existing = await existingProject(storage), project = await appendProject(storage, existing), id = project.item.id, png = await pngOf('#84a');
+    const covered = await uploadAdminImportAsset(actor.toHexString(), id, 'cover', mutation(project.item.revision), { ...file(), buffer: png, size: png.length, originalname: 'cover.png', mimetype: 'image/png' }, storage), copies = storage.copies;
+    await publishAdminImport(actor.toHexString(), id, approvalBody(covered.item, { edit: draft => { draft.album.title = 'Not Applied Title'; }, selectedCoverSlotId: 'cover' }));
+    const frozen = await stored(id);
+    assert.deepEqual([frozen.draft.album.title, frozen.media!.selectedCoverSlotId, frozen.media!.publication!.cover, frozen.media!.publication!.newAlbum], ['Not Applied Title', 'cover', null, false]);
+    await runAdminImportPublicationOnce(storage, id);
+    const album = await getDb()!.collection('albums').findOne({ _id: new ObjectId(existing.albumId) });
+    assert.deepEqual([(await getAdminImport(actor.toHexString(), id)).item.publication, album!.title, storage.copies - copies, await getDb()!.collection('imageAssets').countDocuments()], ['complete', 'Synthetic Album', 1, 0]);
+});
+test('an approval and all its saves take one ordinary receipt, and at the receipt limit it saves nothing', async () => {
+    const storage = new Storage(), { id, item } = await undecided(storage), projects = getDb()!.collection<AdminImportDocument>('adminAlbumImports'), before = await stored(id);
+    const filler = Array.from({ length: 256 - before.receipts.length }, () => ({ ...before.receipts[0], operationId: randomUUID(), kind: 'edit' as const }));
+    await projects.updateOne({ _id: before._id }, { $push: { receipts: { $each: filler } } }); const full = await stored(id);
+    const body = (operationId?: string) => approvalBody(item, { edit: draft => { draft.album.title = 'Approved Title'; }, decisions: distinctAll(item), selectedCoverSlotId: 'cover', operationId });
+    await assert.rejects(publishAdminImport(actor.toHexString(), id, body()), code('ADMIN_IMPORT_OPERATION_LIMIT'));
+    assert.deepEqual(await stored(id), full);
+    await projects.updateOne({ _id: before._id }, { $pop: { receipts: 1 } });
+    await publishAdminImport(actor.toHexString(), id, body()); const approved = await stored(id);
+    assert.deepEqual([approved.receipts.length, approved.receipts.at(-1)!.kind, approved.draft.album.title, approved.media!.selectedCoverSlotId], [256, 'publish', 'Approved Title', 'cover']);
+});
+test('an approval freezes tracks by Disc and Track Number, and tracks without numbers last in draft order', async () => {
+    const storage = new Storage(), uploaded = await discProject(storage), id = uploaded.id, slots = uploaded.manifest.files.map(value => value.slotId);
+    const edited = await editImportDraft(actor.toHexString(), id, uploaded, draft => {
+        Object.assign(draft.album, { title: 'Synthetic Album', artists: artistEntries('Synthetic Artist') }); draft.tracks.forEach((track, index) => { track.title = `Synthetic ${index}`; });
+        draft.tracks[2].trackNumber = 1;
+    });
+    await publishAdminImport(actor.toHexString(), id, approvalBody(edited.item, { decisions: distinctAll(edited.item) }));
+    assert.deepEqual((await stored(id)).media!.publication!.tracks.map(track => track.slotId), [slots[2], slots[0], slots[1]]);
+});
+test('an approval refused by a stale change base, a track reused outside its Album or a null decision writes nothing, and a null decision is invalid input for /decisions too', async () => {
+    const storage = new Storage(), existing = await existingProject(storage), copies = storage.copies, { id, item } = await undecided(storage);
+    const candidates = (await adminImportDuplicateCandidates(actor.toHexString(), id)).items, revision = (kind: 'album' | 'track', candidateId: string) => candidates.find(value => value.kind === kind && value.id === candidateId)!.revision;
+    const album = { scope: 'album', slotId: null, entryKey: null, action: 'reuse', candidateId: existing.albumId, candidateRevision: revision('album', existing.albumId) };
+    const member = { scope: 'track', slotId: item.manifest.files[0].slotId, entryKey: null, action: 'reuse', candidateId: existing.trackIds[0], candidateRevision: revision('track', existing.trackIds[0]) };
+    const [artist, distinctAlbum] = distinctAll(item), before = await stored(id);
+    for (const [label, body, expected] of [
+        // The saved title is the administrator's own and differs from both the change's base and its value.
+        ['a stale change base', { ...approvalBody(item, { decisions: distinctAll(item) }), changes: [{ path: 'album.title', base: 'Not The Saved Title', value: 'Approved Title' }] }, 'ADMIN_IMPORT_FIELD_CONFLICT'],
+        ['a track reused without its Album', approvalBody(item, { decisions: [artist, distinctAlbum, member] }), 'ADMIN_IMPORT_TRACK_BELONGS_TO_ALBUM'],
+        // Listed before the Album reuse a track reuse looks for, a null item is invalid input rather than an unexpected failure.
+        ['a null decision', approvalBody(item, { decisions: [artist, member, null, album] }), 'ADMIN_IMPORT_INVALID_INPUT']
+    ] as const) {
+        await assert.rejects(publishAdminImport(actor.toHexString(), id, body), code(expected), label);
+        assert.deepEqual(await stored(id), before, label);
+    }
+    await assert.rejects(decideAdminImportDuplicates(actor.toHexString(), id, { ...mutation(item.revision), decisions: [artist, member, null, album] }), code('ADMIN_IMPORT_INVALID_INPUT'));
+    assert.deepEqual(await stored(id), before); assert.equal(storage.copies, copies);
+});
+test('a refused approval of a project saved before Draft v2 leaves it unconverted, whether its basis is stale or its review needs a decision', async () => {
+    await getDb()!.collection('users').updateOne({ _id: fixtureAdmin }, { $set: { email: 'fixture-admin@example.test', role: 'admin' } }, { upsert: true });
+    const doc = loadImportFixture('adminImport', 'v1-assets-reviewed.json'), id = doc._id.toHexString(); await getDb()!.collection<AdminImportDocument>('adminAlbumImports').insertOne(doc);
+    const before = await stored(id), { item } = await getAdminImport(fixtureAdmin.toHexString(), id);
+    for (const [label, options, expected] of [
+        ['a stale basis', { approvalDigest: 'f'.repeat(64) }, 'ADMIN_IMPORT_APPROVAL_STALE'],
+        ['an Album decision left out', { decisions: item.decisions.filter(decision => decision.scope !== 'album') }, 'ADMIN_IMPORT_REVIEW_REQUIRED'],
+        // Converted inside the transaction, the decided Artist is renamed by the approval itself and so needs a new decision.
+        ['an unsaved rename of the decided Artist', { edit: (draft: ImportDraftV2) => { draft.album.artists[0].name = 'Renamed Artist'; } }, 'ADMIN_IMPORT_REVIEW_REQUIRED']
+    ] as const) {
+        await assert.rejects(publishAdminImport(fixtureAdmin.toHexString(), id, approvalBody(item, options)), code(expected), label);
+        const after = await stored(id); assert.deepEqual(after, before, label); assert.equal(after.draftVersion, undefined, label);
+    }
+});
+test('an approval showing no cover clears a saved choice, any other body field is refused before receipt lookup, and a replay after completion returns its receipt', async () => {
+    const storage = new Storage(), { id, item } = await undecided(storage);
+    const selected = (await selectAdminImportCover(actor.toHexString(), id, { ...mutation(item.revision), slotId: 'cover' })).item; assert.equal(selected.selectedCoverSlotId, 'cover');
+    const body = approvalBody(selected, { decisions: distinctAll(selected), selectedCoverSlotId: null }), before = await stored(id);
+    // An unknown field is invalid input before the stored receipt of its operation is looked up.
+    for (const value of [{ ...body, draft: selected.draft }, { ...body, operationId: before.receipts.at(-1)!.operationId, slotId: 'cover' }]) {
+        await assert.rejects(publishAdminImport(actor.toHexString(), id, value), code('ADMIN_IMPORT_INVALID_INPUT'), JSON.stringify(Object.keys(value)));
+    }
+    assert.deepEqual(await stored(id), before);
+    const approved = await publishAdminImport(actor.toHexString(), id, body), frozen = await stored(id);
+    assert.deepEqual([frozen.media!.selectedCoverSlotId, frozen.media!.publication!.cover, approved.item.selectedCoverSlotId], [null, null, null]);
+    await runAdminImportPublicationOnce(storage, id);
+    // A shown value changes later without a revision; the receipt is still found before the approval's basis is compared.
+    await getDb()!.collection('adminAlbumImports').updateOne({ _id: new ObjectId(id) }, { $set: { 'media.selectedCoverSlotId': 'cover' } }); const done = await stored(id);
+    const replay = await publishAdminImport(actor.toHexString(), id, body);
+    assert.deepEqual([replay.receipt, replay.item.publication], [approved.receipt, 'complete']); assert.deepEqual(await stored(id), done);
+    assert.deepEqual([await getDb()!.collection('albums').countDocuments(), await getDb()!.collection('imageAssets').countDocuments()], [1, 0]);
 });

@@ -10,7 +10,7 @@
  *   - an outdated strict schema asks for a reload, while a receipt mismatch stays an unconfirmed retryable intent
  *   - AdminMutation and AdminCommand show a reload state with no retryable intent for an outdated response
  *   - a server refusal of a newer-format project asks for a reload of that action only, with no retryable intent
- *   - the server Draft v2 projection parses strictly, while v1 drafts, unknown entry keys, track Artist suggestions and Disc Number 1000 are refused
+ *   - the server Draft v2 projection parses strictly with its approval digest, while v1 drafts, unknown entry keys, track Artist suggestions, Disc Number 1000 and a missing digest are refused
  *   - duplicate candidates parse label Organizations and up to 460 items, and refuse unknown kinds
  * @end-catalog */
 
@@ -152,7 +152,7 @@ test('a server refusal of a newer-format project asks for a reload of that actio
   expect(command.getSnapshot().intent).toBeNull(); expect(adminWorkspace.getSnapshot().reloadRequired).toBe(false);
 });
 
-test('the server Draft v2 projection parses strictly, while v1 drafts, unknown entry keys, track Artist suggestions and Disc Number 1000 are refused', () => {
+test('the server Draft v2 projection parses strictly with its approval digest, while v1 drafts, unknown entry keys, track Artist suggestions, Disc Number 1000 and a missing digest are refused', () => {
   // The server's Draft v2 projection of the synthetic fixture (test/fixtures/adminImportCompat/v2-draft-project.json).
   const projected = {
     id: "b8fe89a0a6b4501d5db35e13",
@@ -170,6 +170,8 @@ test('the server Draft v2 projection parses strictly, while v1 drafts, unknown e
     assets: [{"slotId": "00000009-0000-4000-a000-000000000001", "state": "ready", "byteLength": 4096, "sha256": "719b383821e6441a28fd740b613e025e2e8cae1240f47297cef590f888c1cb31", "contentType": "audio/mpeg", "tags": {"title": "Synthetic Opening", "album": "Synthetic Compat Album", "artists": ["Synthetic Primary", "Synthetic Guest"], "year": 2026, "trackNumber": 1}, "recovery": {"operationId": "00000009-0000-4000-8000-000000000003", "expectedRevision": 2, "kind": "upload", "startedByMe": true}}, {"slotId": "embedded-00000009-0000-4000-a000-000000000001", "state": "ready", "byteLength": 3073, "sha256": "59353ff2c987657686b1510ce52d67a888c1704ffc9c4185ddf33dd1caeae2b4", "contentType": "image/jpeg", "tags": null, "recovery": {"operationId": "00000009-0000-4000-8000-000000000030", "expectedRevision": 4, "kind": "upload", "startedByMe": true}}],
     selectedCoverSlotId: null,
     capabilities: {"analysis": true, "upload": true, "publish": true},
+    // The server's approvalDigest of this projection (adminImportDetail of the fixture); the Web echoes it and never hashes.
+    approvalDigest: "b220c79b50569d175e0ffd58aa59c16fde9713616937fab9fdd5c1c7b49b5467",
     receipts: [{"operationId": "00000009-0000-4000-8000-000000000001", "kind": "create", "revision": 1}, {"operationId": "00000009-0000-4000-8000-000000000002", "kind": "edit", "revision": 2}, {"operationId": "00000009-0000-4000-8000-000000000003", "kind": "upload", "revision": 3}, {"operationId": "00000009-0000-4000-8000-000000000004", "kind": "analyze", "revision": 4}],
     draft: {"album": {"title": "Synthetic Compat Album", "artists": [{"key": "00000009-0000-4000-8000-0000000000e1", "name": "Synthetic Primary", "role": "primary", "joinPhrase": " feat. ", "musicBrainzId": "00000009-0000-4000-8000-0000000000f1"}, {"key": "00000009-0000-4000-8000-0000000000e2", "name": "Synthetic Guest", "role": "featured", "joinPhrase": null, "musicBrainzId": null}], "label": {"name": "Synthetic Label", "musicBrainzId": null}, "releaseDate": {"year": 2026, "month": 3, "day": null}, "visibility": "public"}, "tracks": [{"slotId": "00000009-0000-4000-a000-000000000001", "title": "Synthetic Opening", "discNumber": 1, "trackNumber": 1}, {"slotId": "00000009-0000-4000-a000-000000000002", "title": "Synthetic Reprise", "discNumber": 2, "trackNumber": 1}]},
     suggestions: [{"scope": "album", "slotId": null, "field": "artists", "baseline": [{"key": "00000009-0000-4000-8000-0000000000e1", "name": "Synthetic Primary", "role": "primary", "joinPhrase": " feat. ", "musicBrainzId": "00000009-0000-4000-8000-0000000000f1"}], "value": [{"key": "00000009-0000-4000-8000-0000000000e1", "name": "Synthetic Primary", "role": "primary", "joinPhrase": " feat. ", "musicBrainzId": "00000009-0000-4000-8000-0000000000f1"}, {"key": "00000009-0000-4000-8000-0000000000e2", "name": "Synthetic Guest", "role": "featured", "joinPhrase": null, "musicBrainzId": null}], "source": "context", "evidence": "Selected root: Synthetic Primary - Synthetic Compat Album", "id": "1841aae643a83f45acba69f4", "generation": 1, "decision": "pending"}, {"scope": "album", "slotId": null, "field": "title", "baseline": "Synthetic Compat Album", "value": "Synthetic Compat Album (Deluxe)", "source": "folder", "evidence": "Selected root: Synthetic Primary - Synthetic Compat Album", "id": "6d91973d95b005647626d360", "generation": 1, "decision": "pending"}]
@@ -180,7 +182,10 @@ test('the server Draft v2 projection parses strictly, while v1 drafts, unknown e
   // A completed publication lists every credited Artist and the label; a legacy single artistId is refused.
   const published = { albumId: 'a'.repeat(24), artistIds: ['b'.repeat(24), 'c'.repeat(24)], organizationId: 'd'.repeat(24), trackIds: ['e'.repeat(24)] };
   for (const value of [published, { ...published, organizationId: null }, { ...published, artistIds: [published.artistIds[0]] }]) expect(detailSchema.safeParse({ ...projected, published: value }).success).toBe(true);
+  // An editor from before one-step approval has no digest to echo, so a projection without a 64-hex digest is refused.
+  const { approvalDigest: _digest, ...withoutDigest } = projected;
   for (const changed of [
+    withoutDigest, { ...projected, approvalDigest: 'E'.repeat(64) }, { ...projected, approvalDigest: 'e'.repeat(63) }, { ...projected, approvalDigest: null },
     { ...projected, published: { albumId: published.albumId, artistId: published.artistIds[0], trackIds: published.trackIds } },
     { ...projected, published: { ...published, artistIds: [] } }, { ...projected, published: { ...published, artistIds: Array(51).fill(published.artistIds[0]) } },
     { ...projected, published: { ...published, organizationId: undefined } },

@@ -25,7 +25,9 @@ export const detailSchema = z.object({ ...common, manifest: manifestSchema, draf
   selectedCoverSlotId: z.string().nullable().default(null),
   // Every credited Artist in Credit order and the label Organization of a completed publication.
   published: z.object({ albumId: id, artistIds: z.array(id).min(1).max(50), organizationId: id.nullable(), trackIds: z.array(id).max(100) }).strict().nullable().default(null),
-  capabilities: z.object({ analysis: z.boolean(), upload: z.boolean(), publish: z.boolean() }).strict(), receipts: z.array(receiptSchema).max(256)
+  capabilities: z.object({ analysis: z.boolean(), upload: z.boolean(), publish: z.boolean() }).strict(), receipts: z.array(receiptSchema).max(256),
+  // The server's digest of what an approval confirmation shows from this saved project; a publish body echoes it.
+  approvalDigest: z.string().regex(/^[a-f0-9]{64}$/)
 }).strict().superRefine((item, ctx) => {
   if (item.publication === 'cancelled' && item.publicationRecovery === null || item.publicationRecovery?.cleanupPending && item.publication !== 'cancelled') ctx.addIssue({ code: 'custom', message: 'Invalid publication recovery' });
   const slots = new Set(item.manifest.files.map(file => file.slotId));
@@ -43,6 +45,12 @@ export const workbenchSchema = z.object({ items: z.array(z.object({ ...common, t
 export const candidatesSchema = z.object({ items: z.array(z.object({ kind: z.enum(['artist', 'organization', 'album', 'track']), id, label: z.string(), revision: z.string(), albumId: id.nullable(), visibility: z.enum(['public', 'hidden']), match: z.enum(['name', 'sha256']), matchedSlotIds: z.array(uuid).max(100), automaticReuse: z.literal(false) }).strict()).max(460) }).strict();
 export type ImportDetail = z.infer<typeof detailSchema>;
 export type ImportDecision = z.infer<typeof decisionSchema>;
+/**
+ * The workspace buffer of one import's unsaved Review decisions and the revision they were made at. It lives in this module, which
+ * the import page, Review and the approval checklist all load already, so sharing the key moves no code between their chunks.
+ */
+export const duplicateEditsKey = (id: string) => `duplicate-edits:${id}`;
+export interface DecisionEdits { revision: number; decisions: ImportDecision[] }
 export type ImportCandidate = z.infer<typeof candidatesSchema>['items'][number];
 export type ImportResponse = z.infer<typeof responseSchema>;
 export type WorkbenchItem = z.infer<typeof workbenchSchema>['items'][number];

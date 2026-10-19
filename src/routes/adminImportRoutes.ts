@@ -28,9 +28,11 @@ export function createAdminImportRouter(storage: ImportObjectStorage = defaultIm
         }
         return requireCurrentAccountViewer(req, res, next);
     });
-    // A field save carries each changed value and its base, so up to two copies of a 48 KB draft; other bodies stay at 96 KB.
-    const json = express.json({ limit: '96kb', strict: true }), fieldSaveJson = express.json({ limit: '160kb', strict: true });
-    router.use('/imports', (req, res, next) => (req.method === 'PATCH' && /^\/[^/]+\/?$/.test(req.path) ? fieldSaveJson : json)(req, res, next));
+    // A field save carries each changed value and its base, so up to two copies of a 48 KB draft; an approval carries a field save's
+    // changes plus up to 122 decisions; other bodies stay at 96 KB.
+    const json = express.json({ limit: '96kb', strict: true }), fieldSaveJson = express.json({ limit: '160kb', strict: true }), approvalJson = express.json({ limit: '192kb', strict: true });
+    router.use('/imports', (req, res, next) => (req.method === 'PATCH' && /^\/[^/]+\/?$/.test(req.path) ? fieldSaveJson
+        : req.method === 'POST' && /^\/[^/]+\/publish\/?$/.test(req.path) ? approvalJson : json)(req, res, next));
     const run = (handler: (actor: string, req: express.Request) => Promise<unknown>, status = 200): express.RequestHandler => async (req, res) => {
         try { const result = await runRequestWork(req, () => handler((req as AuthenticatedRequest).auth!.userId, req)); if (!res.destroyed) res.status(status).json(result); }
         catch (error) { const known = error instanceof AdminImportError; res.status(known ? error.status : 503).json({ code: known ? error.code : 'ADMIN_IMPORT_UNAVAILABLE' }); }
