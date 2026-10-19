@@ -3,7 +3,7 @@
  *   Classes: Artist
  *   Re-exports: ArtistCreationOutcomeUnknownError, confirmArtistCreationAfterWriteError
  * Internal
- *   Functions: withoutLegacyTrackIds
+ *   Functions: withoutMusicBrainzId, withoutLegacyTrackIds
  * @end-catalog */
 
 import { preserveCatalogVisibilityUpdate } from '../services/catalog/catalogVisibilityService';
@@ -27,6 +27,13 @@ export {
     confirmArtistCreationAfterWriteError
 } from '../repositories/catalog/artistPublicationRepository';
 
+/**
+ * Legacy and Content Manager updates never write a MusicBrainz ID: only the admin catalog service and import publication do, so
+ * the key (or any dotted path under it) is dropped silently.
+ */
+const withoutMusicBrainzId = (update: Record<string, unknown>): Record<string, unknown> =>
+    Object.fromEntries(Object.entries(update).filter(([key]) => key !== 'musicBrainzId' && !key.startsWith('musicBrainzId.')));
+
 const withoutLegacyTrackIds = (artist: any) => {
     if (artist) {
         delete artist.audioTrackIds;
@@ -49,6 +56,8 @@ export class Artist {
     lifecycleUpdatedAt: Date;
     lifecycleError: string | null;
     referenceRevision: number;
+    /** Private import provenance (lowercase UUID); written only by the admin catalog service and import publication, never by this class. */
+    musicBrainzId?: string;
 
     constructor(
         name: string,  
@@ -144,7 +153,7 @@ export class Artist {
     static async updateById(artistId: string, update: Record<string, unknown>) {
         const db = getDb();
         const artistObjectId = ObjectId.createFromHexString(artistId);
-        const normalizedUpdate = withCatalogSearchUpdate(preserveCatalogVisibilityUpdate(update), 'name');
+        const normalizedUpdate = withCatalogSearchUpdate(withoutMusicBrainzId(preserveCatalogVisibilityUpdate(update)), 'name');
         const mutate = async (session?: ClientSession) => {
             const result = await db!
                 .collection('artists')
@@ -182,7 +191,7 @@ export class Artist {
                 _id: ObjectId.createFromHexString(artistId),
                 $and: [readyArtistLifecycleFilter, expectedReference]
             },
-            { $set: withCatalogSearchUpdate(preserveCatalogVisibilityUpdate(update), 'name') }
+            { $set: withCatalogSearchUpdate(withoutMusicBrainzId(preserveCatalogVisibilityUpdate(update)), 'name') }
         );
     }
 

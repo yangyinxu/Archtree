@@ -29,10 +29,13 @@ const candidateSchema = z.object({
   label: text.nullable(), catalogNumber: text.nullable(), barcode: z.string().max(14).nullable(), country: z.string().max(2).nullable(), date: importDateSchema.nullable(),
   formats: z.array(z.string().max(100)).max(20), trackCount: integer.nullable(), comparison: comparisonSchema.nullable(), groupKey: groupKey.nullable(), artistMismatch: z.boolean().nullable()
 }).strict();
-/** The values a matching group would write; text is evidence and is shown, never applied from here. */
+/**
+ * The values a matching group would write, with the MusicBrainz ID each entry and the label credit (null from a server that sends
+ * none); text is evidence and is shown, never applied from here.
+ */
 const proposalSchema = z.object({
-  albumTitle: text, artists: z.array(z.object({ name: text, role: z.enum(['primary', 'featured']), joinPhrase: z.string().max(200).nullable() }).strict()).max(50),
-  label: text.nullable(), releaseDate: importDateSchema.nullable(), tracks: z.array(z.object({ discNumber: integer, trackNumber: integer, title: text }).strict()).max(100)
+  albumTitle: text, artists: z.array(z.object({ name: text, role: z.enum(['primary', 'featured']), joinPhrase: z.string().max(200).nullable(), musicBrainzId: releaseId.nullable().default(null) }).strict()).max(50),
+  label: text.nullable(), labelMusicBrainzId: releaseId.nullable().default(null), releaseDate: importDateSchema.nullable(), tracks: z.array(z.object({ discNumber: integer, trackNumber: integer, title: text }).strict()).max(100)
 }).strict();
 const groupSchema = z.object({ groupKey, representativeKey: candidateKey, memberKeys: z.array(candidateKey).max(25), proposal: proposalSchema }).strict();
 /** A conflict's lookup value in its draft form: a title, a Disc or Track Number, a date, a label or the Artist entries. */
@@ -40,7 +43,8 @@ const lookupValueSchema = z.union([z.string().max(300), z.number().int().min(1).
 const appliedSchema = z.object({
   run, candidateKey: candidateKey.nullable(), releaseId: releaseId.nullable(), choice: z.enum(['preselected', 'chosen', 'none']), basis: z.union([basis, z.literal('chosen')]).nullable(),
   values: z.array(z.object({ path: valuePath, slotId }).strict()).max(305),
-  conflicts: z.array(z.object({ path: valuePath, slotId, lookup: lookupValueSchema, answer: z.enum(['mine', 'lookup']).nullable() }).strict()).max(305),
+  // `musicBrainzId`: the values differ only in the MusicBrainz IDs of entries or the label that agree in names, roles and phrases.
+  conflicts: z.array(z.object({ path: valuePath, slotId, lookup: lookupValueSchema, answer: z.enum(['mine', 'lookup']).nullable(), musicBrainzId: z.boolean().default(false) }).strict()).max(305),
   flagged: z.array(z.object({ path: valuePath, reason: z.enum(['characters', 'length', 'format', 'size', 'placeholder']) }).strict()).max(305)
 }).strict();
 export const lookupViewSchema = z.object({
@@ -64,8 +68,12 @@ const summarySchema = z.object({
   luna: z.array(z.object({ id: z.string().regex(/^[a-f0-9]{24}$/), tick: z.enum(['ticked', 'unticked', 'resolved', 'conflict']) }).strict()).max(1000),
   analysis: z.object({ runs: integer, attempts: integer, daily: integer }).strict(), lookupAvailable: z.boolean(), identityAnswers: integer.max(1000)
 }).strict();
-/** The lookup view (null before any run) with the import's revision, automatic-write counter and summary state. */
-export const lookupResponseSchema = z.object({ lookup: lookupViewSchema.nullable(), revision: integer, valueRevision: integer, summary: summarySchema }).strict();
+/**
+ * The lookup view (null before any run) with the import's revision, automatic-write counter and summary state, and the names lookup
+ * found for each MusicBrainz ID the saved draft carries (a renamed entry keeps its ID only under one of them).
+ */
+export const lookupResponseSchema = z.object({ lookup: lookupViewSchema.nullable(), revision: integer, valueRevision: integer, summary: summarySchema,
+  musicBrainzNames: z.array(z.object({ musicBrainzId: releaseId, names: z.array(z.string().max(200)).max(32) }).strict()).max(21).default([]) }).strict();
 export type ImportLookupView = z.infer<typeof lookupViewSchema>;
 export type ImportLookupResponse = z.infer<typeof lookupResponseSchema>;
 export type ImportSummaryState = z.infer<typeof summarySchema>;

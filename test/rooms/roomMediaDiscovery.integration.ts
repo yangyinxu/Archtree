@@ -13,6 +13,7 @@
  *   - exact room media resolution hides every unavailable format and keeps only current public descriptor fields
  *   - room media discovery requires an active social profile and an unrevoked session
  *   - room media HTTP routes retain auth, viewer, strict query and legacy response boundaries
+ *   - room media search, lookup and room state never carry a credited Artist's or label's private MusicBrainz ID, for a listener or an administrator in User view
  * @end-catalog */
 
 import assert from 'node:assert/strict';
@@ -85,8 +86,8 @@ test('queue batch preserves unavailable public occurrences while hiding own and 
         assert.deepEqual(batch.get(id(5)), { media: null, canRead: true });
     } finally { await session.endSession(); }
 });
-const account = async (active = true) => {
-    const _id = new ObjectId(), user = { _id, email: `${_id}@example.test`, role: 'user', password: 'synthetic-unused-password', emailVerified: true };
+const account = async (active = true, role: 'user' | 'admin' = 'user') => {
+    const _id = new ObjectId(), user = { _id, email: `${_id}@example.test`, role, password: 'synthetic-unused-password', emailVerified: true };
     await db().collection('users').insertOne(user);
     const session = await createSession(user);
     const actor: RoomActor = { userId: _id.toHexString(), sessionId: session.sessionId, clientId: randomUUID() };
@@ -221,5 +222,39 @@ test('room media HTTP routes retain auth, viewer, strict query and legacy respon
         '/room-media/search?cursor=' + 'x'.repeat(1_025), '/room-media/search?cursor[x]=one',
         '/room-media?q=quiet', `/room-media/${id(1)}?q=quiet`, '/room-media/not-an-id', '/rooms/current?q=quiet']) {
         assert.equal((await request(who, path)).status, 400, path);
+    }
+});
+
+test('room media search, lookup and room state never carry a credited Artist\'s or label\'s private MusicBrainz ID, for a listener or an administrator in User view', async () => {
+    const who = await account(), admin = await account(true, 'admin'), api = service(), artistId = '00000000-0000-4000-8000-0000000000c1', labelId = '00000000-0000-4000-8000-0000000000c2';
+    const artist = new ObjectId(), label = new ObjectId();
+    await db().collection('artists').insertOne({ _id: artist, name: 'Room Provenance Artist', lifecycleStatus: 'ready', musicBrainzId: artistId });
+    await db().collection('organizations').insertOne({ _id: label, name: 'Room Provenance Label', organizationType: 'label', lifecycleStatus: 'ready', musicBrainzId: labelId });
+    await db().collection('audioTracks').insertOne({ ...media(1, 'Provenance Melody'), artistIds: [artist.toHexString()], attributionStatus: 'documented', creditRevision: 1,
+        credits: [{ creditId: 'credit_primary_0', subjectType: 'artist', subjectId: artist.toHexString(), role: 'primary', order: 0 },
+            { creditId: 'credit_label_1', subjectType: 'organization', subjectId: label.toHexString(), role: 'label', order: 1 }] });
+    try {
+        const payloads: unknown[] = [await api.searchMedia(who.actor, {}), await api.searchMedia(who.actor, { query: 'Provenance' }), await api.mediaTrack(who.actor, id(1)), await api.eligibleMedia(who.actor)];
+        assert.equal((payloads[0] as RoomMediaPage).items[0]?.mediaTrackId, id(1));
+        // The HTTP routes answer the same descriptors, for a listener and for an administrator in User view (no admin header).
+        for (const caller of [who, admin]) {
+            for (const path of ['/room-media', '/room-media/search?q=Provenance', `/room-media/${id(1)}`]) payloads.push(await json(await request(caller, path)));
+        }
+        assert.equal((payloads[payloads.length - 1] as { item: RoomMediaDescriptor | null }).item?.mediaTrackId, id(1));
+        // A room queueing the track carries it as the now-playing descriptor of its state, read by the service and over HTTP.
+        const rooms = createRoomService({ enabled: () => true, now: () => now, secret: () => secret, assertAuthority: async () => 1, inspectAuthority: async () => 1 });
+        const scope = await createSocialService({ enabled: () => true, secret: () => secret }).issueScope(admin.actor);
+        assert.equal((await rooms.mutate(admin.actor, { action: 'create', scopeToken: scope.scopeToken, commandId: randomUUID(), mediaTrackIds: [id(1)] })).outcome, 'applied');
+        const state = await rooms.currentRoom(admin.actor);
+        assert.equal(state?.queue.length, 1);
+        const current = await json<{ room: { queue: unknown[] } | null }>(await request(admin, '/rooms/current'));
+        assert.equal(current.room?.queue.length, 1);
+        payloads.push(state, current);
+        for (const payload of payloads) {
+            const text = JSON.stringify(payload);
+            for (const forbidden of ['musicBrainzId', artistId, labelId]) assert.equal(text.includes(forbidden), false, forbidden);
+        }
+    } finally {
+        await db().collection('artists').deleteMany({ _id: artist }); await db().collection('organizations').deleteMany({ _id: label });
     }
 });

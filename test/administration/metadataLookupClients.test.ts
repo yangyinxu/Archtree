@@ -17,6 +17,7 @@
  *   - every malformed synthetic MusicBrainz answer is invalid or unavailable, never a no-match, and is not cached
  *   - redirects are refused off host before a second lookup and after three hops
  *   - unknown fields are dropped and a placeholder barcode becomes no barcode
+ *   - artist and label alias lookups have fixed URLs, refuse a malformed ID before sending, and keep names in a fixed order without search hints
  *   - identifier formats are checked before use
  *   - iTunes accepts text/javascript, drops preview and store links, keeps allowlisted artwork and sends no contact
  *   - iTunes storefronts are fixed and ordered by script
@@ -43,7 +44,7 @@ import {
 import type { LookupGateLease, MetadataLookupRateGate } from '../../src/administration/lookup/lookupRateGate';
 import { createLookupResponseCache, type LookupResponseCache } from '../../src/administration/lookup/lookupResponseCache';
 import { parseRetryAfter, type LookupClientDependencies } from '../../src/administration/lookup/lookupSourceRequest';
-import { createMusicBrainzClient, escapeLucene, musicBrainzLuceneQuery, musicBrainzUrls, parseMusicBrainzReleaseSearch } from '../../src/administration/lookup/musicBrainzClient';
+import { createMusicBrainzClient, escapeLucene, musicBrainzLuceneQuery, musicBrainzUrls, parseMusicBrainzEntityAliases, parseMusicBrainzReleaseSearch } from '../../src/administration/lookup/musicBrainzClient';
 import { createItunesSearchClient, itunesStorefrontsForText, itunesUrls } from '../../src/administration/lookup/iTunesSearchClient';
 import { coverArtDestination, createCoverArtClient } from '../../src/administration/lookup/coverArtClient';
 import {
@@ -326,6 +327,36 @@ test('unknown fields are dropped and a placeholder barcode becomes no barcode', 
     assert.deepEqual(release.media[0].tracks[0].isrcs, ['USAAA2000001']);
     const placeholder = (await musicBrainz.lookupRelease(syntheticId('musicbrainz/synthetic-placeholder-barcode.json'), call()))!;
     assert.equal(placeholder.barcode, null); assert.equal(placeholder.barcodeText, '0000000000000');
+});
+
+test('artist and label alias lookups have fixed URLs, refuse a malformed ID before sending, and keep names in a fixed order without search hints', async () => {
+    const artist = '00000000-0000-4000-8000-0000000000a1', label = '00000000-0000-4000-8000-0000000000b1';
+    assert.equal(musicBrainzUrls.artistAliases(artist.toUpperCase()).href, `https://musicbrainz.org/ws/2/artist/${artist}?inc=aliases&fmt=json`);
+    assert.equal(musicBrainzUrls.labelAliases(label).href, `https://musicbrainz.org/ws/2/label/${label}?inc=aliases&fmt=json`);
+    for (const value of ['not-an-id', '00000000-0000-0000-0000-000000000000', `${artist}/../release`]) {
+        assert.throws(() => musicBrainzUrls.artistAliases(value), inputFailure('identifier'), value);
+        assert.throws(() => musicBrainzUrls.labelAliases(value), inputFailure('identifier'), value);
+    }
+    const alias = (name: string, type: string | null, primary: boolean | null = null) => ({ name, 'sort-name': name, type, primary, locale: null });
+    const body = { id: artist, name: 'Synthetic Artist', disambiguation: 'ignored', aliases: [alias('Zeta', 'Artist name'), alias('Synthetic Artiste', 'Search hint'), alias('beta', null),
+        alias('Ālpha', 'Artist name', true), alias('SYNTHETIC ARTIST', 'Artist name'), alias('Omega', 'Legal name', true), alias('  ', 'Artist name'), alias('Hidden\u200bName', null)] };
+    assert.deepEqual(parseMusicBrainzEntityAliases(body, artist), { id: artist, names: ['Synthetic Artist', 'Omega', 'Ālpha', 'beta', 'Zeta'] });
+    // A merged entity answered under another ID gives no names; a response without aliases gives its own name only.
+    assert.equal(parseMusicBrainzEntityAliases({ ...body, id: label }, artist), null);
+    assert.deepEqual(parseMusicBrainzEntityAliases({ id: artist, name: 'Only' }, artist), { id: artist, names: ['Only'] });
+    const many = { ...body, aliases: Array.from({ length: 40 }, (_unused, index) => alias(`Name ${String(index).padStart(2, '0')}`, 'Artist name')) };
+    assert.equal(parseMusicBrainzEntityAliases(many, artist)!.names.length, 32);
+    for (const invalid of [{ ...body, id: 'x' }, { ...body, name: 7 }, { ...body, aliases: [{ name: 7 }] }, { ...body, aliases: 'x' }, null]) {
+        assert.throws(() => parseMusicBrainzEntityAliases(invalid, artist), JSON.stringify(invalid)?.slice(0, 40));
+    }
+    // Through the client: 404 is null, an answer is parsed, and both kinds use their own URL.
+    const { musicBrainz, fake } = clients([{ url: musicBrainzUrls.artistAliases(artist).href, status: 200, headers: { 'content-type': 'application/json' }, body },
+        { url: musicBrainzUrls.labelAliases(label).href, status: 404, headers: { 'content-type': 'application/json' }, bodyText: '{"error":"Not Found"}' }]);
+    assert.deepEqual(await musicBrainz.lookupAliases('artist', artist, call()), { id: artist, names: ['Synthetic Artist', 'Omega', 'Ālpha', 'beta', 'Zeta'] });
+    assert.equal(await musicBrainz.lookupAliases('label', label, call()), null);
+    assert.equal(fake.requests.length, 2);
+    await assert.rejects(musicBrainz.lookupAliases('artist', 'bad', call()), inputFailure('identifier'));
+    assert.equal(fake.requests.length, 2);
 });
 
 test('identifier formats are checked before use', () => {

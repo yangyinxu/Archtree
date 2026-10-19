@@ -38,3 +38,19 @@ test('suggestions and embedded covers cannot address another file or mix field t
   expect(detailSchema.safeParse({ ...item, selectedCoverSlotId: `embedded-${slotId}` }).success).toBe(false);
   expect(detailSchema.safeParse({ ...item, assets: [{ slotId: 'arbitrary', state: 'ready', sha256: 'a'.repeat(64), byteLength: 1, contentType: 'audio/mpeg', tags: null }] }).success).toBe(false);
 });
+test('Artist and Organization snapshots carry a nullable lowercase MusicBrainz ID that an edit sends only when changed', () => {
+  const base = catalogAlbum(), mbid = '00000000-0000-4000-8000-0000000000a1';
+  const artist = { ...base, kind: 'artist' as const, fields: { name: 'Synthetic Artist', bio: '', birthDate: null, musicBrainzId: null as string | null } };
+  const organization = { ...base, kind: 'organization' as const, fields: { name: 'Synthetic Label', description: '', organizationType: 'label' as const, musicBrainzId: null as string | null } };
+  for (const item of [artist, organization]) {
+    for (const musicBrainzId of [null, mbid]) expect(catalogItemSchema.safeParse({ ...item, fields: { ...item.fields, musicBrainzId } }).success).toBe(true);
+    for (const musicBrainzId of [mbid.toUpperCase(), 'not-an-id', 7]) expect(catalogItemSchema.safeParse({ ...item, fields: { ...item.fields, musicBrainzId } }).success).toBe(false);
+    // A server that predates the field sends none, which reads as no ID.
+    const { musicBrainzId: _id, ...older } = item.fields;
+    expect((catalogItemSchema.parse({ ...item, fields: older }).fields as { musicBrainzId: string | null }).musicBrainzId).toBeNull();
+  }
+  expect(catalogItemSchema.safeParse({ ...base, fields: { ...base.fields, musicBrainzId: mbid } }).success).toBe(false);
+  expect(catalogPatch(artist, { ...artist.fields, musicBrainzId: mbid }, 'public')).toEqual({ expectedRevision: artist.revision, fields: { musicBrainzId: mbid } });
+  expect(catalogPatch({ ...artist, fields: { ...artist.fields, musicBrainzId: mbid } }, artist.fields, 'public')).toEqual({ expectedRevision: artist.revision, fields: { musicBrainzId: null } });
+  expect(catalogPatch(artist, artist.fields, 'public')).not.toHaveProperty('fields');
+});

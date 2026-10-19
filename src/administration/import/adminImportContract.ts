@@ -36,11 +36,18 @@ export type ImportEmbeddedTagsV2 = ImportEmbeddedTags & { version: 2; albumArtis
     durationMs: number | null; identifiers: ImportTagIdentifiers; flagged: ImportTagFlag[] };
 /** The editor's view: version 1 for evidence stored before S8 (extended fields empty), else version 2. */
 export type ImportTagsView = Omit<ImportEmbeddedTagsV2, 'version'> & { version: 1 | 2 };
-export type ImportDuplicateCandidate = { kind: 'artist' | 'organization' | 'album' | 'track'; id: string; label: string; revision: string; albumId: string | null; visibility: 'public' | 'hidden'; match: 'name' | 'sha256'; matchedSlotIds: string[]; automaticReuse: false };
 /**
- * The duplicate candidates of one import: at most 460 name candidates, one verified byte match per staged hash (at most 100) and
- * 300 Album-member matches (860 items). `unavailable` names each Artist entry, label or Album title (at most 22) whose same-name
- * record is malformed: it is no selectable candidate, yet it keeps that row from being preselected.
+ * One identity candidate. `match` says why it is listed: an exact case-insensitive name, verified identical bytes, the entry's or
+ * label's MusicBrainz ID (`musicBrainzId`) or a name metadata lookup found for that ID (`alias`, with `aliasOf` the ID). An Artist
+ * or Organization candidate names the MusicBrainz ID it holds (`musicBrainzId`) only when it holds a keepable one.
+ */
+export type ImportDuplicateCandidate = { kind: 'artist' | 'organization' | 'album' | 'track'; id: string; label: string; revision: string; albumId: string | null; visibility: 'public' | 'hidden';
+    match: 'name' | 'sha256' | 'musicBrainzId' | 'alias'; matchedSlotIds: string[]; automaticReuse: false; musicBrainzId?: string; aliasOf?: string };
+/**
+ * The duplicate candidates of one import: at most 460 name candidates, one verified byte match per staged hash (at most 100),
+ * 300 Album-member matches, one exact MusicBrainz ID match per entry and the label (21) and 20 alias matches each (420): at most
+ * 1301 items. `unavailable` names each Artist entry, label or Album title (at most 22) whose same-name, same-ID or alias record is
+ * malformed: it is no selectable candidate, yet it keeps that row from being preselected.
  */
 export type ImportCandidatesResponse = { items: ImportDuplicateCandidate[]; memberMatchesComplete: boolean; unavailable: { kind: 'artist' | 'organization' | 'album'; label: string }[] };
 export type ImportDuplicateDecision = { scope: 'artist' | 'album' | 'track'; slotId: string | null; action: 'reuse' | 'skip' | 'create-distinct'; candidateId: string | null; candidateRevision: string | null };
@@ -59,9 +66,10 @@ export type AdminImportDetail = {
 export type ImportDecisionScopeV2 = 'artist' | 'label' | 'album' | 'track';
 /**
  * The editor's decision DTO and request item: an Artist decision names its entry and the entry name it was made for, a label
- * decision the label name (entryKey null), and an Album or track decision neither.
+ * decision the label name (entryKey null), and an Album or track decision neither. `replace` reuses an Artist or label
+ * Organization and replaces the MusicBrainz ID it holds with the entry's.
  */
-export type ImportDecisionDtoV2 = { scope: ImportDecisionScopeV2; slotId: string | null; entryKey: string | null; boundName: string | null; action: 'reuse' | 'skip' | 'create-distinct'; candidateId: string | null; candidateRevision: string | null };
+export type ImportDecisionDtoV2 = { scope: ImportDecisionScopeV2; slotId: string | null; entryKey: string | null; boundName: string | null; action: 'reuse' | 'skip' | 'create-distinct' | 'replace'; candidateId: string | null; candidateRevision: string | null };
 /** Published identities for the editor; a legacy approval's single Artist is [artistId]. */
 export type ImportPublishedV2 = { albumId: string; artistIds: string[]; organizationId: string | null; trackIds: string[] };
 /**

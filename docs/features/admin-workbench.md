@@ -75,9 +75,14 @@ mutation. Saving sends only the values the administrator changed, each with
 the saved value the edit started from. A newer saved version (a later revision,
 or automatic values written from file tags or metadata lookup at the same
 revision) that changed only other values carries the unsaved edits over, and so
-does one that changed an edited value automatically, because an administrator
-save always wins over automation; one where another administrator changed an
-edited value, or a refused stale save, loads the saved version for comparison.
+does one that changed an edited value automatically, or changed only the
+MusicBrainz IDs of edited Artist entries or the label (metadata lookup adds and
+removes them on the administrator's own values; the edit takes the saved IDs
+wherever it left an ID as it started, under an unchanged name), because an
+administrator save always wins over automation; one where another
+administrator changed an edited value, or a refused stale save, loads the
+saved version for comparison. The rebase loads beside the editor, outside the
+page's initial JavaScript.
 Compact value comparisons keep source evidence expandable; publication recovery
 has its own status and actions. Confirmation windows show the frozen named
 target and proposed change before secondary explanations. Technical IDs remain
@@ -100,8 +105,10 @@ loses its phrase. A move, role change or join phrase edit keeps the entry's
 key and name, so its saved Artist decision still applies; a rename or removal
 drops that decision when saved, but clearing a name keeps the entry, so
 retyping the exact saved name keeps the decision. A MusicBrainz ID on an entry
-or the label stays only while its name matches the saved one
-case-insensitively. An edited entry list or label that the server would refuse
+or the label stays while its name matches the saved one case-insensitively or
+is one of the names metadata lookup found for that ID (`musicBrainzNames` of
+`GET /lookup`); Draft has no field to type one. An edited entry list or label
+that the server would refuse
 (an empty name, a name repeated case-insensitively, where every entry sharing
 it is marked, control or invisible formatting characters left after trimming,
 more than 200 characters after normalization, an invalid join phrase) blocks
@@ -127,12 +134,22 @@ Review shows an Artist suggestion as its byline
 followed by each entry with its role. Review's existing-content check has one
 Artist row per entry, in draft order and named with its role, and a Label row
 when the draft has a label; each row lists only the candidates found for its
-own name. Review loads the candidates when it opens, and Find matches reads
-them again. A row without an explicit decision that the review preselects is
-collapsed, reads "Preselected as new" or "Preselected to reuse" a named member,
-and needs no answer: an Artist entry, the label or the Album without a name
-candidate of its kind is preselected as new, and so is every track once the
-Album is new (explicitly or preselected). When the Album row reuses an existing
+own name and, for an entry or the label carrying a MusicBrainz ID, the record
+of its kind holding that ID (Same MusicBrainz ID) and the records named as
+metadata lookup found for that ID (MusicBrainz alias). Review loads the
+candidates when it opens, and Find matches reads them again. A row without an
+explicit decision that the review preselects is collapsed, reads "Preselected
+as new", "Preselected to reuse" a named member or "Reuses" a named record
+"(same MusicBrainz ID)", and needs no answer: an entry or the label is
+preselected to reuse the record holding its ID unless another row's reuse,
+replace or an earlier preselection names that record, and an Artist entry,
+the label or the Album without a name, alias or same-ID candidate of its kind
+is preselected as new, and so is every track once the Album is new
+(explicitly or preselected). Creating a distinct record, or reusing another
+one, instead of the record holding the entry's ID records no ID. Reusing a
+record that holds a different ID keeps that ID, and reusing it while
+replacing its ID with the entry's is a separate choice, offered while no
+listed record holds the entry's ID. When the Album row reuses an existing
 Album, a file whose verified bytes match exactly one member of that Album, which
 no other file matches and no other decision reuses, is preselected to reuse it,
 and a file matching no member by bytes or title is preselected as a new member;
@@ -197,7 +214,10 @@ summary only presents it:
   its barcode, catalogue number, country and medium, plus **Use none of
   these**; a conflict with the administrator's own value shows both values with
   **Keep mine** and **Use lookup value** (`/lookup/resolve` bound to the saved
-  value). Identity questions stay in Review and the confirmation; the summary
+  value); one that differs only in MusicBrainz IDs is headed "MusicBrainz ID
+  differs" and shows each entry's or the label's name with its ID. Identity
+  questions, including keeping or replacing a reused record's ID, stay in
+  Review and the confirmation; the summary
   counts the rows the server says still need one. The candidate chooser
   discloses how many files have an unknown duration or Disc Number, which
   ranking never counts as agreement, and says when not every release
@@ -212,7 +232,8 @@ summary only presents it:
   that leaves a tie can be answered with it.
 - **Flagged, never folded.** Values resting only on file tags (automatic and
   not on the applied candidate), a preselection whose artist matches no artist
-  tag, and pending Luna suggestions with their ticks.
+  tag, directly or through an alias the lookup found, and pending Luna
+  suggestions with their ticks.
 - **Folded.** Every other row: title, Artist entries with roles and join
   phrases, label, date, visibility (changed in place by a field save, public by
   default), cover (one chosen automatically says so), the disc and track
@@ -262,6 +283,10 @@ visibility, the cover, and the identity of the Album, each entry and the label:
 New, Reuses a named record (marked Hidden when it is), Needs a decision, Match
 changed (the reused record is not listed at its reviewed revision), or Not
 applied for an append, whose title, date, visibility and cover rows say so too.
+Beside an entry or the label it names the MusicBrainz ID the publication
+records on its new or reused record ("records MusicBrainz ID") or replaces on
+a reused one ("replaces MusicBrainz ID", with the old and new ID), and sends
+that list as `musicBrainzIds`; an append lists none.
 Pending Luna suggestions are written into the shown draft as the summary
 ticks them (a suggestion whose path the unsaved changes also write stays
 unticked), and a row a ticked suggestion renames needs a decision like an
@@ -419,7 +444,10 @@ Import routes (relative to `/api/admin/v1`):
   track holds `slotId`, `title`, `discNumber` and `trackNumber`. An Artist
   entry is `{key, name, role, joinPhrase, musicBrainzId}` with a UUID `key`
   unique in the draft and a `role` of `primary` or `featured`; the label is
-  `null` or `{name, musicBrainzId}`. Suggestions are Draft v2, where an
+  `null` or `{name, musicBrainzId}`. `musicBrainzId` is `null` or the
+  lowercase MusicBrainz artist or label ID that metadata lookup supplied;
+  `GET /lookup` lists the names lookup found for each (`musicBrainzNames`).
+  Suggestions are Draft v2, where an
   `artists` suggestion proposes the whole entry list. A decision is
   `{scope, slotId, entryKey, boundName, action, candidateId,
   candidateRevision}`, where `scope` is `artist`, `label`, `album` or `track`,
@@ -483,7 +511,12 @@ Import routes (relative to `/api/admin/v1`):
   value without an origin counts as the administrator's own): then the whole
   save is refused with `409 ADMIN_IMPORT_FIELD_CONFLICT`, nothing is written,
   and the Web loads the saved version for comparison, which is its reload
-  request. Staleness is decided per path by value, not by a stored per-path
+  request. Artist entries or a label that differ from `base` only in
+  MusicBrainz IDs are not stale: metadata lookup adds and removes IDs on the
+  administrator's own values, and the save merges them, so an entry (by key)
+  or the label whose `musicBrainzId` the save left as `base` had it takes the
+  stored ID, kept only while its name equals the stored one
+  case-insensitively, and an ID the save cleared stays cleared. Staleness is decided per path by value, not by a stored per-path
   revision, so a value changed and then changed back is not stale. A `base`
   equal to what the editor shows for a stored value it cannot display (a
   format-1 value over a bound after NFC, shown as empty) is current too, so
@@ -496,8 +529,12 @@ Import routes (relative to `/api/admin/v1`):
   case-insensitively, titles of at most 300 characters (both bounds hold
   before and after NFC normalization), join phrases valid as Credit phrases,
   Disc Numbers from 1 to 999 and at most 48 KB unless the save does not grow
-  the draft. A `musicBrainzId` must equal the one stored for that unrenamed
-  entry or label; none is stored yet, so it is always `null`. Renaming or
+  the draft. A save never adds a MusicBrainz ID: an entry's or the label's
+  `musicBrainzId` is `null`, which removes a stored one, or the one stored for
+  that entry key (for the label, the stored label's) while its name equals the
+  stored one case-insensitively or is a name metadata lookup found for that ID
+  (`musicBrainzNames` of `GET /lookup`); anything else is
+  `400 ADMIN_IMPORT_INVALID_INPUT`. Renaming or
   removing an entry drops its Artist decision. A whole-draft body (`draft`,
   nested at most four containers deep) from an editor that predates Draft v2
   is refused with `409 ADMIN_IMPORT_RELOAD_REQUIRED` right after receipt
@@ -573,10 +610,21 @@ Import routes (relative to `/api/admin/v1`):
   skip does
   not. Unless the Album decision appends, publishing needs a reuse or
   create-distinct decision still bound to every entry and to the label unless
-  the review preselects it (no name candidate, see `/publish`), so renaming an
+  the review preselects it (no candidate, or a record holding its MusicBrainz
+  ID, see `/publish`), so renaming an
   entry or the label to a name that has a candidate makes publishing return
   `409 ADMIN_IMPORT_REVIEW_REQUIRED` until it is decided again. A preselection
   is never saved: a body item carrying `preselected` is invalid input.
+  An `artist` or `label` decision also binds the entry's or label's MusicBrainz
+  ID, server-side only (`boundMusicBrainzId`, never a DTO field or request
+  item; a decision saved before entries carried IDs binds none), so changing
+  the ID clears the decision as a rename does. `replace` (an `artist` or
+  `label` decision only, otherwise `400`) reuses a record like `reuse` and
+  replaces the MusicBrainz ID it holds with the entry's: the entry or label must
+  carry an ID (`400 ADMIN_IMPORT_INVALID_INPUT`) and the record must hold a
+  different keepable ID at its reviewed revision
+  (`409 ADMIN_IMPORT_DUPLICATE_STALE`). Two entries may not reuse, or reuse and
+  replace, one Artist. The v1 DTO never shows a `replace`.
 - `GET /imports/:id/duplicate-candidates`: bounded candidates; a name match is
   never verified identity or automatic reuse. Candidates are read from the
   Draft v2 view, and each distinct Artist entry name and the label's name are
@@ -595,9 +643,26 @@ Import routes (relative to `/api/admin/v1`):
   each entry name, the label or the Album title (at most 22) whose same-name
   record is malformed (a stored visibility other than public or hidden): it is
   no selectable candidate, but its row is never preselected. Names compare
-  after NFC normalization and locale-independent lower-casing. All reads of one
+  after NFC normalization and locale-independent lower-casing. For the entries
+  and the label that carry a MusicBrainz ID, one query per kind adds the ready
+  record holding each ID (`match: 'musicBrainzId'`, at most 21, upgrading a
+  row already listed by name), and one query per such entry or label adds up to
+  20 ready records named as metadata lookup found for its ID (`match: 'alias'`,
+  `aliasOf` the ID, from at most 32 stored names): at most 1301 items. An Artist
+  or Organization item names the ID it holds in `musicBrainzId` only when it
+  holds a keepable one; a malformed same-ID or alias record makes its entry's or
+  label's name `unavailable`. All reads of one
   request share a 10-second budget, each query at most 3 seconds. The editor
-  loads this on opening Review and with every publication confirmation.
+  loads this on opening Review and with every publication confirmation. Review
+  preselects as reuse the record holding an entry's or the label's ID (unless
+  another row's explicit reuse or replace, or an earlier preselection, names it)
+  and shows its other candidates without needing an answer; a record holding a
+  different ID is offered as reuse that keeps its ID, and as reuse that
+  replaces it while no listed record holds the entry's ID, beside creating a
+  distinct record. The publication confirmation shows a saved replace that is
+  no longer possible (the record holds no other ID, or a listed record holds
+  the entry's) as a changed match that blocks approval, as the server would
+  refuse it.
 - `POST /imports/:id/assets/:slotId`: one multipart `file`; `Idempotency-Key`
   and numeric `If-Match` form the upload intent, which reserves its private
   object identity before S3 work. Admission binds slot state and that intent,
@@ -685,7 +750,21 @@ Import routes (relative to `/api/admin/v1`):
   `400 ADMIN_IMPORT_INVALID_INPUT`. The Web always sends `suggestionTicks`
   `{generation, ticked, unticked}`: the analysis generation and every pending
   suggestion it shows, ticked or unticked, at most 204 distinct suggestion IDs
-  in all, bounded the same way.
+  in all, bounded the same way. The Web also sends `musicBrainzIds`: each
+  MusicBrainz ID the confirmation lists as recorded or replaced,
+  `{scope, entryKey, musicBrainzId, replaces}` (at most 21, bounded the same
+  way, each a keepable ID). The approval computes the frozen writes and
+  refuses any other set, and a body without the field may freeze none
+  (`409 ADMIN_IMPORT_REVIEW_REQUIRED` otherwise, as for two Artists that would
+  record one ID), so an editor that did not show the IDs never records one. Each frozen Artist and the label carry
+  `musicBrainzIdWrite` (`{musicBrainzId, replaces}` or `null`), and the
+  publication freezes the names lookup found for each carried ID
+  (`musicBrainzNames`) for the worker's alias recheck; `schemaVersion` stays 3
+  (the fields are optional). The commit records each write, a reused record only
+  while it still holds what the review saw (a stored value that is no keepable
+  ID, such as a placeholder's, counts as none), and a duplicate key on a MusicBrainz
+  ID index is needs attention with `identityConflict`, minting nothing; an
+  append records no ID.
   One transaction under one ordinary `publish` receipt then saves and freezes
   the approval. It is admitted at any project revision up to the current one:
   `approvalDigest` is its binding, so Luna, the publication worker and
@@ -771,9 +850,11 @@ Import routes (relative to `/api/admin/v1`):
   it applied, and, for each Artist entry and the label, the reviewed record to
   reuse or an ID reserved for a new one,
   so a retry or resume never mints another identity. `artists` lists
-  `{entryKey, artistId, newArtist, candidateRevision}` in Credit order, for an
-  append the target Album's primary Artists with `entryKey` `null`; `label` is
-  `{organizationId, newOrganization, candidateRevision}` or `null`; and the
+  `{entryKey, artistId, newArtist, candidateRevision, musicBrainzIdWrite}` in
+  Credit order, for an append the target Album's primary Artists with
+  `entryKey` `null` and no `musicBrainzIdWrite`; `label` is
+  `{organizationId, newOrganization, candidateRevision, musicBrainzIdWrite}`
+  or `null`; and the
   top-level `artistId` and `newArtist` mirror the first Artist. The approval
   makes every draft value the administrator's own; each entry's join phrase
   is kept on its Album Credit, and on a MediaTrack's Credit only while the
@@ -809,7 +890,8 @@ Import routes (relative to `/api/admin/v1`):
   the records an earlier one created. The fence covers only those commits: a
   record that a format-1 or format-2 commit, the Admin Catalog or the Content
   Manager creates concurrently with a commit is not rechecked, since names are
-  never identity keys.
+  never identity keys; the unique indexes still refuse a MusicBrainz ID that a
+  concurrent write gave another record of the kind.
 - `POST /imports/:id/cancel-publication`: explicit cancellation with
   `{operationId, expectedRevision, publicationOperationId}`. The new operation
   UUID binds the exact original publication UUID, and `expectedRevision` must
@@ -970,7 +1052,18 @@ category. Organizations use a name mark, matching listener details, and do not
 gain artwork upload controls.
 Direct catalog saves also confirm the frozen partial patch with per-field saved
 and proposed values, including coupled Credits with their join phrases and
-attribution, and a MediaTrack's Disc Number. A newer catalog revision disables
+attribution, a MediaTrack's Disc Number and an Artist's or Organization's
+MusicBrainz ID. Every Artist and Organization snapshot names `musicBrainzId`
+(`null` without one; a malformed stored value reads as `null` and stays
+repairable). A `fields.musicBrainzId` patch is a string of at most 64 characters
+naming a keepable ID (any case, stored lowercase) or `null` to clear it; a
+placeholder identity, a malformed value or the field on an Album or MediaTrack
+is `400 ADMIN_CATALOG_INVALID_INPUT`, and an ID another record of the same kind
+keeps, in any lifecycle state, is `409 ADMIN_CATALOG_MUSICBRAINZ_ID_IN_USE`
+(also for the loser of two concurrent setters), writing nothing and storing no
+receipt, so the same `operationId` may retry. The editor trims and lowercases
+the typed ID, an emptied field clears it, and the 409 shows its own message.
+A newer catalog revision disables
 the open confirmation and shows its recovery instruction; cancelling preserves
 unsaved edits. Offline or failed reads do not report a revision change without
 a confirmed newer item.
@@ -1364,7 +1457,40 @@ Later stages raise the oldest release that is safe to roll back to:
   detail that carries `coverChoice`, so reload open workbench tabs after
   deploying or rolling back across them.
 - After MusicBrainz IDs are stored, never roll back below the release before
-  them; its index stays, and listener DTOs already drop unknown fields.
+  them; its index stays, and listener DTOs already drop unknown fields. That
+  release ignores `musicBrainzIdWrite` and `musicBrainzNames` on a frozen
+  format-3 approval: it publishes an approval that creates records, or reuses
+  records without an ID, without writing any ID, and rechecks preselections
+  without alias candidates. An approval that reuses an Artist or Organization
+  holding an ID (an exact-ID reuse, a kept ID or a replace) becomes needs
+  attention there instead: its reviewed revisions include the ID, and that
+  release never preselects by ID. Roll back only while no such publication is
+  preparing or in needs attention. Before rolling back, confirm in `mongosh`
+  that this returns 0 (it counts every such publication that reuses an Artist
+  or the label, a superset), or check and cancel those publications first:
+
+  ```js
+  db.adminAlbumImports.countDocuments({
+    "media.publication.state": { $in: ["preparing", "needsAttention"] },
+    $or: [
+      { "media.publication.artists": { $elemMatch: { newArtist: false, entryKey: { $ne: null } } } },
+      { "media.publication.label.newOrganization": false }
+    ]
+  })
+  ```
+
+  That release completes a lookup record left in the alias phase through its
+  details-done branch, ignoring `aliases`; an unanswered Artist or label
+  conflict whose lookup value carries MusicBrainz IDs is not shown there but
+  still holds publication, so choose the candidate again or choose none to
+  clear it. Its editor cannot parse a `replace` decision or the new candidate
+  fields, and it refuses the `musicBrainzIds` this Web sends with its approvals
+  as invalid input, so reload open workbench tabs after deploying or rolling
+  back across them. Decisions saved while rolled back for an entry or label
+  that carries a MusicBrainz ID bind none after rolling forward and are
+  cleared; decide those rows again. Its catalog editor shows no MusicBrainz ID
+  and its index revision is older, so it verifies its own indexes and leaves
+  both MusicBrainz ID indexes in place.
 - Credit join phrases and Disc Numbers have their own floor in the
   [catalog Credit rollout runbook](../deployment/catalog-credit-rollout-runbook.md#join-phrase-and-disc-number-rollback-floor).
 
@@ -1521,7 +1647,11 @@ database, what the step stores and which request comes next.
   handed to the worker. A new run (an automatic rerun, a submitted name or a
   manual retry) replaces the previous run's results; only the
   automatic-run count, the folder use and the applied values carry over. No
-  history is kept, and records are never deleted.
+  history is kept, and records are never deleted. `aliases` lists the credited
+  artists and labels whose MusicBrainz aliases the run looked up,
+  `{kind, id, state, names}` with `state` `pending`, `fetched`, `missing`
+  (404 or an answer for another ID) or `failed`; a record from an earlier
+  release has none and completes without them.
 - **States.** `queued`, `running` and `retrying` are active; `complete`,
   `unavailable`, `stopped` and `superseded` end a run. A stopped run's issue is
   `permissionLost` or `grantExpired`, an unavailable one's `sourceUnavailable`,
@@ -1534,12 +1664,27 @@ database, what the step stores and which request comes next.
   180-second lease and advances it one MusicBrainz request per stored step: the
   planned queries in order until 25 distinct releases are known, skipping the
   fallbacks when a candidate is known as they start, then each candidate's
-  release lookup, then ranking. Releases whose reported track count can match
-  the files (or is unknown) are admitted first and their details fetched first,
-  so the bound is spent on plausible editions; a recording hit's reported track
-  count is stored with its candidate, since its release has no summary. A run
-  attempt sends at most 6 searches and 25
-  release lookups (31 requests); in wait mode each request is sent at most 3
+  release lookup, then the alias lookups, then ranking. Releases whose reported
+  track count can match the files (or is unknown) are admitted first and their
+  details fetched first, so the bound is spent on plausible editions; a
+  recording hit's reported track count is stored with its candidate, since its
+  release has no summary. After the details (unless they ended unavailable) the
+  run looks up `GET /ws/2/artist/<MBID>?inc=aliases&fmt=json` or
+  `/ws/2/label/<MBID>?inc=aliases&fmt=json` for at most 16 entities, in ranked
+  order (the preselected candidate first): each fetched release's credited
+  artists in credit order, then its first label, each once, never a
+  placeholder. Each alias lookup waits for the gate (within the step deadline,
+  so a gate held by another run does not drop the aliases); a source failure
+  (busy, throttled or unavailable) records that target and every remaining one
+  as `failed` and ranks in the same step, never retried or counted as an
+  attempt, so a source outage never holds value application or Publish, and
+  an identifier MusicBrainz refuses fails only its own target. Kept names are the entity name, then primary
+  aliases, then the others, each group in folded-name order, deduplicated by
+  folded name, at most 32; aliases of type "Search hint" (misspellings) are
+  excluded. Ranking then counts an artist tag that equals an alias of a credited
+  artist as agreement. A run attempt sends at most 6 searches, 25 release
+  lookups and 16 alias lookups (47 requests); in wait mode each request is
+  sent at most 3
   times within one call for a 503 or 429, and a failed step is retried
   automatically at most 3 times. Each step's transaction first
   rechecks the lease, the grant, the granting administrator's current role,
@@ -1689,7 +1834,39 @@ fills only empty or automatic values that are still as it saw them.
   ranking's file order (Disc Numbers count only media with tracks). An entry
   keeps the key of the current entry with the same name, compared
   case-insensitively, else a key derived from the project and the name, so
-  decisions on unchanged entries survive. No MusicBrainz ID is written yet.
+  decisions on unchanged entries survive. Each entry and the label carry the
+  MusicBrainz ID the release credits (never a placeholder's; proposals carry
+  them as `musicBrainzId` and `labelMusicBrainzId`, so candidates crediting
+  different artists or labels under one name are different groups).
+- **MusicBrainz IDs.** IDs come only from a MusicBrainz response: the parser
+  admits an ID on an entry or the label only when the applying server step
+  introduces it. Where the administrator's own entries or label equal the
+  candidate's in names (case-insensitively), roles and join phrases, the
+  candidate's IDs are added, without a decision, to those carrying none, keeping
+  the value's origin (an automatic write: `valueRevision`, never `revision`, and
+  the path joins `paths`). Such an addition keeps an explicit decision on that
+  entry that stays valid, rebound to the ID (reusing the ready record holding
+  it, or creating or reusing a record without an ID while no ready record holds
+  it), and clears any other, which Review shows again. An ID another entry
+  already carries is not added (two Artists never record one ID; an approval
+  whose entries would still record one ID twice needs review again). An ID that
+  differs from one already carried is a conflict marked `musicBrainzId`; a
+  missing ID on either side is no difference. Before applying another candidate
+  or none, each ID the previous application supplied (`applied.musicBrainzIds`)
+  that an entry or the label still carries is removed, unless a decision the
+  administrator saved since binds it, or the new candidate offers it for the
+  same entry and that value already equals the candidate's in names, roles and
+  phrases (so the addition would write it again). A decision value application
+  only rebound to an ID it added is marked `boundBy: 'lookup'` and binds that ID
+  for nobody: removing the ID leaves the decision bound to its entry without
+  one, and saving decisions or an approval stores the decision without the
+  mark. A decision stored without `boundMusicBrainzId` binds none. Answering
+  `lookup` on a conflict writes the lookup value's IDs too. The names found for each carried
+  ID (credited and canonical names, the label name and the run's aliases; at
+  most 21 IDs of 32 names, NFC, at most 200 characters, without control or
+  format characters) are kept on the import as `musicBrainzNames`; a renamed
+  entry or label keeps its ID only under one of them, and Review lists records
+  so named as alias candidates.
 - **Left out.** Text is NFC and trimmed; a value with control, invisible
   formatting or lone surrogate characters, over 300 (titles) or 200 (names)
   characters, one bad Artist entry (including an invalid or over-16 join
@@ -1714,7 +1891,9 @@ fills only empty or automatic values that are still as it saw them.
   how it was chosen (`preselected` with its basis, `chosen` or `none`), the
   administrator and intent, the paths written, each value resting on the
   candidate (a track value names its manifest slot), the conflicts with their
-  answers and the flagged values. Automatic values equal to an applied value
+  answers, the flagged values and the MusicBrainz IDs it supplied that the
+  draft still carries (`musicBrainzIds`). Automatic values equal to an applied
+  value
   are listed in the detail's `lookupPaths` and are not marked as resting only
   on file tags.
 - **All or nothing.** A write bumps `valueRevision` once and keeps only
@@ -1741,7 +1920,10 @@ fills only empty or automatic values that are still as it saw them.
 - **Scope.** Value application writes only the import document and its
   lookup record, never a catalog collection. A published Album or MediaTrack
   and its search projection carry only the reviewed names and values, never
-  a release, recording or iTunes identifier.
+  a release, recording or iTunes identifier. In the catalog, only an Artist or
+  Organization keeps a MusicBrainz ID, written by the publication commit or an
+  explicit catalog edit (see
+  [MusicBrainz IDs](../architecture/catalog.md#musicbrainz-ids)).
 
 ### Lookup routes
 
@@ -1762,7 +1944,7 @@ lookup runs never make them stale.
 
 | Route | Body | Success | Refusals |
 | --- | --- | --- | --- |
-| `GET /lookup` | — | `200 {lookup, revision, valueRevision, summary}`; `lookup` is `null` before any run | `404 ADMIN_IMPORT_NOT_FOUND` for a review or a bad id |
+| `GET /lookup` | — | `200 {lookup, revision, valueRevision, summary, musicBrainzNames}`; `lookup` is `null` before any run; `musicBrainzNames` lists `{musicBrainzId, names}` for each ID the saved draft carries | `404 ADMIN_IMPORT_NOT_FOUND` for a review or a bad id |
 | `POST /lookup` | `{operationId, expectedRevision, kind, text}`, `kind` `album` or `song`, text at most 1000 characters | `202` import response, receipt `lookup` | `503 ADMIN_IMPORT_LOOKUP_UNAVAILABLE`, `400 ADMIN_IMPORT_LOOKUP_INVALID_NAME`, `409 ADMIN_IMPORT_LOOKUP_REFUSED` |
 | `POST /lookup/retry` | `{operationId, expectedRevision}` | `202`, receipt `lookup-retry` | `503 …UNAVAILABLE`, `409 …LOOKUP_ACTIVE`, `409 …NOTHING_TO_RETRY`, `409 …REFUSED` |
 | `POST /lookup/choose` | `{operationId, expectedRevision, run, candidateKey}`, key `musicbrainz:<mbid>` or `null` for none | `200`, receipt `lookup-choose` | `409 ADMIN_IMPORT_LOOKUP_STALE` (another run, an active run, an unknown candidate, a candidate before completion), `409 ADMIN_IMPORT_LOOKUP_CANDIDATE_INCOMPLETE` (no fetched details, or a release fetched under another ID), `409 …REFUSED` |
@@ -1775,10 +1957,13 @@ allowlist: the run, state, issue, outcome and input; at most 25 candidates
 (ranked order, else stored order as incomplete) with title, joined credit,
 label, catalogue number, barcode, country, date, at most 20 formats, track
 count, the comparison counts and differences, group and artist mismatch; at
-most 25 groups with their proposals; the preselection; the disclosure (unknown
-local durations and Disc Numbers, and `partialComparison`); the applied
-candidate's choice, value paths, conflicts (lookup value re-read
-through the draft rules) and flags; stale files; and `needsAnswer` and
+most 25 groups with their proposals (each entry's and the label's MusicBrainz
+ID, `null` for a proposal stored before them); the preselection; the
+disclosure (unknown local durations and Disc Numbers, and `partialComparison`);
+the applied candidate's choice, value paths, conflicts (lookup value re-read
+through the draft rules, its MusicBrainz IDs read as introduced, and
+`musicBrainzId` marking a conflict only in IDs) and flags; stale files; and
+`needsAnswer` and
 `blocking`. It carries no URL, ISRC, recording ID, account, grant, lease,
 fence, file-set digest or query.
 
@@ -1812,7 +1997,9 @@ published track needs without a confirmed upload, is
   name; the cleaned folder name only when no usable tags exist, only for
   folder-chosen imports and automatically only once per project (a manual
   retry of that run repeats it); release MBIDs from earlier results of the
-  same run; and normalized spellings of tag or folder text as fallbacks. The
+  same run; artist and label MBIDs credited by releases the same run fetched
+  (alias lookups, at most 16); and normalized spellings of tag or folder text
+  as fallbacks. The
   number of selected files is never sent; the run uses it only locally.
 - Never file names, relative path segments, account data (including any
   account's email address) or audio. The only contact sent is the operator

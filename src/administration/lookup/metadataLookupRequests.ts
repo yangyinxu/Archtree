@@ -28,7 +28,8 @@ import { boundedJson, parseDraftPath } from '../import/adminImportValueState';
 import { METADATA_LOOKUP_LIMITS } from './lookupContract';
 import { importLookupView, type ImportLookupView } from './lookupView';
 import { chooseLookupCandidate, isLookupValuePath, resolveLookupConflicts } from './lookupValueApplication';
-import { adminImportLookupCollection, metadataLookupAccepted, queueMetadataLookup } from './metadataLookupService';
+import { adminImportLookupCollection, metadataLookupAccepted, queueMetadataLookup, readLookupApplicationContext } from './metadataLookupService';
+import { importMusicBrainzNameMap } from '../import/adminImportMusicBrainzIds';
 import type { MetadataLookupRecord } from './metadataLookupRecord';
 
 const candidateKeyPattern = /^musicbrainz:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -47,11 +48,14 @@ async function storeLookupRecord(next: MetadataLookupRecord, session: ClientSess
     if (written.matchedCount !== 1) throw new AdminImportError(409, 'ADMIN_IMPORT_REVISION_CONFLICT');
 }
 
-export type ImportLookupResponse = { lookup: ImportLookupView | null; revision: number; valueRevision: number; summary: ImportSummaryView };
+export type ImportLookupResponse = { lookup: ImportLookupView | null; revision: number; valueRevision: number; summary: ImportSummaryView;
+    musicBrainzNames: { musicBrainzId: string; names: string[] }[] };
 /**
  * The import's lookup view (null before any run), its revision and automatic-write counter, and the Review and publish summary
  * state (importSummaryView) read in the same snapshot: with the provider calls used today, this server's lookup configuration
  * and the identity rows of the saved draft that neither a saved decision nor a preselection answers (the candidates Review reads).
+ * `musicBrainzNames` are the names lookup found for each MusicBrainz ID the saved draft carries: a renamed entry keeps its ID
+ * only under one of them.
  */
 export async function getAdminImportLookup(actor: string, id: string, configuration: () => MetadataLookupConfiguration = metadataLookupConfiguration): Promise<ImportLookupResponse> {
     if (!objectId(id)) throw notFound();
@@ -61,6 +65,7 @@ export async function getAdminImportLookup(actor: string, id: string, configurat
         const stored = await importLookupRecord(doc._id, session), now = new Date(), identity = await importSavedIdentity(doc, session);
         const identityAnswers = importIdentityAnswers(identity.draft, identity.decisions, importIdentityPreselections(identity.draft, identity.decisions, identity.candidates));
         return { lookup: stored ? importLookupView(stored, doc) : null, revision: doc.revision,
+            musicBrainzNames: [...importMusicBrainzNameMap(doc.musicBrainzNames, identity.draft)].map(([musicBrainzId, names]) => ({ musicBrainzId, names })),
             valueRevision: Number.isSafeInteger(doc.valueRevision) && doc.valueRevision! >= 0 ? doc.valueRevision! : 0,
             summary: importSummaryView(doc, stored, { now, dailyAttemptsUsed: await dailyAnalysisAttemptsUsed(now, session), lookupAvailable: configuration().available, identityAnswers }) };
     });
@@ -90,7 +95,8 @@ export function chooseAdminImportLookup(actor: string, id: string, raw: unknown)
     return mutateAdminImport(actor, id, body, 'lookup-choose', async (doc, session) => {
         if (!metadataLookupAccepted(doc)) throw new AdminImportError(409, 'ADMIN_IMPORT_LOOKUP_REFUSED');
         const stored = await adminImportLookupCollection().findOne({ _id: doc._id }, { session });
-        await storeLookupRecord(chooseLookupCandidate(doc, stored, { run, candidateKey, actorId: actor, operationId: body.operationId }, new Date()), session);
+        await storeLookupRecord(chooseLookupCandidate(doc, stored, { run, candidateKey, actorId: actor, operationId: body.operationId }, new Date(),
+            await readLookupApplicationContext(doc, stored, session)), session);
     });
 }
 

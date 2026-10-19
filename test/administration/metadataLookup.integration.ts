@@ -374,8 +374,13 @@ test('the worker ranks up to 25 Hotel California candidates, nine-track editions
         // The page's 20 nine-track editions (the 2013 digital one among them) are admitted before the others.
         assert.deepEqual(record.candidates.slice(0, 20).map(candidate => candidate.release!.trackCount), Array(20).fill(9));
         assert.ok(record.candidates.some(candidate => candidate.releaseId.startsWith('fa7d3357')));
-        // One release lookup or none, the credited search (the bound then stops the bare one), then every candidate's details not fetched yet.
-        assert.equal(client.requests.length, 26);
+        // One release lookup or none, the credited search (the bound then stops the bare one), then every candidate's details not fetched
+        // yet; the credited artists' and labels' alias lookups follow (unrecorded here: the first fails, which records every alias
+        // target as failed and ranks at once, so a failing source is asked only once).
+        const aliasLookups = client.requests.filter(request => /\/ws\/2\/(?:artist|label)\//.test(request.url)).length;
+        assert.equal(client.requests.length - aliasLookups, 26);
+        assert.deepEqual([aliasLookups, record.aliases!.every(entry => entry.state === 'failed')], [1, true]);
+        assert.ok(record.aliases!.length >= 1 && record.aliases!.length <= 16);
         assert.deepEqual(gates, [{ fence: 2, run: 1, state: 'running', blocking: true }]);
         assert.deepEqual(doc.lookupGate, { fence: 3, run: 1, state: 'complete', blocking: false });
         assert.equal(doc.revision, revision);

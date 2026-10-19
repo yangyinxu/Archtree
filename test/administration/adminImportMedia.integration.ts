@@ -1221,7 +1221,7 @@ test('a Draft v2 approval of one primary entry publishes in reviewed Disc order 
     assert.equal(approved.item.publication, 'preparing');
     assert.deepEqual([publication.schemaVersion, publication.snapshot], [3, reviewed.item.draft]);
     // The single new Artist is frozen for its entry and mirrored as the approval's Artist; there is no label.
-    assert.deepEqual([publication.artists, publication.label, publication.newArtist], [[{ entryKey: reviewed.item.draft.album.artists[0].key, artistId: publication.artistId, newArtist: true, candidateRevision: null }], null, true]);
+    assert.deepEqual([publication.artists, publication.label, publication.newArtist], [[{ entryKey: reviewed.item.draft.album.artists[0].key, artistId: publication.artistId, newArtist: true, candidateRevision: null, musicBrainzIdWrite: null }], null, true]);
     assert.deepEqual((frozen.media!.publication!.decisions as { scope: string; entryKey: string | null }[]).find(value => value.scope === 'artist')!.entryKey, reviewed.item.draft.album.artists[0].key);
     // Every reviewed value included in the approval is the administrator's own.
     assert.equal(Object.keys(frozen.draftOrigins!).length, 5 + 3 * slots.length); assert.ok(Object.values(frozen.draftOrigins!).every(origin => origin === 'administrator'));
@@ -1323,7 +1323,7 @@ test('a project reviewed before Draft v2 converts at approval and publishes with
     assert.deepEqual([approved.item.publication, frozen.draftVersion, publication.schemaVersion], ['preparing', 2, 3]);
     assert.deepEqual([(publication.snapshot as ImportDraftV2).album.artists, (publication.snapshot as ImportDraftV2).tracks.map(track => track.discNumber)], [[entry], [null, null, null]]);
     // The saved Artist decision applies to the converted entry because its name is unchanged.
-    assert.deepEqual((publication.decisions as ImportDecisionV2[]).find(decision => decision.scope === 'artist'), { ...doc.decisions[0], entryKey, boundName: 'Synthetic Artist' });
+    assert.deepEqual((publication.decisions as ImportDecisionV2[]).find(decision => decision.scope === 'artist'), { ...doc.decisions[0], entryKey, boundName: 'Synthetic Artist', boundMusicBrainzId: null });
     assert.equal(await runAdminImportPublicationOnce(storage), true);
     const done = (await getAdminImport(fixtureAdmin.toHexString(), id)).item; assert.equal(done.publication, 'complete');
     const album = await getDb()!.collection('albums').findOne({ _id: new ObjectId(done.published!.albumId) }), artist = await getDb()!.collection('artists').findOne({ _id: new ObjectId(done.published!.artistIds[0]) });

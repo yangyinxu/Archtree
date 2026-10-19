@@ -14,6 +14,7 @@
  *   - a medium without tracks is not a disc: the comparison and the proposal number discs among media that have tracks
  *   - ranking is identical under any permutation and the representative prefers front artwork
  *   - artist mismatch compares case-folded NFC tags with the joined credit, credited names and canonical names
+ *   - an artist tag agrees with a credited artist through an alias the lookup found, and candidates crediting other MusicBrainz artists are other groups
  *   - the tolerance boundary is the tolerance plus the local precision, and legacy durations carry one-second precision
  *   - proposals keep credited names and join phrases, mark featured entries and never propose placeholders
  *   - newly known durations re-rank the stored candidates without any request
@@ -255,6 +256,24 @@ test('artist mismatch compares case-folded NFC tags with the joined credit, cred
     assert.equal(flag(['Someone Else', 'Nor']), false);
 });
 
+test('an artist tag agrees with a credited artist through an alias the lookup found, and candidates crediting other MusicBrainz artists are other groups', () => {
+    const cd = release('8baecda4'), mitsukiyo = cd.artistCredit[0].artistId;
+    const files = filesFrom(cd, { discs: true, artistTags: ['光月夜'] });
+    assert.equal(rankLookupCandidates([candidate(cd)], files).preselection!.artistMismatch, true);
+    assert.equal(rankLookupCandidates([candidate(cd)], files, { aliases: new Map([[mitsukiyo, ['Mitsukiyo', '光月夜']]]) }).preselection!.artistMismatch, false);
+    assert.equal(rankLookupCandidates([candidate(cd)], files, { aliases: new Map([['00000000-0000-4000-8000-000000000001', ['光月夜']]]) }).preselection!.artistMismatch, true);
+    // The same names under another MusicBrainz artist, or another label ID, make another proposal and so another group: a tie.
+    const other = structuredClone(cd);
+    other.releaseId = '00000000-0000-4000-8000-0000000000f1';
+    other.artistCredit[0].artistId = '00000000-0000-4000-8000-0000000000f2';
+    const relabelled = structuredClone(cd);
+    relabelled.releaseId = '00000000-0000-4000-8000-0000000000f3';
+    relabelled.labels = relabelled.labels.map((label, index) => index === 0 ? { ...label, labelId: '00000000-0000-4000-8000-0000000000f4' } : label);
+    const ranked = rankLookupCandidates([candidate(cd), candidate(other), candidate(relabelled)], filesFrom(cd, { discs: true }));
+    assert.deepEqual([ranked.groups.length, ranked.preselection], [3, null]);
+    assert.deepEqual(new Set(ranked.groups.map(group => group.proposal.artists[0].musicBrainzId)), new Set([mitsukiyo, '00000000-0000-4000-8000-0000000000f2']));
+});
+
 test('the tolerance boundary is the tolerance plus the local precision, and legacy durations carry one-second precision', () => {
     const single = release('5302459e');
     const remote = single.media[0].tracks[0].lengthMs!;
@@ -269,8 +288,11 @@ test('the tolerance boundary is the tolerance plus the local precision, and lega
 
 test('proposals keep credited names and join phrases, mark featured entries and never propose placeholders', () => {
     const cd = proposalForRelease(release('8baecda4'));
-    assert.deepEqual(cd.artists, [{ name: 'Mitsukiyo', role: 'primary', joinPhrase: '、' }, { name: 'KARUT', role: 'primary', joinPhrase: '、' },
-        { name: 'Nor', role: 'primary', joinPhrase: null }]);
+    // Each entry carries the MusicBrainz artist the release credits.
+    assert.deepEqual(cd.artists, [{ name: 'Mitsukiyo', role: 'primary', joinPhrase: '、', musicBrainzId: '2f39bcb3-6fbe-4579-9842-990d385b4689' },
+        { name: 'KARUT', role: 'primary', joinPhrase: '、', musicBrainzId: 'd3d376e5-d445-41d3-8485-246790b99d70' },
+        { name: 'Nor', role: 'primary', joinPhrase: null, musicBrainzId: '80ff6fdf-ccea-4f83-85f2-d4d726622cb7' }]);
+    assert.equal(cd.labelMusicBrainzId, release('8baecda4').labels[0].labelId);
     assert.equal(cd.label, '株式会社Yostar'); assert.deepEqual(cd.releaseDate, { year: 2022, month: 3, day: 24 });
     assert.equal(cd.tracks.length, 39); assert.deepEqual(cd.tracks[20], { discNumber: 2, trackNumber: 1, title: release('8baecda4').media[1].tracks[0].title });
     assert.equal(proposalForRelease(release('0ea3b00b')).label, null, '[no label] is never proposed');
@@ -280,7 +302,8 @@ test('proposals keep credited names and join phrases, mark featured entries and 
         { name: 'Guest', joinPhrase: ' & ', artistId: '00000000-0000-4000-8000-000000000002', artistName: 'Guest' },
         { name: 'Various Artists', joinPhrase: '', artistId: '89ad4ac3-39f7-470e-963a-56509c546377', artistName: 'Various Artists' }
     ];
-    assert.deepEqual(proposalForRelease(featuring).artists, [{ name: 'Lead', role: 'primary', joinPhrase: ' feat. ' }, { name: 'Guest', role: 'featured', joinPhrase: ' & ' }]);
+    assert.deepEqual(proposalForRelease(featuring).artists, [{ name: 'Lead', role: 'primary', joinPhrase: ' feat. ', musicBrainzId: '00000000-0000-4000-8000-000000000001' },
+        { name: 'Guest', role: 'featured', joinPhrase: ' & ', musicBrainzId: '00000000-0000-4000-8000-000000000002' }]);
     featuring.artistCredit[0].joinPhrase = ' featuring '; assert.equal(proposalForRelease(featuring).artists[1].role, 'featured');
     featuring.artistCredit[0].joinPhrase = ' (ft. '; assert.equal(proposalForRelease(featuring).artists[1].role, 'featured');
     featuring.artistCredit[0].joinPhrase = ' x '; assert.equal(proposalForRelease(featuring).artists[1].role, 'primary');
@@ -382,7 +405,8 @@ test('a repeated credit keeps only its first entry, by MusicBrainz artist or by 
         { name: 'Guest', joinPhrase: '', artistId: id(4), artistName: 'Guest' }
     ];
     assert.deepEqual(proposalForRelease(single).artists, [
-        { name: 'Lead', role: 'primary', joinPhrase: ' & ' }, { name: 'Second', role: 'primary', joinPhrase: ' feat. ' }, { name: 'Guest', role: 'featured', joinPhrase: null }]);
+        { name: 'Lead', role: 'primary', joinPhrase: ' & ', musicBrainzId: id(1) }, { name: 'Second', role: 'primary', joinPhrase: ' feat. ', musicBrainzId: id(2) },
+        { name: 'Guest', role: 'featured', joinPhrase: null, musicBrainzId: id(4) }]);
     // Two releases that differ only by a repeated credit propose the same values, so they group together.
     const plain = structuredClone(single);
     plain.artistCredit = [single.artistCredit[0], single.artistCredit[2], single.artistCredit[4]];

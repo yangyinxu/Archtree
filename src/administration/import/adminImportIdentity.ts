@@ -7,13 +7,14 @@
  *              IMPORT_CANDIDATE_READ_BUDGET_MS, IMPORT_IDENTITY_FENCE_ID
  * Internal
  *   Types: Kind, TrackContext
- *   Functions: named, sameName, exactName, trackRow, preselectedCreate, identityKey
+ *   Functions: named, sameName, exactName, trackRow, identifiedRows, addMusicBrainzIdCandidates,
+ *              preselectedCreate, identityKey
  *   Constants: boundByteHash, SHOWN_PRESELECTION_KEYS
  * @end-catalog */
 
 /**
- * Identity candidates and preselection for import review. Candidates (exact case-insensitive names and verified identical bytes)
- * are evidence, never identity. A preselection is never a saved decision: the approval computes it again inside its transaction,
+ * Identity candidates and preselection for import review. Candidates (exact case-insensitive names, names metadata lookup found
+ * for an entry's MusicBrainz ID, the same MusicBrainz ID and verified identical bytes) are evidence, never identity. A preselection is never a saved decision: the approval computes it again inside its transaction,
  * refuses a set other than the one its confirmation showed, and freezes it marked `preselected`; the publication worker
  * recomputes it before copying and inside the commit, where a preselection that no longer holds is an identity conflict that
  * mints nothing. Owner rules live in docs/business-rules.md (Administrator Album Imports).
@@ -28,9 +29,12 @@ import { readyOrganizationLifecycleFilter } from '../../services/catalog/organiz
 import { ADMIN_IMPORT_LIMITS, AdminImportError, cleanText, invalidImport, objectId, type ImportCandidatesResponse, type ImportDuplicateCandidate, type ImportManifest } from './adminImportContract';
 import { importPublicationFormat, type ImportAsset, type ImportPublication } from './adminImportMediaTypes';
 import { boundArtistDecision, boundLabelDecision, foldImportName, hasOwn, type ImportDecisionV2, type ImportDraftV2 } from './adminImportDraft';
+import { importMusicBrainzNameMap } from './adminImportMusicBrainzIds';
+import { keepableMusicBrainzId } from '../../utils/musicBrainzId';
 
 type Kind = ImportDuplicateCandidate['kind'];
-export const importCandidateProjection = { name: 1, title: 1, coverArtId: 1, coverArtUrl: 1, creditRevision: 1, adminRevision: 1, albumId: 1, audioTrackIds: 1, releaseDate: 1, credits: 1, visibility: 1, lifecycleStatus: 1, uploadStatus: 1, publicationStatus: 1, mediaType: 1, s3Key: 1, mediaRepresentation: 1, mediaByteHash: 1, updatedAt: 1 };
+/** MongoDB returns `musicBrainzId` only when a record stores one, so the revision of a record without one is unchanged. */
+export const importCandidateProjection = { name: 1, title: 1, coverArtId: 1, coverArtUrl: 1, creditRevision: 1, adminRevision: 1, albumId: 1, audioTrackIds: 1, releaseDate: 1, credits: 1, visibility: 1, lifecycleStatus: 1, uploadStatus: 1, publicationStatus: 1, mediaType: 1, s3Key: 1, mediaRepresentation: 1, mediaByteHash: 1, updatedAt: 1, musicBrainzId: 1 };
 /** Lifecycle touches may materialize legacy defaults; they do not change the reviewed content. */
 export const importCandidateRevision = (doc: Record<string, any>): string => {
     const stable = (value: any): any => value instanceof ObjectId ? value.toHexString() : value instanceof Date ? value.toISOString() : Array.isArray(value) ? value.map(stable) : value && typeof value === 'object' ? Object.fromEntries(Object.keys(value).sort().filter(key => value[key] !== undefined).map(key => [key, stable(value[key])])) : value;
@@ -38,10 +42,15 @@ export const importCandidateRevision = (doc: Record<string, any>): string => {
 };
 /** Artists and Organizations are matched by name; Albums and Tracks by title. */
 const named = (kind: Kind) => kind === 'artist' || kind === 'organization';
-/** One ready record as a name candidate; a stored visibility other than public or hidden is malformed (invalid input, dropped). */
+/**
+ * One ready record as a name candidate; a stored visibility other than public or hidden is malformed (invalid input, dropped). An
+ * Artist or Organization names the MusicBrainz ID it holds only when that ID is keepable.
+ */
 export function importCandidateRow(kind: Kind, doc: Record<string, any>): ImportDuplicateCandidate {
     if (doc.visibility !== undefined && doc.visibility !== 'public' && doc.visibility !== 'hidden') return invalidImport();
-    return { kind, id: doc._id.toHexString(), label: cleanText(named(kind) ? doc.name : doc.title, 300), revision: importCandidateRevision(doc), albumId: typeof doc.albumId === 'string' && objectId(doc.albumId) ? doc.albumId : null, visibility: doc.visibility === 'hidden' ? 'hidden' : 'public', match: 'name', matchedSlotIds: [], automaticReuse: false };
+    const musicBrainzId = named(kind) ? keepableMusicBrainzId(doc.musicBrainzId) : null;
+    return { kind, id: doc._id.toHexString(), label: cleanText(named(kind) ? doc.name : doc.title, 300), revision: importCandidateRevision(doc), albumId: typeof doc.albumId === 'string' && objectId(doc.albumId) ? doc.albumId : null, visibility: doc.visibility === 'hidden' ? 'hidden' : 'public', match: 'name', matchedSlotIds: [], automaticReuse: false,
+        ...(musicBrainzId ? { musicBrainzId } : {}) };
 }
 export const IMPORT_CANDIDATE_COLLECTIONS = { artist: 'artists', organization: 'organizations', album: 'albums', track: 'audioTracks' } as const;
 /** The ready lifecycle a candidate of each kind needs: published audio storage for a Track, ready lifecycle otherwise. */
@@ -78,11 +87,16 @@ export const IMPORT_CANDIDATE_READ_BUDGET_MS = 10_000;
  * (at most 20 * 20 + 3 * 20 = 460 items). Verified byte matches have their own query, the first ready Track outside the explicit
  * append target per staged hash (at most 100), so no number of same-title Tracks hides a possible duplicate. Then every byte or
  * title match among the members of each Album candidate and of the explicit append target (`decisions`), deduplicated and capped
- * at IMPORT_MEMBER_MATCH_LIMIT: at most 860 items. `memberMatchesComplete` is false when more member matches exist or a member
- * is malformed, so no append file is preselected from a partial list; `unavailable` names the rows whose same-name record is
- * malformed. All reads share IMPORT_CANDIDATE_READ_BUDGET_MS. Names are never unique identity keys.
+ * at IMPORT_MEMBER_MATCH_LIMIT. Then, for the entries and the label that carry a MusicBrainz ID, one query per kind for the ready
+ * records holding those IDs (at most 21 rows, `match: 'musicBrainzId'`, upgrading a row already listed by name), and one query
+ * per such entry or label for the names lookup found for its ID (`names`, at most 32 names, 20 rows each, `match: 'alias'`):
+ * at most 1301 items. A row is listed once, by its strongest match (ID over alias over name). `memberMatchesComplete` is false
+ * when more member matches exist or a member is malformed, so no append file is preselected from a partial list; `unavailable`
+ * names the rows whose same-name, same-ID or alias record is malformed. All reads share IMPORT_CANDIDATE_READ_BUDGET_MS. Names are
+ * never unique identity keys.
  */
-export async function importIdentityCandidates(input: { manifest: ImportManifest; draft: ImportDraftV2; assets: readonly ImportAsset[]; decisions: readonly Pick<ImportDecisionV2, 'scope' | 'action' | 'candidateId'>[] }, session: ClientSession): Promise<ImportCandidatesResponse> {
+export async function importIdentityCandidates(input: { manifest: ImportManifest; draft: ImportDraftV2; assets: readonly ImportAsset[]; decisions: readonly Pick<ImportDecisionV2, 'scope' | 'action' | 'candidateId'>[];
+    names?: ReadonlyMap<string, readonly string[]> }, session: ClientSession): Promise<ImportCandidatesResponse> {
     const { manifest, draft, assets } = input, db = getDb()!, items: ImportDuplicateCandidate[] = [], unavailable: ImportCandidatesResponse['unavailable'] = [];
     const deadline = Date.now() + IMPORT_CANDIDATE_READ_BUDGET_MS, maxTimeMS = () => Math.max(1, Math.min(3_000, deadline - Date.now()));
     const target = input.decisions.find(decision => decision.scope === 'album' && decision.action === 'reuse' && objectId(decision.candidateId))?.candidateId ?? null;
@@ -101,6 +115,7 @@ export async function importIdentityCandidates(input: { manifest: ImportManifest
             catch { if (!unavailable.some(entry => entry.kind === kind && sameName(entry.label, value))) unavailable.push({ kind, label: value }); }
         }
     }
+    await addMusicBrainzIdCandidates(draft, input.names ?? new Map(), { items, unavailable, maxTimeMS }, session);
     const listed = new Set<string>();
     /** Adds one Track row once; false when its metadata is malformed. */
     const addTrack = (row: Record<string, any>) => {
@@ -128,12 +143,51 @@ export async function importIdentityCandidates(input: { manifest: ImportManifest
     return { items, memberMatchesComplete, unavailable };
 }
 
-const preselectedCreate = (scope: ImportDecisionV2['scope'], slotId: string | null, entryKey: string | null, boundName: string | null): ImportDecisionV2 =>
-    ({ scope, slotId, entryKey, boundName, action: 'create-distinct', candidateId: null, candidateRevision: null, preselected: true });
+/** Entries and the label that carry a MusicBrainz ID, with the kind of record that may hold it. */
+const identifiedRows = (draft: ImportDraftV2) => [
+    ...draft.album.artists.filter(entry => entry.musicBrainzId).map(entry => ({ kind: 'artist' as const, name: entry.name, id: entry.musicBrainzId! })),
+    ...(draft.album.label?.musicBrainzId ? [{ kind: 'organization' as const, name: draft.album.label.name, id: draft.album.label.musicBrainzId }] : [])];
+/**
+ * Adds the exact-ID and alias candidates (importIdentityCandidates): first one query per kind for the ready records holding an
+ * entry's or the label's ID, upgrading a row already listed by name; then one query per such entry or label for the found names
+ * of its ID other than the entry's own name. A malformed row makes its entry's or label's name unavailable.
+ */
+async function addMusicBrainzIdCandidates(draft: ImportDraftV2, names: ReadonlyMap<string, readonly string[]>,
+    out: { items: ImportDuplicateCandidate[]; unavailable: ImportCandidatesResponse['unavailable']; maxTimeMS: () => number }, session: ClientSession) {
+    const db = getDb()!, rows = identifiedRows(draft);
+    const unavailable = (kind: 'artist' | 'organization', label: string) => { if (!out.unavailable.some(entry => entry.kind === kind && sameName(entry.label, label))) out.unavailable.push({ kind, label }); };
+    for (const kind of ['artist', 'organization'] as const) {
+        const ids = [...new Set(rows.filter(row => row.kind === kind).map(row => row.id))]; if (!ids.length) continue;
+        const found = await db.collection(IMPORT_CANDIDATE_COLLECTIONS[kind]).find({ $and: [readyImportCandidate(kind), { musicBrainzId: { $in: ids } }] }, { session, projection: importCandidateProjection }).sort({ _id: 1 }).limit(ids.length).maxTimeMS(out.maxTimeMS()).toArray();
+        for (const doc of found) {
+            const owner = rows.find(row => row.kind === kind && row.id === doc.musicBrainzId); if (!owner) continue;
+            let item: ImportDuplicateCandidate; try { item = { ...importCandidateRow(kind, doc), match: 'musicBrainzId' }; } catch { unavailable(kind, owner.name); continue; }
+            const index = out.items.findIndex(existing => existing.kind === kind && existing.id === item.id);
+            if (index >= 0) out.items[index] = item; else out.items.push(item);
+        }
+    }
+    for (const row of rows) {
+        const aliases = [...new Set((names.get(row.id) ?? []).slice(0, 32).filter(name => typeof name === 'string' && name && !sameName(name, row.name)))];
+        if (!aliases.length) continue;
+        const found = await db.collection(IMPORT_CANDIDATE_COLLECTIONS[row.kind]).find({ $and: [readyImportCandidate(row.kind), { name: { $in: aliases.map(exactName) } }] }, { session, projection: importCandidateProjection }).sort({ _id: 1 }).limit(20).maxTimeMS(out.maxTimeMS()).toArray();
+        for (const doc of found) {
+            if (!aliases.some(alias => sameName(alias, String(doc.name))) || out.items.some(existing => existing.kind === row.kind && existing.id === doc._id.toHexString() && existing.match !== 'name')) continue;
+            let item: ImportDuplicateCandidate; try { item = { ...importCandidateRow(row.kind, doc), match: 'alias', aliasOf: row.id }; } catch { unavailable(row.kind, row.name); continue; }
+            const index = out.items.findIndex(existing => existing.kind === row.kind && existing.id === item.id);
+            if (index >= 0) out.items[index] = item; else out.items.push(item);
+        }
+    }
+}
+
+const preselectedCreate = (scope: ImportDecisionV2['scope'], slotId: string | null, entryKey: string | null, boundName: string | null, boundMusicBrainzId: string | null = null): ImportDecisionV2 =>
+    ({ scope, slotId, entryKey, boundName, ...(scope === 'artist' || scope === 'label' ? { boundMusicBrainzId } : {}), action: 'create-distinct', candidateId: null, candidateRevision: null, preselected: true });
 /**
  * The decisions the review preselects for rows without an explicit decision in `decisions` (an entry's or the label's bound to its
- * current name), each marked `preselected`; an explicit decision, a skip included, always wins. Without an explicit Album reuse,
- * each entry and the label with no name candidate of its kind, and the Album with no title candidate, are created; once the Album
+ * current name and MusicBrainz ID), each marked `preselected`; an explicit decision, a skip included, always wins. Without an
+ * explicit Album reuse, an entry or the label whose MusicBrainz ID a ready record holds reuses that record (unless an explicit
+ * reuse or replace of another row, or an earlier preselection, already names it; then the row needs an answer), and its other
+ * candidates need no answer; otherwise each entry and the label with no name, alias or same-ID candidate of its kind, and the
+ * Album with no title candidate, are created (carrying the entry's ID as `boundMusicBrainzId`); once the Album
  * is created (explicitly or preselected) so is each of its tracks, whatever their candidates. When appending to target T, entries
  * and the label are not applied and nothing is preselected for them; while T's member matches are complete, a file matching no T
  * member by verified bytes or title becomes a new member, and one whose bytes match exactly one T member, matched by no other
@@ -145,6 +199,18 @@ export function importIdentityPreselections(draft: ImportDraftV2, decisions: rea
     const { items, unavailable } = candidates, preselected: ImportDecisionV2[] = [];
     // A same-name record too malformed to be a candidate still counts as one here: create is never preselected over it.
     const listed = (kind: Kind, name: string) => items.some(item => item.kind === kind && sameName(item.label, name)) || unavailable.some(entry => entry.kind === kind && sameName(entry.label, name));
+    // An entry's candidates also include the records holding its ID and those named as lookup found for its ID.
+    const listedFor = (kind: Kind, name: string, id: string | null) => listed(kind, name)
+        || (id !== null && items.some(item => item.kind === kind && (item.musicBrainzId === id || item.aliasOf === id)));
+    const exactFor = (kind: Kind, id: string | null) => id === null ? undefined : items.find(item => item.kind === kind && item.match === 'musicBrainzId' && item.musicBrainzId === id);
+    // A record another row explicitly reuses (or reuses and replaces the ID of), or an earlier preselection names, is not preselected again.
+    const taken = (kind: Kind, id: string) => decisions.some(decision => (kind === 'artist' ? decision.scope === 'artist' : decision.scope === 'label')
+        && (decision.action === 'reuse' || decision.action === 'replace') && decision.candidateId === id) || preselected.some(decision => decision.candidateId === id && decision.scope === (kind === 'artist' ? 'artist' : 'label'));
+    const preselect = (scope: 'artist' | 'label', kind: 'artist' | 'organization', entryKey: string | null, name: string, id: string | null) => {
+        const exact = exactFor(kind, id);
+        if (exact && !taken(kind, exact.id)) preselected.push({ scope, slotId: null, entryKey, boundName: name, boundMusicBrainzId: id, action: 'reuse', candidateId: exact.id, candidateRevision: exact.revision, preselected: true });
+        else if (!listedFor(kind, name, id)) preselected.push(preselectedCreate(scope, null, entryKey, name, id));
+    };
     const decided = (slotId: string) => decisions.some(decision => decision.scope === 'track' && decision.slotId === slotId);
     const album = decisions.find(decision => decision.scope === 'album');
     if (album?.action === 'reuse') {
@@ -161,9 +227,9 @@ export function importIdentityPreselections(draft: ImportDraftV2, decisions: rea
         }
         return preselected;
     }
-    for (const entry of draft.album.artists) if (!boundArtistDecision(decisions, entry) && !listed('artist', entry.name)) preselected.push(preselectedCreate('artist', null, entry.key, entry.name));
+    for (const entry of draft.album.artists) if (!boundArtistDecision(decisions, entry)) preselect('artist', 'artist', entry.key, entry.name, entry.musicBrainzId ?? null);
     const label = draft.album.label;
-    if (label && !boundLabelDecision(decisions, label) && !listed('organization', label.name)) preselected.push(preselectedCreate('label', null, null, label.name));
+    if (label && !boundLabelDecision(decisions, label)) preselect('label', 'organization', null, label.name, label.musicBrainzId ?? null);
     const created = album ? album.action === 'create-distinct' : !listed('album', draft.album.title);
     if (!album && created) preselected.push(preselectedCreate('album', null, null, null));
     if (created) for (const track of draft.tracks) if (!decided(track.slotId)) preselected.push(preselectedCreate('track', track.slotId, null, null));
@@ -185,7 +251,8 @@ export async function assertImportPreselectionsCurrent(publication: ImportPublic
     if (!preselected.length) return;
     const explicit = frozen.filter(decision => decision.preselected !== true), draft = publication.snapshot as ImportDraftV2;
     let candidates: ImportCandidatesResponse;
-    try { candidates = await importIdentityCandidates({ ...source, draft, decisions: explicit }, session); }
+    // The alias candidates are read from the names frozen with the approval, so the recheck compares what the review compared.
+    try { candidates = await importIdentityCandidates({ ...source, draft, decisions: explicit, names: importMusicBrainzNameMap(publication.musicBrainzNames, draft) }, session); }
     catch (error) { if (error instanceof MongoServerError && error.code === 50) throw new AdminImportError(409, 'ADMIN_IMPORT_PUBLICATION_CONFLICT'); throw error; }
     const current = new Set(importIdentityPreselections(draft, explicit, candidates).map(identityKey));
     if (preselected.some(decision => !current.has(identityKey(decision)))) throw new AdminImportError(409, 'ADMIN_IMPORT_IDENTITY_CONFLICT');

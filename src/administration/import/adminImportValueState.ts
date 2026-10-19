@@ -7,7 +7,8 @@
  *              convertLegacyImportProject, storedDraftV2
  * Internal
  *   Types: TrackField, Target
- *   Functions: reloadRequired, locate, boundedValue, emptyValue
+ *   Functions: reloadRequired, locate, boundedValue, isRecord, idPath, idItems, withoutIds, mergeStoredIds,
+ *              emptyValue
  *   Constants: albumFields, trackFields
  * @end-catalog */
 
@@ -18,8 +19,8 @@
  */
 import { ADMIN_IMPORT_LIMITS, AdminImportError, exact, invalidImport, parseImportDate, record, type ImportManifest } from './adminImportContract';
 import {
-    DRAFT_V2, DRAFT_V2_LIMITS, draftBytes, hasOwn, originKey, parseArtistEntries, parseDiscNumber, parseDraftTitle, parseDraftVisibility, parseLabelEntry, parseTrackNumber,
-    retainBoundDecisions, sameDraftValue, type ImportDraftOrigins, type ImportDraftV2, type ImportValueOrigin
+    DRAFT_V2, DRAFT_V2_LIMITS, draftBytes, foldImportName, hasOwn, originKey, parseArtistEntries, parseDiscNumber, parseDraftTitle, parseDraftVisibility, parseLabelEntry, parseTrackNumber,
+    retainBoundDecisions, sameDraftValue, type ImportDraftOrigins, type ImportDraftParseContext, type ImportDraftV2, type ImportValueOrigin
 } from './adminImportDraft';
 import { importDraftVersion, importProjectV2View } from './adminImportDraftCompat';
 import type { AdminImportDocument } from './adminImportService';
@@ -52,11 +53,14 @@ function locate(draft: ImportDraftV2, path: ImportDraftPath): { holder: Record<s
 export const draftValueAt = (draft: ImportDraftV2, path: ImportDraftPath): unknown => { const { holder, field } = locate(draft, path); return holder[field]; };
 export const setDraftValue = (draft: ImportDraftV2, path: ImportDraftPath, value: unknown) => { const { holder, field } = locate(draft, path); holder[field] = value; };
 
-/** Parses one value for its path; Artist entries and the label may keep only the MusicBrainz IDs the current draft stores. */
-export function parseDraftValue(path: ImportDraftPath, raw: unknown, current: ImportDraftV2): unknown {
+/**
+ * Parses one value for its path; Artist entries and the label may keep only the MusicBrainz IDs the current draft stores (also
+ * under a name lookup found for the ID), and only a server writer's `context` introduces one (adminImportDraft.ts).
+ */
+export function parseDraftValue(path: ImportDraftPath, raw: unknown, current: ImportDraftV2, context: ImportDraftParseContext = {}): unknown {
     const field = path.slice(path.lastIndexOf('.') + 1);
-    if (path === 'album.artists') return parseArtistEntries(raw, current.album.artists);
-    if (path === 'album.label') return parseLabelEntry(raw, current.album.label);
+    if (path === 'album.artists') return parseArtistEntries(raw, current.album.artists, context);
+    if (path === 'album.label') return parseLabelEntry(raw, current.album.label, context);
     if (path === 'album.releaseDate') return parseImportDate(raw);
     if (path === 'album.visibility') return parseDraftVisibility(raw);
     if (field === 'title') return parseDraftTitle(raw);
@@ -92,15 +96,49 @@ export function boundDraftChanges(raw: unknown, min = 1): void {
         if (!hasOwn(change, 'base') || !hasOwn(change, 'value') || typeof change.path !== 'string' || change.path.length > 80 || !boundedValue(change.base) || !boundedValue(change.value)) return invalidImport();
     }
 }
-/** 1 to 5 + 3 per file changes, each exactly {path, base, value} on a distinct path; `base` is only bounded and compared. */
-export function parseDraftChanges(raw: unknown, manifest: ImportManifest, current: ImportDraftV2): ImportDraftChange[] {
+const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+const idPath = (path: ImportDraftPath): path is 'album.artists' | 'album.label' => path === 'album.artists' || path === 'album.label';
+/** The Artist entries (by position) or the label of a value at an ID path; anything malformed reads as no item. */
+const idItems = (path: ImportDraftPath, value: unknown): unknown[] => path === 'album.label' ? [value] : Array.isArray(value) ? value : [];
+/** An Artist entry list or label with every MusicBrainz ID cleared, so two values that differ only in IDs compare equal. */
+const withoutIds = (path: ImportDraftPath, value: unknown): unknown => {
+    const strip = (item: unknown) => isRecord(item) ? { ...item, musicBrainzId: null } : item;
+    return path === 'album.artists' && Array.isArray(value) ? value.map(strip) : path === 'album.label' ? strip(value) : value;
+};
+/**
+ * Three-way merge of the MusicBrainz IDs a save sends for the Artist entries or the label, before parsing: where the sender left an
+ * entry's (matched by key) or the label's ID as its `base` had it and the stored one changed since (metadata lookup adds and
+ * removes IDs on the administrator's own values), the stored ID is taken, kept only while the sent name equals the stored one
+ * case-insensitively. A save therefore never re-adds an ID lookup removed, never drops one it added, and an ID the sender cleared
+ * stays cleared. Any other value, and any malformed item, is returned as sent for the parser to judge.
+ */
+function mergeStoredIds(path: 'album.artists' | 'album.label', raw: unknown, base: unknown, current: unknown): unknown {
+    if (path === 'album.artists' && !Array.isArray(raw)) return raw;
+    const find = (value: unknown, key: unknown) => idItems(path, value).find((item): item is Record<string, unknown> => isRecord(item)
+        && (path === 'album.label' || (typeof item.key === 'string' && typeof key === 'string' && item.key.toLowerCase() === key.toLowerCase())));
+    const merged = idItems(path, raw).map(item => {
+        if (!isRecord(item) || !hasOwn(item, 'musicBrainzId')) return item;
+        const from = find(base, item.key), to = find(current, item.key);
+        if (!from || !to || item.musicBrainzId !== from.musicBrainzId || to.musicBrainzId === from.musicBrainzId) return item;
+        const unrenamed = typeof item.name === 'string' && typeof to.name === 'string' && foldImportName(item.name.normalize('NFC').trim()) === foldImportName(to.name);
+        return { ...item, musicBrainzId: unrenamed ? to.musicBrainzId ?? null : null };
+    });
+    return path === 'album.label' ? merged[0] : merged;
+}
+/**
+ * 1 to 5 + 3 per file changes, each exactly {path, base, value} on a distinct path; `base` is only bounded and compared (and
+ * merges the MusicBrainz IDs metadata lookup changed since, mergeStoredIds). `context` carries the names lookup found for each ID
+ * the draft keeps (never `introduce`: an administrator never adds an ID).
+ */
+export function parseDraftChanges(raw: unknown, manifest: ImportManifest, current: ImportDraftV2, context: Pick<ImportDraftParseContext, 'names'> = {}): ImportDraftChange[] {
     if (!Array.isArray(raw) || raw.length < 1 || raw.length > albumFields.length + trackFields.length * manifest.files.length) return invalidImport();
     const seen = new Set<string>();
     return raw.map(item => {
         const change = record(item); exact(change, ['path', 'base', 'value']);
         if (!hasOwn(change, 'base') || !hasOwn(change, 'value')) return invalidImport();
         const path = parseDraftPath(change.path, manifest); if (seen.has(path)) return invalidImport(); seen.add(path);
-        return { path, base: change.base, value: parseDraftValue(path, change.value, current) };
+        const value = idPath(path) ? mergeStoredIds(path, change.value, change.base, draftValueAt(current, path)) : change.value;
+        return { path, base: change.base, value: parseDraftValue(path, value, current, { names: context.names }) };
     });
 }
 
@@ -114,13 +152,16 @@ const emptyValue = (value: unknown) => value === '' || value === null || (Array.
  * change is stale only when the current value differs from both its base and its value while the path is the administrator's
  * own (another administrator saved it), so a value changed and changed back is not stale. An automatic value is overwritten.
  * `shown` is the editor's view of the stored draft: a base equal to it there is current too, so a value the view cannot show
- * (a v1 value over a bound after NFC) stays replaceable. Every change path becomes the administrator's own; other paths keep
- * their values and origins. Returns the paths whose value changed.
+ * (a v1 value over a bound after NFC) stays replaceable. Artist entries or a label that differ from the base only in MusicBrainz
+ * IDs are current as well: an ID alone changes only through metadata lookup (an application or a conflict answer) or a save that
+ * clears it, and parseDraftChanges already merged the stored IDs into the value, so the save wins without losing them. Every
+ * change path becomes the administrator's own; other paths keep their values and origins. Returns the paths whose value changed.
  */
 export function applyAdministratorChanges(target: Target, changes: readonly ImportDraftChange[], shown?: ImportDraftV2): ImportDraftPath[] {
     for (const change of changes) {
         const current = draftValueAt(target.draft, change.path);
-        if (sameDraftValue(current, change.value) || sameDraftValue(current, change.base) || (shown && sameDraftValue(draftValueAt(shown, change.path), change.base))) continue;
+        if (sameDraftValue(current, change.value) || sameDraftValue(current, change.base) || (shown && sameDraftValue(draftValueAt(shown, change.path), change.base))
+            || (idPath(change.path) && sameDraftValue(withoutIds(change.path, current), withoutIds(change.path, change.base)))) continue;
         if (originOf(target.draftOrigins, change.path) === 'administrator') throw new AdminImportError(409, 'ADMIN_IMPORT_FIELD_CONFLICT');
     }
     const changed: ImportDraftPath[] = [];
@@ -135,15 +176,15 @@ export type ImportAutomaticSkip = { path: ImportDraftPath; reason: 'administrato
  * Automation's only write path: a value is written only while the current value is empty or automatic and still the one
  * automation saw, and it becomes automatic. A value equal to the current one is skipped and keeps its origin, and a write that
  * would grow the draft past the 48 KB cap is reverted alone. Callers (adminImportAutomation.ts) bump `valueRevision`, never
- * receipts or `revision`.
+ * receipts or `revision`. `context.introduce` names the MusicBrainz IDs a lookup application takes from its response.
  */
-export function applyAutomaticValues(target: Target, values: readonly ImportAutomaticValue[]) {
+export function applyAutomaticValues(target: Target, values: readonly ImportAutomaticValue[], context: ImportDraftParseContext = {}) {
     const written: ImportDraftPath[] = [], skipped: ImportAutomaticSkip[] = [];
     for (const { path, seen, value } of values) {
         const current = draftValueAt(target.draft, path);
         if (!emptyValue(current) && originOf(target.draftOrigins, path) === 'administrator') { skipped.push({ path, reason: 'administrator' }); continue; }
         if (!sameDraftValue(current, seen)) { skipped.push({ path, reason: 'changed' }); continue; }
-        let parsed: unknown; try { parsed = parseDraftValue(path, value, target.draft); } catch { skipped.push({ path, reason: 'invalid' }); continue; }
+        let parsed: unknown; try { parsed = parseDraftValue(path, value, target.draft, context); } catch { skipped.push({ path, reason: 'invalid' }); continue; }
         if (sameDraftValue(parsed, current)) { skipped.push({ path, reason: 'unchanged' }); continue; }
         const before = draftBytes(target.draft);
         setDraftValue(target.draft, path, parsed);

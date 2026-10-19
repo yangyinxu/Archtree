@@ -21,7 +21,8 @@ import type { AdminImportDocument } from '../import/adminImportService';
 import { parseDraftValue, type ImportDraftPath } from '../import/adminImportValueState';
 import type { MusicBrainzRelease, MusicBrainzReleaseSummary } from './lookupContract';
 import type { LookupDifference, LookupMatchStatus, LookupPreselection, LookupProposal } from './lookupRanking';
-import { isLookupValuePath, lookupAnswersNeeded } from './lookupValueApplication';
+import { isLookupValuePath, lookupAnswersNeeded, lookupValueIds } from './lookupValueApplication';
+import { normalizeMusicBrainzId } from './lookupIdentifiers';
 import { isBlockingLookupState, type LookupApplication, type MetadataLookupIssue, type MetadataLookupRecord, type MetadataLookupState } from './metadataLookupRecord';
 
 type ViewCandidate = {
@@ -42,7 +43,8 @@ export type ImportLookupView = {
     applied: {
         run: number; candidateKey: string | null; releaseId: string | null; choice: LookupApplication['choice']; basis: LookupApplication['basis'];
         values: { path: string; slotId: string | null }[];
-        conflicts: { path: string; slotId: string | null; lookup: unknown; answer: 'mine' | 'lookup' | null }[];
+        /** `musicBrainzId`: the values differ only in MusicBrainz IDs. */
+        conflicts: { path: string; slotId: string | null; lookup: unknown; answer: 'mine' | 'lookup' | null; musicBrainzId: boolean }[];
         flagged: { path: string; reason: LookupApplication['flagged'][number]['reason'] }[];
     } | null;
     staleFiles: string[]; needsAnswer: { tie: boolean; conflicts: string[] }; blocking: boolean;
@@ -84,12 +86,15 @@ function proposalView(raw: unknown): LookupProposal | null {
     if (!isRecord(raw)) return null;
     const albumTitle = text(raw.albumTitle), artists = list(raw.artists), tracks = list(raw.tracks);
     if (albumTitle === null || artists.length > LIMITS.artists || tracks.length > LIMITS.tracks || (raw.label !== null && text(raw.label) === null)) return null;
+    // A proposal stored before entries carried MusicBrainz IDs shows none.
     const entries = artists.map(entry => isRecord(entry) && text(entry.name) !== null && oneOf(entry.role, ['primary', 'featured'] as const)
-        && (entry.joinPhrase === null || text(entry.joinPhrase, LIMITS.phrase) !== null) ? { name: entry.name as string, role: entry.role, joinPhrase: entry.joinPhrase as string | null } : null);
+        && (entry.joinPhrase === null || text(entry.joinPhrase, LIMITS.phrase) !== null)
+        ? { name: entry.name as string, role: entry.role, joinPhrase: entry.joinPhrase as string | null, musicBrainzId: normalizeMusicBrainzId(entry.musicBrainzId) } : null);
     const numbered = tracks.map(track => isRecord(track) && count(track.discNumber) !== null && count(track.trackNumber) !== null && text(track.title) !== null
         ? { discNumber: track.discNumber as number, trackNumber: track.trackNumber as number, title: track.title as string } : null);
     if (entries.some(entry => entry === null) || numbered.some(track => track === null)) return null;
-    return { albumTitle, artists: entries as LookupProposal['artists'], label: raw.label as string | null, releaseDate: raw.releaseDate === null ? null : date(raw.releaseDate),
+    return { albumTitle, artists: entries as LookupProposal['artists'], label: raw.label as string | null,
+        labelMusicBrainzId: raw.label === null ? null : normalizeMusicBrainzId(raw.labelMusicBrainzId), releaseDate: raw.releaseDate === null ? null : date(raw.releaseDate),
         tracks: numbered as LookupProposal['tracks'] };
 }
 
@@ -140,9 +145,10 @@ function appliedView(raw: unknown, doc: AdminImportDocument, slots: ReadonlySet<
     const conflicts: NonNullable<ImportLookupView['applied']>['conflicts'] = [];
     for (const item of list(raw.conflicts).slice(0, LIMITS.values)) {
         if (!isRecord(item) || !path(item.path) || !(item.answer === null || item.answer === 'mine' || item.answer === 'lookup')) continue;
-        // A lookup value is never empty, so an empty stored one is as unreadable as an invalid one.
-        let lookup: unknown; try { lookup = parseDraftValue(item.path, item.lookup, draft); } catch { continue; }
-        if (lookup !== null && lookup !== '') conflicts.push({ path: item.path, slotId: slot(item.path), lookup, answer: item.answer });
+        // A lookup value is never empty, so an empty stored one is as unreadable as an invalid one. Its MusicBrainz IDs came from the
+        // release, so they are read as introduced.
+        let lookup: unknown; try { lookup = parseDraftValue(item.path, item.lookup, draft, { introduce: lookupValueIds(item.lookup) }); } catch { continue; }
+        if (lookup !== null && lookup !== '') conflicts.push({ path: item.path, slotId: slot(item.path), lookup, answer: item.answer, musicBrainzId: item.musicBrainzId === true });
     }
     return {
         run: raw.run as number, candidateKey: key(raw.candidateKey), releaseId: typeof raw.releaseId === 'string' && releaseIdPattern.test(raw.releaseId) ? raw.releaseId : null,

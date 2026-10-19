@@ -41,7 +41,7 @@ import { importPublicationSupported, importPublicationVersion } from '../../src/
 import { adminImportDetail, adminImportDto, importDigest, type AdminImportDocument } from '../../src/administration/import/adminImportService';
 import {
     catalogReviewAppliedView, catalogReviewSourceDisc, catalogReviewSourceView, importDecisionsV2View, importDraftV2FromV1, importDraftV2View, importDraftVersion, importDraftWritable, importProjectV2View,
-    importPublishedV2View, importSuggestionsV2View, legacyArtistEntryKey, legacyAssetsView, legacyAssetVisible, legacyDraftView, legacyPublicationView, writableDraftFilter, type ImportProjectV2View
+    importPublishedV2View, importSuggestionsV2View, legacyArtistEntryKey, legacyAssetsView, legacyAssetVisible, legacyDecisionsView, legacyDraftView, legacyPublicationView, writableDraftFilter, type ImportProjectV2View
 } from '../../src/administration/import/adminImportDraftCompat';
 import { importTagsV2View } from '../../src/administration/import/adminImportTags';
 import type { CatalogReviewApplied, CatalogReviewSource } from '../../src/administration/catalog/adminCatalogReviewContract';
@@ -386,6 +386,22 @@ test('the Draft v2 decision view keeps one readable decision per entry, label, A
     assert.equal(importDecisionsV2View('not a list', slots).length, 0);
     const many = Array.from({ length: 130 }, (_, index) => decision('artist', { entryKey: `00000009-0000-4000-8000-${String(index).padStart(12, '0')}` }));
     assert.equal(importDecisionsV2View(many, slots).length, 122);
+    // `replace` exists only for Artist and label decisions; the bound MusicBrainz ID is copied only for server reads, never into the DTO.
+    const mbid = '00000000-0000-4000-8000-0000000000a1';
+    const replacing = [decision('artist', { entryKey: e1, action: 'replace', candidateId: id, candidateRevision: 'r', boundMusicBrainzId: mbid }), decision('label', { action: 'replace', candidateId: id, candidateRevision: 'r', boundMusicBrainzId: 'bad' }),
+        decision('album', { action: 'replace', candidateId: id, candidateRevision: 'r' }), decision('track', { action: 'replace', candidateId: id, candidateRevision: 'r' })];
+    assert.deepEqual(importDecisionsV2View(replacing, slots).map(item => [item.scope, item.action, 'boundMusicBrainzId' in item]), [['artist', 'replace', false], ['label', 'replace', false]]);
+    assert.deepEqual(importDecisionsV2View(replacing, slots, { binding: true }).map(item => [item.scope, item.boundMusicBrainzId]), [['artist', mbid], ['label', null]]);
+    assert.deepEqual(importDecisionsV2View([decision('album')], slots, { binding: true }).map(item => 'boundMusicBrainzId' in item), [false]);
+    // A decision stored by a release before MusicBrainz IDs has no bound ID and binds none, also where its entry carries an ID (as
+    // the Draft v2 fixture stores it) or a value-application mark is stored beside it.
+    const stored = loadV2(), [first] = stored.decisions as Record<string, unknown>[];
+    assert.deepEqual(['boundMusicBrainzId' in first, (stored.draft as { album: { artists: { musicBrainzId: string | null }[] } }).album.artists[0].musicBrainzId !== null], [false, true]);
+    assert.equal(importDecisionsV2View([first, { ...decision('label'), boundBy: 'lookup' }], new Set(stored.manifest.files.map(file => file.slotId)), { binding: true })
+        .map(item => item.boundMusicBrainzId).every(value => value === null), true);
+    assert.equal(JSON.stringify(importDecisionsV2View([{ ...decision('label'), boundBy: 'lookup' }], slots)).includes('boundBy'), false);
+    // The frozen v1 DTO never shows a replace.
+    assert.deepEqual(legacyDecisionsView(replacing, slots), []);
 });
 
 test('the editor asset view allowlists version-2 tag evidence and reads evidence stored before it as version 1; the v1 DTO keeps five tag fields', () => {

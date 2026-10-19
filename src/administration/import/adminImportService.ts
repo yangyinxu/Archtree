@@ -38,6 +38,8 @@ import { importCoverChoice, type ImportCoverChoice } from './adminImportCoverAut
 import { ADMIN_IMPORT_LOOKUP_COLLECTION } from '../lookup/lookupContract';
 import type { ImportLookupGate, MetadataLookupRecord } from '../lookup/metadataLookupRecord';
 import { IMPORT_CANDIDATE_COLLECTIONS, IMPORT_IDENTITY_FENCE_ID, importCandidateProjection, importCandidateRevision, importCandidateRow, importIdentityCandidates, readyImportCandidate } from './adminImportIdentity';
+import { importMusicBrainzNameMap, type ImportMusicBrainzNames } from './adminImportMusicBrainzIds';
+import { keepableMusicBrainzId } from '../../utils/musicBrainzId';
 
 export type ProjectReceipt = Omit<ImportReceipt, 'kind'> & { kind: ImportReceipt['kind'] | 'apply' } & { actorId: string; hash: string; at: Date; selection?: { generation: number; acceptedIds: string[]; rejectedIds: string[] } };
 type Receipt = ProjectReceipt;
@@ -53,6 +55,11 @@ export type AdminImportDocument = {
     automation?: { albumAt?: Date } & Record<string, unknown>;
     /** Metadata lookup fence (metadataLookupRecord.ts): written with every run started and every state change, never bumping `revision`; never projected. */
     lookupGate?: ImportLookupGate;
+    /**
+     * Names metadata lookup found for each MusicBrainz ID the draft carries (adminImportMusicBrainzIds.ts): written only by lookup
+     * value application, never projected in v1; GET /lookup shows them.
+     */
+    musicBrainzNames?: ImportMusicBrainzNames;
     _id: ObjectId; actorId: string; revision: number; createdAt: Date; updatedAt: Date; manifest: ImportManifest; draft: ImportDraft | ImportDraftV2; analysis: Analysis; analysisHistory: Analysis[]; attemptsUsed: number;
     suggestions: (ImportSuggestion | ImportSuggestionV2)[]; decisions: (ImportDuplicateDecision | ImportDecisionV2)[]; receipts: Receipt[]; recoveryReceipts?: Receipt[]; automaticReceipts?: Receipt[]; media?: ImportMedia };
 /** A Draft v2 document: an import project or catalog review written by this release, or converted at its first admitted change. */
@@ -299,7 +306,8 @@ export function editAdminImport(actor: string, id: string, raw: unknown) {
     }
     const body = mutation(raw, ['changes']); boundDraftChanges(body.changes);
     return mutate(actor, id, body, 'edit', async doc => {
-        const draft = storedDraftV2(doc), before = structuredClone(draft), changes = parseDraftChanges(body.changes, doc.manifest, draft);
+        // A renamed entry keeps its MusicBrainz ID only under a name metadata lookup found for that ID.
+        const draft = storedDraftV2(doc), before = structuredClone(draft), changes = parseDraftChanges(body.changes, doc.manifest, draft, { names: importMusicBrainzNameMap(doc.musicBrainzNames, draft) });
         applyAdministratorChanges({ draft, draftOrigins: doc.draftOrigins ??= {} }, changes, importDraftV2View(draft, doc.manifest, doc._id.toHexString()));
         if (!draftWithinSizeLimit(before, draft)) invalidImport();
         doc.decisions = retainBoundDecisions(doc.decisions, draft);
@@ -425,18 +433,20 @@ export async function adminImportDuplicateCandidates(actor: string, id: string) 
 }
 /**
  * The saved draft as the editor shows it (its Draft v2 view, whatever format stored it), its saved decisions as the editor shows
- * them (adminImportDetail; decisions saved before Draft v2 name no entry key) and their identity candidates read in `session`,
- * for the duplicate-candidates read and the summary's count of identity rows left to answer.
+ * them with the MusicBrainz ID each binds (adminImportDetail; decisions saved before Draft v2 name no entry key) and their identity
+ * candidates read in `session`, alias candidates from the names lookup found, for the duplicate-candidates read and the summary's
+ * count of identity rows left to answer.
  */
 export async function importSavedIdentity(doc: AdminImportDocument, session: ClientSession) {
     const manifest = legacyManifestView(doc.manifest), draft = importDraftV2View(doc.draft, manifest, doc._id.toHexString());
     const view = importProjectV2View(doc), slots = new Set(manifest.files.map(file => file.slotId));
-    const decisions = (view ? importDecisionsV2View(view.decisions, slots) : legacyDecisionsView(doc.decisions, slots)) as ImportDecisionV2[];
-    return { draft, decisions, candidates: await importIdentityCandidates({ manifest, draft, assets: doc.media?.assets ?? [], decisions }, session) };
+    const decisions = (view ? importDecisionsV2View(view.decisions, slots, { binding: true }) : legacyDecisionsView(doc.decisions, slots)) as ImportDecisionV2[];
+    return { draft, decisions, candidates: await importIdentityCandidates({ manifest, draft, assets: doc.media?.assets ?? [], decisions, names: importMusicBrainzNameMap(doc.musicBrainzNames, draft) }, session) };
 }
-/** Two Artist entries of one decision set cannot reuse one Artist. */
+/** Two Artist entries of one decision set cannot reuse one Artist (a reuse that replaces its ID is a reuse too). */
 export const reusesOneArtistTwice = (raw: readonly unknown[]) => {
-    const reused = raw.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object' && (item as Record<string, unknown>).scope === 'artist' && (item as Record<string, unknown>).action === 'reuse').map(item => item.candidateId);
+    const reused = raw.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object' && (item as Record<string, unknown>).scope === 'artist'
+        && ['reuse', 'replace'].includes((item as Record<string, unknown>).action as string)).map(item => item.candidateId);
     return new Set(reused).size !== reused.length;
 };
 /**
@@ -446,9 +456,12 @@ export const reusesOneArtistTwice = (raw: readonly unknown[]) => {
  * means the decision was made for a value since renamed (409 ADMIN_IMPORT_DECISION_STALE, also in an append); Album and track
  * decisions bind no name (null). A reuse names a ready record at its reviewed revision (409
  * ADMIN_IMPORT_DUPLICATE_STALE), a track reuse inside another Album needs that Album's reuse (409 ADMIN_IMPORT_TRACK_BELONGS_TO_ALBUM)
- * and two entries never reuse one Artist (400). A set that reuses an existing Album (an append) applies no entry or label, so their
- * reuse decisions are kept shape-checked but never looked up and never block it. A reuse or create-distinct Artist or label
- * decision makes that value the administrator's own; nothing else is written.
+ * and two entries never reuse one Artist (400). `replace` (an Artist or label only) reuses a record like `reuse` and replaces its
+ * MusicBrainz ID: the entry or label must carry an ID (400) and the record must hold a different keepable one (409
+ * ADMIN_IMPORT_DUPLICATE_STALE). An Artist or label decision binds the entry's or label's current ID (`boundMusicBrainzId`). A set
+ * that reuses an existing Album (an append) applies no entry or label, so their reuse decisions are kept shape-checked but never
+ * looked up and never block it. A reuse, replace or create-distinct Artist or label decision makes that value the administrator's
+ * own; nothing else is written.
  */
 export async function parseImportDecisions(doc: AdminImportDocument, draft: ImportDraftV2, raw: unknown, session: ClientSession): Promise<ImportDecisionV2[]> {
     if (!Array.isArray(raw) || raw.length > DRAFT_V2_LIMITS.decisions || reusesOneArtistTwice(raw)) return invalidImport();
@@ -457,7 +470,8 @@ export async function parseImportDecisions(doc: AdminImportDocument, draft: Impo
     for (const rawDecision of raw) {
         const decision = record(rawDecision); exact(decision, ['scope', 'slotId', 'entryKey', 'boundName', 'action', 'candidateId', 'candidateRevision']);
         if (!hasOwn(decision, 'boundName') || (decision.boundName !== null && (typeof decision.boundName !== 'string' || decision.boundName.length > DRAFT_V2_LIMITS.name))) return invalidImport();
-        if (!['artist', 'label', 'album', 'track'].includes(decision.scope as string) || !['reuse', 'skip', 'create-distinct'].includes(decision.action as string)) return invalidImport();
+        if (!['artist', 'label', 'album', 'track'].includes(decision.scope as string) || !['reuse', 'skip', 'create-distinct', 'replace'].includes(decision.action as string)
+            || (decision.action === 'replace' && decision.scope !== 'artist' && decision.scope !== 'label')) return invalidImport();
         const scope = decision.scope as ImportDecisionV2['scope']; if (scope === 'track' ? typeof decision.slotId !== 'string' || !doc.manifest.files.some(file => file.slotId === decision.slotId) : decision.slotId !== null) return invalidImport();
         // An Artist decision names a current entry; every other scope names none, and a label decision needs a label.
         const entry = scope === 'artist' && uuid(decision.entryKey) ? draft.album.artists.find(item => item.key === (decision.entryKey as string).toLowerCase()) : undefined;
@@ -466,7 +480,10 @@ export async function parseImportDecisions(doc: AdminImportDocument, draft: Impo
         const boundName = entry?.name ?? (scope === 'label' ? draft.album.label!.name : null);
         if (decision.boundName !== boundName) { if (boundName === null) return invalidImport(); throw conflict('ADMIN_IMPORT_DECISION_STALE'); }
         const key = `${scope}:${decision.slotId}:${entry?.key ?? null}`; if (seen.has(key)) return invalidImport(); seen.add(key);
-        if (decision.action === 'reuse') {
+        // The MusicBrainz ID an Artist or label decision binds: the entry's or the label's current one.
+        const boundMusicBrainzId = scope === 'artist' ? entry!.musicBrainzId ?? null : scope === 'label' ? draft.album.label!.musicBrainzId ?? null : undefined;
+        if (decision.action === 'replace' && !boundMusicBrainzId) return invalidImport();
+        if (decision.action === 'reuse' || decision.action === 'replace') {
             if (!objectId(decision.candidateId) || typeof decision.candidateRevision !== 'string' || !/^[a-f0-9]{64}$/.test(decision.candidateRevision)) return invalidImport();
             // An append applies no entry or label: their saved decisions are kept but never block it.
             if (!(append && (scope === 'artist' || scope === 'label'))) {
@@ -474,11 +491,13 @@ export async function parseImportDecisions(doc: AdminImportDocument, draft: Impo
                 const target = await getDb()!.collection(IMPORT_CANDIDATE_COLLECTIONS[kind]).findOne({ _id: new ObjectId(decision.candidateId), ...readyImportCandidate(kind) }, { session, projection: importCandidateProjection });
                 if (!target || importCandidateRow(kind, target).revision !== decision.candidateRevision) throw conflict('ADMIN_IMPORT_DUPLICATE_STALE');
                 if (scope === 'track' && target.albumId) { const album = (raw as (Record<string, unknown> | null)[]).find(d => d?.scope === 'album' && d.action === 'reuse'); if (!album || album.candidateId !== target.albumId) throw conflict('ADMIN_IMPORT_TRACK_BELONGS_TO_ALBUM'); }
+                // Replacing needs a record that holds another keepable ID; otherwise the review that offered it is stale.
+                if (decision.action === 'replace') { const held = keepableMusicBrainzId(target.musicBrainzId); if (!held || held === boundMusicBrainzId) throw conflict('ADMIN_IMPORT_DUPLICATE_STALE'); }
             }
         } else if (decision.candidateId !== null || decision.candidateRevision !== null) return invalidImport();
         if ((scope === 'artist' || scope === 'label') && decision.action !== 'skip') markAdministratorValues(doc.draftOrigins ??= {}, [scope === 'artist' ? 'album.artists' : 'album.label']);
         const { slotId, action, candidateId, candidateRevision } = decision as unknown as ImportDecisionV2;
-        decisions.push({ scope, slotId, action, candidateId, candidateRevision, entryKey: entry?.key ?? null, boundName });
+        decisions.push({ scope, slotId, action, candidateId, candidateRevision, entryKey: entry?.key ?? null, boundName, ...(boundMusicBrainzId !== undefined ? { boundMusicBrainzId } : {}) });
     }
     return decisions;
 }

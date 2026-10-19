@@ -2,34 +2,47 @@
  * Exports
  *   Functions: ImportDraftV2Editor, ImportAnalysisControls
  * Internal
+ *   Types: EditorItem
  *   Functions: ArtistEntries, LabelField
  *   Constants: ImportAnalysisConfirmation
  * @end-catalog */
 
 import { lazy, Suspense, useId, useLayoutEffect, useRef, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { useLocalization } from '../../localization/LocalizationProvider';
 import type { MessageKey } from '../../localization/contract';
 import type { ImportArtistEntry, ImportDetail, ImportDraftV2, ImportLabelEntry } from './adminApi';
-import { useAdminText } from './AdminAccess';
+import { useAdminAccess, useAdminText } from './AdminAccess';
+import { importSummaryQuery } from './importSummaryQuery';
+import { useOnline } from './useAdminOnline';
 import styles from './adminStyles';
 import { ImportDraftEditor } from './ImportDraftEditor';
 import { draftChanges, entriesByline } from './importDraftPatch';
-import { ARTIST_ENTRY_LIMIT, addArtistEntry, artistEntryIssues, canMoveArtistEntry, labelFromInput, labelIssue, moveArtistEntry, removeArtistEntry, renameArtistEntry, setArtistEntryPhrase, setArtistEntryRole, type EntryIssue } from './importArtistEntries';
+import { ARTIST_ENTRY_LIMIT, addArtistEntry, artistEntryIssues, canMoveArtistEntry, labelFromInput, labelIssue, moveArtistEntry, removeArtistEntry, renameArtistEntry, setArtistEntryPhrase, setArtistEntryRole, type EntryIssue, type FoundNames } from './importArtistEntries';
+
+/** The project fields the Draft editor reads: its files, its automatic markers, and what keys the summary read it shares. */
+type EditorItem = Pick<ImportDetail, 'id' | 'revision' | 'valueRevision' | 'manifest' | 'automaticPaths' | 'lookupPaths' | 'possibleLabelEntryKeys'>;
 
 /**
  * The import project's Draft v2 editor: the shared draft fields, with ordered Artist entries and the label in place of the v1
  * Artist name. An invalid edited value blocks Save through native constraint validation, so no request is sent. Saved automatic
  * values written from file tags (`automaticPaths` apart from `lookupPaths`, which metadata lookup wrote) are marked "From file
- * tags" until edited, and automatic entries named like a company (`possibleLabels`) say they may be a label.
+ * tags" until edited, and automatic entries named like a company (`possibleLabelEntryKeys`) say they may be a label. The names
+ * metadata lookup found for each MusicBrainz ID come from the summary read it shares, so a rename to one of them keeps the ID.
  */
-export function ImportDraftV2Editor({ draft, saved, filenames, disabled, onChange, automaticPaths = [], lookupPaths = [], possibleLabels = [] }: { draft: ImportDraftV2; saved: ImportDraftV2; filenames: ImportDetail['manifest']['files']; disabled: boolean; onChange: (draft: ImportDraftV2) => void; automaticPaths?: readonly string[]; lookupPaths?: readonly string[]; possibleLabels?: readonly string[] }) {
+export function ImportDraftV2Editor({ draft, saved, item, disabled, onChange }: { draft: ImportDraftV2; saved: ImportDraftV2; item: EditorItem; disabled: boolean; onChange: (draft: ImportDraftV2) => void }) {
+  const access = useAdminAccess(), online = useOnline();
+  // Shares the summary's read (its polling stays with the summary); a viewer without admin access reads nothing.
+  const found = useQuery({ ...importSummaryQuery(access, item, online), refetchInterval: false, enabled: access.available,
+    select: data => new Map(data.musicBrainzNames.map(entry => [entry.musicBrainzId, entry.names])) as FoundNames });
+  const { manifest: { files: filenames }, automaticPaths, lookupPaths, possibleLabelEntryKeys: possibleLabels } = item, names = found.data;
   const album = (patch: Partial<ImportDraftV2['album']>) => onChange({ ...draft, album: { ...draft.album, ...patch } });
   // Only an edited value is checked, as the server parses only the paths a save changes.
   const edited = new Set(draftChanges(saved, draft).map(change => change.path));
   const automatic = new Set(automaticPaths.filter(path => !edited.has(path) && !lookupPaths.includes(path))), fromTags = automatic.has('album.artists');
   return <ImportDraftEditor draft={draft} filenames={filenames} disabled={disabled} onChange={onChange} automatic={automatic} artists={<>
-    <ArtistEntries entries={draft.album.artists} saved={saved.album.artists} validate={edited.has('album.artists')} fromTags={fromTags} possibleLabels={fromTags ? possibleLabels : []} onChange={artists => album({ artists })} />
-    <LabelField label={draft.album.label} saved={saved.album.label} validate={edited.has('album.label')} fromTags={automatic.has('album.label')} onChange={label => album({ label })} />
+    <ArtistEntries entries={draft.album.artists} saved={saved.album.artists} names={names} validate={edited.has('album.artists')} fromTags={fromTags} possibleLabels={fromTags ? possibleLabels : []} onChange={artists => album({ artists })} />
+    <LabelField label={draft.album.label} saved={saved.album.label} names={names} validate={edited.has('album.label')} fromTags={automatic.has('album.label')} onChange={label => album({ label })} />
   </>} />;
 }
 
@@ -60,7 +73,7 @@ export function ImportAnalysisControls({ item, available, active, startDisabled,
  * name blocks Save at once but is marked only after its field loses focus or a Save attempt, so a new entry is not announced
  * as invalid when it takes focus.
  */
-function ArtistEntries({ entries, saved, validate, fromTags, possibleLabels, onChange }: { entries: ImportArtistEntry[]; saved: ImportArtistEntry[]; validate: boolean; fromTags: boolean; possibleLabels: readonly string[]; onChange: (entries: ImportArtistEntry[]) => void }) {
+function ArtistEntries({ entries, saved, names, validate, fromTags, possibleLabels, onChange }: { entries: ImportArtistEntry[]; saved: ImportArtistEntry[]; names?: FoundNames; validate: boolean; fromTags: boolean; possibleLabels: readonly string[]; onChange: (entries: ImportArtistEntry[]) => void }) {
   const t = useAdminText(), { t: shared } = useLocalization(), base = useId();
   // The counter remounts the text, so a repeated message (two unnamed entries removed in turn) is announced again.
   const [announcement, setAnnouncement] = useState({ text: '', n: 0 });
@@ -87,7 +100,7 @@ function ArtistEntries({ entries, saved, validate, fromTags, possibleLabels, onC
       return <li className={styles.entry} key={entry.key}>
         <label className={styles.field}>{t('field.artistName')}<input id={id(entry.key, 'name')} className={styles.input} aria-label={`${index + 1} · ${t('field.artistName')}`} value={entry.name} maxLength={200}
           aria-invalid={nameShown || undefined} aria-describedby={nameShown ? id(entry.key, 'nameError') : undefined} ref={element => element?.setCustomValidity(nameMessage)}
-          onBlur={() => touch(entry.key)} onInvalid={() => touch(entry.key)} onChange={event => onChange(renameArtistEntry(entries, entry.key, event.target.value, saved))} /></label>
+          onBlur={() => touch(entry.key)} onInvalid={() => touch(entry.key)} onChange={event => onChange(renameArtistEntry(entries, entry.key, event.target.value, saved, names))} /></label>
         <label className={styles.field}>{t('catalog.role')}<select id={id(entry.key, 'role')} className={styles.input} aria-label={`${index + 1} · ${t('catalog.role')}`} value={entry.role} onChange={event => {
           const role = event.target.value as ImportArtistEntry['role'], next = setArtistEntryRole(entries, entry.key, role);
           apply(next, id(entry.key, 'role'), t('entries.role_changed', { name, role: roleText(role), position: next.findIndex(item => item.key === entry.key) + 1, count }));
@@ -121,11 +134,11 @@ function ArtistEntries({ entries, saved, validate, fromTags, possibleLabels, onC
 }
 
 /** The optional label Organization; its help sits outside the label element so the accessible name stays "Label". */
-function LabelField({ label, saved, validate, fromTags, onChange }: { label: ImportLabelEntry | null; saved: ImportLabelEntry | null; validate: boolean; fromTags: boolean; onChange: (label: ImportLabelEntry | null) => void }) {
+function LabelField({ label, saved, names, validate, fromTags, onChange }: { label: ImportLabelEntry | null; saved: ImportLabelEntry | null; names?: FoundNames; validate: boolean; fromTags: boolean; onChange: (label: ImportLabelEntry | null) => void }) {
   const t = useAdminText(), base = useId(), issue = validate ? labelIssue(label) : null, message = issue ? t(`entries.name_${issue}`) : '';
   return <div className={styles.field}><label className={styles.field}>{fromTags ? `${t('field.label')} · ${t('draft.from_tags')}` : t('field.label')}<input className={styles.input} maxLength={200} value={label?.name ?? ''}
     aria-invalid={Boolean(issue) || undefined} aria-describedby={issue ? `${base}-help ${base}-error` : `${base}-help`} ref={element => element?.setCustomValidity(message)}
-    onChange={event => onChange(labelFromInput(event.target.value, saved))} /></label>
+    onChange={event => onChange(labelFromInput(event.target.value, saved, names))} /></label>
     <p id={`${base}-help`} className={styles.muted}>{t('field.label_help')}</p>
     {issue && <p id={`${base}-error`} className={styles.error}>{message}</p>}
   </div>;

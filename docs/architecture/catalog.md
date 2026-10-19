@@ -27,10 +27,14 @@ Product behavior remains defined in [business-rules.md](../business-rules.md).
   - [Disc Number storage](#disc-number-storage)
   - [Sort key](#sort-key)
   - [Verification](#verification-4)
+- [MusicBrainz IDs](#musicbrainz-ids)
+  - [Storage and format](#storage-and-format)
+  - [Writers and privacy](#writers-and-privacy)
+  - [Verification](#verification-5)
 - [Import publication](#import-publication)
   - [Credits and identities](#credits-and-identities)
   - [Appending to an Album](#appending-to-an-album)
-  - [Verification](#verification-5)
+  - [Verification](#verification-6)
 <!-- @end-catalog -->
 
 ## Catalog application and presentation boundaries
@@ -484,6 +488,77 @@ keeps both numbers out of listener and legacy public responses.
 `test/administration/adminCatalogReview.integration.ts` covers an applied
 review's Disc Numbers and Album order committing with its receipt.
 
+## MusicBrainz IDs
+
+An Artist or Organization may keep one MusicBrainz ID (`musicBrainzId`) as
+private provenance for administrator imports. Product rules are in
+[business-rules.md](../business-rules.md) (Catalog Visibility and
+Administration; Administrator Album Imports).
+
+### Storage and format
+
+The field is a lowercase 8-4-4-4-12 hex UUID of any version (real MusicBrainz
+IDs include version-3 UUIDs); the nil UUID is refused, and writers accept
+uppercase input and store lowercase (`src/utils/musicBrainzId.ts`). A record
+without an ID has no key; clearing an ID removes the key. Placeholder identities
+are never kept: every documented special purpose artist
+(<https://musicbrainz.org/doc/Style/Unknown_and_untitled/Special_purpose_artist>:
+Various Artists, [unknown], [anonymous], [traditional], [data], [dialogue],
+[no artist], MusicBrainz Test Artist and the subsets with their own ID,
+[Disney], [theatre], [church chimes] and [language instruction]) and special
+purpose label
+(<https://musicbrainz.org/doc/Style/Unknown_and_untitled/Special_purpose_label>:
+[no label], [unknown] and MusicBrainz Test Label) forms one blocklist for both
+kinds, which metadata lookup also uses to drop placeholder credits.
+
+Two required unique partial indexes, `artist_musicbrainz_id` and
+`organization_musicbrainz_id` on `{ musicBrainzId: 1 }` with the filter
+`{ musicBrainzId: { $type: 'string' } }`, keep one ID per Artist and one per
+Organization; an Artist and an Organization may share an ID, and deleting a
+record frees its ID. Startup with existing duplicates fails closed
+([runtime.md](runtime.md)).
+
+### Writers and privacy
+
+Only two writers set the field: an explicit existing-catalog edit
+(`src/administration/catalog/adminCatalogService.ts`, which refuses an ID
+another record of the kind holds in any lifecycle state with
+`409 ADMIN_CATALOG_MUSICBRAINZ_ID_IN_USE`, also when the unique index refuses a
+concurrent setter) and import publication (below). `Artist.updateById` and
+`Artist.updateCoverArtById` drop the key silently, and `Organization.updateById`
+writes only its allowlisted fields, so legacy and Content Manager updates cannot
+set it. Every listener v1, legacy content, Search, Follow, Page, Library,
+Playlist, social and Room projection is allowlisted and never includes it.
+
+The admin catalog revision counts a stored ID (malformed ones included, which
+the editor shows as an empty, repairable field) only when one is stored, so
+records without an ID keep their earlier revisions byte for byte. The import
+candidate projection reads `musicBrainzId` too; MongoDB returns it only when it
+is stored, so candidate revisions of records without one are unchanged.
+
+### Verification
+
+`test/catalog/musicBrainzId.test.ts`,
+`test/administration/adminCatalogMusicBrainzId.test.ts` and
+`test/platform/databaseIndexes.test.ts` cover the format, the placeholder
+blocklist, catalog revisions and the indexes.
+`test/catalog/musicBrainzId.integration.ts` shows that model updates, the legacy
+Artist route and the Content Manager forms never set or clear an ID.
+`test/administration/adminCatalog.integration.ts` sets, replaces and clears
+IDs, keeps the revision of a record without one, refuses a same-kind duplicate
+in any lifecycle state and the loser of two concurrent setters, allows one ID
+across kinds, refuses non-administrators and frees an ID when its record is
+deleted. `test/platform/databaseIndexes.integration.ts` shows the indexes
+refuse a same-kind duplicate and admit records without an ID.
+`test/listener/musicBrainzIdPrivacy.integration.ts` scans
+listener, legacy, Search, Page, Follow, Library and Playlist responses for
+anonymous callers, listeners and an administrator in User view;
+`test/social/musicShareLifecycle.integration.ts` and
+`test/rooms/roomMediaDiscovery.integration.ts` scan share cards, Room media
+(service and HTTP routes) and a Room's state, for a listener and an
+administrator in User view.
+Import cases are listed under [Import publication](#import-publication).
+
 ## Import publication
 
 Product behavior is defined in [business-rules.md](../business-rules.md) under
@@ -496,8 +571,9 @@ writes the catalog; its routes are described in
 `src/administration/import/adminImportCatalogCommit.ts` writes the graph of an
 approval frozen with `schemaVersion` 3 in one MongoDB transaction with the
 publication receipt; format-1 and format-2 approvals keep their one-Artist
-commit. The commit never resolves names to identities; it only rechecks that the
-preselections the approval froze still hold.
+commit. The commit never resolves names or MusicBrainz IDs to identities; it
+only rechecks that the preselections the approval froze still hold, and writes
+the MusicBrainz IDs it froze (see [MusicBrainz IDs](#musicbrainz-ids)).
 
 - The approval freezes one identity for each Artist entry and the label: the
   reviewed record to reuse, bound to its revision, or an ID reserved for a new
@@ -524,7 +600,8 @@ preselections the approval froze still hold.
   catalog search projection; a new Organization has `organizationType`
   `label` and an empty description. A reused Artist or Organization is fenced
   with `touchReadyArtistReferences` or `touchReadyOrganizationReferences` and
-  keeps its type, metadata, artwork and visibility.
+  keeps its type, metadata, artwork and visibility; it gains only a MusicBrainz
+  ID the approval froze for it. A new record stores its frozen ID, if any.
 - Only primary Artists, new or reused, gain the Album in their legacy
   `albumIds`. Discography, Collaborations and Organization Releases derive
   from the Credits as for any Album.
@@ -537,8 +614,24 @@ preselections the approval froze still hold.
   where one was reviewed, and fences it. A record that is no longer ready or
   has changed turns the publication into needs attention (`catalogConflict`)
   without minting identities.
+- An approval freezes, with each identity of a new Album, the MusicBrainz ID it
+  records or replaces (`musicBrainzIdWrite`: `{ musicBrainzId, replaces }` or
+  null; `src/administration/import/adminImportMusicBrainzIds.ts`): a new Artist
+  or label Organization keeps its entry's ID unless a ready record of its kind
+  holds it; a reused record without an ID records it while no other record holds
+  it; a reused record holding another ID keeps it unless the administrator chose
+  `replace`. Two Artists recording one ID need review again. The commit
+  inserts new records with their ID and sets a reused record's ID only while it
+  still holds what the review saw (none, which includes a stored value that is
+  no keepable ID, such as a placeholder's, or the ID it replaces; its revision
+  check already proved it unchanged). An append and formats 1 and 2 write no
+  ID. A duplicate key on a MusicBrainz ID index
+  (another publication, an existing-catalog edit, or a holder that was not
+  ready at review) aborts the transaction and becomes needs attention
+  (`identityConflict`), minting nothing.
 - An approval freezes the identities the review preselected (a new record where
-  no name candidate exists, or an append member with identical bytes) marked
+  no name, alias or same-ID candidate exists, the ready record holding an
+  entry's MusicBrainz ID, or an append member with identical bytes) marked
   `preselected`, and only when they are the ones its confirmation showed. The
   worker recomputes them before its first copy and inside the commit
   transaction, which every format-3 import commit serializes on one fence
@@ -547,7 +640,8 @@ preselections the approval froze still hold.
   publication into needs attention (`identityConflict`) without minting
   identities, and its copies stay recorded for cleanup. The fence serializes
   import commits only: a record another editor creates concurrently with a
-  commit is not rechecked.
+  commit is not rechecked, but the unique indexes still refuse a second record
+  of the kind with one MusicBrainz ID.
 
 ### Appending to an Album
 
@@ -564,7 +658,7 @@ Album's own visibility hides them while it is hidden, as for a new Album's
 MediaTracks, and reveals them with its other MediaTracks once it is public.
 They store their reviewed Disc and Track Numbers, and join its order by Disc Number, Track
 Number and MediaTrack ID ([Sort key](#sort-key)). A selected cover is not
-copied.
+copied, and no MusicBrainz ID is recorded.
 
 ### Verification
 
@@ -586,8 +680,21 @@ copy until cancellation and cleanup, then a new approval), same-intent retries,
 resumes, two approvals that preselect one new Artist, a malformed same-name
 record that holds its row, and a recheck over its time budget.
 `test/administration/adminImportIdentity.test.ts` covers the preselection
-matrix, locale-independent names, the shown-preselection comparison and which
-approvals the worker rechecks.
+matrix, exact-ID and alias candidates, locale-independent names, the
+shown-preselection comparison and which approvals the worker rechecks.
+`test/administration/adminImportMusicBrainzIds.test.ts` covers the ID write
+matrix, the shown-write comparison and the found names.
+`test/administration/adminImportCatalogCommit.integration.ts` also records the
+entries' IDs on new records and the label, preselects and credits the record
+holding an entry's ID (a create despite it, or another reuse, records none),
+keeps or replaces another ID (replace refused while another record holds the
+new one), lets one of two publications recording one ID commit while the
+other needs attention with `identityConflict` and mints nothing, records none
+for an append, makes a reused record changed after approval a catalog
+conflict that records none, surfaces a holder that was not ready at review as
+`identityConflict`, rechecks alias candidates from the names the approval
+froze, replaces a placeholder's ID stored on a reused record, and refuses an
+approval in which two entries would record one ID.
 `test/administration/adminImportMedia.integration.ts` covers append
 preselections and their recheck, approvals bound to the preselections they
 showed, byte matches read apart from title matches, a byte match on another

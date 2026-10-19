@@ -5,6 +5,7 @@
  * Tests
  *   - rows that need no answer are folded, while values from file tags, an artist mismatch and Luna suggestions are flagged outside the fold
  *   - Publish stays unavailable while the server says it waits or needs answers, a placeholder-only credit says so at once, and otherwise it opens the confirmation
+ *   - a lookup conflict only in MusicBrainz IDs is headed as one and shows each side's IDs beside the names
  *   - a conflict with the administrator's value offers Keep mine or Use lookup value bound to the saved value, and an append shows Album values as not applied
  *   - a tie lists the values that differ with each release's barcode, catalogue number, country and medium, and allows one release or none
  *   - the next step follows the lookup: a free retry first while busy or stopped, Luna first once unavailable or when nothing matches, and nothing while it runs or after it applied
@@ -130,6 +131,16 @@ test('Publish stays unavailable while the server says it waits or needs answers,
   cleanup();
   rendered = mount();
   fireEvent.click(await ready()); expect(rendered.onPublish).toHaveBeenCalledOnce();
+});
+
+test('a lookup conflict only in MusicBrainz IDs is headed as one and shows each side\'s IDs beside the names', async () => {
+  const item = detail(), mine = '00000000-0000-4000-8000-0000000000a1', theirs = '00000000-0000-4000-8000-0000000000a2';
+  item.draft.album.label = { name: 'Sit Records', musicBrainzId: mine };
+  const conflicts = [{ path: 'album.label', slotId: null, lookup: { name: 'Sit Records', musicBrainzId: theirs }, answer: null, musicBrainzId: true }];
+  const { section } = mount(item, lookupResponse({ lookup: view({ applied: applied({ conflicts }), needsAnswer: { tie: false, conflicts: ['album.label'] } }) }));
+  const [row] = within(await within(section()).findByRole('region', { name: 'Lookup values that differ from yours' })).getAllByRole('listitem');
+  expect(row.querySelector('strong')!.textContent).toBe('Label: MusicBrainz ID differs');
+  expect(within(row).getByText(`Sit Records · ${mine}`)).toBeInTheDocument(); expect(within(row).getByText(`Sit Records · ${theirs}`)).toBeInTheDocument();
 });
 
 test('a conflict with the administrator\'s value offers Keep mine or Use lookup value bound to the saved value, and an append shows Album values as not applied', async () => {

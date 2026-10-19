@@ -52,6 +52,7 @@
  *   - at the receipt limit a field save is refused and an outdated whole-draft save asks for a reload, without a write or conversion, while an earlier save still replays
  *   - a legacy value over its bound after NFC reads as empty, and a save from that shown value converts the project and replaces it
  *   - the summary state is computed by the server: a public default changed in place, what Publish waits for, Luna ticks, lookup and identity answers, an append, the lookup configuration and the budget left
+ *   - a renamed entry keeps its MusicBrainz ID only under a name lookup found for it, and Review lists records named so as alias candidates
  * @end-catalog */
 
 import assert from 'node:assert/strict';
@@ -883,4 +884,31 @@ test('the summary state is computed by the server: a public default changed in p
     // Saving the lookup's own value answers the track conflict without an explicit answer.
     await editAdminImport(by, id, { ...mutation(song.item.revision), changes: [{ path: track, base: 'My Song', value: 'Lookup Song' }] });
     assert.deepEqual((await getAdminImportLookup(by, id)).lookup!.needsAnswer.conflicts, []);
+});
+
+test('a renamed entry keeps its MusicBrainz ID only under a name lookup found for it, and Review lists records named so as alias candidates', async () => {
+    const created = (await create()).item, id = created.id, mbid = '00000000-0000-4000-8000-0000000000a7', key = randomUUID();
+    // Lookup writes an entry's ID and the names it found for it; a client never introduces one.
+    await rewrite(id, doc => {
+        v2(doc).album.artists = [{ key, name: 'Lorem Ensemble', role: 'primary', joinPhrase: null, musicBrainzId: mbid }];
+        doc.musicBrainzNames = [{ musicBrainzId: mbid, names: ['Lorem Ensemble', 'ロレム・アンサンブル'] }];
+    });
+    const read = async () => (await getAdminImport(actor.toHexString(), id)).item;
+    const rename = async (name: string, musicBrainzId: string | null) => { const item = await read();
+        return editAdminImport(actor.toHexString(), id, { ...mutation(item.revision), changes: [{ path: 'album.artists', base: item.draft.album.artists, value: [{ ...item.draft.album.artists[0], name, musicBrainzId }] }] }); };
+    await assert.rejects(rename('Unfound Name', mbid), errorCode('ADMIN_IMPORT_INVALID_INPUT'));
+    await assert.rejects(rename('Lorem Ensemble', '00000000-0000-4000-8000-0000000000a8'), errorCode('ADMIN_IMPORT_INVALID_INPUT'));
+    await rename('ロレム・アンサンブル', mbid);
+    assert.deepEqual(v2(await stored(id)).album.artists[0], { key, name: 'ロレム・アンサンブル', role: 'primary', joinPhrase: null, musicBrainzId: mbid });
+    // GET /lookup lists the found names of carried IDs only.
+    assert.deepEqual((await getAdminImportLookup(actor.toHexString(), id)).musicBrainzNames, [{ musicBrainzId: mbid, names: ['Lorem Ensemble', 'ロレム・アンサンブル'] }]);
+    // A ready record named as lookup found for the ID is an alias candidate; the record holding the ID is an exact one.
+    const alias = new ObjectId(), holder = new ObjectId();
+    await getDb()!.collection('artists').insertMany([{ _id: alias, name: 'lorem ensemble', lifecycleStatus: 'ready' }, { _id: holder, name: 'Elsewhere', lifecycleStatus: 'ready', musicBrainzId: mbid }]);
+    const items = (await adminImportDuplicateCandidates(actor.toHexString(), id)).items.filter(item => item.kind === 'artist');
+    assert.deepEqual(items.map(item => [item.id, item.match, item.aliasOf ?? null, item.musicBrainzId ?? null]).sort(),
+        [[alias.toHexString(), 'alias', mbid, null], [holder.toHexString(), 'musicBrainzId', null, mbid]].sort());
+    // Dropping the ID (always allowed) clears it and its names.
+    await rename('ロレム・アンサンブル', null);
+    assert.deepEqual([v2(await stored(id)).album.artists[0].musicBrainzId, (await getAdminImportLookup(actor.toHexString(), id)).musicBrainzNames], [null, []]);
 });

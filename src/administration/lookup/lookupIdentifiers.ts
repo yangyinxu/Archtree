@@ -1,18 +1,13 @@
 import { MetadataLookupInputError, type LookupInputProblem } from './lookupContract';
+import { MUSICBRAINZ_SPECIAL_PURPOSE_ARTIST_IDS, MUSICBRAINZ_SPECIAL_PURPOSE_LABEL_IDS, normalizeMusicBrainzId } from '../../utils/musicBrainzId';
 
 /**
  * Pure format checks for every identifier and term that metadata lookup may send or compare.
  * Anything that fails is never sent; callers drop it or refuse the lookup.
  */
 
-const musicBrainzIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-
-/** Lowercase 8-4-4-4-12 hex UUID; the nil UUID is refused. */
-export const normalizeMusicBrainzId = (value: unknown): string | null => {
-    if (typeof value !== 'string' || value.length !== 36) return null;
-    const id = value.toLowerCase();
-    return musicBrainzIdPattern.test(id) && id !== '00000000-0000-0000-0000-000000000000' ? id : null;
-};
+/** Lowercase 8-4-4-4-12 hex UUID (the nil UUID refused); the shared check lives in src/utils/musicBrainzId.ts. */
+export { normalizeMusicBrainzId };
 
 export type NormalizedGtin = { digits: string; gtin14: string };
 
@@ -70,15 +65,16 @@ export const cleanLookupTerm = (value: unknown, max = 200): string => {
     return (value as string).normalize('NFC').replace(/\s+/gu, ' ').trim();
 };
 
-/** MusicBrainz special-purpose entities that are never written as credits or labels. */
+/** The best-known MusicBrainz special-purpose entities by name; every documented one is a placeholder (placeholderIds). */
 export const MUSICBRAINZ_PLACEHOLDER_IDS = Object.freeze({
     variousArtists: '89ad4ac3-39f7-470e-963a-56509c546377',
     unknown: '125ec42a-7229-4250-afc5-e057484327fe',
     noLabel: '157afde4-4bf5-4039-8ad2-5a15acc85176'
 });
-const placeholderIds = new Set<string>(Object.values(MUSICBRAINZ_PLACEHOLDER_IDS));
+/** Every documented special purpose artist and label (src/utils/musicBrainzId.ts): never written as credits or labels. */
+const placeholderIds = new Set<string>([...MUSICBRAINZ_SPECIAL_PURPOSE_ARTIST_IDS, ...MUSICBRAINZ_SPECIAL_PURPOSE_LABEL_IDS]);
 const placeholderNames = new Set(['various artists', 'various', 'va', 'v.a.', 'unknown', 'unknown artist',
-    '[unknown]', '[no label]', '[anonymous]', '[traditional]']);
+    '[unknown]', '[no label]', '[anonymous]', '[traditional]', '[data]', '[dialogue]', '[no artist]']);
 
 /** True for placeholder credits such as Various Artists, [unknown] or [no label], by MBID or by name. */
 export const isPlaceholderCredit = (name: unknown, mbid?: unknown): boolean => {

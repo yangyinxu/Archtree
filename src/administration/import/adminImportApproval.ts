@@ -11,15 +11,17 @@ import { importCoverSelectable } from './adminImportMediaTypes';
 import { chooseImportCover, importAlbumNotCreated, importCoverChoice } from './adminImportCoverAutomation';
 import { adminImportDetail, parseImportDecisions, reusesOneArtistTwice, type AdminImportDocument } from './adminImportService';
 import { shownPreselectionKey } from './adminImportIdentity';
+import { IMPORT_MUSICBRAINZ_NAME_LIMITS, importMusicBrainzNameMap, shownMusicBrainzIdWriteKey } from './adminImportMusicBrainzIds';
 import { applyAdministratorChanges, boundDraftChanges, boundedJson, draftWithinSizeLimit, parseDraftChanges, storedDraftV2 } from './adminImportValueState';
 import type { MetadataLookupRecord } from '../lookup/metadataLookupRecord';
 
 /**
  * Bounds a publish body's approval fields before its intent is fingerprinted: changes as a field save bounds them (none allowed),
  * decisions as /decisions bounds them (at most 122 flat records of at most 1 KB, two entries never reusing one Artist), a cover
- * slot and a digest of at most 64 characters, and the optional shown `preselections` as at most 122 well-formed preselections
- * (shownPreselectionKey). A body that predates one-step approval has none of them and passes; every body this release admits
- * passes, so a lost-response replay is never refused.
+ * slot and a digest of at most 64 characters, the optional shown `preselections` as at most 122 well-formed preselections
+ * (shownPreselectionKey) and the optional shown `musicBrainzIds` as at most 21 well-formed ID writes (shownMusicBrainzIdWriteKey).
+ * A body that predates one-step approval has none of them and passes; every body this release admits passes, so a lost-response
+ * replay is never refused.
  */
 export function boundImportApproval(body: Record<string, unknown>): void {
     if (hasOwn(body, 'changes')) boundDraftChanges(body.changes, 0);
@@ -29,6 +31,8 @@ export function boundImportApproval(body: Record<string, unknown>): void {
     if (hasOwn(body, 'approvalDigest') && (typeof body.approvalDigest !== 'string' || body.approvalDigest.length > 64)) invalidImport();
     if (hasOwn(body, 'preselections') && (!Array.isArray(body.preselections) || body.preselections.length > DRAFT_V2_LIMITS.decisions
         || body.preselections.some(item => !boundedJson(item, 1, 1_000) || shownPreselectionKey(item) === null))) invalidImport();
+    if (hasOwn(body, 'musicBrainzIds') && (!Array.isArray(body.musicBrainzIds) || body.musicBrainzIds.length > IMPORT_MUSICBRAINZ_NAME_LIMITS.ids
+        || body.musicBrainzIds.some(item => !boundedJson(item, 1, 300) || shownMusicBrainzIdWriteKey(item) === null))) invalidImport();
 }
 
 /**
@@ -37,7 +41,8 @@ export function boundImportApproval(body: Record<string, unknown>): void {
  * and the cover exactly as /decisions, PATCH and /select-cover would, in that order, unless the cover is the automatic one the
  * confirmation showed and the approval's own decisions still select it or append, which stays automatic. Decisions carry the
  * bound names shown, which must still be the saved names (409 ADMIN_IMPORT_DECISION_STALE), and renaming an entry or the label in
- * the same approval drops its decision. Returns the saved Draft v2; any refusal aborts the transaction with nothing written.
+ * the same approval (or changing its MusicBrainz ID; a renamed entry keeps its ID only under a name lookup found for it) drops
+ * its decision. Returns the saved Draft v2; any refusal aborts the transaction with nothing written.
  */
 export async function saveImportApproval(doc: AdminImportDocument, body: Record<string, unknown>, actor: string, session: ClientSession,
     lookup: Pick<MetadataLookupRecord, 'applied'> | null = null): Promise<ImportDraftV2> {
@@ -49,7 +54,7 @@ export async function saveImportApproval(doc: AdminImportDocument, body: Record<
     const draft = storedDraftV2(doc), before = structuredClone(draft);
     doc.decisions = await parseImportDecisions(doc, draft, body.decisions, session);
     if (body.changes.length) applyAdministratorChanges({ draft, draftOrigins: doc.draftOrigins ??= {} },
-        parseDraftChanges(body.changes, doc.manifest, draft), importDraftV2View(draft, doc.manifest, doc._id.toHexString()));
+        parseDraftChanges(body.changes, doc.manifest, draft, { names: importMusicBrainzNameMap(doc.musicBrainzNames, draft) }), importDraftV2View(draft, doc.manifest, doc._id.toHexString()));
     if (!draftWithinSizeLimit(before, draft)) invalidImport();
     doc.decisions = retainBoundDecisions(doc.decisions, draft);
     if (!importCoverSelectable(doc.media, body.selectedCoverSlotId)) throw new AdminImportError(409, 'ADMIN_IMPORT_ASSET_CONFLICT');

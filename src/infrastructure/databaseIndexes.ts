@@ -13,6 +13,7 @@ import { catalogSearchCollections } from '../utils/catalogSearch';
 import { adminImportIndexes } from '../administration/import/adminImportService';
 import { adminConversionIndexes } from '../administration/conversion/conversionService';
 import { metadataLookupIndexes } from '../administration/lookup/lookupContract';
+import { MUSICBRAINZ_ID_INDEX_NAMES, musicBrainzIdPartialFilter } from '../utils/musicBrainzId';
 
 const catalogSearchIndexKeys: IndexSpecification[] = [
   { catalogSearchVersion: 1 },
@@ -143,6 +144,10 @@ export const databaseIndexes: Array<{
     { collection: 'organizations', keys: { name: 1, _id: 1 } },
     { collection: 'organizations', keys: { organizationType: 1, name: 1 } },
     { collection: 'organizations', keys: { createdBy: 1 } },
+    // One MusicBrainz ID per Artist and per Organization: only string IDs are indexed, so records without one coexist, and existing
+    // duplicates fail startup closed instead of being dropped.
+    { collection: 'artists', keys: { musicBrainzId: 1 }, options: { name: MUSICBRAINZ_ID_INDEX_NAMES.artists, unique: true, partialFilterExpression: musicBrainzIdPartialFilter } },
+    { collection: 'organizations', keys: { musicBrainzId: 1 }, options: { name: MUSICBRAINZ_ID_INDEX_NAMES.organizations, unique: true, partialFilterExpression: musicBrainzIdPartialFilter } },
     { collection: 'albums', keys: { createdBy: 1 } },
     { collection: 'albums', keys: { title: 1, _id: 1 } },
     { collection: 'albums', keys: { 'credits.subjectType': 1, 'credits.subjectId': 1, 'credits.role': 1 } },
@@ -159,7 +164,7 @@ export const databaseIndexes: Array<{
       catalogSearchIndexKeys.map(keys => ({ collection, keys })))
   ];
 
-export const requiredIndexRevision = 'required-indexes-v10-metadata-lookups';
+export const requiredIndexRevision = 'required-indexes-v11-musicbrainz-ids';
 const requiredIndexes = databaseIndexes.filter(index => index.options?.unique === true || index.required);
 
 /** Reports a static schema identifier without retaining database errors or user values. */

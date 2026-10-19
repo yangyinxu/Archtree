@@ -27,6 +27,7 @@
  *   - a Disc Number edit re-derives the parent order in the same transaction
  *   - Disc and Track Numbers saved together reorder once, and an unassigned MediaTrack stores its disc without an Album write
  *   - concurrent Disc Number edits in one Album serialize and the final order reflects both
+ *   - an Artist or Organization MusicBrainz ID is set, replaced and cleared through explicit edits, one per kind, and never by another caller
  * @end-catalog */
 
 import assert from 'node:assert/strict';
@@ -517,4 +518,68 @@ test('concurrent Disc Number edits in one Album serialize and the final order re
     const parent = await db().collection('albums').findOne({ _id: album });
     assert.deepEqual(parent?.audioTrackIds, [third, second, track].map(id => id.toHexString()));
     assert.equal(parent?.adminRevision, startingRevision + 2);
+});
+
+test('an Artist or Organization MusicBrainz ID is set, replaced and cleared through explicit edits, one per kind, and never by another caller', async () => {
+    const actor = admin.toHexString(), artistId = artist.toHexString(), other = new ObjectId(), label = new ObjectId(), mbid = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+    await db().collection('artists').insertOne({ _id: other, name: 'Other Artist', lifecycleStatus: 'ready', albumIds: [] });
+    await db().collection('organizations').insertOne({ _id: label, name: 'Synthetic Label', organizationType: 'label', description: '', lifecycleStatus: 'ready' });
+    const read = async (kind: 'artist' | 'organization', id: string) => (await getAdminCatalogItem(actor, kind, id)).item;
+    const edit = async (kind: 'artist' | 'organization', id: string, musicBrainzId: unknown, operationId: string = randomUUID()) =>
+        editAdminCatalogItem(actor, kind, id, { operationId, expectedRevision: (await read(kind, id)).revision, fields: { musicBrainzId } });
+    // A record without an ID keeps the revision it had before the field existed.
+    const before = await read('artist', artistId);
+    assert.equal(before.revision, adminCatalogItemRevision('artist', await db().collection('artists').findOne({ _id: artist })));
+    assert.equal(before.fields.musicBrainzId, null);
+    // Set (uppercase input is stored lowercase), replace and clear; each changes the revision.
+    const set = await editAdminCatalogItem(actor, 'artist', artistId, { operationId: randomUUID(), expectedRevision: before.revision, fields: { musicBrainzId: '0000000A-0000-4000-8000-000000000001' } }) as { item: { revision: string; fields: Record<string, unknown> } };
+    assert.equal(set.item.fields.musicBrainzId, '0000000a-0000-4000-8000-000000000001');
+    assert.notEqual(set.item.revision, before.revision);
+    await edit('artist', artistId, mbid(2));
+    assert.equal((await db().collection('artists').findOne({ _id: artist }))!.musicBrainzId, mbid(2));
+    // Another Artist cannot take that ID, in any lifecycle state; nothing is written and no receipt is stored, so the intent may retry.
+    const refused = randomUUID(), receipts = await db().collection('adminCatalogMutations').countDocuments();
+    await assert.rejects(edit('artist', other.toHexString(), mbid(2), refused), code('ADMIN_CATALOG_MUSICBRAINZ_ID_IN_USE'));
+    assert.equal((await db().collection('artists').findOne({ _id: other }))!.musicBrainzId, undefined);
+    assert.equal(await db().collection('adminCatalogMutations').countDocuments(), receipts);
+    await db().collection('artists').updateOne({ _id: artist }, { $set: { lifecycleStatus: 'deleting' } });
+    await assert.rejects(edit('artist', other.toHexString(), mbid(2)), code('ADMIN_CATALOG_MUSICBRAINZ_ID_IN_USE'));
+    await db().collection('artists').updateOne({ _id: artist }, { $set: { lifecycleStatus: 'ready' } });
+    // An Organization may keep the same ID as an Artist.
+    await edit('organization', label.toHexString(), mbid(2));
+    assert.equal((await read('organization', label.toHexString())).fields.musicBrainzId, mbid(2));
+    // Two concurrent setters of one ID: one succeeds, the other is refused.
+    const third = new ObjectId(), fourth = new ObjectId();
+    await db().collection('artists').insertMany([{ _id: third, name: 'Third', lifecycleStatus: 'ready', albumIds: [] }, { _id: fourth, name: 'Fourth', lifecycleStatus: 'ready', albumIds: [] }]);
+    const [revisionThird, revisionFourth] = [(await read('artist', third.toHexString())).revision, (await read('artist', fourth.toHexString())).revision];
+    const race = await Promise.allSettled([
+        editAdminCatalogItem(actor, 'artist', third.toHexString(), { operationId: randomUUID(), expectedRevision: revisionThird, fields: { musicBrainzId: mbid(4) } }),
+        editAdminCatalogItem(actor, 'artist', fourth.toHexString(), { operationId: randomUUID(), expectedRevision: revisionFourth, fields: { musicBrainzId: mbid(4) } })]);
+    assert.deepEqual(race.map(result => result.status).sort(), ['fulfilled', 'rejected']);
+    assert.ok(race.some(result => result.status === 'rejected' && (result.reason as { code?: string }).code === 'ADMIN_CATALOG_MUSICBRAINZ_ID_IN_USE'));
+    assert.equal(await db().collection('artists').countDocuments({ musicBrainzId: mbid(4) }), 1);
+    // A placeholder, a malformed value, or the field on an Album is invalid input.
+    for (const value of ['89ad4ac3-39f7-470e-963a-56509c546377', 'not-an-id', 7]) await assert.rejects(edit('artist', artistId, value), code('ADMIN_CATALOG_INVALID_INPUT'));
+    const albumRevision = (await getAdminCatalogItem(actor, 'album', album.toHexString())).item.revision;
+    await assert.rejects(async () => editAdminCatalogItem(actor, 'album', album.toHexString(), { operationId: randomUUID(), expectedRevision: albumRevision, fields: { musicBrainzId: mbid(5) } }), code('ADMIN_CATALOG_INVALID_INPUT'));
+    // A replay returns the stored result; clearing removes the key, so the record's revision counts no ID again.
+    const clearBody = { operationId: randomUUID(), expectedRevision: (await read('artist', artistId)).revision, fields: { musicBrainzId: null } };
+    const cleared = await editAdminCatalogItem(actor, 'artist', artistId, clearBody);
+    assert.deepEqual(await editAdminCatalogItem(actor, 'artist', artistId, clearBody), cleared);
+    assert.equal('musicBrainzId' in (await db().collection('artists').findOne({ _id: artist }))!, false);
+    // A non-administrator, an anonymous caller or a revoked administrator cannot edit it.
+    const patch = { operationId: randomUUID(), expectedRevision: (await read('artist', artistId)).revision, fields: { musicBrainzId: mbid(6) } };
+    assert.equal((await request(`/api/admin/v1/catalog/artist/${artistId}`, patch, userToken)).status, 403);
+    assert.equal((await request(`/api/admin/v1/catalog/artist/${artistId}`, patch, '')).status, 401);
+    await assert.rejects(editAdminCatalogItem(user.toHexString(), 'artist', artistId, patch), code('ADMIN_PERMISSION_REQUIRED'));
+    await db().collection('users').updateOne({ _id: admin }, { $set: { role: 'user' } });
+    await assert.rejects(editAdminCatalogItem(actor, 'artist', artistId, patch), code('ADMIN_PERMISSION_REQUIRED'));
+    await db().collection('users').updateOne({ _id: admin }, { $set: { role: 'admin' } });
+    assert.equal('musicBrainzId' in (await db().collection('artists').findOne({ _id: artist }))!, false);
+    // Deleting the holder frees its ID for another record.
+    await db().collection('organizations').deleteOne({ _id: label });
+    const freed = new ObjectId();
+    await db().collection('organizations').insertOne({ _id: freed, name: 'Successor Label', organizationType: 'label', description: '', lifecycleStatus: 'ready' });
+    await edit('organization', freed.toHexString(), mbid(2));
+    assert.equal((await db().collection('organizations').findOne({ _id: freed }))!.musicBrainzId, mbid(2));
 });

@@ -14,6 +14,7 @@
 import { createHash } from 'node:crypto';
 import { METADATA_LOOKUP_LIMITS, type LookupDate, type MusicBrainzRelease, type MusicBrainzReleaseSummary } from './lookupContract';
 import { isPlaceholderCredit, normalizeGtin, normalizeMusicBrainzId } from './lookupIdentifiers';
+import { keepableMusicBrainzId } from '../../utils/musicBrainzId';
 
 /**
  * Pure ranking of lookup candidates against the import's selected files. It never makes a request:
@@ -43,10 +44,12 @@ export type LookupCandidate = {
     /** The release no longer exists (its lookup answered 404), so, though incomplete, it cannot match. */
     missing?: boolean;
 };
+/** The draft values a release would write; each Artist entry and the label carry the MusicBrainz ID it credits (null for none). */
 export type LookupProposal = {
     albumTitle: string;
-    artists: { name: string; role: 'primary' | 'featured'; joinPhrase: string | null }[];
+    artists: { name: string; role: 'primary' | 'featured'; joinPhrase: string | null; musicBrainzId: string | null }[];
     label: string | null;
+    labelMusicBrainzId: string | null;
     releaseDate: LookupDate | null;
     tracks: { discNumber: number; trackNumber: number; title: string }[];
 };
@@ -95,7 +98,8 @@ const folded = (value: string) => clean(value).toLowerCase();
 /**
  * The draft values a release would write; placeholders and a `[no label]` label are never proposed, and a credit that repeats an
  * earlier one's MusicBrainz artist or folded name is dropped (only its first entry is kept). A dropped credit's join phrase is
- * not moved, as with placeholders: a byline ignores a trailing phrase.
+ * not moved, as with placeholders: a byline ignores a trailing phrase. Each entry and the label carry the MusicBrainz ID the
+ * release credits, so candidates that credit different artists or labels under one name are different proposals.
  */
 export const proposalForRelease = (release: MusicBrainzRelease): LookupProposal => {
     let featured = false;
@@ -111,12 +115,12 @@ export const proposalForRelease = (release: MusicBrainzRelease): LookupProposal 
         seen.add(name);
         // Join phrases keep their surrounding spaces: they are part of the byline presentation.
         const joinPhrase = credit.joinPhrase.normalize('NFC');
-        artists.push({ name: clean(credit.name), role, joinPhrase: joinPhrase ? joinPhrase : null });
+        artists.push({ name: clean(credit.name), role, joinPhrase: joinPhrase ? joinPhrase : null, musicBrainzId: keepableMusicBrainzId(artistId) });
     }
     const first = release.labels.find(label => label.name !== null || label.labelId !== null);
     const label = first?.name && !isPlaceholderCredit(first.name, first.labelId) ? clean(first.name) : null;
     return {
-        albumTitle: clean(release.title), artists, label,
+        albumTitle: clean(release.title), artists, label, labelMusicBrainzId: label === null ? null : keepableMusicBrainzId(first!.labelId),
         releaseDate: release.groupFirstReleaseDate ?? release.date,
         // Discs are numbered among the media that have tracks, as the disc-count comparison counts them,
         // so a CD after a DVD without a tracklist is Disc Number 1.
@@ -192,13 +196,17 @@ const compareRelease = (release: MusicBrainzRelease, files: readonly LocalFileEv
     return { comparison, status, order };
 };
 
-/** True when artist tags exist and none equals the joined credit, a credited name or a canonical artist name. */
-const artistMismatchFor = (release: MusicBrainzRelease, files: readonly LocalFileEvidence[]) => {
+/**
+ * True when artist tags exist and none equals the joined credit, a credited name, a canonical artist name or an alias the lookup
+ * found for a credited artist (`aliases`, by MusicBrainz ID).
+ */
+const artistMismatchFor = (release: MusicBrainzRelease, files: readonly LocalFileEvidence[], aliases?: ReadonlyMap<string, readonly string[]>) => {
     const tags = new Set(files.flatMap(file => file.artistTags).filter(tag => typeof tag === 'string').map(folded).filter(Boolean));
     if (!tags.size) return false;
     const names = new Set([
         folded(release.artistCredit.map(credit => credit.name + credit.joinPhrase).join('')),
-        ...release.artistCredit.flatMap(credit => [folded(credit.name), folded(credit.artistName)])
+        ...release.artistCredit.flatMap(credit => [folded(credit.name), folded(credit.artistName),
+            ...(aliases?.get(normalizeMusicBrainzId(credit.artistId) ?? '') ?? []).filter(name => typeof name === 'string').map(folded)])
     ]);
     return ![...tags].some(tag => names.has(tag));
 };
@@ -229,9 +237,10 @@ const distinctCandidates = (candidates: readonly LookupCandidate[]) => {
 /**
  * `searchComplete` false marks a comparison partial; left out, the searches count as complete (pure callers and tests). An
  * incomplete candidate makes it partial too, unless it cannot match: it no longer exists or reported another track count.
+ * `aliases` are the artist aliases the run found, by MusicBrainz ID (artistMismatchFor).
  */
 export const rankLookupCandidates = (candidates: readonly LookupCandidate[], files: readonly LocalFileEvidence[],
-    options: { toleranceMs?: number; searchComplete?: boolean } = {}): RankedLookup => {
+    options: { toleranceMs?: number; searchComplete?: boolean; aliases?: ReadonlyMap<string, readonly string[]> } = {}): RankedLookup => {
     const toleranceMs = options.toleranceMs ?? METADATA_LOOKUP_LIMITS.durationToleranceMs;
     const sorted = orderedFiles(files), distinct = distinctCandidates(candidates);
     type Scored = RankedLookupCandidate & { order: number[]; frontArtwork: boolean; release: MusicBrainzRelease | null };
@@ -242,7 +251,7 @@ export const rankLookupCandidates = (candidates: readonly LookupCandidate[], fil
         const { comparison, status, order } = compareRelease(release, sorted, toleranceMs);
         const proposal = proposalForRelease(release);
         return { key: candidate.key, releaseId: candidate.releaseId, status, comparison, proposal,
-            groupKey: status === 'matching' ? groupKeyFor(proposal) : null, artistMismatch: artistMismatchFor(release, files),
+            groupKey: status === 'matching' ? groupKeyFor(proposal) : null, artistMismatch: artistMismatchFor(release, files, options.aliases),
             order, frontArtwork: release.frontArtwork === true, release };
     });
 

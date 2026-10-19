@@ -16,6 +16,8 @@
  *   - an append collapses a file with identical bytes on the target as a preselected reuse and one with no member as new, while a title-only member stays expanded and incomplete matches collapse nothing
  *   - a file with identical bytes on another Album is flagged and never collapsed, but needs no answer
  *   - a failed candidate read on opening shows an error and no rows, and Find matches reads them again
+ *   - an entry carrying a MusicBrainz ID lists the record holding it and alias records, collapses an exact-ID reuse, and offers replace only while no record holds the ID
+ *   - only an entry carrying a MusicBrainz ID is offered replace, never while a record holding its ID is listed, and a saved replace takes its record from other entries
  * @end-catalog */
 
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -251,4 +253,56 @@ test('a failed candidate read on opening shows an error and no rows, and Find ma
   expect([screen.queryByRole('combobox'), screen.queryByRole('button', { name: 'Save decisions' })]).toEqual([null, null]);
   fireEvent.click(screen.getByRole('button', { name: 'Find matches' })); await open();
   expect([fetches.mock.calls.length, screen.queryByRole('alert'), shown(1)]).toEqual([2, null, 'collapsed']);
+});
+
+test('an entry carrying a MusicBrainz ID lists the record holding it and alias records, collapses an exact-ID reuse, and offers replace only while no record holds the ID', async () => {
+  const mbid = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`, item = several();
+  item.draft.album.artists[0] = { ...item.draft.album.artists[0], musicBrainzId: mbid(1) };
+  item.draft.album.label = { name: 'Sit Records', musicBrainzId: mbid(9) };
+  const holder = { ...candidate('artist', 'a'.repeat(24), 'Lorem (JP)'), match: 'musicBrainzId' as const, musicBrainzId: mbid(1) };
+  const alias = { ...candidate('artist', 'c'.repeat(24), 'ロレム'), match: 'alias' as const, aliasOf: mbid(1) };
+  const holding = { ...candidate('organization', 'b'.repeat(24), 'Sit Records'), musicBrainzId: mbid(5) };
+  vi.stubGlobal('fetch', vi.fn(async () => listing([holder, alias, holding])));
+  const onSave = mount(item); await open();
+  // The exact-ID reuse is preselected and collapsed, naming the record; its other candidates (the alias) need no answer.
+  expect(screen.getByText('Artist · Lorem Ensemble · Primary · Reuses Lorem (JP) (same MusicBrainz ID)')).toBeInTheDocument();
+  expect([...select(1).options].map(option => option.textContent)).toEqual(expect.arrayContaining([expect.stringContaining('Same MusicBrainz ID'), expect.stringContaining('MusicBrainz alias')]));
+  // The label's same-name record holds another ID: reusing it keeps that ID, and replacing it is offered since no record holds the label's.
+  const options = [...select(4).options];
+  expect(options.find(option => option.value === holding.id)?.textContent).toContain(`keeps its MusicBrainz ID ${mbid(5)}`);
+  expect(options.find(option => option.value === `replace:${holding.id}`)?.textContent).toContain(`Reuse Sit Records and replace its MusicBrainz ID ${mbid(5)} with ${mbid(9)}`);
+  decide(4, `replace:${holding.id}`);
+  fireEvent.click(screen.getByRole('button', { name: 'Save decisions' }));
+  expect(onSave).toHaveBeenCalledExactlyOnceWith(saved([{ scope: 'label', slotId: null, entryKey: null, boundName: 'Sit Records', action: 'replace', candidateId: holding.id, candidateRevision: holding.revision }]));
+  cleanup();
+  // A record holding the label's ID is listed, so replace is not offered for another record.
+  vi.stubGlobal('fetch', vi.fn(async () => listing([holding, { ...candidate('organization', 'd'.repeat(24), 'Sit'), match: 'musicBrainzId' as const, musicBrainzId: mbid(9) }])));
+  mount(item); await open();
+  expect([...select(4).options].some(option => option.value.startsWith('replace:'))).toBe(false);
+});
+
+test('only an entry carrying a MusicBrainz ID is offered replace, never while a record holding its ID is listed, and a saved replace takes its record from other entries', async () => {
+  const mbid = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`, item = several();
+  item.draft.album.artists[1] = { ...item.draft.album.artists[1], musicBrainzId: mbid(2) };
+  // A record named like Lorem and found under an alias of Ipsum's ID, holding another ID: a candidate of both rows.
+  const shared: ImportCandidate = { ...candidate('artist', 'a'.repeat(24), 'Lorem Ensemble'), match: 'alias', aliasOf: mbid(2), musicBrainzId: mbid(5) };
+  item.decisions = [{ scope: 'artist', slotId: null, entryKey: entryKey(2), boundName: 'Ipsum Quartet', action: 'replace', candidateId: shared.id, candidateRevision: shared.revision }];
+  vi.stubGlobal('fetch', vi.fn(async () => listing([shared])));
+  mount(item); await open();
+  // Lorem carries no ID: reusing the record says nothing about its ID, and nothing is replaced; Ipsum's replace already takes it.
+  expect([...select(1).options].map(option => option.value)).toEqual(['', 'create-distinct', shared.id]);
+  expect(select(1).options[2].textContent).not.toContain('keeps its MusicBrainz ID');
+  expect(select(1).options[2].disabled).toBe(true);
+  expect(select(2).value).toBe(`replace:${shared.id}`);
+  expect([...select(2).options].map(option => option.value)).toEqual(['', 'create-distinct', shared.id, `replace:${shared.id}`]);
+  cleanup(); reset();
+  // Once a record holding Ipsum's own ID is listed, no record's ID can be replaced for it, and that record keeps nothing else.
+  const holder: ImportCandidate = { ...candidate('artist', 'b'.repeat(24), 'Ipsum Quartet'), match: 'musicBrainzId', musicBrainzId: mbid(2) };
+  item.decisions = [];
+  vi.stubGlobal('fetch', vi.fn(async () => listing([shared, holder])));
+  mount(item); await open();
+  const options = [...select(2).options];
+  expect(options.some(option => option.value.startsWith('replace:'))).toBe(false);
+  expect(options.find(option => option.value === holder.id)!.textContent).not.toContain('keeps its MusicBrainz ID');
+  expect(options.find(option => option.value === shared.id)!.textContent).toContain(`keeps its MusicBrainz ID ${mbid(5)}`);
 });

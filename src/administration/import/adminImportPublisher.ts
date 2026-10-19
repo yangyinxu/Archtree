@@ -27,6 +27,7 @@ import { defaultImportObjectStorage, importAssetTarget, type ImportObjectStorage
 import { assertImportPreselectionsCurrent, importIdentityCandidates, importIdentityPreselections, sameImportPreselections } from './adminImportIdentity';
 import { assertImportReusedRecordsReady, commitImportCatalogGraph, freezeImportIdentities, importAlbumCredits, importPublicationConflict as conflict, requireCurrentApproval as currentApproval, requireImportPublicationReady as ready } from './adminImportCatalogCommit';
 import { lookupAnswersNeeded } from '../lookup/lookupValueApplication';
+import { importMusicBrainzIdWrites, importMusicBrainzNameMap, mergeImportMusicBrainzNames, sameMusicBrainzIdWrites } from './adminImportMusicBrainzIds';
 import { isBlockingLookupState, lookupGateFor } from '../lookup/metadataLookupRecord';
 import { runAutomaticImportCoverCleanupOnce } from './adminImportCoverCleanup';
 
@@ -54,9 +55,13 @@ const lookupGateProjection = { run: 1, state: 1, 'ranking.preselection': 1, 'ran
  * ADMIN_IMPORT_LOOKUP_ACTIVE, and an unanswered tie or conflict (Album conflicts not for an append) is
  * ADMIN_IMPORT_REVIEW_REQUIRED; an admitted approval writes the lookup gate, so a run started concurrently conflicts with it.
  * The publication freezes the cover the confirmation showed; a cover chosen automatically stays automatic.
+ * The optional `musicBrainzIds` lists each MusicBrainz ID the confirmation showed would be recorded or replaced
+ * ({scope, entryKey, musicBrainzId, replaces}); the frozen writes must equal it, and a body without it may freeze no write
+ * (ADMIN_IMPORT_REVIEW_REQUIRED otherwise), so an editor that did not show the IDs never records one. The names lookup found for
+ * each carried ID are frozen with the approval for the worker's alias recheck.
  */
 export async function publishAdminImport(actor: string, id: string, raw: unknown) {
-    const body = record(raw); exact(body, ['operationId', 'expectedRevision', ...IMPORT_APPROVAL_FIELDS, 'preselections', 'suggestionTicks']); if (!uuid(body.operationId) || !Number.isSafeInteger(body.expectedRevision) || (body.expectedRevision as number) < 1) throw new AdminImportError(400, 'ADMIN_IMPORT_INVALID_INPUT');
+    const body = record(raw); exact(body, ['operationId', 'expectedRevision', ...IMPORT_APPROVAL_FIELDS, 'preselections', 'suggestionTicks', 'musicBrainzIds']); if (!uuid(body.operationId) || !Number.isSafeInteger(body.expectedRevision) || (body.expectedRevision as number) < 1) throw new AdminImportError(400, 'ADMIN_IMPORT_INVALID_INPUT');
     boundImportApproval(body); if (hasOwn(body, 'suggestionTicks')) boundSuggestionTicks(body.suggestionTicks);
     const result = await mutateAdminImport(actor, id, body as typeof body & { operationId: string; expectedRevision: number }, 'publish', async (doc, session) => {
         ready();
@@ -83,7 +88,7 @@ export async function publishAdminImport(actor: string, id: string, raw: unknown
         // review) needs a fresh review below. Saved decisions stay explicit; the preselections are frozen with them, and must be
         // the ones the confirmation showed, so an append file shown as a new member is never frozen as a reuse, or the reverse.
         const explicit = doc.decisions as ImportDecisionV2[];
-        const candidates = await importIdentityCandidates({ manifest: doc.manifest, draft, assets: doc.media?.assets ?? [], decisions: explicit }, session);
+        const candidates = await importIdentityCandidates({ manifest: doc.manifest, draft, assets: doc.media?.assets ?? [], decisions: explicit, names: importMusicBrainzNameMap(doc.musicBrainzNames, draft) }, session);
         const preselections = importIdentityPreselections(draft, explicit, candidates);
         if (hasOwn(body, 'preselections') && !sameImportPreselections(body.preselections as unknown[], preselections)) throw new AdminImportError(409, 'ADMIN_IMPORT_REVIEW_REQUIRED');
         const decisions = [...explicit, ...preselections];
@@ -117,7 +122,10 @@ export async function publishAdminImport(actor: string, id: string, raw: unknown
         // automatic one, which stays automatic. An append never changes the target Album's cover, so it copies none.
         const coverAsset = append ? undefined : doc.media?.assets.find(asset => asset.slotId === body.selectedCoverSlotId);
         if (coverAsset && (coverAsset.state !== 'ready' || !coverAsset.etag)) throw new AdminImportError(409, 'ADMIN_IMPORT_UPLOAD_INCOMPLETE');
-        const identities = await freezeImportIdentities(draft, decisions, existingAlbum, session);
+        const identities = await freezeImportIdentities(draft, decisions, existingAlbum, session, candidates);
+        // Every ID the commit records or replaces must be one the confirmation listed.
+        const writes = importMusicBrainzIdWrites(identities, draft);
+        if (hasOwn(body, 'musicBrainzIds') ? !sameMusicBrainzIdWrites(body.musicBrainzIds as unknown[], writes) : writes.length > 0) throw new AdminImportError(409, 'ADMIN_IMPORT_REVIEW_REQUIRED');
         // The reviewed join phrases already satisfy the Credit rules; a refusal here means the draft cannot be published as shown.
         if (!existingAlbum) { try { importAlbumCredits(draft.album.artists, identities.artists, identities.label); } catch { throw new AdminImportError(400, 'ADMIN_IMPORT_DRAFT_INCOMPLETE'); } }
         doc.media ??= { assets: [] };
@@ -129,7 +137,8 @@ export async function publishAdminImport(actor: string, id: string, raw: unknown
         // Every reviewed value included in the approval is the administrator's own.
         markAdministratorValues(doc.draftOrigins ??= {}, draftV2Paths(draft));
         if (lookup || doc.lookupGate) doc.lookupGate = lookupGateFor(lookup ?? doc.lookupGate!, doc.lookupGate);
-        doc.media.publication = { schemaVersion: 3, operationId: body.operationId as string, actorId: actor, approvedRevision: doc.revision, snapshot: structuredClone(draft), decisions: structuredClone(decisions), state: 'preparing', issue: null, grantExpiresAt: new Date(Date.now() + 24 * 3600000), ...identities, albumId: existingAlbum?._id.toHexString() ?? new ObjectId().toHexString(), newAlbum: !existingAlbum, albumRevision: existingAlbum ? albumDecision.candidateRevision : null, coverId, tracks, cover: coverId ? { slotId: coverAsset!.slotId, key: `images/${coverId}`, state: 'pending', versionId: null, etag: null } : null, bucket: process.env.S3_BUCKET_NAME!.trim(), leaseOwner: null, leaseUntil: null };
+        doc.media.publication = { schemaVersion: 3, operationId: body.operationId as string, actorId: actor, approvedRevision: doc.revision, snapshot: structuredClone(draft), decisions: structuredClone(decisions), state: 'preparing', issue: null, grantExpiresAt: new Date(Date.now() + 24 * 3600000), ...identities, albumId: existingAlbum?._id.toHexString() ?? new ObjectId().toHexString(), newAlbum: !existingAlbum, albumRevision: existingAlbum ? albumDecision.candidateRevision : null, coverId, tracks, cover: coverId ? { slotId: coverAsset!.slotId, key: `images/${coverId}`, state: 'pending', versionId: null, etag: null } : null, bucket: process.env.S3_BUCKET_NAME!.trim(), leaseOwner: null, leaseUntil: null,
+            musicBrainzNames: mergeImportMusicBrainzNames(doc.musicBrainzNames, new Map(), draft) };
     });
     return result;
 }

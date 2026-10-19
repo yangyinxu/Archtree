@@ -13,6 +13,7 @@
  *   - entry names are required, refuse control and invisible formatting characters, stay within 200 characters after NFC, and differ case-insensitively
  *   - join phrases are checked as the server checks them
  *   - a label refuses control and invisible formatting characters and more than 200 characters after NFC
+ *   - a rename keeps the saved MusicBrainz ID under a name metadata lookup found for it, folded, and drops it under any other
  * @end-catalog */
 
 import type { ImportArtistEntry } from './adminApi';
@@ -151,4 +152,15 @@ test('a label refuses control and invisible formatting characters and more than 
   expect(labelIssue(labelEntry('Lorem\u200B'))).toBe('invalid'); expect(labelIssue(labelEntry('Lorem\u0007'))).toBe('invalid');
   expect(labelIssue({ name: '\uFEFFLorem', musicBrainzId: null })).toBeNull(); expect(labelIssue(labelEntry('Lo\uFEFFrem'))).toBe('invalid');
   expect(labelIssue(labelEntry('\u0958'.repeat(101)))).toBe('too_long');
+});
+
+test('a rename keeps the saved MusicBrainz ID under a name metadata lookup found for it, folded, and drops it under any other', () => {
+  const id = '00000000-0000-4000-8000-0000000000a1', saved = [{ ...artistEntry('Lorem'), musicBrainzId: id }], names = new Map([[id, ['Lorem', 'ロレム', 'Lorem Ens.']]]);
+  expect(renameArtistEntry(saved, entryKey(1), 'ロレム', saved, names)[0].musicBrainzId).toBe(id);
+  expect(renameArtistEntry(saved, entryKey(1), ' lorem ens. ', saved, names)[0].musicBrainzId).toBe(id);
+  expect(renameArtistEntry(saved, entryKey(1), 'Other', saved, names)[0].musicBrainzId).toBeNull();
+  expect(renameArtistEntry(saved, entryKey(1), 'ロレム', saved)[0].musicBrainzId).toBeNull();
+  const label = { name: 'Sit Records', musicBrainzId: id };
+  expect(labelFromInput('シット', label, new Map([[id, ['シット']]]))).toEqual({ name: 'シット', musicBrainzId: id });
+  expect(labelFromInput('シット', label, new Map())).toEqual({ name: 'シット', musicBrainzId: null });
 });

@@ -38,6 +38,7 @@
  *   - the confirmation marks Artist entries and the label resting only on file tags and an entry that looks like a label
  *   - the confirmation shows and sends the Luna ticks: the summary's toggles over the server's state, a ticked value in the list, and a path the unsaved changes write left unticked
  *   - a ticked suggestion that renames the Album does not dead-end the confirmation: it offers to apply the ticked suggestions to the saved draft first, then closes
+ *   - the confirmation lists each MusicBrainz ID the publication records or replaces, and sends exactly those
  * @end-catalog */
 
 import type { ComponentProps } from 'react';
@@ -138,7 +139,7 @@ test('reselection mismatches never dispatch, and a matched file waits for the ex
 test('202 publication admission is not completion and source cleanup remains possible after confirmed publication', async () => {
   const item = detail(); item.capabilities.publish = true; item.publication = 'notStarted'; item.decisions = distinct(); const operation = new AdminMutation(); const run = vi.spyOn(operation, 'run').mockImplementation(() => {}); const view = mount(item, operation);
   fireEvent.click(screen.getByRole('button', { name: 'Publish Album' })); expect(run).not.toHaveBeenCalled(); fireEvent.click(await approve());
-  expect(run).toHaveBeenCalledWith('/bbbbbbbbbbbbbbbbbbbbbbbb/publish', 'POST', { expectedRevision: 1, changes: [], decisions: item.decisions, selectedCoverSlotId: null, approvalDigest: 'e'.repeat(64), preselections: [], suggestionTicks: unticked });
+  expect(run).toHaveBeenCalledWith('/bbbbbbbbbbbbbbbbbbbbbbbb/publish', 'POST', { expectedRevision: 1, changes: [], decisions: item.decisions, selectedCoverSlotId: null, approvalDigest: 'e'.repeat(64), preselections: [], suggestionTicks: unticked, musicBrainzIds: [] });
   act(() => view.rerender(view.element({ ...item, publication: 'preparing' }))); expect(screen.queryByText('The Album publication is confirmed.')).not.toBeInTheDocument(); expect(screen.queryByRole('button', { name: 'Publish Album' })).not.toBeInTheDocument();
   const complete = { ...item, publication: 'complete' as const, published: { albumId: '111111111111111111111111', artistIds: ['222222222222222222222222'], organizationId: null, trackIds: ['333333333333333333333333'] }, assets: [{ slotId, state: 'ready' as const, byteLength: 100, sha256: 'a'.repeat(64), contentType: 'audio/mpeg', tags: null, recovery: null }] };
   act(() => view.rerender(view.element(complete))); expect(screen.getByText('The Album publication is confirmed.')).toBeVisible(); expect(screen.getByRole('button', { name: 'Remove file' })).toBeEnabled();
@@ -308,7 +309,7 @@ test('publication confirmation keeps its reviewed name and digest until the admi
   fireEvent.click(screen.getByRole('button', { name: 'Publish Album' }));
   expect(within(screen.getByRole('dialog')).getAllByText('Changed Album')[0]).toBeVisible();
   fireEvent.click(await approve());
-  expect(run).toHaveBeenCalledWith('/bbbbbbbbbbbbbbbbbbbbbbbb/publish', 'POST', { expectedRevision: 4, changes: [], decisions: item.decisions, selectedCoverSlotId: null, approvalDigest: 'f'.repeat(64), preselections: [], suggestionTicks: unticked });
+  expect(run).toHaveBeenCalledWith('/bbbbbbbbbbbbbbbbbbbbbbbb/publish', 'POST', { expectedRevision: 4, changes: [], decisions: item.decisions, selectedCoverSlotId: null, approvalDigest: 'f'.repeat(64), preselections: [], suggestionTicks: unticked, musicBrainzIds: [] });
 });
 
 test.each([1, 2])('cancellation does not rebase onto a replacement approval at current revision %s', revision => {
@@ -480,7 +481,7 @@ test('the approval sends the unsaved changes, the buffered Review decisions, the
   const dialog = within(screen.getByRole('dialog'));
   expect(dialog.getAllByText('Retitled Album')[0]).toBeVisible(); expect(await dialog.findByRole('note')).toHaveTextContent('Your unsaved draft changes are included and are saved with this approval.');
   fireEvent.click(await approve());
-  expect(run).toHaveBeenCalledWith(`/${item.id}/publish`, 'POST', { expectedRevision: 4, changes, decisions: buffered, selectedCoverSlotId: 'cover', approvalDigest: 'e'.repeat(64), preselections: [], suggestionTicks: unticked });
+  expect(run).toHaveBeenCalledWith(`/${item.id}/publish`, 'POST', { expectedRevision: 4, changes, decisions: buffered, selectedCoverSlotId: 'cover', approvalDigest: 'e'.repeat(64), preselections: [], suggestionTicks: unticked, musicBrainzIds: [] });
   cleanup(); run.mockClear();
   adminWorkspace.retain(`duplicate-edits:${item.id}`, { decisions: buffered.map(decision => decision.entryKey === entryKey(1) ? { ...decision, boundName: 'Lorem Before' } : decision) }, captureAccountOperation(viewer));
   mount(item, operation, 'publication', { approval: { draft, changes } }); fireEvent.click(screen.getByRole('button', { name: 'Publish Album' }));
@@ -667,4 +668,23 @@ test('a ticked suggestion that renames the Album does not dead-end the confirmat
   fireEvent.click(screen.getByRole('button', { name: 'Publish Album' }));
   await approve();
   expect(screen.queryByRole('button', { name: 'Apply ticked suggestions now' })).not.toBeInTheDocument();
+});
+
+test('the confirmation lists each MusicBrainz ID the publication records or replaces, and sends exactly those', async () => {
+  const { item, ipsum } = reviewed(), id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+  item.draft.album.artists = item.draft.album.artists.map((entry, index) => index < 2 ? { ...entry, musicBrainzId: id(index + 1) } : entry);
+  item.draft.album.label = { name: 'Sit Records', musicBrainzId: id(9) };
+  const sit: ImportCandidate = { kind: 'organization', id: '2'.repeat(24), label: 'Sit Records', revision: 'r-sit', albumId: null, visibility: 'public', match: 'name', matchedSlotIds: [], automaticReuse: false, musicBrainzId: id(5) };
+  item.decisions = item.decisions.map(decision => decision.scope === 'label' ? { ...decision, action: 'replace', candidateId: sit.id, candidateRevision: sit.revision } : decision);
+  stubFetch(candidatesEndpoint([ipsum, sit]));
+  const operation = new AdminMutation(), run = vi.spyOn(operation, 'run').mockImplementation(() => {}); mount(item, operation, 'publication');
+  fireEvent.click(screen.getByRole('button', { name: 'Publish Album' }));
+  const list = within(await screen.findByRole('region', { name: 'What becomes catalog content' })); fireEvent.click(await approve());
+  const value = (term: string) => list.getByText(term, { selector: 'dt' }).nextElementSibling!;
+  // The new Artist records its entry's ID, the reused one without an ID records it, and the reused label replaces the one it holds.
+  expect(within(value('Artists') as HTMLElement).getAllByRole('listitem').map(entry => entry.textContent)).toEqual([`Lorem · Primary · joined by “ & ” · New · records MusicBrainz ID ${id(1)}`,
+    `Ipsum · Primary · Reuses Ipsum · Hidden · records MusicBrainz ID ${id(2)}`, 'Dolor · Featured · New']);
+  expect(value('Label')).toHaveTextContent(`Sit Records · Reuses Sit Records · replaces MusicBrainz ID ${id(5)} with ${id(9)}`);
+  expect(run).toHaveBeenCalledWith(`/${item.id}/publish`, 'POST', expect.objectContaining({ musicBrainzIds: [{ scope: 'artist', entryKey: entryKey(1), musicBrainzId: id(1), replaces: null },
+    { scope: 'artist', entryKey: entryKey(2), musicBrainzId: id(2), replaces: null }, { scope: 'label', entryKey: null, musicBrainzId: id(9), replaces: id(5) }] }));
 });

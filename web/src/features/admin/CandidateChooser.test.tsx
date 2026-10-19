@@ -10,6 +10,7 @@
  *   - one matching group of a partial comparison is offered in a region with the single-choice heading, every proposal value and Use none of these; the partial-comparison line is shown
  *   - a release applied as a preselection stays choosable when a re-rank leaves a tie, so it can be confirmed as the choice
  *   - a tie from a partial comparison keeps the several-releases heading and says not every release was compared; without a choice the line stands beside the folded list
+ *   - groups that differ only by the MusicBrainz artist or label they credit show each ID beside the names
  * @end-catalog */
 
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
@@ -29,7 +30,7 @@ const comparison = (differences: ('trackCount' | 'discCount' | 'duration')[] = [
 const candidate = (n: number, extra: Partial<Candidate> = {}): Candidate => ({ key: key(n), releaseId: release(n), status: 'matching', title: `Synthetic Album ${n}`, artist: 'Synthetic Lead', label: `Label ${n}`,
   catalogNumber: null, barcode: null, country: null, date: { year: 2021, month: 5, day: null }, formats: [], trackCount: 2, comparison: comparison(), groupKey: String(n).repeat(64), artistMismatch: false, ...extra });
 const group = (n: number, tracks: [number, number, string][]) => ({ groupKey: String(n).repeat(64), representativeKey: key(n), memberKeys: [key(n)], proposal: { albumTitle: 'Synthetic Album',
-  artists: [{ name: 'Synthetic Lead', role: 'primary' as const, joinPhrase: null }], label: 'Label', releaseDate: null, tracks: tracks.map(([discNumber, trackNumber, title]) => ({ discNumber, trackNumber, title })) } });
+  artists: [{ name: 'Synthetic Lead', role: 'primary' as const, joinPhrase: null, musicBrainzId: null as string | null }], label: 'Label', labelMusicBrainzId: null as string | null, releaseDate: null, tracks: tracks.map(([discNumber, trackNumber, title]) => ({ discNumber, trackNumber, title })) } });
 const view = (extra: Partial<ImportLookupView> = {}): ImportLookupView => ({ run: 2, state: 'complete', issue: null, outcome: 'candidates', input: { trigger: 'tags', submitted: null }, candidates: [], groups: [],
   preselection: null, disclosure: null, applied: null, staleFiles: [], needsAnswer: { tie: false, conflicts: [] }, blocking: false, ...extra });
 const applied = (run: number, candidateKey: string | null): ImportLookupView['applied'] => ({ run, candidateKey, releaseId: null, choice: candidateKey ? 'chosen' : 'none', basis: candidateKey ? 'chosen' : null, values: [], conflicts: [], flagged: [] });
@@ -146,4 +147,18 @@ test('a tie from a partial comparison keeps the several-releases heading and say
   expect(screen.queryByRole('region')).not.toBeInTheDocument();
   expect(screen.getByText(line)).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Applied' })).toBeDisabled();
+});
+
+test('groups that differ only by the MusicBrainz artist or label they credit show each ID beside the names', () => {
+  const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`, tracks: [number, number, string][] = [[1, 1, 'First'], [1, 2, 'Second']];
+  const credited = (n: number, artist: string, label: string) => { const value = group(n, tracks); value.proposal.artists = value.proposal.artists.map(entry => ({ ...entry, musicBrainzId: artist })); value.proposal.labelMusicBrainzId = label; return value; };
+  mount(view({ candidates: [candidate(1), candidate(2)], groups: [credited(1, id(1), id(9)), credited(2, id(2), id(9))], needsAnswer: { tie: true, conflicts: [] } }));
+  const [first, second] = within(screen.getByRole('region', { name: 'Several releases match these files. Choose one, or none.' })).getAllByRole('listitem');
+  expect([...first.querySelectorAll('dt')].map(term => term.textContent)[0]).toBe('Artists');
+  expect(first.querySelector('dd')!.textContent).toBe(`Synthetic Lead · MusicBrainz ID ${id(1)}`);
+  expect(second.querySelector('dd')!.textContent).toBe(`Synthetic Lead · MusicBrainz ID ${id(2)}`);
+  cleanup();
+  mount(view({ candidates: [candidate(1), candidate(2)], groups: [credited(1, id(1), id(8)), credited(2, id(1), id(9))], needsAnswer: { tie: true, conflicts: [] } }));
+  const [labelled] = within(screen.getByRole('region', { name: 'Several releases match these files. Choose one, or none.' })).getAllByRole('listitem');
+  expect(labelled.querySelector('dd')!.textContent).toBe(`Label · MusicBrainz ID ${id(8)}`);
 });

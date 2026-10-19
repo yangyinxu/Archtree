@@ -235,7 +235,7 @@ test('metadata lookup routes guard authentication and the current admin before p
     const read = await request(path); assert.equal(read.status, 200); assert.equal(read.headers.get('cache-control'), 'no-store');
     // Before any run the view is null, and the summary state says Publish waits for the uploads, the whole analysis budget is
     // left, nothing named needs an identity answer, and without an operator contact this server cannot run lookup.
-    assert.deepEqual(await read.json(), { lookup: null, revision: 1, valueRevision: 0, summary: { append: false, waiting: { uploads: true, lookup: false, analysis: false },
+    assert.deepEqual(await read.json(), { lookup: null, revision: 1, valueRevision: 0, musicBrainzNames: [], summary: { append: false, waiting: { uploads: true, lookup: false, analysis: false },
         placeholderOnly: false, luna: [], analysis: { runs: 2, attempts: 22, daily: 220 }, lookupAvailable: false, identityAnswers: 0 } });
     assert.equal((await request('/api/admin/v1/imports/not-an-id/lookup')).status, 404);
     const review = await (await request('/api/admin/v1/imports', 'POST', body())).json();

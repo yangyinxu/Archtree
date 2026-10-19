@@ -48,6 +48,7 @@
  *   - after a stale approval the page reloads the saved project, and approving again sends its new digest with the same unsaved edit
  *   - another administrator saving different Artist entries refuses this editor's entry edits and offers the saved version
  *   - a label saved elsewhere rebases unsaved entry edits, and Save sends only album.artists
+ *   - MusicBrainz IDs metadata lookup added to the saved entries rebase unsaved entry edits, and Save keeps the IDs
  *   - a lost response for an entry save retries the identical intent
  *   - unsaved Artist entries and label survive leaving and reopening the project, and an account change drops them
  * @end-catalog */
@@ -735,7 +736,7 @@ test('a draft of two primaries, a featured entry and a label is decided entry by
   const fresh = { action: 'create-distinct', candidateId: null, candidateRevision: null };
   expect(saved).toEqual([]);
   // Without a server tick state for the pending Luna suggestions, the approval keeps their current values (all unticked).
-  expect(publishes).toEqual([{ operationId: expect.any(String), expectedRevision: 1, changes: [], selectedCoverSlotId: null, approvalDigest: 'e'.repeat(64), preselections: [], suggestionTicks: unticked, decisions: [...artists.map(entry => ({ scope: 'artist', slotId: null, entryKey: entry.key, boundName: entry.name, ...fresh })),
+  expect(publishes).toEqual([{ operationId: expect.any(String), expectedRevision: 1, changes: [], selectedCoverSlotId: null, approvalDigest: 'e'.repeat(64), preselections: [], suggestionTicks: unticked, musicBrainzIds: [], decisions: [...artists.map(entry => ({ scope: 'artist', slotId: null, entryKey: entry.key, boundName: entry.name, ...fresh })),
     { scope: 'label', slotId: null, entryKey: null, boundName: 'Lorem Records', ...fresh }, { scope: 'album', slotId: null, entryKey: null, boundName: null, ...fresh }, ...initial.draft.tracks.map(track => ({ scope: 'track', slotId: track.slotId, entryKey: null, boundName: null, ...fresh }))] }]);
   // The approval saved the shown decisions, so no unsaved Review decision remains.
   expect(adminWorkspace.buffer(`duplicate-edits:${projectId}`)).toBeUndefined();
@@ -772,7 +773,7 @@ test('an unsaved title edit is published in one request without Save, the editor
   expect(await dialog.findByRole('note')).toHaveTextContent('Your unsaved draft changes are included and are saved with this approval.');
   await waitFor(() => expect(approve).toBeEnabled()); fireEvent.click(approve);
   await waitFor(() => expect(publishes).toHaveLength(1));
-  expect(publishes[0]).toEqual({ operationId: expect.any(String), expectedRevision: 3, changes: [{ path: 'album.title', base: 'Synthetic Album', value: 'Approved Title' }], decisions: server.current().decisions, selectedCoverSlotId: null, approvalDigest: 'e'.repeat(64), preselections: [], suggestionTicks: unticked });
+  expect(publishes[0]).toEqual({ operationId: expect.any(String), expectedRevision: 3, changes: [{ path: 'album.title', base: 'Synthetic Album', value: 'Approved Title' }], decisions: server.current().decisions, selectedCoverSlotId: null, approvalDigest: 'e'.repeat(64), preselections: [], suggestionTicks: unticked, musicBrainzIds: [] });
   expect(server.writes).toEqual([]);
   fireEvent.click(screen.getByRole('tab', { name: 'Draft' }));
   await waitFor(() => expect(screen.getByText('Saved to private draft', { selector: '[role=status]:not([aria-live])' })).toBeVisible());
@@ -966,6 +967,21 @@ test('a label saved elsewhere rebases unsaved entry edits, and Save sends only a
   expect(server.writes[0]).toEqual({ operationId: expect.any(String), expectedRevision: 2, changes: [{ path: 'album.artists', base: artists, value: moved }] });
   await waitFor(() => expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled());
   expect(server.current().draft.album).toMatchObject({ artists: moved, label: labelEntry('Their Records') });
+});
+
+test('MusicBrainz IDs metadata lookup added to the saved entries rebase unsaved entry edits, and Save keeps the IDs', async () => {
+  const { server, artists, moved } = entriesServer(), mbid = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+  mount(`/admin/imports/${projectId}`);
+  fireEvent.click(await screen.findByRole('button', { name: 'Move up · Ipsum' }));
+  // Lookup's automatic write adds IDs without changing names, roles or phrases (valueRevision only).
+  const identified = artists.map((value, index) => ({ ...value, musicBrainzId: mbid(index + 1) }));
+  server.set({ ...server.current(), valueRevision: 1, draft: applyDraftChanges(server.current().draft, [{ path: 'album.artists', value: identified }]) });
+  fireEvent.click(screen.getByRole('button', { name: 'Refresh status' }));
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled());
+  expect(screen.queryByRole('button', { name: 'Discard local edits and load saved version' })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+  await waitFor(() => expect(server.writes).toHaveLength(1));
+  expect(server.writes[0].changes).toEqual([{ path: 'album.artists', base: identified, value: [{ ...moved[0], musicBrainzId: mbid(2) }, { ...moved[1], musicBrainzId: mbid(1) }, { ...moved[2], musicBrainzId: mbid(3) }] }]);
 });
 
 test('a lost response for an entry save retries the identical intent', async () => {

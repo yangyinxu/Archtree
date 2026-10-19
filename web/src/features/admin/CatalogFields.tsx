@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useLocalization } from '../../localization/LocalizationProvider';
 import type { MessageKey } from '../../localization/contract';
@@ -50,7 +50,7 @@ function CreditEditor({ credits, onChange, disabled }: { credits: CatalogCredit[
   </fieldset>;
 }
 export function CatalogFields({ item, fields, disabled, onChange }: { item: CatalogItem; fields: Fields; disabled: boolean; onChange: (fields: Fields) => void }) {
-  const t = useAdminText();
+  const t = useAdminText(), helpId = useId();
   const set = (key: string, value: unknown) => onChange({ ...fields, [key]: value } as Fields);
   return <fieldset disabled={disabled} className={styles.editor}>
     {Object.entries(fields).filter(([key]) => !['credits', 'attributionStatus'].includes(key)).map(([key, value]) => {
@@ -63,6 +63,11 @@ export function CatalogFields({ item, fields, disabled, onChange }: { item: Cata
         }} /></label>)}</fieldset>;
       }
       if (key === 'organizationType') return <label className={styles.field} key={key}>{label}<select className={styles.input} value={String(value)} onChange={event => set(key, event.target.value)}>{['label', 'publisher', 'distributor', 'archive', 'broadcaster', 'studio', 'other'].map(type => <option key={type} value={type}>{t(`organization.${type}`)}</option>)}</select></label>;
+      // A MusicBrainz ID is typed as text; spaces are trimmed, case is lowered and an empty field clears it. Its help sits outside
+      // the label so the accessible name stays "MusicBrainz ID".
+      if (key === 'musicBrainzId') return <div className={styles.field} key={key}><label className={styles.field}>{label}<input className={styles.input} type="text" maxLength={36} spellCheck={false} autoComplete="off"
+        aria-describedby={`${helpId}-musicbrainz`} value={value == null ? '' : String(value)} onChange={event => set(key, event.target.value.trim().toLowerCase() || null)} /></label>
+        <p id={`${helpId}-musicbrainz`} className={styles.muted}>{t('catalog.musicbrainz_id_help')}</p></div>;
       if (key === 'bio' || key === 'description') return <label className={styles.field} key={key}>{label}<textarea className={styles.input} value={String(value)} maxLength={10000} rows={5} onChange={event => set(key, event.target.value)} /></label>;
       const numeric = key === 'trackNumber' || key === 'discNumber';
       return <label className={styles.field} key={key}>{label}<input className={styles.input} type={numeric ? 'number' : 'text'} min={1} max={key === 'discNumber' ? 999 : 9999} maxLength={key === 'name' ? 200 : 300} required={key === 'name' || key === 'title'} value={value == null ? '' : String(value)} onChange={event => set(key, numeric ? event.target.value ? Number(event.target.value) : null : event.target.value)} /></label>;

@@ -81,7 +81,10 @@ test('the view allowlists evidence: no link, ISRC, recording ID, account, grant,
     assert.deepEqual([view.run, view.state, view.issue, view.outcome, view.input, view.preselection, view.disclosure, view.staleFiles],
         [2, 'complete', null, 'candidates', { trigger: 'submitted', submitted: { kind: 'album', text: 'Synthetic Album' } },
             { candidateKey: `musicbrainz:${mbid(1)}`, basis: 'onlyMatchingGroup', artistMismatch: false }, { unknownLocalDurations: 0, unknownLocalDiscNumbers: 2, partialComparison: false }, [slot(1)]]);
-    assert.deepEqual(view.groups[0].proposal.artists, [{ name: 'Synthetic Lead', role: 'primary', joinPhrase: ' & ' }, { name: 'Synthetic Second', role: 'primary', joinPhrase: null }]);
+    // A proposal names each credited MusicBrainz artist and the label's.
+    assert.deepEqual(view.groups[0].proposal.artists, [{ name: 'Synthetic Lead', role: 'primary', joinPhrase: ' & ', musicBrainzId: mbid(1) },
+        { name: 'Synthetic Second', role: 'primary', joinPhrase: null, musicBrainzId: mbid(2) }]);
+    assert.equal(view.groups[0].proposal.labelMusicBrainzId, mbid(10));
     assert.deepEqual([view.applied!.choice, view.applied!.basis, view.applied!.candidateKey, view.applied!.values.map(value => value.path).slice(0, 2), view.applied!.conflicts, view.applied!.flagged],
         ['preselected', 'onlyMatchingGroup', `musicbrainz:${mbid(1)}`, ['album.title', 'album.artists'], [], []]);
     assert.deepEqual([view.needsAnswer, view.blocking], [{ tie: false, conflicts: [] }, false]);
@@ -121,7 +124,12 @@ test('the view stays within its bounds: 25 candidates and groups, 1000-character
         { path: `tracks.${mbid(77)}.title`, lookup: 'Elsewhere', slotId: mbid(77), answer: null }, { path: 'album.releaseDate', lookup: null, slotId: null, answer: null }];
     applied.applied!.flagged = [{ path: 'album.artists', reason: 'placeholder' }, { path: 'album.label', reason: 'unknown' as never }];
     const conflicted = importLookupView(applied, doc)!;
-    assert.deepEqual(conflicted.applied!.conflicts, [{ path: 'album.label', slotId: null, lookup: { name: 'Label 1', musicBrainzId: null }, answer: null }]);
+    assert.deepEqual(conflicted.applied!.conflicts, [{ path: 'album.label', slotId: null, lookup: { name: 'Label 1', musicBrainzId: null }, answer: null, musicBrainzId: false }]);
+    // An ID conflict's lookup value carries the release's IDs, which the view reads as introduced, and is marked as one.
+    applied.applied!.conflicts = [{ path: 'album.label', lookup: { name: 'Label 1', musicBrainzId: mbid(10) }, slotId: null, answer: null, musicBrainzId: true },
+        { path: 'album.artists', lookup: [{ key: slot(5), name: 'Lead', role: 'primary', joinPhrase: null, musicBrainzId: '89ad4ac3-39f7-470e-963a-56509c546377' }], slotId: null, answer: null }];
+    assert.deepEqual(importLookupView(applied, doc)!.applied!.conflicts, [{ path: 'album.label', slotId: null, lookup: { name: 'Label 1', musicBrainzId: mbid(10) }, answer: null, musicBrainzId: true }],
+        'a placeholder ID is never shown');
     assert.deepEqual(conflicted.applied!.flagged, [{ path: 'album.artists', reason: 'placeholder' }]);
 });
 

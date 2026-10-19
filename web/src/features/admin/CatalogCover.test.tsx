@@ -22,7 +22,7 @@ import { adminWorkspace } from './adminWorkspace';
 import { CatalogCover } from './CatalogCover';
 import { detail, json, projectId, session, slotId, viewer } from './adminFixtures.testSupport';
 import type { CatalogItem } from './catalogApi';
-const item:CatalogItem={kind:'artist',id:'111111111111111111111111',revision:`cr_${'a'.repeat(43)}`,visibility:'public',effectiveVisibility:'public',coverUrl:'/api/admin/v1/catalog/artist/111111111111111111111111/artwork',mediaUrl:null,capabilities:{editing:true,visibility:true},fields:{name:'Synthetic artist',bio:'',birthDate:null}};
+const item:CatalogItem={kind:'artist',id:'111111111111111111111111',revision:`cr_${'a'.repeat(43)}`,visibility:'public',effectiveVisibility:'public',coverUrl:'/api/admin/v1/catalog/artist/111111111111111111111111/artwork',mediaUrl:null,capabilities:{editing:true,visibility:true},fields:{name:'Synthetic artist',bio:'',birthDate:null,musicBrainzId:null}};
 const operationId='30000000-0000-4000-8000-000000000003';
 function mount(removed=vi.fn(),snapshot:CatalogItem|null=item,options:{disabled?:boolean;approvalDisabled?:boolean}={}){const client=new QueryClient();client.setQueryData(['browser-session'],session);const confirmed=vi.fn();render(<QueryClientProvider client={client}><MemoryRouter><CatalogCover item={snapshot} kind={item.kind} id={item.id} disabled={options.disabled??false} approvalDisabled={options.approvalDisabled} onConfirmed={confirmed} onRemoved={removed}/></MemoryRouter></QueryClientProvider>);return confirmed;}
 beforeEach(()=>{adminWorkspace.reset();adminWorkspace.authorize(captureAccountOperation(viewer),true,true,undefined,{editing:true,visibility:true});adminWorkspace.select('admin');});

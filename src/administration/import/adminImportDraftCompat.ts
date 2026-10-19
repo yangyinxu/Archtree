@@ -236,20 +236,23 @@ export function legacyDecisionsView(raw: unknown, slots: ReadonlySet<string>): I
 /**
  * The editor's Draft v2 decisions: an Artist decision names a UUID entry key, a label or Album decision names none, and a track
  * decision names a manifest slot. An Artist or label decision carries the name it was made for (null when unreadable), so the
- * editor can resend it unchanged; Album and track decisions bind none. One per scope, slot and entry (the first stored one),
- * within the request bound.
+ * editor can resend it unchanged; Album and track decisions bind none. `replace` is kept for Artist and label decisions only. One
+ * per scope, slot and entry (the first stored one), within the request bound. With `binding` (server reads only, never a DTO),
+ * an Artist or label decision also carries the MusicBrainz ID it binds (`boundMusicBrainzId`, null when none or unreadable).
  */
-export function importDecisionsV2View(raw: unknown, slots: ReadonlySet<string>): ImportDecisionDtoV2[] {
-    const seen = new Set<string>(), decisions: ImportDecisionDtoV2[] = [];
+export function importDecisionsV2View(raw: unknown, slots: ReadonlySet<string>, options: { binding?: boolean } = {}): (ImportDecisionDtoV2 & { boundMusicBrainzId?: string | null })[] {
+    const seen = new Set<string>(), decisions: (ImportDecisionDtoV2 & { boundMusicBrainzId?: string | null })[] = [];
     for (const value of list(raw)) {
         if (!isRecord(value)) continue;
         const { scope, slotId, entryKey, action, candidateId, candidateRevision } = value;
         const boundName = (scope === 'artist' || scope === 'label') && typeof value.boundName === 'string' && value.boundName.length <= DRAFT_V2_LIMITS.name ? value.boundName : null;
-        if (!oneOf(scope, ['artist', 'label', 'album', 'track'] as const) || !oneOf(action, ['reuse', 'skip', 'create-distinct'] as const)) continue;
+        if (!oneOf(scope, ['artist', 'label', 'album', 'track'] as const) || !oneOf(action, ['reuse', 'skip', 'create-distinct', 'replace'] as const)
+            || (action === 'replace' && scope !== 'artist' && scope !== 'label')) continue;
         if (scope === 'artist' ? !uuid(entryKey) || slotId !== null : scope === 'track' ? typeof slotId !== 'string' || !slots.has(slotId) || entryKey !== null : slotId !== null || entryKey !== null) continue;
         if ((candidateId !== null && !objectId(candidateId)) || (candidateRevision !== null && typeof candidateRevision !== 'string')) continue;
         const key = `${scope}:${slotId}:${entryKey}`; if (seen.has(key)) continue; seen.add(key);
-        decisions.push({ scope, slotId: slotId as string | null, entryKey: entryKey as string | null, boundName, action, candidateId: candidateId as string | null, candidateRevision: candidateRevision as string | null });
+        decisions.push({ scope, slotId: slotId as string | null, entryKey: entryKey as string | null, boundName, action, candidateId: candidateId as string | null, candidateRevision: candidateRevision as string | null,
+            ...(options.binding && (scope === 'artist' || scope === 'label') ? { boundMusicBrainzId: normalizeMusicBrainzId(value.boundMusicBrainzId) } : {}) });
     }
     return decisions.slice(0, DRAFT_V2_LIMITS.decisions);
 }

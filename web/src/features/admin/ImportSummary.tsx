@@ -3,7 +3,7 @@
  *   Functions: ImportSummary
  * Internal
  *   Types: Step
- *   Functions: valueAt, valueText
+ *   Functions: valueAt, valueText, idText
  *   Constants: LookupBox, CandidateChooser, ImportAnalysisConfirmation
  * @end-catalog */
 
@@ -38,6 +38,8 @@ const valueAt = (draft: ImportDraftV2, path: string): unknown => {
 };
 /** Artist entries read as their byline, a label as its name and anything else as review text. */
 const valueText = (value: unknown) => Array.isArray(value) ? entriesByline(value) || '—' : value && typeof value === 'object' && 'name' in value ? String(value.name) : reviewValueText(value);
+/** The MusicBrainz IDs of Artist entries or a label, beside each name, for a conflict that differs only in them. */
+const idText = (value: unknown) => (Array.isArray(value) ? value : value ? [value] : []).map(entry => `${String((entry as { name?: unknown }).name ?? '')} · ${String((entry as { musicBrainzId?: unknown }).musicBrainzId ?? '—')}`).join('; ') || '—';
 
 /**
  * The Review and publish summary an import opens on, above its Draft, Review, Files and Publish sections. The server decides what
@@ -121,8 +123,8 @@ export function ImportSummary({ item, operation, uploads, disabled, publishDisab
       {available && <Suspense fallback={null}><LookupBox key={lookup?.run ?? 0} lookup={lookup} rootLabel={item.manifest.rootLabel} disabled={disabled} onSubmit={(kind, text) => run('lookup', { kind, text })} /></Suspense>}
       {lookup?.state === 'complete' && lookup.candidates.length > 0 && <Suspense fallback={null}><CandidateChooser lookup={lookup} disabled={disabled} onChoose={key => run('lookup/choose', { run: lookup.run, candidateKey: key })} /></Suspense>}
       {open.length > 0 && <section aria-labelledby={`${id}-conflicts`}><h3 id={`${id}-conflicts`}>{t('summary.conflicts')}</h3><ul className={styles.cards}>{open.map(conflict =>
-        <li key={conflict.path} className={styles.card}><strong id={`${id}-${conflict.path}`}>{label(conflict.path)}</strong>
-          <dl className={styles.diff}><div><dt>{t('summary.yours')}</dt><dd>{valueText(valueAt(item.draft, conflict.path))}</dd></div><div><dt>{t('summary.lookup_value')}</dt><dd>{valueText(conflict.lookup)}</dd></div></dl>
+        <li key={conflict.path} className={styles.card}><strong id={`${id}-${conflict.path}`}>{conflict.musicBrainzId ? t('summary.musicbrainz_id_conflict', { field: label(conflict.path) }) : label(conflict.path)}</strong>
+          <dl className={styles.diff}><div><dt>{t('summary.yours')}</dt><dd>{(conflict.musicBrainzId ? idText : valueText)(valueAt(item.draft, conflict.path))}</dd></div><div><dt>{t('summary.lookup_value')}</dt><dd>{(conflict.musicBrainzId ? idText : valueText)(conflict.lookup)}</dd></div></dl>
           <div className={styles.actions}>{(['mine', 'lookup'] as const).map(answer => <button key={answer} type="button" className={styles.button} disabled={disabled} aria-describedby={`${id}-${conflict.path}`}
             onClick={() => resolve(conflict.path, answer)}>{t(answer === 'mine' ? 'summary.keep_mine' : 'summary.use_lookup')}</button>)}</div></li>)}</ul></section>}
       {(fromTags.length > 0 || (lookup?.preselection?.artistMismatch && applied?.choice === 'preselected' && applied.run === lookup.run)) && <ul aria-label={t('summary.flagged')}>

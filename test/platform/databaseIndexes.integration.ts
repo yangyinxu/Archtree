@@ -34,7 +34,7 @@ test('real Mongo indexes are verified, missing uniqueness fails closed, and dupl
   const receipt = await db.collection<{ _id: string }>('schemaMigrations')
     .findOne({ _id: requiredIndexRevision });
   assert.ok(receipt);
-  assert.equal(requiredIndexRevision, 'required-indexes-v10-metadata-lookups');
+  assert.equal(requiredIndexRevision, 'required-indexes-v11-musicbrainz-ids');
   const linkIndexes = await db.collection('emailLinkTokens').listIndexes().toArray();
   const byKey = (key: Record<string, number>) => linkIndexes.find(index => JSON.stringify(index.key) === JSON.stringify(key));
   assert.ok(byKey({ email: 1, purpose: 1 }), 'link cleanup within registration transactions is indexed');
@@ -50,6 +50,30 @@ test('real Mongo indexes are verified, missing uniqueness fails closed, and dupl
   assert.equal(await db.collection('users').countDocuments({}), 2);
   // Fixture cleanup is explicit; migration itself never resolves duplicates by deleting data.
   await db.collection('users').deleteMany({ email: 'synthetic-duplicate@example.test' });
+  await initializeDatabaseIndexes(db);
+  await verifyRequiredDatabaseIndexes(db);
+});
+
+test('MusicBrainz ID indexes refuse a same-kind duplicate and admit records without an ID', async () => {
+  const db = getDb()!;
+  await initializeDatabaseIndexes(db);
+  for (const [collection, name] of [['artists', 'artist_musicbrainz_id'], ['organizations', 'organization_musicbrainz_id']] as const) {
+    const index = (await db.collection(collection).listIndexes().toArray()).find(entry => entry.name === name);
+    assert.deepEqual([index?.key, index?.unique, index?.partialFilterExpression], [{ musicBrainzId: 1 }, true, { musicBrainzId: { $type: 'string' } }]);
+  }
+  const id = '00000000-0000-4000-8000-0000000000a1';
+  await db.collection('artists').insertMany([{ name: 'Synthetic A', musicBrainzId: id }, { name: 'Synthetic B' }, { name: 'Synthetic C' }, { name: 'Synthetic D', musicBrainzId: null }]);
+  await assert.rejects(db.collection('artists').insertOne({ name: 'Synthetic E', musicBrainzId: id }), (error: { code?: number }) => error.code === 11000);
+  // An Artist and an Organization may hold one ID.
+  await db.collection('organizations').insertOne({ name: 'Synthetic Label', musicBrainzId: id });
+  await assert.rejects(db.collection('organizations').insertOne({ name: 'Synthetic Label 2', musicBrainzId: id }), (error: { code?: number }) => error.code === 11000);
+  // Existing duplicates fail startup closed and are never deleted.
+  await db.collection('artists').dropIndex('artist_musicbrainz_id');
+  await db.collection('artists').insertOne({ name: 'Synthetic F', musicBrainzId: id });
+  await assert.rejects(initializeDatabaseIndexes(db), (error: unknown) => error instanceof DatabaseIndexInitializationError && error.indexId === 'artists:musicBrainzId');
+  assert.equal(await db.collection('artists').countDocuments({ musicBrainzId: id }), 2);
+  await db.collection('artists').deleteMany({ name: /^Synthetic/ });
+  await db.collection('organizations').deleteMany({ name: /^Synthetic/ });
   await initializeDatabaseIndexes(db);
   await verifyRequiredDatabaseIndexes(db);
 });

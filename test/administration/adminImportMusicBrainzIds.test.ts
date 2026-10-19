@@ -1,0 +1,95 @@
+/**
+ * MusicBrainz IDs of import entries without a database: which ID a frozen identity records or replaces (the full write matrix),
+ * the order the confirmation lists them in, the names lookup found per ID (filtered to carried IDs, folded, cleaned and bounded),
+ * and the comparison with the writes a confirmation showed. Every ID is synthetic.
+ */
+import assert from 'node:assert/strict';
+import test from 'node:test';
+// The database module loads first; importing adminImportService before it trips the index import cycle.
+import '../../src/infrastructure/database';
+import type { ImportDraftV2 } from '../../src/administration/import/adminImportDraft';
+import {
+    IMPORT_MUSICBRAINZ_NAME_LIMITS, importMusicBrainzIdWrites, importMusicBrainzNameMap, mergeImportMusicBrainzNames, musicBrainzIdWriteFor, sameMusicBrainzIdWrites,
+    shownMusicBrainzIdWriteKey
+} from '../../src/administration/import/adminImportMusicBrainzIds';
+import { MUSICBRAINZ_SPECIAL_PURPOSE_ARTIST_IDS } from '../../src/utils/musicBrainzId';
+
+const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+const key = (n: number) => `00000009-0000-4000-a000-${String(n).padStart(12, '0')}`;
+const record = '0000000000000000000000c1', other = '0000000000000000000000c2';
+const draft = (artistIds: (string | null)[], labelId: string | null | undefined = null): ImportDraftV2 => ({
+    album: { title: 'Synthetic Album', artists: artistIds.map((musicBrainzId, index) => ({ key: key(index + 1), name: `Synthetic ${index + 1}`, role: 'primary', joinPhrase: null, musicBrainzId })),
+        label: labelId === undefined ? null : { name: 'Synthetic Label', musicBrainzId: labelId }, releaseDate: null, visibility: 'public' },
+    tracks: []
+});
+
+test('a new record keeps its entry\'s ID unless another record holds it, and never replaces anything', () => {
+    assert.deepEqual(musicBrainzIdWriteFor({ entryId: id(1), action: 'create-distinct', recordId: null, recordStoredId: null, exactHolderId: null }), { musicBrainzId: id(1), replaces: null });
+    // Creating a distinct record despite an exact-ID match records no ID.
+    assert.equal(musicBrainzIdWriteFor({ entryId: id(1), action: 'create-distinct', recordId: null, recordStoredId: null, exactHolderId: other }), null);
+    for (const action of ['create-distinct', 'reuse'] as const) assert.equal(musicBrainzIdWriteFor({ entryId: null, action, recordId: record, recordStoredId: id(2), exactHolderId: null }), null, action);
+    assert.equal(musicBrainzIdWriteFor({ entryId: null, action: 'replace', recordId: record, recordStoredId: id(2), exactHolderId: null }), 'invalid');
+});
+
+test('a reused record records the ID only while it holds none and no other record holds the ID; one holding another ID keeps it', () => {
+    const reuse = (recordStoredId: string | null, exactHolderId: string | null) => musicBrainzIdWriteFor({ entryId: id(1), action: 'reuse', recordId: record, recordStoredId, exactHolderId });
+    assert.deepEqual(reuse(null, null), { musicBrainzId: id(1), replaces: null });
+    assert.equal(reuse(id(1), record), null, 'the record already holds the ID');
+    assert.equal(reuse(null, other), null, 'reusing a different record despite an exact-ID match records no ID');
+    assert.equal(reuse(id(2), null), null, 'a record holding a different ID keeps it');
+    assert.equal(reuse(id(2), other), null);
+});
+
+test('replace needs a record holding another ID and no record holding the new one', () => {
+    const replace = (recordStoredId: string | null, exactHolderId: string | null) => musicBrainzIdWriteFor({ entryId: id(1), action: 'replace', recordId: record, recordStoredId, exactHolderId });
+    assert.deepEqual(replace(id(2), null), { musicBrainzId: id(1), replaces: id(2) });
+    assert.equal(replace(null, null), 'invalid');
+    assert.equal(replace(id(1), record), 'invalid');
+    assert.equal(replace(id(2), other), 'invalid');
+});
+
+test('the writes of frozen identities follow the draft: Artist entries in order, then the label', () => {
+    const value = draft([id(1), null, id(3)], id(9));
+    const writes = importMusicBrainzIdWrites({
+        artists: [{ entryKey: key(3), artistId: record, newArtist: false, candidateRevision: 'a'.repeat(64), musicBrainzIdWrite: { musicBrainzId: id(3), replaces: id(7) } },
+            { entryKey: key(1), artistId: other, newArtist: true, candidateRevision: null, musicBrainzIdWrite: { musicBrainzId: id(1), replaces: null } },
+            { entryKey: key(2), artistId: '0000000000000000000000c3', newArtist: true, candidateRevision: null, musicBrainzIdWrite: null }],
+        label: { organizationId: '0000000000000000000000c4', newOrganization: true, candidateRevision: null, musicBrainzIdWrite: { musicBrainzId: id(9), replaces: null } }
+    }, value);
+    assert.deepEqual(writes, [{ scope: 'artist', entryKey: key(1), musicBrainzId: id(1), replaces: null }, { scope: 'artist', entryKey: key(3), musicBrainzId: id(3), replaces: id(7) },
+        { scope: 'label', entryKey: null, musicBrainzId: id(9), replaces: null }]);
+    // An append's identities (no entry keys, no writes) and frozen identities from before MusicBrainz IDs write nothing.
+    assert.deepEqual(importMusicBrainzIdWrites({ artists: [{ entryKey: null, artistId: record, newArtist: false, candidateRevision: null }], label: null }, value), []);
+});
+
+test('a confirmation must show exactly the computed writes, in any order, each well formed', () => {
+    const writes = [{ scope: 'artist' as const, entryKey: key(1), musicBrainzId: id(1), replaces: null }, { scope: 'label' as const, entryKey: null, musicBrainzId: id(9), replaces: id(8) }];
+    assert.equal(sameMusicBrainzIdWrites([...writes].reverse(), writes), true);
+    assert.equal(sameMusicBrainzIdWrites([], []), true);
+    assert.equal(sameMusicBrainzIdWrites([writes[0]], writes), false);
+    assert.equal(sameMusicBrainzIdWrites([...writes, writes[0]], writes), false);
+    assert.equal(sameMusicBrainzIdWrites([writes[0], { ...writes[1], replaces: null }], writes), false);
+    for (const value of [null, [], 'x', { ...writes[0], extra: 1 }, { ...writes[0], scope: 'album' }, { ...writes[0], entryKey: null }, { ...writes[1], entryKey: key(1) },
+        { ...writes[0], entryKey: key(1).toUpperCase() }, { ...writes[0], musicBrainzId: '0000000A-0000-4000-8000-000000000001' }, { ...writes[0], musicBrainzId: MUSICBRAINZ_SPECIAL_PURPOSE_ARTIST_IDS[0] },
+        { ...writes[0], replaces: id(1) }, { ...writes[0], replaces: 'x' }, { scope: 'artist', entryKey: key(1), musicBrainzId: id(1) }]) {
+        assert.equal(shownMusicBrainzIdWriteKey(value), null, JSON.stringify(value));
+    }
+    assert.equal(sameMusicBrainzIdWrites([writes[0], { bad: true }], writes), false);
+});
+
+test('found names are kept only for carried IDs, cleaned, fold-deduplicated and bounded to 21 IDs of 32 names', () => {
+    const value = draft([id(1), id(2)], id(9));
+    const stored = [{ musicBrainzId: id(1), names: ['  Café ', 'CAFÉ', 'Second\u200bName', 'n'.repeat(201), 7, 'Alias'] }, { musicBrainzId: id(5), names: ['Not Carried'] },
+        { musicBrainzId: 'bad', names: ['x'] }, null, { musicBrainzId: id(9) }];
+    assert.deepEqual([...importMusicBrainzNameMap(stored, value)], [[id(1), ['Café', 'Alias']]]);
+    assert.deepEqual([...importMusicBrainzNameMap('malformed', value)], []);
+    // Stored names first, then newly found ones, deduplicated by fold; IDs the draft no longer carries drop out.
+    const merged = mergeImportMusicBrainzNames(stored, new Map([[id(1), ['alias', 'Third']], [id(9), ['Synthetic Label']], [id(5), ['Gone']]]), value);
+    assert.deepEqual(merged, [{ musicBrainzId: id(1), names: ['Café', 'Alias', 'Third'] }, { musicBrainzId: id(9), names: ['Synthetic Label'] }]);
+    const many = new Map([[id(1), Array.from({ length: 40 }, (_unused, index) => `Name ${index}`)]]);
+    assert.equal(mergeImportMusicBrainzNames([], many, value)[0].names.length, IMPORT_MUSICBRAINZ_NAME_LIMITS.names);
+    const wide = draft(Array.from({ length: 20 }, (_unused, index) => id(index + 1)), id(99));
+    const found = new Map<string, readonly string[]>([...Array.from({ length: 20 }, (_unused, index): [string, string[]] => [id(index + 1), [`A${index}`]]), [id(99), ['Label']]]);
+    assert.equal(mergeImportMusicBrainzNames([], found, wide).length, IMPORT_MUSICBRAINZ_NAME_LIMITS.ids);
+    assert.deepEqual(mergeImportMusicBrainzNames(stored, new Map(), draft([null], undefined)), []);
+});

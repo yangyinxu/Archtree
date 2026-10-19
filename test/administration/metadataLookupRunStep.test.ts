@@ -2,7 +2,7 @@
  * Internal
  *   Types: Client
  *   Functions: slot, mbid, tags, project, runOf, json, searchUrl, searchAnswer, releaseAnswer, clientOf, drive,
- *              sent, one, fixture
+ *              sent, aliasLookups, one, fixture, creditedAnswer, aliasAnswer
  *   Constants: guard, importId, actor, start, recorded, blueArchiveTag
  * Tests
  *   - fallback queries are sent together only when the searches before them found nothing; a skipped folder fallback spends no folder allowance
@@ -16,6 +16,9 @@
  *   - the bound reached with only fallbacks left keeps the comparison complete; a recording search with more hits than it returned is partial, while release-ID and ISRC lookups are complete
  *   - a request maps every failure for the stored step: a refused gate is busy, a 503/429 rate-limited, other source failures and errors unavailable, refused input skipped and a stop a shutdown
  *   - a throttled release lookup is retried within seconds as busy, and details that stay unavailable leave their candidates failed in a completed, partial run
+ *   - after the details, a run looks up the aliases of its credited artists and first label once each, never a placeholder, and ranks with them
+ *   - alias lookups are bounded to 16 per run, a source failure fails every remaining target and ranks at once without an attempt, and a record without aliases completes
+ *   - alias targets follow the ranking with the preselection first, each release's credits then its first label, each ID once, never a placeholder or an unfetched release, at most 16
  * @end-catalog */
 
 /**
@@ -40,12 +43,12 @@ import {
     METADATA_LOOKUP_JOB_LIMITS, METADATA_LOOKUP_LIMITS, MetadataLookupInputError, MetadataLookupSourceError, type MusicBrainzRelease
 } from '../../src/administration/lookup/lookupContract';
 import type { PlannedLookupQuery } from '../../src/administration/lookup/lookupQueryPlanner';
-import { performLookupStep, proceedLookupRun, type LookupAction, type LookupStepResult } from '../../src/administration/lookup/lookupRunStep';
+import { lookupAliasTargets, performLookupStep, proceedLookupRun, type LookupAction, type LookupStepResult } from '../../src/administration/lookup/lookupRunStep';
 import { lookupAnswersNeeded } from '../../src/administration/lookup/lookupValueApplication';
 import {
     createMusicBrainzClient, musicBrainzUrls, parseMusicBrainzRelease, type MusicBrainzClient, type MusicBrainzRecordingQuery, type MusicBrainzReleaseQuery
 } from '../../src/administration/lookup/musicBrainzClient';
-import { importLookupFileSet, planImportLookup, startLookupRun, type MetadataLookupRecord } from '../../src/administration/lookup/metadataLookupRecord';
+import { importLookupFileSet, planImportLookup, startLookupRun, type MetadataLookupRecord, type StoredLookupCandidate } from '../../src/administration/lookup/metadataLookupRecord';
 import {
     availableLookupConfiguration, fixtureTransport, hotelCaliforniaExchanges, immediateGate, loadLookupFixture, loadLookupFixtures, type LookupExchange
 } from '../support/metadataLookupFixtures';
@@ -101,8 +104,10 @@ async function drive(record: MetadataLookupRecord, doc: AdminImportDocument, cli
     }
     throw new Error('the run did not end');
 }
-const sent = (client: Client) => ({ searches: client.requests.filter(request => !/\/ws\/2\/release\/[0-9a-f-]{36}\?/.test(request.url)).length,
+/** Searches and release lookups sent; artist and label alias lookups are counted apart (`aliasLookups`). */
+const sent = (client: Client) => ({ searches: client.requests.filter(request => !/\/ws\/2\/(?:release|artist|label)\/[0-9a-f-]{36}\?/.test(request.url)).length,
     details: client.requests.filter(request => /\/ws\/2\/release\/[0-9a-f-]{36}\?/.test(request.url)).length });
+const aliasLookups = (client: Client) => client.requests.filter(request => /\/ws\/2\/(?:artist|label)\/[0-9a-f-]{36}\?/.test(request.url)).map(request => request.url);
 const one = (index: number) => tags({ album: 'Synthetic Album', albumArtists: ['Synthetic Ensemble'], durationMs: [200_000, 210_000][index] });
 
 test('fallback queries are sent together only when the searches before them found nothing; a skipped folder fallback spends no folder allowance', async () => {
@@ -372,7 +377,7 @@ test('the bound reached with only fallbacks left keeps the comparison complete; 
 test('a request maps every failure for the stored step: a refused gate is busy, a 503/429 rate-limited, other source failures and errors unavailable, refused input skipped and a stop a shutdown', async () => {
     const failing = (error: unknown): MusicBrainzClient => {
         const fail = async () => { throw error; };
-        return { searchReleases: fail, searchRecordings: fail, lookupRelease: fail, browseReleaseGroupReleases: fail, lookupIsrc: fail };
+        return { searchReleases: fail, searchRecordings: fail, lookupRelease: fail, browseReleaseGroupReleases: fail, lookupIsrc: fail, lookupAliases: fail };
     };
     const search: LookupAction = { kind: 'search', index: 0, query: { kind: 'musicBrainzReleaseSearch', query: { release: 'Synthetic Album' }, basis: 'albumText' } };
     const details: LookupAction = { kind: 'details', releaseId: mbid(1) };
@@ -387,6 +392,10 @@ test('a request maps every failure for the stored step: a refused gate is busy, 
         assert.deepEqual(await performLookupStep(failing(error), search, 'wait'), expected, String(error));
     }
     assert.deepEqual(await performLookupStep(failing(new MetadataLookupInputError('identifier')), details, 'wait'), { kind: 'refused', action: details });
+    // An alias lookup maps its failures the same way (the run then records that target as failed, never retrying it).
+    const aliases: LookupAction = { kind: 'aliases', entity: 'label', id: mbid(2) };
+    assert.deepEqual(await performLookupStep(failing(source('busy', 1000)), aliases, 'busy'), { kind: 'failed', failure: 'busy', retryAfterMs: 1000 });
+    assert.deepEqual(await performLookupStep(failing(new MetadataLookupInputError('identifier')), aliases, 'wait'), { kind: 'refused', action: aliases });
     // A query kind a later release stored is skipped rather than sent.
     const unknown = { kind: 'search', index: 0, query: { kind: 'itunesCollectionSearch', basis: 'albumText' } } as unknown as LookupAction;
     assert.deepEqual(await performLookupStep(failing(new Error('never sent')), unknown, 'wait'), { kind: 'refused', action: unknown });
@@ -413,4 +422,88 @@ test('a throttled release lookup is retried within seconds as busy, and details 
     assert.deepEqual([ended.state, ended.issue, ended.outcome, ended.candidates.map(candidate => candidate.details), ended.ranking!.disclosure.partialComparison, ended.ranking!.preselection],
         ['complete', 'sourceUnavailable', 'candidates', ['failed', 'failed'], true, null]);
     assert.deepEqual(sent(client), { searches: 2, details: 0 });
+});
+
+/** A release lookup answer crediting `credits` ([name, artist ID]) and the given labels ([name, label ID]). */
+const creditedAnswer = (id: string, credits: [string, string][], labels: [string, string][] = []) => json(musicBrainzUrls.release(id).href, {
+    id, title: 'Synthetic Album', 'artist-credit': credits.map(([name, artistId], index) => ({ name, joinphrase: index < credits.length - 1 ? ' & ' : '', artist: { id: artistId, name } })),
+    'label-info': labels.map(([name, labelId]) => ({ 'catalog-number': null, label: { id: labelId, name } })),
+    media: [{ position: 1, format: 'CD', tracks: [200_000, 210_000].map((length, index) => ({ position: index + 1, number: String(index + 1), title: `Synthetic Track ${index + 1}`, length, recording: { id: mbid(900 + index), length } })) }] });
+const aliasAnswer = (kind: 'artist' | 'label', id: string, names: string[]) => json((kind === 'artist' ? musicBrainzUrls.artistAliases(id) : musicBrainzUrls.labelAliases(id)).href,
+    { id, name: names[0], aliases: names.slice(1).map(name => ({ name, type: kind === 'artist' ? 'Artist name' : 'Label name', primary: null })) });
+
+test('after the details, a run looks up the aliases of its credited artists and first label once each, never a placeholder, and ranks with them', async () => {
+    const doc = project(2, index => tags({ album: 'Synthetic Album', albumArtists: ['シンセ'], durationMs: [200_000, 210_000][index] }));
+    const record = runOf(doc), queries = record.queries as { query: MusicBrainzReleaseQuery }[];
+    const client = clientOf([...queries.map(query => searchAnswer(query.query, [[mbid(1), 2]])),
+        creditedAnswer(mbid(1), [['Synthetic Lead', mbid(11)], ['Various Artists', '89ad4ac3-39f7-470e-963a-56509c546377'], ['Synthetic Second', mbid(12)]], [['Synthetic Label', mbid(21)], ['Second Label', mbid(22)]]),
+        aliasAnswer('artist', mbid(11), ['Synthetic Lead', 'シンセ']),
+        { url: musicBrainzUrls.artistAliases(mbid(12)).href, status: 404, headers: { 'content-type': 'application/json' }, bodyText: '{"error":"Not Found"}' }]);
+    const modes: string[] = [], done = await drive(record, doc, client, modes);
+    // The label's lookup has no recorded answer: it fails, is recorded as failed and never retried, and the run still completes.
+    assert.deepEqual(aliasLookups(client), [musicBrainzUrls.artistAliases(mbid(11)).href, musicBrainzUrls.artistAliases(mbid(12)).href, musicBrainzUrls.labelAliases(mbid(21)).href]);
+    assert.deepEqual(done.aliases, [{ kind: 'artist', id: mbid(11), state: 'fetched', names: ['Synthetic Lead', 'シンセ'] }, { kind: 'artist', id: mbid(12), state: 'missing', names: [] },
+        { kind: 'label', id: mbid(21), state: 'failed', names: [] }]);
+    assert.deepEqual([done.state, done.issue, done.phase, done.attempts, done.retryAt], ['complete', null, 'done', { musicbrainz: 0 }, null]);
+    assert.deepEqual(modes.slice(-3), ['wait', 'wait', 'wait']);
+    // The album-artist tag names the lead through an alias the run found, so the preselection is not flagged.
+    assert.deepEqual([done.ranking!.preselection?.basis, done.ranking!.preselection?.artistMismatch], ['onlyMatchingGroup', false]);
+    assert.deepEqual(done.ranking!.groups[0].proposal.artists.map(entry => entry.musicBrainzId), [mbid(11), mbid(12)]);
+});
+
+test('alias lookups are bounded to 16 per run, a source failure fails every remaining target and ranks at once without an attempt, and a record without aliases completes', async () => {
+    const doc = project(2, index => tags({ album: 'Synthetic Album', durationMs: [200_000, 210_000][index] }));
+    const record = runOf(doc), [query] = record.queries as { query: MusicBrainzReleaseQuery }[];
+    const credits = Array.from({ length: 20 }, (_unused, index) => [`Synthetic ${index}`, mbid(100 + index)] as [string, string]);
+    const client = clientOf([searchAnswer(query.query, [[mbid(1), 2]]), creditedAnswer(mbid(1), credits, [['Synthetic Label', mbid(200)]]),
+        ...credits.map(([name, id]) => aliasAnswer('artist', id, [name]))]);
+    const done = await drive(record, doc, client);
+    assert.equal(aliasLookups(client).length, METADATA_LOOKUP_JOB_LIMITS.aliasLookups);
+    assert.deepEqual([done.aliases!.length, done.aliases!.every(entry => entry.kind === 'artist' && entry.state === 'fetched'), done.state], [16, true, 'complete']);
+    // A source failure of an alias step (busy, throttled or unavailable) records every remaining target as failed and ranks in the
+    // same step, spending no attempt, so an outage is never asked 16 times; the fetched names so far still count.
+    const pending: MetadataLookupRecord = { ...done, state: 'running', phase: 'aliases', aliases: [{ kind: 'artist', id: mbid(99), state: 'fetched', names: ['Synthetic Alias'] },
+        { kind: 'artist', id: mbid(100), state: 'pending', names: [] }, { kind: 'artist', id: mbid(101), state: 'pending', names: [] }, { kind: 'label', id: mbid(200), state: 'pending', names: [] }] };
+    for (const failure of ['busy', 'rateLimited', 'unavailable'] as const) {
+        const failed = proceedLookupRun(pending, doc, { kind: 'failed', failure, retryAfterMs: 30_000 }, start);
+        assert.deepEqual([failed.next.state, failed.next.issue, failed.next.retryAt, failed.next.aliases!.map(entry => [entry.state, entry.names]), failed.next.attempts, failed.step.action],
+            ['complete', null, null, [['fetched', ['Synthetic Alias']], ['failed', []], ['failed', []], ['failed', []]], done.attempts, null], failure);
+    }
+    // A refused alias lookup (an identifier the source refuses) fails only its own target, and the run moves on to the next.
+    const refused = proceedLookupRun(pending, doc, { kind: 'refused', action: { kind: 'aliases', entity: 'artist', id: mbid(100) } }, start);
+    assert.deepEqual([refused.next.state, refused.next.aliases!.map(entry => entry.state), refused.step.action],
+        ['running', ['fetched', 'failed', 'pending', 'pending'], { kind: 'aliases', entity: 'artist', id: mbid(101) }]);
+    // A record stored mid-alias-phase by a release without the field completes at once; details that ended unavailable look up no aliases.
+    const { aliases: _aliases, ...legacy } = pending;
+    assert.equal(proceedLookupRun(legacy as MetadataLookupRecord, doc, null, start).next.state, 'complete');
+    // A request maps an alias lookup the same way, always waiting for its gate.
+    assert.deepEqual(await performLookupStep({ lookupAliases: async () => null } as unknown as MusicBrainzClient, { kind: 'aliases', entity: 'artist', id: mbid(1) }, 'busy'),
+        { kind: 'aliases', action: { kind: 'aliases', entity: 'artist', id: mbid(1) }, names: null });
+    let seen: string | undefined;
+    await performLookupStep({ lookupAliases: async (_kind: string, _id: string, options: { mode: string }) => { seen = options.mode; return { id: mbid(1), names: ['A'] }; } } as unknown as MusicBrainzClient,
+        { kind: 'aliases', entity: 'label', id: mbid(1) }, 'busy');
+    assert.equal(seen, 'wait');
+});
+
+test('alias targets follow the ranking with the preselection first, each release\'s credits then its first label, each ID once, never a placeholder or an unfetched release, at most 16', () => {
+    const variousArtists = '89ad4ac3-39f7-470e-963a-56509c546377', noLabel = '157afde4-4bf5-4039-8ad2-5a15acc85176';
+    const stored = (n: number, credits: [string, string][], labels: [string, string][], details: StoredLookupCandidate['details'] = 'fetched'): StoredLookupCandidate => {
+        const release = parseMusicBrainzRelease({ id: mbid(n), title: 'Synthetic Album', 'artist-credit': credits.map(([name, id], index) => ({ name, joinphrase: index < credits.length - 1 ? ' & ' : '', artist: { id, name } })),
+            'label-info': labels.map(([name, id]) => ({ 'catalog-number': null, label: { id, name } })), media: [] });
+        return { key: `musicbrainz:${mbid(n)}`, source: 'musicbrainz', releaseId: mbid(n), basis: 'albumText', summary: null, release: details === 'fetched' ? release : null, details };
+    };
+    // The first listed label is [no label]: no label of that release is looked up, as none is proposed.
+    const first = stored(1, [['Synthetic Lead', mbid(11)], ['Various Artists', variousArtists]], [['[no label]', noLabel], ['Later Label', mbid(29)]]);
+    const second = stored(2, [['Synthetic Second', mbid(12)], ['Synthetic Lead', mbid(11)]], [['Synthetic Label', mbid(21)], ['Other Label', mbid(22)]]);
+    const unfetched = stored(3, [['Unfetched', mbid(13)]], [], 'failed'), fourth = stored(4, [['Synthetic Fourth', mbid(14)]], []);
+    const ranking = { candidates: [second, fourth, first].map(candidate => ({ key: candidate.key })), preselection: { candidateKey: fourth.key } } as never;
+    const targets = lookupAliasTargets([first, second, unfetched, fourth], ranking);
+    assert.deepEqual(targets.map(target => [target.kind, target.id, target.state, target.names]), [['artist', mbid(14), 'pending', []], ['artist', mbid(12), 'pending', []],
+        ['artist', mbid(11), 'pending', []], ['label', mbid(21), 'pending', []]]);
+    // Without a ranking, the stored order; an artist and a label sharing an ID are two targets.
+    assert.deepEqual(lookupAliasTargets([stored(5, [['Shared', mbid(30)]], [['Shared', mbid(30)]])], null).map(target => `${target.kind}:${target.id}`), [`artist:${mbid(30)}`, `label:${mbid(30)}`]);
+    // A release crediting 20 artists and a label yields only the first 16 lookups.
+    const crowded = stored(6, Array.from({ length: 20 }, (_unused, index) => [`Synthetic ${index}`, mbid(100 + index)] as [string, string]), [['Synthetic Label', mbid(200)]]);
+    assert.deepEqual(lookupAliasTargets([crowded], null).map(target => target.id), Array.from({ length: METADATA_LOOKUP_JOB_LIMITS.aliasLookups }, (_unused, index) => mbid(100 + index)));
+    assert.deepEqual(lookupAliasTargets([unfetched], null), []);
 });

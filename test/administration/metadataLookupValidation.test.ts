@@ -23,6 +23,7 @@ import assert from 'node:assert/strict';
 import { after, test } from 'node:test';
 import { MetadataLookupInputError } from '../../src/administration/lookup/lookupContract';
 import { isPlaceholderCredit, lookupTermProblem } from '../../src/administration/lookup/lookupIdentifiers';
+import { MUSICBRAINZ_SPECIAL_PURPOSE_ARTIST_IDS, MUSICBRAINZ_SPECIAL_PURPOSE_LABEL_IDS } from '../../src/utils/musicBrainzId';
 import {
     LookupShapeError, array, boolean, date, decodeLookupJson, integer, object, oneOf, parseLookupDate, string, validateLookupShape, type LookupShape
 } from '../../src/administration/lookup/lookupResponseShape';
@@ -307,6 +308,8 @@ test('lookup terms refuse control, format and link-like text and placeholders ar
     }
     assert.equal(isPlaceholderCredit('Anything', '89AD4AC3-39F7-470E-963A-56509C546377'), true, 'Various Artists by MBID');
     assert.equal(isPlaceholderCredit(null, '157afde4-4bf5-4039-8ad2-5a15acc85176'), true, '[no label] by MBID');
-    for (const name of ['VARIOUS ARTISTS', ' va ', 'V.A.', '[Traditional]', '[anonymous]', 'Unknown Artist', `various${noBreakSpace}artists`]) assert.equal(isPlaceholderCredit(name), true, name);
+    for (const name of ['VARIOUS ARTISTS', ' va ', 'V.A.', '[Traditional]', '[anonymous]', 'Unknown Artist', `various${noBreakSpace}artists`, '[data]', '[Dialogue]', '[no artist]']) assert.equal(isPlaceholderCredit(name), true, name);
+    // Every documented special purpose artist and label is a placeholder by MBID, whatever its name.
+    for (const id of [...MUSICBRAINZ_SPECIAL_PURPOSE_ARTIST_IDS, ...MUSICBRAINZ_SPECIAL_PURPOSE_LABEL_IDS]) assert.equal(isPlaceholderCredit('Anything', id), true, id);
     for (const name of ['Various Artists Tribute', 'Vanessa', 'Eagles', '', null]) assert.equal(isPlaceholderCredit(name, mbid(9)), false, String(name));
 });

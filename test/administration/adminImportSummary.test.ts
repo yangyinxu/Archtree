@@ -224,4 +224,12 @@ test('the identity rows left to answer are the Album, each track not skipped and
     assert.equal(importIdentityAnswers(draft, [decision('album', 'reuse', { candidateId: id(70) })], []), 2);
     const view = importSummaryView(project(), null, { ...context(0), lookupAvailable: false, identityAnswers: 3 });
     assert.deepEqual([view.lookupAvailable, view.identityAnswers], [false, 3]);
+    // Reusing a record and replacing its MusicBrainz ID answers a row, and so does an exact-ID reuse the review preselected.
+    const withId = defaultDraftV2(manifest); withId.album.artists = [{ ...entry('Synthetic Lead'), musicBrainzId: '00000000-0000-4000-8000-000000000001' }];
+    withId.album.label = { name: 'Synthetic Records', musicBrainzId: '00000000-0000-4000-8000-000000000009' };
+    const replaced = decision('artist', 'replace', { entryKey: entry('x').key, boundName: 'Synthetic Lead', boundMusicBrainzId: '00000000-0000-4000-8000-000000000001', candidateId: id(71) });
+    const exact = decision('label', 'reuse', { boundName: 'Synthetic Records', boundMusicBrainzId: '00000000-0000-4000-8000-000000000009', candidateId: id(72), preselected: true });
+    assert.equal(importIdentityAnswers(withId, [...answered, replaced], [exact]), 0);
+    // A decision bound to another (or no) ID answers nothing for an entry that carries one.
+    assert.equal(importIdentityAnswers(withId, [...answered, { ...replaced, boundMusicBrainzId: null } as never], [exact]), 1);
 });

@@ -7,7 +7,7 @@
  *   Functions: isBlockingLookupState, importLookupFileSet, lookupStaleSlots, planImportLookup,
  *              lookupFileEvidence, lookupReportedTrackCount, mergeLookupCandidates, lookupHitsAdmitted,
  *              recordLookupDetails, rankLookupRecord, rankLookupWithinBudget, lookupRetryAt, lookupGateFor,
- *              automaticLookupOperationId, startLookupRun, refreshLookupGrant
+ *              automaticLookupOperationId, startLookupRun, lookupFetchedAliases, refreshLookupGrant
  * Internal
  *   Types: LookupSource, FoundLookupRelease
  *   Functions: sha256, manifestFiles, readyAsset, evidence, shared, names, tagEvidence, compactRelease,
@@ -27,7 +27,7 @@ import type { ImportAsset } from '../import/adminImportMediaTypes';
 import type { AdminImportDocument } from '../import/adminImportService';
 import { importAssetDurationEvidence, importTagsV2View } from '../import/adminImportTags';
 import type { ImportDraftPath } from '../import/adminImportValueState';
-import { METADATA_LOOKUP_JOB_LIMITS, type MusicBrainzRelease, type MusicBrainzReleaseSummary } from './lookupContract';
+import { METADATA_LOOKUP_JOB_LIMITS, type LookupEntityAliases, type MusicBrainzRelease, type MusicBrainzReleaseSummary } from './lookupContract';
 import { normalizeMusicBrainzId } from './lookupIdentifiers';
 import { planMetadataLookup, type LookupPlan, type LookupPlanInput, type PlannedLookupQuery } from './lookupQueryPlanner';
 import { lookupTrackCountPlausible, rankLookupCandidates, type LocalFileEvidence, type LookupPreselection, type RankedLookup } from './lookupRanking';
@@ -54,27 +54,38 @@ export type StoredLookupRanking = RankedLookup & { rankedAt: Date; files: LocalF
 export type LookupValueFlag = { path: ImportDraftPath; reason: 'characters' | 'length' | 'format' | 'size' | 'placeholder' };
 /** A value resting on the applied candidate, in the draft's stored form; a track value names its local file (manifest slot). */
 export type LookupAppliedValue = { path: ImportDraftPath; value: unknown; slotId: string | null };
-/** A candidate value that differs from the administrator's own: nothing is preselected until the administrator keeps one. */
-export type LookupConflict = { path: ImportDraftPath; lookup: unknown; slotId: string | null; answer: 'mine' | 'lookup' | null };
+/**
+ * A candidate value that differs from the administrator's own: nothing is preselected until the administrator keeps one.
+ * `musicBrainzId` marks a difference only in the MusicBrainz IDs of entries or the label whose names, roles and phrases agree.
+ */
+export type LookupConflict = { path: ImportDraftPath; lookup: unknown; slotId: string | null; answer: 'mine' | 'lookup' | null; musicBrainzId?: true };
 /**
  * The candidate (or none) applied to the import's draft and its evidence: who applied it and how (a preselection, an explicit choice
  * or none), the paths this application wrote, the values that rest on it, its unanswered or answered conflicts and the flagged values.
+ * `musicBrainzIds` are the IDs this application supplied that the draft carries after it (an entry by key, the label with entryKey
+ * null), which choosing another candidate or none removes again; absent on an application stored before MusicBrainz IDs.
  */
 export type LookupApplication = {
     run: number; candidateKey: string | null; releaseId: string | null;
     choice: 'preselected' | 'chosen' | 'none'; basis: LookupPreselection['basis'] | 'chosen' | null;
     actorId: string; operationId: string | null; at: Date;
     paths: ImportDraftPath[]; values: LookupAppliedValue[]; conflicts: LookupConflict[]; flagged: LookupValueFlag[];
+    musicBrainzIds?: { entryKey: string | null; musicBrainzId: string }[];
 };
 export type MetadataLookupRecord = {
     _id: ObjectId; run: number; state: MetadataLookupState; issue: MetadataLookupIssue | null;
     outcome: 'candidates' | 'noRelease' | 'noQuery' | null;
     operationId: string; actorId: string; grantSource: MetadataLookupGrantSource; grantExpiresAt: Date;
-    automatic: boolean; input: MetadataLookupInput; queries: PlannedLookupQuery[]; queryIndex: number; phase: 'search' | 'details' | 'done';
+    automatic: boolean; input: MetadataLookupInput; queries: PlannedLookupQuery[]; queryIndex: number; phase: 'search' | 'details' | 'aliases' | 'done';
     fileSetDigest: string; files: LookupFileIdentity[];
     /** Failed MusicBrainz attempts of this run; each one schedules an automatic retry until METADATA_LOOKUP_JOB_LIMITS.retryDelaysMs runs out. */
     attempts: { musicbrainz: number }; retryAt: Date | null;
     candidates: StoredLookupCandidate[]; ranking: StoredLookupRanking | null;
+    /**
+     * The credited artists and labels whose aliases this run looks up after its details (at most 16, lookupRunStep.ts); absent on a
+     * record from an earlier release, which completes without them.
+     */
+    aliases?: LookupEntityAliases[];
     /**
      * Whether every release this run's searches offered that could match was compared: false once a search reported more hits
      * than it returned, the candidate bound left out a release it offered whose reported track count can equal the number of files
@@ -264,14 +275,15 @@ export function recordLookupDetails(candidates: readonly StoredLookupCandidate[]
 /**
  * Ranks the stored candidates against the import's current files; an incomplete candidate is never ranked or preselected, and
  * a comparison whose searches were not complete, or with an incomplete candidate that could match, never preselects its only
- * matching group (a release that no longer exists cannot match).
+ * matching group (a release that no longer exists cannot match). `aliases` (fetched artist aliases by ID) let a credited artist
+ * agree with an artist tag through an alias.
  */
 export function rankLookupRecord(candidates: readonly StoredLookupCandidate[], doc: Pick<AdminImportDocument, '_id' | 'manifest' | 'media' | 'draft'>, now: Date,
-    options: { searchComplete: boolean }): StoredLookupRanking {
+    options: { searchComplete: boolean; aliases?: ReadonlyMap<string, readonly string[]> }): StoredLookupRanking {
     const files = lookupFileEvidence(doc);
     const ranked = rankLookupCandidates(candidates.map(candidate => ({ key: candidate.key, source: candidate.source, releaseId: candidate.releaseId,
         summary: candidate.summary, release: candidate.release, reportedTrackCount: reportedCount(candidate.reportedTrackCount), missing: candidate.details === 'missing' })), files,
-        { searchComplete: options.searchComplete });
+        { searchComplete: options.searchComplete, aliases: options.aliases });
     return { ...ranked, rankedAt: now, files };
 }
 
@@ -282,15 +294,15 @@ export function rankLookupRecord(candidates: readonly StoredLookupCandidate[], d
  * Every ranking gets the run's `searchComplete`; an omitted release makes the comparison partial too.
  */
 export function rankLookupWithinBudget(candidates: readonly StoredLookupCandidate[], doc: Pick<AdminImportDocument, '_id' | 'manifest' | 'media' | 'draft'>, now: Date,
-    options: { searchComplete: boolean; budget?: number }): { candidates: StoredLookupCandidate[]; ranking: StoredLookupRanking } {
-    const budget = options.budget ?? METADATA_LOOKUP_JOB_LIMITS.recordBytes, searchComplete = options.searchComplete;
-    let kept = [...candidates], ranking = rankLookupRecord(kept, doc, now, { searchComplete });
+    options: { searchComplete: boolean; budget?: number; aliases?: ReadonlyMap<string, readonly string[]> }): { candidates: StoredLookupCandidate[]; ranking: StoredLookupRanking } {
+    const budget = options.budget ?? METADATA_LOOKUP_JOB_LIMITS.recordBytes, searchComplete = options.searchComplete, aliases = options.aliases;
+    let kept = [...candidates], ranking = rankLookupRecord(kept, doc, now, { searchComplete, aliases });
     const largest = kept.map((candidate, index) => ({ index, bytes: candidate.release ? candidateBytes([candidate]) : 0 }))
         .filter(entry => entry.bytes > 0).sort((left, right) => right.bytes - left.bytes || left.index - right.index);
     for (const { index } of largest) {
         if (Buffer.byteLength(JSON.stringify({ candidates: kept, ranking })) <= budget) break;
         kept = kept.map((candidate, at): StoredLookupCandidate => at === index ? { ...candidate, release: null, details: 'omitted' } : candidate);
-        ranking = rankLookupRecord(kept, doc, now, { searchComplete });
+        ranking = rankLookupRecord(kept, doc, now, { searchComplete, aliases });
     }
     return { candidates: kept, ranking };
 }
@@ -346,11 +358,21 @@ export function startLookupRun(previous: MetadataLookupRecord | null, init: {
         automatic: init.automatic, input: { trigger: init.input.trigger, submitted: init.input.submitted ? { ...init.input.submitted } : null },
         queries: init.queries.map(query => structuredClone(query)), queryIndex: 0, phase: searching ? 'search' : 'done',
         fileSetDigest: init.fileSet.digest, files: init.fileSet.files.map(file => ({ ...file })), attempts: { musicbrainz: 0 }, retryAt: null,
-        candidates: [], ranking: null, searchComplete: true, applied: previous?.applied ?? null, staleSlotIds: [],
+        candidates: [], ranking: null, aliases: [], searchComplete: true, applied: previous?.applied ?? null, staleSlotIds: [],
         automaticRuns: (Number.isSafeInteger(previous?.automaticRuns) ? previous!.automaticRuns : 0) + (init.automatic ? 1 : 0),
         folderUsed: previous?.folderUsed === true,
         leaseOwner: null, leaseUntil: null, createdAt: now, updatedAt: now, completedAt: searching ? null : now
     };
+}
+
+/** The names of a record's fetched alias lookups by MusicBrainz ID; a record without aliases (or a malformed entry) gives none. */
+export function lookupFetchedAliases(record: Pick<MetadataLookupRecord, 'aliases'> | null | undefined): Map<string, string[]> {
+    const map = new Map<string, string[]>();
+    for (const entry of Array.isArray(record?.aliases) ? record!.aliases : []) {
+        const id = entry && typeof entry === 'object' && entry.state === 'fetched' && Array.isArray(entry.names) ? normalizeMusicBrainzId(entry.id) : null;
+        if (id && !map.has(id)) map.set(id, entry.names.filter((name): name is string => typeof name === 'string').slice(0, METADATA_LOOKUP_JOB_LIMITS.aliasNames));
+    }
+    return map;
 }
 
 /** Moves a record's grant to another administrator's action (choosing a candidate); the run itself is unchanged. */

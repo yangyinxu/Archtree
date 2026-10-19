@@ -44,7 +44,7 @@ An existing correct index is reused. Indexes and duplicate records are never
 automatically dropped or rewritten.
 
 After verification, startup upserts the static receipt named by
-`requiredIndexRevision` (now `required-indexes-v10-metadata-lookups`) in
+`requiredIndexRevision` (now `required-indexes-v11-musicbrainz-ids`) in
 `schemaMigrations`. It records only the revision and application time. A new
 required constraint must receive a new reviewed revision. A partially failed
 attempt is retried using the same additive definitions; a prior receipt is never
@@ -257,7 +257,7 @@ flight and releases the lease, so the next claim resumes at the stored step. It
 is idle while imports are disabled. The required index
 `admin_import_lookup_worker` (`{ state: 1, leaseUntil: 1, retryAt: 1 }`) also
 creates the collection at startup, so no transaction ever creates it, and
-`requiredIndexRevision` is now `required-indexes-v10-metadata-lookups`. The
+`requiredIndexRevision` was then `required-indexes-v10-metadata-lookups`. The
 application account needs insert/update on `adminImportLookups`. Import
 documents gain `lookupGate`, a never-projected fence written in the same
 transaction as every lookup run started, every lookup state change and every
@@ -270,6 +270,42 @@ the record (and, for the worker and a re-rank, the gate). Automatic writes
 bump only `valueRevision`; a choice or an answer also takes its receipt's
 `revision`. File-tag automation reads the record's applied values in its own
 transaction, so it never replaces them; no index is added.
+
+MusicBrainz IDs add two required unique partial indexes,
+`artist_musicbrainz_id` on `artists` and `organization_musicbrainz_id` on
+`organizations`, each `{ musicBrainzId: 1 }` with the partial filter
+`{ musicBrainzId: { $type: 'string' } }`, so any number of records without an ID
+coexist and an Artist and an Organization may share one ID.
+`requiredIndexRevision` is now `required-indexes-v11-musicbrainz-ids`. Existing
+duplicate string IDs fail startup closed
+(`DatabaseIndexInitializationError('artists:musicBrainzId')` or the
+`organizations` equivalent); nothing is dropped. Before deploying, list
+duplicates with an aggregate such as `[{ $match: { musicBrainzId: { $type:
+'string' } } }, { $group: { _id: '$musicBrainzId', count: { $sum: 1 } } },
+{ $match: { count: { $gt: 1 } } }]` on each collection and clear the extra IDs
+through the admin catalog editor. A write that would duplicate an ID fails
+inside its transaction (see [MusicBrainz IDs](catalog.md#musicbrainz-ids)): an
+Admin catalog edit returns `409 ADMIN_CATALOG_MUSICBRAINZ_ID_IN_USE`, and an
+import commit becomes needs attention (`identityConflict`). Once IDs are
+stored, the release before them is the rollback floor (see
+[Rollback floors](../features/admin-workbench.md#rollback-floors)); it keeps
+the indexes (harmless: its writers never set the field, and listener DTOs were
+already allowlisted) and ignores the alias phase of lookup records (they complete
+through the details-done branch). It ignores `musicBrainzIdWrite` and
+`musicBrainzNames`: it publishes a format-3 approval that creates records, or
+reuses records without an ID, without writing any ID, while one that reuses an
+Artist or Organization holding an ID (an exact-ID reuse, a kept ID or a
+replace) becomes needs attention there, because its reviewed revisions include
+the ID and that release never preselects by ID; roll back only while no such
+publication is preparing or in needs attention (the Rollback floors bullet has
+the `mongosh` check), or cancel them first. It refuses the `musicBrainzIds`
+this Web sends with its approvals as invalid input, and an unanswered Artist or
+label conflict whose lookup value carries IDs is not shown there but still
+holds publication (choose the candidate again or none to clear it). Decisions
+saved while rolled back for an entry or label carrying an ID bind none after
+rolling forward and are cleared. The lookup worker sends at most 16 extra
+artist or label alias lookups per run, through the same deployment-wide
+MusicBrainz gate, and a source failure ends that alias phase at once.
 
 Playback Audio/Video GETs that briefly overlap an older stream may wait up to two
 seconds for an existing admission slot. The pending pool is bounded to 32 per

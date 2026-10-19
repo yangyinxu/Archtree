@@ -4,7 +4,7 @@
  *   Classes: Storage
  *   Functions: mutation, code, wav, file, db, imports, stored, row, entry, entries, counts, reviewed, decided,
  *              reuse, candidate, publishNow, substitute, candidateRecord, onlyAnswer, fenceRevision,
- *              otherAlbumTrack
+ *              otherAlbumTrack, mbid, identified, keyOf
  *   Constants: actor, other, listener, by, releaseDate
  *   Variables: harness
  * Tests
@@ -42,6 +42,18 @@
  *   - a publication held by an identity conflict before or after its copy resumes and commits its frozen identities once the candidate is gone, copying once
  *   - a same-name record too malformed to be a candidate is no candidate yet holds its row: the approval requires a fresh review, and an explicit answer publishes
  *   - a recheck whose candidate reads exceed their time budget needs attention as a catalog conflict, copying nothing, and a resume then publishes
+ *   - new Artists and a new label record their entries' MusicBrainz IDs, and an approval must list exactly those writes
+ *   - the record holding an entry's MusicBrainz ID is preselected as reuse and credited; a create despite it, or reusing another record, records no ID
+ *   - reusing a record that holds another ID keeps it unless replace is chosen, and replace is refused while another record holds the new ID
+ *   - two publications recording one MusicBrainz ID: one commits, the other needs attention with identityConflict and mints nothing, for an explicit and a preselected create
+ *   - an append records no MusicBrainz ID even when the draft's entries carry them
+ *   - replace is stale unless the record holds a keepable ID other than the entry's; a saved replace binds the entry's ID and counts as a reuse
+ *   - a reused record that changes after approval is a catalog conflict that records no ID
+ *   - a reused record storing an unkeepable value (a placeholder's ID) holds no ID: the approval lists recording the entry's, and the commit replaces the stored value
+ *   - two entries carrying one MusicBrainz ID cannot both record it: the approval asks for review again and writes nothing
+ *   - a holder that is not ready is no candidate, so its ID surfaces at commit as identityConflict minting nothing; once it is gone a resume records the ID
+ *   - the worker rechecks alias candidates from the names the approval froze; cancelling permits a fresh review that reuses the alias record and records the ID
+ *   - a malformed record holding an entry's ID, or named as an alias of the label's, is unavailable and holds its row; a create despite that holder needs attention at commit
  * @end-catalog */
 
 /**
@@ -816,4 +828,278 @@ test('a recheck whose candidate reads exceed their time budget needs attention a
     assert.deepEqual(await counts(), { artists: 0, organizations: 0, albums: 0, audioTracks: 0, imageAssets: 0 });
     await resumeAdminImportPublication(by, item.id, intent.operationId, storage);
     assert.deepEqual([(await getAdminImport(by, item.id)).item.publication, storage.copies], ['complete', 1]);
+});
+
+// MusicBrainz IDs. Lookup alone writes IDs onto entries; these tests set them on the stored draft as lookup would.
+const mbid = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+/** Stores MusicBrainz IDs on the reviewed draft's entries (by name) and label, then reads the project as the editor shows it. */
+async function identified(item: AdminImportDetailV2, ids: Record<string, string>) {
+    const draft = (await stored(item.id)).draft as ImportDraftV2;
+    draft.album.artists = draft.album.artists.map(value => ({ ...value, musicBrainzId: ids[value.name] ?? null }));
+    if (draft.album.label) draft.album.label = { ...draft.album.label, musicBrainzId: ids.label ?? null };
+    await imports().updateOne({ _id: new ObjectId(item.id) }, { $set: { draft } });
+    return (await getAdminImport(by, item.id)).item;
+}
+const keyOf = (item: AdminImportDetailV2, name: string) => item.draft.album.artists.find(value => value.name === name)!.key;
+
+test('new Artists and a new label record their entries\' MusicBrainz IDs, and an approval must list exactly those writes', async () => {
+    const storage = new Storage(), item = await identified(await reviewed(storage), { 'Lorem Ensemble': mbid(1), label: mbid(9) });
+    const writes = [{ scope: 'artist', entryKey: keyOf(item, 'Lorem Ensemble'), musicBrainzId: mbid(1), replaces: null }, { scope: 'label', entryKey: null, musicBrainzId: mbid(9), replaces: null }];
+    // An approval that did not show the IDs, or showed others, records nothing and writes nothing.
+    for (const musicBrainzIds of [undefined, [], [writes[0]], [{ ...writes[1], replaces: mbid(8) }, writes[0]]]) {
+        await assert.rejects(publishAdminImport(by, item.id, approvalBody(item, musicBrainzIds ? { musicBrainzIds } : {})), code('ADMIN_IMPORT_REVIEW_REQUIRED'), JSON.stringify(musicBrainzIds));
+        assert.equal((await stored(item.id)).media!.publication, undefined);
+    }
+    await publishAdminImport(by, item.id, approvalBody(item, { musicBrainzIds: [...writes].reverse() }));
+    const publication = (await stored(item.id)).media!.publication!;
+    assert.deepEqual([publication.artists!.map(value => value.musicBrainzIdWrite ?? null), publication.label!.musicBrainzIdWrite], [[{ musicBrainzId: mbid(1), replaces: null }, null, null], { musicBrainzId: mbid(9), replaces: null }]);
+    await runAdminImportPublicationOnce(storage, item.id);
+    assert.equal((await stored(item.id)).media!.publication!.state, 'complete');
+    assert.deepEqual([(await db().collection('artists').findOne({ name: 'Lorem Ensemble' }))!.musicBrainzId, (await db().collection('artists').findOne({ name: 'Ipsum Quartet' }))!.musicBrainzId,
+        (await db().collection('organizations').findOne({ name: 'Sit Records' }))!.musicBrainzId], [mbid(1), undefined, mbid(9)]);
+});
+
+test('the record holding an entry\'s MusicBrainz ID is preselected as reuse and credited; a create despite it, or reusing another record, records no ID', async () => {
+    const storage = new Storage(), holder = new ObjectId();
+    await db().collection('artists').insertOne({ _id: holder, name: 'Lorem Ensemble (JP)', albumIds: [], visibility: 'public', lifecycleStatus: 'ready', musicBrainzId: mbid(1) });
+    const item = await identified(await reviewed(storage), { 'Lorem Ensemble': mbid(1) });
+    const listed = await adminImportDuplicateCandidates(by, item.id);
+    assert.deepEqual(listed.items.filter(value => value.kind === 'artist').map(value => [value.id, value.match, value.musicBrainzId]), [[holder.toHexString(), 'musicBrainzId', mbid(1)]]);
+    assert.equal((await getAdminImportLookup(by, item.id)).summary.identityAnswers, 0);
+    await publishAdminImport(by, item.id, approvalBody(item, { musicBrainzIds: [] }));
+    const frozen = (await stored(item.id)).media!.publication!;
+    assert.deepEqual((frozen.decisions as ImportDecisionV2[]).filter(value => value.scope === 'artist').map(value => [value.action, value.candidateId, value.preselected, value.boundMusicBrainzId]),
+        [['reuse', holder.toHexString(), true, mbid(1)], ['create-distinct', null, true, null], ['create-distinct', null, true, null]]);
+    await runAdminImportPublicationOnce(storage, item.id);
+    const album = await db().collection('albums').findOne({ title: 'Amet Collection' });
+    assert.equal(album!.credits[0].subjectId, holder.toHexString());
+    assert.equal(await db().collection('artists').countDocuments({ musicBrainzId: mbid(1) }), 1);
+    // Another import creating a distinct Artist despite the exact-ID match, or reusing a different record, records no ID.
+    const plain = await candidateRecord('artist', 'Ipsum Quartet');
+    const second = await identified(await reviewed(storage), { 'Lorem Ensemble': mbid(1), 'Ipsum Quartet': mbid(2) });
+    // The first import created an Ipsum Quartet too: reuse the plain record this test made.
+    const plainCandidate = (await adminImportDuplicateCandidates(by, second.id)).items.find(value => value.id === plain.toHexString())!;
+    const decidedSecond = await decided(second, { 'Ipsum Quartet': reuse(plainCandidate) });
+    await db().collection('artists').updateOne({ _id: plain }, { $set: { musicBrainzId: mbid(70) } });
+    // The reused record changed since review (it gained an ID), so the approval is stale and writes nothing.
+    await assert.rejects(publishAdminImport(by, second.id, approvalBody(decidedSecond, { musicBrainzIds: [] })), code('ADMIN_IMPORT_DUPLICATE_STALE'));
+    await db().collection('artists').updateOne({ _id: plain }, { $unset: { musicBrainzId: '' } });
+    // Reusing a record without an ID records it; the explicit distinct Lorem gets none.
+    await publishAdminImport(by, second.id, approvalBody(decidedSecond, { musicBrainzIds: [{ scope: 'artist', entryKey: keyOf(second, 'Ipsum Quartet'), musicBrainzId: mbid(2), replaces: null }] }));
+    await runAdminImportPublicationOnce(storage, second.id);
+    assert.equal((await stored(second.id)).media!.publication!.state, 'complete');
+    assert.equal((await db().collection('artists').findOne({ _id: plain }))!.musicBrainzId, mbid(2));
+    assert.equal(await db().collection('artists').countDocuments({ musicBrainzId: mbid(1) }), 1);
+});
+
+test('reusing a record that holds another ID keeps it unless replace is chosen, and replace is refused while another record holds the new ID', async () => {
+    const storage = new Storage(), ipsum = await candidateRecord('artist', 'Ipsum Quartet'), sit = await candidateRecord('organization', 'Sit Records');
+    await db().collection('artists').updateOne({ _id: ipsum }, { $set: { musicBrainzId: mbid(77) } });
+    await db().collection('organizations').updateOne({ _id: sit }, { $set: { musicBrainzId: mbid(55) } });
+    const item = await identified(await reviewed(storage), { 'Ipsum Quartet': mbid(2), label: mbid(9) });
+    const ipsumCandidate = await candidate(item, 'artist', 'Ipsum Quartet'), sitCandidate = await candidate(item, 'organization', 'Sit Records');
+    assert.deepEqual([ipsumCandidate.musicBrainzId, sitCandidate.musicBrainzId], [mbid(77), mbid(55)]);
+    // replace needs an entry carrying an ID and a record holding a different one.
+    await assert.rejects(decided(item, { 'Lorem Ensemble': { action: 'replace', candidateId: ipsumCandidate.id, candidateRevision: ipsumCandidate.revision } }), code('ADMIN_IMPORT_INVALID_INPUT'));
+    await assert.rejects(decided(item, { album: { action: 'replace', candidateId: ipsumCandidate.id, candidateRevision: ipsumCandidate.revision } }), code('ADMIN_IMPORT_INVALID_INPUT'));
+    const chosen = await decided(item, { 'Ipsum Quartet': reuse(ipsumCandidate), label: { action: 'replace', candidateId: sitCandidate.id, candidateRevision: sitCandidate.revision } });
+    assert.deepEqual(chosen.decisions.find(value => value.scope === 'label')!.action, 'replace');
+    // Another Organization taking the label's ID since review makes the replace impossible: a fresh review, writing nothing.
+    const taker = await candidateRecord('organization', 'Elsewhere Records');
+    await db().collection('organizations').updateOne({ _id: taker }, { $set: { musicBrainzId: mbid(9) } });
+    await assert.rejects(publishAdminImport(by, item.id, approvalBody(chosen, { musicBrainzIds: [{ scope: 'label', entryKey: null, musicBrainzId: mbid(9), replaces: mbid(55) }] })), code('ADMIN_IMPORT_REVIEW_REQUIRED'));
+    assert.equal((await stored(item.id)).media!.publication, undefined);
+    await db().collection('organizations').deleteOne({ _id: taker });
+    await publishAdminImport(by, item.id, approvalBody(chosen, { musicBrainzIds: [{ scope: 'label', entryKey: null, musicBrainzId: mbid(9), replaces: mbid(55) }] }));
+    await runAdminImportPublicationOnce(storage, item.id);
+    assert.equal((await stored(item.id)).media!.publication!.state, 'complete');
+    assert.deepEqual([(await db().collection('artists').findOne({ _id: ipsum }))!.musicBrainzId, (await db().collection('organizations').findOne({ _id: sit }))!.musicBrainzId], [mbid(77), mbid(9)]);
+});
+
+test('two publications recording one MusicBrainz ID: one commits, the other needs attention with identityConflict and mints nothing, for an explicit and a preselected create', async () => {
+    for (const explicit of [true, false]) {
+        for (const name of ['adminAlbumImports', 'artists', 'organizations', 'albums', 'audioTracks']) await db().collection(name).deleteMany({});
+        const storage = new Storage();
+        // Different names, so the second import has no name candidate: only the shared ID collides.
+        const first = await identified(await reviewed(storage), { 'Lorem Ensemble': mbid(1) });
+        const second = await identified(await reviewed(storage, draft => { draft.album.artists[0].name = 'Lorem Ensemble Alt'; draft.album.label = null; }), { 'Lorem Ensemble Alt': mbid(1) });
+        const firstShown = explicit ? await decided(first) : first, secondShown = explicit ? await decided(second) : second;
+        await publishAdminImport(by, first.id, approvalBody(firstShown, { musicBrainzIds: [{ scope: 'artist', entryKey: keyOf(first, 'Lorem Ensemble'), musicBrainzId: mbid(1), replaces: null }] }));
+        await publishAdminImport(by, second.id, approvalBody(secondShown, { musicBrainzIds: [{ scope: 'artist', entryKey: keyOf(second, 'Lorem Ensemble Alt'), musicBrainzId: mbid(1), replaces: null }] }));
+        await runAdminImportPublicationOnce(storage, first.id);
+        const before = await counts();
+        await runAdminImportPublicationOnce(storage, second.id);
+        const held = (await stored(second.id)).media!.publication!;
+        assert.deepEqual([(await stored(first.id)).media!.publication!.state, held.state, held.issue], ['complete', 'needsAttention', 'identityConflict'], String(explicit));
+        assert.deepEqual(await counts(), before, String(explicit));
+        assert.equal(await db().collection('artists').countDocuments({ musicBrainzId: mbid(1) }), 1);
+        // Cancelling it permits a fresh review.
+        await cancelAdminImportPublication(by, second.id, { ...mutation((await stored(second.id)).revision), publicationOperationId: held.operationId }, storage);
+        assert.equal((await stored(second.id)).media!.publication!.state, 'cancelled');
+    }
+});
+
+test('an append records no MusicBrainz ID even when the draft\'s entries carry them', async () => {
+    const storage = new Storage(), first = await publishNow(storage, await decided(await reviewed(storage)));
+    const albumId = first.published!.albumId, target = await db().collection('albums').findOne({ _id: new ObjectId(albumId) });
+    const item = await identified(await reviewed(storage, draft => { draft.tracks[0].title = 'Appended Track'; }), { 'Lorem Ensemble': mbid(3), label: mbid(4) });
+    const album = (await adminImportDuplicateCandidates(by, item.id)).items.find(value => value.kind === 'album' && value.id === albumId)!;
+    const appended = await decided(item, { album: reuse(album), [item.draft.tracks[0].slotId]: { action: 'create-distinct' } });
+    await publishAdminImport(by, item.id, approvalBody(appended, { musicBrainzIds: 'created' }));
+    await runAdminImportPublicationOnce(storage, item.id);
+    assert.equal((await stored(item.id)).media!.publication!.state, 'complete');
+    assert.equal(await db().collection('artists').countDocuments({ musicBrainzId: { $exists: true } }) + await db().collection('organizations').countDocuments({ musicBrainzId: { $exists: true } }), 0);
+    assert.ok(target);
+});
+
+test('replace is stale unless the record holds a keepable ID other than the entry\'s; a saved replace binds the entry\'s ID and counts as a reuse', async () => {
+    const storage = new Storage(), ipsum = await candidateRecord('artist', 'Ipsum Quartet'), sit = await candidateRecord('organization', 'Sit Records');
+    await db().collection('organizations').updateOne({ _id: sit }, { $set: { musicBrainzId: mbid(9) } });
+    const item = await identified(await reviewed(storage), { 'Ipsum Quartet': mbid(2), label: mbid(9) });
+    const replace = (target: ImportDuplicateCandidate): Choice => ({ action: 'replace', candidateId: target.id, candidateRevision: target.revision });
+    const before = await stored(item.id);
+    // A record without an ID, or one already holding the entry's own ID, has nothing to replace.
+    await assert.rejects(decided(item, { 'Ipsum Quartet': replace(await candidate(item, 'artist', 'Ipsum Quartet')) }), code('ADMIN_IMPORT_DUPLICATE_STALE'));
+    await assert.rejects(decided(item, { label: replace(await candidate(item, 'organization', 'Sit Records')) }), code('ADMIN_IMPORT_DUPLICATE_STALE'));
+    // A stored placeholder identity is no keepable ID, so the candidate names none and replacing it is stale too.
+    await db().collection('artists').updateOne({ _id: ipsum }, { $set: { musicBrainzId: '89ad4ac3-39f7-470e-963a-56509c546377' } });
+    const placeholder = await candidate(item, 'artist', 'Ipsum Quartet');
+    assert.equal(placeholder.musicBrainzId, undefined);
+    await assert.rejects(decided(item, { 'Ipsum Quartet': replace(placeholder) }), code('ADMIN_IMPORT_DUPLICATE_STALE'));
+    // Once the record holds another ID, a replace at an older revision is stale like a reuse, and at the listed one it is saved.
+    await db().collection('artists').updateOne({ _id: ipsum }, { $set: { musicBrainzId: mbid(70) } });
+    await assert.rejects(decided(item, { 'Ipsum Quartet': replace(placeholder) }), code('ADMIN_IMPORT_DUPLICATE_STALE'));
+    assert.deepEqual(await stored(item.id), before, 'a refused decision set writes nothing');
+    const holding = await candidate(item, 'artist', 'Ipsum Quartet');
+    assert.equal(holding.musicBrainzId, mbid(70));
+    // Two entries cannot reuse one Artist, whether either reuses it plainly or replacing its ID.
+    await assert.rejects(decided(item, { 'Lorem Ensemble': reuse(holding), 'Ipsum Quartet': replace(holding) }), code('ADMIN_IMPORT_INVALID_INPUT'));
+    const saved = await decided(item, { 'Ipsum Quartet': replace(holding) });
+    assert.equal(saved.decisions.find(value => value.entryKey === keyOf(item, 'Ipsum Quartet'))!.action, 'replace');
+    assert.equal('boundMusicBrainzId' in saved.decisions.find(value => value.entryKey === keyOf(item, 'Ipsum Quartet'))!, false, 'the bound ID is never a DTO field');
+    const kept = ((await stored(item.id)).decisions as ImportDecisionV2[]).filter(value => value.scope === 'artist' || value.scope === 'label');
+    assert.deepEqual(kept.map(value => [value.entryKey ?? value.scope, value.action, value.boundMusicBrainzId]), [[keyOf(item, 'Lorem Ensemble'), 'create-distinct', null],
+        [keyOf(item, 'Ipsum Quartet'), 'replace', mbid(2)], [keyOf(item, 'Dolor Soloist'), 'create-distinct', null], ['label', 'create-distinct', mbid(9)]]);
+});
+
+test('a reused record that changes after approval is a catalog conflict that records no ID', async () => {
+    for (const change of ['renamed', 'given another ID'] as const) {
+        for (const name of ['artists', 'organizations', 'albums', 'audioTracks']) await db().collection(name).deleteMany({});
+        const storage = new Storage(), ipsum = await candidateRecord('artist', 'Ipsum Quartet');
+        const item = await identified(await reviewed(storage), { 'Ipsum Quartet': mbid(2) });
+        const chosen = await decided(item, { 'Ipsum Quartet': reuse(await candidate(item, 'artist', 'Ipsum Quartet')) });
+        await publishAdminImport(by, item.id, approvalBody(chosen, { musicBrainzIds: [{ scope: 'artist', entryKey: keyOf(item, 'Ipsum Quartet'), musicBrainzId: mbid(2), replaces: null }] }));
+        assert.deepEqual((await stored(item.id)).media!.publication!.artists![1].musicBrainzIdWrite, { musicBrainzId: mbid(2), replaces: null }, change);
+        storage.afterCopy = async () => {
+            await db().collection('artists').updateOne({ _id: ipsum }, { $set: change === 'renamed' ? { name: 'Ipsum Quartet (corrected)' } : { musicBrainzId: mbid(71) } });
+        };
+        await runAdminImportPublicationOnce(storage, item.id); storage.afterCopy = undefined;
+        const held = (await stored(item.id)).media!.publication!;
+        assert.deepEqual([held.state, held.issue], ['needsAttention', 'catalogConflict'], change);
+        assert.deepEqual(await counts(), { artists: 1, organizations: 0, albums: 0, audioTracks: 0, imageAssets: 0 }, change);
+        assert.equal((await db().collection('artists').findOne({ _id: ipsum }))!.musicBrainzId, change === 'renamed' ? undefined : mbid(71), change);
+        assert.equal(await db().collection('artists').countDocuments({ musicBrainzId: mbid(2) }), 0, change);
+    }
+});
+
+test('a reused record storing an unkeepable value (a placeholder\'s ID) holds no ID: the approval lists recording the entry\'s, and the commit replaces the stored value', async () => {
+    const storage = new Storage(), ipsum = await candidateRecord('artist', 'Ipsum Quartet'), variousArtists = '89ad4ac3-39f7-470e-963a-56509c546377';
+    await db().collection('artists').updateOne({ _id: ipsum }, { $set: { musicBrainzId: variousArtists } });
+    const item = await identified(await reviewed(storage), { 'Ipsum Quartet': mbid(2) });
+    const listed = await candidate(item, 'artist', 'Ipsum Quartet');
+    assert.equal(listed.musicBrainzId, undefined);
+    const chosen = await decided(item, { 'Ipsum Quartet': reuse(listed) }), write = { scope: 'artist', entryKey: keyOf(item, 'Ipsum Quartet'), musicBrainzId: mbid(2), replaces: null };
+    await publishAdminImport(by, item.id, approvalBody(chosen, { musicBrainzIds: [write] }));
+    assert.deepEqual((await stored(item.id)).media!.publication!.artists!.find(value => value.artistId === ipsum.toHexString())!.musicBrainzIdWrite, { musicBrainzId: mbid(2), replaces: null });
+    await runAdminImportPublicationOnce(storage, item.id);
+    assert.equal((await stored(item.id)).media!.publication!.state, 'complete');
+    assert.equal((await db().collection('artists').findOne({ _id: ipsum }))!.musicBrainzId, mbid(2));
+});
+
+test('two entries carrying one MusicBrainz ID cannot both record it: the approval asks for review again and writes nothing', async () => {
+    const storage = new Storage(), item = await identified(await reviewed(storage), { 'Lorem Ensemble': mbid(1), 'Ipsum Quartet': mbid(1) });
+    const before = await stored(item.id), writes = ['Lorem Ensemble', 'Ipsum Quartet'].map(name => ({ scope: 'artist', entryKey: keyOf(item, name), musicBrainzId: mbid(1), replaces: null }));
+    await assert.rejects(publishAdminImport(by, item.id, approvalBody(await decided(item), { musicBrainzIds: writes })), code('ADMIN_IMPORT_REVIEW_REQUIRED'));
+    const after = await stored(item.id);
+    assert.deepEqual([after.media!.publication, after.draft], [undefined, before.draft]);
+});
+
+test('a holder that is not ready is no candidate, so its ID surfaces at commit as identityConflict minting nothing; once it is gone a resume records the ID', async () => {
+    const storage = new Storage(), departing = new ObjectId();
+    await db().collection('artists').insertOne({ _id: departing, name: 'Departing Artist', albumIds: [], visibility: 'public', lifecycleStatus: 'deleting', musicBrainzId: mbid(1) });
+    const item = await identified(await reviewed(storage), { 'Lorem Ensemble': mbid(1) });
+    assert.equal((await adminImportDuplicateCandidates(by, item.id)).items.some(value => value.id === departing.toHexString()), false);
+    // Lorem Ensemble is preselected as a new Artist recording the ID, as the confirmation lists it.
+    const intent = approvalBody(item, { musicBrainzIds: [{ scope: 'artist', entryKey: keyOf(item, 'Lorem Ensemble'), musicBrainzId: mbid(1), replaces: null }] });
+    await publishAdminImport(by, item.id, intent);
+    const before = await counts();
+    await runAdminImportPublicationOnce(storage, item.id);
+    const held = (await stored(item.id)).media!.publication!;
+    assert.deepEqual([held.state, held.issue, held.tracks[0].state, storage.copies], ['needsAttention', 'identityConflict', 'ready', 1]);
+    assert.deepEqual(await counts(), before);
+    // Once the holder's deletion finishes, resuming commits the frozen identities, copies nothing again and records the ID.
+    await db().collection('artists').deleteOne({ _id: departing });
+    await resumeAdminImportPublication(by, item.id, intent.operationId, storage);
+    assert.deepEqual([(await stored(item.id)).media!.publication!.state, storage.copies], ['complete', 1]);
+    assert.equal((await db().collection('artists').findOne({ name: 'Lorem Ensemble' }))!.musicBrainzId, mbid(1));
+});
+
+test('the worker rechecks alias candidates from the names the approval froze; cancelling permits a fresh review that reuses the alias record and records the ID', async () => {
+    const storage = new Storage(), names = [{ musicBrainzId: mbid(1), names: ['Lorem Ensemble', 'ロレム・アンサンブル'] }];
+    const reviewedItem = await identified(await reviewed(storage), { 'Lorem Ensemble': mbid(1) });
+    await imports().updateOne({ _id: new ObjectId(reviewedItem.id) }, { $set: { musicBrainzNames: names } });
+    const item = (await getAdminImport(by, reviewedItem.id)).item, write = { scope: 'artist', entryKey: keyOf(item, 'Lorem Ensemble'), musicBrainzId: mbid(1), replaces: null };
+    await publishAdminImport(by, item.id, approvalBody(item, { musicBrainzIds: [write] }));
+    assert.deepEqual((await stored(item.id)).media!.publication!.musicBrainzNames, names);
+    // The project's own names no longer list the alias, but the recheck compares what the approval compared.
+    await imports().updateOne({ _id: new ObjectId(item.id) }, { $unset: { musicBrainzNames: '' } });
+    const alias = await candidateRecord('artist', 'ロレム・アンサンブル'), before = await counts();
+    await runAdminImportPublicationOnce(storage, item.id);
+    const held = (await stored(item.id)).media!.publication!;
+    assert.deepEqual([held.state, held.issue, storage.copies], ['needsAttention', 'identityConflict', 0]);
+    assert.deepEqual(await counts(), before);
+    const cancelled = await cancelAdminImportPublication(by, item.id, { ...mutation((await stored(item.id)).revision), publicationOperationId: held.operationId }, storage);
+    assert.equal(cancelled.item.publication, 'cancelled');
+    // A fresh review lists the alias record, so the entry needs an answer; reusing that record (which holds no ID) records the ID.
+    await imports().updateOne({ _id: new ObjectId(item.id) }, { $set: { musicBrainzNames: names } });
+    await assert.rejects(publishAdminImport(by, item.id, approvalBody(cancelled.item, { musicBrainzIds: [write] })), code('ADMIN_IMPORT_REVIEW_REQUIRED'));
+    const listed = await candidate(cancelled.item, 'artist', 'ロレム・アンサンブル');
+    assert.deepEqual([listed.id, listed.match, listed.aliasOf], [alias.toHexString(), 'alias', mbid(1)]);
+    const answered = await onlyAnswer(cancelled.item, { 'Lorem Ensemble': reuse(listed) });
+    await publishAdminImport(by, item.id, approvalBody(answered, { musicBrainzIds: [write] }));
+    await runAdminImportPublicationOnce(storage, item.id);
+    assert.equal((await stored(item.id)).media!.publication!.state, 'complete');
+    assert.equal((await db().collection('artists').findOne({ _id: alias }))!.musicBrainzId, mbid(1));
+    assert.equal((await db().collection('albums').findOne({ title: 'Amet Collection' }))!.credits[0].subjectId, alias.toHexString());
+});
+
+test('a malformed record holding an entry\'s ID, or named as an alias of the label\'s, is unavailable and holds its row; a create despite that holder needs attention at commit', async () => {
+    const storage = new Storage(), holder = new ObjectId();
+    await db().collection('artists').insertOne({ _id: holder, name: 'Lorem Ensemble (JP)', albumIds: [], visibility: 'unlisted', lifecycleStatus: 'ready', musicBrainzId: mbid(1) });
+    await db().collection('organizations').insertOne({ _id: new ObjectId(), name: 'シット・レコード', organizationType: 'label', visibility: 'unlisted', lifecycleStatus: 'ready' });
+    const item = await identified(await reviewed(storage), { 'Lorem Ensemble': mbid(1), label: mbid(9) });
+    await imports().updateOne({ _id: new ObjectId(item.id) }, { $set: { musicBrainzNames: [{ musicBrainzId: mbid(9), names: ['Sit Records', 'シット・レコード'] }] } });
+    const listed = await adminImportDuplicateCandidates(by, item.id);
+    assert.deepEqual([listed.items, listed.unavailable], [[], [{ kind: 'artist', label: 'Lorem Ensemble' }, { kind: 'organization', label: 'Sit Records' }]]);
+    const before = await stored(item.id);
+    await assert.rejects(publishAdminImport(by, item.id, approvalBody(item, { musicBrainzIds: 'created' })), code('ADMIN_IMPORT_REVIEW_REQUIRED'));
+    assert.deepEqual(await stored(item.id), before);
+    // Answered as new records, both keep their IDs in the plan; the malformed holder still keeps Lorem's, so the commit refuses it.
+    const answered = await onlyAnswer(item, { 'Lorem Ensemble': {}, label: {} });
+    await publishAdminImport(by, item.id, approvalBody(answered, { musicBrainzIds: 'created' }));
+    const counted = await counts();
+    await runAdminImportPublicationOnce(storage, item.id);
+    const held = (await stored(item.id)).media!.publication!;
+    assert.deepEqual([held.state, held.issue], ['needsAttention', 'identityConflict']);
+    assert.deepEqual(await counts(), counted);
+    // Cancelling, then dropping the entry's ID (always allowed), clears its decision; the fresh review publishes without that ID.
+    const cancelled = await cancelAdminImportPublication(by, item.id, { ...mutation((await stored(item.id)).revision), publicationOperationId: held.operationId }, storage);
+    const dropped = (await editImportDraft(by, item.id, cancelled.item, draft => { draft.album.artists[0].musicBrainzId = null; })).item;
+    assert.equal(dropped.decisions.some(value => value.entryKey === keyOf(dropped, 'Lorem Ensemble')), false);
+    assert.deepEqual((await adminImportDuplicateCandidates(by, item.id)).unavailable, [{ kind: 'organization', label: 'Sit Records' }]);
+    await publishAdminImport(by, item.id, approvalBody(dropped, { musicBrainzIds: 'created' }));
+    await runAdminImportPublicationOnce(storage, item.id);
+    assert.equal((await stored(item.id)).media!.publication!.state, 'complete');
+    assert.deepEqual([(await db().collection('artists').findOne({ name: 'Lorem Ensemble' }))!.musicBrainzId, (await db().collection('artists').findOne({ _id: holder }))!.musicBrainzId,
+        (await db().collection('organizations').findOne({ name: 'Sit Records' }))!.musicBrainzId], [undefined, mbid(1), mbid(9)]);
 });

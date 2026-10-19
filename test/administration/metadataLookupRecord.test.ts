@@ -43,7 +43,7 @@ import type { AdminImportDocument } from '../../src/administration/import/adminI
 import { METADATA_LOOKUP_JOB_LIMITS, type MusicBrainzRelease } from '../../src/administration/lookup/lookupContract';
 import {
     automaticLookupOperationId, importLookupFileSet, isBlockingLookupState, lookupFileEvidence, lookupGateFor, lookupHitsAdmitted, lookupReportedTrackCount, lookupRetryAt,
-    lookupStaleSlots, mergeLookupCandidates, planImportLookup, rankLookupRecord, rankLookupWithinBudget, recordLookupDetails, refreshLookupGrant, startLookupRun,
+    lookupFetchedAliases, lookupStaleSlots, mergeLookupCandidates, planImportLookup, rankLookupRecord, rankLookupWithinBudget, recordLookupDetails, refreshLookupGrant, startLookupRun,
     type MetadataLookupRecord, type MetadataLookupState, type StoredLookupCandidate
 } from '../../src/administration/lookup/metadataLookupRecord';
 import { lookupTrackCountPlausible } from '../../src/administration/lookup/lookupRanking';
@@ -374,7 +374,14 @@ test('a new run replaces the previous results and carries only the automatic cou
         actorId: '0000000000000000000000e1', operationId: null, at: now, paths: ['album.title'], values: [{ path: 'album.title', value: 'Synthetic Album', slotId: null }], conflicts: [], flagged: [] };
     const previous: MetadataLookupRecord = { ...first, state: 'complete', candidates: mergeLookupCandidates([], [{ releaseId: releaseId(1) }], 'albumText'), staleSlotIds: [slotA], applied,
         attempts: { musicbrainz: 2 }, queryIndex: 1, folderUsed: true, searchComplete: false };
-    const second = startLookupRun(previous, { ...init, automatic: false, grantSource: 'submit', queries: [], input: { trigger: 'submitted', submitted: { kind: 'album', text: 'x' } } });
+    // A run starts with no alias lookups; a previous run's aliases never carry over.
+    assert.deepEqual(first.aliases, []);
+    const second = startLookupRun({ ...previous, aliases: [{ kind: 'artist', id: releaseId(9), state: 'fetched', names: ['Old'] }] },
+        { ...init, automatic: false, grantSource: 'submit', queries: [], input: { trigger: 'submitted', submitted: { kind: 'album', text: 'x' } } });
+    assert.deepEqual(second.aliases, []);
+    assert.deepEqual([...lookupFetchedAliases({ aliases: [{ kind: 'artist', id: releaseId(9), state: 'fetched', names: ['A', 7 as never] }, { kind: 'label', id: releaseId(8), state: 'failed', names: ['B'] },
+        { kind: 'artist', id: 'bad', state: 'fetched', names: ['C'] }, null as never] })], [[releaseId(9), ['A']]]);
+    assert.deepEqual([...lookupFetchedAliases({}), ...lookupFetchedAliases(null)], []);
     assert.deepEqual([second.run, second.state, second.phase, second.outcome, second.completedAt, second.automaticRuns, second.folderUsed, second.applied, second.candidates, second.staleSlotIds, second.attempts, second.queryIndex,
         second.searchComplete], [2, 'complete', 'done', 'noQuery', now, 1, true, applied, [], [], { musicbrainz: 0 }, 0, true]);
     const later = new Date(now.getTime() + 1000), granted = refreshLookupGrant(first, '0000000000000000000000e2', 'choose', later);

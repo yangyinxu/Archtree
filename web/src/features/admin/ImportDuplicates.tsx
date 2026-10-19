@@ -15,17 +15,19 @@ import { useAdminAccess, useAdminText } from './AdminAccess';
 import { adminRequest, duplicateEditsKey, importPath, type DecisionEdits, type ImportDecision, type ImportDetail, type ImportDraftV2 } from './adminApi';
 import { adminWorkspace } from './adminWorkspace';
 import { staleDecisionEdits } from './importApproval';
-import { candidatesSchema, duplicateFileSlots, identityPreselections, sameName, type ImportCandidate } from './importIdentity';
+import { candidatesSchema, duplicateFileSlots, identityPreselections, rowCandidates, sameName, type ImportCandidate } from './importIdentity';
 import styles from './adminStyles';
 
-/** One decision row: each Artist entry (by key), the label, the Album and each track. */
-interface DecisionRow { scope: ImportDecision['scope']; slotId: string | null; entryKey: string | null; kind: ImportCandidate['kind']; name: string; text: string }
+/** One decision row: each Artist entry (by key), the label, the Album and each track; an entry or the label may carry a MusicBrainz ID. */
+interface DecisionRow { scope: ImportDecision['scope']; slotId: string | null; entryKey: string | null; kind: ImportCandidate['kind']; name: string; text: string; musicBrainzId: string | null }
 const sameRow = (decision: Pick<ImportDecision, 'scope' | 'slotId' | 'entryKey'>, row: DecisionRow) => decision.scope === row.scope && decision.slotId === row.slotId && decision.entryKey === row.entryKey;
 const rowKey = (row: DecisionRow) => `${row.scope}:${row.slotId}:${row.entryKey}`;
 
 /**
  * Candidate names are evidence, never a unique identity or an automatic reuse decision. Candidates load when Review opens, and
- * Find matches reads them again. A row without an explicit decision that the review preselects (identityPreselections) is
+ * Find matches reads them again. An entry or the label carrying a MusicBrainz ID also lists the record holding it and records
+ * named as lookup found for it; reusing a record that holds a different ID keeps that ID, unless the administrator chooses to
+ * replace it, offered only while no listed record holds the entry's ID. A row without an explicit decision that the review preselects (identityPreselections) is
  * collapsed and needs no answer; a file whose bytes match a MediaTrack outside the append target is flagged and never collapsed;
  * any other row needs an explicit choice. An explicit choice always wins, and its empty choice returns to the preselection. Each
  * Artist entry and the label need their own decision, and two entries cannot reuse one Artist; an append needs none for them, so
@@ -53,10 +55,11 @@ export function ImportDuplicates({ item, disabled, onSave }: { item: ImportDetai
   });
   const { artists, label, title } = item.draft.album;
   const rows: DecisionRow[] = [
-    ...artists.map(entry => ({ scope: 'artist' as const, slotId: null, entryKey: entry.key, kind: 'artist' as const, name: entry.name, text: `${t('duplicates.artist')} · ${entry.name} · ${sharedText(`catalog.credit.${entry.role}` as MessageKey)}` })),
-    ...(label ? [{ scope: 'label' as const, slotId: null, entryKey: null, kind: 'organization' as const, name: label.name, text: `${t('duplicates.label')} · ${label.name}` }] : []),
-    { scope: 'album' as const, slotId: null, entryKey: null, kind: 'album' as const, name: title, text: `${t('duplicates.album')} · ${title || t('common.untitled')}` },
-    ...item.draft.tracks.map(track => ({ scope: 'track' as const, slotId: track.slotId, entryKey: null, kind: 'track' as const, name: track.title, text: `${t('duplicates.track')} · ${track.title || t('common.untitled')}` }))
+    ...artists.map(entry => ({ scope: 'artist' as const, slotId: null, entryKey: entry.key, kind: 'artist' as const, name: entry.name, musicBrainzId: entry.musicBrainzId,
+      text: `${t('duplicates.artist')} · ${entry.name} · ${sharedText(`catalog.credit.${entry.role}` as MessageKey)}` })),
+    ...(label ? [{ scope: 'label' as const, slotId: null, entryKey: null, kind: 'organization' as const, name: label.name, musicBrainzId: label.musicBrainzId, text: `${t('duplicates.label')} · ${label.name}` }] : []),
+    { scope: 'album' as const, slotId: null, entryKey: null, kind: 'album' as const, name: title, musicBrainzId: null, text: `${t('duplicates.album')} · ${title || t('common.untitled')}` },
+    ...item.draft.tracks.map(track => ({ scope: 'track' as const, slotId: track.slotId, entryKey: null, kind: 'track' as const, name: track.title, musicBrainzId: null, text: `${t('duplicates.track')} · ${track.title || t('common.untitled')}` }))
   ];
   // Only decisions on a current row are shown or saved; a removed or renamed entry's decision was already cleared by the server.
   const decisions = (edits?.decisions ?? item.decisions).filter(decision => rows.some(row => sameRow(decision, row)));
@@ -74,9 +77,10 @@ export function ImportDuplicates({ item, disabled, onSave }: { item: ImportDetai
   const decide = (row: DecisionRow, value: string, candidates: ImportCandidate[], collapses: boolean) => {
     if (!decisions.some(decision => sameRow(decision, row)) || (!value && collapses)) refocus.current = rowKey(row);
     const others = decisions.filter(decision => !sameRow(decision, row));
-    const candidate = candidates.find(item => item.id === value);
+    // `replace:<id>` reuses that record and replaces the MusicBrainz ID it holds with the row's.
+    const replacing = value.startsWith('replace:'), candidate = candidates.find(item => item.id === (replacing ? value.slice(8) : value));
     const next: ImportDecision[] = value ? [...others, { scope: row.scope, slotId: row.slotId, entryKey: row.entryKey, boundName: row.scope === 'artist' || row.scope === 'label' ? row.name : null,
-      action: candidate ? 'reuse' : value as 'skip' | 'create-distinct', candidateId: candidate?.id ?? null, candidateRevision: candidate?.revision ?? null }] : others;
+      action: candidate ? replacing ? 'replace' : 'reuse' : value as 'skip' | 'create-distinct', candidateId: candidate?.id ?? null, candidateRevision: candidate?.revision ?? null }] : others;
     const buffer: DecisionEdits = { revision: edits?.revision ?? item.revision, decisions: next };
     setEdits(buffer); adminWorkspace.retain(key, buffer, access);
   };
@@ -89,9 +93,13 @@ export function ImportDuplicates({ item, disabled, onSave }: { item: ImportDetai
       {rows.map((row, index) => {
         const current = decisions.find(decision => sameRow(decision, row));
         // A verified item lists only the files its bytes match, so a title match is read from its label; each item is listed once.
-        const candidates = query.data.items.filter(candidate => candidate.kind === row.kind && ((candidate.match === 'sha256' && candidate.matchedSlotIds.includes(row.slotId ?? '')) || sameName(candidate.label, row.name)));
+        const candidates = row.kind === 'artist' || row.kind === 'organization' ? rowCandidates(row.kind, row.name, row.musicBrainzId, query.data.items)
+          : query.data.items.filter(candidate => candidate.kind === row.kind && ((candidate.match === 'sha256' && candidate.matchedSlotIds.includes(row.slotId ?? '')) || sameName(candidate.label, row.name)));
         // Another entry's reuse already names this Artist, and two entries cannot reuse one Artist.
-        const taken = new Set(row.scope === 'artist' ? decisions.filter(decision => decision.scope === 'artist' && decision.action === 'reuse' && !sameRow(decision, row)).map(decision => decision.candidateId) : []);
+        const taken = new Set(row.scope === 'artist' ? decisions.filter(decision => decision.scope === 'artist' && (decision.action === 'reuse' || decision.action === 'replace') && !sameRow(decision, row)).map(decision => decision.candidateId) : []);
+        // A record holding a different MusicBrainz ID keeps it when reused; replacing it is offered while no listed record holds the row's ID.
+        const keepsId = (candidate: ImportCandidate) => row.musicBrainzId !== null && candidate.musicBrainzId !== undefined && candidate.musicBrainzId !== row.musicBrainzId;
+        const holderListed = row.musicBrainzId !== null && candidates.some(candidate => candidate.match === 'musicBrainzId' && candidate.musicBrainzId === row.musicBrainzId);
         const notApplied = append && (row.scope === 'artist' || row.scope === 'label');
         const preselection = current ? undefined : preselected.find(decision => sameRow(decision, row)), duplicate = row.slotId !== null && flagged.has(row.slotId);
         // The empty choice keeps the preselection: the row's own, or the one it returns to once its answer is cleared.
@@ -99,17 +107,22 @@ export function ImportDuplicates({ item, disabled, onSave }: { item: ImportDetai
         const body = <><label className={styles.field}>
           {row.text}
           <select className={styles.input} disabled={disabled} aria-label={`${index + 1} · ${t('duplicates.decision')}`} data-row={rowKey(row)}
-            value={current?.action === 'reuse' ? current.candidateId ?? '' : current?.action ?? ''}
+            value={current?.action === 'reuse' ? current.candidateId ?? '' : current?.action === 'replace' ? `replace:${current.candidateId}` : current?.action ?? ''}
             onChange={event => decide(row, event.target.value, candidates, Boolean(kept) && !duplicate)}>
             <option value="">{t(kept ? 'duplicates.keep_preselected' : 'duplicates.undecided')}</option>
             <option value="create-distinct">{t('duplicates.distinct')}</option>
             {row.scope === 'track' && <option value="skip">{t('duplicates.skip')}</option>}
-            {candidates.map(candidate => <option value={candidate.id} key={candidate.id} disabled={taken.has(candidate.id)}>{t('duplicates.reuse')} · {candidate.label} · {t(`duplicates.${candidate.match}`)} · {t(`field.${candidate.visibility}`)} · {candidate.id.slice(-6)}</option>)}
+            {candidates.map(candidate => <option value={candidate.id} key={candidate.id} disabled={taken.has(candidate.id)}>{[t('duplicates.reuse'), candidate.label, t(`duplicates.${candidate.match}`), t(`field.${candidate.visibility}`),
+              keepsId(candidate) && t('duplicates.keeps_id', { id: candidate.musicBrainzId! }), candidate.id.slice(-6)].filter(Boolean).join(' · ')}</option>)}
+            {!holderListed && candidates.filter(keepsId).map(candidate => <option value={`replace:${candidate.id}`} key={`replace:${candidate.id}`} disabled={taken.has(candidate.id)}>
+              {t('duplicates.replace_id', { name: candidate.label, previous: candidate.musicBrainzId!, id: row.musicBrainzId! })} · {candidate.id.slice(-6)}</option>)}
           </select>
         </label>{duplicate && <p className={styles.muted}>{t('duplicates.possible_duplicate')}</p>}
         {candidates.map(candidate => <p key={candidate.id}><Link className={styles.itemLink} to={`/admin/catalog/${candidate.kind === 'track' ? 'audioTrack' : candidate.kind}/${candidate.id}`}>{candidate.label}</Link> · {t(`duplicates.${candidate.match}`)} · {t(`field.${candidate.visibility}`)}</p>)}</>;
         // A preselected row needs no answer and stays collapsed until opened; a flagged file never collapses.
-        const summary = preselection?.action === 'reuse' ? t('duplicates.preselected_reuse', { name: candidates.find(candidate => candidate.id === preselection.candidateId)?.label ?? '' }) : t('duplicates.preselected_new');
+        const reused = preselection?.action === 'reuse' ? candidates.find(candidate => candidate.id === preselection.candidateId) : undefined;
+        const summary = reused ? t(reused.match === 'musicBrainzId' && (row.scope === 'artist' || row.scope === 'label') ? 'duplicates.preselected_reuse_id' : 'duplicates.preselected_reuse', { name: reused.label })
+          : preselection?.action === 'reuse' ? t('duplicates.preselected_reuse', { name: '' }) : t('duplicates.preselected_new');
         return <div key={rowKey(row)}>{notApplied ? <p className={styles.field}>{row.text}<span className={styles.muted}>{t('duplicates.not_applied')}</span></p>
           : preselection && !duplicate ? <details><summary data-row={rowKey(row)}>{row.text} · {summary}</summary>{body}</details> : body}</div>;
       })}

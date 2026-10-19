@@ -1744,6 +1744,13 @@
       ],
       "variables": {}
     },
+    "admin.catalog.musicbrainz_id_help": {
+      "description": "Administrator catalog editor: help under the MusicBrainz ID field of an Artist or Organization.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.catalog.no_credits": {
       "description": "An explicitly empty canonical Credit list.",
       "delivery": [
@@ -2024,6 +2031,13 @@
     },
     "admin.common.lookup_unavailable": {
       "description": "Administrator workbench: refusal: metadata lookup is not available on this server.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.common.musicbrainz_id_in_use": {
+      "description": "Administrator catalog editor: the edit was refused because another record of the same kind already keeps this MusicBrainz ID.",
       "delivery": [
         "runtime"
       ],
@@ -2661,6 +2675,13 @@
       ],
       "variables": {}
     },
+    "admin.duplicates.alias": {
+      "description": "Administrator import Review: a candidate named as a MusicBrainz alias that metadata lookup found for the entry's or label's ID.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.duplicates.artist": {
       "description": "Artist",
       "delivery": [
@@ -2703,8 +2724,24 @@
       ],
       "variables": {}
     },
+    "admin.duplicates.keeps_id": {
+      "description": "Administrator import Review: a reuse option for a record that holds a different MusicBrainz ID, which reusing keeps.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "id": "string"
+      }
+    },
     "admin.duplicates.label": {
       "description": "Administrator workbench: identity decision row for the draft label.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.duplicates.music_brainz_id": {
+      "description": "Administrator import Review: a candidate that holds the MusicBrainz ID the entry or label carries.",
       "delivery": [
         "runtime"
       ],
@@ -2745,6 +2782,26 @@
       ],
       "variables": {
         "name": "string"
+      }
+    },
+    "admin.duplicates.preselected_reuse_id": {
+      "description": "Administrator import Review: summary of a collapsed Artist or label row preselected to reuse the named existing record that holds the same MusicBrainz ID.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "name": "string"
+      }
+    },
+    "admin.duplicates.replace_id": {
+      "description": "Administrator import Review: the option to reuse the named record and replace the MusicBrainz ID it holds with the entry's.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "id": "string",
+        "name": "string",
+        "previous": "string"
       }
     },
     "admin.duplicates.reuse": {
@@ -3025,6 +3082,13 @@
     },
     "admin.field.month": {
       "description": "Administrator workbench: field month.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.field.music_brainz_id": {
+      "description": "Administrator catalog editor: the MusicBrainz ID an Artist or Organization keeps as private import provenance.",
       "delivery": [
         "runtime"
       ],
@@ -3405,6 +3469,15 @@
         "runtime"
       ],
       "variables": {}
+    },
+    "admin.lookup.musicbrainz_id": {
+      "description": "Administrator workbench: candidate chooser, the MusicBrainz ID an entry or label of a group credits, shown when groups differ only by ID.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "id": "string"
+      }
     },
     "admin.lookup.name": {
       "description": "Administrator workbench: import summary name box, the name field.",
@@ -4076,6 +4149,25 @@
       ],
       "variables": {}
     },
+    "admin.publication.records_id": {
+      "description": "Administrator workbench: publication confirmation, the MusicBrainz ID the publication records on this row's record.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "id": "string"
+      }
+    },
+    "admin.publication.replaces_id": {
+      "description": "Administrator workbench: publication confirmation, the MusicBrainz ID the publication puts in place of the one the reused record holds.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "id": "string",
+        "previous": "string"
+      }
+    },
     "admin.publication.resume": {
       "description": "Resume confirmed publication",
       "delivery": [
@@ -4552,6 +4644,15 @@
         "runtime"
       ],
       "variables": {}
+    },
+    "admin.summary.musicbrainz_id_conflict": {
+      "description": "Administrator import summary: heading of a lookup conflict whose values agree in names, roles and phrases but differ in MusicBrainz IDs.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "field": "string"
+      }
     },
     "admin.summary.needs_answers": {
       "description": "Administrator workbench: import summary, number of lookup questions to answer before Publish.",

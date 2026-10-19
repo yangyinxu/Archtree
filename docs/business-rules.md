@@ -849,6 +849,14 @@ The wire protocol and operational bounds are documented in
   listeners only through server bylines. A stored join phrase that fails
   validation is presented as `, ` and never hides the Credit list or changes
   Follow eligibility.
+- An Artist or Organization may keep one MusicBrainz ID as private provenance
+  for administrator imports. Only administrators see it; it is never part of
+  listener, legacy public, Search, Follow, Page or social responses, and no
+  listener behavior depends on it. No two Artists, and no two Organizations,
+  share one, and placeholder identities such as Various Artists, [unknown] or
+  [no label] are never kept. Administrator imports record it as described in
+  Administrator Album Imports; otherwise administrators set, replace or clear it
+  only through an explicit existing-catalog edit.
 - Album and MediaTrack Credits are independent. A MediaTrack participant does
   not silently become an Album primary Artist. Adding a MediaTrack primary
   Artist who is not already an Album primary Artist requires an explicit
@@ -1442,27 +1450,31 @@ The wire protocol and operational bounds are documented in
 - The import draft holds the Album title, ordered Artist entries, an optional
   label, the release date and visibility, and each track's title, Disc Number
   and Track Number. Each Artist entry has a name, a role of primary or
-  featured, and an optional join phrase connecting it to the next entry. Every
-  primary entry precedes every featured entry, and two entries cannot share a
-  name compared case-insensitively. A role changes only by an administrator
-  edit, an accepted suggestion or applied metadata lookup values; editing a join
-  phrase never changes it. An empty label adds no label Credit, and unknown Disc
-  and Track Numbers stay empty.
+  featured, and an optional join phrase connecting it to the next entry. An
+  Artist entry or the label may also carry the MusicBrainz ID that metadata
+  lookup supplied for it; renaming the entry or the label removes that ID unless
+  the new name, compared case-insensitively, is a name or alias that metadata
+  lookup found for that ID. Every primary entry precedes every featured entry,
+  and two entries cannot share a name compared case-insensitively. A role
+  changes only by an administrator edit, an accepted suggestion or applied
+  metadata lookup values; editing a join phrase never changes it. An empty label
+  adds no label Credit, and unknown Disc and Track Numbers stay empty.
 - Each draft value is either automatic, written from file tags or metadata
   lookup and not yet reviewed, or the administrator's own: typed, accepted,
   included in a publication approval or, for the label, carrying an explicit
   identity decision. The Artist entries count as one value, which becomes the
   administrator's own once any entry carries an explicit identity decision.
-  Automation writes only empty or automatic values, and only while a value is
-  still the one it last saw. An administrator save writes only the values that
-  administrator changed: it always wins over automation for those values, is
-  never refused merely because automation wrote other values meanwhile, and
-  never erases automatic values it did not change, so nothing is rebased.
-  Automatic text is normalized and trimmed like typed text; a value with control
-  or invisible formatting characters, or over a length limit, is left out and
-  shown, never stripped or truncated. Automatic writes do not use the import's
-  ordinary editing allowance. The summary and the publication confirmation mark
-  Artist and label entries that rest only on file tags.
+  Automation writes only empty or automatic values, apart from MusicBrainz IDs
+  added or removed as described in Administrator Metadata Lookup, and only while
+  a value is still the one it last saw. An administrator save writes only the
+  values that administrator changed: it always wins over automation for those
+  values, is never refused merely because automation wrote other values
+  meanwhile, and never erases automatic values it did not change, so nothing is
+  rebased. Automatic text is normalized and trimmed like typed text; a value
+  with control or invisible formatting characters, or over a length limit, is
+  left out and shown, never stripped or truncated. Automatic writes do not use
+  the import's ordinary editing allowance. The summary and the publication
+  confirmation mark Artist and label entries that rest only on file tags.
 - A confirmed upload keeps bounded, cleaned evidence from the file's embedded
   tags: title, Album, artist and album artist, label, year, Disc and Track
   Numbers, duration, and identifiers such as a barcode, catalogue number, ISRC
@@ -1514,11 +1526,13 @@ The wire protocol and operational bounds are documented in
 - Name matches, identical bytes, external identifiers and matching durations are
   candidates, not proof of Artist or Organization identity, Album edition, or
   recording identity. Candidates load automatically, matching names
-  case-insensitively. Unless the import appends to an existing Album, each draft
-  Artist entry and any label need their own decision, and two entries cannot
-  reuse one Artist. A decision binds its entry and that entry's name: reordering
+  case-insensitively and through MusicBrainz aliases that metadata lookup found.
+  Unless the import appends to an existing Album, each draft Artist entry and
+  any label need their own decision, and two entries cannot reuse one Artist. A
+  decision binds its entry and that entry's name and MusicBrainz ID: reordering
   the entry or changing its role or join phrase keeps it, while renaming or
-  removing the entry or the label clears it. Applying a replacement Artist list
+  removing the entry or the label, or changing its ID, clears it, except as
+  described in Administrator Metadata Lookup. Applying a replacement Artist list
   keeps decisions only for unchanged entries. A decision that this section
   preselects needs no explicit answer, even when other candidates are shown;
   otherwise administrators explicitly choose reuse, skip, append missing
@@ -1526,11 +1540,24 @@ The wire protocol and operational bounds are documented in
   identity. No automatic merge, deletion of catalog content, catalog media or
   uploaded source audio, media replacement, or reassignment of a Track to a
   different Album is permitted. Unhashed historical assets remain unverified.
-- For each Artist entry and the label, create is preselected when no candidate
-  exists. Each preselected create is rechecked when approved and when published.
-  At approval, a new name candidate requires a fresh review. A publication that
-  finds such a candidate becomes needs attention without minting identities, and
-  cancelling it permits a fresh review.
+- For each Artist entry and the label, an existing record with the same
+  MusicBrainz ID is preselected as reuse, and create is preselected when no
+  candidate exists. An entry carries a MusicBrainz ID only from a MusicBrainz
+  response, never from file tags, and applying a candidate that credits one
+  MusicBrainz artist, or one name compared case-insensitively, twice keeps only
+  its first entry. A new Artist or label Organization keeps the ID its entry
+  carries, and reusing a record without an ID records it while the record still
+  has none and is unchanged since review. A record that holds a different ID is
+  never changed automatically: the administrator reuses it and keeps its ID,
+  reuses it and explicitly replaces the ID, or creates a distinct record.
+  Creating a distinct record, or reusing a different record, despite an exact-ID
+  match records no ID, and an ID is replaced only when no other record of that
+  kind holds the new one. Other name candidates for an entry with an exact-ID
+  match are shown but need no answer. Each preselected create is rechecked when
+  approved and when published. At approval, a new exact-ID or name candidate
+  requires a fresh review. A publication that finds such a candidate, or that
+  would give two records one ID, becomes needs attention without minting
+  identities, and cancelling it permits a fresh review.
 - The Album is preselected as create when no Album name candidate exists, and
   that create is rechecked like a preselected Artist create. An Album name
   candidate is shown as a possible duplicate Album that needs an explicit
@@ -1570,22 +1597,23 @@ The wire protocol and operational bounds are documented in
   cover, upload progress and visibility, which defaults to public and can be
   changed in place. Rows that need no answer are collapsed; values resting on
   file tags or Luna are flagged and never collapsed. Only a choice among tied
-  matching groups, a conflict with the administrator's own value or an identity
-  candidate that is not preselected needs an answer. Publish stays unavailable
-  until each is answered and while any upload, lookup, value application or
-  analysis is queued or running. When the files or the applied release credit
-  only a placeholder such as Various Artists and a new Album has no primary
-  Artist entry, the summary says at once that the import cannot be published
-  yet. The Draft, Review, Files and Publish sections remain available for manual
-  work.
+  matching groups, a conflict with the administrator's own value, a MusicBrainz
+  ID conflict or an identity candidate that is not preselected needs an answer.
+  Publish stays unavailable until each is answered and while any upload, lookup,
+  value application or analysis is queued or running. When the files or the
+  applied release credit only a placeholder such as Various Artists and a new
+  Album has no primary Artist entry, the summary says at once that the import
+  cannot be published yet. The Draft, Review, Files and Publish sections remain
+  available for manual work.
 - The publication confirmation lists everything that becomes catalog content:
   the title, the ordered Artist entries with their roles and join phrases, the
   label, the date, the full disc and track list with titles, the cover, the
-  visibility, and each new or reused Artist, Organization and Album, with each
-  reused record that is hidden marked. Approving it saves the shown draft,
-  identity decisions, cover choice and answers to Luna suggestions and freezes
-  the approval as one step bound to exactly what was shown; a failed approval
-  leaves at most the saved draft, never a partial approval.
+  visibility, each new or reused Artist, Organization and Album, with each
+  reused record that is hidden marked, and each MusicBrainz ID to be recorded or
+  replaced. Approving it saves the shown draft, identity decisions, cover choice
+  and answers to Luna suggestions and freezes the approval as one step bound to
+  exactly what was shown; a failed approval leaves at most the saved draft,
+  never a partial approval.
 - Publication is a separate explicit approval of the reviewed draft and duplicate
   decisions. It freezes the approval snapshot, rechecks current role, revisions,
   memberships, visibility and asset readiness, and reports confirmed per-item
@@ -1610,17 +1638,19 @@ The wire protocol and operational bounds are documented in
   allowance is exhausted. Repeated recovery uses the original intent and cannot
   silently restart a destructive step or lose lifecycle evidence.
 - Publishing an import that reuses an existing Artist, Organization or Album
-  does not overwrite that entity's metadata, artwork, Credits or visibility.
-  Corrections require a separate existing-catalog edit. Appending preserves all
-  current members and only adds approved missing members. It never changes the
-  Album's own values or Credits: the draft's Album values, cover, Artist entries
-  and label are shown as not applied and need no identity decision or conflict
-  answer, and appending creates no Artist or Organization. Appended MediaTracks
-  receive that Album's primary Artist Credits, in its order and with its join
-  phrases, and join its automatic order by their Disc and Track Numbers, as the
-  confirmation shows. A hidden Album continues to hide its Tracks until its own
-  visibility changes; a newly created hidden Artist or Organization is not
-  exposed by publishing a private import.
+  does not overwrite that entity's metadata, artwork, Credits or visibility,
+  except that a reused Artist or Organization may gain a missing MusicBrainz ID
+  or one the administrator explicitly chose to replace. Other corrections
+  require a separate existing-catalog edit. Appending preserves all current
+  members and only adds approved missing members. It never changes the Album's
+  own values or Credits: the draft's Album values, cover, Artist entries and
+  label are shown as not applied and need no identity decision or conflict
+  answer, and appending creates no Artist or Organization and records no
+  MusicBrainz ID. Appended MediaTracks receive that Album's primary Artist
+  Credits, in its order and with its join phrases, and join its automatic order
+  by their Disc and Track Numbers, as the confirmation shows. A hidden Album
+  continues to hide its Tracks until its own visibility changes; a newly created
+  hidden Artist or Organization is not exposed by publishing a private import.
 - An unconfirmed existing-catalog cover approval may be explicitly cancelled by
   a current administrator after its active worker lease ends. Cancellation leaves
   the saved cover unchanged and retains the unused object's identity and source
@@ -1688,27 +1718,38 @@ The wire protocol and operational bounds are documented in
   the others stay in evidence. Metadata lookup preselects the matching candidate
   that an embedded identifier shared by every file matches alone, and otherwise
   the only matching group. A preselection whose credited artist agrees with no
-  non-empty artist tag of the files is flagged and never collapsed. A
-  preselection is a proposal that the publication approval confirms. An
-  incomplete or unranked candidate is never preselected. When several matching
-  groups remain, the administrator chooses one from a view of the values that
-  differ and each candidate's barcode, catalogue number, country and medium.
-  Without a matching candidate nothing is preselected and no choice is needed.
-  Every candidate stays selectable, one that does not match shows its
-  differences, and the administrator may choose none.
+  non-empty artist tag of the files, directly or through a MusicBrainz alias
+  that the lookup found, is flagged and never collapsed. A preselection is a
+  proposal that the publication approval confirms. An incomplete or unranked
+  candidate is never preselected. When several matching groups remain, the
+  administrator chooses one from a view of the values that differ and each
+  candidate's barcode, catalogue number, country and medium. Without a matching
+  candidate nothing is preselected and no choice is needed. Every candidate
+  stays selectable, one that does not match shows its differences, and the
+  administrator may choose none.
 - Applying a candidate, automatically when it is preselected or when the
   administrator chooses it, writes all its supported values in one step: the
   Album title, Artist entries, label and date, and each matched file's track
   title, Disc Number and Track Number. It fills only empty or automatic values.
-  Where the administrator's own value differs, the summary shows both with
-  nothing preselected, and publication waits until the administrator keeps one.
-  Each applied value keeps its source evidence, such as the MusicBrainz release
-  ID and the match basis, and each track value names its local file. Applying
+  Where the administrator's own Artist entries or label equal the candidate's in
+  names, compared case-insensitively, roles and join phrases, its MusicBrainz
+  IDs are added without a decision to those that carry no ID, and an ID that
+  differs from one already carried is a difference. Such an addition keeps an
+  explicit decision that stays valid: reusing the record that holds that ID, or
+  creating or reusing a record without an ID while no other record holds it; any
+  other explicit decision on that entry is cleared and shown again. Where the
+  administrator's own value differs, the summary shows both with nothing
+  preselected, and publication waits until the administrator keeps one. Each
+  applied value keeps its source evidence, such as the MusicBrainz release ID
+  and the match basis, and each track value names its local file. Applying
   another candidate replaces the values the earlier one wrote that are still
   automatic, and choosing none returns them to their values from file tags or
-  leaves them empty. Applying stores its complete set of values or nothing, and
-  retrying the same intent is idempotent. Placeholder credits such as Various
-  Artists or [unknown], and a [no label] label, are never written.
+  leaves them empty. Either action first removes each MusicBrainz ID the earlier
+  candidate supplied that an entry or the label still carries, unless an
+  explicit identity decision has bound it since. Applying stores its complete
+  set of values or nothing, and retrying the same intent is idempotent.
+  Placeholder credits such as Various Artists or [unknown], and a [no label]
+  label, are never written.
 - Metadata lookup runs on the server and finishes after the browser closes or
   changes page; reopening shows its result without running it again. It runs
   under an expiring grant from the administrator's import creation, uploads,
@@ -1733,7 +1774,8 @@ The wire protocol and operational bounds are documented in
   known precision; the release's own date stays evidence and is used only when
   the group has none. Romanized or alternate titles enter the catalog only as
   draft values and never become Search aliases. Release and recording
-  identifiers remain private import evidence.
+  identifiers remain private import evidence; only Artists and Organizations
+  keep a MusicBrainz ID, as described in Administrator Album Imports.
 - When metadata lookup finds no release or no matching release, or cannot run
   because no usable tags, folder name or submitted name exist, the summary
   offers Luna analysis as the next step beside the name box. When lookup is
@@ -1747,8 +1789,8 @@ The wire protocol and operational bounds are documented in
   ticked, the others arrive unticked and keep the current value unless ticked,
   unticking rejects one, and none is applied until the administrator accepts it
   or approves the publication with it ticked. Luna receives the current draft
-  values whatever their source. Luna never chooses an identity, selects a
-  release or presents its values as lookup evidence.
+  values whatever their source. Luna never chooses an identity, supplies a
+  MusicBrainz ID, selects a release or presents its values as lookup evidence.
 - Metadata lookup results and evidence are bounded private project data that
   only current administrators can read.
 

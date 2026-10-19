@@ -21,15 +21,19 @@
  *   - retyping a saved label's name restores its MusicBrainz ID, and a renamed label drops it
  *   - saved automatic values are marked From file tags until edited, and an automatic entry named like a company may be a label
  *   - automatic values metadata lookup wrote are not marked From file tags, while the rest still are
+ *   - a signed-in administrator's rename to a name metadata lookup found for the saved ID keeps it, read from the shared summary, and any other name drops it
  * @end-catalog */
 
 import { useState } from 'react';
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { captureAccountOperation } from '../../api/accountEpoch';
 import type { ImportArtistEntry, ImportDraftV2 } from './adminApi';
+import { adminWorkspace } from './adminWorkspace';
 import { ImportDraftV2Editor } from './ImportDraftV2Editor';
 import { draftChanges } from './importDraftPatch';
-import { artistEntry, detail, entryKey, labelEntry } from './adminFixtures.testSupport';
+import { artistEntry, detail, entryKey, json, labelEntry, lookupResponse, projectId, session, viewer, withLookup } from './adminFixtures.testSupport';
 afterEach(cleanup);
 
 const help = 'Primary Artists come before featured Artists. Use Move up and Move down to reorder within a group, and change a role to move an entry to the other group.';
@@ -42,16 +46,18 @@ function savedDraft(artists: ImportArtistEntry[], label: ImportDraftV2['album'][
   const draft = detail().draft; draft.album.artists = artists; draft.album.label = label; return draft;
 }
 /** The editor inside a form like the import page's: Save submits only when native constraint validation passes. */
-function mount(saved: ImportDraftV2, disabled = false, marks: { automaticPaths?: string[]; lookupPaths?: string[]; possibleLabels?: string[] } = {}) {
+function mount(saved: ImportDraftV2, disabled = false, marks: { automaticPaths?: string[]; lookupPaths?: string[]; possibleLabels?: string[] } = {}, client = new QueryClient()) {
   const submit = vi.fn(), changes = vi.fn(), state = { draft: saved };
   function Harness() {
     const [draft, setDraft] = useState(saved); state.draft = draft;
     return <form onSubmit={event => { event.preventDefault(); submit(draft); }}>
-      <ImportDraftV2Editor draft={draft} saved={saved} filenames={detail().manifest.files} disabled={disabled} onChange={next => { changes(next); setDraft(next); }} {...marks} />
+      <ImportDraftV2Editor draft={draft} saved={saved} item={{ ...detail(), automaticPaths: marks.automaticPaths ?? [], lookupPaths: marks.lookupPaths ?? [], possibleLabelEntryKeys: marks.possibleLabels ?? [] }}
+        disabled={disabled} onChange={next => { changes(next); setDraft(next); }} />
       <button type="submit">Save</button>
     </form>;
   }
-  render(<Harness />);
+  // Without a signed-in administrator (the default client) the editor reads no found names, so no request is sent.
+  render(<QueryClientProvider client={client}><Harness /></QueryClientProvider>);
   return { submit, changes, state, user: userEvent.setup(), save: () => screen.getByRole('button', { name: 'Save' }) };
 }
 const names = (draft: ImportDraftV2) => draft.album.artists.map(entry => entry.name);
@@ -285,4 +291,25 @@ test('automatic values metadata lookup wrote are not marked From file tags, whil
   expect(screen.getByRole('spinbutton', { name: '1 · Disc number' })).toHaveValue(1);
   expect(screen.queryByText('This name looks like a label')).toBeNull();
   expect(screen.getByRole('textbox', { name: '1 · Title · From file tags' })).toHaveValue('Tagged One');
+});
+
+test('a signed-in administrator\'s rename to a name metadata lookup found for the saved ID keeps it, read from the shared summary, and any other name drops it', async () => {
+  const id = '00000000-0000-4000-8000-0000000000a1', labelId = '00000000-0000-4000-8000-0000000000a2', client = new QueryClient();
+  client.setQueryData(['browser-session'], session);
+  adminWorkspace.reset(); adminWorkspace.authorize(captureAccountOperation(viewer), true, true); adminWorkspace.select('admin');
+  const other = vi.fn(async () => json({}, 500)), fetch = vi.fn(withLookup(other, () => lookupResponse({ musicBrainzNames: [{ musicBrainzId: id, names: ['Lorem', 'ロレム'] }, { musicBrainzId: labelId, names: ['Sit Records', 'シット'] }] })));
+  vi.stubGlobal('fetch', fetch);
+  try {
+    const { state } = mount(savedDraft([{ ...artistEntry('Lorem'), musicBrainzId: id }], { name: 'Sit Records', musicBrainzId: labelId }), false, {}, client);
+    await waitFor(() => expect(client.getQueryCache().findAll({ queryKey: ['admin-imports'] }).some(query => query.state.status === 'success')).toBe(true));
+    // One summary read of this project, and nothing else.
+    expect(fetch.mock.calls.map(([path]) => String(path))).toEqual([expect.stringMatching(new RegExp(`/${projectId}/lookup$`))]); expect(other).not.toHaveBeenCalled();
+    const name = () => screen.getByRole('textbox', { name: '1 · Artist name' });
+    fireEvent.change(name(), { target: { value: 'ロレム' } });
+    expect(state.draft.album.artists[0]).toMatchObject({ name: 'ロレム', musicBrainzId: id });
+    fireEvent.change(name(), { target: { value: 'Unfound Name' } });
+    expect(state.draft.album.artists[0]).toMatchObject({ name: 'Unfound Name', musicBrainzId: null });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Label' }), { target: { value: 'シット' } });
+    expect(state.draft.album.label).toEqual({ name: 'シット', musicBrainzId: labelId });
+  } finally { adminWorkspace.reset(); vi.unstubAllGlobals(); }
 });

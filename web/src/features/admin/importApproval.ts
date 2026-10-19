@@ -9,7 +9,7 @@
  * @end-catalog */
 
 import type { DecisionEdits, ImportDecision, ImportDetail, ImportDraftV2 } from './adminApi';
-import type { ImportCandidate } from './importIdentity';
+import type { ImportCandidate, MusicBrainzIdWrite } from './importIdentity';
 import type { ImportDraftChange } from './importDraftPatch';
 import { approvalTrackOrder } from './importTrackOrder';
 
@@ -63,8 +63,9 @@ export interface ApprovalChecklist {
   append: boolean;
   /** The Artist entries and the label rest only on file tags (automatic and not changed in this approval). */
   artistsFromTags: boolean; labelFromTags: boolean;
-  artists: { key: string; name: string; role: 'primary' | 'featured'; joinPhrase: string | null; identity: ApprovalIdentity; possibleLabel: boolean }[];
-  label: { name: string; identity: ApprovalIdentity } | null;
+  /** `musicBrainzIdWrite`: the MusicBrainz ID the publication records on (or replaces on) that row's Artist or Organization. */
+  artists: { key: string; name: string; role: 'primary' | 'featured'; joinPhrase: string | null; identity: ApprovalIdentity; possibleLabel: boolean; musicBrainzIdWrite: Pick<MusicBrainzIdWrite, 'musicBrainzId' | 'replaces'> | null }[];
+  label: { name: string; identity: ApprovalIdentity; musicBrainzIdWrite: Pick<MusicBrainzIdWrite, 'musicBrainzId' | 'replaces'> | null } | null;
   album: ApprovalIdentity;
   /**
    * The tracks the approval adds in approved order, then the existing Album members it reuses in draft order (an append keeps a
@@ -74,11 +75,17 @@ export interface ApprovalChecklist {
   blocked: number;
 }
 const notApplied: ApprovalIdentity = { kind: 'notApplied' };
-/** A reuse is shown only while its candidate is listed at the reviewed revision; otherwise the match changed since review. */
-const identityOf = (decision: ImportDecision | undefined, kind: ImportCandidate['kind'], candidates: readonly ImportCandidate[]): ApprovalIdentity => {
+/**
+ * A reuse (one that replaces a MusicBrainz ID included) is shown only while its candidate is listed at the reviewed revision;
+ * otherwise the match changed since review. A replace also needs the record to hold an ID other than the row's `musicBrainzId`
+ * and no listed record to hold the row's, as the server's write plan does; otherwise it changed too.
+ */
+const identityOf = (decision: ImportDecision | undefined, kind: ImportCandidate['kind'], candidates: readonly ImportCandidate[], musicBrainzId: string | null = null): ApprovalIdentity => {
   if (decision?.action === 'create-distinct') return { kind: 'new' };
-  if (decision?.action !== 'reuse') return { kind: 'needsDecision' };
+  if (decision?.action !== 'reuse' && decision?.action !== 'replace') return { kind: 'needsDecision' };
   const candidate = candidates.find(item => item.kind === kind && item.id === decision.candidateId && item.revision === decision.candidateRevision);
+  if (decision.action === 'replace' && (!musicBrainzId || !candidate?.musicBrainzId || candidate.musicBrainzId === musicBrainzId
+    || candidates.some(item => item.kind === kind && item.match === 'musicBrainzId' && item.musicBrainzId === musicBrainzId))) return { kind: 'changed' };
   return candidate ? { kind: 'reused', label: candidate.label, hidden: candidate.visibility === 'hidden' } : { kind: 'changed' };
 };
 /** The saved project's automatic markers (`lookupPaths`: automatic values resting on applied metadata lookup) and the paths the approval's unsaved changes write. */
@@ -89,17 +96,21 @@ export interface ApprovalMarks { automaticPaths: readonly string[]; lookupPaths:
  * neither answered nor preselected needs a decision. `marks` flag the Artist entries and the label that rest only on file tags
  * (automatic and not written by metadata lookup), and automatic entries named like a label; an append applies neither. A value the approval changes is the administrator's own,
  * and so are the label once it carries an explicit identity decision and the entries once any entry carries one (saved or
- * unsaved), so neither is marked then; a preselection never counts as one.
+ * unsaved), so neither is marked then; a preselection never counts as one. `writes` (importIdentity.ts musicBrainzIdWrites) mark
+ * each row whose record gains or replaces a MusicBrainz ID.
  */
-export function approvalChecklist(draft: ImportDraftV2, decisions: readonly ImportDecision[], candidates: readonly ImportCandidate[], marks?: ApprovalMarks, preselections: readonly ImportDecision[] = []): ApprovalChecklist {
+export function approvalChecklist(draft: ImportDraftV2, decisions: readonly ImportDecision[], candidates: readonly ImportCandidate[], marks?: ApprovalMarks, preselections: readonly ImportDecision[] = [],
+  writes: readonly MusicBrainzIdWrite[] = []): ApprovalChecklist {
+  const writeOf = (scope: 'artist' | 'label', entryKey: string | null) => { const found = writes.find(write => write.scope === scope && write.entryKey === entryKey); return found ? { musicBrainzId: found.musicBrainzId, replaces: found.replaces } : null; };
   const effective = (match: (decision: ImportDecision) => boolean) => decisions.find(match) ?? preselections.find(match);
   const albumDecision = effective(decision => decision.scope === 'album'), append = albumDecision?.action === 'reuse';
   const decided = (scope: 'artist' | 'label') => decisions.some(decision => decision.scope === scope && decision.action !== 'skip');
   const fromTags = (path: string) => !append && Boolean(marks?.automaticPaths.includes(path) && !marks.lookupPaths.includes(path) && !marks.changedPaths.includes(path));
   const artistsFromTags = fromTags('album.artists') && draft.album.artists.length > 0 && !decided('artist'), labelFromTags = fromTags('album.label') && draft.album.label !== null && !decided('label');
-  const artists = draft.album.artists.map(({ key, name, role, joinPhrase }) => ({ key, name, role, joinPhrase, possibleLabel: artistsFromTags && Boolean(marks?.possibleLabelEntryKeys.includes(key)),
-    identity: append ? notApplied : identityOf(effective(decision => decision.scope === 'artist' && decision.entryKey === key), 'artist', candidates) }));
-  const label = draft.album.label && { name: draft.album.label.name, identity: append ? notApplied : identityOf(effective(decision => decision.scope === 'label'), 'organization', candidates) };
+  const artists = draft.album.artists.map(({ key, name, role, joinPhrase, musicBrainzId }) => ({ key, name, role, joinPhrase, possibleLabel: artistsFromTags && Boolean(marks?.possibleLabelEntryKeys.includes(key)),
+    identity: append ? notApplied : identityOf(effective(decision => decision.scope === 'artist' && decision.entryKey === key), 'artist', candidates, musicBrainzId), musicBrainzIdWrite: append ? null : writeOf('artist', key) }));
+  const label = draft.album.label && { name: draft.album.label.name, identity: append ? notApplied : identityOf(effective(decision => decision.scope === 'label'), 'organization', candidates, draft.album.label.musicBrainzId),
+    musicBrainzIdWrite: append ? null : writeOf('label', null) };
   const album = identityOf(albumDecision, 'album', candidates);
   const listed = draft.tracks.flatMap(({ slotId, title, discNumber, trackNumber }) => {
     const decision = effective(item => item.scope === 'track' && item.slotId === slotId);

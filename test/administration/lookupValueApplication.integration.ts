@@ -5,7 +5,7 @@
  *   Functions: code, projects, stored, lookup, draftOf, valueRevision, later, mbid, keyOf, v2, timed, seeded,
  *              asset, json, searchUrl, releaseUrl, searchAnswer, releaseAnswer, answers, fixtureClient, drain,
  *              looked, onNextProjectRead, submit, item, complete, approve, choose, preparingPublication,
- *              seededDigitalHotel, smokeHotelExchanges
+ *              seededDigitalHotel, smokeHotelExchanges, ownEntries
  *   Constants: guard, actor, other, by, byOther, contact, lengths, albumQuery, hotelBase, hotelRelease,
  *              hotelLengths, digitalHotel, europeanCd
  *   Variables: harness
@@ -39,6 +39,10 @@
  *   - the same single matching group from a complete search is preselected and applied, and with the digital edition compared two groups tie
  *   - a run stored before searchComplete resumes as a partial comparison: its only matching group is offered, nothing is applied and approval is admitted
  *   - a completed run stored before searchComplete keeps its stored preselection until a re-rank, which leaves its values applied and offers its only matching group without holding publication
+ *   - a run looks up its credited artists' and label's aliases, keeps the names it found, and an added ID keeps a reuse of the record holding it
+ *   - an administrator save started before lookup added IDs to that administrator's own entries is admitted, wins, and keeps the IDs
+ *   - an added ID keeps only the explicit decisions that stay valid against the records holding IDs; cleared rows are preselected again and the approval records the listed ID
+ *   - an ID that differs from one an entry already carries is an ID conflict holding publication until answered; answering lookup writes the release's IDs
  * @end-catalog */
 
 /**
@@ -60,7 +64,7 @@ import { startMongoReplicaSet, type MongoReplicaSetHarness } from '../support/mo
 import { AdminImportError, type AdminImportDetailV2, type ImportEmbeddedTagsV2 } from '../../src/administration/import/adminImportContract';
 import { derivedEntryKey, type ImportDraftV2 } from '../../src/administration/import/adminImportDraft';
 import {
-    adminImportDetail, adminImportDto, adminImportDuplicateCandidates, createAdminImport, editAdminImport, getAdminImport, initializeAdminImportStorage, withImportAdmin,
+    adminImportDetail, adminImportDto, adminImportDuplicateCandidates, createAdminImport, decideAdminImportDuplicates, editAdminImport, getAdminImport, initializeAdminImportStorage, withImportAdmin,
     type AdminImportDocument
 } from '../../src/administration/import/adminImportService';
 import type { ImportObjectIdentity, ImportObjectStorage, ImportObjectTarget } from '../../src/administration/import/adminImportStorage';
@@ -173,7 +177,8 @@ const complete = (draft: ImportDraftV2) => {
     if (!draft.album.artists.length) draft.album.artists = [{ key: randomUUID(), name: 'Typed Artist', role: 'primary', joinPhrase: null, musicBrainzId: null }];
     draft.tracks.forEach((track, index) => { track.title ||= `Typed Track ${index + 1}`; });
 };
-const approve = async (id: string, options: Parameters<typeof approvalBody>[1] = {}) => publishAdminImport(by, id, approvalBody(await item(id), { edit: complete, ...options }));
+/** Approves the shown project completed by `complete`; every MusicBrainz ID lookup wrote is listed as recorded on a new record. */
+const approve = async (id: string, options: Parameters<typeof approvalBody>[1] = {}) => publishAdminImport(by, id, approvalBody(await item(id), { edit: complete, musicBrainzIds: 'created', ...options }));
 const choose = async (id: string, run: number, candidateKey: string | null, actorId = by, operationId = randomUUID()) =>
     chooseAdminImportLookup(actorId, id, { operationId, expectedRevision: (await item(id)).revision, run, candidateKey });
 const preparingPublication = () => ({ operationId: randomUUID(), actorId: by, state: 'preparing', issue: null, approvedRevision: 1, snapshot: {}, decisions: [], tracks: [], cover: null,
@@ -207,8 +212,9 @@ test('the step that completes a run applies its preselection: values and origins
     const record = await lookup(id), doc = await stored(id), draft = draftOf(doc), proposal = proposalForRelease(hotelRelease);
     assert.deepEqual([record.applied?.run, record.applied?.candidateKey, record.applied?.releaseId, record.applied?.choice, record.applied?.basis, record.applied?.actorId, record.applied?.operationId,
         record.applied?.conflicts], [1, `musicbrainz:${hotelBase}`, hotelBase, 'preselected', 'releaseId', by, null, []]);
-    assert.deepEqual(draft.album, { title: 'Hotel California', artists: [{ key: derivedEntryKey({ importId: id, lookupEntry: 'eagles' }), name: 'Eagles', role: 'primary', joinPhrase: null, musicBrainzId: null }],
-        label: { name: proposal.label!, musicBrainzId: null }, releaseDate: proposal.releaseDate, visibility: 'public' });
+    // Entries and the label carry the MusicBrainz IDs the release credits.
+    assert.deepEqual(draft.album, { title: 'Hotel California', artists: [{ key: derivedEntryKey({ importId: id, lookupEntry: 'eagles' }), name: 'Eagles', role: 'primary', joinPhrase: null,
+        musicBrainzId: hotelRelease.artistCredit[0].artistId }], label: { name: proposal.label!, musicBrainzId: proposal.labelMusicBrainzId }, releaseDate: proposal.releaseDate, visibility: 'public' });
     assert.deepEqual(draft.tracks.map(track => [track.title, track.discNumber, track.trackNumber]), proposal.tracks.map(track => [track.title, 1, track.trackNumber]));
     const written = [...['title', 'artists', 'label', 'releaseDate'].map(field => `album.${field}`), ...draft.tracks.flatMap(track => ['title', 'discNumber', 'trackNumber'].map(field => `tracks.${track.slotId}.${field}`))];
     assert.deepEqual([...record.applied!.paths].sort(), [...written].sort());
@@ -221,7 +227,7 @@ test('the step that completes a run applies its preselection: values and origins
     const shown = await item(id);
     assert.equal(shown.approvalDigest, adminImportDetail(doc, by, undefined, record).approvalDigest);
     assert.notEqual(shown.approvalDigest, adminImportDetail(doc, by).approvalDigest);
-    const admitted = await publishAdminImport(by, id, approvalBody(shown));
+    const admitted = await publishAdminImport(by, id, approvalBody(shown, { musicBrainzIds: 'created' }));
     assert.equal(admitted.item.publication, 'preparing');
     assert.equal((await stored(id)).lookupGate!.fence, 4, 'an admitted approval writes the gate once');
 });
@@ -259,7 +265,8 @@ test('a failed write of the completing step stores no value, gate or record, and
         });
         await assert.rejects(drain({ musicBrainz: client.musicBrainz }), /synthetic write failure/, collection);
         const failed = await lookup(id), unchanged = await stored(id);
-        assert.deepEqual([failed.state, failed.phase, failed.applied, valueRevision(unchanged), draftOf(unchanged).album.title, unchanged.lookupGate!.fence], ['running', 'details', null, 0, '', 2], collection);
+        // The completing step follows the alias lookups (unrecorded here, so they fail and are not retried).
+        assert.deepEqual([failed.state, failed.phase, failed.applied, valueRevision(unchanged), draftOf(unchanged).album.title, unchanged.lookupGate!.fence], ['running', 'aliases', null, 0, '', 2], collection);
         await drain({ musicBrainz: client.musicBrainz, now: () => later(181_000) });
         const done = await stored(id);
         assert.deepEqual([(await lookup(id)).state, (await lookup(id)).applied?.candidateKey, done.valueRevision, draftOf(done).album.title, done.lookupGate!.fence],
@@ -302,7 +309,7 @@ test('a tie applies nothing and holds publication until a choice for that run; c
     // A choice through the request entry point applies the candidate under its own receipt, moving the grant to the chooser.
     const operationId = randomUUID(), body = { operationId, expectedRevision: (await item(id)).revision, run: 1, candidateKey: keyOf(2) };
     const chosen = await chooseAdminImportLookup(byOther, id, body);
-    assert.deepEqual([chosen.receipt?.kind, chosen.receipt?.operationId, chosen.item.draft.album.label, chosen.item.valueRevision], ['lookup-choose', operationId, { name: 'Second Label', musicBrainzId: null }, 1]);
+    assert.deepEqual([chosen.receipt?.kind, chosen.receipt?.operationId, chosen.item.draft.album.label, chosen.item.valueRevision], ['lookup-choose', operationId, { name: 'Second Label', musicBrainzId: mbid(400) }, 1]);
     const record = await lookup(id);
     assert.deepEqual([record.applied?.choice, record.applied?.basis, record.applied?.actorId, record.applied?.operationId, record.actorId, record.grantSource], ['chosen', 'chosen', byOther, operationId, byOther, 'choose']);
     assert.deepEqual(await chooseAdminImportLookup(byOther, id, body), chosen);
@@ -506,7 +513,9 @@ test('lookup writes nothing outside the import project, and a published lookup i
     await runAdminImportPublicationOnce(storage, id);
     assert.equal((await item(id)).publication, 'complete', JSON.stringify((await stored(id)).media!.publication!.issue));
     const catalog = await Promise.all(['albums', 'audioTracks', 'artists', 'organizations'].map(name => getDb()!.collection(name).find({}).toArray()));
-    const text = JSON.stringify(catalog).toLowerCase();
+    // Only the new Artists and the label Organization keep the MusicBrainz ID their entries carried, as private provenance.
+    assert.deepEqual([catalog[2].map(row => row.musicBrainzId).sort(), catalog[3].map(row => row.musicBrainzId)], [[mbid(300), mbid(301)], [mbid(400)]]);
+    const text = JSON.stringify(catalog.map(rows => rows.map(({ musicBrainzId: _id, ...row }) => row))).toLowerCase();
     for (const identifier of [mbid(1), mbid(2), mbid(300), mbid(301), mbid(400), mbid(500), mbid(900), mbid(901), 'musicbrainz', 'itunes', 'recording', 'release-group'])
         assert.equal(text.includes(identifier), false, identifier);
     assert.deepEqual(catalog.map(rows => rows.length), [1, 2, 2, 1]);
@@ -532,7 +541,7 @@ test('an administrator value saved while the completing step runs wins: the step
     assert.deepEqual(during, ['running', 'details'], 'the save committed while the completing step was open');
     const record = await lookup(id), doc = await stored(id);
     assert.deepEqual([record.state, record.applied?.candidateKey, record.applied?.conflicts], ['complete', keyOf(1),
-        [{ path: 'album.label', lookup: { name: 'Synthetic Label', musicBrainzId: null }, slotId: null, answer: null }]]);
+        [{ path: 'album.label', lookup: { name: 'Synthetic Label', musicBrainzId: mbid(400) }, slotId: null, answer: null }]]);
     assert.deepEqual([draftOf(doc).album.label, doc.draftOrigins!['album:label'], draftOf(doc).album.title, doc.valueRevision, doc.revision, doc.lookupGate],
         [{ name: 'Mine', musicBrainzId: null }, 'administrator', 'Synthetic Album', 1, 2, { fence: 3, run: 1, state: 'complete', blocking: false }]);
     assert.equal(record.applied!.paths.includes('album.label'), false);
@@ -643,7 +652,7 @@ test('a choice works while lookup is unconfigured; a project whose stored draft 
     await looked(id, [mbid(1), mbid(2)], [releaseAnswer(mbid(1), { label: 'First Label' }), releaseAnswer(mbid(2), { label: 'Second Label' })]);
     delete process.env.FINITUDE_ADMIN_METADATA_LOOKUP_CONTACT;
     try {
-        assert.deepEqual((await choose(id, 1, keyOf(1))).item.draft.album.label, { name: 'First Label', musicBrainzId: null });
+        assert.deepEqual((await choose(id, 1, keyOf(1))).item.draft.album.label, { name: 'First Label', musicBrainzId: mbid(400) });
         await assert.rejects(submitAdminImportLookup(by, id, { operationId: randomUUID(), expectedRevision: 2, kind: 'album', text: 'Typed Album' }), code('ADMIN_IMPORT_LOOKUP_UNAVAILABLE'));
     } finally { process.env.FINITUDE_ADMIN_METADATA_LOOKUP_CONTACT = contact; }
     await projects().updateOne({ _id: new ObjectId(id) }, { $set: { 'draft.tracks': 'malformed' } as never });
@@ -686,7 +695,7 @@ test('a retry or a choice made before another administrator\'s lookup submission
     assert.deepEqual([await stored(id), await lookup(id)], before);
     // Made after that choice, the same choice is admitted.
     const chosen = await chooseAdminImportLookup(by, id, { operationId: randomUUID(), expectedRevision: (await item(id)).revision, run: 1, candidateKey: keyOf(1) });
-    assert.deepEqual(chosen.item.draft.album.label, { name: 'First Label', musicBrainzId: null });
+    assert.deepEqual(chosen.item.draft.album.label, { name: 'First Label', musicBrainzId: mbid(400) });
     // Another administrator's submission starts run 2: a retry or a choice made before it is stale, one made after it is admitted.
     const beforeSubmission = chosen.item.revision;
     await submitAdminImportLookup(byOther, id, { operationId: randomUUID(), expectedRevision: beforeSubmission, kind: 'album', text: 'Typed Album' });
@@ -722,7 +731,7 @@ test('a failed write inside a choice or an answer stores neither the import docu
     // Without the failure, both commit.
     const answered = await resolveAdminImportLookup(by, id, { operationId: randomUUID(), expectedRevision: revision, run: 1, candidateKey: keyOf(1),
         answers: [{ path: 'album.label', answer: 'lookup', base: { name: 'Mine', musicBrainzId: null } }] });
-    assert.deepEqual([answered.item.draft.album.label, (await lookup(id)).applied!.conflicts[0].answer], [{ name: 'First Label', musicBrainzId: null }, 'lookup']);
+    assert.deepEqual([answered.item.draft.album.label, (await lookup(id)).applied!.conflicts[0].answer], [{ name: 'First Label', musicBrainzId: mbid(400) }, 'lookup']);
 });
 
 test('files confirmed after a lookup choice keep the chosen values: file-tag automation fills only what lookup did not write, and none returns tag values', async () => {
@@ -869,6 +878,9 @@ test('a completed run stored before searchComplete keeps its stored preselection
     const queries = (await lookup(id)).queries.map(query => (query as { query: MusicBrainzReleaseQuery }).query);
     const client = fixtureClient([...queries.map((query, index) => searchAnswer(query, index ? [] : [mbid(1)])), releaseAnswer(mbid(1), { lengths: four })]);
     await drain({ musicBrainz: client.musicBrainz });
+    // The run's searches, release lookup and its first alias lookup (unrecorded, so it fails, which ends the alias phase).
+    const sentByRun = client.requests.length;
+    assert.equal(sentByRun, 2 + 1);
     await adminImportLookupCollection().updateOne({ _id: new ObjectId(id) }, { $set: { automaticRuns: 3 } });
     const files = (await item(id)).manifest.files;
     for (const index of [2, 3]) {
@@ -892,5 +904,128 @@ test('a completed run stored before searchComplete keeps its stored preselection
     await choose(id, 1, keyOf(1));
     assert.deepEqual([(await getAdminImportLookup(by, id)).lookup!.needsAnswer, (await lookup(id)).applied?.choice], [{ tie: false, conflicts: [] }, 'chosen']);
     assert.equal((await approve(id)).item.publication, 'preparing');
-    assert.equal(client.requests.length, 2, 'no request after the run: re-ranks and the choice send nothing');
+    assert.equal(client.requests.length, sentByRun, 'no request after the run: re-ranks and the choice send nothing');
+});
+
+test('a run looks up its credited artists\' and label\'s aliases, keeps the names it found, and an added ID keeps a reuse of the record holding it', async () => {
+    const id = await seeded(2, timed), slot = (await item(id)).manifest.files[0].slotId;
+    // The administrator's own entries and label equal the release's names; the lead was decided as a reuse of the record holding its ID.
+    const holder = new ObjectId(), entries = [{ key: randomUUID(), name: 'Synthetic Lead', role: 'primary' as const, joinPhrase: ' & ', musicBrainzId: null }, { key: randomUUID(), name: 'Synthetic Second', role: 'primary' as const, joinPhrase: null, musicBrainzId: null }];
+    await getDb()!.collection('artists').insertOne({ _id: holder, name: 'Synthetic Lead', lifecycleStatus: 'ready', visibility: 'public', musicBrainzId: mbid(300), ...catalogSearchProjection('Synthetic Lead') });
+    await editAdminImport(by, id, { operationId: randomUUID(), expectedRevision: 1, changes: [{ path: 'album.artists', base: [], value: entries }, { path: `tracks.${slot}.title`, base: '', value: 'Typed Title' }] });
+    const listed = (await adminImportDuplicateCandidates(by, id)).items.find(value => value.id === holder.toHexString())!;
+    await decideAdminImportDuplicates(by, id, { operationId: randomUUID(), expectedRevision: (await item(id)).revision,
+        decisions: [{ scope: 'artist', slotId: null, entryKey: entries[0].key, boundName: 'Synthetic Lead', action: 'reuse', candidateId: listed.id, candidateRevision: listed.revision }] });
+    assert.equal((await requestAutomaticMetadataLookup(by, id, 'upload')).reason, 'queued');
+    const client = fixtureClient([...answers([mbid(1)], [releaseAnswer(mbid(1))]),
+        json(musicBrainzUrls.artistAliases(mbid(300)).href, { id: mbid(300), name: 'Synthetic Lead', aliases: [{ name: 'シンセ・リード', type: 'Artist name', primary: true }, { name: 'Synthetic Leed', type: 'Search hint', primary: null }] }),
+        json(musicBrainzUrls.artistAliases(mbid(301)).href, { error: 'Not Found' }, 404),
+        json(musicBrainzUrls.labelAliases(mbid(400)).href, { id: mbid(400), name: 'Synthetic Label', aliases: [] })]);
+    await drain({ musicBrainz: client.musicBrainz });
+    const record = await lookup(id), doc = await stored(id);
+    assert.deepEqual(record.aliases!.map(entry => [entry.kind, entry.id, entry.state, entry.names]), [['artist', mbid(300), 'fetched', ['Synthetic Lead', 'シンセ・リード']],
+        ['artist', mbid(301), 'missing', []], ['label', mbid(400), 'fetched', ['Synthetic Label']]]);
+    // The entries gained the release's IDs; the reuse of the holder stays and binds the ID.
+    assert.deepEqual(draftOf(doc).album.artists.map(entry => entry.musicBrainzId), [mbid(300), mbid(301)]);
+    assert.deepEqual((doc.decisions as { entryKey?: string; boundMusicBrainzId?: string | null; candidateId?: string | null }[]).map(value => [value.entryKey, value.boundMusicBrainzId, value.candidateId]),
+        [[entries[0].key, mbid(300), holder.toHexString()]]);
+    assert.deepEqual(doc.musicBrainzNames?.find(value => value.musicBrainzId === mbid(300))?.names, ['Synthetic Lead', 'シンセ・リード']);
+    // A rename to an alias the run found keeps the ID, as the next GET /lookup lists the names.
+    assert.deepEqual((await getAdminImportLookup(by, id)).musicBrainzNames.find(value => value.musicBrainzId === mbid(300))?.names, ['Synthetic Lead', 'シンセ・リード']);
+    // Choosing none removes every ID this candidate supplied: the reuse was decided before the ID arrived, so value application only
+    // rebound it, which binds the ID for nobody. The reuse stays, bound to its entry, which carries no ID again.
+    await choose(id, 1, null);
+    const none = await stored(id);
+    assert.deepEqual(draftOf(none).album.artists.map(entry => entry.musicBrainzId), [null, null]);
+    assert.deepEqual((none.decisions as { entryKey?: string; boundMusicBrainzId?: string | null; boundBy?: string; candidateId?: string | null }[]).map(value => [value.entryKey, value.boundMusicBrainzId, value.boundBy, value.candidateId]),
+        [[entries[0].key, null, undefined, holder.toHexString()]]);
+});
+
+test('an administrator save started before lookup added IDs to that administrator\'s own entries is admitted, wins, and keeps the IDs', async () => {
+    const { id, entries } = await ownEntries(), read = (await item(id)).revision;
+    assert.equal((await requestAutomaticMetadataLookup(by, id, 'upload')).reason, 'queued');
+    await drain({ musicBrainz: fixtureClient(answers([mbid(1)], [releaseAnswer(mbid(1))])).musicBrainz });
+    assert.deepEqual(draftOf(await stored(id)).album.artists.map(entry => entry.musicBrainzId), [mbid(300), mbid(301)]);
+    // The editor still holds the entries as typed (no IDs) and changes a join phrase; the base without IDs is current.
+    await editAdminImport(by, id, { operationId: randomUUID(), expectedRevision: read, changes: [{ path: 'album.artists', base: entries, value: [{ ...entries[0], joinPhrase: ' and ' }, entries[1]] }] });
+    const doc = await stored(id);
+    assert.deepEqual(draftOf(doc).album.artists.map(entry => [entry.joinPhrase, entry.musicBrainzId]), [[' and ', mbid(300)], [null, mbid(301)]]);
+    assert.deepEqual([doc.draftOrigins!['album:artists'], draftOf(doc).album.label?.musicBrainzId], ['administrator', mbid(400)]);
+    // A name another administrator changed meanwhile (dropping that entry's ID, as a rename lookup did not find does) is still a conflict.
+    await editAdminImport(by, id, { operationId: randomUUID(), expectedRevision: (await item(id)).revision,
+        changes: [{ path: 'album.artists', base: draftOf(doc).album.artists, value: [draftOf(doc).album.artists[0], { ...draftOf(doc).album.artists[1], name: 'Second Renamed', musicBrainzId: null }] }] });
+    await assert.rejects(editAdminImport(by, id, { operationId: randomUUID(), expectedRevision: read, changes: [{ path: 'album.artists', base: entries, value: [entries[0], { ...entries[1], joinPhrase: null, role: 'featured' }] }] }),
+        code('ADMIN_IMPORT_FIELD_CONFLICT'));
+});
+
+/** A seeded import whose administrator saved entries and a label named as the synthetic release credits them, without IDs. */
+async function ownEntries() {
+    const id = await seeded(2, timed);
+    const entries = [{ key: randomUUID(), name: 'Synthetic Lead', role: 'primary' as const, joinPhrase: ' & ', musicBrainzId: null }, { key: randomUUID(), name: 'Synthetic Second', role: 'primary' as const, joinPhrase: null, musicBrainzId: null }];
+    await editAdminImport(by, id, { operationId: randomUUID(), expectedRevision: 1, changes: [{ path: 'album.artists', base: [], value: entries },
+        { path: 'album.label', base: null, value: { name: 'Synthetic Label', musicBrainzId: null } }] });
+    return { id, entries };
+}
+
+test('an added ID keeps only the explicit decisions that stay valid against the records holding IDs; cleared rows are preselected again and the approval records the listed ID', async () => {
+    const holder = new ObjectId(), plain = new ObjectId(), labelHolder = new ObjectId(), ready = { lifecycleStatus: 'ready', visibility: 'public' };
+    await getDb()!.collection('artists').insertMany([{ _id: holder, name: 'Elsewhere Lead', musicBrainzId: mbid(300), ...ready, ...catalogSearchProjection('Elsewhere Lead') },
+        { _id: plain, name: 'Synthetic Lead', ...ready, ...catalogSearchProjection('Synthetic Lead') }]);
+    await getDb()!.collection('organizations').insertOne({ _id: labelHolder, name: 'Elsewhere Label', organizationType: 'label', musicBrainzId: mbid(400), ...ready, ...catalogSearchProjection('Elsewhere Label') });
+    const { id, entries } = await ownEntries();
+    const listedPlain = (await adminImportDuplicateCandidates(by, id)).items.find(value => value.id === plain.toHexString())!;
+    await decideAdminImportDuplicates(by, id, { operationId: randomUUID(), expectedRevision: (await item(id)).revision, decisions: [
+        { scope: 'artist', slotId: null, entryKey: entries[0].key, boundName: 'Synthetic Lead', action: 'reuse', candidateId: listedPlain.id, candidateRevision: listedPlain.revision },
+        { scope: 'artist', slotId: null, entryKey: entries[1].key, boundName: 'Synthetic Second', action: 'create-distinct', candidateId: null, candidateRevision: null },
+        { scope: 'label', slotId: null, entryKey: null, boundName: 'Synthetic Label', action: 'create-distinct', candidateId: null, candidateRevision: null }] });
+    assert.equal((await requestAutomaticMetadataLookup(by, id, 'upload')).reason, 'queued');
+    await drain({ musicBrainz: fixtureClient(answers([mbid(1)], [releaseAnswer(mbid(1))])).musicBrainz });
+    const doc = await stored(id);
+    // The entries and the label gained the release's IDs and stay the administrator's own values.
+    assert.deepEqual([draftOf(doc).album.artists.map(entry => entry.musicBrainzId), draftOf(doc).album.label, doc.draftOrigins!['album:artists'], doc.draftOrigins!['album:label']],
+        [[mbid(300), mbid(301)], { name: 'Synthetic Label', musicBrainzId: mbid(400) }, 'administrator', 'administrator']);
+    // Reusing a record without an ID while another record holds the ID, and creating while a record holds it, are cleared;
+    // creating while no record holds the ID stays, bound to it.
+    assert.deepEqual((doc.decisions as { scope: string; entryKey: string | null; action: string; boundMusicBrainzId?: string | null }[]).map(value => [value.scope, value.entryKey, value.action, value.boundMusicBrainzId]),
+        [['artist', entries[1].key, 'create-distinct', mbid(301)]]);
+    // The holders are now exact-ID candidates, preselected as reuse, so no row needs an answer.
+    const listed = (await adminImportDuplicateCandidates(by, id)).items;
+    assert.deepEqual(listed.filter(value => value.match === 'musicBrainzId').map(value => [value.kind, value.id, value.musicBrainzId]),
+        [['artist', holder.toHexString(), mbid(300)], ['organization', labelHolder.toHexString(), mbid(400)]]);
+    assert.equal((await getAdminImportLookup(by, id)).summary.identityAnswers, 0);
+    // Only the new Artist records an ID: the reused holders already keep theirs, and the confirmation must list exactly that.
+    const write = { scope: 'artist', entryKey: entries[1].key, musicBrainzId: mbid(301), replaces: null };
+    await assert.rejects(approve(id, { musicBrainzIds: 'created' }), code('ADMIN_IMPORT_REVIEW_REQUIRED'));
+    assert.equal((await approve(id, { musicBrainzIds: [write] })).item.publication, 'preparing');
+    await runAdminImportPublicationOnce(new Storage(), id);
+    const published = await item(id);
+    assert.equal(published.publication, 'complete');
+    assert.deepEqual([published.published!.artistIds[0], published.published!.organizationId], [holder.toHexString(), labelHolder.toHexString()]);
+    assert.deepEqual([(await getDb()!.collection('artists').findOne({ _id: new ObjectId(published.published!.artistIds[1]) }))!.musicBrainzId,
+        (await getDb()!.collection('artists').findOne({ _id: plain }))!.musicBrainzId, await getDb()!.collection('organizations').countDocuments()], [mbid(301), undefined, 1]);
+});
+
+test('an ID that differs from one an entry already carries is an ID conflict holding publication until answered; answering lookup writes the release\'s IDs', async () => {
+    const { id } = await ownEntries();
+    // An earlier lookup left another ID on the lead (a client never introduces one).
+    await projects().updateOne({ _id: new ObjectId(id) }, { $set: { 'draft.album.artists.0.musicBrainzId': mbid(77) } });
+    assert.equal((await requestAutomaticMetadataLookup(by, id, 'upload')).reason, 'queued');
+    await drain({ musicBrainz: fixtureClient(answers([mbid(1)], [releaseAnswer(mbid(1))])).musicBrainz });
+    // The second entry and the label, which carried none, gained the release's IDs; the lead keeps its own until answered.
+    assert.deepEqual([draftOf(await stored(id)).album.artists.map(entry => entry.musicBrainzId), draftOf(await stored(id)).album.label?.musicBrainzId], [[mbid(77), mbid(301)], mbid(400)]);
+    const shown = (await getAdminImportLookup(by, id)).lookup!;
+    assert.deepEqual(shown.needsAnswer.conflicts, ['album.artists']);
+    assert.deepEqual(shown.applied!.conflicts.map(conflict => [conflict.path, conflict.musicBrainzId, (conflict.lookup as { musicBrainzId: string | null }[]).map(entry => entry.musicBrainzId)]),
+        [['album.artists', true, [mbid(300), mbid(301)]]]);
+    await assert.rejects(approve(id), code('ADMIN_IMPORT_REVIEW_REQUIRED'));
+    await resolveAdminImportLookup(by, id, { operationId: randomUUID(), expectedRevision: (await item(id)).revision, run: 1, candidateKey: keyOf(1),
+        answers: [{ path: 'album.artists', answer: 'lookup', base: (await item(id)).draft.album.artists }] });
+    assert.deepEqual(draftOf(await stored(id)).album.artists.map(entry => entry.musicBrainzId), [mbid(300), mbid(301)]);
+    assert.deepEqual((await lookup(id)).applied!.musicBrainzIds!.map(value => value.musicBrainzId).sort(), [mbid(300), mbid(301), mbid(400)]);
+    assert.deepEqual((await getAdminImportLookup(by, id)).lookup!.needsAnswer.conflicts, []);
+    assert.equal((await approve(id)).item.publication, 'preparing');
+    await runAdminImportPublicationOnce(new Storage(), id);
+    assert.equal((await item(id)).publication, 'complete');
+    assert.deepEqual([(await getDb()!.collection('artists').find({}).toArray()).map(row => row.musicBrainzId).sort(), (await getDb()!.collection('organizations').findOne({}))!.musicBrainzId],
+        [[mbid(300), mbid(301)], mbid(400)]);
 });

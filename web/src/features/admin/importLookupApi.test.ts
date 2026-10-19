@@ -72,3 +72,17 @@ test('the summary state is strict: no missing or extra field, unknown tick or fo
   refused({ ...item, placeholderOnly: undefined });
   refused({ ...item, lookupAvailable: undefined }); refused({ ...item, identityAnswers: 1.5 }); refused({ ...item, identityAnswers: -1 });
 });
+
+test('proposals, ID conflicts and the found names carry MusicBrainz IDs, defaulting to none for a server that sends none', () => {
+  const mbid = '00000000-0000-4000-8000-0000000000a1', base = view();
+  const parsed = lookupResponseSchema.parse({ lookup: base, revision: 7, valueRevision: 3, summary: summary() });
+  expect([parsed.lookup!.groups[0].proposal.artists[0].musicBrainzId, parsed.lookup!.groups[0].proposal.labelMusicBrainzId, parsed.lookup!.applied!.conflicts[0].musicBrainzId, parsed.musicBrainzNames])
+    .toEqual([null, null, false, []]);
+  const identified = { ...base, groups: [{ ...base.groups[0], proposal: { ...base.groups[0].proposal, labelMusicBrainzId: mbid, artists: base.groups[0].proposal.artists.map(artist => ({ ...artist, musicBrainzId: mbid })) } }],
+    applied: { ...base.applied, conflicts: [{ ...base.applied.conflicts[0], lookup: { name: 'Synthetic Label', musicBrainzId: mbid }, musicBrainzId: true }] } };
+  expect(lookupResponseSchema.safeParse({ lookup: identified, revision: 7, valueRevision: 3, summary: summary(), musicBrainzNames: [{ musicBrainzId: mbid, names: ['Synthetic Lead', 'リード'] }] }).success).toBe(true);
+  for (const musicBrainzNames of [[{ musicBrainzId: 'x', names: [] }], [{ musicBrainzId: mbid, names: ['n'.repeat(201)] }], [{ musicBrainzId: mbid, names: Array(33).fill('n') }],
+    Array(22).fill({ musicBrainzId: mbid, names: [] }), [{ musicBrainzId: mbid, names: [], extra: 1 }]])
+    expect(lookupResponseSchema.safeParse({ lookup: null, revision: 1, valueRevision: 0, summary: summary(), musicBrainzNames }).success).toBe(false);
+  expect(lookupViewSchema.safeParse({ ...base, groups: [{ ...base.groups[0], proposal: { ...base.groups[0].proposal, labelMusicBrainzId: 'X' } }] }).success).toBe(false);
+});

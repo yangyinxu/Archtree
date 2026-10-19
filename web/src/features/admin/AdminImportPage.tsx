@@ -5,6 +5,7 @@
  *   Types: EditorBuffer
  *   Functions: loadDraftEditor, saved, ImportProject
  *   Constants: ImportDraftV2Editor, ImportAnalysisControls, ImportMedia, ImportReview, ImportDuplicates, stages
+ *   Variables: rebase
  * @end-catalog */
 
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
@@ -12,14 +13,16 @@ import { useQuery } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router';
 import { AdminGate, useAdminAccess, useAdminText } from './AdminAccess';
 import { adminRequest, duplicateEditsKey, importPath, newerImport, responseSchema, type ImportDetail, type ImportDraftV2 } from './adminApi';
-import { artistByline, draftChanges, rebaseDraft } from './importDraftPatch';
+import { artistByline, draftChanges } from './importDraftPatch';
 import { adminWorkspace } from './adminWorkspace';
 import { useAdminMutation } from './useAdminMutation';
 import { useImportUploadQueue } from './useImportUploadQueue';
 import { ImportStages, MutationStatus, useOnline } from './AdminShared';
 import { AdminNav } from './AdminNav';
 import styles from './adminStyles';
-// The editor and the analysis controls load beside the project read (see ImportProject), keeping this route inside the initial JavaScript budget.
+// The editor, the analysis controls and the rebase of unsaved edits load beside the project read (see ImportProject), keeping this
+// route inside the initial JavaScript budget. Only a loaded editor holds unsaved edits, so a rebase is never needed earlier.
+let rebase: typeof import('./importDraftRebase') | undefined;
 const loadDraftEditor = () => import('./ImportDraftV2Editor');
 const ImportDraftV2Editor = lazy(() => loadDraftEditor().then(module => ({ default: module.ImportDraftV2Editor })));
 const ImportAnalysisControls = lazy(() => loadDraftEditor().then(module => ({ default: module.ImportAnalysisControls })));
@@ -47,7 +50,7 @@ function ImportProject({ id }: { id: string }) {
   const mutation = useAdminMutation(id);
   const uploads = useImportUploadQueue(id);
   const opened = useRef(false);
-  useEffect(() => { void loadDraftEditor(); }, []);
+  useEffect(() => { void loadDraftEditor(); void import('./importDraftRebase').then(module => { rebase = module; }); }, []);
   const query = useQuery({
     queryKey: ['admin-imports', access.viewerId, access.epoch, access.generation, id],
     queryFn: ({ signal }) => adminRequest(path, responseSchema, { signal }), retry: false, gcTime: 0,
@@ -59,7 +62,7 @@ function ImportProject({ id }: { id: string }) {
   const accept = (item: ImportDetail) => {
     setConfirmed(previous => !previous || !newerImport(previous, item) ? item : previous);
     setEditor(previous => {
-      const rebased = previous?.dirty && newerImport(item, previous) ? rebaseDraft(previous.base, previous.draft, item.draft, new Set(item.automaticPaths)) : null;
+      const rebased = previous?.dirty && newerImport(item, previous) ? rebase?.rebaseDraft(previous.base, previous.draft, item.draft, new Set(item.automaticPaths)) : null;
       if (previous && rebased) return { ...previous, base: item.draft, draft: rebased, revision: item.revision, valueRevision: item.valueRevision, dirty: draftChanges(item.draft, rebased).length > 0 };
       return previous && (previous.dirty || newerImport(previous, item)) ? previous : saved(item, previous?.selected);
     });
@@ -131,7 +134,7 @@ function ImportProject({ id }: { id: string }) {
       <div hidden={stage !== 'draft'} role="tabpanel" id="import-panel-draft" aria-labelledby="import-tab-draft">
       <form className={styles.panel} onSubmit={event => { event.preventDefault(); if (!locked && !conflict && changes.length) mutation.operation.run(path, 'PATCH', { expectedRevision: editor.revision, changes }); }}>
         <header className={styles.sectionHeader}><h2>{t('layout.metadata')}</h2></header>
-        <Suspense fallback={<p role="status">{t('common.loading')}</p>}><ImportDraftV2Editor draft={editor.draft} saved={editor.base} filenames={item.manifest.files} disabled={locked || publicationLocked} automaticPaths={item.automaticPaths} lookupPaths={item.lookupPaths} possibleLabels={item.possibleLabelEntryKeys}
+        <Suspense fallback={<p role="status">{t('common.loading')}</p>}><ImportDraftV2Editor draft={editor.draft} saved={editor.base} item={item} disabled={locked || publicationLocked}
           onChange={draft => setEditor({ ...editor, draft, dirty: true })} /></Suspense>
         <div className={styles.actions}><button className={`${styles.button} ${styles.primary}`} type="submit" disabled={locked || publicationLocked || !editor.dirty || conflict || !changes.length}>{t('action.save')}</button><span role="status">{t(editor.dirty ? 'common.unsaved' : 'common.saved')}</span></div>
       </form>

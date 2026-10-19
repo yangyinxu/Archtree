@@ -11,6 +11,8 @@
  *   - ambiguous identical bytes preselect nothing: two files with one member's bytes, one file matching two members, or a member another file reuses
  *   - an append whose member matches are incomplete preselects no track, and the member cap is 300
  *   - an untitled file is never matched by title when appending, so an untitled member holds only the file its bytes match
+ *   - the record holding an entry's MusicBrainz ID is preselected as reuse, binding the ID, and its other candidates need no answer
+ *   - a record lookup found under an alias of the entry's ID, or holding the ID, blocks create like a name candidate; another ID's does not
  *   - the worker recheck reads no candidates for a format-1 or format-2 approval or one that froze no preselection, and refuses a malformed format-3 decision list
  *   - a same-name record too malformed to be a candidate keeps its row from being preselected, and only that row
  *   - names compare without the host locale, so a Turkish default locale still matches a dotted capital I
@@ -61,7 +63,9 @@ const appendTo = (albumId: string, extra: ImportDecisionV2[] = []) => [decision(
 test('with no candidates every entry, the label, the Album and every track are preselected as create, and an explicit decision always wins', () => {
     const value = draft();
     assert.deepEqual(importIdentityPreselections(value, [], listing([])), [
-        create('artist', { entryKey: lorem, boundName: 'Lorem Ensemble' }), create('artist', { entryKey: ipsum, boundName: 'Ipsum Quartet' }), create('label', { boundName: 'Sit Records' }),
+        // An Artist or label preselection binds its entry's MusicBrainz ID (none here).
+        create('artist', { entryKey: lorem, boundName: 'Lorem Ensemble', boundMusicBrainzId: null }), create('artist', { entryKey: ipsum, boundName: 'Ipsum Quartet', boundMusicBrainzId: null }),
+        create('label', { boundName: 'Sit Records', boundMusicBrainzId: null }),
         create('album'), create('track', { slotId: slotA }), create('track', { slotId: slotB })]);
     // Explicit decisions, a skip included, are never preselected over; the other rows still are.
     const explicit = [decision('artist', 'skip', { entryKey: lorem, boundName: 'Lorem Ensemble' }), decision('label', 'create-distinct', { boundName: 'Sit Records' }), decision('track', 'skip', { slotId: slotA })];
@@ -129,6 +133,44 @@ test('an append whose member matches are incomplete preselects no track, and the
 test('an untitled file is never matched by title when appending, so an untitled member holds only the file its bytes match', () => {
     const value = draft(item => { item.tracks[0].title = ''; }), untitled = candidate('track', '', { albumId: target, match: 'sha256', matchedSlotIds: [slotB] });
     assert.deepEqual(rows(importIdentityPreselections(value, appendTo(target), listing([untitled]))), [`track:${slotA}:create-distinct`, `track:${slotB}:reuse:${untitled.id}`]);
+});
+
+test('the record holding an entry\'s MusicBrainz ID is preselected as reuse, binding the ID, and its other candidates need no answer', () => {
+    const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+    const value = draft(item => { item.album.artists[0].musicBrainzId = id(1); item.album.label = { name: 'Sit Records', musicBrainzId: id(9) }; });
+    const holder = candidate('artist', 'Lorem Ensemble (JP)', { match: 'musicBrainzId', musicBrainzId: id(1), revision: 'b'.repeat(64) });
+    const sameName = candidate('artist', 'Lorem Ensemble'), labelHolder = candidate('organization', 'Sit', { match: 'musicBrainzId', musicBrainzId: id(9) });
+    const preselected = importIdentityPreselections(value, [], listing([sameName, holder, labelHolder]));
+    assert.deepEqual(preselected.filter(item => item.scope === 'artist' || item.scope === 'label'), [
+        { scope: 'artist', slotId: null, entryKey: lorem, boundName: 'Lorem Ensemble', boundMusicBrainzId: id(1), action: 'reuse', candidateId: holder.id, candidateRevision: holder.revision, preselected: true },
+        { scope: 'artist', slotId: null, entryKey: ipsum, boundName: 'Ipsum Quartet', boundMusicBrainzId: null, action: 'create-distinct', candidateId: null, candidateRevision: null, preselected: true },
+        { scope: 'label', slotId: null, entryKey: null, boundName: 'Sit Records', boundMusicBrainzId: id(9), action: 'reuse', candidateId: labelHolder.id, candidateRevision: labelHolder.revision, preselected: true }]);
+    // An explicit decision on the entry still wins.
+    assert.equal(importIdentityPreselections(value, [decision('artist', 'create-distinct', { entryKey: lorem, boundName: 'Lorem Ensemble', boundMusicBrainzId: id(1) })], listing([holder]))
+        .some(item => item.entryKey === lorem), false);
+    // A holder that another row explicitly reuses, or reuses replacing its ID, is not preselected again: the row needs an answer.
+    for (const action of ['reuse', 'replace'] as const) {
+        const taken = [decision('artist', action, { entryKey: ipsum, boundName: 'Ipsum Quartet', candidateId: holder.id, candidateRevision: holder.revision })];
+        assert.equal(importIdentityPreselections(value, taken, listing([holder])).some(item => item.entryKey === lorem), false, action);
+    }
+    // Two entries carrying one ID: only the first is preselected as reuse.
+    const twice = draft(item => { item.album.artists.forEach(entry => { entry.musicBrainzId = id(1); }); });
+    assert.deepEqual(rows(importIdentityPreselections(twice, [], listing([holder]))).slice(0, 1), [`artist:${lorem}:reuse:${holder.id}`]);
+    assert.equal(importIdentityPreselections(twice, [], listing([holder])).some(item => item.entryKey === ipsum), false);
+});
+
+test('a record lookup found under an alias of the entry\'s ID, or holding the ID, blocks create like a name candidate; another ID\'s does not', () => {
+    const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+    const value = draft(item => { item.album.artists[0].musicBrainzId = id(1); });
+    const alias = candidate('artist', 'ロレム', { match: 'alias', aliasOf: id(1) });
+    assert.equal(importIdentityPreselections(value, [], listing([alias])).some(item => item.entryKey === lorem), false);
+    assert.equal(importIdentityPreselections(value, [], listing([candidate('artist', 'ロレム', { match: 'alias', aliasOf: id(2) })])).some(item => item.entryKey === lorem), true);
+    // A row the entry's ID names that is taken elsewhere still holds the entry from a preselected create.
+    const holder = candidate('artist', 'Elsewhere', { match: 'musicBrainzId', musicBrainzId: id(1) });
+    const taken = [decision('artist', 'reuse', { entryKey: ipsum, boundName: 'Ipsum Quartet', candidateId: holder.id, candidateRevision: holder.revision })];
+    assert.equal(importIdentityPreselections(value, taken, listing([holder])).some(item => item.entryKey === lorem), false);
+    // An entry without an ID is never matched by another entry's alias or ID rows.
+    assert.equal(importIdentityPreselections(draft(), [], listing([alias, holder])).some(item => item.entryKey === lorem), true);
 });
 
 test('the worker recheck reads no candidates for a format-1 or format-2 approval or one that froze no preselection, and refuses a malformed format-3 decision list', async () => {

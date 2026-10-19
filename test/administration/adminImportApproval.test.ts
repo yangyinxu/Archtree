@@ -24,6 +24,18 @@ test('a publish body from before one-step approval and every bounded approval pa
     // still answers it as an operation conflict.
     const { approvalDigest: _digest, ...partial } = valid;
     boundImportApproval(partial); boundImportApproval({ ...valid, approvalDigest: 'Z'.repeat(64) });
+    // The MusicBrainz IDs a confirmation showed: at most 21 well-formed writes.
+    const write = { scope: 'artist', entryKey: '00000009-0000-4000-8000-0000000000e1', musicBrainzId: '00000000-0000-4000-8000-0000000000a1', replaces: null };
+    boundImportApproval({ ...valid, musicBrainzIds: [] });
+    boundImportApproval({ ...valid, musicBrainzIds: [write, { scope: 'label', entryKey: null, musicBrainzId: '00000000-0000-4000-8000-0000000000a2', replaces: '00000000-0000-4000-8000-0000000000a3' }] });
+    boundImportApproval({ ...valid, musicBrainzIds: Array.from({ length: 21 }, () => write) });
+});
+
+test('shown MusicBrainz ID writes that are malformed, too many or nested are invalid input before the fingerprint', () => {
+    const write = { scope: 'artist', entryKey: '00000009-0000-4000-8000-0000000000e1', musicBrainzId: '00000000-0000-4000-8000-0000000000a1', replaces: null };
+    for (const [label, musicBrainzIds] of [['not a list', write], ['22 writes', Array.from({ length: 22 }, () => write)], ['an extra key', [{ ...write, extra: 1 }]],
+        ['a malformed ID', [{ ...write, musicBrainzId: 'x' }]], ['a nested ID', [{ ...write, musicBrainzId: [write.musicBrainzId] }]], ['a label with an entry', [{ ...write, scope: 'label' }]],
+        ['a placeholder', [{ ...write, musicBrainzId: '89ad4ac3-39f7-470e-963a-56509c546377' }]], ['null', null]] as const) invalid({ ...valid, musicBrainzIds }, label);
 });
 
 test('approval fields that are unbounded, nested too deep or of the wrong type are invalid input before the fingerprint', () => {

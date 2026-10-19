@@ -13,6 +13,8 @@
  *   - the publish body carries the shown changes and decisions with the saved cover, revision and approval digest
  *   - an append whose Album or member Track is no longer listed at its reviewed revision is a changed match that blocks approval
  *   - preselected rows read New or Reuses and block nothing, while rows neither answered nor preselected block; preselections never clear the tags-only marks
+ *   - a replace reads as a reuse of the listed record, and each row shows the MusicBrainz ID its record records or replaces, none for an append
+ *   - a replace the server would refuse reads as a changed match that blocks approval: no ID on the row, none held by the record, or the row's ID held by a listed record
  * @end-catalog */
 
 import type { ImportDecision } from './adminApi';
@@ -90,7 +92,7 @@ test('the checklist names each identity as new, reused (marking a hidden record)
   expect(checklist.append).toBe(false);
   expect(checklist.artists.map(entry => [entry.name, entry.role, entry.joinPhrase, entry.identity])).toEqual([
     ['Lorem', 'primary', ' & ', { kind: 'new' }], ['Ipsum', 'primary', null, { kind: 'reused', label: 'Ipsum', hidden: true }], ['Dolor', 'featured', null, { kind: 'needsDecision' }]]);
-  expect(checklist.label).toEqual({ name: 'Sit Records', identity: { kind: 'reused', label: 'Sit Records', hidden: false } });
+  expect(checklist.label).toEqual({ name: 'Sit Records', identity: { kind: 'reused', label: 'Sit Records', hidden: false }, musicBrainzIdWrite: null });
   expect(checklist.album).toEqual({ kind: 'new' });
   // A skipped track is no catalog content.
   expect(checklist.tracks.map(value => [value.slotId, value.existing, value.identity])).toEqual([[slotTwo, false, { kind: 'new' }]]);
@@ -168,4 +170,40 @@ test('preselected rows read New or Reuses and block nothing, while rows neither 
   const target = candidate('album', '3'.repeat(24), 'Existing Album');
   const append = approvalChecklist(item.draft, [album(reuse(target)), track(slotTwo, { action: 'skip' })], [target, member], marks, [track(slotId, reuse(member)), track(slotTwo)]);
   expect([append.append, append.tracks.map(value => [value.slotId, value.existing, value.identity]), append.blocked]).toEqual([true, [[slotId, true, { kind: 'reused', label: 'Stored Title', hidden: false }]], 0]);
+});
+
+test('a replace reads as a reuse of the listed record, and each row shows the MusicBrainz ID its record records or replaces, none for an append', () => {
+  const item = saved(), id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+  item.draft.album.artists[1] = { ...item.draft.album.artists[1], musicBrainzId: id(2) };
+  const ipsum = { ...candidate('artist', '1'.repeat(24), 'Ipsum'), musicBrainzId: id(7) }, sit = candidate('organization', '2'.repeat(24), 'Sit Records');
+  const decisions = [artist(1), artist(2, { ...reuse(ipsum), action: 'replace' }), artist(3), label(reuse(sit)), album(), track(slotId), track(slotTwo)];
+  const writes = [{ scope: 'artist' as const, entryKey: entryKey(1), musicBrainzId: id(1), replaces: null }, { scope: 'artist' as const, entryKey: entryKey(2), musicBrainzId: id(2), replaces: id(7) },
+    { scope: 'label' as const, entryKey: null, musicBrainzId: id(9), replaces: null }];
+  const checklist = approvalChecklist(item.draft, decisions, [ipsum, sit], undefined, [], writes);
+  expect(checklist.artists.map(entry => [entry.name, entry.identity, entry.musicBrainzIdWrite])).toEqual([
+    ['Lorem', { kind: 'new' }, { musicBrainzId: id(1), replaces: null }], ['Ipsum', { kind: 'reused', label: 'Ipsum', hidden: false }, { musicBrainzId: id(2), replaces: id(7) }],
+    ['Dolor', { kind: 'new' }, null]]);
+  expect(checklist.label).toEqual({ name: 'Sit Records', identity: { kind: 'reused', label: 'Sit Records', hidden: false }, musicBrainzIdWrite: { musicBrainzId: id(9), replaces: null } });
+  expect(checklist.blocked).toBe(0);
+  // A replace of a record no longer listed at its reviewed revision is a changed match, like a reuse.
+  const changed = approvalChecklist(item.draft, decisions, [{ ...ipsum, revision: 'r-newer' }, sit], undefined, [], writes);
+  expect([changed.artists[1].identity, changed.blocked]).toEqual([{ kind: 'changed' }, 1]);
+  // An append applies no entry or label, so no row records an ID whatever the writes say.
+  const target = candidate('album', '3'.repeat(24), 'Existing Album');
+  const appended = approvalChecklist(item.draft, [album(reuse(target)), track(slotId), track(slotTwo)], [target], undefined, [], writes);
+  expect([appended.artists.map(entry => entry.musicBrainzIdWrite), appended.label?.musicBrainzIdWrite]).toEqual([[null, null, null], null]);
+});
+
+test('a replace the server would refuse reads as a changed match that blocks approval: no ID on the row, none held by the record, or the row\'s ID held by a listed record', () => {
+  const item = saved(), id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+  item.draft.album.label = { name: 'Sit Records', musicBrainzId: id(9) };
+  const sit = { ...candidate('organization', '2'.repeat(24), 'Sit Records'), musicBrainzId: id(5) }, rest = [artist(1), artist(2), artist(3), album(), track(slotId), track(slotTwo)];
+  const identity = (draft: typeof item.draft, candidates: ImportCandidate[]) => approvalChecklist(draft, [...rest, label({ ...reuse(sit), action: 'replace' })], candidates).label!.identity;
+  expect(identity(item.draft, [sit])).toEqual({ kind: 'reused', label: 'Sit Records', hidden: false });
+  expect(identity({ ...item.draft, album: { ...item.draft.album, label: labelEntry('Sit Records') } }, [sit])).toEqual({ kind: 'changed' });
+  expect(identity(item.draft, [{ ...sit, musicBrainzId: undefined }])).toEqual({ kind: 'changed' });
+  expect(identity(item.draft, [{ ...sit, musicBrainzId: id(9) }])).toEqual({ kind: 'changed' });
+  expect(identity(item.draft, [sit, { ...candidate('organization', '6'.repeat(24), 'Elsewhere'), match: 'musicBrainzId', musicBrainzId: id(9) }])).toEqual({ kind: 'changed' });
+  // A plain reuse of the same record is unaffected by who holds the row's ID.
+  expect(approvalChecklist(item.draft, [...rest, label(reuse(sit))], [sit, { ...candidate('organization', '6'.repeat(24), 'Elsewhere'), match: 'musicBrainzId', musicBrainzId: id(9) }]).label!.identity.kind).toBe('reused');
 });

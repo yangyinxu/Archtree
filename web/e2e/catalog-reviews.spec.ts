@@ -75,8 +75,8 @@ function remainingCatalogItems(kind: RemainingCatalogKind): CatalogItem[] {
     const common = { id, revision: catalogAlbum().revision, visibility, effectiveVisibility: visibility,
       coverUrl: kind === 'organization' ? null : `/api/admin/v1/catalog/${kind}/${id}/artwork`, mediaUrl: null,
       capabilities: { editing: true, visibility: true } };
-    if (kind === 'artist') return { ...common, kind, fields: { name, bio: 'Synthetic biography. 私有目录中的艺术家介绍。', birthDate: { year: 1987, month: null, day: null } } };
-    if (kind === 'organization') return { ...common, kind, fields: { name, description: 'Synthetic organization. 保存与发行录音的机构。', organizationType: 'archive' } };
+    if (kind === 'artist') return { ...common, kind, fields: { name, bio: 'Synthetic biography. 私有目录中的艺术家介绍。', birthDate: { year: 1987, month: null, day: null }, musicBrainzId: null } };
+    if (kind === 'organization') return { ...common, kind, fields: { name, description: 'Synthetic organization. 保存与发行录音的机构。', organizationType: 'archive', musicBrainzId: null } };
     return { ...common, kind, fields: { title: name, releaseDate: { year: 2023 + index, month: null, day: null }, credits: null, attributionStatus: 'unknown', discNumber: null, trackNumber: index + 1 } };
   });
 }

@@ -11,6 +11,8 @@
  *   - Disc Numbers, Track Numbers and titles are bounded
  *   - Draft v2 keys are exact at every level, with one track per manifest slot
  *   - a client MusicBrainz ID is kept only when it equals the one stored for the same, unrenamed entry or label
+ *   - a renamed entry or label keeps its ID only under a name lookup found for it, and only a server writer introduces an ID
+ *   - a decision binds its entry's or label's MusicBrainz ID: changing the ID clears it, and a decision saved without one binds none
  *   - the 48 KB cap refuses a growing draft but keeps a converted draft near the cap editable
  *   - value paths are only the Draft v2 paths of the manifest
  *   - a field save is 1 to 5 + 3 per file distinct changes, each exactly {path, base, value} with a valid value
@@ -164,6 +166,43 @@ test('a client MusicBrainz ID is kept only when it equals the one stored for the
     assert.equal(parseArtistEntries([entry(1, 'Renamed')], stored)[0].musicBrainzId, null, 'renaming may always drop the ID');
     const label = { name: 'Synthetic Label', musicBrainzId: mbid(3) };
     assert.deepEqual(parseLabelEntry(label, label), label); invalid(() => parseLabelEntry(label, null)); invalid(() => parseLabelEntry({ ...label, name: 'Other' }, label));
+});
+
+test('a renamed entry or label keeps its ID only under a name lookup found for it, and only a server writer introduces an ID', () => {
+    const stored = [entry(1, 'Lorem Ensemble', 'primary', { musicBrainzId: mbid(1) })], names = new Map([[mbid(1), ['Lorem Ensemble', 'ロレム・アンサンブル', 'Lorem Ens.']]]);
+    assert.equal(parseArtistEntries([entry(1, 'ロレム・アンサンブル', 'primary', { musicBrainzId: mbid(1) })], stored, { names })[0].musicBrainzId, mbid(1), 'an alias keeps it');
+    assert.equal(parseArtistEntries([entry(1, 'LOREM ENS.', 'primary', { musicBrainzId: mbid(1) })], stored, { names })[0].musicBrainzId, mbid(1), 'folded like any name');
+    invalid(() => parseArtistEntries([entry(1, 'Unfound Name', 'primary', { musicBrainzId: mbid(1) })], stored, { names }), 'a name lookup did not find');
+    invalid(() => parseArtistEntries([entry(1, 'ロレム・アンサンブル', 'primary', { musicBrainzId: mbid(1) })], stored, { names: new Map([[mbid(2), ['ロレム・アンサンブル']]]) }), 'names of another ID');
+    invalid(() => parseArtistEntries([entry(1, 'Lorem Ensemble', 'primary', { musicBrainzId: mbid(2) })], stored, { names }), 'names never introduce an ID');
+    // A server writer introduces an ID taken from a MusicBrainz response; a placeholder identity is refused even then.
+    assert.equal(parseArtistEntries([entry(2, 'Ipsum', 'primary', { musicBrainzId: mbid(2) })], [], { introduce: new Set([mbid(2)]) })[0].musicBrainzId, mbid(2));
+    invalid(() => parseArtistEntries([entry(2, 'Ipsum', 'primary', { musicBrainzId: mbid(3) })], [], { introduce: new Set([mbid(2)]) }), 'an ID not introduced');
+    const variousArtists = '89ad4ac3-39f7-470e-963a-56509c546377';
+    invalid(() => parseArtistEntries([entry(2, 'Various Artists', 'primary', { musicBrainzId: variousArtists })], [], { introduce: new Set([variousArtists]) }), 'a placeholder');
+    const label = { name: 'Synthetic Label', musicBrainzId: mbid(3) };
+    assert.deepEqual(parseLabelEntry({ ...label, name: 'Synthetic Records' }, label, { names: new Map([[mbid(3), ['synthetic records']]]) }), { ...label, name: 'Synthetic Records' });
+    invalid(() => parseLabelEntry({ ...label, name: 'Synthetic Records' }, label, { names: new Map() }));
+    assert.deepEqual(parseLabelEntry({ name: 'New Label', musicBrainzId: mbid(4) }, null, { introduce: new Set([mbid(4)]) }), { name: 'New Label', musicBrainzId: mbid(4) });
+    // Field saves pass names (never introduce) through to the entry parser.
+    const current = withAlbum({ artists: stored }), change = { path: 'album.artists', base: stored, value: [entry(1, 'Lorem Ens.', 'primary', { musicBrainzId: mbid(1) })] };
+    assert.equal((parseDraftChanges([change], manifest, current, { names })[0].value as ImportArtistEntry[])[0].musicBrainzId, mbid(1));
+    invalid(() => parseDraftChanges([change], manifest, current));
+});
+
+test('a decision binds its entry\'s or label\'s MusicBrainz ID: changing the ID clears it, and a decision saved without one binds none', () => {
+    const decision = (scope: ImportDecisionV2['scope'], extra: Partial<ImportDecisionV2> = {}): ImportDecisionV2 => ({ scope, slotId: null, action: 'create-distinct', candidateId: null, candidateRevision: null, entryKey: null, boundName: null, ...extra });
+    const decisions = [decision('artist', { entryKey: key(1), boundName: 'A', boundMusicBrainzId: mbid(1) }), decision('artist', { entryKey: key(2), boundName: 'B' }),
+        decision('label', { boundName: 'L', boundMusicBrainzId: null }), decision('album')];
+    const keep = (artists: ImportArtistEntry[], label: ImportDraftV2['album']['label']) => retainBoundDecisions(decisions, withAlbum({ artists, label })).map(value => value.entryKey ?? value.scope);
+    const label = { name: 'L', musicBrainzId: null };
+    assert.deepEqual(keep([entry(1, 'A', 'primary', { musicBrainzId: mbid(1) }), entry(2, 'B')], label), [key(1), key(2), 'label', 'album']);
+    assert.deepEqual(keep([entry(1, 'A'), entry(2, 'B')], label), [key(2), 'label', 'album'], 'an ID removed');
+    assert.deepEqual(keep([entry(1, 'A', 'primary', { musicBrainzId: mbid(2) }), entry(2, 'B')], label), [key(2), 'label', 'album'], 'an ID replaced');
+    assert.deepEqual(keep([entry(1, 'A', 'primary', { musicBrainzId: mbid(1) }), entry(2, 'B', 'primary', { musicBrainzId: mbid(5) })], label), [key(1), 'label', 'album'], 'an ID added to an entry decided without one');
+    assert.deepEqual(keep([entry(1, 'A', 'primary', { musicBrainzId: mbid(1) }), entry(2, 'B')], { name: 'L', musicBrainzId: mbid(6) }), [key(1), key(2), 'album'], 'the label gained an ID');
+    assert.equal(boundArtistDecision(decisions, entry(2, 'B')), decisions[1], 'a missing bound ID is null');
+    assert.equal(boundLabelDecision(decisions, label), decisions[2]);
 });
 
 test('the 48 KB cap refuses a growing draft but keeps a converted draft near the cap editable', () => {
@@ -362,10 +401,14 @@ test('the import detail shows Draft v2 values, entry- and label-bound decisions 
         tracks: [{ slotId: slot1, title: 'Synthetic Opening', discNumber: 1, trackNumber: 1 }, { slotId: slot2, title: 'Synthetic Reprise', discNumber: 2, trackNumber: 1 }] });
     // The lookup-sourced suggestion is outside the v1 source vocabulary and is left out.
     assert.deepEqual(item.suggestions.map(({ field, value }) => [field, value]), [['artists', doc.suggestions[0].value], ['title', 'Synthetic Compat Album (Deluxe)']]);
-    // Each entry and the label keep their own decision, which names its entry (or none) and the name it was made for.
+    // Each entry and the label keep their own decision, which names its entry (or none) and the name it was made for. The first
+    // entry carries a MusicBrainz ID while its decision was stored without `boundMusicBrainzId` (as every release before IDs
+    // stored it): such a decision binds none, so it no longer binds that entry and is decided again.
     const [e1, e2] = doc.draft.album.artists.map(value => value.key);
+    assert.equal('boundMusicBrainzId' in (doc.decisions[0] as object), false);
     assert.deepEqual(item.decisions.map(({ scope, slotId, entryKey, boundName }) => [scope, slotId, entryKey, boundName]),
-        [['artist', null, e1, 'Synthetic Primary'], ['artist', null, e2, 'Synthetic Guest'], ['label', null, null, 'Synthetic Label'], ['album', null, null, null], ['track', slot1, null, null], ['track', slot2, null, null]]);
+        [['artist', null, e2, 'Synthetic Guest'], ['label', null, null, 'Synthetic Label'], ['album', null, null, null], ['track', slot1, null, null], ['track', slot2, null, null]]);
+    assert.deepEqual(retainBoundDecisions(doc.decisions as ImportDecisionV2[], doc.draft as ImportDraftV2).filter(value => value.entryKey === e1), []);
     assert.deepEqual(item.capabilities, { analysis: true, upload: true, publish: true });
     // The stored automatic origins are listed in path order; neither entry name looks like a company, and no automatic write is counted.
     assert.deepEqual(item.automaticPaths, ['album.artists', 'album.label', 'album.releaseDate', `tracks.${slot1}.title`, `tracks.${slot1}.discNumber`, `tracks.${slot1}.trackNumber`, `tracks.${slot2}.discNumber`, `tracks.${slot2}.trackNumber`]);
@@ -378,8 +421,8 @@ test('the import detail shows Draft v2 values, entry- and label-bound decisions 
     const json = JSON.stringify(item);
     for (const sentinel of ['futureAlbumField', 'draftOrigins', 'draftVersion', 'futureTopLevel', 'albumArtist"', '0000000000f2', 'lookup-', 'automatedAt']) assert.equal(json.includes(sentinel), false, sentinel);
     // Renaming the label clears only its decision; removing an entry clears only that entry's.
-    const renamed = adminImportDetail({ ...doc, draft: { ...doc.draft, album: { ...doc.draft.album, label: { name: 'Renamed Label', musicBrainzId: null }, artists: [doc.draft.album.artists[0]] } } } as AdminImportDocument, actor, true);
-    assert.deepEqual(renamed.decisions.map(({ scope, entryKey }) => [scope, entryKey]), [['artist', e1], ['album', null], ['track', null], ['track', null]]);
+    const renamed = adminImportDetail({ ...doc, draft: { ...doc.draft, album: { ...doc.draft.album, label: { name: 'Renamed Label', musicBrainzId: null }, artists: [{ ...doc.draft.album.artists[1], role: 'primary' }] } } } as AdminImportDocument, actor, true);
+    assert.deepEqual(renamed.decisions.map(({ scope, entryKey }) => [scope, entryKey]), [['artist', e2], ['album', null], ['track', null], ['track', null]]);
     // A newer format shows the best-effort allowlist, whose decisions name no entry, and offers no work.
     const newer = adminImportDetail({ ...doc, draftVersion: 3 }, actor, true);
     assert.deepEqual([newer.draft, newer.capabilities], [item.draft, { analysis: false, upload: false, publish: false }]);
@@ -523,8 +566,10 @@ test('the approval digest binds the shown draft, decisions, cover and staged byt
     const reviewed = loadV2(); reviewed.draftOrigins!['album:label'] = 'administrator'; assert.notEqual(adminImportDetail(reviewed, actor, true).approvalDigest, detail.approvalDigest);
     assert.equal(adminImportDetail({ ...loadV2(), valueRevision: 9 }, actor, true).approvalDigest, detail.approvalDigest);
     // The Web contract fixture (web/src/features/admin/adminApi.test.ts) echoes this value. Changing what the digest covers makes
-    // every open confirmation ADMIN_IMPORT_APPROVAL_STALE across that deploy, so both must be updated deliberately.
-    assert.equal(detail.approvalDigest, 'e3fe4303d00be9a0834356a317c65c1e8c7417618fc51471f9fe55284f6d9df9');
+    // every open confirmation ADMIN_IMPORT_APPROVAL_STALE across that deploy, so both must be updated deliberately. (The value
+    // changed with MusicBrainz IDs only because this fixture's first entry carries an ID, which no earlier release wrote: its
+    // decision binds none and is no longer shown. A project stored by an earlier release keeps its digest.)
+    assert.equal(detail.approvalDigest, '0750a0a067e372de32f210b20b4d8ee8d6d25c713afef3dcf777fb387a1cdd8f');
 });
 
 test('converting a project saved before Draft v2 keeps its approval digest, so an approval built on its view stays current', () => {

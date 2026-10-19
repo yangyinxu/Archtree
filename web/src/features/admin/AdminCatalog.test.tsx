@@ -24,6 +24,8 @@
  *   - adding a Credit clears the previous last phrase and keeps every other phrase
  *   - confirmation distinguishes unavailable Credits from explicit removal and includes coupled attribution
  *   - same-named Credit replacements remain distinguishable by their exact records
+ *   - an Artist's MusicBrainz ID is edited as trimmed lowercase text, cleared when emptied, and an ID another Artist keeps is refused with its own message
+ *   - an Organization's saved MusicBrainz ID is shown, and clearing it confirms the stored ID against none and sends only null
  * @end-catalog */
 
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
@@ -40,8 +42,8 @@ import type { CatalogItem, CatalogKind } from './catalogApi';
 const album = (): Extract<CatalogItem, { kind: 'album' }> => ({ kind: 'album', id: '111111111111111111111111', revision: `cr_${'a'.repeat(43)}`, visibility: 'public', effectiveVisibility: 'public', coverUrl: null, mediaUrl: null, capabilities: { editing: true, visibility: true }, fields: { title: 'Synthetic catalog Album', releaseDate: null, credits: null, attributionStatus: 'unknown' } });
 function catalogItem(kind: CatalogKind): CatalogItem {
   const base = album();
-  if (kind === 'artist') return { ...base, kind, fields: { name: 'Synthetic artist', bio: '', birthDate: null } };
-  if (kind === 'organization') return { ...base, kind, fields: { name: '𠮷 Synthetic organization', description: '', organizationType: 'archive' } };
+  if (kind === 'artist') return { ...base, kind, fields: { name: 'Synthetic artist', bio: '', birthDate: null, musicBrainzId: null } };
+  if (kind === 'organization') return { ...base, kind, fields: { name: '𠮷 Synthetic organization', description: '', organizationType: 'archive', musicBrainzId: null } };
   if (kind === 'audioTrack') return { ...base, kind, fields: { ...base.fields, title: 'Synthetic track', releaseDate: { year: 2023, month: 4, day: null }, discNumber: null, trackNumber: 2 } };
   return base;
 }
@@ -700,4 +702,55 @@ test.each([
     const row = screen.getByRole('heading', { name: label }).closest('article')!;
     expect(within(row).getByText(values[index], { exact: true, normalizer: text => text })).toBeVisible();
   });
+});
+
+test('an Artist\'s MusicBrainz ID is edited as trimmed lowercase text, cleared when emptied, and an ID another Artist keeps is refused with its own message', async () => {
+  const item = catalogItem('artist'), writes: Record<string, unknown>[] = [], id = '0000000a-0000-4000-8000-0000000000a1';
+  vi.stubGlobal('fetch', vi.fn(async (path: string, init: RequestInit) => {
+    if (path.endsWith('/cover-operations')) return json({ items: [] });
+    if (init.method === 'PATCH') { writes.push(JSON.parse(String(init.body))); return json({ code: 'ADMIN_CATALOG_MUSICBRAINZ_ID_IN_USE' }, 409); }
+    return json({ item });
+  }));
+  mount(<AdminCatalogPage kind="artist" id={item.id} />);
+  const field = await screen.findByRole('textbox', { name: 'MusicBrainz ID' });
+  expect(field).toHaveValue(''); expect(screen.getByText(/Private import provenance, never shown to listeners/)).toBeVisible();
+  fireEvent.change(field, { target: { value: `  ${id.toUpperCase()} ` } });
+  expect(field).toHaveValue(id);
+  fireEvent.click(screen.getByRole('button', { name: 'Save catalog changes' }));
+  fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Save catalog changes' }));
+  expect(await screen.findByText('Another record of this kind already keeps this MusicBrainz ID. Nothing was saved.')).toBeVisible();
+  expect(writes[0]).toMatchObject({ expectedRevision: item.revision, fields: { musicBrainzId: id } }); expect(Object.keys(writes[0].fields as object)).toEqual(['musicBrainzId']);
+  // The refusal leaves no retryable intent; emptying the field returns to the saved value, so nothing is left to save.
+  expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument();
+  fireEvent.change(screen.getByRole('textbox', { name: 'MusicBrainz ID' }), { target: { value: '' } });
+  expect(screen.getByRole('textbox', { name: 'MusicBrainz ID' })).toHaveValue('');
+});
+
+test('an Organization\'s saved MusicBrainz ID is shown, and clearing it confirms the stored ID against none and sends only null', async () => {
+  const id = '00000000-0000-4000-8000-0000000000b1', base = catalogItem('organization') as Extract<CatalogItem, { kind: 'organization' }>;
+  const item = { ...base, fields: { ...base.fields, musicBrainzId: id } }, writes: Record<string, unknown>[] = [];
+  let current: CatalogItem = item;
+  vi.stubGlobal('fetch', vi.fn(async (path: string, init: RequestInit) => {
+    if (path.endsWith('/cover-operations')) return json({ items: [] });
+    if (init.method === 'PATCH') {
+      const body = JSON.parse(String(init.body)); writes.push(body);
+      current = { ...item, revision: `cr_${'b'.repeat(43)}`, fields: { ...item.fields, ...body.fields } };
+      return json({ item: current, receipt: { operationId: body.operationId } });
+    }
+    return json({ item: current });
+  }));
+  mount(<AdminCatalogPage kind="organization" id={item.id} />);
+  const field = await screen.findByRole('textbox', { name: 'MusicBrainz ID' });
+  expect(field).toHaveValue(id);
+  fireEvent.change(field, { target: { value: '   ' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Save catalog changes' }));
+  const dialog = await screen.findByRole('dialog');
+  expect(within(dialog).getAllByRole('article')).toHaveLength(1);
+  const row = within(dialog).getByRole('heading', { name: 'MusicBrainz ID' }).closest('article')!;
+  expect(within(row).getByText(id, { exact: true })).toBeVisible(); expect(within(row).getByText('—', { exact: true })).toBeVisible();
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Save catalog changes' }));
+  await waitFor(() => expect(writes).toHaveLength(1));
+  expect(writes[0]).toMatchObject({ expectedRevision: item.revision, fields: { musicBrainzId: null } }); expect(Object.keys(writes[0].fields as object)).toEqual(['musicBrainzId']);
+  await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  expect(screen.getByRole('textbox', { name: 'MusicBrainz ID' })).toHaveValue('');
 });

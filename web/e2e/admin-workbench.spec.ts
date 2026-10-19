@@ -139,7 +139,7 @@ async function setup(page: Page, admin = true, media = false, publication?: Publ
       const body = route.request().postDataJSON(); writes.push({ path, body });
       if (path.endsWith('/publish')) {
         // One-step approval: the shown changes, decisions, preselections and cover, bound to the saved project by revision and digest.
-        expect(body).toEqual({ operationId: expect.any(String), expectedRevision: item.revision, changes: expect.any(Array), decisions: item.decisions, selectedCoverSlotId: item.selectedCoverSlotId, approvalDigest: item.approvalDigest, preselections: expect.any(Array),
+        expect(body).toEqual({ operationId: expect.any(String), expectedRevision: item.revision, changes: expect.any(Array), decisions: item.decisions, selectedCoverSlotId: item.selectedCoverSlotId, approvalDigest: item.approvalDigest, preselections: expect.any(Array), musicBrainzIds: expect.any(Array),
           suggestionTicks: { generation: item.analysis.generation, ticked: [], unticked: item.suggestions.filter(suggestion => suggestion.decision === 'pending').map(suggestion => suggestion.id) } });
         item.draft = applyDraftChanges(item.draft, body.changes); item.publication = 'preparing'; item.revision++;
         if (publication) await publication.admission;
@@ -363,7 +363,7 @@ test('an unconfirmed publication can be cancelled and reviewed while exact clean
   await expect(page.getByRole('definition').filter({ hasText: 'Publication in progress' })).toBeVisible();
   expect(writes).toHaveLength(4);
   // The new approval carries the reviewed decisions and the saved project's digest.
-  expect(writes[3].body).toEqual({ operationId: expect.any(String), expectedRevision: 10, changes: [], decisions: item.decisions, selectedCoverSlotId: null, approvalDigest: item.approvalDigest, preselections: [],
+  expect(writes[3].body).toEqual({ operationId: expect.any(String), expectedRevision: 10, changes: [], decisions: item.decisions, selectedCoverSlotId: null, approvalDigest: item.approvalDigest, preselections: [], musicBrainzIds: [],
     suggestionTicks: { generation: 1, ticked: [], unticked: ['c'.repeat(24), 'd'.repeat(24)] } });
 });
 
@@ -634,7 +634,7 @@ test('several Artist entries and a label are decided one row each and published 
   expect(writes.map(write => write.path.split('/').at(-1))).toEqual(['publish']);
   const fresh = { action: 'create-distinct', candidateId: null, candidateRevision: null };
   // The fixture's pending Luna suggestions have no tick state from the summary read, so the approval keeps their current values.
-  expect(writes[0].body).toEqual({ operationId: expect.any(String), expectedRevision: 1, changes: [], selectedCoverSlotId: null, approvalDigest: 'e'.repeat(64), preselections: [], suggestionTicks: { generation: 1, ticked: [], unticked: ['c'.repeat(24), 'd'.repeat(24)] }, decisions: [...artists.map(entry => ({ scope: 'artist', slotId: null, entryKey: entry.key, boundName: entry.name, ...fresh })),
+  expect(writes[0].body).toEqual({ operationId: expect.any(String), expectedRevision: 1, changes: [], selectedCoverSlotId: null, approvalDigest: 'e'.repeat(64), preselections: [], musicBrainzIds: [], suggestionTicks: { generation: 1, ticked: [], unticked: ['c'.repeat(24), 'd'.repeat(24)] }, decisions: [...artists.map(entry => ({ scope: 'artist', slotId: null, entryKey: entry.key, boundName: entry.name, ...fresh })),
     { scope: 'label', slotId: null, entryKey: null, boundName: 'Lorem Records', ...fresh }, { scope: 'album', slotId: null, entryKey: null, boundName: null, ...fresh }, { scope: 'track', slotId, entryKey: null, boundName: null, ...fresh }, { scope: 'track', slotId: slotTwo, entryKey: null, boundName: null, ...fresh }] });
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
 });
@@ -694,7 +694,7 @@ test('an unsaved title edit is published in one approval without Save, and the e
   await expect(page.getByRole('dialog').getByText('Your unsaved draft changes are included and are saved with this approval.')).toBeVisible();
   await page.getByRole('dialog').getByRole('button', { name: 'Publish Album', exact: true }).click();
   await expect.poll(() => writes.length).toBe(1);
-  expect(writes[0]).toEqual({ path: `/api/admin/v1/imports/${projectId}/publish`, method: 'POST', body: { operationId: expect.any(String), expectedRevision: 1, changes: [{ path: 'album.title', base: 'Synthetic Album', value: 'Approved Title' }], decisions: item.decisions, selectedCoverSlotId: null, approvalDigest: 'e'.repeat(64), preselections: [],
+  expect(writes[0]).toEqual({ path: `/api/admin/v1/imports/${projectId}/publish`, method: 'POST', body: { operationId: expect.any(String), expectedRevision: 1, changes: [{ path: 'album.title', base: 'Synthetic Album', value: 'Approved Title' }], decisions: item.decisions, selectedCoverSlotId: null, approvalDigest: 'e'.repeat(64), preselections: [], musicBrainzIds: [],
     suggestionTicks: { generation: 1, ticked: [], unticked: ['c'.repeat(24), 'd'.repeat(24)] } } });
   await page.getByRole('tab', { name: 'Draft', exact: true }).click();
   await expect(page.getByRole('textbox', { name: 'Title', exact: true })).toHaveValue('Approved Title');
@@ -735,7 +735,7 @@ test('an import with no candidates publishes without answering identity question
   // The approval carries no identity decision, only the preselections it showed, which the server must compute again exactly.
   expect(writes.map(write => write.path.split('/').at(-1))).toEqual(['publish']);
   const created = { action: 'create-distinct', candidateId: null, candidateRevision: null };
-  expect(writes[0].body).toEqual({ operationId: expect.any(String), expectedRevision: 1, changes: [], decisions: [], selectedCoverSlotId: null, approvalDigest: 'e'.repeat(64), suggestionTicks: { generation: 1, ticked: [], unticked: [] }, preselections: [
+  expect(writes[0].body).toEqual({ operationId: expect.any(String), expectedRevision: 1, changes: [], decisions: [], selectedCoverSlotId: null, approvalDigest: 'e'.repeat(64), suggestionTicks: { generation: 1, ticked: [], unticked: [] }, musicBrainzIds: [], preselections: [
     { scope: 'artist', slotId: null, entryKey: entryKey(1), boundName: 'Lorem', ...created }, { scope: 'label', slotId: null, entryKey: null, boundName: 'Lorem Records', ...created },
     { scope: 'album', slotId: null, entryKey: null, boundName: null, ...created }, ...[slotId, slotTwo].map(slot => ({ scope: 'track', slotId: slot, entryKey: null, boundName: null, ...created }))] });
 });

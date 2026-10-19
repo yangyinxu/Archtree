@@ -12,6 +12,7 @@
  *   - report deduplication and deletion cleanup indexes are mandatory, while the triage sort index is optional
  *   - nonunique, sparse, partial, and incompatible collation constraints fail verification
  *   - the cover cancellation receipt index requires both declared string predicates
+ *   - the MusicBrainz ID indexes are required, unique and partial on stored strings only
  *   - a dropped required index makes a previously initialized database unready
  *   - optional performance-index failure preserves required constraints and emits bounded diagnostics
  *   - a failed metadata read does not finish verification while another read occupies the pool
@@ -192,6 +193,31 @@ test('the cover cancellation receipt index requires both declared string predica
   await verifyRequiredDatabaseIndexes(fake.db);
   index.partialFilterExpression = { 'cancellation.actor': { $type: 'string' } };
   await assert.rejects(verifyRequiredDatabaseIndexes(fake.db), /cancellation.actor,cancellation.operationId/);
+});
+
+test('the MusicBrainz ID indexes are required, unique and partial on stored strings only', async () => {
+  for (const collection of ['artists', 'organizations']) {
+    const fake = databaseDouble(); await initializeDatabaseIndexes(fake.db);
+    const index = () => fake.metadata.get(collection)!.find(entry => 'musicBrainzId' in entry.key)!;
+    assert.deepEqual(index().partialFilterExpression, { musicBrainzId: { $type: 'string' } });
+    assert.equal(index().unique, true);
+    assert.equal(index().name, collection === 'artists' ? 'artist_musicbrainz_id' : 'organization_musicbrainz_id');
+    await verifyRequiredDatabaseIndexes(fake.db);
+    // A sparse, non-partial or non-unique substitute cannot stand in for the declared constraint.
+    for (const altered of [{ sparse: true }, { partialFilterExpression: undefined }, { unique: false }, { partialFilterExpression: { musicBrainzId: { $exists: true } } }]) {
+      const entry = index(), original = structuredClone(entry);
+      Object.assign(entry, altered);
+      await assert.rejects(verifyRequiredDatabaseIndexes(fake.db), new RegExp(`${collection}:musicBrainzId`));
+      for (const key of Object.keys(entry)) delete entry[key];
+      Object.assign(entry, original);
+      await verifyRequiredDatabaseIndexes(fake.db);
+    }
+    // Startup fails closed (existing duplicates refuse the unique index) and records no revision.
+    const failing = databaseDouble(); failing.fail(collection);
+    await assert.rejects(initializeDatabaseIndexes(failing.db), DatabaseIndexInitializationError);
+    assert.deepEqual(failing.receipts, []);
+  }
+  assert.equal(requiredIndexRevision, 'required-indexes-v11-musicbrainz-ids');
 });
 
 test('a dropped required index makes a previously initialized database unready', async () => {

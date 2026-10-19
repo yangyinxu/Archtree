@@ -76,7 +76,8 @@ export function importUploadsWaiting(doc: Pick<AdminImportDocument, 'manifest' |
 }
 
 /**
- * How many identity rows of `draft` neither an explicit decision nor a preselection answers with a reuse or a new record, as the
+ * How many identity rows of `draft` neither an explicit decision nor a preselection answers with a reuse (one that replaces a
+ * MusicBrainz ID included; an exact-ID match is preselected as reuse) or a new record, as the
  * publication confirmation counts the rows that need a decision: the Album, each track that is not skipped and, unless the
  * Album is reused (an append applies neither), each Artist entry and the label.
  */
@@ -85,7 +86,7 @@ export function importIdentityAnswers(draft: ImportDraftV2, decisions: readonly 
     const tracks = draft.tracks.map(track => all.find(decision => decision.scope === 'track' && decision.slotId === track.slotId)).filter(decision => decision?.action !== 'skip');
     const rows = [album, ...tracks, ...album?.action === 'reuse' ? [] : [...draft.album.artists.map(entry => boundArtistDecision(all, entry)),
         ...draft.album.label ? [boundLabelDecision(all, draft.album.label)] : []]];
-    return rows.filter(decision => decision?.action !== 'reuse' && decision?.action !== 'create-distinct').length;
+    return rows.filter(decision => decision?.action !== 'reuse' && decision?.action !== 'replace' && decision?.action !== 'create-distinct').length;
 }
 
 /**

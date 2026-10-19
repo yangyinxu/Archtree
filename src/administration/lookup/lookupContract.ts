@@ -3,7 +3,7 @@
  *   Types: MetadataLookupSource, LookupGateMode, LookupSourceRate, ItunesStorefront, LookupDate,
  *          LookupArtistCredit, LookupLabel, MusicBrainzReleaseSummary, MusicBrainzTrack, MusicBrainzRelease,
  *          MusicBrainzRecordingHit, MusicBrainzIsrcResult, ItunesCollection, ItunesTrack, ItunesSearchResult,
- *          CoverArtListing, LookupSourceFailure, LookupInputProblem
+ *          CoverArtListing, LookupSourceFailure, LookupInputProblem, LookupEntityAliases
  *   Classes: MetadataLookupSourceError, MetadataLookupInputError
  *   Constants: metadataLookupSources, METADATA_LOOKUP_RATES, METADATA_LOOKUP_LIMITS, METADATA_LOOKUP_RETRY,
  *              METADATA_LOOKUP_HOSTS, ITUNES_STOREFRONTS, ADMIN_IMPORT_LOOKUP_COLLECTION,
@@ -148,15 +148,21 @@ export const ADMIN_IMPORT_LOOKUP_COLLECTION = 'adminImportLookups';
  * a wait-mode request with its gate waits and in-call retries, which the deadline then aborts as unavailable), the candidate
  * bounds, the JSON budget of candidates plus ranking (well under MongoDB's 16 MiB document limit), the automatic runs per
  * project, and the automatic retries per run with the longest Retry-After they honour. The first automatic retry after a
- * 503/429 follows its Retry-After within `rateLimitedRetryMs`; a run sends at most `plannedQueries` searches and `candidates`
- * release lookups.
+ * 503/429 follows its Retry-After within `rateLimitedRetryMs`; a run sends at most `plannedQueries` searches, `candidates`
+ * release lookups and `aliasLookups` artist or label alias lookups, keeping at most `aliasNames` names per entity.
  */
 export const METADATA_LOOKUP_JOB_LIMITS = Object.freeze({
     grantMs: 60 * 60 * 1000, leaseMs: 180_000, stepDeadlineMs: 120_000, workerIntervalMs: 2_000,
-    candidates: 25, candidateBytes: 4 * 1024 * 1024, recordBytes: 12 * 1024 * 1024, automaticRuns: 3,
+    candidates: 25, aliasLookups: 16, aliasNames: 32, candidateBytes: 4 * 1024 * 1024, recordBytes: 12 * 1024 * 1024, automaticRuns: 3,
     retryDelaysMs: Object.freeze([30_000, 120_000, 300_000]), retryAfterMaximumMs: 60_000,
     rateLimitedRetryMs: Object.freeze({ minimum: 2_000, maximum: 10_000 })
 });
+/**
+ * One credited artist or label whose MusicBrainz aliases a run looks up after its release details: `pending` until fetched,
+ * `missing` for a 404 or an answer for another ID, `failed` when the source did not answer (never retried). `names` holds the
+ * entity name and its aliases (search hints excluded), at most `aliasNames`.
+ */
+export type LookupEntityAliases = { kind: 'artist' | 'label'; id: string; state: 'pending' | 'fetched' | 'missing' | 'failed'; names: string[] };
 /** Required: the worker's claim index also creates the collection before any transaction writes it. */
 export const metadataLookupIndexes = [
     { collection: ADMIN_IMPORT_LOOKUP_COLLECTION, keys: { state: 1, leaseUntil: 1, retryAt: 1 }, options: { name: 'admin_import_lookup_worker' }, required: true }

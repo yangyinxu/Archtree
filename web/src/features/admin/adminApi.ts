@@ -15,8 +15,11 @@ const draftPaths = z.array(z.string().max(80)).max(305).default([]);
 export const manifestSchema = z.object({ rootLabel: z.string().max(200), files: z.array(z.object({ slotId: uuid, filename: z.string().max(255), relativePath: z.string().max(1024), byteLength: integer.nullable() }).strict()).min(1).max(100) }).strict();
 const receiptSchema = z.object({ operationId: uuid, kind: z.enum(['create', 'edit', 'analyze', 'adopt', 'decisions', 'cancel-analysis', 'cancel-publication', 'upload', 'publish', 'cleanup', 'select-cover',
   'lookup', 'lookup-retry', 'lookup-choose', 'lookup-resolve']), revision: integer }).strict();
-/** One identity decision: an Artist decision names its entry (entryKey) and both it and a label decision the name they were made for (boundName). */
-export const decisionSchema = z.object({ scope: z.enum(['artist', 'label', 'album', 'track']), slotId: uuid.nullable(), entryKey: uuid.nullable(), boundName: z.string().max(200).nullable(), action: z.enum(['reuse', 'skip', 'create-distinct']), candidateId: id.nullable(), candidateRevision: z.string().nullable() }).strict();
+/**
+ * One identity decision: an Artist decision names its entry (entryKey) and both it and a label decision the name they were made for
+ * (boundName); `replace` reuses an Artist or label Organization and replaces the MusicBrainz ID it holds.
+ */
+export const decisionSchema = z.object({ scope: z.enum(['artist', 'label', 'album', 'track']), slotId: uuid.nullable(), entryKey: uuid.nullable(), boundName: z.string().max(200).nullable(), action: z.enum(['reuse', 'skip', 'create-distinct', 'replace']), candidateId: id.nullable(), candidateRevision: z.string().nullable() }).strict();
 const upload = z.object({ ready: integer, total: integer, available: z.boolean() }).strict();
 export const assetRecoverySchema = z.object({ operationId: uuid, expectedRevision: integer, kind: z.enum(['upload', 'cleanup']), startedByMe: z.boolean() }).strict();
 // Embedded-tag evidence: version 1 (stored before tag evidence v2, extended fields empty) or version 2; flagged values were left out.

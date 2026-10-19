@@ -3,18 +3,18 @@
  *   Types: MusicBrainzReleaseQuery, MusicBrainzRecordingQuery, MusicBrainzClient
  *   Functions: escapeLucene, musicBrainzLuceneQuery, musicBrainzDestination, parseMusicBrainzReleaseSearch,
  *              parseMusicBrainzBrowse, parseMusicBrainzRelease, parseMusicBrainzRecordingSearch,
- *              parseMusicBrainzIsrc, createMusicBrainzClient
+ *              parseMusicBrainzIsrc, parseMusicBrainzEntityAliases, createMusicBrainzClient
  *   Constants: musicBrainzUrls, musicBrainzShapes
  * Internal
  *   Types: RawCredit, RawLabelInfo, RawGroup, RawReleaseCommon, RawSummary, RawRelease
  *   Functions: withParameters, requireMbid, credits, labels, common, summary
  *   Constants: textFields, primaryTypes, secondaryTypes, base, text, mbid, country, length, typeName,
- *              artistCredit, labelInfo, releaseGroup, releaseCommon, summaryShape, requestBase
+ *              artistCredit, labelInfo, releaseGroup, releaseCommon, summaryShape, aliasInvisible, requestBase
  * @end-catalog */
 
 import { strictHttpsUrl } from '../adminPinnedHttps';
 import {
-    METADATA_LOOKUP_HOSTS, METADATA_LOOKUP_LIMITS, MetadataLookupInputError,
+    METADATA_LOOKUP_HOSTS, METADATA_LOOKUP_JOB_LIMITS, METADATA_LOOKUP_LIMITS, MetadataLookupInputError,
     type LookupArtistCredit, type LookupLabel, type MusicBrainzIsrcResult, type MusicBrainzRecordingHit,
     type MusicBrainzRelease, type MusicBrainzReleaseSummary, type MusicBrainzTrack
 } from './lookupContract';
@@ -95,7 +95,10 @@ export const musicBrainzUrls = Object.freeze({
         const normalized = normalizeIsrc(isrc);
         if (!normalized) throw new MetadataLookupInputError('identifier');
         return withParameters(`isrc/${normalized}`, [['inc', 'releases'], ['fmt', 'json']]);
-    }
+    },
+    /** Artist and label lookups with aliases (the release lookup documents no aliases include). */
+    artistAliases: (artistId: string) => withParameters(`artist/${requireMbid(artistId)}`, [['inc', 'aliases'], ['fmt', 'json']]),
+    labelAliases: (labelId: string) => withParameters(`label/${requireMbid(labelId)}`, [['inc', 'aliases'], ['fmt', 'json']])
 });
 
 /** Every hop must stay on musicbrainz.org under `/ws/2/`. */
@@ -143,7 +146,7 @@ const summaryShape = object({
 });
 
 /** Allowlisted shapes; the recorder trims fixtures with these, and the parsers below accept the result. */
-export const musicBrainzShapes: Readonly<Record<'releaseSearch' | 'release' | 'recordingSearch' | 'browse' | 'isrc', LookupShape>> = Object.freeze({
+export const musicBrainzShapes: Readonly<Record<'releaseSearch' | 'release' | 'recordingSearch' | 'browse' | 'isrc' | 'entityAliases', LookupShape>> = Object.freeze({
     releaseSearch: object({ count: integer(0, 1_000_000_000), offset: integer(0, 1_000_000_000, { optional: true }), releases: array(summaryShape, METADATA_LOOKUP_LIMITS.releaseSearchLimit) }),
     release: object({
         ...releaseCommon,
@@ -175,6 +178,10 @@ export const musicBrainzShapes: Readonly<Record<'releaseSearch' | 'release' | 'r
     isrc: object({
         isrc: string(12, { pattern: /^[A-Z]{2}[A-Z0-9]{3}\d{7}$/ }),
         recordings: array(object({ id: mbid, title: string(text), length, releases: array(object({ id: mbid }), 100, { optional: true }) }), 100)
+    }),
+    entityAliases: object({
+        id: mbid, name: string(text),
+        aliases: array(object({ name: string(text), type: typeName, primary: boolean({ nullable: true, optional: true }) }), 1000, { optional: true })
     })
 });
 
@@ -257,6 +264,29 @@ export const parseMusicBrainzIsrc = (json: unknown): MusicBrainzIsrcResult => {
     })) };
 };
 
+const aliasInvisible = /[\p{Cc}\p{Cf}\p{Cs}]/u;
+/**
+ * An artist's or label's names from a lookup with aliases, or null when MusicBrainz answered for another ID (a merged entity):
+ * the entity name, then primary aliases, then the others, each group in folded-name order (MusicBrainz documents aliases as an
+ * unordered set), deduplicated by folded name, NFC and trimmed, at most 200 characters without control or invisible characters,
+ * and at most `METADATA_LOOKUP_JOB_LIMITS.aliasNames`. Search hints are excluded: MusicBrainz documents them as misspellings.
+ */
+export const parseMusicBrainzEntityAliases = (json: unknown, requestedId: string): { id: string; names: string[] } | null => {
+    const raw = validateLookupShape<{ id: string; name: string; aliases?: { name: string; type?: string | null; primary?: boolean | null }[] }>(musicBrainzShapes.entityAliases, json);
+    if (raw.id !== normalizeMusicBrainzId(requestedId)) return null;
+    const clean = (value: string) => { const name = value.normalize('NFC').trim(); return name && name.length <= 200 && !aliasInvisible.test(name) ? name : null; };
+    const fold = (value: string) => value.toLowerCase();
+    const aliases = (raw.aliases ?? []).filter(alias => (alias.type ?? '').toLowerCase() !== 'search hint');
+    const sorted = (primary: boolean) => aliases.filter(alias => (alias.primary === true) === primary).map(alias => clean(alias.name)).filter((name): name is string => name !== null)
+        .sort((left, right) => fold(left) < fold(right) ? -1 : fold(left) > fold(right) ? 1 : left < right ? -1 : left > right ? 1 : 0);
+    const names: string[] = [];
+    for (const name of [clean(raw.name), ...sorted(true), ...sorted(false)]) {
+        if (names.length >= METADATA_LOOKUP_JOB_LIMITS.aliasNames) break;
+        if (name && !names.some(existing => fold(existing) === fold(name))) names.push(name);
+    }
+    return { id: raw.id, names };
+};
+
 export interface MusicBrainzClient {
     searchReleases(query: MusicBrainzReleaseQuery, options: LookupCallOptions): Promise<{ count: number; releases: MusicBrainzReleaseSummary[] }>;
     searchRecordings(query: MusicBrainzRecordingQuery, options: LookupCallOptions): Promise<{ count: number; recordings: MusicBrainzRecordingHit[] }>;
@@ -265,6 +295,8 @@ export interface MusicBrainzClient {
     browseReleaseGroupReleases(releaseGroupId: string, options: LookupCallOptions): Promise<MusicBrainzReleaseSummary[]>;
     /** Null when MusicBrainz answers 404. */
     lookupIsrc(isrc: string, options: LookupCallOptions): Promise<MusicBrainzIsrcResult | null>;
+    /** An artist's or label's names (parseMusicBrainzEntityAliases); null when MusicBrainz answers 404 or for another ID. */
+    lookupAliases(kind: 'artist' | 'label', id: string, options: LookupCallOptions): Promise<{ id: string; names: string[] } | null>;
 }
 
 const requestBase = {
@@ -293,5 +325,10 @@ export const createMusicBrainzClient = (dependencies: LookupClientDependencies):
     async lookupIsrc(isrc, options) {
         const url = musicBrainzUrls.isrc(isrc);
         return requestLookupJson<MusicBrainzIsrcResult | null>({ ...requestBase, url, emptyStatuses: [404], emptyValue: null, parse: parseMusicBrainzIsrc }, options, dependencies);
+    },
+    async lookupAliases(kind, id, options) {
+        const url = kind === 'artist' ? musicBrainzUrls.artistAliases(id) : musicBrainzUrls.labelAliases(id);
+        return requestLookupJson<{ id: string; names: string[] } | null>({ ...requestBase, url, emptyStatuses: [404], emptyValue: null,
+            parse: json => parseMusicBrainzEntityAliases(json, id) }, options, dependencies);
     }
 });

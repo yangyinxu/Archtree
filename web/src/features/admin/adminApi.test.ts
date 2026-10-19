@@ -13,6 +13,7 @@
  *   - a server refusal of a newer-format project asks for a reload of that action only, with no retryable intent
  *   - the server Draft v2 projection parses strictly with its approval digest, bound names, tag view and automatic markers, while v1 drafts, unknown entry keys, track Artist suggestions, Disc Number 1000 and a missing digest are refused
  *   - a newer saved state is a later revision, or the same revision with later automatic writes
+ *   - a saved replace decision parses, and a catalog edit refused for an ID another record keeps shows that, with no retryable intent
  * @end-catalog */
 
 import { z } from 'zod';
@@ -173,7 +174,7 @@ test('the server Draft v2 projection parses strictly with its approval digest, b
     startedByMe: true,
     manifest: {"rootLabel": "Synthetic Primary - Synthetic Compat Album", "files": [{"slotId": "00000009-0000-4000-a000-000000000001", "filename": "01 - Synthetic Opening.mp3", "relativePath": "Disc 1/01 - Synthetic Opening.mp3", "byteLength": 4096}, {"slotId": "00000009-0000-4000-a000-000000000002", "filename": "01 - Synthetic Reprise.mp3", "relativePath": "Disc 2/01 - Synthetic Reprise.mp3", "byteLength": null}]},
     analysis: {"state": "queued", "generation": 1, "operationId": "00000009-0000-4000-8000-000000000004", "completedChunks": 1, "totalChunks": 2, "attemptsUsed": 1, "maxAttempts": 22, "issue": null},
-    decisions: [{"scope": "artist", "slotId": null, "entryKey": "00000009-0000-4000-8000-0000000000e1", "boundName": "Synthetic Primary", "action": "create-distinct", "candidateId": null, "candidateRevision": null}, {"scope": "artist", "slotId": null, "entryKey": "00000009-0000-4000-8000-0000000000e2", "boundName": "Synthetic Guest", "action": "create-distinct", "candidateId": null, "candidateRevision": null}, {"scope": "label", "slotId": null, "entryKey": null, "boundName": "Synthetic Label", "action": "create-distinct", "candidateId": null, "candidateRevision": null}, {"scope": "album", "slotId": null, "entryKey": null, "boundName": null, "action": "create-distinct", "candidateId": null, "candidateRevision": null}, {"scope": "track", "slotId": "00000009-0000-4000-a000-000000000001", "entryKey": null, "boundName": null, "action": "create-distinct", "candidateId": null, "candidateRevision": null}, {"scope": "track", "slotId": "00000009-0000-4000-a000-000000000002", "entryKey": null, "boundName": null, "action": "create-distinct", "candidateId": null, "candidateRevision": null}],
+    decisions: [{"scope": "artist", "slotId": null, "entryKey": "00000009-0000-4000-8000-0000000000e2", "boundName": "Synthetic Guest", "action": "create-distinct", "candidateId": null, "candidateRevision": null}, {"scope": "label", "slotId": null, "entryKey": null, "boundName": "Synthetic Label", "action": "create-distinct", "candidateId": null, "candidateRevision": null}, {"scope": "album", "slotId": null, "entryKey": null, "boundName": null, "action": "create-distinct", "candidateId": null, "candidateRevision": null}, {"scope": "track", "slotId": "00000009-0000-4000-a000-000000000001", "entryKey": null, "boundName": null, "action": "create-distinct", "candidateId": null, "candidateRevision": null}, {"scope": "track", "slotId": "00000009-0000-4000-a000-000000000002", "entryKey": null, "boundName": null, "action": "create-distinct", "candidateId": null, "candidateRevision": null}],
     upload: {"ready": 1, "total": 2, "available": true},
     publication: "notStarted",
     publicationRecovery: null,
@@ -184,7 +185,7 @@ test('the server Draft v2 projection parses strictly with its approval digest, b
     coverChoice: 'explicit',
     capabilities: {"analysis": true, "upload": true, "publish": true},
     // The server's approvalDigest of this projection (adminImportDetail of the fixture); the Web echoes it and never hashes.
-    approvalDigest: "e3fe4303d00be9a0834356a317c65c1e8c7417618fc51471f9fe55284f6d9df9",
+    approvalDigest: "0750a0a067e372de32f210b20b4d8ee8d6d25c713afef3dcf777fb387a1cdd8f",
     valueRevision: 0,
     automaticPaths: ["album.artists", "album.label", "album.releaseDate", "tracks.00000009-0000-4000-a000-000000000001.title", "tracks.00000009-0000-4000-a000-000000000001.discNumber", "tracks.00000009-0000-4000-a000-000000000001.trackNumber", "tracks.00000009-0000-4000-a000-000000000002.discNumber", "tracks.00000009-0000-4000-a000-000000000002.trackNumber"],
     lookupPaths: [],
@@ -248,4 +249,14 @@ test('a newer saved state is a later revision, or the same revision with later a
   expect(newerImport({ revision: 2, valueRevision: 4 }, { revision: 2, valueRevision: 3 })).toBe(true);
   for (const [next, previous] of [[{ revision: 2, valueRevision: 3 }, { revision: 2, valueRevision: 3 }], [{ revision: 2, valueRevision: 9 }, { revision: 3, valueRevision: 0 }], [{ revision: 2, valueRevision: 2 }, { revision: 2, valueRevision: 3 }]])
     expect(newerImport(next, previous)).toBe(false);
+});
+
+test('a saved replace decision parses, and a catalog edit refused for an ID another record keeps shows that, with no retryable intent', async () => {
+  const item = detail(), replace = { scope: 'label' as const, slotId: null, entryKey: null, boundName: 'Sit Records', action: 'replace' as const, candidateId: 'a'.repeat(24), candidateRevision: 'r' };
+  expect(detailSchema.safeParse({ ...item, decisions: [replace] }).success).toBe(true);
+  expect(detailSchema.safeParse({ ...item, decisions: [{ ...replace, action: 'merge' }] }).success).toBe(false);
+  vi.stubGlobal('fetch', vi.fn(async () => json({ code: 'ADMIN_CATALOG_MUSICBRAINZ_ID_IN_USE' }, 409)));
+  const command = new AdminCommand(z.object({ receipt: z.object({ operationId: z.string() }).strict() }).strict()); command.run('/catalog/artist/item', { fields: { musicBrainzId: '00000000-0000-4000-8000-0000000000a1' } });
+  await vi.waitFor(() => expect(command.getSnapshot().error).toBe('musicbrainz_id_in_use'));
+  expect(command.getSnapshot().intent).toBeNull(); expect(command.getSnapshot().running).toBe(false);
 });

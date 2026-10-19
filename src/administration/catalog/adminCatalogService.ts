@@ -8,8 +8,9 @@
  * Internal
  *   Types: CatalogReceipt
  *   Functions: hasOwn, fail, id, record, exact, date, text, visibility, revision, hasStoredDiscNumber,
- *              storedDiscNumber, stateForRevision, parseFields, assertHiddenDelivery, receipts, parseMutation,
- *              replay, receipt, pageSnapshot
+ *              hasStoredMusicBrainzId, storedDiscNumber, storedMusicBrainzId, musicBrainzIdField,
+ *              stateForRevision, parseFields, assertHiddenDelivery, receipts, parseMutation, replay, receipt,
+ *              pageSnapshot
  *   Constants: configs, fields
  * @end-catalog */
 
@@ -31,6 +32,7 @@ import { pageItemIdentity } from '../../utils/pageItemIdentity';
 import { touchAvailablePageItemReferences } from '../../services/content/pageReferenceLifecycleService';
 import { parseImportDate, cleanText, uuid, type ImportDate } from '../import/adminImportContract';
 import { adminCatalogArtworkSource } from './adminCatalogArtworkSource';
+import { isMusicBrainzIdDuplicateKey, keepableMusicBrainzId, normalizeMusicBrainzId } from '../../utils/musicBrainzId';
 
 export type AdminCatalogKind = 'album' | 'artist' | 'audioTrack' | 'organization';
 export class AdminCatalogError extends Error {
@@ -70,13 +72,21 @@ const visibility = (value: unknown) => value === undefined ? 'public' : value ==
 
 /** A metadata hash detects edits through legacy writers as well as this new API. */
 const revision = (value: unknown) => `cr_${createHash('sha256').update(JSON.stringify(value)).digest('base64url')}`;
-/** Only a stored Disc Number enters the revision, so records without one keep their earlier revisions byte for byte. */
+/**
+ * Only a stored Disc Number or MusicBrainz ID enters the revision, so records without one keep their earlier revisions byte for
+ * byte.
+ */
 const hasStoredDiscNumber = (doc: any) => doc.discNumber !== undefined && doc.discNumber !== null;
+const hasStoredMusicBrainzId = (doc: any) => doc.musicBrainzId !== undefined && doc.musicBrainzId !== null;
 /** An invalid stored Disc Number is a repairable empty field. */
 const storedDiscNumber = (value: unknown) => embeddedDiscNumber(value) ?? null;
+/** A malformed stored MusicBrainz ID reads as none, so the editor can repair it (it still changes the revision). */
+const storedMusicBrainzId = (value: unknown) => normalizeMusicBrainzId(value);
+/** An Artist's or Organization's stored MusicBrainz ID as an editable field, only while one is stored (revision stability). */
+const musicBrainzIdField = (doc: any) => hasStoredMusicBrainzId(doc) ? { musicBrainzId: storedMusicBrainzId(doc.musicBrainzId) } : {};
 export const adminCatalogEditableFields = (kind: AdminCatalogKind, doc: any): Record<string, unknown> => {
-    if (kind === 'artist') return { name: text(doc.name, 200), bio: text(doc.bio, 10_000, true), birthDate: date(doc.birthDate) };
-    if (kind === 'organization') return { name: text(doc.name, 200), description: text(doc.description, 10_000, true), organizationType: organizationTypes.includes(doc.organizationType) ? doc.organizationType : 'other' };
+    if (kind === 'artist') return { name: text(doc.name, 200), bio: text(doc.bio, 10_000, true), birthDate: date(doc.birthDate), ...musicBrainzIdField(doc) };
+    if (kind === 'organization') return { name: text(doc.name, 200), description: text(doc.description, 10_000, true), organizationType: organizationTypes.includes(doc.organizationType) ? doc.organizationType : 'other', ...musicBrainzIdField(doc) };
     let credits = null;
     // Valid stored join phrases are editable fields; an invalid one reads as absent but still changes the revision through rawMetadata.
     try { if (Array.isArray(doc.credits)) credits = normalizeStoredCatalogCredits(doc.credits); } catch { /* Private editor exposes a repairable absent list. */ }
@@ -87,7 +97,7 @@ export const adminCatalogEditableFields = (kind: AdminCatalogKind, doc: any): Re
 };
 const fields = adminCatalogEditableFields;
 const stateForRevision = (kind: AdminCatalogKind, doc: any) => ({
-    fields: fields(kind, doc), rawMetadata: [doc.title, doc.name, doc.bio, doc.description, doc.birthDate, doc.releaseDate, doc.credits, doc.attributionStatus, doc.trackNumber, doc.organizationType, ...(hasStoredDiscNumber(doc) ? [doc.discNumber] : [])], visibility: doc.visibility ?? 'public', coverArtId: doc.coverArtId ?? null,
+    fields: fields(kind, doc), rawMetadata: [doc.title, doc.name, doc.bio, doc.description, doc.birthDate, doc.releaseDate, doc.credits, doc.attributionStatus, doc.trackNumber, doc.organizationType, ...(hasStoredDiscNumber(doc) ? [doc.discNumber] : []), ...(hasStoredMusicBrainzId(doc) ? [doc.musicBrainzId] : [])], visibility: doc.visibility ?? 'public', coverArtId: doc.coverArtId ?? null,
     coverArtUrl: doc.coverArtUrl ?? null, artistIds: doc.artistIds ?? null, albumId: doc.albumId ?? null,
     audioTrackIds: doc.audioTrackIds ?? null, creditRevision: doc.creditRevision ?? null,
     adminRevision: doc.adminRevision ?? 0, lifecycleStatus: doc.lifecycleStatus ?? null,
@@ -122,9 +132,12 @@ export const adminCatalogSnapshot = async (kind: AdminCatalogKind, doc: any, ses
     }
     const ownerId = String(doc._id);
     const artwork = adminCatalogArtworkSource(doc);
-    // The snapshot always names discNumber for a MediaTrack (null when none is stored) so the editor can set one.
+    // The snapshot always names discNumber for a MediaTrack and musicBrainzId for an Artist or Organization (null when none is
+    // stored) so the editor can set one.
+    const shown = kind === 'audioTrack' ? { ...fields(kind, doc), discNumber: storedDiscNumber(doc.discNumber) }
+        : kind === 'artist' || kind === 'organization' ? { ...fields(kind, doc), musicBrainzId: storedMusicBrainzId(doc.musicBrainzId) } : fields(kind, doc);
     return { kind, id: ownerId, revision: revision(stateForRevision(kind, doc)), visibility: visibility(doc.visibility), effectiveVisibility,
-        fields: kind === 'audioTrack' ? { ...fields(kind, doc), discNumber: storedDiscNumber(doc.discNumber) } : fields(kind, doc), coverUrl: artwork ? `/api/admin/v1/catalog/${kind}/${ownerId}/artwork` : null,
+        fields: shown, coverUrl: artwork ? `/api/admin/v1/catalog/${kind}/${ownerId}/artwork` : null,
         mediaUrl: kind === 'audioTrack' ? `/api/admin/v1/catalog/audioTrack/${ownerId}/media` : null,
         capabilities: { editing: true, visibility: true } };
 };
@@ -148,7 +161,7 @@ export const listAdminCatalog = (actor: string, kind: AdminCatalogKind, query: R
 
 const parseFields = (kind: AdminCatalogKind, value: unknown) => {
     const input = record(value);
-    const permitted = kind === 'artist' ? ['name', 'bio', 'birthDate'] : kind === 'organization' ? ['name', 'description', 'organizationType']
+    const permitted = kind === 'artist' ? ['name', 'bio', 'birthDate', 'musicBrainzId'] : kind === 'organization' ? ['name', 'description', 'organizationType', 'musicBrainzId']
         : ['title', 'releaseDate', 'credits', 'attributionStatus', ...(kind === 'audioTrack' ? ['trackNumber', 'discNumber'] : [])];
     exact(input, permitted);
     const output: Record<string, unknown> = {};
@@ -164,6 +177,12 @@ const parseFields = (kind: AdminCatalogKind, value: unknown) => {
         }
         else if (key === 'trackNumber') { if (value !== null && (!Number.isInteger(value) || Number(value) < 1 || Number(value) > 9999)) fail(400, 'ADMIN_CATALOG_INVALID_INPUT'); output[key] = value; }
         else if (key === 'discNumber') { if (value !== null && embeddedDiscNumber(value) === undefined) fail(400, 'ADMIN_CATALOG_INVALID_INPUT'); output[key] = value; }
+        // A MusicBrainz ID is null (clear) or a string of at most 64 characters naming a keepable ID, stored lowercase.
+        else if (key === 'musicBrainzId') {
+            if (value === null) { output[key] = null; continue; }
+            const id = typeof value === 'string' && value.length <= 64 ? keepableMusicBrainzId(value) : null;
+            output[key] = id ?? fail(400, 'ADMIN_CATALOG_INVALID_INPUT');
+        }
         else if (key === 'organizationType') { if (!organizationTypes.includes(value as any)) fail(400, 'ADMIN_CATALOG_INVALID_INPUT'); output[key] = value; }
         // A present join phrase must be valid: an absent key means none, and null, empty, blank, overlong or invisible text is rejected before any transaction or receipt.
         else if (key === 'credits') {
@@ -229,13 +248,27 @@ export const editAdminCatalogItem = (actor: string, kind: AdminCatalogKind, rawI
         }
         const discChanged = hasOwn(actualPatch, 'discNumber'), discNumber = actualPatch.discNumber;
         delete actualPatch.discNumber;
-        // Clearing a Disc Number removes both keys rather than storing null, so the record orders as disc 1 and keeps no stale source.
-        await getDb()!.collection(configs[kind].collection).updateOne({ _id: doc._id, ...configs[kind].ready }, {
-            $set: { ...withCatalogSearchUpdate(actualPatch, configs[kind].field), ...(desiredVisibility !== undefined ? { visibility: desiredVisibility } : {}),
-                ...(discChanged && discNumber !== null ? { discNumber, discNumberSource: 'admin-catalog' } : {}), updatedAt: new Date() },
-            ...(discChanged && discNumber === null ? { $unset: { discNumber: '', discNumberSource: '' } } : {}),
-            $inc: { adminRevision: 1, referenceRevision: 1 }
-        }, { session });
+        const idChanged = hasOwn(actualPatch, 'musicBrainzId'), musicBrainzId = actualPatch.musicBrainzId as string | null | undefined;
+        delete actualPatch.musicBrainzId;
+        const idInUse = () => fail(409, 'ADMIN_CATALOG_MUSICBRAINZ_ID_IN_USE');
+        // Another record of the same kind in any lifecycle state holds the ID: no two Artists, and no two Organizations, share one.
+        if (idChanged && musicBrainzId && await getDb()!.collection(configs[kind].collection).findOne({ musicBrainzId, _id: { $ne: doc._id } }, { session, projection: { _id: 1 } })) idInUse();
+        // Clearing a Disc Number removes both keys rather than storing null, so the record orders as disc 1 and keeps no stale source;
+        // clearing a MusicBrainz ID removes its key too, so the record holds none and its revision counts none.
+        const unset = { ...(discChanged && discNumber === null ? { discNumber: '', discNumberSource: '' } : {}), ...(idChanged && musicBrainzId === null ? { musicBrainzId: '' } : {}) };
+        try {
+            await getDb()!.collection(configs[kind].collection).updateOne({ _id: doc._id, ...configs[kind].ready }, {
+                $set: { ...withCatalogSearchUpdate(actualPatch, configs[kind].field), ...(desiredVisibility !== undefined ? { visibility: desiredVisibility } : {}),
+                    ...(discChanged && discNumber !== null ? { discNumber, discNumberSource: 'admin-catalog' } : {}),
+                    ...(idChanged && musicBrainzId ? { musicBrainzId } : {}), updatedAt: new Date() },
+                ...(Object.keys(unset).length ? { $unset: unset } : {}),
+                $inc: { adminRevision: 1, referenceRevision: 1 }
+            }, { session });
+        } catch (error) {
+            // A concurrent setter that committed first: the unique index refuses this one as the pre-check would.
+            if (isMusicBrainzIdDuplicateKey(error)) idInUse();
+            throw error;
+        }
         if (kind === 'audioTrack' && (hasOwn(actualPatch, 'trackNumber') || discChanged) && doc.albumId) {
             const albumId = String(doc.albumId).toLowerCase();
             await touchReadyAlbumReferences([albumId], session);

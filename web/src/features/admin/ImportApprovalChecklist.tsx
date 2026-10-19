@@ -12,7 +12,7 @@ import { useLocalization } from '../../localization/LocalizationProvider';
 import type { MessageKey } from '../../localization/contract';
 import { useAdminAccess, useAdminText } from './AdminAccess';
 import { adminRequest, duplicateEditsKey, importPath, type DecisionEdits, type ImportDecision, type ImportDetail, type ImportDraftV2 } from './adminApi';
-import { candidatesSchema, identityPreselections } from './importIdentity';
+import { candidatesSchema, identityPreselections, musicBrainzIdWrites, type MusicBrainzIdWrite } from './importIdentity';
 import { adminWorkspace } from './adminWorkspace';
 import { approvalBody, approvalChecklist, shownDecisions, type ApprovalBody, type ApprovalIdentity } from './importApproval';
 import { entriesByline } from './artistEntriesByline';
@@ -23,10 +23,10 @@ import { reviewValueText } from './reviewValueText';
 import styles from './adminStyles';
 
 /**
- * The publish body a confirmation can send, with the preselections and Luna ticks it shows (the approval refuses any other set),
- * and whether everything it shows is decided and current.
+ * The publish body a confirmation can send, with the preselections, Luna ticks and MusicBrainz ID writes it shows (the approval
+ * refuses any other set), and whether everything it shows is decided and current.
  */
-export interface ApprovalState { body: ApprovalBody & { preselections: ImportDecision[]; suggestionTicks: ReturnType<typeof suggestionTicks> }; ready: boolean }
+export interface ApprovalState { body: ApprovalBody & { preselections: ImportDecision[]; suggestionTicks: ReturnType<typeof suggestionTicks>; musicBrainzIds: MusicBrainzIdWrite[] }; ready: boolean }
 
 const identityKeys = { new: 'publication.new_record', needsDecision: 'publication.needs_decision', changed: 'publication.decision_changed', notApplied: 'publication.not_applied' } as const;
 
@@ -67,21 +67,25 @@ export function ImportApprovalChecklist({ item, draft, changes, onChange, onAdop
     enabled: Boolean(body), retry: false, gcTime: 0
   });
   const preselections = body && candidates.isSuccess && lunaReady ? identityPreselections(shown, item.draft, body.decisions, candidates.data) : [];
+  // Every MusicBrainz ID the publication records or replaces is listed, and sent: the approval refuses any other set.
+  const writes = body && candidates.isSuccess && lunaReady ? musicBrainzIdWrites(shown, body.decisions, preselections, candidates.data) : [];
   const ticked = new Set(luna.ticked.map(id => suggestionPath(item.suggestions.find(suggestion => suggestion.id === id)!)));
   const checklist = body && candidates.isSuccess && lunaReady ? approvalChecklist(shown, body.decisions, candidates.data.items,
-    { automaticPaths: item.automaticPaths, lookupPaths: item.lookupPaths, possibleLabelEntryKeys: item.possibleLabelEntryKeys, changedPaths: [...changes.map(change => change.path), ...ticked] }, preselections) : null;
+    { automaticPaths: item.automaticPaths, lookupPaths: item.lookupPaths, possibleLabelEntryKeys: item.possibleLabelEntryKeys, changedPaths: [...changes.map(change => change.path), ...ticked] }, preselections, writes) : null;
   const ready = Boolean(checklist && checklist.blocked === 0 && !candidates.isFetching && !summary.isFetching);
   // Rows held only because a ticked suggestion renamed them: the same checklist without the ticks blocks fewer rows.
   const renamed = Boolean(checklist && luna.ticked.length && checklist.blocked > approvalChecklist(draft, body!.decisions, candidates.data!.items, undefined,
     identityPreselections(draft, item.draft, body!.decisions, candidates.data!)).blocked);
   // Reported again only when what it shows changes, so the dialog's state update never loops back here.
-  const reported = JSON.stringify([preselections, luna]);
+  const reported = JSON.stringify([preselections, luna, writes]);
   useEffect(() => {
-    const [shownPreselections, shownTicks] = JSON.parse(reported) as [ImportDecision[], typeof luna];
-    onChange(body && { body: { ...body, preselections: shownPreselections, suggestionTicks: shownTicks }, ready });
+    const [shownPreselections, shownTicks, shownWrites] = JSON.parse(reported) as [ImportDecision[], typeof luna, MusicBrainzIdWrite[]];
+    onChange(body && { body: { ...body, preselections: shownPreselections, suggestionTicks: shownTicks, musicBrainzIds: shownWrites }, ready });
   }, [body, ready, reported]);
   const identity = (value: ApprovalIdentity) => value.kind === 'reused'
     ? [t('publication.reused_record', { name: value.label }), value.hidden && t('field.hidden')].filter(Boolean).join(' · ') : t(identityKeys[value.kind]);
+  const idWrite = (write: { musicBrainzId: string; replaces: string | null } | null) => write && (write.replaces
+    ? t('publication.replaces_id', { previous: write.replaces, id: write.musicBrainzId }) : t('publication.records_id', { id: write.musicBrainzId }));
   // An append applies none of the draft's Album values or cover; each such row says so.
   const applied = (text: string) => checklist?.append ? `${text} · ${t('publication.not_applied')}` : text;
   const cover = body?.selectedCoverSlotId ?? null;
@@ -102,8 +106,8 @@ export function ImportApprovalChecklist({ item, draft, changes, onChange, onAdop
         <div><dt>{t('field.title')}</dt><dd>{applied(shown.album.title || t('common.untitled'))}</dd></div>
         <div><dt>{t('field.artists')}</dt><dd>{[entriesByline(shown.album.artists) || '—', checklist.artistsFromTags && t('publication.tags_only')].filter(Boolean).join(' · ')}
           <ol>{checklist.artists.map(entry => <li key={entry.key}>{[entry.name, sharedText(`catalog.credit.${entry.role}` as MessageKey),
-            entry.joinPhrase && t('publication.join_phrase', { phrase: entry.joinPhrase }), identity(entry.identity), entry.possibleLabel && t('entries.possible_label')].filter(Boolean).join(' · ')}</li>)}</ol></dd></div>
-        <div><dt>{t('field.label')}</dt><dd>{checklist.label ? [checklist.label.name, identity(checklist.label.identity), checklist.labelFromTags && t('publication.tags_only')].filter(Boolean).join(' · ') : t('publication.no_label')}</dd></div>
+            entry.joinPhrase && t('publication.join_phrase', { phrase: entry.joinPhrase }), identity(entry.identity), idWrite(entry.musicBrainzIdWrite), entry.possibleLabel && t('entries.possible_label')].filter(Boolean).join(' · ')}</li>)}</ol></dd></div>
+        <div><dt>{t('field.label')}</dt><dd>{checklist.label ? [checklist.label.name, identity(checklist.label.identity), idWrite(checklist.label.musicBrainzIdWrite), checklist.labelFromTags && t('publication.tags_only')].filter(Boolean).join(' · ') : t('publication.no_label')}</dd></div>
         <div><dt>{t('field.releaseDate')}</dt><dd>{applied(reviewValueText(shown.album.releaseDate))}</dd></div>
         <div><dt>{t('field.visibility')}</dt><dd>{applied(t(`field.${shown.album.visibility}`))}</dd></div>
         <div><dt>{t('layout.selectedCover')}</dt><dd>{applied(coverText)}</dd></div>
