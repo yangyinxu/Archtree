@@ -1,7 +1,8 @@
 /**
  * Automatic cover cleanup once an import completes (owner rules: docs/business-rules.md, Administrator Album Imports, cover
- * bullet). Each automatically staged candidate that is neither the published cover, an explicit choice, nor pinned by an
- * existing-catalog cover operation is cleaned through the ordinary staged cleanup lifecycle:
+ * bullet). Each automatically staged candidate (embedded images and lookup covers) that is neither the published cover, an
+ * explicit choice, nor pinned by an existing-catalog cover operation is cleaned through the ordinary staged cleanup lifecycle;
+ * before completion, the lookup cover pass (adminImportLookupCover.ts) cleans lookup covers no longer applied the same way:
  * - Reservation is a system lifecycle step with no role fence: it writes intent only (`deleting` with a cleanup `recovery`
  *   naming the publisher) under a UUID derived from the candidate version, receipted in `automaticReceipts`, never in ordinary or
  *   recovery receipts, and deletes nothing.

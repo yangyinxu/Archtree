@@ -11,7 +11,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useLocalization } from '../../localization/LocalizationProvider';
 import type { MessageKey } from '../../localization/contract';
 import { useAdminAccess, useAdminText } from './AdminAccess';
-import { adminRequest, duplicateEditsKey, importPath, type DecisionEdits, type ImportDecision, type ImportDetail, type ImportDraftV2 } from './adminApi';
+import { adminRequest, duplicateEditsKey, importPath, lookupCoverName, type DecisionEdits, type ImportDecision, type ImportDetail, type ImportDraftV2 } from './adminApi';
 import { candidatesSchema, identityPreselections, musicBrainzIdWrites, type MusicBrainzIdWrite } from './importIdentity';
 import { adminWorkspace } from './adminWorkspace';
 import { approvalBody, approvalChecklist, boundDecisions, shownDecisions, type ApprovalBody, type ApprovalIdentity } from './importApproval';
@@ -94,7 +94,7 @@ export function ImportApprovalChecklist({ item, draft, changes, onChange, onAdop
   // An append applies none of the draft's Album values or cover; each such row says so.
   const applied = (text: string) => checklist?.append ? `${text} · ${t('publication.not_applied')}` : text;
   const cover = body?.selectedCoverSlotId ?? null;
-  const coverText = [cover === null ? t('media.no_cover') : cover === 'cover' ? t('media.manual_cover') : item.manifest.files.find(file => `embedded-${file.slotId}` === cover)?.filename ?? cover,
+  const coverText = [cover === null ? t('media.no_cover') : cover === 'cover' ? t('media.manual_cover') : cover.startsWith('lookup-') ? lookupCoverName(t('media.lookup_cover'), cover) : item.manifest.files.find(file => `embedded-${file.slotId}` === cover)?.filename ?? cover,
     // The automatic cover the project shows stays automatic when approved as shown.
     item.coverChoice === 'automatic' && cover !== null && cover === item.selectedCoverSlotId && t('summary.cover_automatic')].filter(Boolean).join(' · ');
   return <section aria-labelledby={heading} className={styles.checklist}>

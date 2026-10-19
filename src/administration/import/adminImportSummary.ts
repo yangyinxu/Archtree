@@ -14,11 +14,12 @@
  * in the lookup view (`needsAnswer`). The publish transaction rechecks all of it, the upload wait with importUploadsWaiting.
  * Pure. Owner rules: docs/business-rules.md (Administrator Album Imports, Review and publish summary and Luna bullets).
  */
-import { ADMIN_IMPORT_LIMITS } from './adminImportContract';
+import { ADMIN_IMPORT_LIMITS, isLookupCoverSlot } from './adminImportContract';
 import { boundArtistDecision, boundLabelDecision, type ImportDecisionV2, type ImportDraftV2 } from './adminImportDraft';
 import { importDraftV2View, importProjectV2View, legacyManifestView } from './adminImportDraftCompat';
 import { lunaTick, shownPendingSuggestions, type LunaTick } from './adminImportLunaTicks';
 import { importUploadSettled } from './adminImportMediaTypes';
+import { lookupCoverStagingActive } from './adminImportCoverAutomation';
 import type { AdminImportDocument } from './adminImportService';
 import { importTagsV2View } from './adminImportTags';
 import { importAutomationMarkers } from './adminImportValueState';
@@ -28,7 +29,8 @@ import { isBlockingLookupState, type MetadataLookupRecord } from '../lookup/meta
 export type ImportSummaryView = {
     /** An explicit Album reuse: the draft's Album values, entries, label, cover and Album lookup conflicts are not applied. */
     append: boolean;
-    waiting: { uploads: boolean; lookup: boolean; analysis: boolean };
+    /** `cover`: the applied lookup candidate's front artwork is being staged (queued or running within its grant). */
+    waiting: { uploads: boolean; lookup: boolean; cover: boolean; analysis: boolean };
     /** A new Album without a primary Artist entry whose files or applied lookup release credit only a placeholder. */
     placeholderOnly: boolean;
     luna: { id: string; tick: LunaTick }[];
@@ -64,14 +66,16 @@ function filesCreditOnlyPlaceholders(files: readonly { slotId: string }[], doc: 
 /**
  * Whether Publish waits for uploads: any staged upload (a file or a cover) is still in flight, pending with a PUT that can
  * still land (importUploadSettled), or a manifest file whose track needs its bytes lacks a confirmed upload. A track decided
- * `skip` is never published and one decided `reuse` keeps the existing member's media, so neither needs its file. The summary
- * passes the saved decisions; the publish transaction its frozen ones, preselections included.
+ * `skip` is never published and one decided `reuse` keeps the existing member's media, so neither needs its file. A lookup cover
+ * never counts: its staging holds Publish only while queued or running within its grant (lookupCoverStagingActive), and a failed
+ * one never waits, even while its admitted record has not settled. The summary passes the saved decisions; the publish
+ * transaction its frozen ones, preselections included.
  */
 export function importUploadsWaiting(doc: Pick<AdminImportDocument, 'manifest' | 'media'>, decisions: readonly unknown[], now: Date): boolean {
     const files = legacyManifestView(doc.manifest).files, assets = doc.media?.assets ?? [];
     const unneeded = (slotId: string) => decisions.some(decision => isRecord(decision) && decision.scope === 'track' && decision.slotId === slotId
         && (decision.action === 'skip' || decision.action === 'reuse'));
-    return assets.some(asset => asset.state === 'pending' && !importUploadSettled(asset, now))
+    return assets.some(asset => asset.state === 'pending' && !isLookupCoverSlot(asset.slotId) && !importUploadSettled(asset, now))
         || files.some(file => !unneeded(file.slotId) && !assets.some(asset => asset.slotId === file.slotId && asset.state === 'ready'));
 }
 
@@ -92,7 +96,8 @@ export function importIdentityAnswers(draft: ImportDraftV2, decisions: readonly 
 /**
  * The summary state of `doc` with its lookup record (null before any run) and `context`. Uploads are waited for as
  * importUploadsWaiting says with the saved decisions, lookup while its run is queued, running or retrying automatically (value
- * application shares that step), and analysis while it is queued or running. A stored manifest in a shape this release does not
+ * application shares that step), the lookup cover while its staging is queued or running within its grant (a failed, skipped or
+ * expired one never waits), and analysis while it is queued or running. A stored manifest in a shape this release does not
  * know reads as its sanitized view, as the editor shows it.
  */
 export function importSummaryView(doc: AdminImportDocument, lookup: Partial<MetadataLookupRecord> | null, context: ImportSummaryContext): ImportSummaryView {
@@ -109,6 +114,7 @@ export function importSummaryView(doc: AdminImportDocument, lookup: Partial<Meta
         waiting: {
             uploads: importUploadsWaiting(doc, decisions, context.now),
             lookup: isBlockingLookupState(lookup?.state) || doc.lookupGate?.blocking === true,
+            cover: lookupCoverStagingActive(doc.media?.lookupCover, context.now),
             analysis: ['queued', 'running'].includes(doc.analysis?.state)
         },
         placeholderOnly: !append && !draft.album.artists.some(entry => entry.role === 'primary') && (appliedPlaceholder || filesCreditOnlyPlaceholders(manifest.files, doc)),

@@ -125,11 +125,14 @@ label and each track's title, Disc Number and Track Number, until that value is
 edited; an automatic Artist entry whose name looks like a company says "This
 name looks like a label". In Files, a file whose tags had values left out says
 how many beside its tag evidence. Once a staged image is ready, the cover
-choice offers No cover and each ready image, manual or embedded. While the
-choice is automatic, a note says so and only the image chosen automatically is
-checked (nothing is checked when no image is); choosing any option, No cover
-and the image already chosen automatically included, makes the choice explicit
-for good.
+choice offers No cover and each ready image: manual, embedded or Cover Art
+Archive front artwork from metadata lookup, which Files and the cover choice
+name with the first eight characters of its release MBID so lookup covers
+kept at once read apart. While the choice is automatic, a note says so,
+naming Cover Art Archive when the lookup cover is chosen, and only the image
+chosen automatically is checked (nothing is checked when no image is);
+choosing any option, No cover and the image already chosen automatically
+included, makes the choice explicit for good.
 Review shows an Artist suggestion as its byline
 followed by each entry with its role, and a label suggestion by the label's
 name. Review's existing-content check has one
@@ -182,12 +185,13 @@ reads `GET /imports/:id/lookup` (the lookup view and the server's summary state,
 see [Lookup routes](#lookup-routes)) again whenever the project's revision or
 automatic values change, every 3 seconds while a lookup is queued or running
 or waits on a busy source (`sourceBusy`, whose throttled first retry comes
-within seconds), and every 10 seconds while it waits out an outage; a read that sees a
-newer saved project reloads the page's project read. The summary components
-(`ImportSummary.tsx`, `LookupBox.tsx`, `CandidateChooser.tsx` and the shared
-`ImportAnalysisConfirmation.tsx`) load lazily from the media panel, outside the
-import route's initial JavaScript. The server decides what holds Publish; the
-summary only presents it:
+within seconds) and while the applied release's cover is being staged
+(`waiting.cover`), and every 10 seconds while it waits out an outage; a read
+that sees a newer saved project reloads the page's project read. The summary
+components (`ImportSummary.tsx`, `LookupBox.tsx`, `CandidateChooser.tsx` and
+the shared `ImportAnalysisConfirmation.tsx`) load lazily from the media panel,
+outside the import route's initial JavaScript. The server decides what holds
+Publish; the summary only presents it:
 
 - **Status and next step.** Not run yet while uploads are awaited, not run
   although every needed file is uploaded (its automatic trigger failed; Luna
@@ -204,7 +208,10 @@ summary only presents it:
   release.
   Where the server cannot run lookup (`lookupAvailable` false) the summary says
   it is not configured, before any run too, and offers neither a retry nor the
-  name box. Stale files are counted.
+  name box. Stale files are counted. While the applied release's front artwork
+  is being staged (`waiting.cover`) the summary says Publish waits for it; a
+  staging that failed or was skipped is not shown, and the cover choice stays
+  as it was.
 - **Name box.** An Album or song name; a folder-name run prefills the folder
   name for editing, a submitted run its name. A link is refused in place
   (`Enter a name, not a link`), and the box has no autocomplete and stores
@@ -231,22 +238,34 @@ summary only presents it:
   it is not counted as an answer and never holds Publish. A release applied as
   a preselection stays choosable while a tie needs an answer, so a re-rank
   that leaves a tie can be answered with it.
+- **Artwork previews.** The candidate chooser shows a preview beside each
+  listed release whose `artwork` flag is set, loaded from
+  `GET /imports/:id/lookup/candidates/:key/artwork` with the `viewer` query
+  parameter and "Front artwork of this release" as its text alternative. Each
+  release's preview appears once: beside it in the tie or single-choice view
+  when it represents a group there, else in the folded list once that is
+  opened. At most two previews load at a time, in the order shown, as Cover Art
+  Archive serves two; a preview that fails is tried once more two seconds
+  later and then hidden. The browser never loads a Cover Art Archive address.
 - **Flagged, never folded.** Values resting only on file tags (automatic and
   not on the applied candidate), a preselection whose artist matches no artist
   tag, directly or through an alias the lookup found, and pending Luna
   suggestions with their ticks.
 - **Folded.** Every other row: title, Artist entries with roles and join
   phrases, label, date, visibility (changed in place by a field save, public by
-  default), cover (one chosen automatically says so), the disc and track
-  order, saved identity decisions, upload progress, answered conflicts, and
-  all candidates when there is no tie. An append marks the Album values, their
-  conflicts and Album Luna suggestions not applied.
-- **Publish.** Disabled while the server says it waits for uploads, lookup or
-  analysis or this browser is still uploading, while a tie, a conflict or an
-  identity row (`identityAnswers`) needs an answer, or while a new Album's
-  credit rests only on a placeholder (said at once, unless the unsaved changes
-  Publish includes add a primary Artist entry); otherwise it opens the same
-  one-step confirmation as the Publish section.
+  default), cover (one chosen automatically says so, and a lookup cover is
+  named Cover Art Archive front artwork with the first eight characters of its
+  release MBID), the disc and track order, saved
+  identity decisions, upload progress, answered conflicts, and all candidates
+  when there is no tie. An append marks the Album values, their conflicts and
+  Album Luna suggestions not applied.
+- **Publish.** Disabled while the server says it waits for uploads, lookup,
+  the applied release's cover staging or analysis or this browser is still
+  uploading, while a tie, a conflict or an identity row (`identityAnswers`)
+  needs an answer, or while a new Album's credit rests only on a placeholder
+  (said at once, unless the unsaved changes Publish includes add a primary
+  Artist entry); otherwise it opens the same one-step confirmation as the
+  Publish section.
 - **Luna ticks.** The summary state gives each pending suggestion the editor
   shows a tick state: `ticked` for an empty value or one resting only on file
   tags, `unticked` for any other, `resolved` when it already equals the current
@@ -490,11 +509,15 @@ Import routes (relative to `/api/admin/v1`):
   is `automatic` until an administrator chooses (`/select-cover`, or an
   approval saving a cover its own decisions would not select automatically;
   see `POST /imports/:id/publish`) and `explicit` after (see
-  `POST /imports/:id/select-cover`). A stored `selectedCoverSlotId`, including
-  those saved by earlier releases and by every earlier one-step approval, is
-  explicit. Once a publication is active or complete, an automatic choice shows
-  the cover that publication froze (none for an append). The v1 projection
-  shows the same `selectedCoverSlotId` without `coverChoice`.
+  `POST /imports/:id/select-cover`). The automatic choice prefers the applied
+  metadata lookup candidate's ready `lookup-<candidateKey>` cover (see Lookup
+  cover staging below); lookup cover slots appear in `assets` in every state
+  but `deleted`, so the list holds at most 205 assets. A stored
+  `selectedCoverSlotId`, including those saved by earlier releases and by
+  every earlier one-step approval, is explicit. Once a publication is active
+  or complete, an automatic choice shows the cover that publication froze
+  (none for an append). The v1 projection shows the same `selectedCoverSlotId`
+  without `coverChoice`.
   `approvalDigest` is the SHA-256 hex digest of the key-sorted JSON of what a
   publication confirmation shows from the saved project: the Draft v2 view, the
   returned decisions with their bound names, the selected cover
@@ -574,8 +597,8 @@ Import routes (relative to `/api/admin/v1`):
   decisions (a `decisions` or `publish` receipt); `/cancel-analysis` binds the
   generation its `analyze` receipt started; and `/analyze`, staged cleanup and
   `/cancel-publication` bind the last administrator receipt of any kind. Luna
-  ticks, upload transfers, publication-worker checkpoints, embedded staging
-  and automatic values add no such receipt, so they never make a change
+  ticks, upload transfers, publication-worker checkpoints, cover staging and
+  automatic values add no such receipt, so they never make a change
   stale, while another administrator's change of what it binds still does:
   a decision set built before another administrator's saved decisions, or a
   stop issued before another administrator's re-analysis, is refused with
@@ -740,7 +763,7 @@ Import routes (relative to `/api/admin/v1`):
   publication may lock the sources. `If-Match` stays in the intent hash, so a
   replay of the original intent still matches its receipt, and only the
   administrator who started an upload may replay it. Analysis checkpoints,
-  draft saves, automatic values, completed uploads and embedded staging never
+  draft saves, automatic values, completed uploads and cover staging never
   make a queued upload stale. A transfer error leaves the asset unknown; only
   reconciliation confirms a failure. A confirmed audio upload, including a
   replay of an intent already confirmed, then runs tag automation and the
@@ -772,21 +795,30 @@ Import routes (relative to `/api/admin/v1`):
   removal of a file that a lookup run bound lists its slot in `staleSlotIds`
   and supersedes that run while it is active (see
   [Triggers and grants](#triggers-and-grants)).
-- `POST /imports/:id/select-cover`: explicitly choose a ready manual or embedded
-  artwork slot, or `null` for No cover. Choosing makes the cover choice explicit
-  for good; nothing turns it back to automatic. Until then the choice is
-  automatic: each audio upload records at admission the SHA-256 of its validated
-  embedded front image, or none, and the import selects the ready `embedded-*`
-  candidate, first in manifest order, of the one image every confirmed audio
-  file carries, ignoring files whose saved track decision is `skip` (they
-  become no track). It selects nothing when such a file carries none, carries
-  another image or has no evidence (an upload admitted before automatic covers
-  has evidence only through its own per-file candidate), when that image has no
-  ready candidate (the staging bound kept it out, its staging is unresolved, or
-  the candidate was removed), or when the saved Album decision is `reuse` or
-  `skip`. The automatic choice is stored nowhere and recomputed on every read,
-  so a changed file set (an upload, a reconcile, a removal or a replacement)
-  re-evaluates it. Uploading a manual cover never selects it. A choice binds the
+- `POST /imports/:id/select-cover`: explicitly choose a ready manual, embedded
+  or lookup artwork slot, or `null` for No cover. Choosing makes the cover
+  choice explicit for good; nothing turns it back to automatic. Until then the
+  choice is automatic. It first selects the ready `lookup-<candidateKey>` cover
+  of the applied metadata lookup candidate, while, and only while, that
+  candidate is applied (a cover staged for a candidate no longer applied is
+  never selected). Without one (no candidate applied, none chosen, a release
+  without front artwork, or a staging that failed, was skipped or is
+  unresolved), each audio upload records at admission the SHA-256 of its
+  validated embedded front image, or none, and the import selects the ready
+  `embedded-*` candidate, first in manifest order, of the one image every
+  confirmed audio file carries, ignoring files whose saved track decision is
+  `skip` (they become no track). It selects nothing when such a file carries
+  none, carries another image or has no evidence (an upload admitted before
+  automatic covers has evidence only through its own per-file candidate), or
+  when that image has no ready candidate (the staging bound kept it out, its
+  staging is unresolved, or the candidate was removed). A saved Album decision
+  of `reuse` or `skip` deselects every automatic cover, lookup or embedded, and
+  `create` selects it again. The automatic choice is stored nowhere and
+  recomputed on every read, so a changed file set (an upload, a reconcile, a
+  removal or a replacement) or applied candidate re-evaluates it. Uploading a
+  manual cover never selects it. Moving an explicit choice away from a lookup
+  cover lets the lookup cover pass clean that cover once its candidate is no
+  longer applied. A choice binds the
   cover state the administrator saw: `expectedRevision` must not predate the
   last cover selection, approval or staged cleanup, and a chosen slot must hold
   a ready image admitted no later than that revision, so a stale tab never
@@ -796,8 +828,9 @@ Import routes (relative to `/api/admin/v1`):
 - `GET /imports/:id/assets/:slotId/preview`: protected staged artwork preview.
 - `GET /imports/:id/lookup` and `POST /imports/:id/lookup`, `/lookup/retry`,
   `/lookup/choose` and `/lookup/resolve`: the import's metadata lookup view, a
-  submitted name, a manual retry, a candidate choice and conflict answers (see
-  [Lookup routes](#lookup-routes)).
+  submitted name, a manual retry, a candidate choice and conflict answers; and
+  `GET /imports/:id/lookup/candidates/:key/artwork`, a candidate's transient
+  artwork preview (see [Lookup routes](#lookup-routes)).
 - `POST /imports/:id/publish`: explicit reviewed approval, then asynchronous
   fixed-identity publication; `/resume-publication` reconciles that approval's
   original operation ID rather than creating another Album. The body is
@@ -908,7 +941,8 @@ Import routes (relative to `/api/admin/v1`):
   (`409 ADMIN_IMPORT_REVIEW_REQUIRED`). A stored value the editor cannot show
   (it reads as empty there) is also `400 ADMIN_IMPORT_DRAFT_INCOMPLETE`, so it
   is never frozen. Metadata lookup holds it too, read in the
-  same transaction: a queued, running or automatically retrying lookup is
+  same transaction: a queued, running or automatically retrying lookup, or a
+  lookup cover staging queued or running within its grant, is
   `409 ADMIN_IMPORT_LOOKUP_ACTIVE`, and an unanswered tie or conflict (see
   [Value application](#value-application)) is
   `409 ADMIN_IMPORT_REVIEW_REQUIRED`, checked against the draft the approval
@@ -1007,6 +1041,10 @@ attention. A later staging of that slot resumes a cleanup that stopped before
 deleting. Embedded assets that an earlier release staged under ordinary
 receipts keep them and their existing lifecycle until the import completes,
 when unselected ones are cleaned up like any automatic candidate (below).
+Lookup cover staging (described below) takes automatic `upload` and `cleanup`
+receipts too, keeps at most 4 lookup covers at once and never counts against
+the 16 embedded stagings, which embedded stagings likewise never take from the
+lookup bound.
 Automatic values written from file tags and automatic metadata lookup runs and
 applications take no receipt of either kind, so they use neither the 256
 ordinary receipts nor the 16 automatic embedded stagings. A submitted lookup, a manual retry, a choice and conflict answers each
@@ -1016,15 +1054,17 @@ The client receives a bounded recent receipt projection; the original publicatio
 UUID remains available through `publicationRecovery` for durable reconciliation.
 
 **Automatic cover cleanup.** Once an import completes, each automatically
-staged `embedded-*` candidate is cleaned up through the staged cleanup
-lifecycle unless it is the published cover (which is where an approved
+staged `embedded-*` or `lookup-*` candidate is cleaned up through the staged
+cleanup lifecycle unless it is the published cover (which is where an approved
 automatic cover lives), an explicitly chosen cover, pinned by an
 existing-catalog cover operation (`coverConsumers`), or already being cleaned
 or removed. That includes the per-file duplicates that releases before
 embedded deduplication staged, and imports completed before automatic cleanup
 existed; an image the files would select automatically but the publication
 never used, such as the first of those duplicates, is cleaned too. A manual
-cover is never cleaned automatically. The automatic choice is computed in
+cover is never cleaned automatically, and a lookup cover is cleaned earlier,
+once its candidate is no longer applied (see Lookup cover staging below).
+The automatic choice is computed in
 `src/administration/import/adminImportCoverAutomation.ts`, and this cleanup
 runs in `adminImportCoverCleanup.ts` beside it.
 
@@ -1058,6 +1098,69 @@ runs in `adminImportCoverCleanup.ts` beside it.
   It skips projects saved in a newer draft format, and looks again a day later
   at an approval format this release cannot read. A stopped pass resumes the
   same reserved intents once its five-minute lease expires.
+
+**Lookup cover staging.** When the applied metadata lookup candidate's fetched
+release reports Cover Art Archive front artwork, the server stages that artwork
+as the cover candidate `lookup-<candidateKey>`
+(`lookup-musicbrainz:<release MBID>`). The code lives in
+`src/administration/import/adminImportLookupCover.ts`.
+
+- **Queueing.** The application that applies the candidate records the cover
+  job (`media.lookupCover`, never projected, never changing `revision` or
+  `valueRevision`) in its own transaction: the worker step that completes a run
+  under the run's grant, a re-rank under the confirming administrator's fresh
+  one-hour grant, and `POST /lookup/choose` under the chooser's fresh grant.
+  Another candidate, or none, replaces the job, so each application gets its
+  own staging intent. Applying the same candidate again records nothing while
+  its staging is staged, or queued or running within its grant; one that
+  failed, was skipped or ran past its grant is queued again under the new
+  application's grant, with its own intent. A later run preselecting the same
+  release does the same, and so does choosing it again through the API; the
+  Web keeps Choose disabled for the applied release, so there an administrator
+  retries by choosing Use none of these, or another release, and then this
+  release again. Queueing writes no lookup fence: the application's own write
+  of the import document already conflicts with a concurrent approval.
+- **Publish waits.** While the job is queued or running within its grant, the
+  summary reports `waiting.cover` and an approval is
+  `409 ADMIN_IMPORT_LOOKUP_ACTIVE`. A failed, skipped or expired staging never
+  holds Publish; every settled staging bumps the lookup fence.
+- **The pass.** On ticks that publish and sweep nothing, the publication
+  worker (which owns private storage) claims one import whose job is due under
+  a five-minute lease. Its planning transaction, a system step with no role
+  fence, reserves cleanups and decides the staging: an expired grant or a
+  closed project skips it, a ready cover already staged for the same candidate
+  is adopted without a fetch, another unresolved record in the slot fails it
+  without blocking (a failure reconciliation confirmed is replaced instead, as
+  an upload replaces one), 4 other lookup covers already kept (not counting
+  the cleanups this pass deletes first) skip it before anything is fetched,
+  and its own admitted record resumes the same intent.
+- **Fetch.** Under the applying administrator's fresh check, the pass fetches
+  the release's `front-1200` thumbnail from a URL the server builds (see
+  Cover Art Archive artwork under [Metadata lookup](#metadata-lookup)). 404 is
+  no artwork; an unconfigured lookup, an unavailable source or an invalid
+  image, one larger than 1200 pixels included, fails the staging; a shutdown
+  leaves it running for the next pass.
+- **Admission and transfer.** The bytes are admitted as a `pending` asset with
+  one automatic `upload` receipt under the job's UUID (a replay with the same
+  bytes is recognised; different bytes fail as unknown), only while fewer than
+  4 other lookup covers are kept (removed ones, and a confirmed failure this
+  staging replaces, move to `assetHistory`; else the staging is skipped), then
+  transferred with the shared HEAD/PUT/HEAD transfer. A lookup cover record
+  never counts as an upload Publish waits for, even while it is pending: only
+  the job holds Publish. An unknown outcome fails the staging without blocking
+  and keeps its record; reopening the import reconciles it
+  (`POST /imports/:id/assets/:slotId/reconcile` accepts lookup slots and
+  re-arms the pass), after which a confirmed cover is selected while its
+  candidate is applied and cleaned otherwise.
+- **Cleanup.** Each lookup cover no longer applied that is neither an explicit
+  choice nor pinned is reserved and deleted exactly as completion cleans
+  automatic candidates, with the applying administrator as actor. A failure is
+  needs attention and is retried by any current administrator with the
+  original intent. A lookup cover whose transfer may still land waits for its
+  deadline, a pinned cover is checked again a day later (the pass looks again
+  at the earliest of these times), and a project a publication locks is
+  checked again an hour later; completion hands every lookup cover to the
+  completion sweep.
 
 The Web upload queue starts when the create action succeeds, or when an
 administrator resumes an import after reselecting its files; no file asks for
@@ -1405,7 +1508,7 @@ reads live in `src/administration/import/adminImportDraftCompat.ts`.
   analysis concurrency, so neither a queued analysis nor a chunk a newer
   release left in flight blocks other projects; it waits for a release that
   knows the format. An upload admitted earlier still completes and can be
-  reconciled, but no new embedded-cover staging is admitted, and the project
+  reconciled, but no new automatic cover staging is admitted, and the project
   cannot become the source of an existing-catalog cover; releasing an existing
   cover pin stays admitted.
 - **Unknown approvals.** An approval in a newer format is never copied,
@@ -1578,6 +1681,24 @@ Later stages raise the oldest release that is safe to roll back to:
   cleared; decide those rows again. Its catalog editor shows no MusicBrainz ID
   and its index revision is older, so it verifies its own indexes and leaves
   both MusicBrainz ID indexes in place.
+- Lookup covers need no floor of their own. The release before them keeps
+  `media.lookupCover` as it reads it but never runs it, so Publish no longer
+  waits for a staging there, and it leaves the optional
+  `admin_import_lookup_cover_worker` index in place. It lists only `cover`,
+  file and `embedded-*` assets, so it hides `lookup-*` covers, shows one chosen
+  explicitly as No cover and an automatic choice without the lookup cover, and
+  refuses to reconcile one; an approval that already froze one still
+  publishes it. It counts lookup staging receipts toward the 16 embedded
+  stagings, and its completion sweep finishes an import without removing its
+  lookup covers, so after rolling forward remove those with
+  `DELETE …/assets/:slotId`. A release chosen, preselected or re-ranked
+  while rolled back does not update `media.lookupCover`, so after rolling
+  forward an import whose applied release changed meanwhile may still select,
+  and keep, the earlier release's lookup cover; before publishing it, choose
+  Use none of these and then the release again, or choose the cover
+  explicitly. A Web tab opened before them cannot parse a detail with a
+  `lookup-*` asset, a candidate's `artwork` or the summary's `waiting.cover`,
+  so reload open workbench tabs after deploying or rolling back across them.
 - Credit join phrases and Disc Numbers have their own floor in the
   [catalog Credit rollout runbook](../deployment/catalog-credit-rollout-runbook.md#join-phrase-and-disc-number-rollback-floor).
 
@@ -1587,14 +1708,16 @@ A server worker runs MusicBrainz lookups for import projects automatically (see
 [Lookup runs](#lookup-runs)) and applies a preselected candidate's values (see
 [Value application](#value-application)). [Routes](#lookup-routes) and the
 `metadataLookup` capability expose them, and the import's Review and publish
-summary (see the import page above) is their Web control. iTunes and Cover Art
-Archive are not queried yet. The source layer, the jobs and their routes live
-in `src/administration/lookup/`.
+summary (see the import page above) is their Web control. Cover Art Archive is
+queried only for a release's front artwork (see Cover Art Archive artwork
+below); iTunes is not queried yet. The source layer, the jobs and their routes
+live in `src/administration/lookup/`.
 
 - **Sources and hosts.** MusicBrainz (`https://musicbrainz.org/ws/2/` only), the
   iTunes Search API (`https://itunes.apple.com/search` and `/lookup`, in the
   fixed storefronts `jp`, `us`, `kr` and `tw`, ordered by the query's script)
-  and Cover Art Archive listings. A listing starts at
+  and Cover Art Archive listings and front artwork (see Cover Art Archive
+  artwork below). A listing starts at
   `coverartarchive.org/release/<mbid>` and may redirect only to
   `archive.org/download/mbid-<mbid>/index.json` and then to the same item on an
   `ia….us.archive.org` or `dn….ca.archive.org` storage node, all bound to the
@@ -1617,7 +1740,10 @@ in `src/administration/lookup/`.
   `User-Agent` are sent: no cookie, authorization or referrer.
 - **Bounds.** One deadline covers DNS, every hop and the body: 10 seconds for
   MusicBrainz and Cover Art Archive, 8 seconds for iTunes. Bodies are capped at
-  2 MiB (MusicBrainz), 1 MiB (iTunes) and 256 KiB (listings).
+  2 MiB (MusicBrainz), 1 MiB (iTunes), 256 KiB (listings) and 4 MiB (front
+  artwork, or the cover upload limit `MAX_IMAGE_UPLOAD_MB` if lower). A
+  candidate preview, including its gate wait and WebP conversion, must finish
+  within 20 seconds.
 - **Deployment-wide gates.** `adminMetadataLookupGates` holds one `_id`-keyed
   document per source with its next allowed start and expiring leases, decided
   on the MongoDB clock and written outside transactions. MusicBrainz requests
@@ -1650,8 +1776,25 @@ in `src/administration/lookup/`.
   they are sent or compared. A failure is reported as `unavailable`,
   `invalidResponse`, `rateLimited`, `busy`, `cancelled` or `notConfigured`,
   never as an empty result.
-- **Cache.** Validated answers, including 404 answers, stay in a process-local
-  LRU of 128 entries, 8 MiB and 15 minutes. Failures are never cached.
+- **Cache.** Validated JSON answers, including 404 answers, stay in a
+  process-local LRU of 128 entries, 8 MiB and 15 minutes. Failures and artwork
+  bytes are never cached.
+- **Cover Art Archive artwork.** Front artwork is fetched from a URL the server
+  builds from a candidate's release MBID, never one a response named:
+  `https://coverartarchive.org/release/<mbid>/front-1200` for a staged cover
+  and `front-500` for a preview. Later hops may only reach the same release's
+  thumbnail of that size: `coverartarchive.org/release/<mbid>/<image>-<size>.jpg`,
+  `archive.org/download/mbid-<mbid>/mbid-<mbid>-<image>_thumb<size>.jpg` or the
+  same item path on an `ia….us.archive.org` or `dn….ca.archive.org` storage
+  node, with no query. The request accepts JPEG, PNG and WebP and sends the
+  contact User-Agent; the gate admits two Cover Art Archive requests at once
+  without spacing. The body is capped at 4 MiB within the 10-second deadline,
+  must match its declared type's signature, may hold at most 16 megapixels,
+  may be no wider or taller than the thumbnail size asked for and must decode
+  completely, which runs in the shared cover-art scheduler; anything else is
+  `invalidResponse`, and 404 is no artwork. A preview is converted to WebP
+  within 500 pixels; a staged cover keeps the validated bytes unchanged, so it
+  is never larger than 1200 pixels.
 - **Discarded links.** iTunes preview, track, collection and artist links never
   enter the response shape, so they never reach evidence or fixtures. A
   100-pixel iTunes artwork URL survives only on `is1-ssl.mzstatic.com` through
@@ -1819,7 +1962,9 @@ database, what the step stores and which request comes next.
   transaction, the gate before the record, with `fence` incremented so the
   write always conflicts with a concurrent transaction that also writes the
   document. A re-rank of stored candidates writes it too, and the publish gate
-  reads and writes it. A transaction that only reads the document does not
+  reads and writes it. A lookup cover staging that settles increments an
+  existing gate's `fence` without changing `blocking` (see Lookup cover
+  staging above). A transaction that only reads the document does not
   conflict. A trigger that starts nothing, stale marking of a finished run and
   progress steps do not write it. It never changes `revision`,
   `valueRevision`, `updatedAt`, receipts or the editing allowance, and it is
@@ -1997,7 +2142,8 @@ fills only empty or automatic values that are still as it saw them.
   it re-ranked: a stale slot whose replacement is confirmed is no longer
   stale, one still without a confirmed file stays stale, and the stored
   `fileSetDigest` still decides automatic reruns.
-- **Publish.** An approval waits while a run is queued, running or retrying
+- **Publish.** An approval waits while a run is queued, running or retrying,
+  or a lookup cover staging is queued or running within its grant
   (`409 ADMIN_IMPORT_LOOKUP_ACTIVE`), and for a tie (a completed run with two
   or more matching groups, no preselection and no choice for that run) or an
   unanswered conflict of the applied candidate, whatever the current run's
@@ -2036,6 +2182,18 @@ lookup runs never make them stale.
 | `POST /lookup/retry` | `{operationId, expectedRevision}` | `202`, receipt `lookup-retry` | `503 …UNAVAILABLE`, `409 …LOOKUP_ACTIVE`, `409 …NOTHING_TO_RETRY`, `409 …REFUSED` |
 | `POST /lookup/choose` | `{operationId, expectedRevision, run, candidateKey}`, key `musicbrainz:<mbid>` or `null` for none | `200`, receipt `lookup-choose` | `409 ADMIN_IMPORT_LOOKUP_STALE` (another run, an active run, an unknown candidate, a candidate before completion), `409 ADMIN_IMPORT_LOOKUP_CANDIDATE_INCOMPLETE` (no fetched details, or a release fetched under another ID), `409 …REFUSED` |
 | `POST /lookup/resolve` | `{operationId, expectedRevision, run, candidateKey, answers}`, 1 to 305 distinct `{path, answer, base}`, `answer` `mine` or `lookup` | `200`, receipt `lookup-resolve` | `409 …LOOKUP_STALE` (another application or a path that is no conflict), `409 ADMIN_IMPORT_FIELD_CONFLICT` (the current value is not `base`), `409 …REFUSED` (the project no longer accepts lookup or its draft cannot be read), `400 ADMIN_IMPORT_INVALID_INPUT` (an answer that grows the draft past 48 KB) |
+| `GET /lookup/candidates/:key/artwork` | — (an image element names the viewer with `?viewer=<account id>`, as staged previews do) | `200 image/webp`, the candidate's `front-500` thumbnail within 500 pixels, `Cache-Control: private, no-store`, `nosniff` | `403` (not a current administrator, rechecked after the fetch), `404` (a bad id or key, an unknown candidate, one whose fetched release reports no front artwork, or a Cover Art Archive 404), `503` (lookup unavailable or the fetch failed); no body |
+
+The artwork preview is read-only: it checks the role (and a live session),
+the import and the candidate without a fence write, stores no bytes, writes
+nothing to storage or to the import, lookup or catalog collections (only the
+deployment-wide gate's bookkeeping in `adminMetadataLookupGates`), and sends no
+credential to the artwork host; the browser never loads a lookup address. It
+is counted in the media delivery metrics but stays out of the per-IP media
+admission pool, which refuses at once instead of queueing: the Cover Art
+Archive gate (two at a time, waiting), the preview deadline and the shared
+cover scheduler already bound it, so a chooser listing many releases never
+starves the same administrator's staged-cover previews or listener artwork.
 
 A malformed body is `400 ADMIN_IMPORT_INVALID_INPUT` before its intent is
 fingerprinted. Answering `lookup` writes the lookup value as the
@@ -2043,7 +2201,9 @@ administrator's own; `mine` keeps the current value. The lookup view is an
 allowlist: the run, state, issue, outcome and input; at most 25 candidates
 (ranked order, else stored order as incomplete) with title, joined credit,
 label, catalogue number, barcode, country, date, at most 20 formats, track
-count, the comparison counts and differences, group and artist mismatch; at
+count, the comparison counts and differences, group and artist mismatch, and
+`artwork` (whether the fetched release reports front artwork, so a protected
+preview exists; never an address); at
 most 25 groups with their proposals (each entry's and the label's MusicBrainz
 ID, `null` for a proposal stored before them); the preselection; the
 disclosure (unknown local durations and Disc Numbers, and `partialComparison`);
@@ -2057,10 +2217,12 @@ fence, file-set digest or query.
 The `summary` is the import's Review and publish state, computed by
 `src/administration/import/adminImportSummary.ts` from the same snapshot:
 `append` (a saved Album reuse), `waiting` (`uploads` while any staged upload,
-a file's or a cover's, is still in flight, pending with a transfer that can
-still land, or any manifest file whose track is neither skipped nor reused
-lacks a confirmed upload; `lookup` while a run is queued, running or
-retrying; `analysis` while Luna is queued or running), `placeholderOnly` (no
+a file's or a manual cover's, is still in flight, pending with a transfer that
+can still land, or any manifest file whose track is neither skipped nor reused
+lacks a confirmed upload, a lookup cover never counting; `lookup` while a run
+is queued, running or retrying; `cover` while the applied candidate's front
+artwork is being staged, queued or running within its grant; `analysis` while
+Luna is queued or running), `placeholderOnly` (no
 Album reuse, no primary Artist entry, and every file's album-level credit,
 album artists else artists, is a placeholder such as Various Artists, or the
 applied candidate was flagged `placeholder`), `luna` (each pending suggestion
@@ -2078,7 +2240,7 @@ published track needs without a confirmed upload, is
 
 ### What lookup sends
 
-- Only the planner's MusicBrainz URLs under `https://musicbrainz.org/ws/2/`:
+- To MusicBrainz, only the planner's URLs under `https://musicbrainz.org/ws/2/`:
   the shared album text and album-artist names, or a one-file import's title
   and artist; shared identifiers that pass their format checks; a submitted
   name; the cleaned folder name only when no usable tags exist, only for
@@ -2088,6 +2250,9 @@ published track needs without a confirmed upload, is
   (alias lookups, at most 16); and normalized spellings of tag or folder text
   as fallbacks. The
   number of selected files is never sent; the run uses it only locally.
+- Cover Art Archive front-artwork URLs the server builds from release MBIDs of
+  the same import's lookup candidates (a staged cover or a preview), and the
+  archive.org redirects they lead to.
 - Never file names, relative path segments, account data (including any
   account's email address) or audio. The only contact sent is the operator
   contact configured in `FINITUDE_ADMIN_METADATA_LOOKUP_CONTACT`, in the

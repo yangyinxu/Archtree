@@ -11,7 +11,7 @@ import { lazy, Suspense, useRef, useState, type ComponentProps, type ComponentTy
 import { Link } from 'react-router';
 import { ModalDialog } from '../../components/ModalDialog';
 import type { ImportDetail, ImportDraftV2 } from './adminApi';
-import { importPath } from './adminApi';
+import { importPath, lookupCoverName } from './adminApi';
 import type { ImportDraftChange } from './importDraftPatch';
 import type { ApprovalState, ImportApprovalChecklist as ApprovalChecklist } from './ImportApprovalChecklist';
 import type { ImportSummary as Summary } from './ImportSummary';
@@ -53,8 +53,9 @@ const refusal: Record<string, string> = { content_changed: 'upload.refused_chang
  * and approving sends them with the shown decisions, cover and Luna ticks (`publishDisabled` gates only this; other actions need a
  * saved draft). When ticked suggestions rename rows that then need a decision, the checklist may instead apply them to the saved
  * draft, which closes the confirmation. The `summary` view is the Review and publish summary, whose Publish opens the same
- * confirmation. The cover choice is automatic (the server selects the one image embedded in every track, if any) until a radio is
- * chosen, the image already chosen automatically included, which makes it explicit.
+ * confirmation. The cover choice is automatic (the server selects the applied lookup release's staged front artwork, else the one
+ * image embedded in every track, if any) until a radio is chosen, the image already chosen automatically included, which makes it
+ * explicit.
  */
 export function ImportMedia({ item, operation, uploads, disabled, publishDisabled = disabled, approval = { draft: item.draft, changes: [] }, view, active = true }: {
   item: ImportDetail; operation: AdminMutation; uploads: ImportUploadQueueView; disabled: boolean; publishDisabled?: boolean;
@@ -96,12 +97,14 @@ export function ImportMedia({ item, operation, uploads, disabled, publishDisable
     finally { setChecking(null); }
   };
   const covers = item.assets.filter(asset => asset.contentType.startsWith('image/') && asset.state === 'ready'), automatic = item.coverChoice === 'automatic';
-  // Extracted images have their own lifecycle and remain removable even after preview readiness is lost.
+  // Extracted images and lookup covers have their own automatic lifecycle and remain removable even after preview readiness is lost.
+  // A lookup cover is named by its source and release, so two kept at once read apart.
+  const lookupCover = (slotId: string | null) => Boolean(slotId?.startsWith('lookup-')), lookupName = (slotId: string) => lookupCoverName(t('media.lookup_cover'), slotId);
   const mediaRows = [
     ...item.manifest.files.map(file => ({ slotId: file.slotId, label: file.relativePath, kind: 'audio' as const })),
     { slotId: 'cover', label: t('media.manual_cover'), kind: 'cover' as const },
-    ...item.assets.filter(asset => asset.slotId.startsWith('embedded-') && asset.state !== 'deleted').map(asset => ({
-      slotId: asset.slotId, label: `${t('media.cover_candidate')} · ${item.manifest.files.find(file => `embedded-${file.slotId}` === asset.slotId)?.filename || t('common.untitled')}`, kind: 'embedded' as const
+    ...item.assets.filter(asset => (asset.slotId.startsWith('embedded-') || lookupCover(asset.slotId)) && asset.state !== 'deleted').map(asset => ({
+      slotId: asset.slotId, label: lookupCover(asset.slotId) ? lookupName(asset.slotId) : `${t('media.cover_candidate')} · ${item.manifest.files.find(file => `embedded-${file.slotId}` === asset.slotId)?.filename || t('common.untitled')}`, kind: 'embedded' as const
     }))
   ];
   const publishOperation = item.publicationRecovery?.operationId ?? [...item.receipts].reverse().find(receipt => receipt.kind === 'publish')?.operationId;
@@ -170,13 +173,13 @@ export function ImportMedia({ item, operation, uploads, disabled, publishDisable
       </li>;
     })}</ul>
     {covers.length > 0 && <fieldset disabled={disabled || publicationLocked} className={styles.editor}><legend>{t('layout.selected_cover')}</legend>
-      {automatic && <p className={styles.muted}>{t(item.selectedCoverSlotId === null ? 'media.cover_automatic_none' : 'media.cover_automatic')}</p>}
+      {automatic && <p className={styles.muted}>{t(item.selectedCoverSlotId === null ? 'media.cover_automatic_none' : lookupCover(item.selectedCoverSlotId) ? 'media.cover_automatic_lookup' : 'media.cover_automatic')}</p>}
       <label><input type="radio" name="selected-cover" checked={!automatic && item.selectedCoverSlotId === null} onChange={() => operation.run(`${path}/select-cover`, 'POST', { expectedRevision: item.revision, slotId: null })} />{t('media.no_cover')}</label>
       {/* A checked radio fires no change, so choosing the image already chosen automatically is a click that makes it explicit. */}
       {covers.map(asset => <label key={asset.slotId} className={styles.artworkChoice}><input type="radio" name="selected-cover" checked={item.selectedCoverSlotId === asset.slotId} onChange={() => operation.run(`${path}/select-cover`, 'POST', { expectedRevision: item.revision, slotId: asset.slotId })}
         onClick={() => { if (automatic && item.selectedCoverSlotId === asset.slotId) operation.run(`${path}/select-cover`, 'POST', { expectedRevision: item.revision, slotId: asset.slotId }); }} />
         <img alt={t('media.cover_candidate')} src={active ? `/api/admin/v1/imports/${item.id}/assets/${encodeURIComponent(asset.slotId)}/preview?viewer=${encodeURIComponent(access.viewerId)}` : undefined} width={96} height={96} />
-        <span>{asset.slotId === 'cover' ? t('media.manual_cover') : item.manifest.files.find(file => `embedded-${file.slotId}` === asset.slotId)?.filename}</span>
+        <span>{asset.slotId === 'cover' ? t('media.manual_cover') : lookupCover(asset.slotId) ? lookupName(asset.slotId) : item.manifest.files.find(file => `embedded-${file.slotId}` === asset.slotId)?.filename}</span>
       </label>)}
     </fieldset>}
     </>}

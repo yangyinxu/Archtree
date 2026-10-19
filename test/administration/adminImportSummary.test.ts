@@ -10,6 +10,7 @@
  *   - an approval refuses a missing, stale or conflicting tick and asks an editor without ticks to reload
  *   - the tick body is bounded before fingerprinting: exact fields, a generation and at most 304 distinct suggestion IDs
  *   - Publish waits for uploads, an active lookup and a queued or running analysis, and the budget shows what is left
+ *   - Publish waits for a lookup cover staging only while it is queued or running within its grant, never after it settled or expired, and never as an upload
  *   - a new Album without a primary entry says at once when its files or the applied release credit only a placeholder, but an append or a primary entry does not
  *   - Publish does not wait for the upload of a file whose track is explicitly skipped or reused, but waits for any other file without a confirmed upload
  *   - Publish waits while any upload is still in flight, a skipped file's or a cover's included, until no transfer can land
@@ -165,15 +166,38 @@ test('the tick body is bounded before fingerprinting: exact fields, a generation
 
 test('Publish waits for uploads, an active lookup and a queued or running analysis, and the budget shows what is left', () => {
     const doc = project();
-    assert.deepEqual(importSummaryView(doc, null, context(5)).waiting, { uploads: true, lookup: false, analysis: false });
+    assert.deepEqual(importSummaryView(doc, null, context(5)).waiting, { uploads: true, lookup: false, cover: false, analysis: false });
     ready(doc, [tags(['Synthetic Lead']), tags(['Synthetic Lead'])]);
-    assert.deepEqual(importSummaryView(doc, null, context(5)).waiting, { uploads: false, lookup: false, analysis: false });
+    assert.deepEqual(importSummaryView(doc, null, context(5)).waiting, { uploads: false, lookup: false, cover: false, analysis: false });
     for (const state of ['queued', 'running', 'retrying'] as const) assert.equal(importSummaryView(doc, { state } as MetadataLookupRecord, context(5)).waiting.lookup, true);
     for (const state of ['complete', 'unavailable', 'stopped', 'superseded'] as const) assert.equal(importSummaryView(doc, { state } as MetadataLookupRecord, context(5)).waiting.lookup, false);
     doc.lookupGate = { fence: 2, run: 1, state: 'queued', blocking: true }; assert.equal(importSummaryView(doc, null, context(5)).waiting.lookup, true);
     doc.analysis.state = 'running'; assert.equal(importSummaryView(doc, null, context(5)).waiting.analysis, true);
     assert.deepEqual(importSummaryView(doc, null, context(5)).analysis, { runs: 1, attempts: 19, daily: 215 });
     doc.analysis.generation = 2; doc.attemptsUsed = 30; assert.deepEqual(importSummaryView(doc, null, context(400)).analysis, { runs: 0, attempts: 0, daily: 0 });
+});
+
+test('Publish waits for a lookup cover staging only while it is queued or running within its grant, never after it settled or expired, and never as an upload', () => {
+    const doc = project(), now = new Date('2026-10-19T12:00:00Z');
+    ready(doc, [tags(['Synthetic Lead']), tags(['Synthetic Lead'])]);
+    const waiting = (state: string, grantExpiresAt: unknown = new Date(now.getTime() + 60_000)) => {
+        doc.media!.lookupCover = { candidateKey: 'musicbrainz:0000000b-0000-4000-8000-000000000001', releaseId: '0000000b-0000-4000-8000-000000000001',
+            operationId: '0000000b-0000-4000-8000-000000000099', state, issue: null, actorId: id(1), grantExpiresAt, due: true, leaseOwner: null, leaseUntil: null, updatedAt: now } as never;
+        return importSummaryView(doc, null, { ...context(0), now }).waiting;
+    };
+    assert.equal(importSummaryView(doc, null, { ...context(0), now }).waiting.cover, false, 'no job');
+    assert.deepEqual(waiting('queued'), { uploads: false, lookup: false, cover: true, analysis: false });
+    assert.equal(waiting('running').cover, true);
+    for (const state of ['staged', 'failed', 'skipped', 'idle']) assert.equal(waiting(state).cover, false, state);
+    assert.equal(waiting('queued', now).cover, false, 'a grant ending now no longer holds Publish');
+    assert.equal(waiting('running', new Date(now.getTime() - 1)).cover, false, 'expired');
+    assert.equal(waiting('queued', 'tomorrow').cover, false, 'a malformed grant never holds Publish');
+    // A failed staging whose admitted record has not settled is never an upload Publish waits for; a running one waits as the cover.
+    const lookupSlot = 'lookup-musicbrainz:0000000b-0000-4000-8000-000000000001';
+    doc.media!.assets.push({ ...doc.media!.assets[0], slotId: lookupSlot, contentType: 'image/jpeg', state: 'pending', updatedAt: now, leaseUntil: null, transferDeadline: null } as ImportAsset);
+    assert.deepEqual(waiting('failed'), { uploads: false, lookup: false, cover: false, analysis: false });
+    assert.equal(importUploadsWaiting(doc, [], now), false);
+    assert.deepEqual(waiting('running'), { uploads: false, lookup: false, cover: true, analysis: false });
 });
 
 test('a new Album without a primary entry says at once when its files or the applied release credit only a placeholder, but an append or a primary entry does not', () => {

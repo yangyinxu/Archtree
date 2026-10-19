@@ -34,6 +34,9 @@
  *   - approval waits again while the open confirmation reads the candidates again
  *   - a failed candidate read keeps the approval locked with an error, and every confirmation reads candidates once and approval waits for them
  *   - the checklist names an embedded cover by its file and says when there is no label or cover, and an unsaved rename of a decided entry needs a decision again
+ *   - a lookup cover is an automatic row: never uploaded again, checked again under its staging intent, removed with its own slot or original cleanup intent, and named in the chooser
+ *   - the checklist names a lookup cover by its source
+ *   - lookup covers of two releases kept at once are named apart by their release, in the files and the cover choice
  *   - a file whose tags had values left out says how many fields beside its evidence, and one without says nothing
  *   - the confirmation marks Artist entries and the label resting only on file tags and an entry that looks like a label
  *   - the confirmation shows and sends the Luna ticks: the summary's toggles over the server's state, a ticked value in the list, and a path the unsaved changes write left unticked
@@ -586,6 +589,58 @@ test('the checklist names an embedded cover by its file and says when there is n
   expect(await screen.findByText('Ipsum Renamed · Primary · Needs a decision in Review')).toBeVisible();
   const locked = within(screen.getByRole('dialog')).getByRole('button', { name: 'Publish Album' }); expect(locked).toBeDisabled();
   fireEvent.click(locked); expect(run).not.toHaveBeenCalled();
+});
+
+test('a lookup cover is an automatic row: never uploaded again, checked again under its staging intent, removed with its own slot or original cleanup intent, and named in the chooser', async () => {
+  const lookupSlot = 'lookup-musicbrainz:0000000b-0000-4000-8000-000000000001', item = detail();
+  item.publication = 'notStarted'; item.capabilities.upload = true; item.coverChoice = 'automatic'; item.selectedCoverSlotId = lookupSlot;
+  const staging = { operationId: '30000000-0000-4000-8000-000000000005', expectedRevision: 3, kind: 'upload' as const, startedByMe: false };
+  item.assets = [{ slotId: lookupSlot, state: 'ready', byteLength: 100, sha256: 'a'.repeat(64), contentType: 'image/jpeg', tags: null, recovery: staging }];
+  const operation = new AdminMutation(), removal = vi.spyOn(operation, 'cleanup').mockImplementation(() => {}), view = mount(item, operation);
+  const row = () => screen.getByText('Cover Art Archive front artwork · 0000000b', { selector: 'strong' }).closest('li')!;
+  expect(within(row()).getByText('Ready')).toBeVisible();
+  expect(within(row()).queryByRole('button', { name: 'Retry upload' })).toBeNull(); expect(within(row()).queryByLabelText('Choose Album cover')).toBeNull();
+  expect(screen.getByRole('radio', { name: /Cover Art Archive front artwork · 0000000b$/ })).toBeChecked();
+  expect(screen.getByText('Chosen automatically: the applied release’s front artwork from Cover Art Archive. Choosing an option here replaces the automatic choice.')).toBeVisible();
+  fireEvent.click(within(row()).getByRole('button', { name: 'Remove file' }));
+  fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Remove file' }));
+  expect(removal).toHaveBeenLastCalledWith(`/${item.id}/assets/${encodeURIComponent(lookupSlot)}`, 1, undefined);
+  // A cleanup that needs attention is retried with its original intent.
+  const reserved = { operationId: '30000000-0000-4000-8000-000000000006', expectedRevision: 4, kind: 'cleanup' as const, startedByMe: false };
+  act(() => view.rerender(view.element({ ...item, selectedCoverSlotId: null, assets: [{ ...item.assets[0], state: 'cleanupFailed', recovery: reserved }] })));
+  expect(within(row()).getByText('Cleanup needs attention')).toBeVisible();
+  fireEvent.click(within(row()).getByRole('button', { name: 'Remove file' }));
+  fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Remove file' }));
+  expect(removal).toHaveBeenLastCalledWith(`/${item.id}/assets/${encodeURIComponent(lookupSlot)}`, 1, reserved);
+  // A staging whose outcome is unknown is checked again under its own intent, by any administrator.
+  const requests: { path: string; init: RequestInit }[] = [];
+  stubFetch(vi.fn(async (path: string, init: RequestInit) => { requests.push({ path, init }); throw new TypeError('offline'); }));
+  act(() => view.rerender(view.element({ ...item, assets: [{ ...item.assets[0], state: 'unknown' }] })));
+  fireEvent.click(within(row()).getByRole('button', { name: 'Check again' }));
+  await vi.waitFor(() => expect(requests).toHaveLength(1));
+  expect(requests[0].path).toBe(`/api/admin/v1/imports/${item.id}/assets/${encodeURIComponent(lookupSlot)}/reconcile`);
+  expect([requests[0].init.method, JSON.parse(String(requests[0].init.body))]).toEqual(['POST', { operationId: staging.operationId }]);
+});
+
+test('the checklist names a lookup cover by its source', async () => {
+  const { item, ipsum } = reviewed(); stubFetch(candidatesEndpoint([ipsum]));
+  const value = (term: string) => within(screen.getByRole('region', { name: 'What becomes catalog content' })).getByText(term, { selector: 'dt' }).nextElementSibling!;
+  const lookupSlot = 'lookup-musicbrainz:0000000b-0000-4000-8000-000000000001';
+  mount({ ...item, coverChoice: 'automatic', selectedCoverSlotId: lookupSlot, assets: [{ slotId: lookupSlot, state: 'ready', byteLength: 100, sha256: 'c'.repeat(64), contentType: 'image/jpeg', tags: null, recovery: null }] }, new AdminMutation(), 'publication');
+  fireEvent.click(screen.getByRole('button', { name: 'Publish Album' })); await approve();
+  expect(value('Album cover')).toHaveTextContent(/^Cover Art Archive front artwork · 0000000b · Chosen automatically$/);
+});
+
+test('lookup covers of two releases kept at once are named apart by their release, in the files and the cover choice', () => {
+  const item = detail(), slot = (prefix: string) => `lookup-musicbrainz:${prefix}-0000-4000-8000-000000000001`;
+  item.publication = 'notStarted'; item.coverChoice = 'explicit'; item.selectedCoverSlotId = slot('1a2b3c4d');
+  item.assets = ['1a2b3c4d', '5e6f7a8b'].map((prefix, index) => ({ slotId: slot(prefix), state: 'ready' as const, byteLength: 100, sha256: String(index + 1).repeat(64), contentType: 'image/jpeg', tags: null, recovery: null }));
+  mount(item, new AdminMutation());
+  // Each radio's accessible name ends with its image's name.
+  const radios = [/Cover Art Archive front artwork · 1a2b3c4d$/, /Cover Art Archive front artwork · 5e6f7a8b$/].map(name => screen.getByRole('radio', { name }));
+  expect(radios.map(radio => (radio as HTMLInputElement).checked)).toEqual([true, false]);
+  expect(screen.getAllByText(/^Cover Art Archive front artwork · /, { selector: 'strong' }).map(label => label.textContent))
+    .toEqual(['Cover Art Archive front artwork · 1a2b3c4d', 'Cover Art Archive front artwork · 5e6f7a8b']);
 });
 
 test('a file whose tags had values left out says how many fields beside its evidence, and one without says nothing', () => {

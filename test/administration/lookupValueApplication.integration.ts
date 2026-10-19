@@ -82,6 +82,8 @@ import {
 import { catalogSearchProjection } from '../../src/utils/catalogSearch';
 import { approvalBody } from '../support/adminImportApproval';
 import { fixtureTransport, hotelCaliforniaExchanges, immediateGate, loadLookupFixture, type LookupExchange } from '../support/metadataLookupFixtures';
+import { runLookupCoverPassOnce } from '../../src/administration/import/adminImportLookupCover';
+import { createCoverArtClient } from '../../src/administration/lookup/coverArtClient';
 import { installNetworkGuard } from '../support/networkGuard';
 
 const guard = installNetworkGuard();
@@ -761,7 +763,7 @@ test('Luna tick defaults follow each value\'s origin: a suggestion for a lookup 
     const id = await seeded(2, tagged, 1), summary = async () => (await getAdminImportLookup(by, id)).summary;
     await submit(id);
     // Publish waits for the second file's upload and for the submitted lookup while it is queued.
-    assert.deepEqual((await summary()).waiting, { uploads: true, lookup: true, analysis: false });
+    assert.deepEqual((await summary()).waiting, { uploads: true, lookup: true, cover: false, analysis: false });
     const queries = (await lookup(id)).queries.map(query => (query as { query: MusicBrainzReleaseQuery }).query);
     await drain({ musicBrainz: fixtureClient([...queries.map((query, index) => searchAnswer(query, index ? [] : [mbid(1)])), releaseAnswer(mbid(1))]).musicBrainz });
     const chosen = (await choose(id, 1, keyOf(1))).item, file = chosen.manifest.files[1], { automatedAt: _automated, ...pending } = asset(id, file.slotId, file.filename, tagged(1));
@@ -792,7 +794,7 @@ test('a release crediting only Various Artists writes no Artist entry, and the s
     const record = await looked(id, [mbid(1)], [releaseAnswer(mbid(1), { credits: [['Various Artists', '']] })]);
     assert.deepEqual([record.applied?.candidateKey, record.applied!.flagged.filter(flag => flag.path === 'album.artists')], [keyOf(1), [{ path: 'album.artists', reason: 'placeholder' }]]);
     assert.deepEqual([draftOf(await stored(id)).album.title, draftOf(await stored(id)).album.artists], ['Synthetic Album', []]);
-    assert.deepEqual([(await summary()).placeholderOnly, (await summary()).waiting], [true, { uploads: false, lookup: false, analysis: false }]);
+    assert.deepEqual([(await summary()).placeholderOnly, (await summary()).waiting], [true, { uploads: false, lookup: false, cover: false, analysis: false }]);
     // The approval itself refuses a new Album without a primary entry, writing nothing.
     const before = await stored(id);
     await assert.rejects(publishAdminImport(by, id, approvalBody(await item(id))), code('ADMIN_IMPORT_DRAFT_INCOMPLETE'));
@@ -820,9 +822,15 @@ test('a search with more hits than it returned offers its only matching group wi
         ['complete', false, [`musicbrainz:${europeanCd}`], null, null, 0]);
     const view = (await getAdminImportLookup(by, id)).lookup!;
     assert.deepEqual([view.disclosure?.partialComparison, view.needsAnswer, view.blocking], [true, { tie: false, conflicts: [] }, false]);
-    // Choosing the offered release applies its values; the import then publishes with them.
+    // Choosing the offered release applies its values; the import then publishes with them once its front artwork (which the
+    // release reports) is no longer being staged: here Cover Art Archive has none, so staging fails and Publish stops waiting.
     const chosen = (await choose(id, 1, `musicbrainz:${europeanCd}`)).item;
     assert.deepEqual([chosen.draft.album.title, chosen.draft.album.label?.name, (await lookup(id)).applied?.choice], ['Hotel California', 'Asylum Records', 'chosen']);
+    assert.equal((await getAdminImportLookup(by, id)).summary.waiting.cover, true);
+    await assert.rejects(approve(id), code('ADMIN_IMPORT_LOOKUP_ACTIVE'));
+    const front = fixtureTransport([{ url: `https://coverartarchive.org/release/${europeanCd}/front-1200`, status: 404, headers: { 'content-type': 'text/html' } }]);
+    assert.equal(await runLookupCoverPassOnce(new Storage(), id, undefined, { artwork: createCoverArtClient({ gate: immediateGate(), transport: front.transport }) }), true);
+    assert.deepEqual([front.requests.length, (await stored(id)).media!.lookupCover!.state, (await stored(id)).media!.lookupCover!.issue], [1, 'failed', 'noArtwork']);
     assert.equal((await approve(id)).item.publication, 'preparing');
     // Left unchosen, it holds nothing: the import is approved with its tag values and nothing from the release.
     const unchosen = await seededDigitalHotel();
@@ -844,6 +852,12 @@ test('the same single matching group from a complete search is preselected and a
     assert.deepEqual([record.searchComplete, record.ranking!.preselection?.candidateKey, record.ranking!.preselection?.basis, record.applied?.choice, record.applied?.candidateKey,
         record.ranking!.disclosure.partialComparison], [true, `musicbrainz:${europeanCd}`, 'onlyMatchingGroup', 'preselected', `musicbrainz:${europeanCd}`, false]);
     assert.deepEqual([(await getAdminImportLookup(by, id)).lookup!.needsAnswer, draftOf(await stored(id)).album.label?.name], [{ tie: false, conflicts: [] }, 'Asylum Records']);
+    // The completing step queued the release's front artwork under the run's grant, in its own transaction, without another fence.
+    const cover = (await stored(id)).media!.lookupCover!;
+    assert.deepEqual([cover.candidateKey, cover.releaseId, cover.state, cover.actorId, cover.grantExpiresAt, cover.due, (await stored(id)).lookupGate!.fence, (await stored(id)).automaticReceipts ?? []],
+        [`musicbrainz:${europeanCd}`, europeanCd, 'queued', by, record.grantExpiresAt, true, 3, []]);
+    assert.equal((await getAdminImportLookup(by, id)).summary.waiting.cover, true);
+    await assert.rejects(approve(id), code('ADMIN_IMPORT_LOOKUP_ACTIVE'));
     // The 100-release page with the digital edition: the European CD and the digital edition tie, and approval waits for a choice.
     const tied = await seededDigitalHotel();
     await requestAutomaticMetadataLookup(by, tied, 'upload');

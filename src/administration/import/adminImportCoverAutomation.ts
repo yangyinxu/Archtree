@@ -3,28 +3,34 @@
  *   Types: ImportCoverChoice
  *   Functions: embeddedImportOperationId, automaticCoverCleanupOperationId, isAutomaticCoverSlot,
  *              importAudioArtwork, importAlbumNotCreated, importAutomaticCover, importCoverChoice,
- *              chooseImportCover, replacedEmbeddedCandidateCleanable, automaticCoverCleanupCandidates
+ *              chooseImportCover, replacedEmbeddedCandidateCleanable, automaticCoverCleanupCandidates,
+ *              lookupCoverOperationId, noteLookupCoverApplication, lookupCoverStagingActive,
+ *              lookupCoverCleanupCandidates, automaticEmbeddedStagings
  * Internal
  *   Types: CoverSource
- *   Functions: isRecord, sha256, derivedUuid, assetsOf, skippedTrackSlots, cleanupReadiness
+ *   Functions: isRecord, sha256, derivedUuid, assetsOf, lookupJob, appliedLookupSlot, skippedTrackSlots,
+ *              cleanupReadiness
  *   Constants: PIN_RECHECK_MS
  * @end-catalog */
 
 /**
- * Automatic embedded cover choice, and the candidates completion or a replaced file's staging cleans up. Pure; owner rules in
- * docs/business-rules.md (Administrator Album Imports, cover bullet). The choice is never stored: it is derived on every read, so a
- * changed file set re-evaluates it. Each audio upload records the image it carries at admission (`artworkSha256`); an upload
- * admitted before that has evidence only through its own per-file `embedded-<slotId>` candidate staged under the UUID derived from
- * its intent.
+ * Automatic cover choice (the applied metadata lookup candidate's staged front artwork, else the embedded image every track
+ * shares), the lookup cover job an application records, and the candidates completion, a replaced file's staging or the lookup
+ * cover pass cleans up. Pure; owner rules in docs/business-rules.md (Administrator Album Imports, cover bullet). The choice is
+ * never stored: it is derived on every read, so a changed file set or applied candidate re-evaluates it. Each audio upload records
+ * the image it carries at admission (`artworkSha256`); an upload admitted before that has evidence only through its own per-file
+ * `embedded-<slotId>` candidate staged under the UUID derived from its intent. A lookup cover is `lookup-<candidateKey>`, staged by
+ * adminImportLookupCover.ts.
  */
 import { createHash } from 'node:crypto';
-import { ADMIN_IMPORT_LIMITS } from './adminImportContract';
+import { ADMIN_IMPORT_LIMITS, isLookupCoverSlot, lookupCoverSlotId } from './adminImportContract';
 import { hasOwn } from './adminImportDraft';
 import { legacyManifestView } from './adminImportDraftCompat';
 import { importUploadSettled, type ImportAsset, type ImportMedia } from './adminImportMediaTypes';
 import type { AdminImportDocument } from './adminImportService';
+import type { StoredLookupCandidate } from '../lookup/metadataLookupRecord';
 
-/** An explicit choice is an administrator's (a slot or No cover); an automatic one is the shared embedded image or null. */
+/** An explicit choice is an administrator's (a slot or No cover); an automatic one is the lookup cover, the shared embedded image or null. */
 export type ImportCoverChoice = { mode: 'automatic' | 'explicit'; slotId: string | null };
 type CoverSource = Pick<AdminImportDocument, 'manifest' | 'media' | 'decisions'>;
 const isRecord = (value: unknown): value is Record<string, any> => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -37,8 +43,15 @@ const derivedUuid = (value: unknown) => {
 export const embeddedImportOperationId = (audioOperationId: string, audioSlotId: string) => derivedUuid({ operationId: audioOperationId, embedded: audioSlotId });
 /** The cleanup intent completion reserves for one automatic candidate version; any current administrator retries with it. */
 export const automaticCoverCleanupOperationId = (asset: Pick<ImportAsset, 'operationId' | 'slotId'>) => derivedUuid({ operationId: asset.operationId, automaticCleanup: asset.slotId });
-export const isAutomaticCoverSlot = (slotId: unknown): slotId is string => typeof slotId === 'string' && slotId.startsWith('embedded-');
+/** Slots only automation stages: embedded images and lookup covers. */
+export const isAutomaticCoverSlot = (slotId: unknown): slotId is string => typeof slotId === 'string' && (slotId.startsWith('embedded-') || isLookupCoverSlot(slotId));
 const assetsOf = (media: unknown): Record<string, any>[] => isRecord(media) && Array.isArray(media.assets) ? media.assets.filter(isRecord) : [];
+const lookupJob = (media: unknown): Record<string, any> | null => isRecord(media) && isRecord(media.lookupCover) ? media.lookupCover : null;
+/** The slot of the applied candidate's lookup cover, or null when none is applied, it reports no artwork or the job is malformed. */
+const appliedLookupSlot = (media: unknown): string | null => {
+    const key = lookupJob(media)?.candidateKey;
+    return typeof key === 'string' && isLookupCoverSlot(lookupCoverSlotId(key)) ? lookupCoverSlotId(key) : null;
+};
 
 /**
  * The embedded image one confirmed audio upload carries: its recorded SHA-256, null for none, or undefined when unknown (a
@@ -59,13 +72,17 @@ const skippedTrackSlots = (decisions: unknown) => new Set(Array.isArray(decision
     ? decisions.filter(decision => isRecord(decision) && decision.scope === 'track' && decision.action === 'skip').map(decision => decision.slotId) : []);
 
 /**
- * The automatic cover: the ready `embedded-*` candidate, first in manifest order, of the one image every confirmed audio file
- * that becomes a track carries (a file whose saved track decision is skip does not count). Null when the Album is not created,
- * no such file is confirmed, one carries none, another image or unknown evidence, or that image has no ready candidate (bound
- * reached, staging unresolved or removed). Total on malformed records.
+ * The automatic cover: the applied lookup candidate's ready `lookup-<candidateKey>` image; else the ready `embedded-*` candidate,
+ * first in manifest order, of the one image every confirmed audio file that becomes a track carries (a file whose saved track
+ * decision is skip does not count). A lookup cover of a candidate no longer applied is never selected. Null when the Album is not
+ * created, or without a ready lookup cover when no such file is confirmed, one carries none, another image or unknown evidence, or
+ * that image has no ready candidate (bound reached, staging unresolved or removed). Total on malformed records.
  */
 export function importAutomaticCover(doc: CoverSource): string | null {
     if (importAlbumNotCreated(doc.decisions)) return null;
+    const lookupSlot = appliedLookupSlot(doc.media);
+    const lookupCover = lookupSlot ? assetsOf(doc.media).find(asset => asset.slotId === lookupSlot && asset.state !== 'deleted') : undefined;
+    if (lookupCover?.state === 'ready' && typeof lookupCover.contentType === 'string' && lookupCover.contentType.startsWith('image/')) return lookupSlot;
     const bySlot = new Map<unknown, Record<string, any>>(), skipped = skippedTrackSlots(doc.decisions); let shared: string | undefined;
     const assets = assetsOf(doc.media), files = legacyManifestView(doc.manifest).files;
     for (const asset of assets) if (!bySlot.has(asset.slotId)) bySlot.set(asset.slotId, asset);
@@ -103,7 +120,8 @@ export const chooseImportCover = (media: ImportMedia, slotId: string | null) => 
  * or never (false: already cleaning or removed, or malformed). Pins are judged by the caller.
  */
 function cleanupReadiness(asset: ImportAsset, now: Date): true | Date | false {
-    if ((asset.recovery?.kind ?? 'upload') !== 'upload' || ['deleting', 'cleanupFailed', 'deleted'].includes(asset.state) || !(asset.updatedAt instanceof Date)) return false;
+    if ((asset.recovery?.kind ?? 'upload') !== 'upload' || ['deleting', 'cleanupFailed', 'deleted'].includes(asset.state) || !(asset.updatedAt instanceof Date)
+        || (asset.leaseUntil != null && !(asset.leaseUntil instanceof Date)) || (asset.transferDeadline != null && !(asset.transferDeadline instanceof Date))) return false;
     const leased = Boolean(asset.leaseUntil && asset.leaseUntil > now);
     const settled = asset.state === 'ready' || (asset.state === 'failed' && Boolean(asset.failureConfirmedAt)) || importUploadSettled(asset, now);
     if (!leased && settled) return true;
@@ -147,4 +165,58 @@ export function automaticCoverCleanupCandidates(doc: CoverSource, now: Date): { 
         else wait(readiness);
     }
     return { reserve, waitUntil };
+}
+
+/** The staging intent of one application's lookup cover; each application of a candidate gets its own. */
+export const lookupCoverOperationId = (importId: string, candidateKey: string, at: Date) => derivedUuid({ importId, lookupCover: candidateKey, at: at.getTime() });
+/**
+ * Records, in memory, which candidate's front artwork the lookup cover pass stages, as part of the application that applies
+ * `candidate` (or none): a fetched release reporting front artwork queues a staging under `grant` (the grant of the run or choice
+ * applying it), and any other change of the applied candidate leaves the job idle while the pass cleans the covers no longer
+ * applied. Applying the same candidate again writes nothing while its staging is staged, or queued or running within its grant;
+ * one that failed, was skipped or ran past its grant is queued again under this application's grant with its own intent. None
+ * without an earlier artwork candidate writes nothing. It never bumps `lookupGate`: the application writes the import document in
+ * its own transaction, which already fences Publish. Returns whether the job changed.
+ */
+export function noteLookupCoverApplication(doc: Pick<AdminImportDocument, '_id' | 'media'>, candidate: Pick<StoredLookupCandidate, 'key' | 'releaseId' | 'release'> | null,
+    grant: { actorId: string; grantExpiresAt: Date }, now: Date): boolean {
+    const offered = candidate?.release?.frontArtwork === true && typeof candidate.key === 'string' && isLookupCoverSlot(lookupCoverSlotId(candidate.key)) ? candidate.key : null;
+    const current = lookupJob(doc.media);
+    if (current ? current.candidateKey === offered && (offered === null || current.state === 'staged' || lookupCoverStagingActive(current, now)) : offered === null) return false;
+    doc.media ??= { assets: [] };
+    doc.media.lookupCover = { candidateKey: offered, releaseId: offered ? candidate!.releaseId : null,
+        operationId: offered ? lookupCoverOperationId(doc._id.toHexString(), offered, now) : null, state: offered ? 'queued' : 'idle', issue: null,
+        actorId: grant.actorId, grantExpiresAt: grant.grantExpiresAt, due: true, leaseOwner: null, leaseUntil: null, updatedAt: now };
+    return true;
+}
+/** Whether a lookup cover staging holds Publish: queued or running within its grant (one past its grant never does). */
+export const lookupCoverStagingActive = (cover: unknown, now: Date): boolean => isRecord(cover) && (cover.state === 'queued' || cover.state === 'running')
+    && cover.grantExpiresAt instanceof Date && cover.grantExpiresAt > now;
+/**
+ * Before completion: the lookup covers to clean up, being neither the applied candidate's cover nor an explicit choice, and neither
+ * pinned by an existing-catalog cover operation nor already cleaning or removed. One whose transfer may still land waits for it,
+ * and a pinned one is checked again a day later; `waitUntil` is the earliest such time (the pass plans again after every look, so
+ * a pin never delays a transfer that settles sooner). Total on malformed records.
+ */
+export function lookupCoverCleanupCandidates(doc: CoverSource, now: Date): { reserve: ImportAsset[]; waitUntil: Date | null } {
+    const media = doc.media as unknown, reserve: ImportAsset[] = []; let waitUntil: Date | null = null;
+    const applied = appliedLookupSlot(media), explicit = isRecord(media) && hasOwn(media, 'selectedCoverSlotId') ? media.selectedCoverSlotId : undefined;
+    const wait = (until: Date) => { if (!waitUntil || until < waitUntil) waitUntil = until; };
+    for (const asset of assetsOf(media) as ImportAsset[]) {
+        if (!isLookupCoverSlot(asset.slotId) || asset.slotId === applied || asset.slotId === explicit) continue;
+        const readiness = cleanupReadiness(asset, now); if (readiness === false) continue;
+        if (Array.isArray(asset.coverConsumers) && asset.coverConsumers.length) wait(new Date(now.getTime() + PIN_RECHECK_MS));
+        else if (readiness === true) reserve.push(asset);
+        else wait(readiness);
+    }
+    return { reserve, waitUntil };
+}
+/**
+ * Automatic `upload` receipts that staged embedded images, which the embedded bound counts: every automatic upload receipt except
+ * a lookup cover's (named by a `lookup-*` record, current or in history). Lookup covers have their own bound.
+ */
+export function automaticEmbeddedStagings(doc: Pick<AdminImportDocument, 'media' | 'automaticReceipts'>): number {
+    const media = doc.media as unknown, history = isRecord(media) && Array.isArray(media.assetHistory) ? media.assetHistory.filter(isRecord) : [];
+    const lookup = new Set([...assetsOf(media), ...history].filter(asset => isLookupCoverSlot(asset.slotId)).map(asset => asset.operationId));
+    return (Array.isArray(doc.automaticReceipts) ? doc.automaticReceipts : []).filter(receipt => isRecord(receipt) && receipt.kind === 'upload' && !lookup.has(receipt.operationId)).length;
 }

@@ -22,6 +22,7 @@
  *   - answered conflicts fold with their answer, an artist mismatch is flagged only for a preselection applied in this run, and neither unsaved nor appended Album values are flagged as file tags
  *   - a suggestion whose value an unsaved change writes cannot be ticked, and the fold lists the shown tracks in approved order with decisions, cover and upload progress
  *   - the fold marks a cover chosen automatically, never an explicit one, and an append marks it not applied
+ *   - Publish waits while the applied release's cover is being staged, the summary polls meanwhile, and a staged lookup cover is named in the fold
  *   - the Analyze confirmation focuses Cancel, closes on Escape without starting anything, and cannot be confirmed while its budget is loading, failed or too small for one more run
  * @end-catalog */
 
@@ -477,6 +478,27 @@ test('the fold marks a cover chosen automatically, never an explicit one, and an
   mount(item, lookupResponse({ summary: summary({ append: true }) })); await ready(); expect(cover()).toHaveTextContent(/^Private cover candidate · Chosen automatically · Not applied$/); cleanup();
   // No image shared and nothing chosen: No cover selected, without the mark.
   mount({ ...item, selectedCoverSlotId: null }); await ready(); expect(cover()).toHaveTextContent(/^No cover selected$/);
+});
+
+test('Publish waits while the applied release\'s cover is being staged, the summary polls meanwhile, and a staged lookup cover is named in the fold', async () => {
+  const waitingCover = { uploads: false, lookup: false, cover: true, analysis: false };
+  let rendered = mount(detail(), lookupResponse({ summary: summary({ waiting: waitingCover }) }));
+  expect(await ready()).toBeDisabled();
+  expect(within(rendered.section()).getByText('Publish waits while the applied release’s cover is being staged.')).toHaveAttribute('role', 'status');
+  cleanup();
+  // Once staging ended (staged, failed or skipped), the server stops waiting and so does Publish.
+  rendered = mount(detail(), lookupResponse({ summary: summary({ waiting: { ...waitingCover, cover: false } }) }));
+  expect(await ready()).toBeEnabled(); expect(screen.queryByText(/cover is being staged/)).not.toBeInTheDocument();
+  cleanup();
+  const access = { viewerId: viewer, epoch: 0, generation: 1 }, interval = (cover: boolean, online = true, state: string | null = null) =>
+    importSummaryQuery(access, detail(), online).refetchInterval({ state: { data: lookupResponse({ lookup: state ? view({ state }) : null, summary: summary({ waiting: { ...waitingCover, cover } }) }) as never } });
+  expect([interval(true), interval(true, false), interval(false), interval(true, true, 'complete'), interval(true, true, 'retrying')]).toEqual([3000, false, false, 3000, 10_000]);
+  const lookupSlot = 'lookup-musicbrainz:0000000b-0000-4000-8000-000000000001', item = detail();
+  item.coverChoice = 'automatic'; item.selectedCoverSlotId = lookupSlot;
+  item.assets = [{ slotId: lookupSlot, state: 'ready', byteLength: 100, sha256: 'a'.repeat(64), contentType: 'image/jpeg', tags: null, recovery: null }];
+  mount(item); await ready();
+  expect(within(screen.getByText('Values that need no answer').closest('details')!).getByText('Album cover', { selector: 'dt' }).nextElementSibling!)
+    .toHaveTextContent(/^Cover Art Archive front artwork · 0000000b · Chosen automatically$/);
 });
 
 test('the Analyze confirmation focuses Cancel, closes on Escape without starting anything, and cannot be confirmed while its budget is loading, failed or too small for one more run', async () => {

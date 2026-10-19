@@ -9,7 +9,7 @@
  *   Types: TextResult, AddedId
  *   Functions: stale, emptyValue, emptyFor, slotOf, isRecord, valueAt, applicable, lookupText,
  *              lookupArtistEntries, isEntryLike, idOf, itemsOf, foundNames, storedValues, storedConflicts,
- *              withLookupIds, rerankEvidence
+ *              withLookupIds, freshGrant, rerankEvidence
  *   Constants: lookupPath, invisible, idsIn, noContext, LABEL
  * @end-catalog */
 
@@ -26,6 +26,7 @@
 import { normalizeJoinPhrase } from '../../models/catalogCredit';
 import { AdminImportError, invalidImport, parseImportDate } from '../import/adminImportContract';
 import { importTagValues } from '../import/adminImportAutomation';
+import { noteLookupCoverApplication } from '../import/adminImportCoverAutomation';
 import {
     DRAFT_V2_LIMITS, derivedEntryKey, foldImportName, originKey, retainBoundDecisions, sameDraftValue, type ImportArtistEntry, type ImportDecisionV2, type ImportDraftV2, type ImportLabelEntry
 } from '../import/adminImportDraft';
@@ -36,7 +37,7 @@ import {
     applyAutomaticValues, draftValueAt, draftWithinSizeLimit, markAdministratorValues, originOf, parseDraftValue, setDraftValue, storedDraftV2,
     type ImportAutomaticValue, type ImportDraftPath
 } from '../import/adminImportValueState';
-import type { MusicBrainzRelease } from './lookupContract';
+import { METADATA_LOOKUP_JOB_LIMITS, type MusicBrainzRelease } from './lookupContract';
 import { normalizeMusicBrainzId } from './lookupIdentifiers';
 import { lookupTrackAssignment, proposalForRelease, type LocalFileEvidence } from './lookupRanking';
 import {
@@ -248,9 +249,16 @@ function withLookupIds(path: ImportDraftPath, current: unknown, lookup: unknown)
     return { value, lookup: full, added, differs };
 }
 
+/**
+ * Who applies a candidate, how and when. `grantExpiresAt` bounds the cover staging the application queues (the run's grant for a
+ * preselection the worker applies, a fresh one for a choice or re-rank); absent, it is `now` plus the lookup grant.
+ */
 export type LookupApplicationIntent = {
     run: number; choice: LookupApplication['choice']; basis: LookupApplication['basis']; actorId: string; operationId: string | null; now: Date;
+    grantExpiresAt?: Date;
 };
+/** A fresh lookup grant from `now`, as refreshLookupGrant sets it. */
+const freshGrant = (now: Date) => new Date(now.getTime() + METADATA_LOOKUP_JOB_LIMITS.grantMs);
 /**
  * Applies a fetched candidate, or none, to `doc` in memory, all or nothing for the document (its caller writes it, the record
  * and the gate in one transaction). Every supplied value targets its path; every value the previous application wrote that is
@@ -265,7 +273,10 @@ export type LookupApplicationIntent = {
  * holds it, or creating or reusing a record without an ID while no record holds it; any other is removed), and an ID that
  * differs from one already carried is a conflict marked `musicBrainzId`. Additions and removals keep their path's origin.
  * Writes bump `valueRevision` and keep only decisions still bound to their entry or label; `revision` and receipts never change.
- * The names found for each carried ID are merged into `musicBrainzNames`. Applying the same candidate again writes nothing.
+ * The names found for each carried ID are merged into `musicBrainzNames`. Last, the lookup cover job records the candidate (its
+ * front artwork is staged under the intent's grant) or none (noteLookupCoverApplication), without bumping `valueRevision`.
+ * Applying the same candidate again writes nothing, except that a cover staging of it that failed, was skipped or ran past its
+ * grant is queued again under the intent's grant.
  */
 export function applyLookupCandidate(doc: AdminImportDocument, previous: LookupApplication | null | undefined, candidate: StoredLookupCandidate | null,
     intent: LookupApplicationIntent, context: LookupApplicationContext = noContext): { application: LookupApplication; changed: boolean } {
@@ -382,10 +393,13 @@ export function applyLookupCandidate(doc: AdminImportDocument, previous: LookupA
     const names = mergeImportMusicBrainzNames(doc.musicBrainzNames, foundNames(candidate?.release, context.aliases), draft);
     const namesChanged = !sameDraftValue(names, doc.musicBrainzNames ?? []);
     if (namesChanged) doc.musicBrainzNames = names;
+    // Last, after every step that can refuse, so a refused application queues no staging.
+    const coverChanged = noteLookupCoverApplication(doc, candidate,
+        { actorId: intent.actorId, grantExpiresAt: intent.grantExpiresAt instanceof Date ? intent.grantExpiresAt : freshGrant(intent.now) }, intent.now);
     return {
         application: { run: intent.run, candidateKey: candidate?.key ?? null, releaseId: candidate?.releaseId ?? null, choice: intent.choice, basis: intent.basis,
             actorId: intent.actorId, operationId: intent.operationId, at: intent.now, paths, values, conflicts, flagged, ...(musicBrainzIds.length ? { musicBrainzIds } : {}) },
-        changed: valuesChanged || namesChanged
+        changed: valuesChanged || namesChanged || coverChanged
     };
 }
 
@@ -393,10 +407,11 @@ export function applyLookupCandidate(doc: AdminImportDocument, previous: LookupA
  * Applies a completed run's preselection, as the run's granting administrator in the worker's completion step or as `actorId`
  * (the administrator whose confirmation re-ranked it), unless this run already has an explicit choice or this very preselection,
  * or the candidate is not applicable (not fetched, or fetched under another release ID). A malformed draft applies nothing.
- * `context` is what the caller read in its transaction (who holds each ID, the reused records' IDs and the run's aliases).
+ * `context` is what the caller read in its transaction (who holds each ID, the reused records' IDs and the run's aliases). The
+ * cover staging it queues uses `grantExpiresAt`: by default the run's own grant (the worker's completion), else a fresh one.
  */
 export function applyPreselectedLookup(doc: AdminImportDocument, record: MetadataLookupRecord, now: Date, actorId: string = record.actorId,
-    context: LookupApplicationContext = noContext): { record: MetadataLookupRecord; changed: boolean } {
+    context: LookupApplicationContext = noContext, grantExpiresAt?: Date): { record: MetadataLookupRecord; changed: boolean } {
     const unchanged = { record, changed: false };
     const preselection = record.state === 'complete' ? record.ranking?.preselection : null;
     if (!preselection || typeof preselection.candidateKey !== 'string') return unchanged;
@@ -405,8 +420,9 @@ export function applyPreselectedLookup(doc: AdminImportDocument, record: Metadat
     const candidate = Array.isArray(record.candidates) ? record.candidates.find(item => item?.key === preselection.candidateKey) : undefined;
     if (!candidate || !applicable(candidate)) return unchanged;
     try {
+        const grant = grantExpiresAt ?? (record.grantExpiresAt instanceof Date && Number.isFinite(record.grantExpiresAt.getTime()) ? record.grantExpiresAt : freshGrant(now));
         const { application, changed } = applyLookupCandidate(doc, applied, candidate,
-            { run: record.run, choice: 'preselected', basis: preselection.basis, actorId, operationId: null, now }, context);
+            { run: record.run, choice: 'preselected', basis: preselection.basis, actorId, operationId: null, now, grantExpiresAt: grant }, context);
         return { record: { ...record, applied: application }, changed };
     } catch (error) {
         if (error instanceof AdminImportError) return unchanged;
@@ -433,7 +449,8 @@ export function lookupRerankNeeded(doc: AdminImportDocument, record: MetadataLoo
  * identifiers or files), then applies a new preselection as `actorId`. The run then binds the file set it re-ranked, so a stale
  * slot whose file was confirmed again is no longer stale (one still without a confirmed file stays stale), while `fileSetDigest`
  * keeps governing automatic reruns. A run whose searches were not complete (or that predates the record) stays a partial
- * comparison. The run's fetched aliases still count. Never makes a request; null when nothing needs re-ranking.
+ * comparison. The run's fetched aliases still count. Never makes a request; null when nothing needs re-ranking. A cover staging
+ * a new preselection queues uses a fresh grant: the confirming administrator's.
  */
 export function rerankStoredLookup(doc: AdminImportDocument, record: MetadataLookupRecord, now: Date, actorId: string = record.actorId,
     context: LookupApplicationContext = noContext): { record: MetadataLookupRecord; changed: boolean } | null {
@@ -441,7 +458,7 @@ export function rerankStoredLookup(doc: AdminImportDocument, record: MetadataLoo
     const ranked = rankLookupWithinBudget(record.candidates, doc, now, { searchComplete: record.searchComplete === true, aliases: lookupFetchedAliases(record) }), files = importLookupFileSet(doc).files;
     const confirmed = new Set(files.filter(file => file.operationId !== null && file.sha256 !== null).map(file => file.slotId));
     const staleSlotIds = (Array.isArray(record.staleSlotIds) ? record.staleSlotIds : []).filter(slot => !confirmed.has(slot));
-    return applyPreselectedLookup(doc, { ...record, files, staleSlotIds, candidates: ranked.candidates, ranking: ranked.ranking, updatedAt: now }, now, actorId, context);
+    return applyPreselectedLookup(doc, { ...record, files, staleSlotIds, candidates: ranked.candidates, ranking: ranked.ranking, updatedAt: now }, now, actorId, context, freshGrant(now));
 }
 
 /**
@@ -465,8 +482,9 @@ export function lookupAnswersNeeded(record: Partial<MetadataLookupRecord> | null
 
 /**
  * An administrator's choice of a candidate of the current run (complete, with fetched details) or of none (any finished run),
- * applied at once; the run's grant moves to that administrator (`choose`). Refused as stale for another run, an active run or
- * an unknown candidate, and as incomplete for a candidate without fetched details or whose fetched release has another ID.
+ * applied at once; the run's grant moves to that administrator (`choose`), which also bounds the cover staging it queues. Refused
+ * as stale for another run, an active run or an unknown candidate, and as incomplete for a candidate without fetched details or
+ * whose fetched release has another ID.
  */
 export function chooseLookupCandidate(doc: AdminImportDocument, record: MetadataLookupRecord | null,
     request: { run: number; candidateKey: string | null; actorId: string; operationId: string }, now: Date, context: LookupApplicationContext = noContext): MetadataLookupRecord {
@@ -479,7 +497,8 @@ export function chooseLookupCandidate(doc: AdminImportDocument, record: Metadata
         if (!applicable(candidate)) throw new AdminImportError(409, 'ADMIN_IMPORT_LOOKUP_CANDIDATE_INCOMPLETE');
     }
     const { application } = applyLookupCandidate(doc, isRecord(record.applied) ? record.applied : null, candidate, {
-        run: record.run, choice: candidate ? 'chosen' : 'none', basis: candidate ? 'chosen' : null, actorId: request.actorId, operationId: request.operationId, now
+        run: record.run, choice: candidate ? 'chosen' : 'none', basis: candidate ? 'chosen' : null, actorId: request.actorId, operationId: request.operationId, now,
+        grantExpiresAt: freshGrant(now)
     }, context);
     return refreshLookupGrant({ ...record, applied: application }, request.actorId, 'choose', now);
 }

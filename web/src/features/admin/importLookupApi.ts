@@ -27,7 +27,9 @@ const comparisonSchema = z.object({
 const candidateSchema = z.object({
   key: candidateKey, releaseId, status: z.enum(['matching', 'unverified', 'notMatching', 'incomplete']), title: text.nullable(), artist: text.nullable(),
   label: text.nullable(), catalogNumber: text.nullable(), barcode: z.string().max(14).nullable(), country: z.string().max(2).nullable(), date: importDateSchema.nullable(),
-  formats: z.array(z.string().max(100)).max(20), trackCount: integer.nullable(), comparison: comparisonSchema.nullable(), groupKey: groupKey.nullable(), artistMismatch: z.boolean().nullable()
+  formats: z.array(z.string().max(100)).max(20), trackCount: integer.nullable(), comparison: comparisonSchema.nullable(), groupKey: groupKey.nullable(), artistMismatch: z.boolean().nullable(),
+  // Whether a protected front-artwork preview exists (never an address); false from a server that sends none.
+  artwork: z.boolean().default(false)
 }).strict();
 /**
  * The values a matching group would write, with the MusicBrainz ID each entry and the label credit (null from a server that sends
@@ -59,12 +61,14 @@ export const lookupViewSchema = z.object({
   needsAnswer: z.object({ tie: z.boolean(), conflicts: z.array(valuePath).max(305) }).strict(), blocking: z.boolean()
 }).strict();
 /**
- * What the server decided for the summary: an append, the work Publish waits for, a new Album credited only by a placeholder,
+ * What the server decided for the summary: an append, the work Publish waits for (uploads, lookup, the lookup cover's staging and
+ * analysis), a new Album credited only by a placeholder,
  * each shown Luna suggestion's tick state, the analysis budget left (project runs and calls, and calls today), whether this
  * server can run metadata lookup and how many identity rows of the saved draft no decision or preselection answers.
  */
 const summarySchema = z.object({
-  append: z.boolean(), waiting: z.object({ uploads: z.boolean(), lookup: z.boolean(), analysis: z.boolean() }).strict(), placeholderOnly: z.boolean(),
+  // `cover`: the applied release's front artwork is being staged (false from a server that sends none).
+  append: z.boolean(), waiting: z.object({ uploads: z.boolean(), lookup: z.boolean(), cover: z.boolean().default(false), analysis: z.boolean() }).strict(), placeholderOnly: z.boolean(),
   luna: z.array(z.object({ id: z.string().regex(/^[a-f0-9]{24}$/), tick: z.enum(['ticked', 'unticked', 'resolved', 'conflict']) }).strict()).max(1000),
   analysis: z.object({ runs: integer, attempts: integer, daily: integer }).strict(), lookupAvailable: z.boolean(), identityAnswers: integer.max(1000)
 }).strict();

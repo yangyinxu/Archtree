@@ -30,6 +30,7 @@
  *   - without a folder or usable tags the summary offers Luna beside an empty name box, which looks up a typed name from the keyboard
  *   - after a lookup finds no release Luna is offered, and its ticked entries, label and Disc Number are preselected and approved in one confirmation
  *   - an image every file shares is chosen automatically until the administrator chooses, and the summary and confirmation show the choice
+ *   - a release with front artwork shows a protected preview, Publish waits while its cover is staged, and the staged lookup cover is then chosen automatically and published
  * @end-catalog */
 
 import { expect, test, type Page, type Request } from '@playwright/test';
@@ -1068,4 +1069,40 @@ test('an image every file shares is chosen automatically until the administrator
   await expect.poll(() => server.writes.map(write => write.action)).toEqual(['select-cover', 'publish']);
   expect(server.writes[1].body.selectedCoverSlotId).toBeNull();
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+});
+
+test('a release with front artwork shows a protected preview, Publish waits while its cover is staged, and the staged lookup cover is then chosen automatically and published', async ({ page }) => {
+  await setup(page);
+  const lookupSlot = `lookup-${releaseKey(1)}`;
+  const server = await summaryProject(page, uploadedProject(), (_state, action) => { expect(action).toBe('publish'); return 'publish'; });
+  server.lookup = lookupView({ candidates: [{ ...lookupCandidate(1), artwork: true }], groups: [lookupGroup(1)],
+    preselection: { candidateKey: releaseKey(1), basis: 'onlyMatchingGroup', artistMismatch: false }, applied: appliedRelease(1, 'preselected') });
+  server.summary = { waiting: { uploads: false, lookup: false, cover: true, analysis: false } };
+  // Registered last, so it answers the protected preview before the project route; the browser never asks a lookup host.
+  const previews: string[] = [], webp = Buffer.from('UklGRiQAAABXRUJQVlA4IBgAAABQAQCdASoBAAEAAUAmJaQABYwAAP6igAA=', 'base64');
+  await page.route('**/lookup/candidates/**/artwork**', route => { previews.push(route.request().url()); return route.fulfill({ body: webp, contentType: 'image/webp', headers: { 'Cache-Control': 'private, no-store' } }); });
+  const outside: string[] = [];
+  page.on('request', request => { if (/coverartarchive\.org|archive\.org/.test(request.url())) outside.push(request.url()); });
+  await page.goto(`/finitude/admin/imports/${projectId}`); await page.getByRole('button', { name: 'Switch to Admin view' }).click();
+  await expect(publishFromSummary(page)).toBeDisabled();
+  await expect(summaryRegion(page).getByText('Publish waits while the applied release’s cover is being staged.', { exact: true })).toBeVisible();
+  await summaryRegion(page).getByText('Releases found: 1', { exact: true }).click();
+  await expect(summaryRegion(page).getByRole('img', { name: 'Front artwork of this release', exact: true })).toBeVisible();
+  await expect.poll(() => previews.length).toBeGreaterThan(0);
+  expect(new URL(previews[0]).pathname).toBe(`/api/admin/v1/imports/${projectId}/lookup/candidates/${encodeURIComponent(releaseKey(1))}/artwork`);
+  expect(new URL(previews[0]).searchParams.get('viewer')).toBe(viewer);
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+  // The staging lands: the project gains the lookup cover, chosen automatically, and the summary (polling meanwhile) stops waiting.
+  server.summary = {};
+  server.item = { ...server.item, revision: server.item.revision + 1, coverChoice: 'automatic', selectedCoverSlotId: lookupSlot,
+    assets: [...server.item.assets, { slotId: lookupSlot, state: 'ready', byteLength: 68, sha256: 'c'.repeat(64), contentType: 'image/jpeg', tags: null, recovery: null }] };
+  await expect(summaryRegion(page).getByText('Cover Art Archive front artwork · 0000000b · Chosen automatically', { exact: true })).toBeAttached({ timeout: 10_000 });
+  await expect(publishFromSummary(page)).toBeEnabled();
+  await publishFromSummary(page).click();
+  const dialog = page.getByRole('dialog'), checklist = dialog.getByRole('region', { name: 'What becomes catalog content', exact: true });
+  await expect(checklist.getByText('Album cover', { exact: true }).locator('xpath=following-sibling::dd')).toHaveText('Cover Art Archive front artwork · 0000000b · Chosen automatically');
+  await dialog.getByRole('button', { name: 'Publish Album', exact: true }).click();
+  await expect.poll(() => server.writes.map(write => write.action)).toEqual(['publish']);
+  expect(server.writes[0].body.selectedCoverSlotId).toBe(lookupSlot);
+  expect(outside).toEqual([]);
 });

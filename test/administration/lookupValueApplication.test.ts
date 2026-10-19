@@ -33,6 +33,9 @@
  *   - an administrator save wins over IDs lookup added or removed meanwhile: a base without them is current, the save keeps them, and a real difference still conflicts
  *   - answering lookup on an ID conflict writes the release's IDs; the run's aliases join the names found for each ID
  *   - the identity state an application needs is every fetched candidate's credited IDs and the records explicit decisions reuse
+ *   - a release with front artwork queues its cover staging under the intent's actor and grant, as a change that never bumps valueRevision
+ *   - the worker's preselection stages under the run's grant, while a re-rank and a choice stage under a fresh grant of the administrator acting
+ *   - an application that is refused queues no cover staging
  * @end-catalog */
 
 /**
@@ -741,4 +744,65 @@ test('the identity state an application needs is every fetched candidate\'s cred
     const doc = ownEntries([decided('artist', mbid(830), 'Synthetic Lead', 'reuse', holderId(1)), decided('label', null, 'Synthetic Label', 'replace', holderId(2)),
         decided('artist', mbid(831), 'Synthetic Second', 'create-distinct'), { scope: 'track', action: 'reuse', candidateId: holderId(3) }]);
     assert.deepEqual(lookupDecisionRecords(doc), [{ kind: 'artist', id: holderId(1) }, { kind: 'organization', id: holderId(2) }]);
+});
+
+test('a release with front artwork queues its cover staging under the intent\'s actor and grant, as a change that never bumps valueRevision', () => {
+    const doc = project(2, timed), grant = new Date(now.getTime() + 5_000), later = new Date(now.getTime() + 1_000);
+    // A release without front artwork writes its values and queues nothing.
+    const first = applyLookupCandidate(doc, null, stored(synthetic(1)), intent({ grantExpiresAt: grant }));
+    assert.deepEqual([first.changed, doc.valueRevision, doc.media!.lookupCover], [true, 1, undefined]);
+    // Another release with the same values but front artwork changes only the cover job.
+    const second = applyLookupCandidate(doc, first.application, stored(synthetic(3, { frontArtwork: true })), intent({ actorId: other, grantExpiresAt: grant, now: later }));
+    assert.deepEqual([second.changed, second.application.paths, doc.valueRevision, doc.updatedAt], [true, [], 1, now]);
+    assert.deepEqual([doc.media!.lookupCover!.candidateKey, doc.media!.lookupCover!.releaseId, doc.media!.lookupCover!.state, doc.media!.lookupCover!.actorId,
+        doc.media!.lookupCover!.grantExpiresAt, doc.media!.lookupCover!.due, doc.media!.lookupCover!.updatedAt], [`musicbrainz:${mbid(3)}`, mbid(3), 'queued', other, grant, true, later]);
+    // The same candidate again writes nothing; one without artwork leaves the job idle for the pass to clean.
+    const queued = structuredClone(doc.media!.lookupCover);
+    assert.equal(applyLookupCandidate(doc, second.application, stored(synthetic(3, { frontArtwork: true })), intent({ now: later })).changed, false);
+    assert.deepEqual(doc.media!.lookupCover, queued);
+    const third = applyLookupCandidate(doc, second.application, stored(synthetic(1)), intent({ now: later }));
+    assert.deepEqual([third.changed, doc.valueRevision, doc.media!.lookupCover!.state, doc.media!.lookupCover!.candidateKey], [true, 1, 'idle', null]);
+    // Without a grant in the intent, a fresh lookup grant from the application's time bounds the staging.
+    const fresh = project(2, timed);
+    applyLookupCandidate(fresh, null, stored(synthetic(4, { frontArtwork: true })), intent());
+    assert.deepEqual(fresh.media!.lookupCover!.grantExpiresAt, new Date(now.getTime() + METADATA_LOOKUP_JOB_LIMITS.grantMs));
+    // Choosing none without an earlier artwork candidate records no job.
+    const none = project(2, timed);
+    applyLookupCandidate(none, null, null, intent({ choice: 'none', basis: null }));
+    assert.equal(none.media!.lookupCover, undefined);
+});
+
+test('the worker\'s preselection stages under the run\'s grant, while a re-rank and a choice stage under a fresh grant of the administrator acting', () => {
+    const doc = project(2, timed), run = completed(doc, [stored(synthetic(1, { frontArtwork: true }))]);
+    applyPreselectedLookup(doc, run, now);
+    assert.deepEqual([doc.media!.lookupCover!.state, doc.media!.lookupCover!.actorId, doc.media!.lookupCover!.grantExpiresAt], ['queued', actor, run.grantExpiresAt]);
+    // A run whose grant is unreadable falls back to a fresh one.
+    const unreadable = project(2, timed);
+    applyPreselectedLookup(unreadable, { ...completed(unreadable, [stored(synthetic(1, { frontArtwork: true }))]), grantExpiresAt: 'x' as unknown as Date }, now);
+    assert.deepEqual(unreadable.media!.lookupCover!.grantExpiresAt, new Date(now.getTime() + METADATA_LOOKUP_JOB_LIMITS.grantMs));
+    // A re-rank applies its new preselection as the confirming administrator with a fresh grant.
+    const ranked = project(2), stale = completed(ranked, [stored(synthetic(1, { frontArtwork: true })),
+        stored(synthetic(2, { media: [{ position: 1, format: 'CD', tracks: [track(1, 'X', 100_000), track(2, 'Y', 100_000)] }] }))]);
+    ranked.media!.assets.forEach((asset, index) => { asset.tags = timed(index) as never; });
+    const later = new Date(now.getTime() + 30_000);
+    assert.equal(rerankStoredLookup(ranked, stale, later, other)!.changed, true);
+    assert.deepEqual([ranked.media!.lookupCover!.actorId, ranked.media!.lookupCover!.grantExpiresAt], [other, new Date(later.getTime() + METADATA_LOOKUP_JOB_LIMITS.grantMs)]);
+    // A choice moves the run's grant to the chooser, and the staging uses the same grant.
+    const chosen = project(2, timed), record = chooseLookupCandidate(chosen, completed(chosen, [stored(synthetic(1, { frontArtwork: true }))]),
+        { run: 1, candidateKey: `musicbrainz:${mbid(1)}`, actorId: other, operationId: mbid(701) }, later);
+    assert.deepEqual([chosen.media!.lookupCover!.actorId, chosen.media!.lookupCover!.grantExpiresAt, chosen.media!.lookupCover!.state], [other, record.grantExpiresAt, 'queued']);
+    chooseLookupCandidate(chosen, record, { run: 1, candidateKey: null, actorId: other, operationId: mbid(702) }, later);
+    assert.deepEqual([chosen.media!.lookupCover!.state, chosen.media!.lookupCover!.candidateKey], ['idle', null]);
+});
+
+test('an application that is refused queues no cover staging', () => {
+    const doc = project(2, timed), run = completed(doc, [stored(synthetic(1, { frontArtwork: true }), 'failed')]);
+    assert.throws(() => chooseLookupCandidate(doc, run, { run: 1, candidateKey: `musicbrainz:${mbid(1)}`, actorId: other, operationId: mbid(701) }, now), code('ADMIN_IMPORT_LOOKUP_CANDIDATE_INCOMPLETE'));
+    assert.equal(doc.media!.lookupCover, undefined);
+    // A malformed stored draft refuses the whole application, before the cover job is recorded.
+    const malformed = project(2, timed); (malformed as unknown as { draft: unknown }).draft = { album: 42 };
+    assert.throws(() => applyLookupCandidate(malformed, null, stored(synthetic(1, { frontArtwork: true })), intent()));
+    assert.equal(malformed.media!.lookupCover, undefined);
+    assert.equal(applyPreselectedLookup(malformed, completed(project(2, timed), [stored(synthetic(1, { frontArtwork: true }))]), now).changed, false);
+    assert.equal(malformed.media!.lookupCover, undefined);
 });

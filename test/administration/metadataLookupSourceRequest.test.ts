@@ -12,6 +12,7 @@
  *   - a gate refusal propagates unchanged and nothing is resolved or sent
  *   - cached answers are deep-frozen, shared by reference and keyed by source and exact URL
  *   - each attempt marks its lease as sent after DNS and before the request, so spacing counts from the send
+ *   - a byte request shares configuration, gate, retry and failure mapping with JSON, never touches the cache, and answers null for an empty status
  *   - every call in this file released exactly the leases it acquired
  * @end-catalog */
 
@@ -22,7 +23,7 @@ import type { PinnedHttpsTransport } from '../../src/administration/adminPinnedH
 import { MetadataLookupSourceError, type LookupGateMode } from '../../src/administration/lookup/lookupContract';
 import type { LookupGateLease, MetadataLookupRateGate } from '../../src/administration/lookup/lookupRateGate';
 import { createLookupResponseCache, type LookupResponseCache } from '../../src/administration/lookup/lookupResponseCache';
-import { requestLookupJson, type LookupClientDependencies, type LookupJsonRequest } from '../../src/administration/lookup/lookupSourceRequest';
+import { requestLookupBytes, requestLookupJson, type LookupBytesRequest, type LookupClientDependencies, type LookupJsonRequest } from '../../src/administration/lookup/lookupSourceRequest';
 import { musicBrainzDestination } from '../../src/administration/lookup/musicBrainzClient';
 import { availableLookupConfiguration, fixtureAddress, fixtureTransport, type LookupExchange } from '../support/metadataLookupFixtures';
 import { installNetworkGuard } from '../support/networkGuard';
@@ -260,6 +261,40 @@ test('each attempt marks its lease as sent after DNS and before the request, so 
     const refused = harness({ lookup: async () => [{ address: '10.0.0.1', family: 4 }], request: async () => assert.fail('a private answer is never connected') });
     await assert.rejects(run(refused), failure('unavailable'));
     assert.equal(refused.gate.sends, 0, 'nothing sent, nothing marked');
+});
+
+test('a byte request shares configuration, gate, retry and failure mapping with JSON, never touches the cache, and answers null for an empty status', async () => {
+    const bytes = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4]);
+    const image = (status: number, headers: Record<string, string | null> = { 'content-type': 'image/jpeg' }): LookupExchange => ({ url: target, status, headers, bodyBase64: bytes.toString('base64') });
+    const bytesRequest = (overrides: Partial<LookupBytesRequest> = {}): LookupBytesRequest => ({ source: 'musicbrainz', url: new URL(target), destination: musicBrainzDestination,
+        accept: 'image/jpeg', contentTypes: ['image/jpeg', 'image/png'], maximumBytes: 64, deadlineMs: 5000, rateLimitStatuses: [429, 503], emptyStatuses: [404], ...overrides });
+    const fetchBytes = (current: Harness, mode: LookupGateMode = 'wait', request = bytesRequest()) => requestLookupBytes(request, { mode, signal: new AbortController().signal }, current.dependencies);
+    // Nothing is sent while lookup is not configured.
+    const unconfigured = harness(fixtureTransport([]).transport, { configuration: () => ({ available: false, reason: 'contactMissing' }) });
+    await assert.rejects(fetchBytes(unconfigured), failure('notConfigured')); assert.equal(unconfigured.gate.acquisitions, 0);
+    // A complete answer returns the bytes and their normalized type; the same request again is sent again, never cached.
+    const fake = fixtureTransport([image(200, { 'content-type': 'IMAGE/JPEG; charset=utf-8' }), image(200)]), served = harness(fake.transport);
+    assert.deepEqual(await fetchBytes(served), { body: bytes, contentType: 'image/jpeg' });
+    assert.deepEqual(await fetchBytes(served), { body: bytes, contentType: 'image/jpeg' });
+    assert.deepEqual([fake.requests.length, served.sets, served.gate.sends], [2, [], 2]);
+    // 404 is null, uncached; 503 is retried in wait mode after the backoff, and rate limited after the last attempt.
+    const empty = harness(fixtureTransport([image(404, { 'content-type': 'text/html' })]).transport);
+    assert.equal(await fetchBytes(empty), null); assert.deepEqual(empty.sets, []);
+    const retried = harness(fixtureTransport([image(503, { 'content-type': 'text/html', 'retry-after': '2' }), image(200)]).transport);
+    assert.deepEqual(await fetchBytes(retried), { body: bytes, contentType: 'image/jpeg' });
+    assert.deepEqual([retried.gate.acquisitions, retried.sleeps, retried.gate.releases], [2, [2000], [{ backoffMs: 2000 }, undefined]]);
+    const limited = harness(fixtureTransport([1, 2, 3].map(() => image(503, { 'content-type': 'text/html' }))).transport);
+    await assert.rejects(fetchBytes(limited), failure('rateLimited')); assert.equal(limited.gate.acquisitions, 3);
+    const busy = harness(fixtureTransport([image(503, { 'content-type': 'text/html' })]).transport);
+    await assert.rejects(fetchBytes(busy, 'busy'), failure('rateLimited')); assert.equal(busy.gate.acquisitions, 1);
+    // Another type, an encoding, an oversized body (declared or streamed) and an unexpected status fail like JSON.
+    for (const [exchange, kind] of [[image(200, { 'content-type': 'image/gif' }), 'invalidResponse'], [image(200, { 'content-type': 'image/jpeg', 'content-encoding': 'gzip' }), 'invalidResponse'],
+        [{ ...image(200), bodyBase64: Buffer.alloc(65).toString('base64') }, 'unavailable'], [{ ...image(200, { 'content-type': 'image/jpeg', 'content-length': null }), bodyBase64: Buffer.alloc(65).toString('base64') }, 'unavailable'],
+        [image(500, { 'content-type': 'text/html' }), 'unavailable']] as const) {
+        const current = harness(fixtureTransport([exchange]).transport);
+        await assert.rejects(fetchBytes(current), failure(kind), JSON.stringify(exchange.headers));
+        assert.deepEqual([current.gate.acquisitions, current.sets], [1, []]);
+    }
 });
 
 test('every call in this file released exactly the leases it acquired', () => {

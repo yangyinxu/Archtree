@@ -1995,7 +1995,7 @@
       "variables": {}
     },
     "admin.common.lookup_active": {
-      "description": "Administrator workbench: refusal: metadata lookup is still queued or running.",
+      "description": "Administrator workbench: refusal: metadata lookup or the staging of its cover is still queued or running.",
       "delivery": [
         "runtime"
       ],
@@ -3350,6 +3350,13 @@
       ],
       "variables": {}
     },
+    "admin.lookup.artwork_preview": {
+      "description": "Administrator workbench: metadata lookup candidate list, alternative text of a release's front artwork preview.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.lookup.barcode": {
       "description": "Administrator workbench: candidate chooser, barcode.",
       "delivery": [
@@ -3718,6 +3725,13 @@
       ],
       "variables": {}
     },
+    "admin.media.cover_automatic_lookup": {
+      "description": "Administrator workbench: import files, note under the cover choice while the cover is chosen automatically as the applied lookup release's front artwork.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.media.cover_automatic_none": {
       "description": "Administrator workbench: import files, note under the cover choice while the choice is automatic and selects no image.",
       "delivery": [
@@ -3734,6 +3748,13 @@
     },
     "admin.media.invalid": {
       "description": "Choose the original file with the same filename and size.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.media.lookup_cover": {
+      "description": "Administrator workbench: import files and summary, label of the cover staged from the applied metadata lookup release's Cover Art Archive front artwork.",
       "delivery": [
         "runtime"
       ],
@@ -4741,6 +4762,13 @@
     },
     "admin.summary.waiting_analysis": {
       "description": "Administrator workbench: import summary, Publish waits for Luna analysis.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.summary.waiting_cover": {
+      "description": "Administrator workbench: Review and publish summary, status while the applied lookup release's cover is being staged and Publish waits.",
       "delivery": [
         "runtime"
       ],

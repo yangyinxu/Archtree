@@ -819,7 +819,7 @@ test('an approval refused while metadata lookup runs explains it with its own me
   const approve = within(screen.getByRole('dialog')).getByRole('button', { name: 'Publish Album' }); await waitFor(() => expect(approve).toBeEnabled());
   const before = [summaryReads, projectReads];
   fireEvent.click(approve);
-  expect(await screen.findByText('Metadata lookup is still running. Wait for it to finish, then try again.')).toBeVisible();
+  expect(await screen.findByText('Metadata lookup or its cover staging is still running. Wait for it to finish, then try again.')).toBeVisible();
   expect(screen.queryByText('This project changed elsewhere. Refresh its saved version and compare your changes before trying again.')).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Retry original operation' })).not.toBeInTheDocument();
   await waitFor(() => expect([summaryReads > before[0], projectReads > before[1]]).toEqual([true, true]));

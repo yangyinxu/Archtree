@@ -16,7 +16,8 @@
  * retried runs, and the persisted worker that advances one run one MusicBrainz request per stored step (the request and the pure
  * step decision live in lookupRunStep.ts) and applies a completed run's preselection (lookupValueApplication.ts) in the step that
  * completes it. Starting a run, every state change and a re-rank write the import document's `lookupGate` in the same
- * transaction, and an application writes the document itself; neither ever changes its `revision`. A trigger that starts
+ * transaction, and an application writes the document itself (its values, and the lookup cover staging it queues under the run's
+ * grant); neither ever changes its `revision`. A trigger that starts
  * nothing, stale marking of a finished run and progress steps do not write it. Owner rules: the confirmed Administrator Metadata
  * Lookup rules (they land with the summary).
  */

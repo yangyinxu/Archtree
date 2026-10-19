@@ -61,7 +61,7 @@ export function deferred<T>() { let resolve!: (value: T) => void; const promise 
  * unticked; without `item`, none).
  */
 export const lookupResponse = (overrides: Record<string, unknown> = {}, item?: Pick<ImportDetail, 'suggestions'>) => ({ lookup: null, revision: 0, valueRevision: 0,
-  summary: { append: false, waiting: { uploads: false, lookup: false, analysis: false }, placeholderOnly: false,
+  summary: { append: false, waiting: { uploads: false, lookup: false, cover: false, analysis: false }, placeholderOnly: false,
     luna: (item?.suggestions ?? []).filter(suggestion => suggestion.decision === 'pending').map(suggestion => ({ id: suggestion.id, tick: 'unticked' })),
     analysis: { runs: 1, attempts: 20, daily: 200 }, lookupAvailable: true, identityAnswers: 0 }, ...overrides });
 /** A fetch stub that answers the summary read with `response` and passes every other request to `fetch`, which never sees it. */

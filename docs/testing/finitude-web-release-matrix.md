@@ -110,6 +110,12 @@ from the keyboard and stores nothing; and that after a lookup finds no release
 Luna is offered, and its ticked Artist entries, label and Disc Number are
 preselected in one confirmation, which offers no Apply ticked suggestions now
 and approves with their preselections and ticks, with axe scans throughout.
+Another shows a candidate whose release reports front artwork through the
+protected administrator preview (a mocked WebP; no request reaches a lookup
+host), checks that the summary says Publish waits while the applied release's
+cover is staged and keeps Publish disabled, and that once the staged lookup
+cover arrives it is chosen automatically, named in the summary and the
+confirmation, and carried by the one publish request.
 
 The catalog reviews spec checks that an existing-Album review shows the Album's
 Artist Credits and label read-only and applies a Disc Number change, and that a
@@ -492,6 +498,19 @@ player control still works.
   shows the release with every value, says not every release was compared and
   offers Use none of these, that Publish is available without a choice, and
   that choosing the release applies it.
+- As an administrator, with metadata lookup configured against MusicBrainz and
+  Cover Art Archive in a development environment, import an Album whose
+  matching release has front artwork. Confirm the chooser shows the release's
+  front artwork through the protected preview and the browser requests no
+  Cover Art Archive or archive.org address; that the summary says Publish waits
+  while the cover is staged; and that once staging ends Files lists the Cover
+  Art Archive front artwork, chosen automatically over an image every file
+  shares. Choose another release and confirm the earlier cover is cleaned up
+  and the new one chosen; choose none and confirm the shared embedded image is
+  chosen again. Repeat for a release without front artwork, and with Cover Art
+  Archive unreachable, and confirm Publish stops waiting with the current cover
+  choice kept. Publish and confirm the Album shows the chosen cover and Files
+  keeps no other lookup cover. Repeat with a screen reader at 320 CSS px.
 
 ## Media Session observations
 

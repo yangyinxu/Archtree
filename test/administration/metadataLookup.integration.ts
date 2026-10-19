@@ -79,6 +79,7 @@ import {
     createMusicBrainzClient, musicBrainzUrls, type MusicBrainzClient, type MusicBrainzRecordingQuery, type MusicBrainzReleaseQuery
 } from '../../src/administration/lookup/musicBrainzClient';
 import type { MetadataLookupRecord } from '../../src/administration/lookup/metadataLookupRecord';
+import { getAdminImportLookup } from '../../src/administration/lookup/metadataLookupRequests';
 import {
     adminImportLookupCollection, queueMetadataLookup, requestAutomaticMetadataLookup, runMetadataLookupOnce, startMetadataLookupWorker,
     type MetadataLookupRequest, type MetadataLookupWorkerDependencies
@@ -679,8 +680,14 @@ test('the editor, the inventory and candidates never expose the fence or the loo
     assert.ok(doc.lookupGate);
     const { lookupGate: _gate, ...without } = doc;
     assert.deepEqual(adminImportDetail(doc, by), adminImportDetail(without as AdminImportDocument, by));
-    const responses = [await getAdminImport(by, id), await listAdminImports(by, {}), await adminImportDuplicateCandidates(by, id)].map(value => JSON.stringify(value));
-    for (const response of responses) for (const key of ['lookupGate', 'fence', 'grantExpiresAt', 'fileSetDigest', 'musicBrainzReleaseSearch', 'staleSlotIds', 'queryIndex']) assert.equal(response.includes(key), false, key);
+    // A lookup cover job (here a queued one) is never projected either, nor does it change the projection.
+    await stored(id).then(current => getDb()!.collection('adminAlbumImports').updateOne({ _id: current._id }, { $set: { 'media.lookupCover': { candidateKey: `musicbrainz:${'0'.repeat(7)}1-0000-4000-8000-000000000001`,
+        releaseId: `${'0'.repeat(7)}1-0000-4000-8000-000000000001`, operationId: '00000001-0000-4000-8000-000000000002', state: 'queued', issue: null, actorId: by, grantExpiresAt: new Date(Date.now() + 60_000),
+        due: true, leaseOwner: null, leaseUntil: null, updatedAt: new Date() } } }));
+    const withJob = await stored(id), { media: { lookupCover: _job, ...media } = {} as never } = withJob;
+    assert.deepEqual(adminImportDetail(withJob, by), adminImportDetail({ ...withJob, media } as AdminImportDocument, by));
+    const responses = [await getAdminImport(by, id), await listAdminImports(by, {}), await adminImportDuplicateCandidates(by, id), await getAdminImportLookup(by, id)].map(value => JSON.stringify(value));
+    for (const response of responses) for (const key of ['lookupGate', 'lookupCover', 'fence', 'grantExpiresAt', 'fileSetDigest', 'musicBrainzReleaseSearch', 'staleSlotIds', 'queryIndex']) assert.equal(response.includes(key), false, key);
 });
 
 test('lookup unconfigured after queueing ends the run unavailable without a request, and disabled imports claim nothing', async () => {

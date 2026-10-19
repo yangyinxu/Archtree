@@ -15,6 +15,7 @@
  *   - the MusicBrainz ID indexes are required, unique and partial on stored strings only
  *   - a dropped required index makes a previously initialized database unready
  *   - optional performance-index failure preserves required constraints and emits bounded diagnostics
+ *   - the lookup cover worker index is optional: its failure is a bounded diagnostic and needs no required-index revision
  *   - a failed metadata read does not finish verification while another read occupies the pool
  * @end-catalog */
 
@@ -238,6 +239,30 @@ test('optional performance-index failure preserves required constraints and emit
     { category: 'optional_index_unavailable', indexId: 'posts:createdAt' }
   ]);
   assert.equal(fake.receipts.length, 1);
+});
+
+test('the lookup cover worker index is optional: its failure is a bounded diagnostic and needs no required-index revision', async () => {
+  const declared = databaseIndexes.filter(index => index.options?.name === 'admin_import_lookup_cover_worker');
+  assert.deepEqual(declared.map(index => [index.collection, index.keys, Boolean(index.required || index.options?.unique)]),
+    [['adminAlbumImports', { 'media.lookupCover.due': 1, 'media.lookupCover.leaseUntil': 1 }, false]]);
+  assert.equal(requiredIndexRevision, 'required-indexes-v11-musicbrainz-ids');
+  const fake = databaseDouble(), collection = fake.db.collection.bind(fake.db);
+  (fake.db as unknown as { collection: unknown }).collection = (name: string) => {
+    const target = collection(name);
+    return { ...target, createIndex: async (key: Document, options: Document) => {
+      if (options?.name === 'admin_import_lookup_cover_worker') throw new Error('private-email@example.test');
+      return target.createIndex(key, options);
+    } };
+  };
+  const entries: string[] = [];
+  const warn = console.warn;
+  console.warn = (entry: string) => { entries.push(entry); };
+  try { await initializeDatabaseIndexes(fake.db); } finally { console.warn = warn; }
+  assert.deepEqual(entries.map(entry => JSON.parse(entry)), [
+    { category: 'optional_index_unavailable', indexId: 'adminAlbumImports:media.lookupCover.due,media.lookupCover.leaseUntil' }
+  ]);
+  assert.equal(fake.receipts.length, 1);
+  await verifyRequiredDatabaseIndexes(fake.db);
 });
 
 test('a failed metadata read does not finish verification while another read occupies the pool', async () => {

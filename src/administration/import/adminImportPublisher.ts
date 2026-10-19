@@ -30,6 +30,9 @@ import { lookupAnswersNeeded } from '../lookup/lookupValueApplication';
 import { importMusicBrainzIdWrites, importMusicBrainzNameMap, mergeImportMusicBrainzNames, sameMusicBrainzIdWrites } from './adminImportMusicBrainzIds';
 import { isBlockingLookupState, lookupGateFor } from '../lookup/metadataLookupRecord';
 import { runAutomaticImportCoverCleanupOnce } from './adminImportCoverCleanup';
+import { lookupCoverStagingActive } from './adminImportCoverAutomation';
+import { runLookupCoverPassOnce } from './adminImportLookupCover';
+import type { CoverArtClient } from '../lookup/coverArtClient';
 
 const candidateProjection = importCandidateProjection;
 /** What the publish gate reads of the lookup record: the run and its state, whether it ranked a tie, and the applied values. */
@@ -54,7 +57,9 @@ const lookupGateProjection = { run: 1, state: 1, 'ranking.preselection': 1, 'ran
  * (importUploadsWaiting, the summary's own upload wait).
  * Metadata lookup gates it in the same transaction: a queued, running or automatically retrying run is
  * ADMIN_IMPORT_LOOKUP_ACTIVE, and an unanswered tie or conflict (Album conflicts not for an append) is
- * ADMIN_IMPORT_REVIEW_REQUIRED; an admitted approval writes the lookup gate, so a run started concurrently conflicts with it.
+ * ADMIN_IMPORT_REVIEW_REQUIRED; an admitted approval writes the lookup gate, so a run started concurrently conflicts with it. A
+ * lookup cover staging queued or running within its grant is ADMIN_IMPORT_LOOKUP_ACTIVE too; a failed, skipped or expired one is
+ * not waited for.
  * The publication freezes the cover the confirmation showed; a cover chosen automatically stays automatic.
  * The optional `musicBrainzIds` lists each MusicBrainz ID the confirmation showed would be recorded or replaced
  * ({scope, entryKey, musicBrainzId, replaces}); the frozen writes must equal it, and a body without it may freeze no write
@@ -83,6 +88,7 @@ export async function publishAdminImport(actor: string, id: string, raw: unknown
         // A stopped, unavailable, superseded or completed run never holds the approval as active; a tie of the current run or an
         // unanswered conflict of the applied candidate still does below, whatever the current run's state.
         if (doc.lookupGate?.blocking === true || isBlockingLookupState(lookup?.state)) throw new AdminImportError(409, 'ADMIN_IMPORT_LOOKUP_ACTIVE');
+        if (lookupCoverStagingActive(doc.media?.lookupCover, new Date())) throw new AdminImportError(409, 'ADMIN_IMPORT_LOOKUP_ACTIVE');
         // The project is Draft v2 here (converted on admission). A stored value the editor cannot show (a v1 value over its bound
         // after NFC reads as empty there) is never frozen.
         if (!draft.album.title || !sameDraftValue(importDraftV2View(draft, doc.manifest, id), draft)) throw new AdminImportError(400, 'ADMIN_IMPORT_DRAFT_INCOMPLETE');
@@ -322,8 +328,12 @@ export async function resumeAdminImportPublication(actor: string, id: string, op
 }
 /**
  * The publication worker: a tick that publishes nothing sweeps one completed import whose automatic cover cleanup is not done
- * (crash recovery, imports completed before automatic covers, and candidates that were waiting or pinned).
+ * (crash recovery, imports completed before automatic covers, and candidates that were waiting or pinned), and otherwise runs one
+ * lookup cover pass (adminImportLookupCover.ts), which needs this worker's private storage. `artwork` replaces the production
+ * Cover Art Archive client (tests).
  */
-export function startAdminImportPublisher(storage: ImportObjectStorage = defaultImportObjectStorage, intervalMs = 2_000, track?: AdminWorkTracker): () => Promise<void> {
-    return startAdminWorker(async signal => await runAdminImportPublicationOnce(storage, undefined, signal) || await runAutomaticImportCoverCleanupOnce(storage, undefined, signal), intervalMs, track);
+export function startAdminImportPublisher(storage: ImportObjectStorage = defaultImportObjectStorage, intervalMs = 2_000, track?: AdminWorkTracker,
+    artwork?: () => CoverArtClient): () => Promise<void> {
+    return startAdminWorker(async signal => await runAdminImportPublicationOnce(storage, undefined, signal) || await runAutomaticImportCoverCleanupOnce(storage, undefined, signal)
+        || await runLookupCoverPassOnce(storage, undefined, signal, { artwork: artwork?.() }), intervalMs, track);
 }

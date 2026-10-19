@@ -1570,18 +1570,32 @@ The wire protocol and operational bounds are documented in
   MediaTrack on that Album is preselected as reuse, a name-only match needs an
   explicit choice, and a file with no candidate is preselected as a new member.
 - A new Album's cover is chosen automatically only while the administrator has
-  made no cover choice; an explicit choice, including No cover, always wins. A
-  single embedded image shared by every track is selected, re-evaluated whenever
-  the file set changes while the cover choice is automatic. Embedded images are
+  made no cover choice; an explicit choice, including No cover, always wins. The
+  applied metadata lookup candidate's front artwork is staged when the candidate
+  is applied, under the grant that applies it, as described in Administrator
+  Metadata Lookup. Each applied candidate gets its own cover candidate, which is
+  selected while, and only while, that candidate is applied, the Album decision
+  is create and the cover choice is automatic. Without a lookup cover, a single
+  embedded image shared by every track is selected, re-evaluated whenever the
+  file set changes while the cover choice is automatic. Embedded images are
   validated and completely decoded like other covers and staged under the same
   staged-upload lifecycle; identical ones are staged once, and each import
-  stages a bounded number of them. While the cover choice is automatic, any
-  Album decision other than create deselects every automatic cover. Unless it is
-  selected or a publication uses or locks it, an automatically staged cover
-  candidate is cleaned up automatically through the existing cleanup lifecycle
-  once the import completes. A cleaned-up candidate's record remains until
-  deletion is confirmed, a retry uses the original intent, and a failure becomes
-  needs attention.
+  stages a bounded number of them. A failed fetch or staging, or one whose
+  outcome is unknown, keeps the current cover choice and Publish never waits for
+  it; an unknown staging keeps its record until reopening or completing the
+  import reconciles it, and a cover it confirms then follows this bullet's
+  selection and cleanup rules. While the cover choice is automatic, choosing no
+  candidate selects the shared embedded image, if any, instead of the lookup
+  cover, and any Album decision other than create deselects every automatic
+  cover. Unless it is selected or a publication uses or locks it, an
+  automatically staged cover candidate is cleaned up automatically through the
+  existing cleanup lifecycle: a lookup cover once its candidate is no longer
+  applied, and any of them once the import completes. The number of lookup
+  covers kept at once is bounded. A cover that cannot be staged, because that
+  bound is reached or no current administrator grant covers it, is skipped like
+  a failed fetch: the current cover choice stays, and Publish never waits for
+  it. A cleaned-up candidate's record remains until deletion is confirmed, a
+  retry uses the original intent, and a failure becomes needs attention.
 - Publishing a new Album requires at least one primary Artist entry, and
   appending requires a target Album that has a primary Artist Credit. It creates
   the Album's Credits in draft order: each Artist entry as an Album primary or
@@ -1602,11 +1616,11 @@ The wire protocol and operational bounds are documented in
   matching groups, a conflict with the administrator's own value, a MusicBrainz
   ID conflict or an identity candidate that is not preselected needs an answer.
   Publish stays unavailable until each is answered and while any upload, lookup,
-  value application or analysis is queued or running. When the files or the
-  applied release credit only a placeholder such as Various Artists and a new
-  Album has no primary Artist entry, the summary says at once that the import
-  cannot be published yet. The Draft, Review, Files and Publish sections remain
-  available for manual work.
+  value application, cover staging or analysis is queued or running. When the
+  files or the applied release credit only a placeholder such as Various Artists
+  and a new Album has no primary Artist entry, the summary says at once that the
+  import cannot be published yet. The Draft, Review, Files and Publish sections
+  remain available for manual work.
 - The publication confirmation lists everything that becomes catalog content:
   the title, the ordered Artist entries with their roles and join phrases, the
   label, the date, the full disc and track list with titles, the cover, the
@@ -1682,14 +1696,15 @@ The wire protocol and operational bounds are documented in
   terms taken from earlier results of the same lookup, and embedded identifiers;
   every identifier or barcode used in a query must match its expected format. An
   automatic lookup never sends file names, sends a folder name only when no
-  usable tags exist, and no lookup sends account data or audio. The server
-  follows no link found in a lookup response. Metadata lookup never downloads
-  audio, audio previews or streams from any service, and audio-preview and store
-  links are discarded before results are stored. The lookup box is not listener
-  Search: it keeps no search history and does not restore global music search to
-  the administration layout.
+  usable tags exist, and no lookup sends account data or audio. Apart from
+  artwork from the fixed artwork-host allowlist, the server follows no link
+  found in a lookup response. Metadata lookup never downloads audio, audio
+  previews or streams from any service, and audio-preview and store links are
+  discarded before results are stored. The lookup box is not listener Search: it
+  keeps no search history and does not restore global music search to the
+  administration layout.
 - Metadata lookup uses these sources in order:
-  - MusicBrainz is the primary source.
+  - MusicBrainz is the primary source, with Cover Art Archive for artwork.
   - Deezer, Spotify and other services are not used.
 - Metadata lookup responses are untrusted data. Each source is bounded in time
   and size, and its request-rate and concurrency bounds apply across the whole
@@ -1799,6 +1814,18 @@ The wire protocol and operational bounds are documented in
   it. Other candidates and all iTunes evidence and identifiers are never sent to
   Luna. Luna never chooses an identity, supplies a MusicBrainz ID, selects a
   release or presents its values as lookup evidence.
+- Metadata lookup artwork is Cover Art Archive artwork from a fixed allowlist of
+  artwork hosts. The server fetches artwork only from those hosts, including
+  after every redirect, and within size and pixel bounds. Candidate previews are
+  transient: the server shows them through protected administrator image
+  delivery that stores no bytes and sends no credentials to the artwork host,
+  and the browser never loads a lookup address directly. To use an applied
+  release's front artwork as a new Album's cover, the server validates and
+  completely decodes it, then stages it as a cover candidate under the existing
+  staged-upload lifecycle and selects it as described in Administrator Album
+  Imports; a failed fetch or staging, or one whose outcome is unknown, keeps the
+  current cover choice. Metadata lookup never creates an external artwork
+  reference.
 - Metadata lookup results and evidence are bounded private project data that
   only current administrators can read.
 

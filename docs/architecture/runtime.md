@@ -162,7 +162,8 @@ normal error handling; already-admitted business work remains tracked until it s
 
 After the listener opens, startup starts the administrator background workers:
 Luna analysis, import publication (which also cleans up automatic cover
-candidates of completed imports), existing-catalog covers and metadata lookup.
+candidates of completed imports and stages and cleans up lookup covers),
+existing-catalog covers and metadata lookup.
 Each polls every two seconds and runs at most one pass at a time through the
 lifecycle tracker, so that pass counts as admitted business work. Draining
 aborts each worker's signal, which cancels an in-flight metadata lookup
@@ -270,6 +271,21 @@ the record (and, for the worker and a re-rank, the gate). Automatic writes
 bump only `valueRevision`; a choice or an answer also takes its receipt's
 `revision`. File-tag automation reads the record's applied values in its own
 transaction, so it never replaces them; no index is added.
+
+An application whose release reports front artwork also records the import's
+lookup cover job, `media.lookupCover`, in the same transaction; it is never
+projected and never changes `revision`. The publication worker runs the lookup
+cover pass (`runLookupCoverPassOnce` in
+`src/administration/import/adminImportLookupCover.ts`) on ticks that publish
+and sweep nothing, because it owns private storage: one import whose job is
+due, under a five-minute lease that a stopped pass leaves to expire. The
+optional index `admin_import_lookup_cover_worker`
+(`{ 'media.lookupCover.due': 1, 'media.lookupCover.leaseUntil': 1 }`) serves
+its claim; it is no constraint, so its failure is only a startup diagnostic and
+`requiredIndexRevision` does not change. Candidate artwork previews are
+read-only apart from the shared gate's bookkeeping in
+`adminMetadataLookupGates`: they write no import, lookup or catalog document
+and no storage object.
 
 MusicBrainz IDs add two required unique partial indexes,
 `artist_musicbrainz_id` on `artists` and `organization_musicbrainz_id` on

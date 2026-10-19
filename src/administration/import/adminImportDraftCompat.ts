@@ -26,7 +26,7 @@
  * pure: they never write back and never mutate their input, and every projection is total (it never throws).
  */
 import { createHash } from 'node:crypto';
-import { ADMIN_IMPORT_LIMITS as LIMITS, objectId, parseImportDate, uuid, type AdminImportDetail, type ImportAnalysisState, type ImportDate, type ImportDecisionDtoV2, type ImportDraft, type ImportDuplicateDecision, type ImportEmbeddedTags, type ImportIssue, type ImportManifest, type ImportPublishedV2, type ImportReceipt, type ImportSuggestion, type ImportValue } from './adminImportContract';
+import { ADMIN_IMPORT_LIMITS as LIMITS, isLookupCoverSlot, objectId, parseImportDate, uuid, type AdminImportDetail, type ImportAnalysisState, type ImportDate, type ImportDecisionDtoV2, type ImportDraft, type ImportDuplicateDecision, type ImportEmbeddedTags, type ImportIssue, type ImportManifest, type ImportPublishedV2, type ImportReceipt, type ImportSuggestion, type ImportValue } from './adminImportContract';
 import { importFormatVersion, type ImportAsset, type ImportPublication } from './adminImportMediaTypes';
 import { isPlaceholderCredit, normalizeMusicBrainzId } from '../lookup/lookupIdentifiers';
 import { DRAFT_V2_LIMITS, hasOwn, originKey, type ImportArtistEntry, type ImportDecisionV2, type ImportDraftOrigins, type ImportDraftV2, type ImportLabelEntry, type ImportSuggestionV2 } from './adminImportDraft';
@@ -277,11 +277,14 @@ export function importDecisionsV2View(raw: unknown, slots: ReadonlySet<string>, 
     return decisions.slice(0, DRAFT_V2_LIMITS.decisions);
 }
 
-/** Only assets on a v1 slot, in a v1 state and lifecycle, with a valid identity are shown to a v1 client. */
+/**
+ * Only assets on a v1 slot, an embedded slot of a manifest file or a lookup cover slot (unless removed: removed lookup covers are
+ * never shown, which keeps the DTO within 205 assets), in a v1 state and lifecycle, with a valid identity are shown to a v1 client.
+ */
 export function legacyAssetVisible(asset: ImportAsset, slots: ReadonlySet<string>): boolean {
     if (!isRecord(asset)) return false;
     const slot: unknown = asset.slotId, recovery = isRecord(asset.recovery) ? asset.recovery : undefined;
-    return typeof slot === 'string' && (slot === 'cover' || slots.has(slot) || (slot.startsWith('embedded-') && slots.has(slot.slice(9))))
+    return typeof slot === 'string' && (slot === 'cover' || slots.has(slot) || (slot.startsWith('embedded-') && slots.has(slot.slice(9))) || (isLookupCoverSlot(slot) && asset.state !== 'deleted'))
         && oneOf(asset.state, assetStates) && oneOf(recovery?.kind ?? 'upload', ['upload', 'cleanup'] as const)
         && typeof asset.sha256 === 'string' && /^[a-f0-9]{64}$/.test(asset.sha256) && count(asset.byteLength) !== null && typeof asset.contentType === 'string'
         && uuid(recovery?.operationId ?? asset.operationId) && count(recovery?.expectedRevision ?? 1) !== null;

@@ -21,11 +21,12 @@ be completed solely through application code.
 ## Administrator Metadata Lookup Rollout
 
 Status: Lookup jobs run on the server once an import's uploads complete and
-apply a preselected release's values to the draft; Publish waits while a run
-is active, a tie is unresolved or a conflict with an administrator's own value
-is unanswered. The Web Review and publish summary shows each run's status,
-ties and conflicts, takes a submitted Album or song name and offers a manual
-retry. Without the contact below, nothing is sent and no lookup starts.
+apply a preselected release's values to the draft, staging its Cover Art
+Archive front artwork as a cover candidate; Publish waits while a run or that
+staging is active, a tie is unresolved or a conflict with an administrator's
+own value is unanswered. The Web Review and publish summary shows each run's
+status, ties and conflicts, takes a submitted Album or song name and offers a
+manual retry. Without the contact below, nothing is sent and no lookup starts.
 
 - [ ] Set `FINITUDE_ADMIN_METADATA_LOOKUP_CONTACT` in production to an operator
       email address or https URL before metadata lookup is enabled for

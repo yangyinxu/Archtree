@@ -18,6 +18,7 @@
  *   - a discarded slot leaves the running queue and its remembered intent, and a later Resume cannot send it
  *   - reselection matches relative path and size, reports mismatches, and a changed file is refused without dispatching bytes
  *   - reopening reconciles unknown uploads with their original intent and no bytes, and skips while the queue runs
+ *   - reopening reconciles a lookup cover staging of unknown outcome under its own intent, with its slot encoded and no bytes
  *   - an outdated strict response requires a reload and stops the queue without retrying
  *   - the multipart body keeps a Unicode filename and a normalized media type for the server parser
  *   - a view change after reconciliation aborts the resend before dispatch and stops the queue as view
@@ -256,6 +257,17 @@ test('reopening reconciles unknown uploads with their original intent and no byt
   running.start(busy, files(), adminWorkspace.capture()); await vi.waitFor(() => expect(held.requests).toHaveLength(1));
   await running.reconcileOnOpen({ ...busy, assets: [asset(slotTwo, 'unknown')] }, adminWorkspace.capture());
   expect(held.requests.some(request => request.reconcile)).toBe(false); gate.resolve(); await settle(running);
+});
+
+test('reopening reconciles a lookup cover staging of unknown outcome under its own intent, with its slot encoded and no bytes', async () => {
+  const item = project(), lookupSlot = 'lookup-musicbrainz:0000000b-0000-4000-8000-000000000001', staging = '40000000-0000-4000-8000-000000000007';
+  item.assets = [{ slotId: lookupSlot, state: 'unknown', byteLength: 100, sha256: 'a'.repeat(64), contentType: 'image/jpeg', tags: null, recovery: { operationId: staging, expectedRevision: 2, kind: 'upload', startedByMe: false } }];
+  const server = serve(item, () => ({ state: 'ready' })), queue = importUploadQueue(item.id);
+  await queue.reconcileOnOpen(item, adminWorkspace.capture());
+  expect(server.requests.map(request => [request.slot, request.reconcile, JSON.parse(String(request.init.body))])).toEqual([[lookupSlot, true, { operationId: staging }]]);
+  expect(server.requests[0].path).toMatch(new RegExp(`/assets/${encodeURIComponent(lookupSlot)}/reconcile$`));
+  expect(header(server.requests[0], 'Idempotency-Key')).toBeNull();
+  expect(queue.getSnapshot().latest?.assets.map(asset => [asset.slotId, asset.state])).toEqual([[lookupSlot, 'ready']]);
 });
 
 test('an outdated strict response requires a reload and stops the queue without retrying', async () => {

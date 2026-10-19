@@ -12,7 +12,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useLocalization } from '../../localization/LocalizationProvider';
 import type { MessageKey } from '../../localization/contract';
 import { useAdminAccess, useAdminText } from './AdminAccess';
-import { importPath, type ImportDetail, type ImportDraftV2 } from './adminApi';
+import { importPath, lookupCoverName, type ImportDetail, type ImportDraftV2 } from './adminApi';
 import { adminWorkspace } from './adminWorkspace';
 import { entriesByline } from './artistEntriesByline';
 import { approvalTrackOrder } from './importTrackOrder';
@@ -105,7 +105,7 @@ export function ImportSummary({ item, operation, uploads, disabled, publishDisab
   const on = suggestions.filter(suggestion => ticked(suggestion, ticks.get(suggestion.id), toggles, changed)).map(suggestion => suggestion.id);
   const toggle = (suggestion: string, value: boolean) => { const next = { ...toggles, [suggestion]: value }; setToggles(next); adminWorkspace.retain(lunaTicksKey(item.id), next, access); };
   // This browser's own upload queue holds Publish too, before the server has seen its transfers.
-  const waiting = summary ? (['uploads', 'lookup', 'analysis'] as const).filter(work => summary.waiting[work] || (work === 'uploads' && uploads.running)) : [];
+  const waiting = summary ? (['uploads', 'lookup', 'cover', 'analysis'] as const).filter(work => summary.waiting[work] || (work === 'uploads' && uploads.running)) : [];
   const identities = summary?.identityAnswers ?? 0, answers = (tie ? 1 : 0) + open.length + identities, locked = ['preparing', 'needsAttention', 'complete'].includes(item.publication);
   const placeholder = summary?.placeholderOnly && !draft.album.artists.some(entry => entry.role === 'primary');
   const notApplied = (text: string) => append ? `${text} · ${t('publication.not_applied')}` : text;
@@ -121,7 +121,7 @@ export function ImportSummary({ item, operation, uploads, disabled, publishDisab
       {lookup && lookup.staleFiles.length > 0 && <p>{t('lookup.stale_files', { count: lookup.staleFiles.length })}</p>}
       {steps.length > 0 && <div className={styles.actions}>{steps.map((kind, index) => step(kind, !index))}</div>}
       {available && <Suspense fallback={null}><LookupBox key={lookup?.run ?? 0} lookup={lookup} rootLabel={item.manifest.rootLabel} disabled={disabled} onSubmit={(kind, text) => run('lookup', { kind, text })} /></Suspense>}
-      {lookup?.state === 'complete' && lookup.candidates.length > 0 && <Suspense fallback={null}><CandidateChooser lookup={lookup} disabled={disabled} onChoose={key => run('lookup/choose', { run: lookup.run, candidateKey: key })} /></Suspense>}
+      {lookup?.state === 'complete' && lookup.candidates.length > 0 && <Suspense fallback={null}><CandidateChooser importId={item.id} viewerId={access.viewerId} lookup={lookup} disabled={disabled} onChoose={key => run('lookup/choose', { run: lookup.run, candidateKey: key })} /></Suspense>}
       {open.length > 0 && <section aria-labelledby={`${id}-conflicts`}><h3 id={`${id}-conflicts`}>{t('summary.conflicts')}</h3><ul className={styles.cards}>{open.map(conflict =>
         <li key={conflict.path} className={styles.card}><strong id={`${id}-${conflict.path}`}>{conflict.musicBrainzId ? t('summary.musicbrainz_id_conflict', { field: label(conflict.path) }) : label(conflict.path)}</strong>
           <dl className={styles.diff}><div><dt>{t('summary.yours')}</dt><dd>{(conflict.musicBrainzId ? idText : valueText)(valueAt(item.draft, conflict.path))}</dd></div><div><dt>{t('summary.lookup_value')}</dt><dd>{(conflict.musicBrainzId ? idText : valueText)(conflict.lookup)}</dd></div></dl>
@@ -148,7 +148,7 @@ export function ImportSummary({ item, operation, uploads, disabled, publishDisab
         <div><dt><label htmlFor={`${id}-visibility`}>{t('field.visibility')}</label></dt><dd><select id={`${id}-visibility`} value={draft.album.visibility} disabled={disabled || append || locked}
           onChange={event => operation.run(path, 'PATCH', { expectedRevision: item.revision, changes: [{ path: 'album.visibility', base: item.draft.album.visibility, value: event.target.value }] })}>
           {(['public', 'hidden'] as const).map(value => <option key={value} value={value}>{t(`field.${value}`)}</option>)}</select>{append && ` · ${t('publication.not_applied')}`}</dd></div>
-        <div><dt>{t('layout.selected_cover')}</dt><dd>{notApplied([cover === null ? t('media.no_cover') : cover === 'cover' ? t('media.manual_cover') : t('media.cover_candidate'),
+        <div><dt>{t('layout.selected_cover')}</dt><dd>{notApplied([cover === null ? t('media.no_cover') : cover === 'cover' ? t('media.manual_cover') : cover.startsWith('lookup-') ? lookupCoverName(t('media.lookup_cover'), cover) : t('media.cover_candidate'),
           item.coverChoice === 'automatic' && cover !== null && t('summary.cover_automatic')].filter(Boolean).join(' · '))}</dd></div>
         <div><dt>{t('summary.tracks')}</dt><dd><ol>{approvalTrackOrder(draft.tracks).map(track => <li key={track.slotId}>{[t('publication.track_position', { disc: String(track.discNumber ?? 1), track: track.trackNumber === null ? '—' : String(track.trackNumber) }), track.title || t('common.untitled')].join(' · ')}</li>)}</ol></dd></div>
         <div><dt>{t('summary.identities')}</dt><dd>{t('summary.identities_saved', { count: item.decisions.length })}</dd></div>

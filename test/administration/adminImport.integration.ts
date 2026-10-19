@@ -1117,7 +1117,7 @@ test('the summary state is computed by the server: a public default changed in p
     const summary = async () => (await getAdminImportLookup(by, id)).summary;
     // Nothing is named yet, so the new Album and its track are preselected and no identity row needs an answer. Without an
     // operator contact this server cannot run metadata lookup.
-    assert.deepEqual(await summary(), { append: false, waiting: { uploads: true, lookup: false, analysis: false }, placeholderOnly: false, luna: [], analysis: { runs: 2, attempts: 22, daily: 220 },
+    assert.deepEqual(await summary(), { append: false, waiting: { uploads: true, lookup: false, cover: false, analysis: false }, placeholderOnly: false, luna: [], analysis: { runs: 2, attempts: 22, daily: 220 },
         lookupAvailable: false, identityAnswers: 0 });
     assert.equal((await getAdminImportLookup(by, id, () => ({ available: true, userAgent: 'Synthetic/1.0' }))).summary.lookupAvailable, true);
     // Visibility is changed in place by an ordinary field save, and back.
@@ -1129,7 +1129,7 @@ test('the summary state is computed by the server: a public default changed in p
     await settle(provider);
     const done = await getAdminImport(by, id), title = done.item.suggestions.find(value => value.field === 'title')!;
     // The empty title's suggestion arrives ticked; two provider calls are spent from the project and the day.
-    assert.deepEqual(await summary(), { append: false, waiting: { uploads: true, lookup: false, analysis: false }, placeholderOnly: false, luna: [{ id: title.id, tick: 'ticked' }], analysis: { runs: 1, attempts: 20, daily: 218 },
+    assert.deepEqual(await summary(), { append: false, waiting: { uploads: true, lookup: false, cover: false, analysis: false }, placeholderOnly: false, luna: [{ id: title.id, tick: 'ticked' }], analysis: { runs: 1, attempts: 20, daily: 218 },
         lookupAvailable: false, identityAnswers: 0 });
     assert.equal(analyzed.item.analysis.generation, 1);
     // A ready Album already named like the saved title is a candidate: the Album is no longer preselected, nor is its track.

@@ -9,6 +9,7 @@
  *   - needsAnswer and blocking show a tie until a choice, unanswered conflicts, and ignore Album conflicts once an explicit Album reuse makes it an append
  *   - a partial comparison is disclosed, and its single matching group is offered without a preselection but needs no answer
  *   - the view never carries what the strict Web schema refuses: an impossible calendar date shows as unknown and a repeated difference once
+ *   - a candidate shows a front-artwork preview only when its fetched release reports one, and never an address
  * @end-catalog */
 
 /**
@@ -77,7 +78,7 @@ test('the view allowlists evidence: no link, ISRC, recording ID, account, grant,
     assert.deepEqual(view.candidates[0], { key: `musicbrainz:${mbid(1)}`, releaseId: mbid(1), status: 'matching', title: 'Synthetic Album', artist: 'Synthetic Lead & Synthetic Second',
         label: 'Label 1', catalogNumber: 'SYN-001', barcode: '4006381333931', country: 'JP', date: { year: 2021, month: 5, day: 1 }, formats: ['CD'], trackCount: 2,
         comparison: { trackCount: { local: 2, candidate: 2 }, discCount: { local: null, candidate: 1 }, differences: [], unknownLocalDurations: 0, unknownCandidateDurations: 0 },
-        groupKey: view.groups[0].groupKey, artistMismatch: false });
+        groupKey: view.groups[0].groupKey, artistMismatch: false, artwork: true });
     assert.deepEqual([view.run, view.state, view.issue, view.outcome, view.input, view.preselection, view.disclosure, view.staleFiles],
         [2, 'complete', null, 'candidates', { trigger: 'submitted', submitted: { kind: 'album', text: 'Synthetic Album' } },
             { candidateKey: `musicbrainz:${mbid(1)}`, basis: 'onlyMatchingGroup', artistMismatch: false }, { unknownLocalDurations: 0, unknownLocalDiscNumbers: 2, partialComparison: false }, [slot(1)]]);
@@ -171,4 +172,15 @@ test('the view never carries what the strict Web schema refuses: an impossible c
     for (const [date, shown] of [[{ year: 2020, month: 2, day: 29 }, true], [{ year: 2000, month: 2, day: 29 }, true], [{ year: 1900, month: 2, day: 29 }, false],
         [{ year: 2021, month: 4, day: 31 }, false], [{ year: 2021, month: 2, day: null }, true], [{ year: 2021, month: null, day: null }, true], [{ year: 2021, month: null, day: 1 }, false]] as const)
         assert.deepEqual(importLookupView(record(doc, [stored(release(2, { date }))]), doc)!.candidates[0].date, shown ? date : null, JSON.stringify(date));
+});
+
+test('a candidate shows a front-artwork preview only when its fetched release reports one, and never an address', () => {
+    const doc = project();
+    const candidates = [stored(release(1)), stored(release(2, { frontArtwork: false })), stored(release(3, { frontArtwork: null })), stored(release(4), 'pending'),
+        { ...stored(release(5)), release: { ...release(5), frontArtwork: 'true' as unknown as boolean } }];
+    const view = importLookupView(record(doc, candidates), doc)!;
+    assert.deepEqual(Object.fromEntries(view.candidates.map(candidate => [candidate.releaseId, candidate.artwork])),
+        { [mbid(1)]: true, [mbid(2)]: false, [mbid(3)]: false, [mbid(4)]: false, [mbid(5)]: false });
+    const text = JSON.stringify(view);
+    for (const address of ['coverartarchive', 'archive.org', 'front-', '://']) assert.equal(text.includes(address), false, address);
 });

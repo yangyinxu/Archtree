@@ -13,6 +13,7 @@ import { catalogSearchCollections } from '../utils/catalogSearch';
 import { adminImportIndexes } from '../administration/import/adminImportService';
 import { adminConversionIndexes } from '../administration/conversion/conversionService';
 import { metadataLookupIndexes } from '../administration/lookup/lookupContract';
+import { adminImportLookupCoverIndexes } from '../administration/import/adminImportMediaTypes';
 import { MUSICBRAINZ_ID_INDEX_NAMES, musicBrainzIdPartialFilter } from '../utils/musicBrainzId';
 
 const catalogSearchIndexKeys: IndexSpecification[] = [
@@ -31,6 +32,8 @@ export const databaseIndexes: Array<{
     ...adminImportIndexes,
     ...adminConversionIndexes,
     ...metadataLookupIndexes,
+    // Optional: the lookup cover pass's claim stays correct without it, so it needs no required-index revision.
+    ...adminImportLookupCoverIndexes,
     { collection: 'adminCatalogCoverOperations', keys: { actor: 1, operationId: 1 }, options: { unique: true } },
     { collection: 'adminCatalogCoverOperations', keys: { 'cancellation.actor': 1, 'cancellation.operationId': 1 }, options: { unique: true, partialFilterExpression: { 'cancellation.actor': { $type: 'string' }, 'cancellation.operationId': { $type: 'string' } } }, required: true },
     { collection: 'adminCatalogCoverOperations', keys: { kind: 1, ownerId: 1, state: 1 }, required: true },

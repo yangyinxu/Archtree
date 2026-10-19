@@ -89,7 +89,10 @@ export function retryAdminImportLookup(actor: string, id: string, raw: unknown) 
     });
 }
 
-/** `{operationId, expectedRevision, run, candidateKey}`: applies a candidate of the current run, or none (`candidateKey: null`). */
+/**
+ * `{operationId, expectedRevision, run, candidateKey}`: applies a candidate of the current run, or none (`candidateKey: null`); a
+ * candidate whose release reports front artwork queues its cover staging under the chooser's fresh grant in this transaction.
+ */
 export function chooseAdminImportLookup(actor: string, id: string, raw: unknown) {
     const body = parseAdminProjectMutation(raw, ['run', 'candidateKey']), { run, candidateKey } = boundRunAndCandidate(body);
     return mutateAdminImport(actor, id, body, 'lookup-choose', async (doc, session) => {

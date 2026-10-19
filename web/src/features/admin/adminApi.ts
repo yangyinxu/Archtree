@@ -32,7 +32,7 @@ const common = { id, revision: integer, createdAt: z.string(), updatedAt: z.stri
 export const detailSchema = z.object({ ...common, manifest: manifestSchema, draft: importDraftV2Schema,
   publicationRecovery: z.object({ operationId: uuid, cleanupPending: z.boolean(), startedByMe: z.boolean() }).strict().nullable().default(null),
   suggestions: z.array(importSuggestionV2Schema).max(1000), decisions: z.array(decisionSchema).max(122),
-  assets: z.array(z.object({ slotId: z.string(), state: z.enum(['pending', 'ready', 'failed', 'unknown', 'deleting', 'cleanupFailed', 'deleted']), byteLength: integer, sha256: z.string().regex(/^[a-f0-9]{64}$/), contentType: z.string(), recovery: assetRecoverySchema.nullable().default(null), tags: tagsSchema.nullable().default(null) }).strict()).max(201).default([]),
+  assets: z.array(z.object({ slotId: z.string(), state: z.enum(['pending', 'ready', 'failed', 'unknown', 'deleting', 'cleanupFailed', 'deleted']), byteLength: integer, sha256: z.string().regex(/^[a-f0-9]{64}$/), contentType: z.string(), recovery: assetRecoverySchema.nullable().default(null), tags: tagsSchema.nullable().default(null) }).strict()).max(205).default([]),
   // The selected cover and whether it is the automatic choice (no administrator choice yet) or an explicit one.
   selectedCoverSlotId: z.string().nullable().default(null), coverChoice: z.enum(['automatic', 'explicit']).default('explicit'),
   // Every credited Artist in Credit order and the label Organization of a completed publication.
@@ -52,7 +52,7 @@ export const detailSchema = z.object({ ...common, manifest: manifestSchema, draf
     if (suggestion.generation !== item.analysis.generation || (suggestion.scope === 'album' ? suggestion.slotId !== null : !slots.has(suggestion.slotId ?? ''))) ctx.addIssue({ code: 'custom', message: 'Invalid suggestion path' });
   }
   const assets = new Set(item.assets.map(asset => asset.slotId));
-  if (assets.size !== item.assets.length || item.assets.some(asset => asset.slotId !== 'cover' && !slots.has(asset.slotId) && !(asset.slotId.startsWith('embedded-') && slots.has(asset.slotId.slice(9)))) || item.selectedCoverSlotId !== null && !item.assets.some(asset => asset.slotId === item.selectedCoverSlotId && asset.state === 'ready' && asset.contentType.startsWith('image/'))) ctx.addIssue({ code: 'custom', message: 'Invalid asset mapping' });
+  if (assets.size !== item.assets.length || item.assets.some(asset => asset.slotId !== 'cover' && !slots.has(asset.slotId) && !(asset.slotId.startsWith('embedded-') && slots.has(asset.slotId.slice(9))) && !asset.slotId.startsWith('lookup-')) || item.selectedCoverSlotId !== null && !item.assets.some(asset => asset.slotId === item.selectedCoverSlotId && asset.state === 'ready' && asset.contentType.startsWith('image/'))) ctx.addIssue({ code: 'custom', message: 'Invalid asset mapping' });
 });
 export const responseSchema = z.object({ item: detailSchema, receipt: receiptSchema.nullable() }).strict();
 export const filters = ['all', 'analyzing', 'awaitingReview', 'needsAttention', 'completed'] as const;
@@ -66,6 +66,12 @@ export type ImportDecision = z.infer<typeof decisionSchema>;
  */
 export const duplicateEditsKey = (id: string) => `duplicate-edits:${id}`;
 export interface DecisionEdits { revision: number; decisions: ImportDecision[] }
+/**
+ * A lookup cover's name: `name` (its source) and the first eight characters of its release MBID (`lookup-musicbrainz:<mbid>`), so
+ * lookup covers kept at once read apart. It lives here for the same reason as duplicateEditsKey: the import page, the summary and
+ * the checklist all load this module.
+ */
+export const lookupCoverName = (name: string, slotId: string) => [name, slotId.split(':')[1]?.slice(0, 8)].filter(Boolean).join(' · ');
 /** Whether `next` is a newer saved state than `previous`: a later revision, or the same revision with later automatic writes. */
 export const newerImport = (next: Pick<ImportDetail, 'revision' | 'valueRevision'>, previous: Pick<ImportDetail, 'revision' | 'valueRevision'>) =>
   next.revision > previous.revision || next.revision === previous.revision && next.valueRevision > previous.valueRevision;

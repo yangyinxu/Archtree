@@ -31,6 +31,8 @@ type ViewCandidate = {
     comparison: { trackCount: { local: number; candidate: number }; discCount: { local: number | null; candidate: number }; differences: LookupDifference[];
         unknownLocalDurations: number; unknownCandidateDurations: number } | null;
     groupKey: string | null; artistMismatch: boolean | null;
+    /** Whether the fetched release reports Cover Art Archive front artwork (a protected preview exists); never an address. */
+    artwork: boolean;
 };
 export type ImportLookupView = {
     run: number; state: MetadataLookupState; issue: MetadataLookupIssue | null; outcome: 'candidates' | 'noRelease' | 'noQuery' | null;
@@ -132,7 +134,8 @@ function candidateView(stored: Record<string, unknown>, ranked: Record<string, u
         trackCount: release ? list(release.media).reduce<number>((sum, medium) => sum + list(isRecord(medium) ? medium.tracks : null).length, 0) : count(summary?.trackCount),
         comparison: ranked ? comparisonView(ranked.comparison) : null,
         groupKey: ranked && typeof ranked.groupKey === 'string' && /^[a-f0-9]{64}$/.test(ranked.groupKey) ? ranked.groupKey : null,
-        artistMismatch: ranked && typeof ranked.artistMismatch === 'boolean' ? ranked.artistMismatch : null
+        artistMismatch: ranked && typeof ranked.artistMismatch === 'boolean' ? ranked.artistMismatch : null,
+        artwork: release?.frontArtwork === true
     };
 }
 

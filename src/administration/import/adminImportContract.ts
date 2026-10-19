@@ -7,14 +7,14 @@
  *          ImportDecisionDtoV2, ImportPublishedV2, AdminImportDetailV2, AdminImportResponse,
  *          ImportWorkbenchFilter, ImportWorkbenchItem, ImportWorkbenchResponse
  *   Classes: AdminImportError
- *   Functions: invalidImport, importEnabled, uuid, objectId, record, exact, cleanText, parseImportDate,
- *              parseManifest, parseDraft, defaultDraft, legacyDefaultDraftV1
+ *   Functions: invalidImport, importEnabled, uuid, objectId, isLookupCoverSlot, lookupCoverSlotId, record,
+ *              exact, cleanText, parseImportDate, parseManifest, parseDraft, defaultDraft, legacyDefaultDraftV1
  *   Constants: ADMIN_IMPORT_LIMITS, IMPORT_APPROVAL_FIELDS
  * @end-catalog */
 
 /** Allowlisted admin-only naming, review, asset and publication contract. */
 import type { ImportDraftV2, ImportSuggestionV2 } from './adminImportDraft';
-export const ADMIN_IMPORT_LIMITS = Object.freeze({ files: 100, page: 25, receipts: 256, publications: 16, generations: 2, tracksPerChunk: 10, attempts: 22, dailyAttempts: 220, outputTokens: 4000, inputBytes: 48_000, responseBytes: 256_000, grantMs: 24 * 60 * 60 * 1000, leaseMs: 120_000, embeddedCovers: 16, uploadSettleMs: 180_000 });
+export const ADMIN_IMPORT_LIMITS = Object.freeze({ files: 100, page: 25, receipts: 256, publications: 16, generations: 2, tracksPerChunk: 10, attempts: 22, dailyAttempts: 220, outputTokens: 4000, inputBytes: 48_000, responseBytes: 256_000, grantMs: 24 * 60 * 60 * 1000, leaseMs: 120_000, embeddedCovers: 16, lookupCovers: 4, uploadSettleMs: 180_000 });
 export type ImportDate = { year: number; month: number | null; day: number | null };
 export type ImportManifest = { rootLabel: string; files: { slotId: string; filename: string; relativePath: string; byteLength: number | null }[] };
 export type ImportDraft = { album: { title: string; artistName: string; releaseDate: ImportDate | null; visibility: 'public' | 'hidden' }; tracks: { slotId: string; title: string; trackNumber: number | null }[] };
@@ -99,6 +99,10 @@ export const invalidImport = (): never => { throw new AdminImportError(400, 'ADM
 export const importEnabled = () => process.env.FINITUDE_ADMIN_IMPORTS_ENABLED === 'true';
 export const uuid = (value: unknown): value is string => typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 export const objectId = (value: unknown): value is string => typeof value === 'string' && /^[0-9a-f]{24}$/.test(value);
+/** The staged front artwork of one metadata lookup candidate (`lookup-musicbrainz:<release MBID>`, adminImportLookupCover.ts). */
+export const isLookupCoverSlot = (slotId: unknown): slotId is string => typeof slotId === 'string'
+    && /^lookup-musicbrainz:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(slotId);
+export const lookupCoverSlotId = (candidateKey: string) => `lookup-${candidateKey}`;
 export const record = (value: unknown): Record<string, unknown> => { if (!value || typeof value !== 'object' || Array.isArray(value)) return invalidImport(); return value as Record<string, unknown>; };
 export const exact = (value: Record<string, unknown>, keys: string[]) => { if (Object.keys(value).some(key => !keys.includes(key))) invalidImport(); };
 export const cleanText = (value: unknown, max: number, empty = false): string => {

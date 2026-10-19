@@ -260,6 +260,19 @@ test('assets outside the v1 slots, states, lifecycles or identities are hidden f
     for (const change of [{ slotId: 'lookup-1' }, { slotId: 'embedded-unknown' }, { state: 'staging' }, { recovery: { ...audio.recovery, kind: 'automatic' } }, { sha256: audio.sha256.toUpperCase() }, { byteLength: -1 }, { recovery: { ...audio.recovery, operationId: 'nope' } }]) {
         assert.equal(legacyAssetVisible({ ...audio, ...change } as typeof audio, slots), false, JSON.stringify(change));
     }
+    // A lookup cover is shown in every state but removed; a malformed lookup slot never is.
+    const lookup = { ...audio, slotId: 'lookup-musicbrainz:0000000b-0000-4000-8000-000000000001', contentType: 'image/jpeg' };
+    for (const state of ['pending', 'ready', 'failed', 'unknown', 'deleting', 'cleanupFailed'] as const) assert.equal(legacyAssetVisible({ ...lookup, state }, slots), true, state);
+    assert.equal(legacyAssetVisible({ ...lookup, state: 'deleted' }, slots), false);
+    for (const slotId of ['lookup-musicbrainz:0000000B-0000-4000-8000-000000000001', 'lookup-musicbrainz:x', 'lookup-itunes:1', 'lookup-', `lookup-musicbrainz:0000000b-0000-4000-8000-000000000001/x`]) {
+        assert.equal(legacyAssetVisible({ ...lookup, slotId }, slots), false, slotId);
+    }
+    // In the projections, a ready lookup cover can be the selected cover; its removed record never shows.
+    const projected = { ...doc, media: { ...doc.media!, assets: [...doc.media!.assets, { ...lookup, state: 'ready' as const }, { ...lookup, slotId: 'lookup-musicbrainz:0000000b-0000-4000-8000-000000000002', state: 'deleted' as const }],
+        selectedCoverSlotId: lookup.slotId } } as AdminImportDocument;
+    const dto = adminImportDto(projected, doc.actorId);
+    assert.deepEqual(dto.assets.filter(asset => asset.slotId.startsWith('lookup-')).map(asset => asset.slotId), [lookup.slotId]);
+    assert.equal(dto.selectedCoverSlotId, lookup.slotId);
 });
 
 test('catalog review sources keep known fields and a captured Disc Number, applied evidence keeps disc fields and is never dropped', () => {

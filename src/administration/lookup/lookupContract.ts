@@ -5,6 +5,7 @@
  *          MusicBrainzRecordingHit, MusicBrainzIsrcResult, ItunesCollection, ItunesTrack, ItunesSearchResult,
  *          CoverArtListing, LookupSourceFailure, LookupInputProblem, LookupEntityAliases
  *   Classes: MetadataLookupSourceError, MetadataLookupInputError
+ *   Functions: isLookupCandidateKey
  *   Constants: metadataLookupSources, METADATA_LOOKUP_RATES, METADATA_LOOKUP_LIMITS, METADATA_LOOKUP_RETRY,
  *              METADATA_LOOKUP_HOSTS, ITUNES_STOREFRONTS, ADMIN_IMPORT_LOOKUP_COLLECTION,
  *              METADATA_LOOKUP_JOB_LIMITS, metadataLookupIndexes
@@ -16,9 +17,10 @@ import type { ImportDate } from '../import/adminImportContract';
 
 /**
  * Fixed sources, hosts, bounds and evidence types of administrator metadata lookup. The lookup
- * worker (metadataLookupService.ts) calls the MusicBrainz client; the iTunes and Cover Art Archive
- * clients wait for later stages. Every value here is server-chosen; no administrator input can
- * change a host, a rate or a size bound.
+ * worker (metadataLookupService.ts) calls the MusicBrainz client; the Cover Art Archive client
+ * fetches only a release's front artwork, for candidate previews and the lookup cover pass
+ * (adminImportLookupCover.ts); the iTunes client waits for a later stage. Every value here is
+ * server-chosen; no administrator input can change a host, a rate or a size bound.
  */
 export const metadataLookupSources = ['musicbrainz', 'itunes', 'coverartarchive'] as const;
 export type MetadataLookupSource = typeof metadataLookupSources[number];
@@ -42,6 +44,10 @@ export const METADATA_LOOKUP_LIMITS = Object.freeze({
     musicBrainzBytes: 2 * 1024 * 1024,
     itunesBytes: 1024 * 1024,
     coverArtBytes: 256 * 1024,
+    /** One front-artwork thumbnail; clamped at use to the cover upload bound (maxCoverArtInputBytes). */
+    artworkBytes: 4 * 1024 * 1024,
+    /** A candidate preview's whole deadline: gate, every hop, the body and the WebP conversion. */
+    artworkPreviewDeadlineMs: 20_000,
     /** Recordings per recording search page. */
     searchLimit: 25,
     /** Releases per release search page: the run admits the plausible editions among them first (lookupRunStep.ts). */
@@ -117,6 +123,10 @@ export type ItunesTrack = { trackId: string; collectionId: string; collectionNam
     discNumber: number | null; discCount: number | null; trackNumber: number | null; trackTimeMillis: number | null };
 export type ItunesSearchResult = { collections: ItunesCollection[]; tracks: ItunesTrack[] };
 export type CoverArtListing = { releaseId: string; images: { imageId: string; front: boolean; back: boolean; approved: boolean; types: string[]; sizes: (250 | 500 | 1200)[] }[] };
+
+/** A stored candidate's key: `musicbrainz:<release MBID>` in lower case. */
+export const isLookupCandidateKey = (value: unknown): value is string => typeof value === 'string'
+    && /^musicbrainz:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value);
 
 export type LookupSourceFailure = 'notConfigured' | 'busy' | 'rateLimited' | 'unavailable' | 'invalidResponse' | 'cancelled';
 const failureCodes: Record<LookupSourceFailure, string> = {
