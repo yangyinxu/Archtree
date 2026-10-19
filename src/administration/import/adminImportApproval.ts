@@ -9,13 +9,15 @@ import { DRAFT_V2_LIMITS, hasOwn, retainBoundDecisions, type ImportDraftV2 } fro
 import { importDraftV2View } from './adminImportDraftCompat';
 import { importCoverSelectable } from './adminImportMediaTypes';
 import { adminImportDetail, parseImportDecisions, reusesOneArtistTwice, type AdminImportDocument } from './adminImportService';
+import { shownPreselectionKey } from './adminImportIdentity';
 import { applyAdministratorChanges, boundDraftChanges, boundedJson, draftWithinSizeLimit, parseDraftChanges, storedDraftV2 } from './adminImportValueState';
 
 /**
  * Bounds a publish body's approval fields before its intent is fingerprinted: changes as a field save bounds them (none allowed),
  * decisions as /decisions bounds them (at most 122 flat records of at most 1 KB, two entries never reusing one Artist), a cover
- * slot and a digest of at most 64 characters. A body that predates one-step approval has none of them and passes; every body this
- * release admits passes, so a lost-response replay is never refused.
+ * slot and a digest of at most 64 characters, and the optional shown `preselections` as at most 122 well-formed preselections
+ * (shownPreselectionKey). A body that predates one-step approval has none of them and passes; every body this release admits
+ * passes, so a lost-response replay is never refused.
  */
 export function boundImportApproval(body: Record<string, unknown>): void {
     if (hasOwn(body, 'changes')) boundDraftChanges(body.changes, 0);
@@ -23,6 +25,8 @@ export function boundImportApproval(body: Record<string, unknown>): void {
         || body.decisions.some(item => !boundedJson(item, 1, 1_000)) || reusesOneArtistTwice(body.decisions))) invalidImport();
     if (hasOwn(body, 'selectedCoverSlotId') && body.selectedCoverSlotId !== null && (typeof body.selectedCoverSlotId !== 'string' || body.selectedCoverSlotId.length > 64)) invalidImport();
     if (hasOwn(body, 'approvalDigest') && (typeof body.approvalDigest !== 'string' || body.approvalDigest.length > 64)) invalidImport();
+    if (hasOwn(body, 'preselections') && (!Array.isArray(body.preselections) || body.preselections.length > DRAFT_V2_LIMITS.decisions
+        || body.preselections.some(item => !boundedJson(item, 1, 1_000) || shownPreselectionKey(item) === null))) invalidImport();
 }
 
 /**

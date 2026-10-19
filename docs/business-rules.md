@@ -1509,17 +1509,33 @@ The wire protocol and operational bounds are documented in
   becomes needs attention without dispatching another provider request.
 - Name matches, identical bytes, external identifiers and matching durations are
   candidates, not proof of Artist or Organization identity, Album edition, or
-  recording identity. Unless the import appends to an existing Album, each draft
+  recording identity. Candidates load automatically, matching names
+  case-insensitively. Unless the import appends to an existing Album, each draft
   Artist entry and any label need their own decision, and two entries cannot
   reuse one Artist. A decision binds its entry and that entry's name: reordering
   the entry or changing its role or join phrase keeps it, while renaming or
   removing the entry or the label clears it. Applying a replacement Artist list
-  keeps decisions only for unchanged entries. Administrators explicitly choose
-  reuse, skip, append missing members, or create a distinct entry. Luna never
-  chooses or preselects an identity. No automatic merge, deletion of catalog
-  content, catalog media or uploaded source audio, media replacement, or
-  reassignment of a Track to a different Album is permitted. Unhashed historical
-  assets remain unverified.
+  keeps decisions only for unchanged entries. A decision that this section
+  preselects needs no explicit answer, even when other candidates are shown;
+  otherwise administrators explicitly choose reuse, skip, append missing
+  members, or create a distinct entry. Luna never chooses or preselects an
+  identity. No automatic merge, deletion of catalog content, catalog media or
+  uploaded source audio, media replacement, or reassignment of a Track to a
+  different Album is permitted. Unhashed historical assets remain unverified.
+- For each Artist entry and the label, create is preselected when no candidate
+  exists. Each preselected create is rechecked when approved and when published.
+  At approval, a new name candidate requires a fresh review. A publication that
+  finds such a candidate becomes needs attention without minting identities, and
+  cancelling it permits a fresh review.
+- The Album is preselected as create when no Album name candidate exists, and
+  that create is rechecked like a preselected Artist create. An Album name
+  candidate is shown as a possible duplicate Album that needs an explicit
+  choice. A ready MediaTrack on another Album whose bytes match a staged file is
+  flagged as a possible duplicate and never collapsed, but it needs no answer by
+  itself. The Tracks of a new Album are preselected as create, since a Track
+  never moves to another Album. When appending, a file whose bytes match a
+  MediaTrack on that Album is preselected as reuse, a name-only match needs an
+  explicit choice, and a file with no candidate is preselected as a new member.
 - Embedded images are validated and completely decoded like other covers and
   staged under the same staged-upload lifecycle; identical ones are staged
   once, and each import stages a bounded number of them.

@@ -1,4 +1,5 @@
-import type { ImportArtistEntry, ImportCandidate, ImportDetail, ImportDraftV2, ImportLabelEntry } from './adminApi';
+import type { ImportArtistEntry, ImportDetail, ImportDraftV2, ImportLabelEntry } from './adminApi';
+import type { ImportCandidate } from './importIdentity';
 export const viewer = 'aaaaaaaaaaaaaaaaaaaaaaaa';
 export const projectId = 'bbbbbbbbbbbbbbbbbbbbbbbb';
 export const slotId = '10000000-0000-4000-8000-000000000001';
@@ -36,7 +37,7 @@ export function applyDraftChanges(draft: ImportDraftV2, changes: { path: string;
 }
 /**
  * A synthetic import project endpoint: a PATCH records its body, applies its changes as the server writes them and confirms a
- * new revision; the duplicate candidates read lists `candidates`; any other request reads the current project. `set` replaces
+ * new revision; the duplicate candidates read lists `candidates` (complete member matches); any other request reads the current project. `set` replaces
  * the project, as another administrator's save would.
  */
 export function fieldSaveEndpoint(initial: ImportDetail, candidates: ImportCandidate[] = []) {
@@ -44,7 +45,7 @@ export function fieldSaveEndpoint(initial: ImportDetail, candidates: ImportCandi
   return {
     writes, current: () => item, set: (next: ImportDetail) => { item = next; },
     fetch: async (path: string, init?: RequestInit) => {
-      if (path.endsWith('/duplicate-candidates')) return json({ items: candidates });
+      if (path.endsWith('/duplicate-candidates')) return json({ items: candidates, memberMatchesComplete: true });
       if (init?.method !== 'PATCH') return json({ item, receipt: null });
       const body = JSON.parse(String(init.body)); writes.push(body);
       item = { ...item, revision: item.revision + 1, draft: applyDraftChanges(item.draft, body.changes) };

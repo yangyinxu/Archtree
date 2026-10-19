@@ -37,9 +37,10 @@ export const originKey = (path: string) => path.split('.').join(':');
 export type ImportSuggestionV2 = Omit<ImportSuggestion, 'field' | 'baseline' | 'value'> & { field: 'title' | 'artists' | 'releaseDate' | 'trackNumber'; baseline: ImportValue | ImportArtistEntry[]; value: ImportValue | ImportArtistEntry[] };
 /**
  * An Artist decision binds one entry by key and the name it was decided for; a label decision binds the label's name (entryKey
- * null); Album and track decisions bind neither.
+ * null); Album and track decisions bind neither. `preselected` is set only on a decision an approval froze because the review
+ * preselected it (adminImportIdentity.ts); it is never a saved project decision, request item or DTO field.
  */
-export type ImportDecisionV2 = Omit<ImportDuplicateDecision, 'scope'> & { scope: ImportDecisionScopeV2; entryKey: string | null; boundName: string | null };
+export type ImportDecisionV2 = Omit<ImportDuplicateDecision, 'scope'> & { scope: ImportDecisionScopeV2; entryKey: string | null; boundName: string | null; preselected?: true };
 
 export const DRAFT_V2 = 2;
 /** `decisions` is one per entry, the label, the Album and each of at most 100 tracks. */

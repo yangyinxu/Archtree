@@ -12,9 +12,11 @@
  *   - the confirmation marks Artist entries and the label resting only on file tags and automatic entries named like a label, unless appended, changed or decided
  *   - the publish body carries the shown changes and decisions with the saved cover, revision and approval digest
  *   - an append whose Album or member Track is no longer listed at its reviewed revision is a changed match that blocks approval
+ *   - preselected rows read New or Reuses and block nothing, while rows neither answered nor preselected block; preselections never clear the tags-only marks
  * @end-catalog */
 
-import type { ImportCandidate, ImportDecision } from './adminApi';
+import type { ImportDecision } from './adminApi';
+import type { ImportCandidate } from './importIdentity';
 import { approvalBody, approvalChecklist, approvalTrackOrder, shownDecisions, staleDecisionEdits, staleDecisions } from './importApproval';
 import { artistEntry, detail, entryKey, labelEntry, slotId, slotTwo } from './adminFixtures.testSupport';
 
@@ -145,4 +147,20 @@ test('an append whose Album or member Track is no longer listed at its reviewed 
   // Still an append: its entries and label stay not applied, while the changed Album and member each block.
   expect([gone.append, gone.album, gone.tracks.map(value => [value.existing, value.identity.kind]), gone.artists.every(entry => entry.identity.kind === 'notApplied'), gone.blocked])
     .toEqual([true, { kind: 'changed' }, [[false, 'new'], [true, 'changed']], true, 2]);
+});
+
+test('preselected rows read New or Reuses and block nothing, while rows neither answered nor preselected block; preselections never clear the tags-only marks', () => {
+  const item = saved(), member = { ...candidate('track', '4'.repeat(24), 'Stored Title'), match: 'sha256' as const };
+  const marks = { automaticPaths: ['album.artists', 'album.label'], possibleLabelEntryKeys: [] as string[], changedPaths: [] as string[] };
+  // Lorem has a candidate and no answer; every other row is preselected.
+  const preselections = [artist(2), artist(3), label(), album(), track(slotId), track(slotTwo)];
+  const checklist = approvalChecklist(item.draft, [], [candidate('artist', '1'.repeat(24), 'Lorem')], marks, preselections);
+  expect([checklist.artists.map(entry => entry.identity.kind), checklist.label?.identity.kind, checklist.album.kind, checklist.tracks.map(value => value.identity.kind), checklist.blocked])
+    .toEqual([['needsDecision', 'new', 'new'], 'new', 'new', ['new', 'new'], 1]);
+  // Values resting on file tags stay marked: a preselection is not the administrator's own decision.
+  expect([checklist.artistsFromTags, checklist.labelFromTags]).toEqual([true, true]);
+  // An explicit answer wins over a preselection, and a preselected reuse of an append member is listed as an existing member.
+  const target = candidate('album', '3'.repeat(24), 'Existing Album');
+  const append = approvalChecklist(item.draft, [album(reuse(target)), track(slotTwo, { action: 'skip' })], [target, member], marks, [track(slotId, reuse(member)), track(slotTwo)]);
+  expect([append.append, append.tracks.map(value => [value.slotId, value.existing, value.identity]), append.blocked]).toEqual([true, [[slotId, true, { kind: 'reused', label: 'Stored Title', hidden: false }]], 0]);
 });

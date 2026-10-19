@@ -22,6 +22,7 @@
  *   - explicit cancellation retains in-flight outcome but prevents next chunk and generation replacement
  *   - unknown provider failures are bounded with no paid auto-retry; budget and grant boundaries persist
  *   - duplicate candidates include hidden ready identities without raw storage and prevent cross-album track reuse
+ *   - candidates include every byte or name match among the members of each Album candidate and of the saved append target beyond the 20 global Track rows, without duplicates, and say when they are incomplete
  *   - analysis checkpoints retain admitted tag context despite later upload metadata changes
  *   - a draftless create stores public visibility while its receipt keeps the pre-public fingerprint
  *   - create-page and conversion-bridge retries admitted before the public default replay their hidden project, and conflicting retries fail
@@ -29,6 +30,7 @@
  *   - reads of a newer-format project expose only the Draft v2 allowlist in detail and the v1 allowlist in inventory and duplicate candidates
  *   - newer-format analyses, queued or with a chunk left in flight, hold no analysis capacity and are never claimed
  *   - an analysis claimed just before a newer release saved its project is released without a provider call or checkpoint
+ *   - a project saved before Draft v2 contributes the members of the append target its editor shows to its candidates
  *   - a whole-draft save from an editor that predates Draft v2 is refused without a write, and its lost response still replays
  *   - a field save writes and marks only its changed paths, replays its intent and refuses a changed body under the same operation
  *   - a field save is admitted after a Luna tick bumped the revision, and editing a join phrase keeps the role
@@ -61,7 +63,7 @@ import { AdminImportError, ADMIN_IMPORT_LIMITS, defaultDraft, legacyDefaultDraft
 import { defaultDraftV2, draftBytes, type ImportDecisionV2, type ImportDraftV2 } from '../../src/administration/import/adminImportDraft';
 import { importDraftV2FromV1, legacyAdministratorOrigins, legacyArtistEntryKey, legacyDraftView } from '../../src/administration/import/adminImportDraftCompat';
 import { ImportProviderError, type AnalysisInput, type ImportAnalysisProvider } from '../../src/administration/import/adminImportProvider';
-import { createAdminImport, getAdminImport, editAdminImport, idleAnalysis, listAdminImports, analyzeAdminImport, cancelAdminImportAnalysis, adoptAdminImportSuggestions, adminImportDuplicateCandidates, decideAdminImportDuplicates, importCreateHash, importDigest, initializeAdminImportStorage, runAdminImportWorkerOnce, type AdminImportDocument } from '../../src/administration/import/adminImportService';
+import { createAdminImport, getAdminImport, editAdminImport, idleAnalysis, importCandidateProjection, importCandidateRevision, listAdminImports, analyzeAdminImport, cancelAdminImportAnalysis, adoptAdminImportSuggestions, adminImportDuplicateCandidates, decideAdminImportDuplicates, importCreateHash, importDigest, initializeAdminImportStorage, runAdminImportWorkerOnce, type AdminImportDocument } from '../../src/administration/import/adminImportService';
 import { publishAdminImport } from '../../src/administration/import/adminImportPublisher';
 import { approvalBody } from '../support/adminImportApproval';
 import { selectAdminImportCover } from '../../src/administration/import/adminImportStorage';
@@ -238,13 +240,37 @@ test('duplicate candidates include hidden ready identities without raw storage a
     await getDb()!.collection('artists').insertMany([{ _id: artistId, name: 'Same name', visibility: 'hidden', lifecycleStatus: 'ready' }, { _id: broken, name: 'Same name', lifecycleStatus: 'deleteFailed' }]);
     await getDb()!.collection('albums').insertOne({ _id: albumId, title: 'Edition', lifecycleStatus: 'ready' });
     await getDb()!.collection('audioTracks').insertOne({ _id: trackId, title: 'Recording', albumId: albumId.toHexString(), s3Key: trackId.toHexString(), uploadStatus: 'ready', publicationStatus: 'ready' });
-    const { items } = await adminImportDuplicateCandidates(actor.toHexString(), first.item.id); assert.equal(items.length, 3); assert.equal(items[0].visibility, 'hidden'); assert.equal(JSON.stringify(items).includes('s3Key'), false);
+    const { items, memberMatchesComplete } = await adminImportDuplicateCandidates(actor.toHexString(), first.item.id); assert.equal(items.length, 3); assert.equal(memberMatchesComplete, true); assert.equal(items[0].visibility, 'hidden'); assert.equal(JSON.stringify(items).includes('s3Key'), false);
     const track = items.find(i => i.kind === 'track')!, album = items.find(i => i.kind === 'album')!;
     const decision = { scope: 'track', slotId: draft.tracks[0].slotId, entryKey: null, boundName: null, action: 'reuse', candidateId: track.id, candidateRevision: track.revision };
     await assert.rejects(decideAdminImportDuplicates(actor.toHexString(), first.item.id, { ...mutation(2), decisions: [decision] }), errorCode('ADMIN_IMPORT_TRACK_BELONGS_TO_ALBUM'));
     const result = await decideAdminImportDuplicates(actor.toHexString(), first.item.id, { ...mutation(2), decisions: [decision, { scope: 'album', slotId: null, entryKey: null, boundName: null, action: 'reuse', candidateId: album.id, candidateRevision: album.revision }] }); assert.equal(result.item.decisions.length, 2);
     await getDb()!.collection('audioTracks').updateOne({ _id: trackId }, { $set: { title: 'Changed' } });
     await assert.rejects(decideAdminImportDuplicates(actor.toHexString(), first.item.id, { ...mutation(result.item.revision), decisions: result.item.decisions }), errorCode('ADMIN_IMPORT_DUPLICATE_STALE'));
+});
+
+test('candidates include every byte or name match among the members of each Album candidate and of the saved append target beyond the 20 global Track rows, without duplicates, and say when they are incomplete', async () => {
+    const first = await create(), db = getDb()!, edition = new ObjectId(), target = new ObjectId();
+    const { draft, revision } = (await editImportDraft(actor.toHexString(), first.item.id, first.item, draft => { draft.album.artists = artistEntries('Member Artist'); draft.album.title = 'Edition'; draft.tracks[0].title = 'Recording'; })).item;
+    const track = (title: string, album: ObjectId) => { const _id = new ObjectId(); return { _id, title, albumId: album.toHexString(), s3Key: _id.toHexString(), uploadStatus: 'ready', publicationStatus: 'ready' }; };
+    await db.collection('albums').insertMany([{ _id: edition, title: 'Edition', lifecycleStatus: 'ready' }, { _id: target, title: 'Unrelated Target', lifecycleStatus: 'ready' }]);
+    // Same-title Tracks on 25 other Albums fill the 20 global Track rows; the Album candidate's member sorts after them.
+    await db.collection('audioTracks').insertMany(Array.from({ length: 25 }, () => track('Recording', new ObjectId())));
+    const member = track('RECORDING', edition); await db.collection('audioTracks').insertOne(member);
+    const listed = async () => { const response = await adminImportDuplicateCandidates(actor.toHexString(), first.item.id); assert.equal(new Set(response.items.map(item => item.id)).size, response.items.length); return response; };
+    let response = await listed(), find = (id: ObjectId) => response.items.filter(item => item.id === id.toHexString()).map(item => [item.kind, item.albumId, item.match, item.matchedSlotIds]);
+    assert.deepEqual([response.memberMatchesComplete, response.items.filter(item => item.kind === 'track').length, find(member._id)], [true, 21, [['track', edition.toHexString(), 'name', [draft.tracks[0].slotId]]]]);
+    // A saved append target that is no name candidate still contributes its members.
+    const targetMember = track('recording', target); await db.collection('audioTracks').insertOne(targetMember);
+    const candidateRevision = importCandidateRevision((await db.collection('albums').findOne({ _id: target }, { projection: importCandidateProjection }))!);
+    await decideAdminImportDuplicates(actor.toHexString(), first.item.id, { ...mutation(revision), decisions: [{ scope: 'album', slotId: null, entryKey: null, boundName: null, action: 'reuse', candidateId: target.toHexString(), candidateRevision }] });
+    response = await listed();
+    assert.deepEqual([response.memberMatchesComplete, find(member._id).length, find(targetMember._id)], [true, 1, [['track', target.toHexString(), 'name', [draft.tracks[0].slotId]]]]);
+    // More member matches than the cap: the listing stops there and says it is incomplete.
+    await db.collection('audioTracks').insertMany(Array.from({ length: 300 }, () => track('Recording', edition)));
+    response = await listed();
+    assert.equal(response.memberMatchesComplete, false); assert.ok(response.items.length <= 760);
+    assert.equal(response.items.filter(item => item.kind === 'track').length, 320);
 });
 
 test('analysis checkpoints retain admitted tag context despite later upload metadata changes', async () => {
@@ -405,6 +431,18 @@ async function legacyProject(name: string, change: (doc: AdminImportDocument) =>
     return { id: doc._id.toHexString(), doc };
 }
 const entry = (name: string, role: 'primary' | 'featured' = 'primary', joinPhrase: string | null = null) => ({ key: randomUUID(), name, role, joinPhrase, musicBrainzId: null });
+
+test('a project saved before Draft v2 contributes the members of the append target its editor shows to its candidates', async () => {
+    const { id, doc } = await legacyProject('v1-decisions-album-reuse.json'), db = getDb()!, slot = doc.draft.tracks.find(track => track.title === 'Ipsum Interlude')!.slotId;
+    const target = (await getAdminImport(actor.toHexString(), id)).item.decisions.find(decision => decision.scope === 'album')!.candidateId!;
+    const track = (title: string, albumId: string) => { const _id = new ObjectId(); return { _id, title, albumId, s3Key: _id.toHexString(), uploadStatus: 'ready', publicationStatus: 'ready' }; };
+    // The target is no name candidate, and same-title Tracks on 25 other Albums fill the 20 global Track rows before its member.
+    await db.collection('albums').insertOne({ _id: new ObjectId(target), title: 'Unrelated Target', lifecycleStatus: 'ready' });
+    await db.collection('audioTracks').insertMany(Array.from({ length: 25 }, () => track('Ipsum Interlude', new ObjectId().toHexString())));
+    const member = track('IPSUM INTERLUDE', target); await db.collection('audioTracks').insertOne(member);
+    const response = await adminImportDuplicateCandidates(actor.toHexString(), id);
+    assert.deepEqual([response.memberMatchesComplete, response.items.filter(item => item.id === member._id.toHexString()).map(item => [item.albumId, item.match, item.matchedSlotIds])], [true, [[target, 'name', [slot]]]]);
+});
 
 test('a whole-draft save from an editor that predates Draft v2 is refused without a write, and its lost response still replays', async () => {
     const created = await create(), id = created.item.id, before = await stored(id);

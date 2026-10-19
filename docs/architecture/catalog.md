@@ -496,12 +496,15 @@ writes the catalog; its routes are described in
 `src/administration/import/adminImportCatalogCommit.ts` writes the graph of an
 approval frozen with `schemaVersion` 3 in one MongoDB transaction with the
 publication receipt; format-1 and format-2 approvals keep their one-Artist
-commit. The commit never resolves names.
+commit. The commit never resolves names to identities; it only rechecks that the
+preselections the approval froze still hold.
 
 - The approval freezes one identity for each Artist entry and the label: the
   reviewed record to reuse, bound to its revision, or an ID reserved for a new
-  record. Retries and resumes reuse those IDs, so they never mint another
-  record, and two entries never share one Artist.
+  record, whether an administrator chose it or the import preselected it
+  (`preselected: true` on its frozen decision). Retries and resumes reuse those
+  IDs, so they never mint another record, and two entries never share one
+  Artist.
 - A new Album's Credits follow the draft: each Artist entry in order as a
   `primary` or `featured` Artist Credit with its join phrase and the
   `creditId` `import_<role>_<artistId>`, then the label as an Organization
@@ -534,6 +537,17 @@ commit. The commit never resolves names.
   where one was reviewed, and fences it. A record that is no longer ready or
   has changed turns the publication into needs attention (`catalogConflict`)
   without minting identities.
+- An approval freezes the identities the review preselected (a new record where
+  no name candidate exists, or an append member with identical bytes) marked
+  `preselected`, and only when they are the ones its confirmation showed. The
+  worker recomputes them before its first copy and inside the commit
+  transaction, which every format-3 import commit serializes on one fence
+  document (format-1 and format-2 commits are not fenced); a preselection that
+  no longer holds, because a candidate appeared meanwhile, turns the
+  publication into needs attention (`identityConflict`) without minting
+  identities, and its copies stay recorded for cleanup. The fence serializes
+  import commits only: a record another editor creates concurrently with a
+  commit is not rechecked.
 
 ### Appending to an Album
 
@@ -564,8 +578,20 @@ Releases, Discography, Collaborations, Follow eligibility, the frozen listener
 fixture, hidden imports and untouched reused records. It also covers decision
 binding, appends, a target without a primary Credit, same-intent retries, a
 crash between copy and commit, unknown copies, permission loss, cancellation
-with independent identities and reused records that change.
+with independent identities and reused records that change. It also covers
+identity preselection: an import with no candidates, a name candidate created
+after review (a fresh review at approval) or after approval, before or after the
+copy (needs attention with `identityConflict`, minting nothing and keeping the
+copy until cancellation and cleanup, then a new approval), same-intent retries,
+resumes, two approvals that preselect one new Artist, a malformed same-name
+record that holds its row, and a recheck over its time budget.
+`test/administration/adminImportIdentity.test.ts` covers the preselection
+matrix, locale-independent names, the shown-preselection comparison and which
+approvals the worker rechecks.
 `test/administration/adminImportMedia.integration.ts` covers append
-visibility and the sixteen-approval bound with a new import of the same files,
-and `web/src/api/listenerContractCompatibility.test.ts` parses
+preselections and their recheck, approvals bound to the preselections they
+showed, byte matches read apart from title matches, a byte match on another
+Album that needs no answer, append visibility and the sixteen-approval bound
+with a new import of the same files, and
+`web/src/api/listenerContractCompatibility.test.ts` parses
 `contracts/listener/v1/fixtures/album-multi-artist-label.json`.

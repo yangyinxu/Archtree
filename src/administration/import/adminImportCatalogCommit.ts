@@ -30,7 +30,8 @@ import { readyAudioStorageFilter } from '../../utils/audioStorageKey';
 import { sortTrackIdsByDiscAndTrackNumber } from '../../services/catalog/albumTrackLinkService';
 import { checkAdminWorker } from '../adminWorkerLifecycle';
 import { AdminImportError, importEnabled, objectId, type ImportDate, type ImportDraft } from './adminImportContract';
-import { importCandidateProjection, importCandidateRevision, importCollection, importPurposeFilter, touchImportAdmin } from './adminImportService';
+import { importCandidateProjection, importCandidateRevision, importCollection, importPurposeFilter, touchImportAdmin, type AdminImportDocument } from './adminImportService';
+import { assertImportPreselectionsCurrent, serializeImportIdentityCommits } from './adminImportIdentity';
 import { importPrivateStorageReady, importPublicationFormat, type ImportPublication, type ImportPublicationArtist, type ImportPublicationLabel } from './adminImportMediaTypes';
 import { boundArtistDecision, boundLabelDecision, type ImportArtistEntry, type ImportDecisionV2, type ImportDraftV2 } from './adminImportDraft';
 
@@ -205,11 +206,14 @@ async function legacyGraph(publication: ImportPublication, format: 1 | 2, sessio
 
 /**
  * Format 3. Every read precedes the first write, so an unavailable or changed record is a catalog conflict before any fence
- * helper runs. A new Album creates its Credits in draft order, new Artists and a new label Organization with the draft's
- * visibility, and gives primaries (only) the Album in albumIds; reused records are fenced and otherwise unchanged. An append
- * changes no Artist, Organization, Album value or Credit: its tracks inherit the target Album's primary Credits and release date.
+ * helper runs. Every frozen preselection is then rechecked against fresh candidates (a candidate that appeared since approval is
+ * an identity conflict), and the identity fence serializes this commit against every other format-3 import commit (formats 1
+ * and 2 do not write it). A new Album creates its Credits in draft order, new Artists and a new label Organization with the
+ * draft's visibility, and gives primaries (only) the Album in albumIds; reused records are fenced and otherwise unchanged. An
+ * append changes no Artist, Organization, Album value or Credit: its tracks inherit the target Album's primary Credits and
+ * release date.
  */
-async function approvedGraph(publication: ImportPublication, session: ClientSession): Promise<CommitGraph> {
+async function approvedGraph(publication: ImportPublication, doc: AdminImportDocument, session: ClientSession): Promise<CommitGraph> {
     const db = getDb()!, snapshot = publication.snapshot as ImportDraftV2, { artists, label } = frozenIdentities(publication), reused = artists.filter(artist => !artist.newArtist);
     let existingAlbum: Record<string, any> | null = null;
     if (!publication.newAlbum) { existingAlbum = await db.collection('albums').findOne({ _id: oid(publication.albumId) }, { session, projection: importCandidateProjection }); if (!existingAlbum || importCandidateRevision(existingAlbum) !== publication.albumRevision) throw conflict(); }
@@ -232,6 +236,8 @@ async function approvedGraph(publication: ImportPublication, session: ClientSess
         const credits = importNewAlbumTrackCredits(albumCredits);
         for (const track of publication.tracks) trackCredits.set(track.id, credits);
     }
+    await assertImportPreselectionsCurrent(publication, { manifest: doc.manifest, assets: doc.media?.assets ?? [] }, session);
+    await serializeImportIdentityCommits(session);
     if (existingAlbum) await touchReadyAlbumReferences([publication.albumId], session);
     if (reused.length) await touchReadyArtistReferences(reused.map(artist => artist.artistId), session);
     if (!existingAlbum) {
@@ -257,7 +263,9 @@ async function approvedGraph(publication: ImportPublication, session: ClientSess
 
 /**
  * Commits the approved catalog graph and the publication receipt in one transaction; S3 work never holds a Mongo transaction.
- * An approval format this release does not know is refused before any catalog write. Every new MediaTrack, appended ones included,
+ * An approval format this release does not know is refused before any catalog write. A format-3 preselection that no longer holds
+ * aborts the transaction (ADMIN_IMPORT_IDENTITY_CONFLICT, needs attention): nothing is minted, and the copied objects stay recorded
+ * in the publication for cancellation and cleanup. Every new MediaTrack, appended ones included,
  * is stored public: its Album's own visibility hides it while that Album is hidden, so it follows the Album's later changes.
  */
 export async function commitImportCatalogGraph(id: string, worker: string, signal?: AbortSignal): Promise<void> {
@@ -269,7 +277,7 @@ export async function commitImportCatalogGraph(id: string, worker: string, signa
             if (format === null) throw new AdminImportError(409, 'ADMIN_IMPORT_PUBLICATION_UNSUPPORTED');
             checkAdminWorker(signal); await touchImportAdmin(publication.actorId, session); requireImportPublicationReady(); requireCurrentApproval(publication);
             if (publication.tracks.some(track => track.state !== 'ready') || (publication.cover && publication.cover.state !== 'ready')) throw conflict();
-            const graph = format === 3 ? await approvedGraph(publication, session) : await legacyGraph(publication, format, session), { existingAlbum, album } = graph;
+            const graph = format === 3 ? await approvedGraph(publication, doc, session) : await legacyGraph(publication, format, session), { existingAlbum, album } = graph;
             const cover = publication.coverId ? { coverArtId: publication.coverId, coverArtUrl: `/content/images/${publication.coverId}` } : { coverArtUrl: '' };
             if (!existingAlbum) await db.collection('albums').insertOne({ _id: oid(publication.albumId), title: album.title, ...cover, audioTrackIds: publication.tracks.map(track => track.id), releaseDate: date(album.releaseDate), createdBy: publication.actorId, visibility: album.visibility, lifecycleStatus: 'ready', lifecycleUpdatedAt: new Date(), lifecycleError: null, referenceRevision: 0, credits: graph.albumCredits, attributionStatus: 'documented', creditRevision: 1, ...catalogSearchProjection(album.title) }, { session });
             for (const track of publication.tracks) {

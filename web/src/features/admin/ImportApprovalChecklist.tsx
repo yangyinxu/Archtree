@@ -3,7 +3,8 @@ import { useQuery } from '@tanstack/react-query';
 import { useLocalization } from '../../localization/LocalizationProvider';
 import type { MessageKey } from '../../localization/contract';
 import { useAdminAccess, useAdminText } from './AdminAccess';
-import { adminRequest, candidatesSchema, duplicateEditsKey, importPath, type DecisionEdits, type ImportDetail, type ImportDraftV2 } from './adminApi';
+import { adminRequest, duplicateEditsKey, importPath, type DecisionEdits, type ImportDecision, type ImportDetail, type ImportDraftV2 } from './adminApi';
+import { candidatesSchema, identityPreselections } from './importIdentity';
 import { adminWorkspace } from './adminWorkspace';
 import { approvalBody, approvalChecklist, shownDecisions, type ApprovalBody, type ApprovalIdentity } from './importApproval';
 import { entriesByline } from './artistEntriesByline';
@@ -11,15 +12,20 @@ import type { ImportDraftChange } from './importDraftPatch';
 import { reviewValueText } from './reviewValueText';
 import styles from './adminStyles';
 
-/** The publish body a confirmation can send, and whether everything it shows is decided and current. */
-export interface ApprovalState { body: ApprovalBody; ready: boolean }
+/**
+ * The publish body a confirmation can send, with the preselections it shows (the approval refuses any other set), and whether
+ * everything it shows is decided and current.
+ */
+export interface ApprovalState { body: ApprovalBody & { preselections: ImportDecision[] }; ready: boolean }
 
 const identityKeys = { new: 'publication.new_record', needsDecision: 'publication.needs_decision', changed: 'publication.decision_changed', notApplied: 'publication.not_applied' } as const;
 
 /**
  * The publication confirmation's list of everything that becomes catalog content, built from the project, the editor's draft and
- * its unsaved changes as they were when Publish was chosen. It reports the publish body to the dialog, which approves it only while
- * every shown identity is decided and current. Loaded on demand with the confirmation.
+ * its unsaved changes as they were when Publish was chosen. It always reads the duplicate candidates, since the rows Review
+ * preselects depend on them, and reports the publish body, carrying the preselections it shows, to the dialog, which approves it
+ * only once that read settled and every shown identity is answered or preselected, and current. Loaded on demand with the
+ * confirmation.
  */
 export function ImportApprovalChecklist({ item, draft, changes, onChange }: {
   item: ImportDetail; draft: ImportDraftV2; changes: ImportDraftChange[]; onChange: (approval: ApprovalState | null) => void;
@@ -30,17 +36,20 @@ export function ImportApprovalChecklist({ item, draft, changes, onChange }: {
     const decisions = shownDecisions(item, draft, adminWorkspace.buffer<DecisionEdits>(duplicateEditsKey(item.id)) ?? null);
     return decisions && approvalBody(item, changes, decisions);
   });
-  // A reuse is shown by name and visibility from the same candidate read Review uses (and shares while Review keeps it).
-  const reuses = Boolean(body?.decisions.some(decision => decision.action === 'reuse'));
+  // The same candidate read Review uses (and shares while Review keeps it): reuses are shown by name and visibility from it, and
+  // the preselections are computed from it; a row renamed in the unsaved draft is never preselected (its candidates are stale).
   const candidates = useQuery({
     queryKey: ['admin-imports', access.viewerId, access.epoch, access.generation, item.id, 'duplicates', item.revision, item.valueRevision],
     queryFn: ({ signal }) => adminRequest(`${importPath(item.id)}/duplicate-candidates`, candidatesSchema, { signal }),
-    enabled: reuses, retry: false, gcTime: 0
+    enabled: Boolean(body), retry: false, gcTime: 0
   });
-  const checklist = body && (!reuses || candidates.isSuccess) ? approvalChecklist(draft, body.decisions, candidates.data?.items ?? [],
-    { automaticPaths: item.automaticPaths, possibleLabelEntryKeys: item.possibleLabelEntryKeys, changedPaths: changes.map(change => change.path) }) : null;
-  const ready = Boolean(checklist && checklist.blocked === 0);
-  useEffect(() => { onChange(body && { body, ready }); }, [body, ready]);
+  const preselections = body && candidates.isSuccess ? identityPreselections(draft, item.draft, body.decisions, candidates.data) : [];
+  const checklist = body && candidates.isSuccess ? approvalChecklist(draft, body.decisions, candidates.data.items,
+    { automaticPaths: item.automaticPaths, possibleLabelEntryKeys: item.possibleLabelEntryKeys, changedPaths: changes.map(change => change.path) }, preselections) : null;
+  const ready = Boolean(checklist && checklist.blocked === 0 && !candidates.isFetching);
+  // Reported again only when what it shows changes, so the dialog's state update never loops back here.
+  const shown = JSON.stringify(preselections);
+  useEffect(() => { onChange(body && { body: { ...body, preselections: JSON.parse(shown) as ImportDecision[] }, ready }); }, [body, ready, shown]);
   const identity = (value: ApprovalIdentity) => value.kind === 'reused'
     ? [t('publication.reused_record', { name: value.label }), value.hidden && t('field.hidden')].filter(Boolean).join(' · ') : t(identityKeys[value.kind]);
   // An append applies none of the draft's Album values or cover; each such row says so.
@@ -51,8 +60,8 @@ export function ImportApprovalChecklist({ item, draft, changes, onChange }: {
     <h3 id={heading}>{t('publication.checklist')}</h3>
     {changes.length > 0 && <p role="note">{t('publication.unsaved_included')}</p>}
     {!body && <p role="alert">{t('publication.decisions_conflict')}</p>}
-    {reuses && candidates.isPending && <p role="status">{t('common.loading')}</p>}
-    {reuses && candidates.isError && <p role="alert">{t('common.error')}</p>}
+    {body && candidates.isPending && <p role="status">{t('common.loading')}</p>}
+    {body && candidates.isError && <p role="alert">{t('common.error')}</p>}
     {checklist && <>
       {checklist.append && <p role="note">{t('publication.append_not_applied')}</p>}
       <dl>

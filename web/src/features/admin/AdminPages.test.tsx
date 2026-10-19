@@ -273,7 +273,7 @@ test('an append to an Album without a primary Artist explains the refusal instea
     ...item.draft.tracks.map(track => ({ scope: 'track' as const, slotId: track.slotId, entryKey: null, boundName: null, action: 'create-distinct' as const, candidateId: null, candidateRevision: null }))];
   const album = { kind: 'album', id: '1'.repeat(24), label: 'Existing Album', revision: 'r', albumId: null, visibility: 'public', match: 'name', matchedSlotIds: [], automaticReuse: false };
   vi.stubGlobal('fetch', vi.fn(async (path: string, init: RequestInit) => {
-    if (path.endsWith('/duplicate-candidates')) return json({ items: [album] });
+    if (path.endsWith('/duplicate-candidates')) return json({ items: [album], memberMatchesComplete: true });
     if (init.method === 'POST' && path.endsWith('/publish')) { publishes.push(path); return json({ code: 'ADMIN_IMPORT_APPEND_PRIMARY_REQUIRED' }, 409); }
     if (path === `/api/admin/v1/imports/${projectId}`) reads.push(path);
     return json({ item, receipt: null });
@@ -702,7 +702,7 @@ test('a draft of two primaries, a featured entry and a label is decided entry by
     return json({ item: server.current(), receipt: { operationId, kind, revision: server.current().revision } });
   };
   vi.stubGlobal('fetch', vi.fn(async (path: string, init?: RequestInit) => {
-    if (path.endsWith('/duplicate-candidates')) return json({ items: [] });
+    if (path.endsWith('/duplicate-candidates')) return json({ items: [], memberMatchesComplete: true });
     if (init?.method !== 'POST' || !(path.endsWith('/publish') || path.endsWith('/decisions'))) return server.fetch(path, init);
     const body = JSON.parse(String(init.body));
     if (path.endsWith('/decisions')) { saved.push(body); return confirm('decisions', body.operationId, { decisions: body.decisions }); }
@@ -710,11 +710,13 @@ test('a draft of two primaries, a featured entry and a label is decided entry by
   }));
   mount(`/admin/imports/${projectId}`);
   fireEvent.click(await screen.findByRole('tab', { name: 'Review' }));
-  fireEvent.click(await screen.findByRole('button', { name: 'Find matches' }));
-  // One row per entry with its role, then the label, the Album and each track.
+  // Candidates load with Review. One row per entry with its role, then the label, the Album and each track; with no candidate
+  // each row is collapsed as a preselected new record.
   const rows = await Promise.all([1, 2, 3, 4, 5, 6, 7].map(index => screen.findByRole('combobox', { name: `${index} · Decision` })));
   expect(rows.map(row => row.closest('label')!.firstChild!.textContent)).toEqual(['Artist · Lorem · Primary', 'Artist · Ipsum · Primary', 'Artist · Dolor · Featured', 'Label · Lorem Records', 'Album · Synthetic Album', 'Track · First', 'Track · Second']);
-  for (const row of rows) fireEvent.change(row, { target: { value: 'create-distinct' } });
+  expect(rows.every(row => row.closest('details') && !row.closest('details')!.open)).toBe(true);
+  // An explicit choice renders its row expanded again, so each row is read anew.
+  for (const index of [1, 2, 3, 4, 5, 6, 7]) fireEvent.change(screen.getByRole('combobox', { name: `${index} · Decision` }), { target: { value: 'create-distinct' } });
   // The decisions are not saved separately: the approval carries them.
   fireEvent.click(screen.getByRole('tab', { name: 'Publish' })); fireEvent.click(await screen.findByRole('button', { name: 'Publish Album' }));
   const approve = within(screen.getByRole('dialog')).getByRole('button', { name: 'Publish Album' }); await waitFor(() => expect(approve).toBeEnabled());
@@ -725,7 +727,7 @@ test('a draft of two primaries, a featured entry and a label is decided entry by
   expect(screen.getByRole('link', { name: 'Edit label' })).toHaveAttribute('href', `/admin/catalog/organization/${published.organizationId}`);
   const fresh = { action: 'create-distinct', candidateId: null, candidateRevision: null };
   expect(saved).toEqual([]);
-  expect(publishes).toEqual([{ operationId: expect.any(String), expectedRevision: 1, changes: [], selectedCoverSlotId: null, approvalDigest: 'e'.repeat(64), decisions: [...artists.map(entry => ({ scope: 'artist', slotId: null, entryKey: entry.key, boundName: entry.name, ...fresh })),
+  expect(publishes).toEqual([{ operationId: expect.any(String), expectedRevision: 1, changes: [], selectedCoverSlotId: null, approvalDigest: 'e'.repeat(64), preselections: [], decisions: [...artists.map(entry => ({ scope: 'artist', slotId: null, entryKey: entry.key, boundName: entry.name, ...fresh })),
     { scope: 'label', slotId: null, entryKey: null, boundName: 'Lorem Records', ...fresh }, { scope: 'album', slotId: null, entryKey: null, boundName: null, ...fresh }, ...initial.draft.tracks.map(track => ({ scope: 'track', slotId: track.slotId, entryKey: null, boundName: null, ...fresh }))] }]);
   // The approval saved the shown decisions, so no unsaved Review decision remains.
   expect(adminWorkspace.buffer(`duplicate-edits:${projectId}`)).toBeUndefined();
@@ -762,7 +764,7 @@ test('an unsaved title edit is published in one request without Save, the editor
   expect(await dialog.findByRole('note')).toHaveTextContent('Your unsaved draft changes are included and are saved with this approval.');
   await waitFor(() => expect(approve).toBeEnabled()); fireEvent.click(approve);
   await waitFor(() => expect(publishes).toHaveLength(1));
-  expect(publishes[0]).toEqual({ operationId: expect.any(String), expectedRevision: 3, changes: [{ path: 'album.title', base: 'Synthetic Album', value: 'Approved Title' }], decisions: server.current().decisions, selectedCoverSlotId: null, approvalDigest: 'e'.repeat(64) });
+  expect(publishes[0]).toEqual({ operationId: expect.any(String), expectedRevision: 3, changes: [{ path: 'album.title', base: 'Synthetic Album', value: 'Approved Title' }], decisions: server.current().decisions, selectedCoverSlotId: null, approvalDigest: 'e'.repeat(64), preselections: [] });
   expect(server.writes).toEqual([]);
   fireEvent.click(screen.getByRole('tab', { name: 'Draft' }));
   await waitFor(() => expect(screen.getByText('Saved to private draft', { selector: '[role=status]:not([aria-live])' })).toBeVisible());
@@ -781,7 +783,7 @@ test('unsaved decisions save with the revision of their first edit through Luna 
     fireEvent.change(await screen.findByRole('combobox', { name: '1 · Decision' }), { target: { value: 'create-distinct' } });
   };
   const refresh = async (next: ReturnType<typeof detail>) => {
-    // Review remounts for the newer revision, so its matches are hidden until they are requested again.
+    // Review remounts for the newer revision, so its matches are hidden until they load again.
     server.set(next); fireEvent.click(screen.getByRole('button', { name: 'Refresh status' }));
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Save decisions' })).not.toBeInTheDocument());
     fireEvent.click(await screen.findByRole('button', { name: 'Find matches' })); await screen.findByRole('button', { name: 'Save decisions' });
@@ -807,7 +809,7 @@ test('a decision save refused because its entry was renamed meanwhile reloads th
   const initial = detail(); initial.draft.album.title = 'Synthetic Album'; initial.draft.album.artists = [artistEntry('Lorem')];
   const server = fieldSaveEndpoint(initial), saved: Record<string, any>[] = []; let reads = 0;
   vi.stubGlobal('fetch', vi.fn(async (path: string, init?: RequestInit) => {
-    if (path.endsWith('/duplicate-candidates')) return json({ items: [] });
+    if (path.endsWith('/duplicate-candidates')) return json({ items: [], memberMatchesComplete: true });
     if (path === `/api/admin/v1/imports/${projectId}` && !init?.method) reads++;
     if (init?.method !== 'POST' || !path.endsWith('/decisions')) return server.fetch(path, init);
     saved.push(JSON.parse(String(init.body))); const current = server.current();

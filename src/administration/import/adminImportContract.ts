@@ -3,9 +3,9 @@
  *   Types: ImportDate, ImportManifest, ImportDraft, ImportField, ImportValue, ImportSuggestion,
  *          ImportAnalysisState, ImportIssue, ImportReceipt, ImportEmbeddedTags, ImportTagField, ImportTagFlag,
  *          ImportTagIdentifiers, ImportEmbeddedTagsV2, ImportTagsView, ImportDuplicateCandidate,
- *          ImportDuplicateDecision, AdminImportDetail, ImportDecisionScopeV2, ImportDecisionDtoV2,
- *          ImportPublishedV2, AdminImportDetailV2, AdminImportResponse, ImportWorkbenchFilter,
- *          ImportWorkbenchItem, ImportWorkbenchResponse
+ *          ImportCandidatesResponse, ImportDuplicateDecision, AdminImportDetail, ImportDecisionScopeV2,
+ *          ImportDecisionDtoV2, ImportPublishedV2, AdminImportDetailV2, AdminImportResponse,
+ *          ImportWorkbenchFilter, ImportWorkbenchItem, ImportWorkbenchResponse
  *   Classes: AdminImportError
  *   Functions: invalidImport, importEnabled, uuid, objectId, record, exact, cleanText, parseImportDate,
  *              parseManifest, parseDraft, defaultDraft, legacyDefaultDraftV1
@@ -35,6 +35,12 @@ export type ImportEmbeddedTagsV2 = ImportEmbeddedTags & { version: 2; albumArtis
 /** The editor's view: version 1 for evidence stored before S8 (extended fields empty), else version 2. */
 export type ImportTagsView = Omit<ImportEmbeddedTagsV2, 'version'> & { version: 1 | 2 };
 export type ImportDuplicateCandidate = { kind: 'artist' | 'organization' | 'album' | 'track'; id: string; label: string; revision: string; albumId: string | null; visibility: 'public' | 'hidden'; match: 'name' | 'sha256'; matchedSlotIds: string[]; automaticReuse: false };
+/**
+ * The duplicate candidates of one import: at most 460 name candidates, one verified byte match per staged hash (at most 100) and
+ * 300 Album-member matches (860 items). `unavailable` names each Artist entry, label or Album title (at most 22) whose same-name
+ * record is malformed: it is no selectable candidate, yet it keeps that row from being preselected.
+ */
+export type ImportCandidatesResponse = { items: ImportDuplicateCandidate[]; memberMatchesComplete: boolean; unavailable: { kind: 'artist' | 'organization' | 'album'; label: string }[] };
 export type ImportDuplicateDecision = { scope: 'artist' | 'album' | 'track'; slotId: string | null; action: 'reuse' | 'skip' | 'create-distinct'; candidateId: string | null; candidateRevision: string | null };
 export type AdminImportDetail = {
     id: string; revision: number; createdAt: string; updatedAt: string; startedByMe: boolean;

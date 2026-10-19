@@ -26,7 +26,9 @@
  *   - approval waits for the candidate read, and a missing decision, a changed match or a newer approval digest keeps it locked
  *   - the approval sends the unsaved changes, the buffered Review decisions, the cover and the digest, and a decision buffer made for a since-renamed entry blocks it
  *   - an append confirmation marks the Album values, cover, entries and label not applied and lists existing members
- *   - a failed candidate read keeps the approval locked with an error, and a confirmation that reuses nothing reads no candidates
+ *   - an append confirmation lists a file with identical bytes on the target as already on the Album and an unmatched file as new, sending those preselections beside the Album decision, and incomplete member matches hold every track
+ *   - approval waits again while the open confirmation reads the candidates again
+ *   - a failed candidate read keeps the approval locked with an error, and every confirmation reads candidates once and approval waits for them
  *   - the checklist names an embedded cover by its file and says when there is no label or cover, and an unsaved rename of a decided entry needs a decision again
  *   - a file whose tags had values left out says how many fields beside its evidence, and one without says nothing
  *   - the confirmation marks Artist entries and the label resting only on file tags and an entry that looks like a label
@@ -34,7 +36,7 @@
 
 import type { ComponentProps } from 'react';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClient, QueryClientProvider, focusManager } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router';
 import { captureAccountOperation } from '../../api/accountEpoch';
 import { adminWorkspace } from './adminWorkspace';
@@ -42,8 +44,9 @@ import { ImportMedia } from './ImportMedia';
 import { AdminMutation } from './useAdminMutation';
 import { importUploadQueue } from './importUploadQueue';
 import { loadImportUploadQueue, useImportUploadQueue } from './useImportUploadQueue';
-import { artistEntry, detail, entryKey, json, labelEntry, session, slotId, slotTwo, viewer } from './adminFixtures.testSupport';
-import type { ImportCandidate, ImportDecision } from './adminApi';
+import { artistEntry, deferred, detail, entryKey, json, labelEntry, session, slotId, slotTwo, viewer } from './adminFixtures.testSupport';
+import type { ImportDecision } from './adminApi';
+import type { ImportCandidate } from './importIdentity';
 /** Subscribes the panel to its import's queue as the import page does. */
 function Media(props: Omit<ComponentProps<typeof ImportMedia>, 'uploads'>) { return <ImportMedia {...props} uploads={useImportUploadQueue(props.item.id)} />; }
 function mount(item = detail(), operation = new AdminMutation(), view?: 'files' | 'publication', extra: Partial<ComponentProps<typeof ImportMedia>> = {}) { const client = new QueryClient(); client.setQueryData(['browser-session'], session); const element = (value: typeof item) => <QueryClientProvider client={client}><MemoryRouter><Media item={value} operation={operation} disabled={false} view={view} {...extra} /></MemoryRouter></QueryClientProvider>; return { ...render(element(item)), element, operation }; }
@@ -54,7 +57,8 @@ const distinct = (): ImportDecision[] => [{ scope: 'album', slotId: null, entryK
 const approve = async () => { const button = within(screen.getByRole('dialog')).getByRole('button', { name: 'Publish Album' }); await waitFor(() => expect(button).toBeEnabled()); return button; };
 // With the engine loaded, a panel opens its queue on mount; useImportUploadQueue.test covers the first load.
 beforeAll(() => loadImportUploadQueue());
-beforeEach(() => { adminWorkspace.reset(); adminWorkspace.authorize(captureAccountOperation(viewer), true, true); adminWorkspace.select('admin'); });
+// Every publication confirmation reads the duplicate candidates; unless a test says otherwise there are none.
+beforeEach(() => { adminWorkspace.reset(); adminWorkspace.authorize(captureAccountOperation(viewer), true, true); adminWorkspace.select('admin'); vi.stubGlobal('fetch', vi.fn(async () => json({ items: [], memberMatchesComplete: true }))); });
 afterEach(() => { cleanup(); adminWorkspace.reset(); vi.unstubAllGlobals(); });
 test('the Files section identifies its own task and leaves publication actions in Publish', () => {
   const item = detail(); item.publication = 'notStarted'; item.capabilities.publish = true;
@@ -123,7 +127,7 @@ test('reselection mismatches never dispatch, and a matched file waits for the ex
 test('202 publication admission is not completion and source cleanup remains possible after confirmed publication', async () => {
   const item = detail(); item.capabilities.publish = true; item.publication = 'notStarted'; item.decisions = distinct(); const operation = new AdminMutation(); const run = vi.spyOn(operation, 'run').mockImplementation(() => {}); const view = mount(item, operation);
   fireEvent.click(screen.getByRole('button', { name: 'Publish Album' })); expect(run).not.toHaveBeenCalled(); fireEvent.click(await approve());
-  expect(run).toHaveBeenCalledWith('/bbbbbbbbbbbbbbbbbbbbbbbb/publish', 'POST', { expectedRevision: 1, changes: [], decisions: item.decisions, selectedCoverSlotId: null, approvalDigest: 'e'.repeat(64) });
+  expect(run).toHaveBeenCalledWith('/bbbbbbbbbbbbbbbbbbbbbbbb/publish', 'POST', { expectedRevision: 1, changes: [], decisions: item.decisions, selectedCoverSlotId: null, approvalDigest: 'e'.repeat(64), preselections: [] });
   act(() => view.rerender(view.element({ ...item, publication: 'preparing' }))); expect(screen.queryByText('The Album publication is confirmed.')).not.toBeInTheDocument(); expect(screen.queryByRole('button', { name: 'Publish Album' })).not.toBeInTheDocument();
   const complete = { ...item, publication: 'complete' as const, published: { albumId: '111111111111111111111111', artistIds: ['222222222222222222222222'], organizationId: null, trackIds: ['333333333333333333333333'] }, assets: [{ slotId, state: 'ready' as const, byteLength: 100, sha256: 'a'.repeat(64), contentType: 'audio/mpeg', tags: null, recovery: null }] };
   act(() => view.rerender(view.element(complete))); expect(screen.getByText('The Album publication is confirmed.')).toBeVisible(); expect(screen.getByRole('button', { name: 'Remove file' })).toBeEnabled();
@@ -252,7 +256,7 @@ test('publication confirmation keeps its reviewed name and digest until the admi
   fireEvent.click(screen.getByRole('button', { name: 'Publish Album' }));
   expect(within(screen.getByRole('dialog')).getAllByText('Changed Album')[0]).toBeVisible();
   fireEvent.click(await approve());
-  expect(run).toHaveBeenCalledWith('/bbbbbbbbbbbbbbbbbbbbbbbb/publish', 'POST', { expectedRevision: 4, changes: [], decisions: item.decisions, selectedCoverSlotId: null, approvalDigest: 'f'.repeat(64) });
+  expect(run).toHaveBeenCalledWith('/bbbbbbbbbbbbbbbbbbbbbbbb/publish', 'POST', { expectedRevision: 4, changes: [], decisions: item.decisions, selectedCoverSlotId: null, approvalDigest: 'f'.repeat(64), preselections: [] });
 });
 
 test.each([1, 2])('cancellation does not rebase onto a replacement approval at current revision %s', revision => {
@@ -369,7 +373,7 @@ function reviewed() {
     { scope: 'artist', slotId: null, entryKey: entryKey(3), boundName: 'Dolor', ...fresh }, { scope: 'label', slotId: null, entryKey: null, boundName: 'Sit Records', ...fresh }, ...distinct()];
   return { item, ipsum };
 }
-const candidatesEndpoint = (items: ImportCandidate[], reads: string[] = []) => vi.fn(async (path: string) => { reads.push(path); return json({ items }); });
+const candidatesEndpoint = (items: ImportCandidate[], reads: string[] = []) => vi.fn(async (path: string) => { reads.push(path); return json({ items, memberMatchesComplete: true }); });
 
 test('the publication confirmation lists everything that becomes catalog content, in approved order, with each identity and the hidden marker', async () => {
   const { item, ipsum } = reviewed(), reads: string[] = []; vi.stubGlobal('fetch', candidatesEndpoint([ipsum], reads)); mount(item, new AdminMutation(), 'publication');
@@ -399,10 +403,10 @@ test('approval waits for the candidate read, and a missing decision, a changed m
   fireEvent.click(screen.getByRole('button', { name: 'Publish Album' }));
   expect(await screen.findByText('Ipsum · Primary · This match changed since review. Choose again in Review.')).toBeVisible();
   expect(within(screen.getByRole('dialog')).getByRole('button', { name: 'Publish Album' })).toBeDisabled(); cleanup();
-  // A track without a decision.
-  vi.stubGlobal('fetch', candidatesEndpoint([ipsum])); mount({ ...item, decisions: item.decisions.slice(0, -1) }, operation, 'publication');
+  // An entry with a name candidate and no decision is not preselected.
+  vi.stubGlobal('fetch', candidatesEndpoint([ipsum])); mount({ ...item, decisions: item.decisions.filter(decision => decision.entryKey !== entryKey(2)) }, operation, 'publication');
   fireEvent.click(screen.getByRole('button', { name: 'Publish Album' }));
-  expect(await screen.findByText('Disc 1 · Track 1 · First Disc Opening · Needs a decision in Review')).toBeVisible();
+  expect(await screen.findByText('Ipsum · Primary · Needs a decision in Review')).toBeVisible();
   expect(within(screen.getByRole('dialog')).getByRole('button', { name: 'Publish Album' })).toBeDisabled(); cleanup();
   // Automation changed a shown value without a new revision: the open confirmation is stale.
   const current = mount(item, operation, 'publication'); fireEvent.click(screen.getByRole('button', { name: 'Publish Album' })); await approve();
@@ -424,7 +428,7 @@ test('the approval sends the unsaved changes, the buffered Review decisions, the
   const dialog = within(screen.getByRole('dialog'));
   expect(dialog.getAllByText('Retitled Album')[0]).toBeVisible(); expect(await dialog.findByRole('note')).toHaveTextContent('Your unsaved draft changes are included and are saved with this approval.');
   fireEvent.click(await approve());
-  expect(run).toHaveBeenCalledWith(`/${item.id}/publish`, 'POST', { expectedRevision: 4, changes, decisions: buffered, selectedCoverSlotId: 'cover', approvalDigest: 'e'.repeat(64) });
+  expect(run).toHaveBeenCalledWith(`/${item.id}/publish`, 'POST', { expectedRevision: 4, changes, decisions: buffered, selectedCoverSlotId: 'cover', approvalDigest: 'e'.repeat(64), preselections: [] });
   cleanup(); run.mockClear();
   adminWorkspace.retain(`duplicate-edits:${item.id}`, { decisions: buffered.map(decision => decision.entryKey === entryKey(1) ? { ...decision, boundName: 'Lorem Before' } : decision) }, captureAccountOperation(viewer));
   mount(item, operation, 'publication', { approval: { draft, changes } }); fireEvent.click(screen.getByRole('button', { name: 'Publish Album' }));
@@ -455,19 +459,54 @@ test('an append confirmation marks the Album values, cover, entries and label no
   expect(within(screen.getByRole('dialog')).getByRole('button', { name: 'Publish Album' })).toBeDisabled();
 });
 
-test('a failed candidate read keeps the approval locked with an error, and a confirmation that reuses nothing reads no candidates', async () => {
+test('an append confirmation lists a file with identical bytes on the target as already on the Album and an unmatched file as new, sending those preselections beside the Album decision, and incomplete member matches hold every track', async () => {
+  const { item } = reviewed(), target: ImportCandidate = { kind: 'album', id: '3'.repeat(24), label: 'Existing Album', revision: 'r-album', albumId: null, visibility: 'public', match: 'name', matchedSlotIds: [], automaticReuse: false };
+  const member: ImportCandidate = { ...target, kind: 'track', id: '4'.repeat(24), label: 'Stored Opening', revision: 'r-track', albumId: target.id, match: 'sha256', matchedSlotIds: [slotId] };
+  const album: ImportDecision = { scope: 'album', slotId: null, entryKey: null, boundName: null, action: 'reuse', candidateId: target.id, candidateRevision: target.revision };
+  item.decisions = [album]; vi.stubGlobal('fetch', candidatesEndpoint([target, member]));
+  const operation = new AdminMutation(), run = vi.spyOn(operation, 'run').mockImplementation(() => {}); mount(item, operation, 'publication');
+  fireEvent.click(screen.getByRole('button', { name: 'Publish Album' })); const button = await approve();
+  const tracks = () => within(within(screen.getByRole('region', { name: 'What becomes catalog content' })).getByText('Tracks', { selector: 'dt' }).nextElementSibling as HTMLElement).getAllByRole('listitem').map(track => track.textContent);
+  expect(tracks()).toEqual(['Disc 1 · Track 1 · First Disc Opening · New', 'Reuses Stored Opening · Already on the Album']);
+  // The shown preselections travel with the approval, which refuses any other set the server computes (an append file shown as
+  // new could otherwise be frozen as a reuse, or the reverse); they are never sent as decisions.
+  const preselected = (slot: string, reused?: ImportCandidate): ImportDecision => ({ scope: 'track', slotId: slot, entryKey: null, boundName: null, action: reused ? 'reuse' : 'create-distinct', candidateId: reused?.id ?? null, candidateRevision: reused?.revision ?? null });
+  fireEvent.click(button); expect(run).toHaveBeenCalledWith(`/${item.id}/publish`, 'POST', expect.objectContaining({ decisions: [album], preselections: [preselected(slotId, member), preselected(slotTwo)] })); cleanup();
+  vi.stubGlobal('fetch', vi.fn(async () => json({ items: [target, member], memberMatchesComplete: false }))); mount(item, new AdminMutation(), 'publication');
+  fireEvent.click(screen.getByRole('button', { name: 'Publish Album' }));
+  expect(await screen.findByText('Disc 1 · Track 1 · First Disc Opening · Needs a decision in Review')).toBeVisible();
+  expect(tracks()).toEqual(['Disc 1 · Track 1 · First Disc Opening · Needs a decision in Review', 'Disc 2 · Track 1 · Second Disc Opening · Needs a decision in Review']);
+  expect(within(screen.getByRole('dialog')).getByRole('button', { name: 'Publish Album' })).toBeDisabled();
+});
+
+test('approval waits again while the open confirmation reads the candidates again', async () => {
+  const { item, ipsum } = reviewed(), again = deferred<Response>(), listing = () => json({ items: [ipsum], memberMatchesComplete: true });
+  const reads = vi.fn(() => reads.mock.calls.length > 1 ? again.promise : Promise.resolve(listing())); vi.stubGlobal('fetch', reads);
+  mount(item, new AdminMutation(), 'publication'); fireEvent.click(screen.getByRole('button', { name: 'Publish Album' }));
+  const button = await approve();
+  try {
+    // Returning to the window reads the candidates again, and the preselections follow that read once it settles.
+    act(() => { focusManager.setFocused(false); focusManager.setFocused(true); });
+    await waitFor(() => expect(button).toBeDisabled()); expect(reads).toHaveBeenCalledTimes(2);
+    again.resolve(listing()); await approve();
+  } finally { focusManager.setFocused(undefined); }
+});
+
+test('a failed candidate read keeps the approval locked with an error, and every confirmation reads candidates once and approval waits for them', async () => {
   const { item } = reviewed(); vi.stubGlobal('fetch', vi.fn(async () => json({ code: 'ADMIN_IMPORT_UNAVAILABLE' }, 503)));
   const operation = new AdminMutation(), run = vi.spyOn(operation, 'run').mockImplementation(() => {}); mount(item, operation, 'publication');
   fireEvent.click(screen.getByRole('button', { name: 'Publish Album' }));
   expect(await within(screen.getByRole('dialog')).findByText('The request could not be confirmed. Your saved draft is retained.', { selector: '[role=alert]' })).toBeVisible();
   const locked = within(screen.getByRole('dialog')).getByRole('button', { name: 'Publish Album' }); expect(locked).toBeDisabled();
   fireEvent.click(locked); expect(run).not.toHaveBeenCalled(); cleanup();
-  // Every identity is new: the checklist needs no candidate to show it.
-  const reads = vi.fn(async () => json({ items: [] })); vi.stubGlobal('fetch', reads);
+  // Every identity is new, yet preselections depend on the candidates: the confirmation reads them once and approval waits for them.
+  const read = deferred<Response>(), reads = vi.fn(() => read.promise); vi.stubGlobal('fetch', reads);
   const distinctOnly = item.decisions.map(decision => decision.action === 'reuse' ? { ...decision, action: 'create-distinct' as const, candidateId: null, candidateRevision: null } : decision);
   mount({ ...item, decisions: distinctOnly }, operation, 'publication');
-  fireEvent.click(screen.getByRole('button', { name: 'Publish Album' })); fireEvent.click(await approve());
-  expect(reads).not.toHaveBeenCalled(); expect(run).toHaveBeenCalledWith(`/${item.id}/publish`, 'POST', expect.objectContaining({ decisions: distinctOnly }));
+  fireEvent.click(screen.getByRole('button', { name: 'Publish Album' }));
+  expect(within(screen.getByRole('dialog')).getByRole('button', { name: 'Publish Album' })).toBeDisabled();
+  read.resolve(json({ items: [], memberMatchesComplete: true })); fireEvent.click(await approve());
+  expect(reads).toHaveBeenCalledTimes(1); expect(run).toHaveBeenCalledWith(`/${item.id}/publish`, 'POST', expect.objectContaining({ decisions: distinctOnly }));
 });
 
 test('the checklist names an embedded cover by its file and says when there is no label or cover, and an unsaved rename of a decided entry needs a decision again', async () => {
@@ -507,16 +546,20 @@ test('the confirmation marks Artist entries and the label resting only on file t
   mount(tagged, new AdminMutation(), 'publication');
   fireEvent.click(screen.getByRole('button', { name: 'Publish Album' }));
   const list = within(await screen.findByRole('region', { name: 'What becomes catalog content' })), value = (term: string) => list.getByText(term, { selector: 'dt' }).nextElementSibling!;
+  await list.findByText('Artists', { selector: 'dt' });
   expect(value('Artists').firstChild!.textContent).toBe('Lorem & Ipsum, Dolor · From file tags only');
-  expect(within(value('Artists') as HTMLElement).getAllByRole('listitem').map(entry => entry.textContent)).toEqual(['Lorem · Primary · joined by “ & ” · Needs a decision in Review',
-    'Ipsum · Primary · Needs a decision in Review · This name looks like a label', 'Dolor · Featured · Needs a decision in Review']);
-  expect(value('Label')).toHaveTextContent('Sit Records · Needs a decision in Review · From file tags only');
+  // Entries and the label without a name candidate are preselected as new; Ipsum has one and needs a decision.
+  expect(within(value('Artists') as HTMLElement).getAllByRole('listitem').map(entry => entry.textContent)).toEqual(['Lorem · Primary · joined by “ & ” · New',
+    'Ipsum · Primary · Needs a decision in Review · This name looks like a label', 'Dolor · Featured · New']);
+  expect(value('Label').textContent).toBe('Sit Records · New · From file tags only');
   // A label this approval changes is the administrator's own, so only the untouched entries keep their marks.
   cleanup();
   const draft = { ...tagged.draft, album: { ...tagged.draft.album, label: labelEntry('Sit Records Ltd') } };
   mount(tagged, new AdminMutation(), 'publication', { approval: { draft, changes: [{ path: 'album.label', base: tagged.draft.album.label, value: draft.album.label }] } });
   fireEvent.click(screen.getByRole('button', { name: 'Publish Album' }));
   const changed = within(await screen.findByRole('region', { name: 'What becomes catalog content' })), shown = (term: string) => changed.getByText(term, { selector: 'dt' }).nextElementSibling!;
+  await changed.findByText('Label', { selector: 'dt' });
+  // The label renamed in this approval is not the name its candidates were read for, so it is not preselected.
   expect(shown('Label').textContent).toBe('Sit Records Ltd · Needs a decision in Review');
   expect(shown('Artists').firstChild!.textContent).toBe('Lorem & Ipsum, Dolor · From file tags only');
 });

@@ -12,13 +12,12 @@
  *   - a server refusal of a newer-format project asks for a reload of that action only, with no retryable intent
  *   - the server Draft v2 projection parses strictly with its approval digest, bound names, tag view and automatic markers, while v1 drafts, unknown entry keys, track Artist suggestions, Disc Number 1000 and a missing digest are refused
  *   - a newer saved state is a later revision, or the same revision with later automatic writes
- *   - duplicate candidates parse label Organizations and up to 460 items, and refuse unknown kinds
  * @end-catalog */
 
 import { z } from 'zod';
 import { advanceAccountEpoch, captureAccountOperation } from '../../api/accountEpoch';
 import { adminWorkspace } from './adminWorkspace';
-import { ADMIN_IMPORT_RELOAD_REQUIRED, adminRequest, candidatesSchema, detailSchema, newerImport, responseSchema } from './adminApi';
+import { ADMIN_IMPORT_RELOAD_REQUIRED, adminRequest, detailSchema, newerImport, responseSchema } from './adminApi';
 import { ADMIN_RELOAD_REQUIRED } from './adminTransport';
 import { AdminCommand } from './useAdminCommand';
 import { AdminMutation } from './useAdminMutation';
@@ -228,11 +227,4 @@ test('a newer saved state is a later revision, or the same revision with later a
   expect(newerImport({ revision: 2, valueRevision: 4 }, { revision: 2, valueRevision: 3 })).toBe(true);
   for (const [next, previous] of [[{ revision: 2, valueRevision: 3 }, { revision: 2, valueRevision: 3 }], [{ revision: 2, valueRevision: 9 }, { revision: 3, valueRevision: 0 }], [{ revision: 2, valueRevision: 2 }, { revision: 2, valueRevision: 3 }]])
     expect(newerImport(next, previous)).toBe(false);
-});
-
-test('duplicate candidates parse label Organizations and up to 460 items, and refuse unknown kinds', () => {
-  const candidate = { kind: 'organization', id: 'a'.repeat(24), label: 'Sit Records', revision: 'r', albumId: null, visibility: 'hidden', match: 'name', matchedSlotIds: [], automaticReuse: false };
-  expect(candidatesSchema.parse({ items: [candidate] }).items[0].kind).toBe('organization');
-  expect(candidatesSchema.safeParse({ items: Array(460).fill(candidate) }).success).toBe(true);
-  for (const items of [Array(461).fill(candidate), [{ ...candidate, kind: 'label' }], [{ ...candidate, automaticReuse: true }]]) expect(candidatesSchema.safeParse({ items }).success).toBe(false);
 });

@@ -30,7 +30,7 @@ export interface ImportPublication {
      */
     schemaVersion?: number;
     operationId: string; actorId: string; approvedRevision: number; snapshot: ImportDraft | ImportDraftV2; decisions: ImportDuplicateDecision[] | ImportDecisionV2[];
-    state: 'preparing' | 'needsAttention' | 'complete' | 'cancelled'; issue: 'storageUnknown' | 'permissionLost' | 'catalogConflict' | 'configurationUnavailable' | 'unsupportedVersion' | null;
+    state: 'preparing' | 'needsAttention' | 'complete' | 'cancelled'; issue: 'storageUnknown' | 'permissionLost' | 'catalogConflict' | 'identityConflict' | 'configurationUnavailable' | 'unsupportedVersion' | null;
     cleanupPending?: boolean;
     cancellation?: { operationId: string; actorId: string };
     /** In format 3 these mirror artists[0], so v1 projections and older readers keep a valid Artist. */

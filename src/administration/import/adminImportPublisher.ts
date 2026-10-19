@@ -18,10 +18,11 @@ import { ADMIN_IMPORT_LIMITS, AdminImportError, IMPORT_APPROVAL_FIELDS, exact, i
 import { boundImportApproval, saveImportApproval } from './adminImportApproval';
 import { getAdminImport, importCandidateProjection, importCollection, importPurposeFilter, importCandidateRevision, mutateAdminImport, withImportAdmin } from './adminImportService';
 import { importPrivateStorageReady, importPublicationSupported, type ImportAsset, type ImportPublication } from './adminImportMediaTypes';
-import { sameDraftValue, type ImportDecisionV2 } from './adminImportDraft';
+import { hasOwn, sameDraftValue, type ImportDecisionV2 } from './adminImportDraft';
 import { importDraftV2View, importSuggestionsV2View } from './adminImportDraftCompat';
 import { draftV2Paths, markAdministratorValues } from './adminImportValueState';
 import { defaultImportObjectStorage, importAssetTarget, type ImportObjectStorage, type ImportObjectTarget, type ImportObjectIdentity } from './adminImportStorage';
+import { assertImportPreselectionsCurrent, importIdentityCandidates, importIdentityPreselections, sameImportPreselections } from './adminImportIdentity';
 import { assertImportReusedRecordsReady, commitImportCatalogGraph, freezeImportIdentities, importAlbumCredits, importPublicationConflict as conflict, requireCurrentApproval as currentApproval, requireImportPublicationReady as ready } from './adminImportCatalogCommit';
 
 const candidateProjection = importCandidateProjection;
@@ -31,12 +32,15 @@ const candidateProjection = importCandidateProjection;
  * Album or appends only missing tracks to the exact reviewed existing Album. It is admitted at any project revision up to the
  * current one: the approvalDigest is its binding, so Luna, the publication worker and tag automation never make it stale unless
  * they changed what the confirmation showed. One transaction and one receipt save what the confirmation showed (adminImportApproval.ts) and freeze
- * the reviewed draft, decisions and identities as format 3: every credited Artist and the label are fixed here. A body without
+ * the reviewed draft, decisions and identities as format 3: every credited Artist and the label are fixed here. Candidates are read
+ * again in the same transaction, and the rows the review preselects (adminImportIdentity.ts) are frozen as decisions marked
+ * `preselected`; a row neither answered nor still preselected, or (when the body sends the optional `preselections` its
+ * confirmation showed) any other set of preselections, is ADMIN_IMPORT_REVIEW_REQUIRED, writing nothing. A body without
  * the one-step fields or with decisions lacking bound names replays its stored receipt, or otherwise is refused with
  * ADMIN_IMPORT_RELOAD_REQUIRED (importPolicy). The raw body is fingerprinted as sent, so an earlier receipt still matches.
  */
 export async function publishAdminImport(actor: string, id: string, raw: unknown) {
-    const body = record(raw); exact(body, ['operationId', 'expectedRevision', ...IMPORT_APPROVAL_FIELDS]); if (!uuid(body.operationId) || !Number.isSafeInteger(body.expectedRevision) || (body.expectedRevision as number) < 1) throw new AdminImportError(400, 'ADMIN_IMPORT_INVALID_INPUT');
+    const body = record(raw); exact(body, ['operationId', 'expectedRevision', ...IMPORT_APPROVAL_FIELDS, 'preselections']); if (!uuid(body.operationId) || !Number.isSafeInteger(body.expectedRevision) || (body.expectedRevision as number) < 1) throw new AdminImportError(400, 'ADMIN_IMPORT_INVALID_INPUT');
     boundImportApproval(body);
     const result = await mutateAdminImport(actor, id, body as typeof body & { operationId: string; expectedRevision: number }, 'publish', async (doc, session) => {
         ready();
@@ -53,8 +57,15 @@ export async function publishAdminImport(actor: string, id: string, raw: unknown
         if (['queued', 'running'].includes(doc.analysis.state) || shown.some(suggestion => suggestion.decision === 'pending')) throw new AdminImportError(409, 'ADMIN_IMPORT_REVIEW_REQUIRED');
         // The project is Draft v2 here (converted on admission). A stored value the editor cannot show (a v1 value over its bound
         // after NFC reads as empty there) is never frozen.
-        const decisions = doc.decisions as ImportDecisionV2[];
         if (!draft.album.title || !sameDraftValue(importDraftV2View(draft, doc.manifest, id), draft)) throw new AdminImportError(400, 'ADMIN_IMPORT_DRAFT_INCOMPLETE');
+        // Candidates are read again in this transaction: a row neither answered nor still preselected (a candidate appeared since
+        // review) needs a fresh review below. Saved decisions stay explicit; the preselections are frozen with them, and must be
+        // the ones the confirmation showed, so an append file shown as a new member is never frozen as a reuse, or the reverse.
+        const explicit = doc.decisions as ImportDecisionV2[];
+        const candidates = await importIdentityCandidates({ manifest: doc.manifest, draft, assets: doc.media?.assets ?? [], decisions: explicit }, session);
+        const preselections = importIdentityPreselections(draft, explicit, candidates);
+        if (hasOwn(body, 'preselections') && !sameImportPreselections(body.preselections as unknown[], preselections)) throw new AdminImportError(409, 'ADMIN_IMPORT_REVIEW_REQUIRED');
+        const decisions = [...explicit, ...preselections];
         // A new Album needs a primary Artist entry; an append credits the target Album's own primaries instead.
         const albumDecision = decisions.find(decision => decision.scope === 'album'), append = albumDecision?.action === 'reuse';
         if (!append && !draft.album.artists.some(entry => entry.role === 'primary')) throw new AdminImportError(400, 'ADMIN_IMPORT_DRAFT_INCOMPLETE');
@@ -171,7 +182,11 @@ async function cleanupCancelledPublication(id: string, worker: string, publicati
         await importCollection().replaceOne({ _id: current._id, revision: current.revision - 1, 'media.publication.leaseOwner': worker }, current, { session });
     });
 }
-/** HEAD-only reconciliation is always safe; unknown sent copies are never repeated when absence is ambiguous. */
+/**
+ * HEAD-only reconciliation is always safe; unknown sent copies are never repeated when absence is ambiguous. Before any copy, the
+ * reused records must still be ready and every frozen preselection must still hold: a candidate that appeared since approval is
+ * needs attention with `identityConflict`, copying and minting nothing.
+ */
 export async function runAdminImportPublicationOnce(storage: ImportObjectStorage = defaultImportObjectStorage, onlyId?: string, signal?: AbortSignal,
     operationId?: string, cleanupActor?: string): Promise<boolean> {
     if (signal?.aborted) return false;
@@ -204,6 +219,7 @@ export async function runAdminImportPublicationOnce(storage: ImportObjectStorage
         await withImportAdmin(publication.actorId, async session => {
             const current = await importCollection().findOne({ _id: doc._id, 'media.publication.leaseOwner': worker }, { session }); if (!current?.media?.publication) throw conflict(); currentApproval(current.media.publication);
             await assertImportReusedRecordsReady(current.media.publication, session);
+            await assertImportPreselectionsCurrent(current.media.publication, { manifest: current.manifest, assets: current.media.assets }, session);
         });
         const copies = [...publication.tracks.filter(track => !track.reused).map(track => ({ slotId: track.slotId, key: track.key, value: track, isCover: false })), ...(publication.cover ? [{ slotId: publication.cover.slotId, key: publication.cover.key, value: publication.cover, isCover: true }] : [])];
         for (const copy of copies) {
@@ -244,6 +260,7 @@ export async function runAdminImportPublicationOnce(storage: ImportObjectStorage
         if (!issue) await commitImportCatalogGraph(id, worker, signal);
     } catch (error) {
         issue = error instanceof AdminImportError && error.code === 'ADMIN_IMPORT_PUBLICATION_UNSUPPORTED' ? 'unsupportedVersion'
+            : error instanceof AdminImportError && error.code === 'ADMIN_IMPORT_IDENTITY_CONFLICT' ? 'identityConflict'
             : error instanceof AdminImportError && error.status === 403 ? 'permissionLost' : error instanceof AdminImportError && error.status === 409 ? 'catalogConflict' : 'storageUnknown';
     }
     if (issue) await importCollection().updateOne({ _id: doc._id, 'media.publication.leaseOwner': worker, 'media.publication.state': { $nin: ['complete', 'cancelled'] } }, { $set: { 'media.publication.state': 'needsAttention', 'media.publication.issue': issue, 'media.publication.leaseOwner': null, 'media.publication.leaseUntil': null, updatedAt: new Date() }, $inc: { revision: 1 } });

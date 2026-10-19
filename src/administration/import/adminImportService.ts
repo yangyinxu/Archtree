@@ -6,29 +6,24 @@
  *              adminImportDetail, parseAdminProjectMutation, mutateAdminProject, mutateAdminImport,
  *              createAdminImport, getAdminImport, editAdminImport, listAdminImports, analyzeAdminImport,
  *              analyzeAdminProject, cancelAdminImportAnalysis, adoptAdminImportSuggestions,
- *              adoptAdminProjectSuggestions, importCandidateRevision, adminImportDuplicateCandidates,
- *              reusesOneArtistTwice, parseImportDecisions, decideAdminImportDuplicates,
- *              runAdminImportWorkerOnce, startAdminImportWorker
- *   Constants: importPurposeFilter, adminImportIndexes, importCandidateProjection
+ *              adoptAdminProjectSuggestions, adminImportDuplicateCandidates, reusesOneArtistTwice,
+ *              parseImportDecisions, decideAdminImportDuplicates, runAdminImportWorkerOnce,
+ *              startAdminImportWorker
+ *   Constants: importPurposeFilter, adminImportIndexes
+ *   Re-exports: importCandidateProjection, importCandidateRevision
  * Internal
  *   Types: Receipt, Chunk, Analysis
  *   Functions: notFound, conflict, isActive, admit, idValue, importCapabilities, response, outdatedDecisions,
- *              revisionFloor, suggestionPath, acceptDraftV2Suggestion, named, candidate, readyCandidate,
- *              boundedTags, reserveDailyAnalysisAttempt
+ *              revisionFloor, suggestionPath, acceptDraftV2Suggestion, boundedTags, reserveDailyAnalysisAttempt
  *   Constants: collection, digest, occupiedAnalysis, touchAdmin, withAdmin, importPolicy, mutation,
- *              slotBoundKinds, importRevisionFloors, readOnlyProjectKinds, mutate, filters,
- *              candidateProjection, candidateCollection
+ *              slotBoundKinds, importRevisionFloors, readOnlyProjectKinds, mutate, filters
  * @end-catalog */
 
 import { startAdminWorker, type AdminWorkTracker } from '../adminWorkerLifecycle';
 import { createHash, randomUUID } from 'node:crypto';
 import { ObjectId, type ClientSession, type Db, type Filter } from 'mongodb';
 import { getDatabaseClient, getDb } from '../../infrastructure/database';
-import { readyAudioStorageFilter } from '../../utils/audioStorageKey';
-import { readyArtistLifecycleFilter } from '../../services/catalog/artistReferenceFenceService';
-import { readyAlbumLifecycleFilter } from '../../services/catalog/albumReferenceFenceService';
-import { readyOrganizationLifecycleFilter } from '../../services/catalog/organizationReferenceFenceService';
-import { ADMIN_IMPORT_LIMITS as LIMITS, AdminImportError, IMPORT_APPROVAL_FIELDS, cleanText, exact, importEnabled, invalidImport, legacyDefaultDraftV1, objectId, parseDraft, parseManifest, record, uuid, type AdminImportDetail, type AdminImportDetailV2, type AdminImportResponse, type ImportAnalysisState, type ImportDraft, type ImportDuplicateCandidate, type ImportDuplicateDecision, type ImportEmbeddedTags, type ImportIssue, type ImportManifest, type ImportReceipt, type ImportSuggestion, type ImportWorkbenchFilter, type ImportWorkbenchResponse } from './adminImportContract';
+import { ADMIN_IMPORT_LIMITS as LIMITS, AdminImportError, IMPORT_APPROVAL_FIELDS, cleanText, exact, importEnabled, invalidImport, legacyDefaultDraftV1, objectId, parseDraft, parseManifest, record, uuid, type AdminImportDetail, type AdminImportDetailV2, type AdminImportResponse, type ImportAnalysisState, type ImportDraft, type ImportDuplicateDecision, type ImportEmbeddedTags, type ImportIssue, type ImportManifest, type ImportReceipt, type ImportSuggestion, type ImportWorkbenchFilter, type ImportWorkbenchResponse } from './adminImportContract';
 import { type AnalysisInput, type ImportAnalysisProvider, ImportProviderError, OpenAiImportAnalysisProvider } from './adminImportProvider';
 import type { CatalogReviewSource, CatalogReviewApplied } from '../catalog/adminCatalogReviewContract';
 import type { ImportMedia } from './adminImportMediaTypes';
@@ -37,6 +32,7 @@ import { importDraftV2FromV1, importDraftV2View, importDraftVersion, importDraft
 import { DRAFT_V2, DRAFT_V2_LIMITS, defaultDraftV2, draftBytes, draftV2Suggestion, hasOwn, importApprovalDigest, isDraftV2, retainBoundDecisions, sameDraftValue, type ImportDecisionV2, type ImportDraftOrigins, type ImportDraftV2, type ImportSuggestionV2 } from './adminImportDraft';
 import { applyAdministratorChanges, boundDraftChanges, boundedJson, convertLegacyImportProject, draftValueAt, draftWithinSizeLimit, importAutomationMarkers, markAdministratorValues, originOf, parseDraftChanges, parseDraftValue, setDraftValue, storedDraftV2, type ImportDraftPath } from './adminImportValueState';
 import { importTagsV2View } from './adminImportTags';
+import { IMPORT_CANDIDATE_COLLECTIONS, IMPORT_IDENTITY_FENCE_ID, importCandidateProjection, importCandidateRevision, importCandidateRow, importIdentityCandidates, readyImportCandidate } from './adminImportIdentity';
 
 export type ProjectReceipt = Omit<ImportReceipt, 'kind'> & { kind: ImportReceipt['kind'] | 'apply' } & { actorId: string; hash: string; at: Date; selection?: { generation: number; acceptedIds: string[]; rejectedIds: string[] } };
 type Receipt = ProjectReceipt;
@@ -112,8 +108,11 @@ export const adminImportIndexes = [
     { collection: 'adminAlbumImports', keys: { 'analysis.actorId': 1, 'analysis.state': 1 }, options: { name: 'admin_import_actor_admission' }, required: true },
     { collection: 'adminAlbumImports', keys: { 'media.publication.state': 1, 'media.publication.leaseUntil': 1 }, options: { name: 'admin_import_publication_worker' }, required: true }
 ] as const;
+/** Creates the admission gate and the identity fence (adminImportIdentity.ts) outside any transaction: 4.2 cannot create collections inside one. */
 export async function initializeAdminImportStorage(db: Db) {
-    await db.collection<{ _id: string; revision: number }>('adminImportAnalysisSlots').updateOne({ _id: 'admission' }, { $setOnInsert: { revision: 0 } }, { upsert: true });
+    const slots = db.collection<{ _id: string; revision: number }>('adminImportAnalysisSlots');
+    await slots.updateOne({ _id: 'admission' }, { $setOnInsert: { revision: 0 } }, { upsert: true });
+    await slots.updateOne({ _id: IMPORT_IDENTITY_FENCE_ID }, { $setOnInsert: { revision: 0 } }, { upsert: true });
 }
 
 /**
@@ -376,50 +375,24 @@ export function adoptAdminProjectSuggestions<T>(actor: string, id: string, raw: 
     }, policy);
 }
 
-export const importCandidateProjection = { name: 1, title: 1, coverArtId: 1, coverArtUrl: 1, creditRevision: 1, adminRevision: 1, albumId: 1, audioTrackIds: 1, releaseDate: 1, credits: 1, visibility: 1, lifecycleStatus: 1, uploadStatus: 1, publicationStatus: 1, mediaType: 1, s3Key: 1, mediaRepresentation: 1, mediaByteHash: 1, updatedAt: 1 };
-const candidateProjection = importCandidateProjection;
-/** Lifecycle touches may materialize legacy defaults; they do not change the reviewed content. */
-export const importCandidateRevision = (doc: Record<string, any>): string => {
-    const stable = (value: any): any => value instanceof ObjectId ? value.toHexString() : value instanceof Date ? value.toISOString() : Array.isArray(value) ? value.map(stable) : value && typeof value === 'object' ? Object.fromEntries(Object.keys(value).sort().filter(key => value[key] !== undefined).map(key => [key, stable(value[key])])) : value;
-    return digest(stable({ ...doc, lifecycleStatus: doc.lifecycleStatus ?? 'ready', visibility: doc.visibility ?? 'public' }));
-};
-/** Artists and Organizations are matched by name; Albums and Tracks by title. */
-const named = (kind: ImportDuplicateCandidate['kind']) => kind === 'artist' || kind === 'organization';
-function candidate(kind: ImportDuplicateCandidate['kind'], doc: Record<string, any>): ImportDuplicateCandidate {
-    if (doc.visibility !== undefined && doc.visibility !== 'public' && doc.visibility !== 'hidden') return invalidImport();
-    return { kind, id: doc._id.toHexString(), label: cleanText(named(kind) ? doc.name : doc.title, 300), revision: importCandidateRevision(doc), albumId: typeof doc.albumId === 'string' && objectId(doc.albumId) ? doc.albumId : null, visibility: doc.visibility === 'hidden' ? 'hidden' : 'public', match: 'name', matchedSlotIds: [], automaticReuse: false };
-}
-const candidateCollection = { artist: 'artists', organization: 'organizations', album: 'albums', track: 'audioTracks' };
-const readyCandidate = (kind: ImportDuplicateCandidate['kind']) => kind === 'track' ? { $and: [readyAudioStorageFilter, { $or: [{ mediaType: 'audio' }, { mediaType: { $exists: false } }] }] }
-    : kind === 'artist' ? readyArtistLifecycleFilter : kind === 'organization' ? readyOrganizationLifecycleFilter : readyAlbumLifecycleFilter;
+// The candidate projection and revision live in adminImportIdentity.ts; the publisher, the catalog commit and the golden tests read them here.
+export { importCandidateProjection, importCandidateRevision };
 /**
- * Exact case-insensitive name candidates: one query of at most 20 rows per distinct Artist entry name (so one common name cannot
- * hide another entry's candidates), one for the label among ready Organizations, one for the Album title and one for track
- * titles and verified bytes: at most 20 * 20 + 3 * 20 = 460 items. Names are never unique identity keys.
+ * The duplicate candidates the import editor loads automatically on opening Review and the approval confirmation: exact
+ * case-insensitive name candidates for each Artist entry, the label, the Album and the tracks, one verified byte candidate per
+ * staged hash, and every byte or title match among the members of each Album candidate and of the saved append target
+ * (importIdentityCandidates): at most 860 items, with `memberMatchesComplete` false when more member matches exist, and the
+ * `unavailable` names whose same-name record is malformed. Only the saved Album reuse target is read from the decisions.
  */
 export async function adminImportDuplicateCandidates(actor: string, id: string) {
     return withAdmin(actor, async session => {
-        const doc = await collection().findOne({ _id: idValue(id), ...importPurposeFilter }, { session }); if (!doc) throw notFound(); const items: ImportDuplicateCandidate[] = [];
+        const doc = await collection().findOne({ _id: idValue(id), ...importPurposeFilter }, { session }); if (!doc) throw notFound();
         // Candidates read the same Draft v2 view the editor shows, whatever format stored it.
         const manifest = legacyManifestView(doc.manifest), draft = importDraftV2View(doc.draft, manifest, doc._id.toHexString());
-        const groups: { kind: ImportDuplicateCandidate['kind']; values: string[] }[] = [
-            ...[...new Set(draft.album.artists.map(entry => entry.name))].map(name => ({ kind: 'artist' as const, values: [name] })),
-            { kind: 'organization', values: draft.album.label ? [draft.album.label.name] : [] }, { kind: 'album', values: [draft.album.title] }, { kind: 'track', values: draft.tracks.map(track => track.title) }];
-        const hashes = new Set((doc.media?.assets ?? []).filter(asset => asset.state === 'ready' && manifest.files.some(file => file.slotId === asset.slotId)).map(asset => asset.sha256));
-        for (const { kind, values: labels } of groups) {
-            const values = [...new Set(labels.filter(Boolean))].slice(0, 100); if (!values.length && (kind !== 'track' || !hashes.size)) continue;
-            const patterns = values.map(value => new RegExp(`^${value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i'));
-            const matches: Record<string, unknown>[] = [{ [named(kind) ? 'name' : 'title']: { $in: patterns } }];
-            if (kind === 'track' && hashes.size) matches.push({ 'mediaByteHash.value': { $in: [...hashes] } });
-            const rows = await getDb()!.collection(candidateCollection[kind]).find({ $and: [readyCandidate(kind), { $or: matches }] }, { session, projection: candidateProjection }).sort({ _id: 1 }).limit(20).maxTimeMS(3_000).toArray();
-            for (const row of rows) { try {
-                const hash = row.mediaByteHash, representation = row.mediaRepresentation;
-                const verified = kind === 'track' && typeof hash?.objectKey === 'string' && hash.objectKey.length > 0 && Number.isSafeInteger(hash.byteLength) && hash.byteLength > 0 && typeof hash.etag === 'string' && /^"[^"\r\n]{1,200}"$/.test(hash.etag) && (hash.versionId === null || (typeof hash.versionId === 'string' && hash.versionId.length > 0 && hash.versionId.length <= 1024)) && hash?.algorithm === 'sha256' && /^[a-f0-9]{64}$/.test(hash?.value) && hashes.has(hash.value) && hash.objectKey === row.s3Key && hash.objectKey === representation?.objectKey && hash.byteLength === representation?.byteLength && hash.etag === representation?.etag && hash.versionId === representation?.versionId;
-                if (!verified && !values.some(value => value.toLocaleLowerCase() === String(named(kind) ? row.name : row.title).toLocaleLowerCase())) continue;
-                items.push({ ...candidate(kind, row), match: verified ? 'sha256' : 'name', matchedSlotIds: kind === 'track' ? draft.tracks.filter(track => verified ? doc.media?.assets.some(asset => asset.slotId === track.slotId && asset.state === 'ready' && asset.sha256 === hash.value && asset.byteLength === hash.byteLength) : track.title.toLocaleLowerCase() === String(row.title).toLocaleLowerCase()).map(track => track.slotId) : [] });
-            } catch { /* Malformed legacy metadata cannot become a selectable identity. */ } }
-        }
-        return { items };
+        // The saved append target as the editor shows it (adminImportDetail): decisions saved before Draft v2 name no entry key.
+        const view = importProjectV2View(doc), slots = new Set(manifest.files.map(file => file.slotId));
+        const decisions = view ? importDecisionsV2View(view.decisions, slots) : legacyDecisionsView(doc.decisions, slots);
+        return importIdentityCandidates({ manifest, draft, assets: doc.media?.assets ?? [], decisions }, session);
     });
 }
 /** Two Artist entries of one decision set cannot reuse one Artist. */
@@ -459,8 +432,8 @@ export async function parseImportDecisions(doc: AdminImportDocument, draft: Impo
             // An append applies no entry or label: their saved decisions are kept but never block it.
             if (!(append && (scope === 'artist' || scope === 'label'))) {
                 const kind = scope === 'label' ? 'organization' : scope;
-                const target = await getDb()!.collection(candidateCollection[kind]).findOne({ _id: new ObjectId(decision.candidateId), ...readyCandidate(kind) }, { session, projection: candidateProjection });
-                if (!target || candidate(kind, target).revision !== decision.candidateRevision) throw conflict('ADMIN_IMPORT_DUPLICATE_STALE');
+                const target = await getDb()!.collection(IMPORT_CANDIDATE_COLLECTIONS[kind]).findOne({ _id: new ObjectId(decision.candidateId), ...readyImportCandidate(kind) }, { session, projection: importCandidateProjection });
+                if (!target || importCandidateRow(kind, target).revision !== decision.candidateRevision) throw conflict('ADMIN_IMPORT_DUPLICATE_STALE');
                 if (scope === 'track' && target.albumId) { const album = (raw as (Record<string, unknown> | null)[]).find(d => d?.scope === 'album' && d.action === 'reuse'); if (!album || album.candidateId !== target.albumId) throw conflict('ADMIN_IMPORT_TRACK_BELONGS_TO_ALBUM'); }
             }
         } else if (decision.candidateId !== null || decision.candidateRevision !== null) return invalidImport();

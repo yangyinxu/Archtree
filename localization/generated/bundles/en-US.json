@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "locale": "en-US",
-  "revision": "sha256-ZixelxWsbO-v2UEGVSWnsKz7e87F3-stLFf7ZuDWAfQ",
+  "revision": "sha256-AIfp5tUMZjwURxAwx2Kcob3N4ZTJfjRwlxWWsD4B1R8",
   "messages": {
     "account.common.back_account": "← Back to Account",
     "account.common.checking": "Checking your account…",
@@ -371,9 +371,13 @@
     "admin.duplicates.copy": "Matches, including identical files, do not prove identity. Decisions update this draft without merging or publishing content.",
     "admin.duplicates.decision": "Decision",
     "admin.duplicates.distinct": "Create as distinct",
+    "admin.duplicates.keep_preselected": "Keep the preselected choice",
     "admin.duplicates.label": "Label",
     "admin.duplicates.name": "Name match",
     "admin.duplicates.not_applied": "Not applied: this import adds tracks to an existing Album, so this needs no decision.",
+    "admin.duplicates.possible_duplicate": "A ready MediaTrack outside this Album has identical bytes. It may be a duplicate, is never merged, and needs no answer.",
+    "admin.duplicates.preselected_new": "Preselected as new",
+    "admin.duplicates.preselected_reuse": "Preselected to reuse {name}: identical verified bytes on this Album",
     "admin.duplicates.reuse": "Reuse existing",
     "admin.duplicates.save": "Save duplicate decisions",
     "admin.duplicates.sha256": "Identical verified bytes",

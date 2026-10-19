@@ -2614,6 +2614,13 @@
       ],
       "variables": {}
     },
+    "admin.duplicates.keep_preselected": {
+      "description": "Administrator import Review: the empty choice of a decision row the review preselected, which keeps that preselection instead of an explicit answer.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.duplicates.label": {
       "description": "Administrator workbench: identity decision row for the draft label.",
       "delivery": [
@@ -2634,6 +2641,29 @@
         "runtime"
       ],
       "variables": {}
+    },
+    "admin.duplicates.possible_duplicate": {
+      "description": "Administrator import Review: a track row whose staged file has the same verified bytes as a ready MediaTrack outside this Album (on another Album or on none); the row is never collapsed but needs no answer.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.duplicates.preselected_new": {
+      "description": "Administrator import Review: summary of a collapsed decision row preselected as a new record: an entry, the label or the Album without a name candidate, a track of a new Album, or an appended file matching no member of the target Album.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.duplicates.preselected_reuse": {
+      "description": "Administrator import Review: summary of a collapsed track row of an append preselected to reuse the named existing member of the target Album with identical verified bytes.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "name": "string"
+      }
     },
     "admin.duplicates.reuse": {
       "description": "Reuse existing",

@@ -20,6 +20,7 @@
  *   - several Artist entries and a label are decided one row each and published in one approval that lists them, linking every confirmed identity
  *   - values written from file tags are marked in the editor, and the confirmation marks entries and the label that rest only on file tags
  *   - an unsaved title edit is published in one approval without Save, and the editor then shows it saved
+ *   - an import with no candidates publishes without answering identity questions
  * @end-catalog */
 
 import { expect, test, type Page, type Request } from '@playwright/test';
@@ -110,6 +111,8 @@ async function setup(page: Page, admin = true, media = false, publication?: Publ
     expect(route.request().headers()['x-finitude-account-viewer']).toBe(viewer);
     const path = new URL(route.request().url()).pathname;
     if (path.endsWith('capabilities')) return route.fulfill({ json: { ...capabilities, catalog: { editing: true, visibility: true } }, headers });
+    // Review and every publication confirmation read the duplicate candidates; this project has none.
+    if (path.endsWith('/duplicate-candidates')) return route.fulfill({ json: { items: [], memberMatchesComplete: true }, headers });
     if (route.request().method() === 'POST' && path.endsWith('/reconcile')) {
       // HEAD-only reconciliation finds nothing yet, so the unknown upload stays unknown.
       const body = route.request().postDataJSON(); writes.push({ path, body });
@@ -124,8 +127,8 @@ async function setup(page: Page, admin = true, media = false, publication?: Publ
     if (route.request().method() === 'POST') {
       const body = route.request().postDataJSON(); writes.push({ path, body });
       if (path.endsWith('/publish')) {
-        // One-step approval: the shown changes, decisions and cover, bound to the saved project by revision and digest.
-        expect(body).toEqual({ operationId: expect.any(String), expectedRevision: item.revision, changes: expect.any(Array), decisions: item.decisions, selectedCoverSlotId: item.selectedCoverSlotId, approvalDigest: item.approvalDigest });
+        // One-step approval: the shown changes, decisions, preselections and cover, bound to the saved project by revision and digest.
+        expect(body).toEqual({ operationId: expect.any(String), expectedRevision: item.revision, changes: expect.any(Array), decisions: item.decisions, selectedCoverSlotId: item.selectedCoverSlotId, approvalDigest: item.approvalDigest, preselections: expect.any(Array) });
         item.draft = applyDraftChanges(item.draft, body.changes); item.publication = 'preparing'; item.revision++;
         if (publication) await publication.admission;
         return route.fulfill({ status: 202, json: { item, receipt: { operationId: body.operationId, kind: 'publish', revision: item.revision } }, headers });
@@ -285,6 +288,7 @@ test('an unconfirmed publication can be cancelled and reviewed while exact clean
   const writes: Array<{ path: string; body: Record<string, unknown> }> = [], headers = { 'X-Finitude-Account-Viewer': viewer };
   await page.route(`**/api/admin/v1/imports/${projectId}**`, async route => {
     const path = new URL(route.request().url()).pathname, method = route.request().method();
+    if (path.endsWith('/duplicate-candidates')) return route.fulfill({ json: { items: [], memberMatchesComplete: true }, headers });
     if (method === 'GET') return route.fulfill({ json: { item, receipt: null }, headers });
     const body = route.request().postDataJSON(); writes.push({ path, body });
     let kind: 'cancel-publication' | 'edit' | 'publish' = 'publish';
@@ -347,7 +351,7 @@ test('an unconfirmed publication can be cancelled and reviewed while exact clean
   await expect(page.getByRole('definition').filter({ hasText: 'Publication in progress' })).toBeVisible();
   expect(writes).toHaveLength(4);
   // The new approval carries the reviewed decisions and the saved project's digest.
-  expect(writes[3].body).toEqual({ operationId: expect.any(String), expectedRevision: 10, changes: [], decisions: item.decisions, selectedCoverSlotId: null, approvalDigest: item.approvalDigest });
+  expect(writes[3].body).toEqual({ operationId: expect.any(String), expectedRevision: 10, changes: [], decisions: item.decisions, selectedCoverSlotId: null, approvalDigest: item.approvalDigest, preselections: [] });
 });
 
 test('ordinary account has no admin switch and requests no admin data', async ({ page }) => {
@@ -583,7 +587,7 @@ test('several Artist entries and a label are decided one row each and published 
   // Only this project's reads, candidates, decisions and approval; every other admin path keeps setup's mock.
   await page.route(`**/api/admin/v1/imports/${projectId}**`, async route => {
     const path = new URL(route.request().url()).pathname;
-    if (path.endsWith('/duplicate-candidates')) return route.fulfill({ json: { items: [] }, headers });
+    if (path.endsWith('/duplicate-candidates')) return route.fulfill({ json: { items: [], memberMatchesComplete: true }, headers });
     if (route.request().method() !== 'POST') return route.fulfill({ json: { item, receipt: null }, headers });
     const body = route.request().postDataJSON(); writes.push({ path, body });
     const kind = path.endsWith('/publish') ? 'publish' : 'decisions';
@@ -593,8 +597,11 @@ test('several Artist entries and a label are decided one row each and published 
   await page.goto(`/finitude/admin/imports/${projectId}`);
   await page.getByRole('button', { name: 'Switch to Admin view' }).click();
   await page.getByRole('tab', { name: 'Review', exact: true }).click();
-  await page.getByRole('button', { name: 'Find matches', exact: true }).click();
+  // Candidates load with Review; with none, every row is collapsed as preselected, and an explicit answer is still possible.
+  await expect(page.getByRole('button', { name: 'Save decisions', exact: true })).toBeVisible();
   for (const [index, text] of ['Artist · Lorem · Primary', 'Artist · Ipsum · Primary', 'Artist · Dolor · Featured', 'Label · Lorem Records', 'Album · Synthetic Album', 'Track · Second Disc Song', 'Track · First Disc Song'].entries()) {
+    const collapsed = page.locator('details:not([open])').filter({ has: page.locator(`select[aria-label="${index + 1} · Decision"]`) });
+    if (await collapsed.count()) await collapsed.locator('summary').click();
     const row = page.getByRole('combobox', { name: `${index + 1} · Decision`, exact: true });
     await expect(page.locator('label').filter({ has: row })).toContainText(text);
     await row.selectOption('create-distinct');
@@ -613,7 +620,7 @@ test('several Artist entries and a label are decided one row each and published 
   await expect(page.getByRole('link', { name: 'Edit label', exact: true })).toHaveAttribute('href', `/finitude/admin/catalog/organization/${published.organizationId}`);
   expect(writes.map(write => write.path.split('/').at(-1))).toEqual(['publish']);
   const fresh = { action: 'create-distinct', candidateId: null, candidateRevision: null };
-  expect(writes[0].body).toEqual({ operationId: expect.any(String), expectedRevision: 1, changes: [], selectedCoverSlotId: null, approvalDigest: 'e'.repeat(64), decisions: [...artists.map(entry => ({ scope: 'artist', slotId: null, entryKey: entry.key, boundName: entry.name, ...fresh })),
+  expect(writes[0].body).toEqual({ operationId: expect.any(String), expectedRevision: 1, changes: [], selectedCoverSlotId: null, approvalDigest: 'e'.repeat(64), preselections: [], decisions: [...artists.map(entry => ({ scope: 'artist', slotId: null, entryKey: entry.key, boundName: entry.name, ...fresh })),
     { scope: 'label', slotId: null, entryKey: null, boundName: 'Lorem Records', ...fresh }, { scope: 'album', slotId: null, entryKey: null, boundName: null, ...fresh }, { scope: 'track', slotId, entryKey: null, boundName: null, ...fresh }, { scope: 'track', slotId: slotTwo, entryKey: null, boundName: null, ...fresh }] });
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
 });
@@ -629,7 +636,7 @@ test('values written from file tags are marked in the editor, and the confirmati
   item.decisions = distinctDecisions(item).filter(decision => decision.scope !== 'artist');
   const headers = { 'X-Finitude-Account-Viewer': viewer, 'Cache-Control': 'no-store' };
   await page.route(`**/api/admin/v1/imports/${projectId}**`, route => route.request().method() === 'GET'
-    ? route.fulfill({ json: new URL(route.request().url()).pathname.endsWith('/duplicate-candidates') ? { items: [] } : { item, receipt: null }, headers }) : route.fallback());
+    ? route.fulfill({ json: new URL(route.request().url()).pathname.endsWith('/duplicate-candidates') ? { items: [], memberMatchesComplete: true } : { item, receipt: null }, headers }) : route.fallback());
   await page.goto(`/finitude/admin/imports/${projectId}`);
   await page.getByRole('button', { name: 'Switch to Admin view' }).click();
   await expect(page.getByRole('textbox', { name: 'Title · From file tags', exact: true })).toHaveValue('Tagged Album');
@@ -645,8 +652,9 @@ test('values written from file tags are marked in the editor, and the confirmati
   await page.getByRole('button', { name: 'Publish Album', exact: true }).click();
   const checklist = page.getByRole('dialog').getByRole('region', { name: 'What becomes catalog content', exact: true });
   await expect(checklist.getByRole('definition').filter({ hasText: 'Synthetic Records · From file tags only' }).first()).toBeVisible();
-  await expect(checklist.getByRole('listitem').first()).toHaveText('Synthetic Records · Primary · Needs a decision in Review · This name looks like a label');
-  await expect(checklist.getByRole('definition').filter({ hasText: 'Tagged Label · Needs a decision in Review · From file tags only' })).toBeVisible();
+  // Without a name candidate the entry and the label are preselected as new, and still marked as resting on file tags.
+  await expect(checklist.getByRole('listitem').first()).toHaveText('Synthetic Records · Primary · New · This name looks like a label');
+  await expect(checklist.getByRole('definition').filter({ hasText: 'Tagged Label · New · From file tags only' })).toBeVisible();
   expect((await new AxeBuilder({ page }).include('[role=dialog]').analyze()).violations).toEqual([]);
 });
 
@@ -657,6 +665,7 @@ test('an unsaved title edit is published in one approval without Save, and the e
   const writes: Array<{ path: string; method: string; body: Record<string, any> }> = [], headers = { 'X-Finitude-Account-Viewer': viewer, 'Cache-Control': 'no-store' };
   await page.route(`**/api/admin/v1/imports/${projectId}**`, async route => {
     const path = new URL(route.request().url()).pathname, method = route.request().method();
+    if (path.endsWith('/duplicate-candidates')) return route.fulfill({ json: { items: [], memberMatchesComplete: true }, headers });
     if (method === 'GET') return route.fulfill({ json: { item, receipt: null }, headers });
     const body = route.request().postDataJSON(); writes.push({ path, method, body });
     item = { ...item, revision: item.revision + 1, draft: applyDraftChanges(item.draft, body.changes), publication: 'preparing' };
@@ -670,8 +679,47 @@ test('an unsaved title edit is published in one approval without Save, and the e
   await expect(page.getByRole('dialog').getByText('Your unsaved draft changes are included and are saved with this approval.')).toBeVisible();
   await page.getByRole('dialog').getByRole('button', { name: 'Publish Album', exact: true }).click();
   await expect.poll(() => writes.length).toBe(1);
-  expect(writes[0]).toEqual({ path: `/api/admin/v1/imports/${projectId}/publish`, method: 'POST', body: { operationId: expect.any(String), expectedRevision: 1, changes: [{ path: 'album.title', base: 'Synthetic Album', value: 'Approved Title' }], decisions: item.decisions, selectedCoverSlotId: null, approvalDigest: 'e'.repeat(64) } });
+  expect(writes[0]).toEqual({ path: `/api/admin/v1/imports/${projectId}/publish`, method: 'POST', body: { operationId: expect.any(String), expectedRevision: 1, changes: [{ path: 'album.title', base: 'Synthetic Album', value: 'Approved Title' }], decisions: item.decisions, selectedCoverSlotId: null, approvalDigest: 'e'.repeat(64), preselections: [] } });
   await page.getByRole('tab', { name: 'Draft', exact: true }).click();
   await expect(page.getByRole('textbox', { name: 'Title', exact: true })).toHaveValue('Approved Title');
   await expect(page.getByRole('button', { name: 'Save', exact: true })).toBeDisabled();
+});
+
+test('an import with no candidates publishes without answering identity questions', async ({ page }) => {
+  await setup(page);
+  let item = detail(); Object.assign(item.draft.album, { title: 'Synthetic Album', artists: [artistEntry('Lorem')], label: labelEntry('Lorem Records') });
+  item.capabilities.publish = true; item.publication = 'notStarted'; item.suggestions = []; item.draft.tracks.forEach((track, index) => { track.title = `Song ${index + 1}`; });
+  const published = { albumId: '1'.repeat(24), artistIds: ['2'.repeat(24)], organizationId: '5'.repeat(24), trackIds: [] };
+  const writes: Array<{ path: string; body: Record<string, any> }> = [], headers = { 'X-Finitude-Account-Viewer': viewer, 'Cache-Control': 'no-store' };
+  await page.route(`**/api/admin/v1/imports/${projectId}**`, async route => {
+    const path = new URL(route.request().url()).pathname;
+    if (path.endsWith('/duplicate-candidates')) return route.fulfill({ json: { items: [], memberMatchesComplete: true }, headers });
+    if (route.request().method() !== 'POST') return route.fulfill({ json: { item, receipt: null }, headers });
+    const body = route.request().postDataJSON(); writes.push({ path, body });
+    item = { ...item, revision: item.revision + 1, publication: 'complete', published };
+    return route.fulfill({ json: { item, receipt: { operationId: body.operationId, kind: 'publish', revision: item.revision } }, headers });
+  });
+  await page.goto(`/finitude/admin/imports/${projectId}`);
+  await page.getByRole('button', { name: 'Switch to Admin view' }).click();
+  await page.getByRole('tab', { name: 'Review', exact: true }).click();
+  // Every row is collapsed as a preselected new record; no decision is asked for.
+  await expect(page.locator('details > summary').filter({ hasText: 'Preselected as new' })).toHaveText(['Artist · Lorem · Primary · Preselected as new',
+    'Label · Lorem Records · Preselected as new', 'Album · Synthetic Album · Preselected as new', 'Track · Song 1 · Preselected as new', 'Track · Song 2 · Preselected as new']);
+  await expect(page.getByRole('combobox', { name: /· Decision$/ })).toHaveCount(0);
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+  await page.getByRole('tab', { name: 'Publish', exact: true }).click();
+  await page.getByRole('button', { name: 'Publish Album', exact: true }).click();
+  const checklist = page.getByRole('dialog').getByRole('region', { name: 'What becomes catalog content', exact: true });
+  await expect(checklist.getByRole('listitem')).toHaveText(['Lorem · Primary · New', 'Disc 1 · Track — · Song 1 · New', 'Disc 1 · Track — · Song 2 · New']);
+  await expect(checklist.getByRole('definition').filter({ hasText: 'Lorem Records · New' })).toBeVisible();
+  await expect(page.getByRole('dialog').getByRole('button', { name: 'Publish Album', exact: true })).toBeEnabled();
+  expect((await new AxeBuilder({ page }).include('[role=dialog]').analyze()).violations).toEqual([]);
+  await page.getByRole('dialog').getByRole('button', { name: 'Publish Album', exact: true }).click();
+  await expect(page.getByRole('link', { name: 'Edit published Album', exact: true })).toHaveAttribute('href', `/finitude/admin/catalog/album/${published.albumId}`);
+  // The approval carries no identity decision, only the preselections it showed, which the server must compute again exactly.
+  expect(writes.map(write => write.path.split('/').at(-1))).toEqual(['publish']);
+  const created = { action: 'create-distinct', candidateId: null, candidateRevision: null };
+  expect(writes[0].body).toEqual({ operationId: expect.any(String), expectedRevision: 1, changes: [], decisions: [], selectedCoverSlotId: null, approvalDigest: 'e'.repeat(64), preselections: [
+    { scope: 'artist', slotId: null, entryKey: entryKey(1), boundName: 'Lorem', ...created }, { scope: 'label', slotId: null, entryKey: null, boundName: 'Lorem Records', ...created },
+    { scope: 'album', slotId: null, entryKey: null, boundName: null, ...created }, ...[slotId, slotTwo].map(slot => ({ scope: 'track', slotId: slot, entryKey: null, boundName: null, ...created }))] });
 });

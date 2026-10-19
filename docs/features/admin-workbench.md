@@ -121,7 +121,29 @@ Review shows an Artist suggestion as its byline
 followed by each entry with its role. Review's existing-content check has one
 Artist row per entry, in draft order and named with its role, and a Label row
 when the draft has a label; each row lists only the candidates found for its
-own name. An Artist that another entry already reuses cannot be chosen again,
+own name. Review loads the candidates when it opens, and Find matches reads
+them again. A row without an explicit decision that the review preselects is
+collapsed, reads "Preselected as new" or "Preselected to reuse" a named member,
+and needs no answer: an Artist entry, the label or the Album without a name
+candidate of its kind is preselected as new, and so is every track once the
+Album is new (explicitly or preselected). When the Album row reuses an existing
+Album, a file whose verified bytes match exactly one member of that Album, which
+no other file matches and no other decision reuses, is preselected to reuse it,
+and a file matching no member by bytes or title is preselected as a new member;
+a title-only match, ambiguous bytes or an incomplete member list
+(`memberMatchesComplete` false) needs an explicit choice. So does a row whose
+name matches a record too malformed to be a candidate (listed in `unavailable`),
+which offers create but no reuse. A file whose bytes match a ready MediaTrack
+outside the append target (on another Album or on none) is flagged as a
+possible duplicate and never collapsed, but needs no answer and changes no
+preselection: a file with no candidate on the target is preselected as a new
+member even when its title or bytes match a Track on another Album. Any other
+row stays expanded until answered. An explicit choice, made inside a collapsed
+row too, always wins; the empty choice reads "Keep the preselected choice"
+while the row has a preselection to return to, answered or not, and choosing it
+collapses the row again with the focus on its summary. Saving sends only
+explicit decisions.
+An Artist that another entry already reuses cannot be chosen again,
 and a save in which two entries reuse the same Artist is refused. While the
 Album row reuses an existing Album, each Artist and Label row says it is not
 applied and needs no decision, and Publish notes that the draft's Album title,
@@ -148,14 +170,20 @@ The tracks the approval adds follow in approved order, Disc Number (unknown as
 1), then Track Number (unknown last), then draft order, followed by an existing
 Album's members, named by their catalog title (or draft title while the match
 changed) without a position, which the append leaves unchanged; skipped tracks
-are left out. The confirmation reads the duplicate candidates only when it shows
-a reuse. The Artist entries and the label are marked "From file tags only"
-while they are automatic and the approval neither changes them nor shows an
-explicit identity decision for them, saved or unsaved (never for an append),
-and an automatic entry named like a company says it may be a label.
-Approve stays disabled while those load or fail, while any row needs a
-decision or holds a changed match, and while Review's unsaved decisions are
-in conflict as described above. Only a changed
+are left out. The confirmation always reads the duplicate candidates, since
+the preselections depend on them, and a row without an explicit decision shows
+its preselection as New or Reuses; a row renamed in the unsaved draft (an entry,
+the label, the Album title or, in an append, a track title) is not preselected,
+because its candidates were read for the saved name. The approval carries the
+preselections the confirmation shows, so the server freezes exactly those or
+asks for a fresh review. The Artist entries and the
+label are marked "From file tags only" while they are automatic and the
+approval neither changes them nor shows an explicit identity decision for them,
+saved or unsaved (never for an append; a preselection is not one), and an
+automatic entry named like a company says it may be a label.
+Approve stays disabled while the candidates load, reload or fail, while any row
+is neither answered nor preselected, or holds a changed match, and while
+Review's unsaved decisions are in conflict as described above. Only a changed
 approval digest makes an open confirmation stale, so Luna, uploads and
 automatic values that change nothing it shows leave it current. Approving
 sends the unsaved changes and Review's unsaved decisions with the approval; a
@@ -423,16 +451,32 @@ Import routes (relative to `/api/admin/v1`):
   decision makes the Artist entries, or the label, the administrator's own; a
   skip does
   not. Unless the Album decision appends, publishing needs a reuse or
-  create-distinct decision still bound to every entry and to the label, so
-  renaming an entry or the label makes publishing return
-  `409 ADMIN_IMPORT_REVIEW_REQUIRED` until it is decided again.
+  create-distinct decision still bound to every entry and to the label unless
+  the review preselects it (no name candidate, see `/publish`), so renaming an
+  entry or the label to a name that has a candidate makes publishing return
+  `409 ADMIN_IMPORT_REVIEW_REQUIRED` until it is decided again. A preselection
+  is never saved: a body item carrying `preselected` is invalid input.
 - `GET /imports/:id/duplicate-candidates`: bounded candidates; a name match is
   never verified identity or automatic reuse. Candidates are read from the
   Draft v2 view, and each distinct Artist entry name and the label's name are
   matched on their own, exactly and case-insensitively: at most 20 ready
   Artists per name (kind `artist`) and 20 ready Organizations of any type for
   the label (kind `organization`, `albumId` `null`), beside at most 20 Album
-  and 20 Track candidates, so at most 460 items.
+  and 20 Track title candidates. Verified byte matches are read on their own:
+  for each staged file's hash, the first ready Track outside the saved append
+  target whose stored hash is bound to its current object, so at most 100, and
+  no number of same-title Tracks hides one. Every ready Track on an Album
+  candidate or on the saved append target whose verified bytes or exact title
+  match a staged file is then added once (the global Track rows could leave it
+  out), at most 300 of them, so at most 860 items. `memberMatchesComplete` is
+  `false` when more such member matches exist or one of them is malformed; the
+  Web then preselects no append file. `unavailable` lists `{kind, label}` for
+  each entry name, the label or the Album title (at most 22) whose same-name
+  record is malformed (a stored visibility other than public or hidden): it is
+  no selectable candidate, but its row is never preselected. Names compare
+  after NFC normalization and locale-independent lower-casing. All reads of one
+  request share a 10-second budget, each query at most 3 seconds. The editor
+  loads this on opening Review and with every publication confirmation.
 - `POST /imports/:id/assets/:slotId`: one multipart `file`; `Idempotency-Key`
   and numeric `If-Match` form the upload intent, which reserves its private
   object identity before S3 work. Admission binds slot state and that intent,
@@ -485,10 +529,15 @@ Import routes (relative to `/api/admin/v1`):
   shape (possibly none), the whole decision set it shows in the `/decisions`
   shape, the cover it shows (`null` or a staged slot) and the `approvalDigest`
   of the saved project it was built on; each decision carries its
-  `boundName`. Before the intent is fingerprinted,
+  `boundName`. The Web also sends the optional `preselections`: the rows the
+  confirmation shows as preselected, each in the decision shape without
+  `preselected`. Before the intent is fingerprinted,
   `changes` and `decisions` are bounded as `PATCH` and `/decisions` bound them
-  (so two entries reusing one Artist are refused here) and the cover and
-  digest to 64 characters, or the body is `400 ADMIN_IMPORT_INVALID_INPUT`.
+  (so two entries reusing one Artist are refused here), the cover and
+  digest to 64 characters, and `preselections` to at most 122 well-formed
+  items (each identifier at most 300 characters or `null`, `action`
+  `create-distinct` or `reuse`), or the body is
+  `400 ADMIN_IMPORT_INVALID_INPUT`.
   One transaction under one ordinary `publish` receipt then saves and freezes
   the approval. It is admitted at any project revision up to the current one:
   `approvalDigest` is its binding, so Luna, the publication worker and
@@ -522,7 +571,8 @@ Import routes (relative to `/api/admin/v1`):
   needs an Album
   title, and a new Album also at least one primary Artist entry, or it is
   `400 ADMIN_IMPORT_DRAFT_INCOMPLETE` before anything is frozen. A new Album's
-  entries and label need the decisions described under `/decisions`
+  entries and label need the decisions described under `/decisions` or a
+  preselection that still holds when the approval reads the candidates again
   (`409 ADMIN_IMPORT_REVIEW_REQUIRED`), and a reused Artist or Organization
   must still be ready at its reviewed revision
   (`409 ADMIN_IMPORT_DUPLICATE_STALE`). An append needs neither a primary entry
@@ -543,8 +593,9 @@ Import routes (relative to `/api/admin/v1`):
   `400 ADMIN_IMPORT_DRAFT_INCOMPLETE`, so it is never frozen, and only pending
   suggestions the editor shows hold the approval with
   `409 ADMIN_IMPORT_REVIEW_REQUIRED`. The approval freezes the Draft v2
-  snapshot with `schemaVersion` 3, its decisions and, for each Artist entry
-  and the label, the reviewed record to reuse or an ID reserved for a new one,
+  snapshot with `schemaVersion` 3, its decisions, including each preselection
+  it applied, and, for each Artist entry and the label, the reviewed record to
+  reuse or an ID reserved for a new one,
   so a retry or resume never mints another identity. `artists` lists
   `{entryKey, artistId, newArtist, candidateRevision}` in Credit order, for an
   append the target Album's primary Artists with `entryKey` `null`; `label` is
@@ -556,6 +607,35 @@ Import routes (relative to `/api/admin/v1`):
   `ADMIN_IMPORT_PUBLICATION_UNSUPPORTED` any more; the worker keeps it only as
   its internal signal for an approval format it cannot commit
   (`unsupportedVersion`).
+  Inside the same transaction the approval reads the duplicate candidates again
+  and computes the rows the review preselects (see Review): a row neither
+  answered nor still preselected, because a candidate appeared since review, is
+  `409 ADMIN_IMPORT_REVIEW_REQUIRED` and writes nothing, while a lost-response
+  replay finds its receipt first. When the body carries `preselections`, any
+  other set of computed preselections, candidate revisions included, is the
+  same `409 ADMIN_IMPORT_REVIEW_REQUIRED`: an append file shown as a new member
+  is never frozen as a reuse, or the reverse, even when a member's verified
+  bytes changed without changing the target Album's revision. A body without
+  them freezes what the approval computes. The saved decisions stay explicit;
+  the frozen `decisions` add each preselection marked `preselected: true`,
+  which is never a saved decision, request item or DTO field. Before the first
+  copy and again inside the commit transaction, the worker recomputes the
+  preselections of a format-3 approval from its frozen snapshot, its frozen
+  explicit decisions and fresh candidates; a frozen one that no longer holds
+  makes the publication needs attention (internal issue `identityConflict`,
+  not projected, like `catalogConflict`) without minting identities, the
+  copies already made stay recorded in the publication for cancellation and
+  cleanup, and resuming checks again. A format-3 decision list in another
+  shape, or candidate reads over their time budget, are a resumable catalog
+  conflict (`catalogConflict`), never a passed recheck or an unknown storage
+  outcome. No route returns the internal `ADMIN_IMPORT_IDENTITY_CONFLICT`. Every
+  format-3 commit also increments one identity-fence document
+  (`adminImportAnalysisSlots`, `_id` `identity`, created at startup), so
+  concurrent format-3 import commits serialize and a later one rechecks against
+  the records an earlier one created. The fence covers only those commits: a
+  record that a format-1 or format-2 commit, the Admin Catalog or the Content
+  Manager creates concurrently with a commit is not rechecked, since names are
+  never identity keys.
 - `POST /imports/:id/cancel-publication`: explicit cancellation with
   `{operationId, expectedRevision, publicationOperationId}`. The new operation
   UUID binds the exact original publication UUID, and `expectedRevision` must
@@ -750,7 +830,9 @@ approval's identities and commits a format-3 approval as described in
 1 and 2 keep their earlier commit. Before the first copy, the worker checks
 that every reused Artist and Organization and an append's target Album is
 still ready, and the commit checks them again; otherwise the publication
-needs attention (`catalogConflict`) without minting identities.
+needs attention (`catalogConflict`) without minting identities. The
+preselections the approval froze are rechecked at the same two points, as
+described for `POST /imports/:id/publish`, with `identityConflict` instead.
 Audio/artwork reconciliation includes unresolved canonical copy reservations
 from import and cover operations before reporting orphan candidates. Completed
 history does not mask later unreferenced objects; unresolved cleanup evidence
@@ -979,6 +1061,25 @@ Later stages raise the oldest release that is safe to roll back to:
   checkpoints can make them stale there. A file uploaded while rolled back
   keeps only its original five tag fields and fills nothing after rolling
   forward.
+- An approval made with preselections keeps format 3. A release before them
+  commits its frozen preselected creates without the recheck, so a name
+  candidate that appeared after approval is then not caught; roll back only
+  while no such publication is preparing or in needs attention. Before rolling
+  back, confirm in `mongosh` that this returns 0, or cancel those publications
+  first:
+
+  ```js
+  db.adminAlbumImports.countDocuments({
+    "media.publication.state": { $in: ["preparing", "needsAttention"] },
+    "media.publication.decisions.preselected": true
+  })
+  ```
+
+  A Web tab opened before them cannot parse the candidates response, which
+  now carries `memberMatchesComplete`, `unavailable` and up to 860 items, and
+  a release before them refuses the `preselections` this Web sends with its
+  approvals as invalid input, so reload open workbench tabs after deploying or
+  rolling back across them.
 - After metadata lookup jobs run, never roll back below the release before
   them, which ignores their records.
 - After MusicBrainz IDs are stored, never roll back below the release before

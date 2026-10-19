@@ -72,19 +72,25 @@ moves an Artist entry with the keyboard, checking that the move is announced
 and keeps focus on the moved entry and that the reordered entries and a new
 label save as just `album.artists` and `album.label`, with axe scans and
 reflow at 320, 768 and 1440 px. Another test publishes an import with two
-primary Artists, a featured Artist and a new label in one step, deciding each
-entry, the label, the Album and each track on its own row without a separate
-save, checks that the confirmation lists the entries with their roles and
-join phrase, the label and the tracks in disc order, that the single publish
-request carries those decisions, and the links to the Album, each Artist and
-the label Organization, with axe scans of the page and the confirmation.
+primary Artists, a featured Artist and a new label in one step, expanding each
+row Review collapsed as preselected and deciding each entry, the label, the
+Album and each track on its own row without a separate save, checks that the
+confirmation lists the entries with their roles and join phrase, the label and
+the tracks in disc order, that the single publish request carries those
+decisions, and the links to the Album, each Artist and the label Organization,
+with axe scans of the page and the confirmation.
 Another publishes an unsaved title edit without Save and checks that the one
 publish request carries it and the editor then shows it saved. Another loads a
 draft whose values came from file tags and checks that the editor marks them
 From file tags, notes that a company-like Artist entry looks like a label and
 drops a value's marker once it is edited, and that the confirmation marks the
 entry and the label From file tags only, with axe scans of the page and the
-confirmation.
+confirmation. Another opens Review on an import with no candidates and checks
+that its matches load without a find step, that the entry, the label, the Album
+and each track are collapsed as preselected new records with no decision asked,
+that the confirmation lists each as New, and that the single publish request
+carries no decisions, only the preselections the confirmation showed, with axe
+scans of the page and the confirmation.
 
 The catalog reviews spec checks that an existing-Album review shows the Album's
 Artist Credits and label read-only and applies a Disc Number change.
@@ -387,16 +393,20 @@ player control still works.
   move is announced with the entry's new position, focus stays on the moved
   entry and no primary entry follows a featured one. Repeat at 320 CSS px.
 - As an administrator, publish an import with two primary Artists, a featured
-  Artist and a new label. Confirm Review asks for one decision per entry and
-  for the label, refuses reusing one Artist for two entries, and that the
-  completed import links to the Album, each Artist and the label
-  Organization. In User view, confirm the Album byline keeps the join phrases,
-  the tracks credit only the primary Artists, the Album appears in each
-  primary Artist's Discography, the featured Artist's Collaborations and the
-  label's Releases. Then append one more file to that Album and confirm the
-  draft's Album values, entries, label and cover are shown as not applied, the
-  confirmation lists the new track with its Disc and Track Number, and the new
-  track takes the Album's primary Artists, order and visibility.
+  Artist and a new label, where only one primary name matches an existing
+  Artist, in different letter case. Confirm Review loads its matches without a
+  find step, shows the other entries, the label, the Album and each track
+  collapsed as preselected new records, asks for a decision only for the
+  matching entry, refuses reusing one Artist for two entries, and that the
+  completed import links to the Album, each Artist and the label Organization.
+  In User view, confirm the Album byline keeps the join phrases, the tracks
+  credit only the primary Artists, the Album appears in each primary Artist's
+  Discography, the featured Artist's Collaborations and the label's Releases.
+  Then append one new file and one file already on that Album and confirm the
+  identical file is preselected to reuse its track and the new one as a new
+  member, the draft's Album values, entries, label and cover are shown as not
+  applied, the confirmation lists the new track with its Disc and Track Number,
+  and the new track takes the Album's primary Artists, order and visibility.
 - As an administrator, make each Review decision without Save decisions, then
   edit the import's title without saving and choose Publish. Confirm the
   confirmation says the unsaved changes are included and lists the title, the
@@ -405,6 +415,11 @@ player control still works.
   identity, with a hidden reused record marked Hidden. Approve, refresh the
   page and confirm the saved draft holds the edited title and the decisions.
   Repeat with a screen reader at 320 CSS px.
+- As an administrator, open the publication confirmation of an import whose rows
+  are all preselected, create an Artist named like one of its entries in another
+  letter case from a second tab, then approve. Confirm the approval is refused
+  and nothing is published, and that Review, once it reads its matches again,
+  asks for a decision on that entry.
 - As an administrator, create an import from a folder of tagged audio files
   that share their album, album artist, year and label tags, with the tracks
   in `Disc 1` and `Disc 2` folders and no disc tags. Confirm each track's

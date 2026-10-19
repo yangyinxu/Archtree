@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "locale": "zh-Hans",
-  "revision": "sha256-_utQw33N-x3C-C1k5aDWs6dQPCMR4jnEDUmhUQbVHgc",
+  "revision": "sha256-KNlACiFJUtGPO1oE3PP7caYtMQsII0qWIYr5akYrG6Q",
   "messages": {
     "account.common.back_account": "← 返回账户",
     "account.common.checking": "正在检查你的账户…",
@@ -371,9 +371,13 @@
     "admin.duplicates.copy": "匹配（包括相同文件）不能确认身份。决定只更新此草稿，不会合并或发布内容。",
     "admin.duplicates.decision": "处理方式",
     "admin.duplicates.distinct": "创建为独立内容",
+    "admin.duplicates.keep_preselected": "保留预选",
     "admin.duplicates.label": "唱片公司",
     "admin.duplicates.name": "名称匹配",
     "admin.duplicates.not_applied": "不适用：此导入会向现有专辑追加曲目，因此这里无需做出决定。",
+    "admin.duplicates.possible_duplicate": "此专辑之外有字节相同的就绪曲目。它可能是重复内容，不会被合并，也无需回答。",
+    "admin.duplicates.preselected_new": "已预选为新建",
+    "admin.duplicates.preselected_reuse": "已预选复用 {name}：此专辑中有字节相同的已验证文件",
     "admin.duplicates.reuse": "复用已有内容",
     "admin.duplicates.save": "保存重复内容处理方式",
     "admin.duplicates.sha256": "字节一致且已核验",

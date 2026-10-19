@@ -4,7 +4,8 @@
  *   Functions: mutation, code, wav, file, stored, taggedWav, hundredTagged, create, prepared, existingProject,
  *              appendProject, cancelPublication, later, unknownUpload, land, reconcile, distinctCovers,
  *              taggedProject, pngOf, legacyApproval, landCopy, markNewer, discProject, fresh, undecided,
- *              distinctAll
+ *              distinctAll, uploadedProject, changedFile, appendTo, newMember, appendDraft, trackCopy,
+ *              flaggedSlots
  *   Constants: actor, other, analysisProvider, fixtureAdmin, catalogCollections
  *   Variables: harness
  * Tests
@@ -102,6 +103,12 @@
  *   - an approval refused by a stale change base, a track reused outside its Album or a null decision writes nothing, and a null decision is invalid input for /decisions too
  *   - a refused approval of a project saved before Draft v2 leaves it unconverted, whether its basis is stale or its review needs a decision
  *   - an approval showing no cover clears a saved choice, any other body field is refused before receipt lookup, and a replay after completion returns its receipt
+ *   - an append preselects reuse for identical bytes on the target and a new member for a file with no match, while a title-only member needs an answer
+ *   - a staged file byte-identical to a ready track on another Album is a candidate but needs no answer
+ *   - an append whose member matches are incomplete preselects no track until each is answered
+ *   - an append preselection that stops holding after approval needs attention with identityConflict before any copy, while a title match on another Album changes nothing
+ *   - byte matches have their own read: 25 files byte-identical to Tracks on another Album are all flagged, and no number of same-title Tracks hides one
+ *   - an approval sending the preselections its confirmation showed freezes exactly them, and refuses, writing nothing, once an append file would flip between new and reuse
  * @end-catalog */
 
 import assert from 'node:assert/strict';
@@ -124,6 +131,7 @@ import { id3TextFrame } from '../support/pcmWav';
 import { convertLegacyImportProject, draftV2Paths } from '../../src/administration/import/adminImportValueState';
 import { importDraftV2FromV1, legacyAdministratorOrigins, legacyArtistEntryKey, legacyDraftView } from '../../src/administration/import/adminImportDraftCompat';
 import { originKey, type ImportDecisionV2, type ImportDraftV2 } from '../../src/administration/import/adminImportDraft';
+import { importIdentityPreselections } from '../../src/administration/import/adminImportIdentity';
 
 let harness: MongoReplicaSetHarness; const actor = new ObjectId(), other = new ObjectId();
 const mutation = (expectedRevision: number) => ({ operationId: randomUUID(), expectedRevision });
@@ -1247,10 +1255,10 @@ test('a new Album without a primary Artist entry is refused before freezing, wri
         assert.deepEqual(await stored(id), before, label); assert.equal(storage.copies, 0, label);
         project = await editImportDraft(actor.toHexString(), id, changed.item, draft => { draft.album.artists = project.item.draft.album.artists; draft.album.label = null; });
     }
-    // Removing the entry dropped its Artist decision; decided again for the restored entry, the draft publishes.
-    await assert.rejects(publishAdminImport(actor.toHexString(), id, approvalBody(project.item)), code('ADMIN_IMPORT_REVIEW_REQUIRED'));
-    project = await decideAdminImportDuplicates(actor.toHexString(), id, { ...mutation(project.item.revision), decisions: withEntryKeys(project.item.draft, [fresh('artist'), fresh('album'), fresh('track', project.item.manifest.files[0].slotId)]) });
-    await publishAdminImport(actor.toHexString(), id, approvalBody(project.item)); await runAdminImportPublicationOnce(storage);
+    // Removing the entry dropped its Artist decision; the restored entry has no name candidate, so it is preselected and the draft publishes.
+    await publishAdminImport(actor.toHexString(), id, approvalBody(project.item));
+    assert.deepEqual(((await stored(id)).media!.publication!.decisions as ImportDecisionV2[]).filter(decision => decision.scope === 'artist').map(decision => [decision.action, decision.preselected]), [['create-distinct', true]]);
+    await runAdminImportPublicationOnce(storage);
     assert.equal((await getAdminImport(actor.toHexString(), id)).item.publication, 'complete');
 });
 test('a stored value the editor cannot show is never frozen, and only a pending suggestion the editor shows holds the approval', async () => {
@@ -1391,6 +1399,8 @@ test('an approval refused while saving or freezing writes nothing: a renamed reu
     const candidates = (await adminImportDuplicateCandidates(actor.toHexString(), id)).items, artist = candidates.find(value => value.kind === 'artist' && value.id === existing.artistId)!;
     const album = candidates.find(value => value.kind === 'album' && value.id === existing.albumId)!, appended = { scope: 'album', slotId: null, entryKey: null, boundName: null, action: 'reuse', candidateId: album.id, candidateRevision: album.revision };
     const reuse = [{ scope: 'artist', slotId: null, entryKey: item.draft.album.artists[0].key, boundName: item.draft.album.artists[0].name, action: 'reuse', candidateId: artist.id, candidateRevision: artist.revision }, ...distinctAll(item).slice(1)];
+    // The renamed entry has a name candidate, so it is not preselected.
+    await getDb()!.collection('artists').insertOne({ _id: new ObjectId(), name: 'renamed artist', visibility: 'public', lifecycleStatus: 'ready' });
     const before = await stored(id);
     for (const [label, options, expected] of [
         // The rename drops the decision made for the saved name, so the entry needs a new one.
@@ -1480,9 +1490,9 @@ test('values included in an approval become the administrator\'s own, while a re
     const storage = new Storage(), project = await prepared(storage), id = project.item.id, slotId = project.item.manifest.files[0].slotId, projects = getDb()!.collection('adminAlbumImports');
     await projects.updateOne({ _id: new ObjectId(id) }, { $set: { 'draftOrigins.album:title': 'automatic', [`draftOrigins.tracks:${slotId}:discNumber`]: 'automatic' } });
     const automatic = (await stored(id)).draftOrigins;
-    // Refused before and after the approval's own saves: a stale basis, and an Album decision left out.
+    // Refused before and after the approval's own saves: a stale basis, and an Album decision set to skip.
     await assert.rejects(publishAdminImport(actor.toHexString(), id, approvalBody(project.item, { approvalDigest: 'f'.repeat(64) })), code('ADMIN_IMPORT_APPROVAL_STALE'));
-    await assert.rejects(publishAdminImport(actor.toHexString(), id, approvalBody(project.item, { decisions: project.item.decisions.filter(decision => decision.scope !== 'album') })), code('ADMIN_IMPORT_REVIEW_REQUIRED'));
+    await assert.rejects(publishAdminImport(actor.toHexString(), id, approvalBody(project.item, { decisions: project.item.decisions.map(decision => decision.scope === 'album' ? { ...decision, action: 'skip' } : decision) })), code('ADMIN_IMPORT_REVIEW_REQUIRED'));
     assert.deepEqual((await stored(id)).draftOrigins, automatic);
     await publishAdminImport(actor.toHexString(), id, approvalBody(project.item));
     const origins = (await stored(id)).draftOrigins!, paths = draftV2Paths(project.item.draft);
@@ -1541,10 +1551,12 @@ test('an approval refused by a stale change base, a track reused outside its Alb
 test('a refused approval of a project saved before Draft v2 leaves it unconverted, whether its basis is stale or its review needs a decision', async () => {
     await getDb()!.collection('users').updateOne({ _id: fixtureAdmin }, { $set: { email: 'fixture-admin@example.test', role: 'admin' } }, { upsert: true });
     const doc = loadImportFixture('adminImport', 'v1-assets-reviewed.json'), id = doc._id.toHexString(); await getDb()!.collection<AdminImportDocument>('adminAlbumImports').insertOne(doc);
+    // The renamed Artist has a name candidate, so the rename is not preselected away.
+    await getDb()!.collection('artists').insertOne({ _id: new ObjectId(), name: 'renamed artist', visibility: 'public', lifecycleStatus: 'ready' });
     const before = await stored(id), { item } = await getAdminImport(fixtureAdmin.toHexString(), id);
     for (const [label, options, expected] of [
         ['a stale basis', { approvalDigest: 'f'.repeat(64) }, 'ADMIN_IMPORT_APPROVAL_STALE'],
-        ['an Album decision left out', { decisions: item.decisions.filter(decision => decision.scope !== 'album') }, 'ADMIN_IMPORT_REVIEW_REQUIRED'],
+        ['an Album decision set to skip', { decisions: item.decisions.map(decision => decision.scope === 'album' ? { ...decision, action: 'skip' as const } : decision) }, 'ADMIN_IMPORT_REVIEW_REQUIRED'],
         // Converted inside the transaction, the decided Artist is renamed by the approval itself and so needs a new decision.
         ['an unsaved rename of the decided Artist', { edit: (draft: ImportDraftV2) => { draft.album.artists[0].name = 'Renamed Artist'; } }, 'ADMIN_IMPORT_REVIEW_REQUIRED']
     ] as const) {
@@ -1569,4 +1581,164 @@ test('an approval showing no cover clears a saved choice, any other body field i
     const replay = await publishAdminImport(actor.toHexString(), id, body);
     assert.deepEqual([replay.receipt, replay.item.publication], [approved.receipt, 'complete']); assert.deepEqual(await stored(id), done);
     assert.deepEqual([await getDb()!.collection('albums').countDocuments(), await getDb()!.collection('imageAssets').countDocuments()], [1, 0]);
+});
+
+/** Creates an import of `files` (uploaded in order, each slot following its file) and saves `change` to its draft. */
+async function uploadedProject(storage: Storage, files: Express.Multer.File[], change: (draft: ImportDraftV2) => void) {
+    const slots = files.map(() => randomUUID());
+    let { item } = await createAdminImport(actor.toHexString(), { operationId: randomUUID(), manifest: { rootLabel: 'Synthetic Album', files: files.map((value, index) => ({ slotId: slots[index], filename: value.originalname, relativePath: value.originalname, byteLength: value.size })) } });
+    for (const [index, value] of files.entries()) item = (await uploadAdminImportAsset(actor.toHexString(), item.id, slots[index], mutation(item.revision), value, storage)).item;
+    return { slots, item: (await editImportDraft(actor.toHexString(), item.id, item, change)).item };
+}
+/** A synthetic recording whose bytes differ from file() at one sample. */
+const changedFile = (name: string, sample: number) => { const value = { ...file(), originalname: name }; value.buffer[100] = sample; return value; };
+/** Saves an explicit reuse of the existing Album, at its current candidate revision, plus `tracks`, as the import's only decisions. */
+async function appendTo(item: { id: string; revision: number }, albumId: string, tracks: Record<string, unknown>[] = []) {
+    const album = (await adminImportDuplicateCandidates(actor.toHexString(), item.id)).items.find(value => value.kind === 'album' && value.id === albumId)!;
+    return (await decideAdminImportDuplicates(actor.toHexString(), item.id, { ...mutation(item.revision), decisions: [{ scope: 'album', slotId: null, entryKey: null, boundName: null, action: 'reuse', candidateId: album.id, candidateRevision: album.revision }, ...tracks] })).item;
+}
+const newMember = (slotId: string) => ({ scope: 'track', slotId, entryKey: null, boundName: null, action: 'create-distinct', candidateId: null, candidateRevision: null });
+const appendDraft = (titles: string[]) => (draft: ImportDraftV2) => { Object.assign(draft.album, { title: 'Synthetic Album', artists: [], label: null }); titles.forEach((title, index) => { draft.tracks[index].title = title; }); };
+
+test('an append preselects reuse for identical bytes on the target and a new member for a file with no match, while a title-only member needs an answer', async () => {
+    const storage = new Storage(), existing = await existingProject(storage);
+    const { slots, item } = await uploadedProject(storage, [{ ...file(), originalname: '01 - Identical.wav' }, changedFile('02 - New.wav', 20)], appendDraft(['Identical Copy', 'New Member']));
+    await publishAdminImport(actor.toHexString(), item.id, approvalBody(await appendTo(item, existing.albumId)));
+    const publication = (await stored(item.id)).media!.publication!;
+    assert.deepEqual((publication.decisions as ImportDecisionV2[]).map(value => [value.scope, value.slotId, value.action, value.candidateId, value.preselected ?? false]),
+        [['album', null, 'reuse', existing.albumId, false], ['track', slots[0], 'reuse', existing.trackIds[0], true], ['track', slots[1], 'create-distinct', null, true]]);
+    assert.deepEqual(slots.map(slot => publication.tracks.find(track => track.slotId === slot)!).map(track => [track.reused, track.reused ? track.id : null]), [[true, existing.trackIds[0]], [false, null]]);
+    await runAdminImportPublicationOnce(storage, item.id);
+    assert.equal((await getAdminImport(actor.toHexString(), item.id)).item.publication, 'complete');
+    assert.deepEqual([await getDb()!.collection('audioTracks').countDocuments(), (await getDb()!.collection('albums').findOne({ _id: new ObjectId(existing.albumId) }))!.audioTrackIds.length], [2, 2]);
+    // Different bytes titled like a member (in another case) need an explicit choice; answered as a new member, the file publishes.
+    const titled = await uploadedProject(storage, [changedFile('03 - Titled.wav', 30)], appendDraft(['synthetic recording']));
+    const unanswered = await appendTo(titled.item, existing.albumId), before = await stored(titled.item.id);
+    await assert.rejects(publishAdminImport(actor.toHexString(), titled.item.id, approvalBody(unanswered)), code('ADMIN_IMPORT_REVIEW_REQUIRED'));
+    assert.deepEqual(await stored(titled.item.id), before);
+    await publishAdminImport(actor.toHexString(), titled.item.id, approvalBody(await appendTo(unanswered, existing.albumId, [newMember(titled.slots[0])])));
+    await runAdminImportPublicationOnce(storage, titled.item.id);
+    assert.deepEqual([(await getAdminImport(actor.toHexString(), titled.item.id)).item.publication, await getDb()!.collection('audioTracks').countDocuments()], ['complete', 3]);
+});
+
+test('a staged file byte-identical to a ready track on another Album is a candidate but needs no answer', async () => {
+    const storage = new Storage(), existing = await existingProject(storage);
+    const { slots, item } = await uploadedProject(storage, [file()], draft => { Object.assign(draft.album, { title: 'Distinct Album', artists: artistEntries('Distinct Artist') }); draft.tracks[0].title = 'Distinct Recording'; });
+    const candidates = await adminImportDuplicateCandidates(actor.toHexString(), item.id);
+    assert.deepEqual([candidates.memberMatchesComplete, candidates.items.map(value => [value.kind, value.id, value.match, value.albumId, value.matchedSlotIds])], [true, [['track', existing.trackIds[0], 'sha256', existing.albumId, slots]]]);
+    await publishAdminImport(actor.toHexString(), item.id, approvalBody(item)); await runAdminImportPublicationOnce(storage, item.id);
+    const done = (await getAdminImport(actor.toHexString(), item.id)).item;
+    assert.deepEqual([done.publication, done.published!.albumId === existing.albumId, await getDb()!.collection('audioTracks').countDocuments()], ['complete', false, 2]);
+});
+
+test('an append whose member matches are incomplete preselects no track until each is answered', async () => {
+    const storage = new Storage(), existing = await existingProject(storage);
+    // More members titled like a staged file than the member cap lists.
+    await getDb()!.collection('audioTracks').insertMany(Array.from({ length: 301 }, () => { const _id = new ObjectId(); return { _id, title: 'Seeded Title', albumId: existing.albumId, s3Key: _id.toHexString(), uploadStatus: 'ready', publicationStatus: 'ready', mediaType: 'audio', visibility: 'public' }; }));
+    const { slots, item } = await uploadedProject(storage, [changedFile('01 - Seeded.wav', 20), changedFile('02 - Lone.wav', 30)], appendDraft(['Seeded Title', 'Lone Title']));
+    let reviewed = await appendTo(item, existing.albumId);
+    const candidates = await adminImportDuplicateCandidates(actor.toHexString(), item.id);
+    assert.equal(candidates.memberMatchesComplete, false); assert.ok(candidates.items.length <= 760);
+    // The file matching no member would be a new member with complete matches; here it needs an answer too.
+    for (const answered of [[], [slots[0]]]) {
+        if (answered.length) reviewed = await appendTo(reviewed, existing.albumId, answered.map(newMember));
+        const before = await stored(item.id);
+        await assert.rejects(publishAdminImport(actor.toHexString(), item.id, approvalBody(reviewed)), code('ADMIN_IMPORT_REVIEW_REQUIRED'), String(answered.length));
+        assert.deepEqual(await stored(item.id), before);
+    }
+    const approved = await publishAdminImport(actor.toHexString(), item.id, approvalBody(await appendTo(reviewed, existing.albumId, slots.map(newMember))));
+    assert.equal(approved.item.publication, 'preparing');
+});
+
+test('an append preselection that stops holding after approval needs attention with identityConflict before any copy, while a title match on another Album changes nothing', async () => {
+    const storage = new Storage(), existing = await existingProject(storage), tracks = getDb()!.collection('audioTracks');
+    const nameOnly = (title: string, albumId: string) => { const _id = new ObjectId(); return { _id, title, albumId, s3Key: _id.toHexString(), uploadStatus: 'ready', publicationStatus: 'ready', mediaType: 'audio', visibility: 'public' }; };
+    const approved = async (files: Express.Multer.File[], titles: string[]) => { const { item } = await uploadedProject(storage, files, appendDraft(titles)); await publishAdminImport(actor.toHexString(), item.id, approvalBody(await appendTo(item, existing.albumId))); return item.id; };
+    const held = async (id: string, copies: number, trackCount: number) => {
+        await runAdminImportPublicationOnce(storage, id); const publication = (await stored(id)).media!.publication!;
+        assert.deepEqual([publication.state, publication.issue, storage.copies, await tracks.countDocuments()], ['needsAttention', 'identityConflict', copies, trackCount]);
+    };
+    // A new member preselected because no target member matched it still publishes after a Track on another Album takes its title.
+    const elsewhere = await approved([changedFile('02 - Fresh.wav', 20)], ['Fresh Member']);
+    await tracks.insertOne(nameOnly('FRESH MEMBER', new ObjectId().toHexString()));
+    await runAdminImportPublicationOnce(storage, elsewhere);
+    assert.equal((await getAdminImport(actor.toHexString(), elsewhere)).item.publication, 'complete');
+    // A target member titled like a preselected new member appears after approval: no copy, no Track.
+    const titled = await approved([changedFile('03 - Second.wav', 30)], ['Second Member']), copies = storage.copies;
+    await tracks.insertOne(nameOnly('second member', existing.albumId));
+    await held(titled, copies, await tracks.countDocuments());
+    // A second target member with the reused member's verified bytes makes the preselected reuse ambiguous.
+    const reused = await approved([{ ...file(), originalname: '04 - Copy.wav' }], ['Copied Recording']);
+    assert.deepEqual(((await stored(reused)).media!.publication!.decisions as ImportDecisionV2[]).filter(value => value.scope === 'track').map(value => [value.action, value.candidateId, value.preselected]), [['reuse', existing.trackIds[0], true]]);
+    // Its object key embeds its own id, as a ready MediaTrack's must.
+    const original = (await tracks.findOne({ _id: new ObjectId(existing.trackIds[0]) }))!, _id = new ObjectId(), objectKey = `audio/${_id.toHexString()}/${new ObjectId().toHexString()}`;
+    await tracks.insertOne({ ...original, _id, s3Key: objectKey, mediaRepresentation: { ...original.mediaRepresentation, objectKey }, mediaByteHash: { ...original.mediaByteHash, objectKey } });
+    assert.equal((await adminImportDuplicateCandidates(actor.toHexString(), reused)).items.filter(value => value.match === 'sha256' && value.albumId === existing.albumId).length, 2);
+    await held(reused, copies, await tracks.countDocuments());
+});
+
+/** A ready copy of the published Track `original` on `albumId`, titled `title`, whose verified bytes are the staged `asset`'s. */
+const trackCopy = (original: Record<string, any>, albumId: string, sha256: string, title: string = original.title) => {
+    // Its object key embeds its own id, as a ready MediaTrack's must.
+    const _id = new ObjectId(), objectKey = `audio/${_id.toHexString()}/${new ObjectId().toHexString()}`;
+    return { ...original, _id, title, albumId, s3Key: objectKey, mediaRepresentation: { ...original.mediaRepresentation, objectKey }, mediaByteHash: { ...original.mediaByteHash, objectKey, value: sha256 } };
+};
+/** The slots whose verified bytes match a ready Track outside `target` (the Web flags those as possible duplicates). */
+const flaggedSlots = (items: { kind: string; match: string; albumId: string | null; matchedSlotIds: string[] }[], target: string | null = null) =>
+    [...new Set(items.filter(value => value.kind === 'track' && value.match === 'sha256' && value.albumId !== target).flatMap(value => value.matchedSlotIds))].sort();
+
+test('byte matches have their own read: 25 files byte-identical to Tracks on another Album are all flagged, and no number of same-title Tracks hides one', async () => {
+    const storage = new Storage(), existing = await existingProject(storage), tracks = getDb()!.collection('audioTracks');
+    const original = (await tracks.findOne({ _id: new ObjectId(existing.trackIds[0]) }))!, elsewhere = new ObjectId().toHexString();
+    const files = Array.from({ length: 25 }, (_, index) => changedFile(`${String(index + 1).padStart(2, '0')} - Copy.wav`, index + 1));
+    const many = await uploadedProject(storage, files, draft => { Object.assign(draft.album, { title: 'Distinct Album', artists: artistEntries('Distinct Artist') }); draft.tracks.forEach((track, index) => { track.title = `Distinct Recording ${index + 1}`; }); });
+    const hashOf = async (id: string, slot: string) => (await stored(id)).media!.assets.find(asset => asset.slotId === slot)!.sha256;
+    for (const slot of many.slots) await tracks.insertOne(trackCopy(original, elsewhere, await hashOf(many.item.id, slot)));
+    let response = await adminImportDuplicateCandidates(actor.toHexString(), many.item.id);
+    assert.deepEqual([flaggedSlots(response.items), response.items.length], [[...many.slots].sort(), 25]);
+    // The new Album's tracks are all preselected as new, the flagged ones included.
+    await publishAdminImport(actor.toHexString(), many.item.id, approvalBody(many.item));
+    assert.equal(((await stored(many.item.id)).media!.publication!.decisions as ImportDecisionV2[]).filter(value => value.scope === 'track' && value.action === 'create-distinct' && value.preselected).length, 25);
+    // 25 older ready Tracks titled like the file fill the title rows; the byte-identical Track on another Album is still listed.
+    await tracks.insertMany(Array.from({ length: 25 }, () => trackCopy(original, new ObjectId().toHexString(), 'f'.repeat(64), 'Common Intro')));
+    const common = await uploadedProject(storage, [changedFile('01 - Intro.wav', 90)], draft => { Object.assign(draft.album, { title: 'Intro Album', artists: artistEntries('Intro Artist') }); draft.tracks[0].title = 'Common Intro'; });
+    const copy = trackCopy(original, elsewhere, await hashOf(common.item.id, common.slots[0]), 'Unrelated Title'); await tracks.insertOne(copy);
+    response = await adminImportDuplicateCandidates(actor.toHexString(), common.item.id);
+    assert.deepEqual([flaggedSlots(response.items), response.items.filter(value => value.kind === 'track' && value.match === 'name').length, response.items.find(value => value.match === 'sha256')?.id], [common.slots, 20, copy._id.toHexString()]);
+    // When appending, a byte-identical member of the target never hides the same bytes on another Album: the file is preselected
+    // to reuse the member and is still flagged.
+    const appended = await uploadedProject(storage, [{ ...file(), originalname: '01 - Member.wav' }], appendDraft(['Member Copy']));
+    const sameBytes = trackCopy(original, elsewhere, original.mediaByteHash.value); await tracks.insertOne(sameBytes);
+    const reviewed = await appendTo(appended.item, existing.albumId);
+    response = await adminImportDuplicateCandidates(actor.toHexString(), appended.item.id);
+    assert.deepEqual(response.items.filter(value => value.match === 'sha256').map(value => [value.id, value.albumId]).sort(), [[existing.trackIds[0], existing.albumId], [sameBytes._id.toHexString(), elsewhere]].sort());
+    assert.deepEqual(flaggedSlots(response.items, existing.albumId), appended.slots);
+    await publishAdminImport(actor.toHexString(), appended.item.id, approvalBody(reviewed));
+    assert.deepEqual(((await stored(appended.item.id)).media!.publication!.decisions as ImportDecisionV2[]).filter(value => value.scope === 'track').map(value => [value.action, value.candidateId, value.preselected]), [['reuse', existing.trackIds[0], true]]);
+});
+
+test('an approval sending the preselections its confirmation showed freezes exactly them, and refuses, writing nothing, once an append file would flip between new and reuse', async () => {
+    const storage = new Storage(), existing = await existingProject(storage), tracks = getDb()!.collection('audioTracks');
+    const { slots, item } = await uploadedProject(storage, [changedFile('01 - Fresh.wav', 40)], appendDraft(['Fresh Member']));
+    const reviewed = await appendTo(item, existing.albumId);
+    /** The preselections a confirmation of `shown` displays from the candidates it reads now. */
+    const confirmation = async (shown: typeof reviewed) => importIdentityPreselections(shown.draft, shown.decisions as ImportDecisionV2[], await adminImportDuplicateCandidates(actor.toHexString(), shown.id)).map(({ preselected: _, ...value }) => value);
+    const asNew = await confirmation(reviewed);
+    assert.deepEqual(asNew.map(value => [value.scope, value.slotId, value.action]), [['track', slots[0], 'create-distinct']]);
+    // Admin conversion rewrites the member's verified bytes to the staged file's; the target Album's revision stays the same.
+    const sha256 = (await stored(item.id)).media!.assets[0].sha256, before = await stored(item.id);
+    await tracks.updateOne({ _id: new ObjectId(existing.trackIds[0]) }, { $set: { 'mediaByteHash.value': sha256 } });
+    await assert.rejects(publishAdminImport(actor.toHexString(), item.id, approvalBody(reviewed, { preselections: asNew })), code('ADMIN_IMPORT_REVIEW_REQUIRED'));
+    assert.deepEqual(await stored(item.id), before);
+    // A malformed or forged preselection list is invalid input before any read.
+    for (const preselections of [[{ ...asNew[0], preselected: true }], [{ ...asNew[0], action: 'skip' }], Array(123).fill(asNew[0])])
+        await assert.rejects(publishAdminImport(actor.toHexString(), item.id, approvalBody(reviewed, { preselections })), code('ADMIN_IMPORT_INVALID_INPUT'));
+    // A fresh confirmation shows the reuse, and its approval freezes exactly that; the reverse flip is refused the same way.
+    const asReuse = await confirmation(reviewed);
+    assert.deepEqual(asReuse.map(value => [value.action, value.candidateId]), [['reuse', existing.trackIds[0]]]);
+    await tracks.updateOne({ _id: new ObjectId(existing.trackIds[0]) }, { $set: { 'mediaByteHash.value': 'e'.repeat(64) } });
+    await assert.rejects(publishAdminImport(actor.toHexString(), item.id, approvalBody(reviewed, { preselections: asReuse })), code('ADMIN_IMPORT_REVIEW_REQUIRED'));
+    await tracks.updateOne({ _id: new ObjectId(existing.trackIds[0]) }, { $set: { 'mediaByteHash.value': sha256 } });
+    await publishAdminImport(actor.toHexString(), item.id, approvalBody(reviewed, { preselections: asReuse }));
+    assert.deepEqual(((await stored(item.id)).media!.publication!.decisions as ImportDecisionV2[]).filter(value => value.scope === 'track').map(value => [value.action, value.candidateId, value.preselected]), [['reuse', existing.trackIds[0], true]]);
 });

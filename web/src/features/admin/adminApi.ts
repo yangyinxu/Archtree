@@ -48,8 +48,6 @@ export const detailSchema = z.object({ ...common, manifest: manifestSchema, draf
 export const responseSchema = z.object({ item: detailSchema, receipt: receiptSchema.nullable() }).strict();
 export const filters = ['all', 'analyzing', 'awaitingReview', 'needsAttention', 'completed'] as const;
 export const workbenchSchema = z.object({ items: z.array(z.object({ ...common, title: z.string(), rootLabel: z.string(), artistName: z.string(), visibility: z.enum(['public', 'hidden']), pendingSuggestions: integer }).strict()).max(25), counts: z.object({ all: integer, analyzing: integer, awaitingReview: integer, needsAttention: integer, completed: integer }).strict(), nextCursor: z.string().nullable() }).strict();
-// At most 20 per Artist entry name (20 entries), plus 20 each for the label, the Album and the tracks.
-export const candidatesSchema = z.object({ items: z.array(z.object({ kind: z.enum(['artist', 'organization', 'album', 'track']), id, label: z.string(), revision: z.string(), albumId: id.nullable(), visibility: z.enum(['public', 'hidden']), match: z.enum(['name', 'sha256']), matchedSlotIds: z.array(uuid).max(100), automaticReuse: z.literal(false) }).strict()).max(460) }).strict();
 export type ImportDetail = z.infer<typeof detailSchema>;
 export type ImportDecision = z.infer<typeof decisionSchema>;
 /**
@@ -62,7 +60,6 @@ export interface DecisionEdits { revision: number; decisions: ImportDecision[] }
 /** Whether `next` is a newer saved state than `previous`: a later revision, or the same revision with later automatic writes. */
 export const newerImport = (next: Pick<ImportDetail, 'revision' | 'valueRevision'>, previous: Pick<ImportDetail, 'revision' | 'valueRevision'>) =>
   next.revision > previous.revision || next.revision === previous.revision && next.valueRevision > previous.valueRevision;
-export type ImportCandidate = z.infer<typeof candidatesSchema>['items'][number];
 export type ImportResponse = z.infer<typeof responseSchema>;
 export type WorkbenchItem = z.infer<typeof workbenchSchema>['items'][number];
 export type WorkbenchFilter = typeof filters[number];
