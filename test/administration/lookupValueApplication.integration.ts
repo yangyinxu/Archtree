@@ -5,9 +5,9 @@
  *   Functions: code, projects, stored, lookup, draftOf, valueRevision, later, mbid, keyOf, v2, timed, seeded,
  *              asset, json, searchUrl, releaseUrl, searchAnswer, releaseAnswer, answers, fixtureClient, drain,
  *              looked, onNextProjectRead, submit, item, complete, approve, choose, preparingPublication,
- *              hotelExchanges
+ *              seededDigitalHotel, smokeHotelExchanges
  *   Constants: guard, actor, other, by, byOther, contact, lengths, albumQuery, hotelBase, hotelRelease,
- *              hotelLengths
+ *              hotelLengths, digitalHotel, europeanCd
  *   Variables: harness
  * Tests
  *   - the step that completes a run applies its preselection: values and origins change once, while revision, receipts and the fence stay as without values
@@ -35,6 +35,10 @@
  *   - files confirmed after a lookup choice keep the chosen values: file-tag automation fills only what lookup did not write, and none returns tag values
  *   - Luna tick defaults follow each value's origin: a suggestion for a lookup value arrives unticked, ticked once choosing none returns the file-tag value, and the approval applies it
  *   - a release crediting only Various Artists writes no Artist entry, and the summary says at once that the new Album cannot be published until a primary entry is added
+ *   - a search with more hits than it returned offers its only matching group without applying it: no answer is needed, approval is admitted, and choosing it applies it
+ *   - the same single matching group from a complete search is preselected and applied, and with the digital edition compared two groups tie
+ *   - a run stored before searchComplete resumes as a partial comparison: its only matching group is offered, nothing is applied and approval is admitted
+ *   - a completed run stored before searchComplete keeps its stored preselection until a re-rank, which leaves its values applied and offers its only matching group without holding publication
  * @end-catalog */
 
 /**
@@ -73,7 +77,7 @@ import {
 } from '../../src/administration/lookup/metadataLookupService';
 import { catalogSearchProjection } from '../../src/utils/catalogSearch';
 import { approvalBody } from '../support/adminImportApproval';
-import { fixtureTransport, immediateGate, loadLookupFixture, loadLookupFixtures, type LookupExchange } from '../support/metadataLookupFixtures';
+import { fixtureTransport, hotelCaliforniaExchanges, immediateGate, loadLookupFixture, type LookupExchange } from '../support/metadataLookupFixtures';
 import { installNetworkGuard } from '../support/networkGuard';
 
 const guard = installNetworkGuard();
@@ -175,9 +179,7 @@ const choose = async (id: string, run: number, candidateKey: string | null, acto
 const preparingPublication = () => ({ operationId: randomUUID(), actorId: by, state: 'preparing', issue: null, approvedRevision: 1, snapshot: {}, decisions: [], tracks: [], cover: null,
     bucket: 'synthetic-catalog', leaseOwner: null, leaseUntil: null, grantExpiresAt: later(60_000), artistId: 'a'.repeat(24), newArtist: true, albumId: 'b'.repeat(24), newAlbum: true, albumRevision: null, coverId: null });
 
-/** Hotel California: the recorded search, every recorded release lookup and the base edition. */
-const hotelExchanges = () => [...loadLookupFixture('musicbrainz/release-search-hotel-california.json').exchanges,
-    ...[...loadLookupFixtures('musicbrainz').entries()].filter(([name]) => /^release-[0-9a-f-]{36}\.json$/.test(name)).flatMap(([, file]) => file.exchanges)];
+/** Hotel California: the base edition (hotelCaliforniaExchanges serves the searches and every recorded release lookup). */
 const hotelBase = '24ae881f-7cb3-4c43-b80e-70332cd7c50d';
 const hotelRelease = parseMusicBrainzRelease(loadLookupFixture(`musicbrainz/release-${hotelBase}.json`).exchanges.at(-1)!.body);
 const hotelLengths = hotelRelease.media[0].tracks.map(track => track.lengthMs!);
@@ -200,7 +202,7 @@ after(async () => {
 test('the step that completes a run applies its preselection: values and origins change once, while revision, receipts and the fence stay as without values', async () => {
     const id = await seeded(9, index => v2({ album: 'Hotel California', albumArtists: ['Eagles'], artists: ['Eagles'], durationMs: hotelLengths[index] }, { musicBrainzReleaseId: hotelBase }));
     assert.equal((await requestAutomaticMetadataLookup(by, id, 'upload')).reason, 'queued');
-    const before = await stored(id), client = fixtureClient(hotelExchanges());
+    const before = await stored(id), client = fixtureClient(hotelCaliforniaExchanges());
     await drain({ musicBrainz: client.musicBrainz });
     const record = await lookup(id), doc = await stored(id), draft = draftOf(doc), proposal = proposalForRelease(hotelRelease);
     assert.deepEqual([record.applied?.run, record.applied?.candidateKey, record.applied?.releaseId, record.applied?.choice, record.applied?.basis, record.applied?.actorId, record.applied?.operationId,
@@ -658,7 +660,7 @@ test('a choice works while lookup is unconfigured; a project whose stored draft 
 test('the lookup view of a recorded run shows the ranked candidates and applied values without any link, ISRC, recording, account, grant or query', async () => {
     const id = await seeded(9, index => v2({ album: 'Hotel California', albumArtists: ['Eagles'], artists: ['Eagles'], durationMs: hotelLengths[index] }, { musicBrainzReleaseId: hotelBase }));
     await requestAutomaticMetadataLookup(by, id, 'upload');
-    await drain({ musicBrainz: fixtureClient(hotelExchanges()).musicBrainz });
+    await drain({ musicBrainz: fixtureClient(hotelCaliforniaExchanges()).musicBrainz });
     const record = await lookup(id), shown = await getAdminImportLookup(by, id), view = shown.lookup!;
     assert.deepEqual([view.state, view.outcome, view.preselection?.candidateKey, view.preselection?.basis, view.applied?.candidateKey, view.applied?.choice, view.blocking, shown.revision, shown.valueRevision],
         ['complete', 'candidates', `musicbrainz:${hotelBase}`, 'releaseId', `musicbrainz:${hotelBase}`, 'preselected', false, 1, 1]);
@@ -790,4 +792,105 @@ test('a release crediting only Various Artists writes no Artist entry, and the s
     await editAdminImport(by, id, { operationId: randomUUID(), expectedRevision: (await item(id)).revision,
         changes: [{ path: 'album.artists', base: [], value: [{ key: randomUUID(), name: 'Typed Artist', role: 'primary', joinPhrase: null, musicBrainzId: null }] }] });
     assert.equal((await summary()).placeholderOnly, false);
+});
+
+/** Nine files with the Hotel California 2013 digital edition's exact durations: among the recorded nine-track editions, only the 1984 European CD matches. */
+const digitalHotel = parseMusicBrainzRelease(loadLookupFixture('musicbrainz/release-fa7d3357-f3e9-4da5-ad70-09c05ef8207f.json').exchanges.at(-1)!.body);
+const europeanCd = 'cb961c6b-b51e-45de-9633-fa9a5d33f5cf';
+const seededDigitalHotel = () => seeded(9, index => v2({ album: 'Hotel California', albumArtists: ['Eagles'], artists: ['Eagles'], durationMs: digitalHotel.media[0].tracks[index].lengthMs }));
+/** The live smoke's answer: the recorded first page of the credited search (25 of 83 hits), as a run asking for 100 would see too many hits. */
+const smokeHotelExchanges = () => [{ ...loadLookupFixture('musicbrainz/release-search-hotel-california.json').exchanges[0],
+    url: musicBrainzUrls.releaseSearch({ release: 'Hotel California', artist: 'Eagles' }).href }, ...hotelCaliforniaExchanges().filter(exchange => !exchange.url.includes('/ws/2/release?query='))];
+
+test('a search with more hits than it returned offers its only matching group without applying it: no answer is needed, approval is admitted, and choosing it applies it', async () => {
+    const id = await seededDigitalHotel();
+    assert.equal((await requestAutomaticMetadataLookup(by, id, 'upload')).reason, 'queued');
+    await drain({ musicBrainz: fixtureClient(smokeHotelExchanges()).musicBrainz });
+    const record = await lookup(id);
+    assert.deepEqual([record.state, record.searchComplete, record.ranking!.groups.map(group => group.representativeKey), record.ranking!.preselection, record.applied, valueRevision(await stored(id))],
+        ['complete', false, [`musicbrainz:${europeanCd}`], null, null, 0]);
+    const view = (await getAdminImportLookup(by, id)).lookup!;
+    assert.deepEqual([view.disclosure?.partialComparison, view.needsAnswer, view.blocking], [true, { tie: false, conflicts: [] }, false]);
+    // Choosing the offered release applies its values; the import then publishes with them.
+    const chosen = (await choose(id, 1, `musicbrainz:${europeanCd}`)).item;
+    assert.deepEqual([chosen.draft.album.title, chosen.draft.album.label?.name, (await lookup(id)).applied?.choice], ['Hotel California', 'Asylum Records', 'chosen']);
+    assert.equal((await approve(id)).item.publication, 'preparing');
+    // Left unchosen, it holds nothing: the import is approved with its tag values and nothing from the release.
+    const unchosen = await seededDigitalHotel();
+    await requestAutomaticMetadataLookup(by, unchosen, 'upload');
+    await drain({ musicBrainz: fixtureClient(smokeHotelExchanges()).musicBrainz });
+    assert.deepEqual([(await lookup(unchosen)).applied, (await approve(unchosen)).item.publication, draftOf(await stored(unchosen)).album.label], [null, 'preparing', null]);
+});
+
+test('the same single matching group from a complete search is preselected and applied, and with the digital edition compared two groups tie', async () => {
+    const id = await seededDigitalHotel();
+    await requestAutomaticMetadataLookup(by, id, 'upload');
+    // As if MusicBrainz offered only the recorded nine-track editions to both searches.
+    const recorded = loadLookupFixture('musicbrainz/release-search-hotel-california.json').exchanges[0].body as { releases: { 'track-count': number }[] };
+    const nine = recorded.releases.filter(release => release['track-count'] === 9);
+    const page = (query: MusicBrainzReleaseQuery) => ({ url: musicBrainzUrls.releaseSearch(query).href, status: 200, headers: { 'content-type': 'application/json' },
+        body: { count: nine.length, offset: 0, releases: nine } });
+    await drain({ musicBrainz: fixtureClient([page({ release: 'Hotel California', artist: 'Eagles' }), page({ release: 'Hotel California' }), ...hotelCaliforniaExchanges().slice(1)]).musicBrainz });
+    const record = await lookup(id);
+    assert.deepEqual([record.searchComplete, record.ranking!.preselection?.candidateKey, record.ranking!.preselection?.basis, record.applied?.choice, record.applied?.candidateKey,
+        record.ranking!.disclosure.partialComparison], [true, `musicbrainz:${europeanCd}`, 'onlyMatchingGroup', 'preselected', `musicbrainz:${europeanCd}`, false]);
+    assert.deepEqual([(await getAdminImportLookup(by, id)).lookup!.needsAnswer, draftOf(await stored(id)).album.label?.name], [{ tie: false, conflicts: [] }, 'Asylum Records']);
+    // The 100-release page with the digital edition: the European CD and the digital edition tie, and approval waits for a choice.
+    const tied = await seededDigitalHotel();
+    await requestAutomaticMetadataLookup(by, tied, 'upload');
+    await drain({ musicBrainz: fixtureClient(hotelCaliforniaExchanges()).musicBrainz });
+    const tie = await lookup(tied);
+    assert.deepEqual([tie.ranking!.groups.length, tie.ranking!.preselection, tie.applied, (await getAdminImportLookup(by, tied)).lookup!.needsAnswer], [2, null, null, { tie: true, conflicts: [] }]);
+    await assert.rejects(approve(tied), code('ADMIN_IMPORT_REVIEW_REQUIRED'));
+});
+
+test('a run stored before searchComplete resumes as a partial comparison: its only matching group is offered, nothing is applied and approval is admitted', async () => {
+    const id = await seeded(2, timed);
+    assert.equal((await requestAutomaticMetadataLookup(by, id, 'upload')).reason, 'queued');
+    // The queued record as a release before the field stored it.
+    await adminImportLookupCollection().updateOne({ _id: new ObjectId(id) }, { $unset: { searchComplete: '' } });
+    await drain({ musicBrainz: fixtureClient(answers([mbid(1)], [releaseAnswer(mbid(1))])).musicBrainz });
+    const record = await lookup(id);
+    assert.deepEqual([record.state, record.searchComplete, record.ranking!.groups.length, record.ranking!.preselection, record.ranking!.disclosure.partialComparison, record.applied,
+        valueRevision(await stored(id))], ['complete', false, 1, null, true, null, 0]);
+    const view = (await getAdminImportLookup(by, id)).lookup!;
+    assert.deepEqual([view.disclosure?.partialComparison, view.needsAnswer, view.blocking], [true, { tie: false, conflicts: [] }, false]);
+    assert.equal((await approve(id)).item.publication, 'preparing');
+    // The same answers for a run that records the field preselect and apply the release.
+    const current = await looked(await seeded(2, timed), [mbid(1)], [releaseAnswer(mbid(1))]);
+    assert.deepEqual([current.searchComplete, current.ranking!.preselection?.basis, current.applied?.choice], [true, 'onlyMatchingGroup', 'preselected']);
+});
+
+test('a completed run stored before searchComplete keeps its stored preselection until a re-rank, which leaves its values applied and offers its only matching group without holding publication', async () => {
+    // As in the re-rank test above: a submitted run, then the remaining files confirmed at the automatic limit preselect and apply.
+    const four = [200_000, 210_000, 220_000, 230_000];
+    const id = await seeded(4, index => v2({ durationMs: four[index] }), 2);
+    await submit(id);
+    const queries = (await lookup(id)).queries.map(query => (query as { query: MusicBrainzReleaseQuery }).query);
+    const client = fixtureClient([...queries.map((query, index) => searchAnswer(query, index ? [] : [mbid(1)])), releaseAnswer(mbid(1), { lengths: four })]);
+    await drain({ musicBrainz: client.musicBrainz });
+    await adminImportLookupCollection().updateOne({ _id: new ObjectId(id) }, { $set: { automaticRuns: 3 } });
+    const files = (await item(id)).manifest.files;
+    for (const index of [2, 3]) {
+        await projects().updateOne({ _id: new ObjectId(id) }, { $push: { 'media.assets': asset(id, files[index].slotId, files[index].filename, v2({ durationMs: four[index] })) } as never });
+        await requestAutomaticMetadataLookup(by, id, 'upload');
+    }
+    assert.deepEqual([(await lookup(id)).applied?.choice, valueRevision(await stored(id))], ['preselected', 1]);
+    // The record as a release before the field stored it: its ranking is shown as it was stored.
+    await adminImportLookupCollection().updateOne({ _id: new ObjectId(id) }, { $unset: { searchComplete: '', 'ranking.disclosure.partialComparison': '' } });
+    const asStored = (await getAdminImportLookup(by, id)).lookup!;
+    assert.deepEqual([asStored.preselection?.basis, asStored.disclosure?.partialComparison, asStored.needsAnswer, asStored.blocking],
+        ['onlyMatchingGroup', false, { tie: false, conflicts: [] }, false]);
+    // New evidence (an artist tag) re-ranks it as a partial comparison: the values stay applied, and the group needs no answer.
+    await projects().updateOne({ _id: new ObjectId(id) }, { $set: { 'media.assets.0.tags.artists': ['Synthetic Lead'] } });
+    assert.equal((await requestAutomaticMetadataLookup(by, id, 'upload')).reason, 'limit');
+    const reranked = await lookup(id), view = (await getAdminImportLookup(by, id)).lookup!;
+    assert.deepEqual([reranked.ranking!.groups.length, reranked.ranking!.preselection, reranked.ranking!.disclosure.partialComparison, reranked.applied?.choice, valueRevision(await stored(id))],
+        [1, null, true, 'preselected', 1]);
+    assert.deepEqual([view.disclosure?.partialComparison, view.needsAnswer, view.blocking], [true, { tie: false, conflicts: [] }, false]);
+    // Choosing the applied release confirms it as a choice.
+    await choose(id, 1, keyOf(1));
+    assert.deepEqual([(await getAdminImportLookup(by, id)).lookup!.needsAnswer, (await lookup(id)).applied?.choice], [{ tie: false, conflicts: [] }, 'chosen']);
+    assert.equal((await approve(id)).item.publication, 'preparing');
+    assert.equal(client.requests.length, 2, 'no request after the run: re-ranks and the choice send nothing');
 });

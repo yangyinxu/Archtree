@@ -87,7 +87,7 @@ const requireMbid = (value: unknown) => {
 
 /** URL builders with a fixed parameter order; the fixture recorder and tests use the same ones. */
 export const musicBrainzUrls = Object.freeze({
-    releaseSearch: (query: MusicBrainzReleaseQuery) => withParameters('release', [['query', musicBrainzLuceneQuery(query)], ['fmt', 'json'], ['limit', String(METADATA_LOOKUP_LIMITS.searchLimit)]]),
+    releaseSearch: (query: MusicBrainzReleaseQuery) => withParameters('release', [['query', musicBrainzLuceneQuery(query)], ['fmt', 'json'], ['limit', String(METADATA_LOOKUP_LIMITS.releaseSearchLimit)]]),
     recordingSearch: (query: MusicBrainzRecordingQuery) => withParameters('recording', [['query', musicBrainzLuceneQuery(query)], ['fmt', 'json'], ['limit', String(METADATA_LOOKUP_LIMITS.searchLimit)]]),
     release: (releaseId: string) => withParameters(`release/${requireMbid(releaseId)}`, [['inc', 'artist-credits labels recordings release-groups isrcs'], ['fmt', 'json']]),
     releaseGroupBrowse: (releaseGroupId: string) => withParameters('release', [['release-group', requireMbid(releaseGroupId)], ['inc', 'artist-credits labels media'], ['fmt', 'json'], ['limit', String(METADATA_LOOKUP_LIMITS.browseLimit)]]),
@@ -144,7 +144,7 @@ const summaryShape = object({
 
 /** Allowlisted shapes; the recorder trims fixtures with these, and the parsers below accept the result. */
 export const musicBrainzShapes: Readonly<Record<'releaseSearch' | 'release' | 'recordingSearch' | 'browse' | 'isrc', LookupShape>> = Object.freeze({
-    releaseSearch: object({ count: integer(0, 1_000_000_000), offset: integer(0, 1_000_000_000, { optional: true }), releases: array(summaryShape, 100) }),
+    releaseSearch: object({ count: integer(0, 1_000_000_000), offset: integer(0, 1_000_000_000, { optional: true }), releases: array(summaryShape, METADATA_LOOKUP_LIMITS.releaseSearchLimit) }),
     release: object({
         ...releaseCommon,
         'cover-art-archive': object({ front: boolean() }, { optional: true }),

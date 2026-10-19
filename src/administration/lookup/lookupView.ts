@@ -37,7 +37,8 @@ export type ImportLookupView = {
     candidates: ViewCandidate[];
     groups: { groupKey: string; representativeKey: string; memberKeys: string[]; proposal: LookupProposal }[];
     preselection: Pick<LookupPreselection, 'candidateKey' | 'basis' | 'artistMismatch'> | null;
-    disclosure: { unknownLocalDurations: number; unknownLocalDiscNumbers: number } | null;
+    /** `partialComparison`: not every release found was compared (false for a ranking stored before it was recorded). */
+    disclosure: { unknownLocalDurations: number; unknownLocalDiscNumbers: number; partialComparison: boolean } | null;
     applied: {
         run: number; candidateKey: string | null; releaseId: string | null; choice: LookupApplication['choice']; basis: LookupApplication['basis'];
         values: { path: string; slotId: string | null }[];
@@ -179,7 +180,8 @@ export function importLookupView(record: MetadataLookupRecord, doc: AdminImportD
     const preselection = ranking && isRecord(ranking.preselection) && key(ranking.preselection.candidateKey) && oneOf(ranking.preselection.basis, bases)
         ? { candidateKey: ranking.preselection.candidateKey as string, basis: ranking.preselection.basis as LookupPreselection['basis'], artistMismatch: ranking.preselection.artistMismatch === true } : null;
     const disclosure = ranking && isRecord(ranking.disclosure) && count(ranking.disclosure.unknownLocalDurations) !== null && count(ranking.disclosure.unknownLocalDiscNumbers) !== null
-        ? { unknownLocalDurations: ranking.disclosure.unknownLocalDurations as number, unknownLocalDiscNumbers: ranking.disclosure.unknownLocalDiscNumbers as number } : null;
+        ? { unknownLocalDurations: ranking.disclosure.unknownLocalDurations as number, unknownLocalDiscNumbers: ranking.disclosure.unknownLocalDiscNumbers as number,
+            partialComparison: ranking.disclosure.partialComparison === true } : null;
     const slots = new Set((Array.isArray(doc.manifest?.files) ? doc.manifest.files : []).map(file => file.slotId));
     const append = list(doc.decisions).some(decision => isRecord(decision) && decision.scope === 'album' && decision.action === 'reuse');
     const needed = lookupAnswersNeeded(record, doc, { append });

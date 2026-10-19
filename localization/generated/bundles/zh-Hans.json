@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "locale": "zh-Hans",
-  "revision": "sha256-Vu-BMjhFz00-F_FlTllmZ63K7aQouHvdtEpvI3-GbA8",
+  "revision": "sha256-uDBiNFNROa_FYl4fUELLCKE7YHVlesAm3AFaIMOVl0I",
   "messages": {
     "account.common.back_account": "← 返回账户",
     "account.common.checking": "正在检查你的账户…",
@@ -486,8 +486,10 @@
     "admin.lookup.not_configured": "此服务器未配置元数据查找。请手动编辑草稿，或用 Luna 分析。",
     "admin.lookup.not_run": "尚未进行元数据查找。所有选中的文件上传后会自动运行，你也可以在下方按名称查找。",
     "admin.lookup.not_started": "尚未对这些文件进行元数据查找。你可以在下方按名称查找，或用 Luna 分析。",
+    "admin.lookup.partial_comparison": "MusicBrainz 找到的发行没有全部与这些文件比较，匹配的发行可能不在此列表中。",
     "admin.lookup.retry": "重试查找",
     "admin.lookup.retrying": "MusicBrainz 繁忙或不可用，查找会自动重试。你也可以立即免费重试。",
+    "admin.lookup.single_choice": "有一个发行与这些文件匹配，但由于 MusicBrainz 找到的发行没有全部参与比较，它没有被应用。你可以选择它、其他发行，或都不选。",
     "admin.lookup.stale_files": "此次查找后有 {count} 个文件发生变化，其匹配依据已过时。",
     "admin.lookup.status_incomplete": "无法获取详细信息",
     "admin.lookup.status_matching": "与这些文件匹配",

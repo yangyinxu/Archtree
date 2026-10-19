@@ -31,6 +31,14 @@ export const loadLookupFixture = (file: string): LookupFixtureFile => JSON.parse
 export const loadLookupFixtures = (source: MetadataLookupSource): Map<string, LookupFixtureFile> => new Map(readdirSync(path.join(fixtureRoot, source))
     .filter(name => name.endsWith('.json')).sort().map(name => [name, loadLookupFixture(`${source}/${name}`)]));
 
+/**
+ * Hotel California by Eagles: the derived credited search at the run's page size (the recorded first 25 releases and the 2013
+ * digital edition, 26 of 26) and every recorded release lookup.
+ */
+export const hotelCaliforniaExchanges = (): LookupExchange[] => [
+    ...loadLookupFixture('musicbrainz/synthetic-release-search-hotel-california-page.json').exchanges,
+    ...[...loadLookupFixtures('musicbrainz').entries()].filter(([name]) => /^release-[0-9a-f-]{36}\.json$/.test(name)).flatMap(([, file]) => file.exchanges)];
+
 export const allLookupFixtureFiles = () => metadataLookupSources.flatMap(source => [...loadLookupFixtures(source).entries()].map(([name, file]) => ({ path: `${source}/${name}`, file })));
 
 /** The exact bytes a fixture exchange serves. */

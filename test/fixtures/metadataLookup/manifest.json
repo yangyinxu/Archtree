@@ -196,8 +196,24 @@
       "description": "MusicBrainz release lookup (Hotel California search result)"
     },
     {
+      "file": "musicbrainz/release-fa7d3357-f3e9-4da5-ad70-09c05ef8207f.json",
+      "description": "MusicBrainz release lookup (Hotel California 2013 digital edition, beyond the first search page)"
+    },
+    {
       "file": "musicbrainz/release-search-blue-archive-credited.json",
       "description": "Release search with the credited names and the ~ subtitle"
+    },
+    {
+      "file": "musicbrainz/release-search-blue-archive-normalized.json",
+      "description": "Release searches with the normalized spelling \"Soundtrack\": alone and with the label (both find the JP CD and JP digital editions)"
+    },
+    {
+      "file": "musicbrainz/release-search-blue-archive-sound-track.json",
+      "description": "Release searches with the tag spelling \"Sound Track\": alone, with the credited names and with the label (no release found)"
+    },
+    {
+      "file": "musicbrainz/release-search-blue-archive-subtitle.json",
+      "description": "Release searches by the subtitle alone and with the credited names"
     },
     {
       "file": "musicbrainz/release-search-blue-archive-title.json",

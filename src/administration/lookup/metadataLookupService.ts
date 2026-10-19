@@ -4,21 +4,20 @@
  *   Functions: adminImportLookupCollection, metadataLookupAccepted, requestAutomaticMetadataLookup,
  *              noteMetadataLookupFiles, queueMetadataLookup, runMetadataLookupOnce, startMetadataLookupWorker
  * Internal
- *   Types: LookupAction, FoundRelease, LookupStepResult, LookupStep
  *   Functions: lookupConfiguration, writeLookupGate, reconcileLookupFiles, rerankLookup, refuse,
- *              retryableInput, performLookupAction, endRun, proceedLookup, advanceLookup, releaseLookupLease,
- *              defaultMusicBrainzClient
- *   Constants: lookups, transactionOptions, idle, maximumStepsPerTick
+ *              retryableInput, advanceLookup, releaseLookupLease, defaultMusicBrainzClient
+ *   Constants: lookups, transactionOptions, maximumStepsPerTick
  * @end-catalog */
 
 /**
  * Metadata lookup jobs for import projects: the automatic trigger after the confirmation that completes the file set (or a re-rank
  * of the stored candidates when it completes nothing new), stale marking when a bound file is removed, admission of submitted and
- * retried runs, and the persisted worker that advances one run one MusicBrainz request per stored step and applies a completed
- * run's preselection (lookupValueApplication.ts) in the step that completes it. Starting a run, every state change and a re-rank
- * write the import document's `lookupGate` in the same transaction, and an application writes the document itself; neither ever
- * changes its `revision`. A trigger that starts nothing, stale marking of a finished run and progress steps do not write it.
- * Owner rules: the confirmed Administrator Metadata Lookup rules (they land with the summary).
+ * retried runs, and the persisted worker that advances one run one MusicBrainz request per stored step (the request and the pure
+ * step decision live in lookupRunStep.ts) and applies a completed run's preselection (lookupValueApplication.ts) in the step that
+ * completes it. Starting a run, every state change and a re-rank write the import document's `lookupGate` in the same
+ * transaction, and an application writes the document itself; neither ever changes its `revision`. A trigger that starts
+ * nothing, stale marking of a finished run and progress steps do not write it. Owner rules: the confirmed Administrator Metadata
+ * Lookup rules (they land with the summary).
  */
 import { randomUUID } from 'node:crypto';
 import { ObjectId, type ClientSession } from 'mongodb';
@@ -33,20 +32,16 @@ import {
     importCollection, importPurposeFilter, isDraftV2Document, isImportProject, touchImportAdmin, withImportAdmin, type AdminImportDocument
 } from '../import/adminImportService';
 import { storedDraftV2 } from '../import/adminImportValueState';
-import {
-    ADMIN_IMPORT_LOOKUP_COLLECTION, METADATA_LOOKUP_JOB_LIMITS as JOB, MetadataLookupInputError, MetadataLookupSourceError,
-    type LookupGateMode, type MusicBrainzRelease, type MusicBrainzReleaseSummary
-} from './lookupContract';
+import { ADMIN_IMPORT_LOOKUP_COLLECTION, METADATA_LOOKUP_JOB_LIMITS as JOB } from './lookupContract';
 import { lookupTermProblem } from './lookupIdentifiers';
-import type { PlannedLookupQuery } from './lookupQueryPlanner';
 import { createMongoLookupRateGate } from './lookupRateGate';
 import { createLookupResponseCache } from './lookupResponseCache';
+import { endLookupRun, idleLookupStep, performLookupStep, proceedLookupRun, type LookupStep, type LookupStepResult } from './lookupRunStep';
 import { createMusicBrainzClient, type MusicBrainzClient } from './musicBrainzClient';
 import { applyPreselectedLookup, rerankStoredLookup } from './lookupValueApplication';
 import {
-    automaticLookupOperationId, importLookupFileSet, isBlockingLookupState, lookupGateFor, lookupRetryAt, lookupStaleSlots,
-    mergeLookupCandidates, planImportLookup, rankLookupWithinBudget, recordLookupDetails, startLookupRun,
-    type MetadataLookupInput, type MetadataLookupIssue, type MetadataLookupRecord, type MetadataLookupState, type MetadataLookupSubmission
+    automaticLookupOperationId, importLookupFileSet, isBlockingLookupState, lookupGateFor, lookupStaleSlots, planImportLookup, startLookupRun,
+    type MetadataLookupInput, type MetadataLookupRecord, type MetadataLookupSubmission
 } from './metadataLookupRecord';
 
 export const adminImportLookupCollection = () => getDb()!.collection<MetadataLookupRecord>(ADMIN_IMPORT_LOOKUP_COLLECTION);
@@ -194,95 +189,6 @@ export async function queueMetadataLookup(doc: AdminImportDocument, request: Met
     return run;
 }
 
-type LookupAction = { kind: 'search'; index: number; query: PlannedLookupQuery } | { kind: 'details'; releaseId: string };
-type FoundRelease = { releaseId: string; summary?: MusicBrainzReleaseSummary; release?: MusicBrainzRelease };
-/** What one request answered, mapped so that the step that stores it never needs the source's errors. */
-type LookupStepResult =
-    | { kind: 'found'; action: LookupAction & { kind: 'search' }; found: FoundRelease[] }
-    | { kind: 'details'; action: LookupAction & { kind: 'details' }; release: MusicBrainzRelease | null }
-    | { kind: 'refused'; action: LookupAction }
-    | { kind: 'failed'; failure: 'busy' | 'unavailable'; retryAfterMs: number | null }
-    | { kind: 'notConfigured' }
-    | { kind: 'shutdown' };
-type LookupStep = { action: LookupAction | null; mode: LookupGateMode };
-const idle: LookupStep = { action: null, mode: 'wait' };
-
-/** Performs one request outside any transaction, bounded by the step deadline; never throws. */
-async function performLookupAction(client: MusicBrainzClient, action: LookupAction, mode: LookupGateMode, signal?: AbortSignal): Promise<LookupStepResult> {
-    const deadline = AbortSignal.timeout(JOB.stepDeadlineMs);
-    const options = { mode, signal: signal ? AbortSignal.any([signal, deadline]) : deadline };
-    try {
-        if (action.kind === 'details') return { kind: 'details', action, release: await client.lookupRelease(action.releaseId, options) };
-        const found = (items: FoundRelease[]): LookupStepResult => ({ kind: 'found', action, found: items });
-        const { query } = action;
-        switch (query.kind) {
-            // Keyed by the release MusicBrainz returned: a merged release answers an old ID with its current one.
-            case 'musicBrainzRelease': { const release = await client.lookupRelease(query.releaseId, options); return found(release ? [{ releaseId: release.releaseId, release }] : []); }
-            case 'musicBrainzReleaseSearch': return found((await client.searchReleases(query.query, options)).releases.map(summary => ({ releaseId: summary.releaseId, summary })));
-            case 'musicBrainzRecordingSearch': return found((await client.searchRecordings(query.query, options)).recordings.flatMap(hit => hit.releases.map(release => ({ releaseId: release.releaseId }))));
-            case 'musicBrainzIsrc': return found(((await client.lookupIsrc(query.isrc, options))?.recordings ?? []).flatMap(recording => recording.releaseIds.map(releaseId => ({ releaseId }))));
-            // A query kind a later release stored is skipped rather than sent.
-            default: return { kind: 'refused', action };
-        }
-    } catch (error) {
-        if (error instanceof MetadataLookupInputError) return { kind: 'refused', action };
-        if (signal?.aborted) return { kind: 'shutdown' };
-        if (error instanceof MetadataLookupSourceError) {
-            if (error.failure === 'notConfigured') return { kind: 'notConfigured' };
-            // `cancelled` here is the step deadline: the source did not answer in time.
-            return { kind: 'failed', failure: error.failure === 'busy' ? 'busy' : 'unavailable', retryAfterMs: error.retryAfterMs };
-        }
-        return { kind: 'failed', failure: 'unavailable', retryAfterMs: null };
-    }
-}
-
-/** Ends a run: the lease and retry are cleared and nothing else from the step that ended it is stored. */
-const endRun = (record: MetadataLookupRecord, state: MetadataLookupState, issue: MetadataLookupIssue | null, now: Date, extra: Partial<MetadataLookupRecord> = {}): MetadataLookupRecord =>
-    ({ ...record, ...extra, state, issue, retryAt: null, leaseOwner: null, leaseUntil: null, updatedAt: now, completedAt: now });
-
-/**
- * Stores one request's result and decides the next request (pure): the planned queries in order until 25 candidates are known,
- * then each pending candidate's details, then ranking. A source failure schedules an automatic retry; once retries run out, a
- * search ends unavailable (never "no release") and missing details leave their candidates incomplete in a completed run.
- */
-function proceedLookup(record: MetadataLookupRecord, doc: AdminImportDocument, result: LookupStepResult | null, now: Date): { next: MetadataLookupRecord; step: LookupStep } {
-    let next: MetadataLookupRecord = { ...record, updatedAt: now }, issue: MetadataLookupIssue | null = null;
-    if (result?.kind === 'notConfigured') return { next: endRun(record, 'unavailable', 'notConfigured', now), step: idle };
-    if (result?.kind === 'failed') {
-        const failures = (Number.isSafeInteger(record.attempts?.musicbrainz) ? record.attempts.musicbrainz : 0) + 1;
-        const retryAt = lookupRetryAt(failures, now, result.retryAfterMs), failed = result.failure === 'busy' ? 'sourceBusy' : 'sourceUnavailable';
-        next = { ...next, attempts: { ...record.attempts, musicbrainz: failures } };
-        // A retry its grant would not reach counts as exhausted, so a run never stays blocking past its grant.
-        if (retryAt && retryAt < record.grantExpiresAt) return { next: { ...next, state: 'retrying', issue: failed, retryAt, leaseOwner: null, leaseUntil: null }, step: idle };
-        if (next.phase === 'search') return { next: endRun(next, 'unavailable', failed, now), step: idle };
-        next.candidates = next.candidates.map(candidate => candidate.details === 'pending' ? { ...candidate, details: 'failed' } : candidate);
-        issue = 'sourceUnavailable';
-    } else if (result?.kind === 'found' && next.phase === 'search' && next.queryIndex === result.action.index) {
-        next = { ...next, candidates: mergeLookupCandidates(next.candidates, result.found, result.action.query.basis), queryIndex: next.queryIndex + 1 };
-    } else if (result?.kind === 'details') {
-        next.candidates = recordLookupDetails(next.candidates, result.action.releaseId, result.release);
-    } else if (result?.kind === 'refused') {
-        if (result.action.kind === 'search' && next.phase === 'search' && next.queryIndex === result.action.index) next.queryIndex++;
-        else if (result.action.kind === 'details') next.candidates = recordLookupDetails(next.candidates, result.action.releaseId, 'failed');
-    }
-    // A submitted run uses busy mode until its first failed attempt; automatic runs (also reruns of submitted text) and manual retries wait.
-    const mode: LookupGateMode = next.grantSource === 'submit' && !next.attempts?.musicbrainz ? 'busy' : 'wait';
-    const running = (action: LookupAction, phase: MetadataLookupRecord['phase']) => ({
-        next: { ...next, state: 'running' as const, issue: null, phase, retryAt: null, leaseUntil: new Date(now.getTime() + JOB.leaseMs),
-            // Stored before the request is sent, so the folder allowance is spent only once a folder name may have left.
-            folderUsed: next.folderUsed === true || (action.kind === 'search' && action.query?.basis === 'folder') }, step: { action, mode }
-    });
-    if (next.phase === 'search' && next.queryIndex < next.queries.length && next.candidates.length < JOB.candidates) {
-        return running({ kind: 'search', index: next.queryIndex, query: next.queries[next.queryIndex] }, 'search');
-    }
-    const pending = next.candidates.find(candidate => candidate.details === 'pending');
-    if (pending) return running({ kind: 'details', releaseId: pending.releaseId }, 'details');
-    // The single place where a run is ranked as it completes; advanceLookup applies its preselection in the same step.
-    const ranked = rankLookupWithinBudget(next.candidates, doc, now);
-    return { next: endRun(next, 'complete', issue, now, { phase: 'done', outcome: next.candidates.length ? 'candidates' : 'noRelease',
-        candidates: ranked.candidates, ranking: ranked.ranking }), step: idle };
-}
-
 /**
  * One stored step in one transaction: the lease, the grant, the actor's current role, the project and the bound file set are
  * checked before anything is stored. A lost lease writes nothing; a stop keeps earlier candidates but never this step's result.
@@ -291,10 +197,10 @@ function proceedLookup(record: MetadataLookupRecord, doc: AdminImportDocument, r
 async function advanceLookup(id: ObjectId, run: number, worker: string, now: Date, result: LookupStepResult | null,
     configuration: () => MetadataLookupConfiguration): Promise<LookupStep> {
     const session = getDatabaseClient().startSession();
-    let step = idle;
+    let step = idleLookupStep;
     try {
         await session.withTransaction(async () => {
-            step = idle;
+            step = idleLookupStep;
             const record = await lookups().findOne({ _id: id, run, leaseOwner: worker }, { session });
             if (!record) return;
             const doc = await importCollection().findOne({ _id: id, ...importPurposeFilter }, { session });
@@ -307,13 +213,13 @@ async function advanceLookup(id: ObjectId, run: number, worker: string, now: Dat
             const stale = () => lookupStaleSlots(record.files, importLookupFileSet(doc!).files);
             let staleSlots: string[] = [];
             if (!isBlockingLookupState(record.state)) next = { ...record, leaseOwner: null, leaseUntil: null };
-            else if (!(record.grantExpiresAt instanceof Date) || record.grantExpiresAt <= now) next = endRun(record, 'stopped', 'grantExpired', now);
-            else if (!permitted) next = endRun(record, 'stopped', 'permissionLost', now);
-            else if (!doc || !metadataLookupAccepted(doc)) next = endRun(record, 'superseded', 'projectClosed', now);
-            else if ((staleSlots = stale()).length) next = endRun(record, 'superseded', 'fileSetChanged', now, { staleSlotIds: [...new Set([...(record.staleSlotIds ?? []), ...staleSlots])] });
-            else if (!configuration().available) next = endRun(record, 'unavailable', 'notConfigured', now);
+            else if (!(record.grantExpiresAt instanceof Date) || record.grantExpiresAt <= now) next = endLookupRun(record, 'stopped', 'grantExpired', now);
+            else if (!permitted) next = endLookupRun(record, 'stopped', 'permissionLost', now);
+            else if (!doc || !metadataLookupAccepted(doc)) next = endLookupRun(record, 'superseded', 'projectClosed', now);
+            else if ((staleSlots = stale()).length) next = endLookupRun(record, 'superseded', 'fileSetChanged', now, { staleSlotIds: [...new Set([...(record.staleSlotIds ?? []), ...staleSlots])] });
+            else if (!configuration().available) next = endLookupRun(record, 'unavailable', 'notConfigured', now);
             else {
-                ({ next, step } = proceedLookup(record, doc, result, now));
+                ({ next, step } = proceedLookupRun(record, doc, result, now));
                 if (next.state === 'complete' && next.phase === 'done') ({ record: next, changed: applied } = applyPreselectedLookup(doc, next, now));
             }
             if (next.state !== record.state && doc) await writeLookupGate(doc, next, session);
@@ -337,7 +243,7 @@ export type MetadataLookupWorkerDependencies = { musicBrainz?: MusicBrainzClient
 const defaultMusicBrainzClient = (configuration?: () => MetadataLookupConfiguration) => createMusicBrainzClient({
     gate: createMongoLookupRateGate(getDb()!), transport: pinnedHttpsTransport, cache: createLookupResponseCache(), ...(configuration ? { configuration } : {})
 });
-/** More steps than any run needs (six queries, 25 details, retries end the tick); a safety bound against a step that stores nothing. */
+/** More steps than any run needs (at most six searches and 25 release lookups, retries end the tick); a safety bound against a step that stores nothing. */
 const maximumStepsPerTick = 64;
 
 /** Claims one due run and advances it, one MusicBrainz request per stored step, until it ends, waits for a retry, or loses its lease. */
@@ -358,7 +264,7 @@ export async function runMetadataLookupOnce(dependencies: MetadataLookupWorkerDe
         const step = await advanceLookup(claimed._id, claimed.run, worker, clock(), result, configuration);
         if (!step.action) return true;
         if (signal?.aborted) break;
-        result = await performLookupAction(musicBrainz, step.action, step.mode, signal);
+        result = await performLookupStep(musicBrainz, step.action, step.mode, signal);
         if (result.kind === 'shutdown') break;
     }
     // Shutdown (or the safety bound): the request in flight is discarded and the stored progress resumes on the next claim.

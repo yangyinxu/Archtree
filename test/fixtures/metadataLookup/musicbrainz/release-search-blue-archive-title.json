@@ -4,7 +4,7 @@
   "description": "Release search by title only",
   "exchanges": [
     {
-      "url": "https://musicbrainz.org/ws/2/release?query=release%3A%22Blue+Archive+Original+Soundtrack+Vol.1%22&fmt=json&limit=25",
+      "url": "https://musicbrainz.org/ws/2/release?query=release%3A%22Blue+Archive+Original+Soundtrack+Vol.1%22&fmt=json&limit=100",
       "status": 200,
       "headers": {
         "content-type": "application/json"

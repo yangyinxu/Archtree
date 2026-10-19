@@ -15,7 +15,7 @@ const view = () => ({
     artists: [{ name: 'Synthetic Lead', role: 'primary', joinPhrase: ' & ' }, { name: 'Synthetic Second', role: 'primary', joinPhrase: null }], label: 'Synthetic Label',
     releaseDate: { year: 2020, month: null, day: null }, tracks: [{ discNumber: 1, trackNumber: 1, title: 'First Song' }, { discNumber: 1, trackNumber: 2, title: 'Second Song' }] } }],
   preselection: { candidateKey: key, basis: 'onlyMatchingGroup', artistMismatch: false },
-  disclosure: { unknownLocalDurations: 0, unknownLocalDiscNumbers: 2 },
+  disclosure: { unknownLocalDurations: 0, unknownLocalDiscNumbers: 2, partialComparison: false },
   applied: { run: 2, candidateKey: key, releaseId: release, choice: 'preselected', basis: 'onlyMatchingGroup',
     values: [{ path: 'album.title', slotId: null }, { path: `tracks.${slot}.title`, slotId: slot }],
     conflicts: [{ path: 'album.label', slotId: null, lookup: { name: 'Synthetic Label', musicBrainzId: null }, answer: null },
@@ -47,6 +47,10 @@ test('extra keys, links, forged paths, unknown states and oversized lists are re
   refused({ ...item, needsAnswer: { tie: false, conflicts: ['__proto__'] } });
   refused({ ...item, applied: { ...item.applied, conflicts: [{ ...item.applied.conflicts[0], lookup: { name: 'x', musicBrainzId: null, url: 'https://example.invalid' } }] } });
   refused({ ...item, state: 'paused' });
+  // The disclosure says whether the comparison was partial, always as a boolean.
+  refused({ ...item, disclosure: { unknownLocalDurations: 0, unknownLocalDiscNumbers: 2 } });
+  refused({ ...item, disclosure: { ...item.disclosure, partialComparison: 'yes' } });
+  expect(lookupViewSchema.safeParse({ ...item, disclosure: { ...item.disclosure, partialComparison: true } }).success).toBe(true);
   refused({ ...item, candidates: [{ ...item.candidates[0], key: 'itunes:1' }] });
   refused({ ...item, candidates: Array.from({ length: 26 }, () => item.candidates[0]) });
   refused({ ...item, groups: Array.from({ length: 26 }, () => item.groups[0]) });

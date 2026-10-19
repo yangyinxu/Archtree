@@ -4,7 +4,7 @@
   "description": "Release search whose track-count is a string",
   "exchanges": [
     {
-      "url": "https://musicbrainz.org/ws/2/release?query=release%3A%22Synthetic+Wrong+Type%22&fmt=json&limit=25",
+      "url": "https://musicbrainz.org/ws/2/release?query=release%3A%22Synthetic+Wrong+Type%22&fmt=json&limit=100",
       "status": 200,
       "headers": {
         "content-type": "application/json"

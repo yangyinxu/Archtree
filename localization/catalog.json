@@ -3455,6 +3455,13 @@
       ],
       "variables": {}
     },
+    "admin.lookup.partial_comparison": {
+      "description": "Administrator workbench: import summary, lookup candidate chooser, not every release the search found was compared with the files.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.lookup.retry": {
       "description": "Administrator workbench: import summary, manual free retry of metadata lookup.",
       "delivery": [
@@ -3464,6 +3471,13 @@
     },
     "admin.lookup.retrying": {
       "description": "Administrator workbench: import summary, the lookup source was busy or unavailable and is retried automatically.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.lookup.single_choice": {
+      "description": "Administrator workbench: import summary, one matching release from a partial comparison is offered but not applied automatically; choosing it is optional.",
       "delivery": [
         "runtime"
       ],

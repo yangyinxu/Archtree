@@ -5,13 +5,13 @@
  *          LookupValueFlag, LookupAppliedValue, LookupConflict, LookupApplication, MetadataLookupRecord,
  *          ImportLookupGate
  *   Functions: isBlockingLookupState, importLookupFileSet, lookupStaleSlots, planImportLookup,
- *              lookupFileEvidence, mergeLookupCandidates, recordLookupDetails, rankLookupRecord,
- *              rankLookupWithinBudget, lookupRetryAt, lookupGateFor, automaticLookupOperationId,
- *              startLookupRun, refreshLookupGrant
+ *              lookupFileEvidence, lookupReportedTrackCount, mergeLookupCandidates, lookupHitsAdmitted,
+ *              recordLookupDetails, rankLookupRecord, rankLookupWithinBudget, lookupRetryAt, lookupGateFor,
+ *              automaticLookupOperationId, startLookupRun, refreshLookupGrant
  * Internal
- *   Types: LookupSource
+ *   Types: LookupSource, FoundLookupRelease
  *   Functions: sha256, manifestFiles, readyAsset, evidence, shared, names, tagEvidence, compactRelease,
- *              candidateBytes, withRelease
+ *              candidateBytes, withRelease, reportedCount
  * @end-catalog */
 
 /**
@@ -30,7 +30,7 @@ import type { ImportDraftPath } from '../import/adminImportValueState';
 import { METADATA_LOOKUP_JOB_LIMITS, type MusicBrainzRelease, type MusicBrainzReleaseSummary } from './lookupContract';
 import { normalizeMusicBrainzId } from './lookupIdentifiers';
 import { planMetadataLookup, type LookupPlan, type LookupPlanInput, type PlannedLookupQuery } from './lookupQueryPlanner';
-import { rankLookupCandidates, type LocalFileEvidence, type LookupPreselection, type RankedLookup } from './lookupRanking';
+import { lookupTrackCountPlausible, rankLookupCandidates, type LocalFileEvidence, type LookupPreselection, type RankedLookup } from './lookupRanking';
 
 export type MetadataLookupState = 'queued' | 'running' | 'retrying' | 'complete' | 'unavailable' | 'stopped' | 'superseded';
 export type MetadataLookupIssue = 'permissionLost' | 'grantExpired' | 'notConfigured' | 'sourceUnavailable' | 'sourceBusy' | 'fileSetChanged' | 'projectClosed';
@@ -46,6 +46,8 @@ export type StoredLookupCandidate = {
     basis: PlannedLookupQuery['basis']; summary: MusicBrainzReleaseSummary | null; release: MusicBrainzRelease | null;
     /** Only `fetched` candidates carry a release; every other one is incomplete and unranked. */
     details: 'pending' | 'fetched' | 'missing' | 'failed' | 'omitted';
+    /** The release total a recording hit reported for a release without a summary; absent when unknown or stored by an earlier release. */
+    reportedTrackCount?: number;
 };
 export type StoredLookupRanking = RankedLookup & { rankedAt: Date; files: LocalFileEvidence[] };
 /** A candidate value left out: control or invisible characters, over a length bound, a failed format, the draft cap, or only placeholder credits. */
@@ -73,6 +75,14 @@ export type MetadataLookupRecord = {
     /** Failed MusicBrainz attempts of this run; each one schedules an automatic retry until METADATA_LOOKUP_JOB_LIMITS.retryDelaysMs runs out. */
     attempts: { musicbrainz: number }; retryAt: Date | null;
     candidates: StoredLookupCandidate[]; ranking: StoredLookupRanking | null;
+    /**
+     * Whether every release this run's searches offered that could match was compared: false once a search reported more hits
+     * than it returned, the candidate bound left out a release it offered whose reported track count can equal the number of files
+     * (or is unknown) or ended the search before a planned non-fallback query, or a planned search was refused (an incomplete
+     * candidate that could match makes the ranking partial too). A record without it, from an earlier release, counts as partial
+     * when it is re-ranked or resumed. A partial comparison never preselects its only matching group; it offers it.
+     */
+    searchComplete: boolean;
     /** Written by value application (lookupValueApplication.ts) only; carried over to every later run. */
     applied: LookupApplication | null;
     /**
@@ -197,21 +207,46 @@ function withRelease(candidates: StoredLookupCandidate[], index: number, release
     return next;
 }
 
-/** Adds newly found releases in order, once each by normalized MBID, up to the candidate bound; a release found by ID is fetched. */
-export function mergeLookupCandidates(candidates: readonly StoredLookupCandidate[],
-    found: readonly { releaseId: string; summary?: MusicBrainzReleaseSummary | null; release?: MusicBrainzRelease | null }[],
-    basis: PlannedLookupQuery['basis']): StoredLookupCandidate[] {
+type FoundLookupRelease = { releaseId: string; summary?: MusicBrainzReleaseSummary | null; release?: MusicBrainzRelease | null; trackCount?: number | null };
+const reportedCount = (count: unknown) => Number.isSafeInteger(count) && (count as number) > 0 ? count as number : null;
+/** The release total a search or lookup reported for a found release or a stored candidate; null when unknown. */
+export const lookupReportedTrackCount = (item: { summary?: MusicBrainzReleaseSummary | null; release?: MusicBrainzRelease | null; trackCount?: number | null; reportedTrackCount?: number }) =>
+    reportedCount(item.release?.trackCount) ?? reportedCount(item.summary?.trackCount) ?? reportedCount(item.trackCount) ?? reportedCount(item.reportedTrackCount);
+
+/**
+ * Adds newly found releases in order, once each by normalized MBID, up to the candidate bound; a release found by ID is fetched.
+ * With `fileCount`, releases whose reported track count can match the files are admitted first (a stable partition), so the bound
+ * is spent on plausible editions. A recording hit's reported track count is kept, since its release has no summary.
+ */
+export function mergeLookupCandidates(candidates: readonly StoredLookupCandidate[], found: readonly FoundLookupRelease[],
+    basis: PlannedLookupQuery['basis'], fileCount?: number): StoredLookupCandidate[] {
     let next = [...candidates];
     const seen = new Set(next.map(candidate => normalizeMusicBrainzId(candidate.releaseId)));
-    for (const item of found) {
+    const plausible = (item: FoundLookupRelease) => fileCount === undefined || lookupTrackCountPlausible(lookupReportedTrackCount(item), fileCount);
+    const ordered = fileCount === undefined ? found : [...found.filter(plausible), ...found.filter(item => !plausible(item))];
+    for (const item of ordered) {
         if (next.length >= METADATA_LOOKUP_JOB_LIMITS.candidates) break;
         const releaseId = normalizeMusicBrainzId(item.releaseId);
         if (!releaseId || seen.has(releaseId)) continue;
         seen.add(releaseId);
-        next.push({ key: `musicbrainz:${releaseId}`, source: 'musicbrainz', releaseId, basis, summary: item.summary ?? null, release: null, details: 'pending' });
+        const reported = item.summary || item.release ? null : reportedCount(item.trackCount);
+        next.push({ key: `musicbrainz:${releaseId}`, source: 'musicbrainz', releaseId, basis, summary: item.summary ?? null, release: null, details: 'pending',
+            ...(reported === null ? {} : { reportedTrackCount: reported }) });
         if (item.release) next = withRelease(next, next.length - 1, item.release);
     }
     return next;
+}
+
+/**
+ * Whether every release a search offered (each valid MBID) that could match `fileCount` files is now a candidate: none was left
+ * out by the candidate bound. A left-out release whose reported track count differs cannot match, so it hides nothing.
+ */
+export function lookupHitsAdmitted(candidates: readonly StoredLookupCandidate[], found: readonly FoundLookupRelease[], fileCount: number): boolean {
+    const admitted = new Set(candidates.map(candidate => normalizeMusicBrainzId(candidate.releaseId)));
+    return found.every(item => {
+        const id = normalizeMusicBrainzId(item.releaseId);
+        return !id || admitted.has(id) || !lookupTrackCountPlausible(lookupReportedTrackCount(item), fileCount);
+    });
 }
 
 /** Stores one candidate's details: a fetched release (compact, within the budget), `missing` for a 404 or `failed`. */
@@ -226,10 +261,17 @@ export function recordLookupDetails(candidates: readonly StoredLookupCandidate[]
     return withRelease([...candidates], index, result);
 }
 
-/** Ranks the stored candidates against the import's current files; an incomplete candidate is never ranked or preselected. */
-export function rankLookupRecord(candidates: readonly StoredLookupCandidate[], doc: Pick<AdminImportDocument, '_id' | 'manifest' | 'media' | 'draft'>, now: Date): StoredLookupRanking {
+/**
+ * Ranks the stored candidates against the import's current files; an incomplete candidate is never ranked or preselected, and
+ * a comparison whose searches were not complete, or with an incomplete candidate that could match, never preselects its only
+ * matching group (a release that no longer exists cannot match).
+ */
+export function rankLookupRecord(candidates: readonly StoredLookupCandidate[], doc: Pick<AdminImportDocument, '_id' | 'manifest' | 'media' | 'draft'>, now: Date,
+    options: { searchComplete: boolean }): StoredLookupRanking {
     const files = lookupFileEvidence(doc);
-    const ranked = rankLookupCandidates(candidates.map(({ key, source, releaseId, summary, release }) => ({ key, source, releaseId, summary, release })), files);
+    const ranked = rankLookupCandidates(candidates.map(candidate => ({ key: candidate.key, source: candidate.source, releaseId: candidate.releaseId,
+        summary: candidate.summary, release: candidate.release, reportedTrackCount: reportedCount(candidate.reportedTrackCount), missing: candidate.details === 'missing' })), files,
+        { searchComplete: options.searchComplete });
     return { ...ranked, rankedAt: now, files };
 }
 
@@ -237,29 +279,37 @@ export function rankLookupRecord(candidates: readonly StoredLookupCandidate[], d
  * Ranks the stored candidates while candidates and ranking together stay within `budget` bytes of JSON, measured like the
  * candidate budget (every ranked candidate and group repeats a proposal), so the record stays well under MongoDB's document
  * limit: while over it, the largest fetched release is omitted, incomplete and unranked, and the candidates are ranked again.
+ * Every ranking gets the run's `searchComplete`; an omitted release makes the comparison partial too.
  */
 export function rankLookupWithinBudget(candidates: readonly StoredLookupCandidate[], doc: Pick<AdminImportDocument, '_id' | 'manifest' | 'media' | 'draft'>, now: Date,
-    budget: number = METADATA_LOOKUP_JOB_LIMITS.recordBytes): { candidates: StoredLookupCandidate[]; ranking: StoredLookupRanking } {
-    let kept = [...candidates], ranking = rankLookupRecord(kept, doc, now);
+    options: { searchComplete: boolean; budget?: number }): { candidates: StoredLookupCandidate[]; ranking: StoredLookupRanking } {
+    const budget = options.budget ?? METADATA_LOOKUP_JOB_LIMITS.recordBytes, searchComplete = options.searchComplete;
+    let kept = [...candidates], ranking = rankLookupRecord(kept, doc, now, { searchComplete });
     const largest = kept.map((candidate, index) => ({ index, bytes: candidate.release ? candidateBytes([candidate]) : 0 }))
         .filter(entry => entry.bytes > 0).sort((left, right) => right.bytes - left.bytes || left.index - right.index);
     for (const { index } of largest) {
         if (Buffer.byteLength(JSON.stringify({ candidates: kept, ranking })) <= budget) break;
         kept = kept.map((candidate, at): StoredLookupCandidate => at === index ? { ...candidate, release: null, details: 'omitted' } : candidate);
-        ranking = rankLookupRecord(kept, doc, now);
+        ranking = rankLookupRecord(kept, doc, now, { searchComplete });
     }
     return { candidates: kept, ranking };
 }
 
 /**
  * When the next automatic retry runs after `failures` failed attempts (30 s, 2 min, 5 min, or a longer Retry-After of at most
- * 60 s; a negative or non-finite one counts as none); null once exhausted.
+ * 60 s; a negative or non-finite one counts as none); null once exhausted. A run's first failure that was a 503/429
+ * (`rateLimited`) is a throttled source rather than an outage: it is retried after its Retry-After within 2 to 10 seconds (2 s
+ * without one), while the deployment-wide gate still holds the source for a longer Retry-After.
  */
-export function lookupRetryAt(failures: number, now: Date, retryAfterMs: number | null): Date | null {
+export function lookupRetryAt(failures: number, now: Date, retryAfterMs: number | null, options: { rateLimited?: boolean } = {}): Date | null {
     const delays = METADATA_LOOKUP_JOB_LIMITS.retryDelaysMs;
     if (!Number.isSafeInteger(failures) || failures < 1 || failures > delays.length) return null;
-    const extra = typeof retryAfterMs === 'number' && Number.isFinite(retryAfterMs) ? Math.min(Math.max(retryAfterMs, 0), METADATA_LOOKUP_JOB_LIMITS.retryAfterMaximumMs) : 0;
-    return new Date(now.getTime() + Math.max(delays[failures - 1], extra));
+    const given = typeof retryAfterMs === 'number' && Number.isFinite(retryAfterMs) && retryAfterMs >= 0 ? retryAfterMs : null;
+    if (options.rateLimited && failures === 1) {
+        const { minimum, maximum } = METADATA_LOOKUP_JOB_LIMITS.rateLimitedRetryMs;
+        return new Date(now.getTime() + Math.min(Math.max(given ?? minimum, minimum), maximum));
+    }
+    return new Date(now.getTime() + Math.max(delays[failures - 1], Math.min(given ?? 0, METADATA_LOOKUP_JOB_LIMITS.retryAfterMaximumMs)));
 }
 
 /**
@@ -280,8 +330,8 @@ export function automaticLookupOperationId(importId: string, run: number, digest
 
 /**
  * The next run of an import, replacing the previous run's results. Only the automatic-run count, whether a folder-name query
- * was handed to the worker and the applied values carry over. A run with no query is complete at once (`noQuery`) and sends
- * nothing.
+ * was handed to the worker and the applied values carry over; its searches start complete. A run with no query is complete at
+ * once (`noQuery`) and sends nothing.
  */
 export function startLookupRun(previous: MetadataLookupRecord | null, init: {
     importId: ObjectId; actorId: string; grantSource: MetadataLookupGrantSource; operationId: string; automatic: boolean;
@@ -296,7 +346,7 @@ export function startLookupRun(previous: MetadataLookupRecord | null, init: {
         automatic: init.automatic, input: { trigger: init.input.trigger, submitted: init.input.submitted ? { ...init.input.submitted } : null },
         queries: init.queries.map(query => structuredClone(query)), queryIndex: 0, phase: searching ? 'search' : 'done',
         fileSetDigest: init.fileSet.digest, files: init.fileSet.files.map(file => ({ ...file })), attempts: { musicbrainz: 0 }, retryAt: null,
-        candidates: [], ranking: null, applied: previous?.applied ?? null, staleSlotIds: [],
+        candidates: [], ranking: null, searchComplete: true, applied: previous?.applied ?? null, staleSlotIds: [],
         automaticRuns: (Number.isSafeInteger(previous?.automaticRuns) ? previous!.automaticRuns : 0) + (init.automatic ? 1 : 0),
         folderUsed: previous?.folderUsed === true,
         leaseOwner: null, leaseUntil: null, createdAt: now, updatedAt: now, completedAt: searching ? null : now

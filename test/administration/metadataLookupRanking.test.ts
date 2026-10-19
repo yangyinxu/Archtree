@@ -8,7 +8,8 @@
  *   - Blue Archive: the JP CD and JP digital editions match as two groups and the Korean edition is excluded by two disclosed deltas
  *   - Pandora Call: only the two 1-track singles match, as one group represented by the single with front artwork
  *   - an unknown local duration is unverified, disclosed and never preselected
- *   - an incomplete candidate is last, unranked and never preselected, even when its ID equals the tag
+ *   - an incomplete candidate is last and unranked and makes the comparison partial, so the only matching group is not preselected, while a release-ID tag still preselects
+ *   - Hotel California beyond the first page: with exact digital (fa7d3357) durations only the 1984 European CD cb961c6b matches among the recorded nine-track editions; a partial search shows it as one group without a preselection, a complete one would preselect it, and adding the digital edition makes a tie
  *   - unknown disc numbers are disclosed while the candidate still matches; a known disc count must agree
  *   - a medium without tracks is not a disc: the comparison and the proposal number discs among media that have tracks
  *   - ranking is identical under any permutation and the representative prefers front artwork
@@ -71,7 +72,8 @@ test('Hotel California: every 9-track edition within tolerance matches, groups s
     assert.deepEqual(matching.map(entry => entry.releaseId).sort(), expected);
     assert.ok(expected.length >= 10);
     for (const prefix of ['24ae881f', '0a9833a9', 'e38dc685', 'bef9ebe8', '519c3c07']) assert.ok(expected.some(id => id.startsWith(prefix)), prefix);
-    for (const prefix of ['7b73e57c', 'ebd981c7', '54614efa', '0ea3b00b']) {
+    // Remastered editions differ in duration; so does the 2013 digital edition (fa7d3357, 4.6 s off at track 9 with the jitter).
+    for (const prefix of ['7b73e57c', 'ebd981c7', '54614efa', '0ea3b00b', 'fa7d3357']) {
         const remaster = ranked.candidates.find(entry => entry.releaseId.startsWith(prefix))!;
         assert.equal(remaster.status, 'notMatching', prefix); assert.deepEqual(remaster.comparison!.differences, ['duration']);
     }
@@ -144,7 +146,7 @@ test('an unknown local duration is unverified, disclosed and never preselected',
     const files = filesFrom(release('5302459e')).map(file => ({ ...file, durationMs: null }));
     const ranked = rankLookupCandidates([candidate(release('5302459e'))], files);
     assert.equal(ranked.candidates[0].status, 'unverified'); assert.equal(ranked.candidates[0].comparison!.unknownLocalDurations, 1);
-    assert.deepEqual(ranked.disclosure, { unknownLocalDurations: 1, unknownLocalDiscNumbers: 1 });
+    assert.deepEqual(ranked.disclosure, { unknownLocalDurations: 1, unknownLocalDiscNumbers: 1, partialComparison: false });
     assert.equal(ranked.preselection, null); assert.deepEqual(ranked.groups, []);
     const unknownRemote = structuredClone(release('5302459e'));
     unknownRemote.media[0].tracks[0].lengthMs = null;
@@ -152,15 +154,50 @@ test('an unknown local duration is unverified, disclosed and never preselected',
     assert.equal(remote.candidates[0].status, 'unverified'); assert.equal(remote.candidates[0].comparison!.unknownCandidateDurations, 1);
 });
 
-test('an incomplete candidate is last, unranked and never preselected, even when its ID equals the tag', () => {
+test('an incomplete candidate is last and unranked and makes the comparison partial, so the only matching group is not preselected, while a release-ID tag still preselects', () => {
     const files = filesFrom(hotelBase, { identifiers: { releaseId: hotelBase.releaseId } });
     const ranked = rankLookupCandidates([candidate(hotelBase, false), candidate(release('0a9833a9'))], files);
     assert.equal(ranked.candidates.at(-1)!.releaseId, hotelBase.releaseId);
     assert.equal(ranked.candidates.at(-1)!.status, 'incomplete'); assert.equal(ranked.candidates.at(-1)!.comparison, null);
-    assert.equal(ranked.preselection?.candidateKey, `musicbrainz:${release('0a9833a9').releaseId}`);
-    assert.equal(ranked.preselection?.basis, 'onlyMatchingGroup');
+    // The incomplete edition might match too, so the one matching group is shown without a preselection.
+    assert.deepEqual([ranked.groups.length, ranked.preselection, ranked.disclosure.partialComparison], [1, null, true]);
     const alone = rankLookupCandidates([candidate(hotelBase, false)], files);
-    assert.equal(alone.preselection, null);
+    assert.deepEqual([alone.preselection, alone.disclosure.partialComparison], [null, true]);
+    // An incomplete candidate that cannot match hides nothing: one that no longer exists, or one that reported another track count.
+    const untagged = filesFrom(hotelBase);
+    for (const hidden of [{ ...candidate(hotelBase, false), missing: true }, { ...candidate(hotelBase, false), reportedTrackCount: 19 },
+        { ...candidate(hotelBase, false), summary: { trackCount: 18 } as LookupCandidate['summary'] }]) {
+        const ranked = rankLookupCandidates([hidden, candidate(release('0a9833a9'))], untagged);
+        assert.deepEqual([ranked.disclosure.partialComparison, ranked.preselection?.basis], [false, 'onlyMatchingGroup'], JSON.stringify(Object.keys(hidden)));
+    }
+    for (const possible of [{ ...candidate(hotelBase, false), reportedTrackCount: 9 }, { ...candidate(hotelBase, false), summary: { trackCount: 0 } as LookupCandidate['summary'] }]) {
+        assert.equal(rankLookupCandidates([possible, candidate(release('0a9833a9'))], untagged).disclosure.partialComparison, true);
+    }
+    // An identifier every file shares still preselects the one complete matching edition it names.
+    const tagged = rankLookupCandidates([candidate(hotelBase, false), candidate(release('0a9833a9'))],
+        filesFrom(hotelBase, { identifiers: { releaseId: release('0a9833a9').releaseId } }), { searchComplete: false });
+    assert.deepEqual([tagged.preselection?.candidateKey, tagged.preselection?.basis, tagged.disclosure.partialComparison],
+        [`musicbrainz:${release('0a9833a9').releaseId}`, 'releaseId', true]);
+});
+
+test('Hotel California beyond the first page: with exact digital (fa7d3357) durations only the 1984 European CD cb961c6b matches among the recorded nine-track editions; a partial search shows it as one group without a preselection, a complete one would preselect it, and adding the digital edition makes a tie', () => {
+    const digital = release('fa7d3357'), europeanCd = release('cb961c6b');
+    const recorded = loadLookupFixture('musicbrainz/release-search-hotel-california.json').exchanges[0].body as { count: number; releases: { id: string; 'track-count': number }[] };
+    const nine = recorded.releases.filter(entry => entry['track-count'] === 9).map(entry => releases.get(entry.id)!);
+    assert.deepEqual([recorded.count, recorded.releases.length, nine.length, nine.every(value => durationsOf(value).length === 9), nine.includes(digital)], [83, 25, 19, true, false]);
+    const files = filesFrom(digital, { artistTags: ['Eagles'] });
+    const partial = rankLookupCandidates(nine.map(value => candidate(value)), files, { searchComplete: false });
+    assert.deepEqual(partial.candidates.filter(entry => entry.status === 'matching').map(entry => entry.releaseId), [europeanCd.releaseId]);
+    assert.deepEqual([partial.groups.length, partial.groups[0].representativeKey, partial.groups[0].proposal.label, partial.preselection, partial.disclosure],
+        [1, `musicbrainz:${europeanCd.releaseId}`, 'Asylum Records', null, { unknownLocalDurations: 0, unknownLocalDiscNumbers: 9, partialComparison: true }]);
+    const complete = rankLookupCandidates(nine.map(value => candidate(value)), files, { searchComplete: true });
+    assert.deepEqual([complete.preselection?.candidateKey, complete.preselection?.basis, complete.disclosure.partialComparison],
+        [`musicbrainz:${europeanCd.releaseId}`, 'onlyMatchingGroup', false]);
+    // With the digital edition compared too, its own Elektra group ties with the CD's, whether or not the search was complete.
+    for (const searchComplete of [true, false]) {
+        const both = rankLookupCandidates([...nine, digital].map(value => candidate(value)), files, { searchComplete });
+        assert.deepEqual([both.groups.map(group => group.proposal.label).sort(), both.preselection], [['Asylum Records', 'Elektra'], null], String(searchComplete));
+    }
 });
 
 test('unknown disc numbers are disclosed while the candidate still matches; a known disc count must agree', () => {

@@ -469,6 +469,14 @@ player control still works.
   an operator contact, confirm the summary says lookup is not configured, offers
   Luna and shows neither a retry nor the name box. Repeat with a screen reader
   at 320 CSS px.
+- As an administrator, with metadata lookup configured against MusicBrainz in a
+  development environment, import a popular Album with many editions (for
+  example Hotel California by Eagles) whose files match exactly one edition
+  among those compared. Confirm the summary says one release matches but was
+  not applied because not every release found was compared, that the chooser
+  shows the release with every value, says not every release was compared and
+  offers Use none of these, that Publish is available without a choice, and
+  that choosing the release applies it.
 
 ## Media Session observations
 

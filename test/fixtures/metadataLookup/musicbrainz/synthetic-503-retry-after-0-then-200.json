@@ -1,0 +1,35 @@
+{
+  "source": "musicbrainz",
+  "synthetic": true,
+  "description": "A 503 with Retry-After: 0, as MusicBrainz throttles about one request in four at its documented rate, then the answer",
+  "exchanges": [
+    {
+      "url": "https://musicbrainz.org/ws/2/release?query=release%3A%22Synthetic+Album%22&fmt=json&limit=100",
+      "status": 503,
+      "headers": {
+        "content-type": "application/json",
+        "retry-after": "0"
+      },
+      "bodyText": "{\"error\":\"rate limited\"}"
+    },
+    {
+      "url": "https://musicbrainz.org/ws/2/release?query=release%3A%22Synthetic+Album%22&fmt=json&limit=100",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json"
+      },
+      "body": {
+        "count": 1,
+        "offset": 0,
+        "releases": [
+          {
+            "id": "0000000d-0000-4000-8000-000000000001",
+            "title": "Synthetic Album",
+            "score": 100,
+            "track-count": 2
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -6,9 +6,10 @@ export const lookupActive = (state: string | undefined) => state === 'queued' ||
 
 /**
  * The Review and publish summary read (GET /imports/:id/lookup): the lookup view and the server's summary state. It is read again
- * whenever the project's revision or automatic values change, and polled every 3 seconds while a lookup is queued or running (10
- * while it waits for an automatic retry). The summary, the Analyze confirmation and the publication checklist share it; its
- * strict schema loads with the read, so none of their chunks carries it.
+ * whenever the project's revision or automatic values change, and polled every 3 seconds while a lookup is queued or running, or
+ * waits on a busy source (a throttled source is retried within seconds), and every 10 while it waits out an outage. The summary,
+ * the Analyze confirmation and the publication checklist share it; its strict schema loads with the read, so none of their chunks
+ * carries it.
  */
 export function importSummaryQuery(access: { viewerId: string; epoch: number; generation: number }, item: Pick<ImportDetail, 'id' | 'revision' | 'valueRevision'>, online = true) {
   return {
@@ -19,8 +20,8 @@ export function importSummaryQuery(access: { viewerId: string; epoch: number; ge
     },
     retry: false, gcTime: 0,
     refetchInterval: (query: { state: { data?: ImportLookupResponse } }) => {
-      const state = query.state.data?.lookup?.state;
-      return online && lookupActive(state) ? state === 'retrying' ? 10_000 : 3_000 : false;
+      const lookup = query.state.data?.lookup, state = lookup?.state;
+      return online && lookupActive(state) ? state === 'retrying' && lookup?.issue !== 'sourceBusy' ? 10_000 : 3_000 : false;
     }
   };
 }

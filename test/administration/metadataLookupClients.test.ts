@@ -7,6 +7,9 @@
  *   - type filters are allowlisted and empty, over-long or link-like queries are refused
  *   - a link-like or malformed query is refused before any gate, DNS or request
  *   - recorded MusicBrainz searches, lookups, browse and ISRC answers parse completely
+ *   - the live smoke's recorded searches parse: "Sound Track" finds nothing, "Soundtrack" and the subtitle find the CD and digital editions, and the digital Hotel California parses
+ *   - recorded release searches are complete pages, so they answer the 100-release page alike; the derived Hotel California page is the recorded first page and the digital edition
+ *   - a 503 with Retry-After 0 waits the one-second minimum in wait mode and succeeds, and fails at once as rateLimited in busy mode
  *   - a 404 lookup is null and cached, so a repeat sends nothing
  *   - 503 honors Retry-After through the injected sleep, pushes the gate backoff and succeeds on the second attempt
  *   - three 503 answers end as rateLimited after the bounded schedule, and busy mode tries once without sleeping
@@ -40,11 +43,11 @@ import {
 import type { LookupGateLease, MetadataLookupRateGate } from '../../src/administration/lookup/lookupRateGate';
 import { createLookupResponseCache, type LookupResponseCache } from '../../src/administration/lookup/lookupResponseCache';
 import { parseRetryAfter, type LookupClientDependencies } from '../../src/administration/lookup/lookupSourceRequest';
-import { createMusicBrainzClient, escapeLucene, musicBrainzLuceneQuery, musicBrainzUrls } from '../../src/administration/lookup/musicBrainzClient';
+import { createMusicBrainzClient, escapeLucene, musicBrainzLuceneQuery, musicBrainzUrls, parseMusicBrainzReleaseSearch } from '../../src/administration/lookup/musicBrainzClient';
 import { createItunesSearchClient, itunesStorefrontsForText, itunesUrls } from '../../src/administration/lookup/iTunesSearchClient';
 import { coverArtDestination, createCoverArtClient } from '../../src/administration/lookup/coverArtClient';
 import {
-    allLookupFixtureFiles, availableLookupConfiguration, fixtureRoot, fixtureTransport, immediateGate, loadLookupFixture, type LookupExchange
+    allLookupFixtureFiles, availableLookupConfiguration, fixtureRoot, fixtureTransport, immediateGate, loadLookupFixture, loadLookupFixtures, type LookupExchange
 } from '../support/metadataLookupFixtures';
 import { installNetworkGuard } from '../support/networkGuard';
 
@@ -107,6 +110,13 @@ test('Lucene escaping covers every special character and phrase terms join with 
         'release:"Vol.1 \\~Longing for the memorable days\\~" AND artist:"AC\\/DC"');
     assert.equal(musicBrainzLuceneQuery({ release: 'say "hi" \\ (live): x-y', tracks: 9, primarytype: 'album', secondarytype: 'audio drama' }),
         'release:"say \\"hi\\" \\\\ \\(live\\)\\: x\\-y" AND tracks:9 AND primarytype:"album" AND secondarytype:"audio drama"');
+    // Terms keep a fixed order whatever the key order, so equal plans give equal URLs; a release search asks for a page of 100
+    // releases (the run admits the plausible editions among them), a recording search for 25 recordings.
+    const credited = { label: 'Asylum Records', artist: 'Eagles', release: 'Hotel California' };
+    assert.equal(musicBrainzLuceneQuery(credited), 'release:"Hotel California" AND artist:"Eagles" AND label:"Asylum Records"');
+    assert.equal(musicBrainzUrls.releaseSearch(credited).href, musicBrainzUrls.releaseSearch({ release: 'Hotel California', artist: 'Eagles', label: 'Asylum Records' }).href);
+    assert.deepEqual([...musicBrainzUrls.releaseSearch(credited).searchParams.entries()].slice(1), [['fmt', 'json'], ['limit', '100']]);
+    assert.equal(musicBrainzUrls.recordingSearch({ recording: 'パンドラコール' }).searchParams.get('limit'), '25');
     assert.equal(musicBrainzLuceneQuery({ barcode: '0 75596-05092 0', catno: '7559-60509-2' }), 'catno:"7559\\-60509\\-2" AND barcode:"075596050920"');
     assert.equal(musicBrainzLuceneQuery({ recording: 'パンドラコール', artist: 'ヰ世界情緒' }), 'recording:"パンドラコール" AND artist:"ヰ世界情緒"');
 });
@@ -144,9 +154,12 @@ test('a link-like or malformed query is refused before any gate, DNS or request'
 });
 
 test('recorded MusicBrainz searches, lookups, browse and ISRC answers parse completely', async () => {
-    const { musicBrainz, fake } = clients(exchangesOf('musicbrainz/release-search-hotel-california.json', `musicbrainz/release-${blueArchiveCd}.json`,
+    // The recorded first page of the Hotel California search (limit=25) is served for the run's 100-release URL: parsing is the same.
+    const [hotel, ...others] = exchangesOf('musicbrainz/release-search-hotel-california.json', `musicbrainz/release-${blueArchiveCd}.json`,
         'musicbrainz/release-0ea3b00b-a9a3-46e1-b1e2-f1e7697e8878.json', 'musicbrainz/recording-search-pandora-call.json',
-        'musicbrainz/browse-release-group-836f349a.json', 'musicbrainz/isrc-JPY392200483.json'));
+        'musicbrainz/browse-release-group-836f349a.json', 'musicbrainz/isrc-JPY392200483.json');
+    assert.ok(hotel.url.endsWith('&limit=25'));
+    const { musicBrainz, fake } = clients([{ ...hotel, url: musicBrainzUrls.releaseSearch({ release: 'Hotel California', artist: 'Eagles' }).href }, ...others]);
     const search = await musicBrainz.searchReleases({ release: 'Hotel California', artist: 'Eagles' }, call());
     assert.equal(search.count, 83); assert.equal(search.releases.length, 25);
     assert.ok(search.releases.every(release => release.score !== null && normalizeMusicBrainzId(release.releaseId)));
@@ -174,6 +187,58 @@ test('recorded MusicBrainz searches, lookups, browse and ISRC answers parse comp
     assert.equal(isrc.isrc, 'JPY392200483'); assert.equal(isrc.recordings.length, 2);
     assert.ok(fake.requests.every(request => request.headers['User-Agent'] === 'Finitude/1.0 ( lookup-operator@example.test )'));
     assert.deepEqual(Object.keys(fake.requests[0].headers), ['Accept', 'Accept-Encoding', 'User-Agent']);
+});
+
+test('the live smoke\'s recorded searches parse: "Sound Track" finds nothing, "Soundtrack" and the subtitle find the CD and digital editions, and the digital Hotel California parses', async () => {
+    const { musicBrainz } = clients(exchangesOf('musicbrainz/release-search-blue-archive-sound-track.json', 'musicbrainz/release-search-blue-archive-normalized.json',
+        'musicbrainz/release-search-blue-archive-subtitle.json', 'musicbrainz/release-fa7d3357-f3e9-4da5-ad70-09c05ef8207f.json'));
+    const tag = 'Blue Archive Original Sound Track Vol.1 ~Longing for the memorable days~';
+    for (const extra of [{}, { artist: 'ミツキヨ、KARUT、Nor' }, { label: '株式会社Yostar' }]) {
+        assert.deepEqual(await musicBrainz.searchReleases({ release: tag, ...extra }, call()), { count: 0, releases: [] }, JSON.stringify(extra));
+    }
+    const found = async (query: { release: string; artist?: string; label?: string }) => (await musicBrainz.searchReleases(query, call())).releases.map(release => [release.releaseId.slice(0, 8), release.trackCount]);
+    assert.deepEqual(await found({ release: 'Blue Archive Original Soundtrack Vol.1 ~Longing for the memorable days~' }), [['8baecda4', 39], ['8f032fff', 39]]);
+    assert.deepEqual(await found({ release: 'Blue Archive Original Soundtrack Vol.1 ~Longing for the memorable days~', label: '株式会社Yostar' }), [['8baecda4', 39], ['8f032fff', 39]]);
+    assert.deepEqual(await found({ release: 'Longing for the memorable days' }), [['8baecda4', 39], ['8f032fff', 39]]);
+    assert.deepEqual(await found({ release: 'Longing for the memorable days', artist: 'ミツキヨ、KARUT、Nor' }), [['8f032fff', 39]]);
+    const digital = (await musicBrainz.lookupRelease('fa7d3357-f3e9-4da5-ad70-09c05ef8207f', call()))!;
+    assert.deepEqual([digital.title, digital.trackCount, digital.labels.map(label => label.name), digital.media[0].tracks.every(track => track.lengthMs !== null)],
+        ['Hotel California', 9, ['Elektra', 'Rhino'], true]);
+});
+
+test('recorded release searches are complete pages, so they answer the 100-release page alike; the derived Hotel California page is the recorded first page and the digital edition', () => {
+    type Page = { count: number; releases: { id: string; 'track-count'?: number }[] };
+    const searches = loadLookupFixtures('musicbrainz');
+    for (const [name, file] of searches) for (const exchange of file.exchanges.filter(item => item.url.includes('/ws/2/release?query=') && item.status === 200 && !file.synthetic)) {
+        const body = exchange.body as Page, page = new URL(exchange.url).searchParams.get('limit');
+        // Every recorded search but Hotel California (83 hits, recorded with a 25-release page) is a complete page.
+        if (name === 'release-search-hotel-california.json') assert.deepEqual([page, body.count, body.releases.length], ['25', 83, 25]);
+        else assert.ok(page === '100' && body.count <= body.releases.length, name);
+    }
+    const recorded = loadLookupFixture('musicbrainz/release-search-hotel-california.json').exchanges[0].body as Page;
+    const derived = loadLookupFixture('musicbrainz/synthetic-release-search-hotel-california-page.json');
+    const browsed = loadLookupFixture('musicbrainz/browse-release-group-836f349a.json').exchanges.flatMap(exchange => (exchange.body as { releases: { id: string }[] }).releases);
+    const page = derived.exchanges[0].body as Page;
+    assert.deepEqual([derived.synthetic, derived.exchanges.length, derived.exchanges[0].url, page.count, page.releases.slice(0, 25)],
+        [true, 1, musicBrainzUrls.releaseSearch({ release: 'Hotel California', artist: 'Eagles' }).href, 26, recorded.releases]);
+    const digital = page.releases[25];
+    assert.deepEqual([digital.id, digital['track-count'], browsed.some(release => release.id === digital.id), recorded.releases.some(release => release.id === digital.id)],
+        ['fa7d3357-f3e9-4da5-ad70-09c05ef8207f', 9, true, false]);
+    assert.equal(parseMusicBrainzReleaseSearch(page).releases.length, 26);
+});
+
+test('a 503 with Retry-After 0 waits the one-second minimum in wait mode and succeeds, and fails at once as rateLimited in busy mode', async () => {
+    const file = 'musicbrainz/synthetic-503-retry-after-0-then-200.json';
+    const query = { release: 'Synthetic Album' };
+    const waiting = clients(exchangesOf(file));
+    assert.equal((await waiting.musicBrainz.searchReleases(query, call())).count, 1);
+    assert.deepEqual([waiting.sleeps, waiting.fake.requests.length, waiting.gate.releases], [[1000], 2, [{ backoffMs: 1000 }, undefined]]);
+    const busy = clients(exchangesOf(file));
+    await assert.rejects(busy.musicBrainz.searchReleases(query, call('busy')), error => {
+        sourceFailure('musicbrainz', 'rateLimited')(error);
+        assert.equal((error as MetadataLookupSourceError).retryAfterMs, 1000); return true;
+    });
+    assert.deepEqual([busy.sleeps, busy.fake.requests.length], [[], 1]);
 });
 
 test('a 404 lookup is null and cached, so a repeat sends nothing', async () => {
@@ -427,6 +492,11 @@ test('fixtures hold only allowlisted public exchanges, under 2 MiB, and no test 
     const manifest = JSON.parse(readFileSync(path.join(fixtureRoot, 'manifest.json'), 'utf8'));
     assert.deepEqual(Object.keys(manifest).sort(), ['probes', 'recordedAt', 'recorder', 'userAgentProduct']);
     assert.equal(manifest.userAgentProduct, 'ArchtreeMetadataFixtureRecorder/0.1');
+    // Every recorded file is a described probe, listed once in sorted order; synthetic files are described in themselves instead.
+    const probes = (manifest.probes as { file: string; description: string }[]).map(probe => probe.file);
+    assert.deepEqual(probes, files.filter(entry => !entry.file.synthetic).map(entry => entry.path).sort());
+    assert.ok((manifest.probes as { description: unknown }[]).every(probe => typeof probe.description === 'string' && probe.description.length > 0));
+    assert.ok(files.every(entry => typeof entry.file.description === 'string' && entry.file.description.length > 0), 'every fixture says what it holds');
 
     const recorderName = ['record', 'metadata', 'lookup', 'fixtures'].join('-');
     const testRoot = fileURLToPath(new URL('..', import.meta.url));

@@ -7,6 +7,7 @@
  *   - candidates follow the ranking when ranked and the stored order as incomplete otherwise; an unreadable record is no view
  *   - the view stays within its bounds: 25 candidates and groups, 1000-character text, 20 formats, and out-of-bound groups or values are left out
  *   - needsAnswer and blocking show a tie until a choice, unanswered conflicts, and ignore Album conflicts once an explicit Album reuse makes it an append
+ *   - a partial comparison is disclosed, and its single matching group is offered without a preselection but needs no answer
  *   - the view never carries what the strict Web schema refuses: an impossible calendar date shows as unknown and a repeated difference once
  * @end-catalog */
 
@@ -50,11 +51,11 @@ const release = (id: number, extra: Partial<MusicBrainzRelease> = {}): MusicBrai
 const stored = (value: MusicBrainzRelease, details: StoredLookupCandidate['details'] = 'fetched'): StoredLookupCandidate => ({ key: `musicbrainz:${value.releaseId}`, source: 'musicbrainz',
     releaseId: value.releaseId, basis: 'albumText', summary: null, release: details === 'fetched' ? value : null, details });
 function record(doc: AdminImportDocument, candidates: StoredLookupCandidate[], extra: Partial<MetadataLookupRecord> = {}): MetadataLookupRecord {
-    const ranked = rankLookupWithinBudget(candidates, doc, now);
+    const searchComplete = extra.searchComplete ?? true, ranked = rankLookupWithinBudget(candidates, doc, now, { searchComplete });
     return { _id: doc._id, run: 2, state: 'complete', issue: null, outcome: 'candidates', operationId: mbid(600), actorId: actor, grantSource: 'submit',
         grantExpiresAt: new Date(now.getTime() + 60_000), automatic: false, input: { trigger: 'submitted', submitted: { kind: 'album', text: 'Synthetic Album' } },
         queries: [{ kind: 'musicBrainzReleaseSearch', query: { release: 'Synthetic Album' }, basis: 'submitted' } as never], queryIndex: 1, phase: 'done',
-        fileSetDigest: 'f'.repeat(64), files: [], attempts: { musicbrainz: 1 }, retryAt: null, candidates: ranked.candidates, ranking: ranked.ranking, applied: null,
+        fileSetDigest: 'f'.repeat(64), files: [], attempts: { musicbrainz: 1 }, retryAt: null, candidates: ranked.candidates, ranking: ranked.ranking, searchComplete, applied: null,
         staleSlotIds: [slot(1), 'removed-slot'], automaticRuns: 1, folderUsed: false, leaseOwner: 'worker-secret', leaseUntil: now, createdAt: now, updatedAt: now, completedAt: now, ...extra };
 }
 
@@ -79,7 +80,7 @@ test('the view allowlists evidence: no link, ISRC, recording ID, account, grant,
         groupKey: view.groups[0].groupKey, artistMismatch: false });
     assert.deepEqual([view.run, view.state, view.issue, view.outcome, view.input, view.preselection, view.disclosure, view.staleFiles],
         [2, 'complete', null, 'candidates', { trigger: 'submitted', submitted: { kind: 'album', text: 'Synthetic Album' } },
-            { candidateKey: `musicbrainz:${mbid(1)}`, basis: 'onlyMatchingGroup', artistMismatch: false }, { unknownLocalDurations: 0, unknownLocalDiscNumbers: 2 }, [slot(1)]]);
+            { candidateKey: `musicbrainz:${mbid(1)}`, basis: 'onlyMatchingGroup', artistMismatch: false }, { unknownLocalDurations: 0, unknownLocalDiscNumbers: 2, partialComparison: false }, [slot(1)]]);
     assert.deepEqual(view.groups[0].proposal.artists, [{ name: 'Synthetic Lead', role: 'primary', joinPhrase: ' & ' }, { name: 'Synthetic Second', role: 'primary', joinPhrase: null }]);
     assert.deepEqual([view.applied!.choice, view.applied!.basis, view.applied!.candidateKey, view.applied!.values.map(value => value.path).slice(0, 2), view.applied!.conflicts, view.applied!.flagged],
         ['preselected', 'onlyMatchingGroup', `musicbrainz:${mbid(1)}`, ['album.title', 'album.artists'], [], []]);
@@ -135,6 +136,20 @@ test('needsAnswer and blocking show a tie until a choice, unanswered conflicts, 
     assert.deepEqual([importLookupView(conflicted, mine)!.needsAnswer, importLookupView(conflicted, mine)!.blocking], [{ tie: false, conflicts: [] }, false]);
     for (const state of ['queued', 'running', 'retrying'] as const) assert.equal(importLookupView({ ...tie, state }, doc)!.blocking, true, state);
     for (const state of ['stopped', 'unavailable', 'superseded'] as const) assert.equal(importLookupView({ ...tie, state }, doc)!.blocking, false, state);
+});
+
+test('a partial comparison is disclosed, and its single matching group is offered without a preselection but needs no answer', () => {
+    const doc = project(), partial = record(doc, [stored(release(1))], { searchComplete: false });
+    const view = importLookupView(applyPreselectedLookup(doc, partial, now).record, doc)!;
+    assert.deepEqual([view.groups.length, view.preselection, view.applied, view.disclosure, view.needsAnswer, view.blocking],
+        [1, null, null, { unknownLocalDurations: 0, unknownLocalDiscNumbers: 2, partialComparison: true }, { tie: false, conflicts: [] }, false]);
+    // Two matching groups of a partial comparison are a tie as before.
+    const two = record(doc, [stored(release(1)), stored(release(2, { title: 'Synthetic Other' }))], { searchComplete: false });
+    assert.deepEqual([two.ranking!.groups.length, importLookupView(two, doc)!.needsAnswer], [2, { tie: true, conflicts: [] }]);
+    // A ranking stored before the field shows a complete comparison, as its own preselection already decided.
+    const legacy = record(doc, [stored(release(1))]);
+    delete (legacy.ranking!.disclosure as { partialComparison?: boolean }).partialComparison;
+    assert.deepEqual(importLookupView(legacy, doc)!.disclosure, { unknownLocalDurations: 0, unknownLocalDiscNumbers: 2, partialComparison: false });
 });
 
 test('the view never carries what the strict Web schema refuses: an impossible calendar date shows as unknown and a repeated difference once', () => {

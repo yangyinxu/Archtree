@@ -18,6 +18,8 @@
  *   - newly known durations re-rank stored candidates without a request and apply the new preselection; unchanged evidence re-ranks nothing
  *   - a re-rank binds the file set it ranked: a stale slot confirmed again is no longer stale, one still without a confirmed file stays stale
  *   - publication waits for a tie until a choice for that run, and for unanswered conflicts whose value still differs; an append ignores Album conflicts
+ *   - one matching group of a partial comparison is offered, not applied, and needs no answer; choosing it applies it
+ *   - re-ranking a record without searchComplete never preselects its only group
  *   - choosing refuses another run, an active run, a candidate before completion or unknown as stale, and one without fetched details as incomplete
  *   - answering a conflict: lookup writes the value as the administrator's own, mine keeps it, and a stale application, path or base is refused
  *   - Artist entries and a label equal to the applied lookup values do not rest on file tags alone; differing ones still do
@@ -101,12 +103,12 @@ const intent = (extra: Partial<LookupApplicationIntent> = {}): LookupApplication
 const valuesOf = (doc: AdminImportDocument, release: MusicBrainzRelease) => lookupCandidateValues(release, lookupFileEvidence(doc), draftOf(doc), importId);
 const entry = (name: string, role: ImportArtistEntry['role'] = 'primary', joinPhrase: string | null = null): ImportArtistEntry =>
     ({ key: derivedEntryKey({ importId, lookupEntry: name.normalize('NFC').toLowerCase() }), name, role, joinPhrase, musicBrainzId: null });
-/** A completed run ranked against the import's current files, with `applied` as given. */
+/** A completed run ranked against the import's current files (complete searches unless `extra` says otherwise), with `applied` as given. */
 function completed(doc: AdminImportDocument, candidates: StoredLookupCandidate[], extra: Partial<MetadataLookupRecord> = {}): MetadataLookupRecord {
-    const ranked = rankLookupWithinBudget(candidates, doc, now);
+    const searchComplete = extra.searchComplete ?? true, ranked = rankLookupWithinBudget(candidates, doc, now, { searchComplete });
     return { _id: doc._id, run: 1, state: 'complete', issue: null, outcome: 'candidates', operationId: mbid(600), actorId: actor, grantSource: 'upload',
         grantExpiresAt: new Date(now.getTime() + 60_000), automatic: true, input: { trigger: 'tags', submitted: null }, queries: [], queryIndex: 0, phase: 'done',
-        fileSetDigest: 'digest', files: [], attempts: { musicbrainz: 0 }, retryAt: null, candidates: ranked.candidates, ranking: ranked.ranking, applied: null,
+        fileSetDigest: 'digest', files: [], attempts: { musicbrainz: 0 }, retryAt: null, candidates: ranked.candidates, ranking: ranked.ranking, searchComplete, applied: null,
         staleSlotIds: [], automaticRuns: 1, folderUsed: false, leaseOwner: null, leaseUntil: null, createdAt: now, updatedAt: now, completedAt: now, ...extra };
 }
 /** Files whose durations match the synthetic releases' two tracks. */
@@ -385,6 +387,41 @@ test('publication waits for a tie until a choice for that run, and for unanswere
     assert.deepEqual(lookupAnswersNeeded(malformed, mine, { append: false }), { tie: false, conflicts: [] });
     assert.deepEqual(lookupAnswersNeeded(null, mine, { append: false }), { tie: false, conflicts: [] });
     assert.deepEqual(lookupAnswersNeeded({ ...conflicted, ranking: 'x' as never, applied: 'y' as never }, mine, { append: false }), { tie: false, conflicts: [] });
+});
+
+test('one matching group of a partial comparison is offered, not applied, and needs no answer; choosing it applies it', () => {
+    const doc = project(2, timed), partial = completed(doc, [stored(synthetic(1))], { searchComplete: false });
+    assert.deepEqual([partial.ranking!.groups.length, partial.ranking!.preselection, partial.ranking!.disclosure.partialComparison], [1, null, true]);
+    assert.deepEqual(applyPreselectedLookup(doc, partial, now), { record: partial, changed: false });
+    assert.deepEqual([draftOf(doc).album.title, doc.valueRevision], ['', 0]);
+    // One group is no tie: publication never waits for it.
+    assert.deepEqual(lookupAnswersNeeded(partial, doc, { append: false }), { tie: false, conflicts: [] });
+    assert.deepEqual(lookupAnswersNeeded(partial, doc, { append: true }), { tie: false, conflicts: [] });
+    const chosen = chooseLookupCandidate(doc, partial, { run: 1, candidateKey: `musicbrainz:${mbid(1)}`, actorId: other, operationId: mbid(704) }, now);
+    assert.deepEqual([lookupAnswersNeeded(chosen, doc, { append: false }).tie, chosen.applied?.choice, draftOf(doc).album.title], [false, 'chosen', 'Synthetic Album']);
+    const none = chooseLookupCandidate(project(2, timed), partial, { run: 1, candidateKey: null, actorId: other, operationId: mbid(705) }, now);
+    assert.equal(lookupAnswersNeeded(none, doc, { append: false }).tie, false);
+    // Two matching groups of a partial comparison are still a tie.
+    const two = completed(doc, [stored(synthetic(1)), stored({ ...synthetic(2), title: 'Synthetic Other' })], { searchComplete: false });
+    assert.deepEqual([two.ranking!.groups.length, lookupAnswersNeeded(two, doc, { append: false }).tie], [2, true]);
+    // A complete comparison preselects the same group, and without a matching candidate nothing is preselected and no choice is needed.
+    assert.equal(completed(doc, [stored(synthetic(1))]).ranking!.preselection?.basis, 'onlyMatchingGroup');
+    const nothing = completed(project(2), [stored(synthetic(1))], { searchComplete: false });
+    assert.deepEqual([nothing.ranking!.groups, lookupAnswersNeeded(nothing, project(2), { append: false }).tie], [[], false]);
+});
+
+test('re-ranking a record without searchComplete never preselects its only group', () => {
+    const doc = project(2), run = completed(doc, [stored(synthetic(1))]);
+    const legacy = { ...run } as Partial<MetadataLookupRecord>;
+    delete legacy.searchComplete;
+    // Durations become known: a record from a release before the field is a partial comparison, so its only group is only offered.
+    doc.media!.assets.forEach((asset, index) => { asset.tags = timed(index) as never; });
+    const reranked = rerankStoredLookup(doc, legacy as MetadataLookupRecord, now)!;
+    assert.deepEqual([reranked.changed, reranked.record.ranking!.groups.length, reranked.record.ranking!.preselection, reranked.record.ranking!.disclosure.partialComparison,
+        reranked.record.applied, lookupAnswersNeeded(reranked.record, doc, { append: false }).tie], [false, 1, null, true, null, false]);
+    // The same run with complete searches preselects and applies it.
+    const complete = rerankStoredLookup(project(2, timed), { ...run, ranking: { ...run.ranking!, files: [] } }, now)!;
+    assert.deepEqual([complete.changed, complete.record.ranking!.preselection?.basis], [true, 'onlyMatchingGroup']);
 });
 
 test('choosing refuses another run, an active run, a candidate before completion or unknown as stale, and one without fetched details as incomplete', () => {

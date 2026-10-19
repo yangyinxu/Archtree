@@ -4,7 +4,7 @@
   "description": "Release search with the credited names and the ~ subtitle",
   "exchanges": [
     {
-      "url": "https://musicbrainz.org/ws/2/release?query=release%3A%22Blue+Archive+Original+Soundtrack+Vol.1+%5C%7ELonging+for+the+memorable+days%5C%7E%22+AND+artist%3A%22Mitsukiyo%E3%80%81KARUT%E3%80%81Nor%22&fmt=json&limit=25",
+      "url": "https://musicbrainz.org/ws/2/release?query=release%3A%22Blue+Archive+Original+Soundtrack+Vol.1+%5C%7ELonging+for+the+memorable+days%5C%7E%22+AND+artist%3A%22Mitsukiyo%E3%80%81KARUT%E3%80%81Nor%22&fmt=json&limit=100",
       "status": 200,
       "headers": {
         "content-type": "application/json"

@@ -1,0 +1,43 @@
+{
+  "source": "musicbrainz",
+  "recordedAt": "2026-10-19T15:32:08.999Z",
+  "description": "Release searches with the tag spelling \"Sound Track\": alone, with the credited names and with the label (no release found)",
+  "exchanges": [
+    {
+      "url": "https://musicbrainz.org/ws/2/release?query=release%3A%22Blue+Archive+Original+Sound+Track+Vol.1+%5C%7ELonging+for+the+memorable+days%5C%7E%22&fmt=json&limit=100",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json"
+      },
+      "body": {
+        "count": 0,
+        "offset": 0,
+        "releases": []
+      }
+    },
+    {
+      "url": "https://musicbrainz.org/ws/2/release?query=release%3A%22Blue+Archive+Original+Sound+Track+Vol.1+%5C%7ELonging+for+the+memorable+days%5C%7E%22+AND+artist%3A%22%E3%83%9F%E3%83%84%E3%82%AD%E3%83%A8%E3%80%81KARUT%E3%80%81Nor%22&fmt=json&limit=100",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json"
+      },
+      "body": {
+        "count": 0,
+        "offset": 0,
+        "releases": []
+      }
+    },
+    {
+      "url": "https://musicbrainz.org/ws/2/release?query=release%3A%22Blue+Archive+Original+Sound+Track+Vol.1+%5C%7ELonging+for+the+memorable+days%5C%7E%22+AND+label%3A%22%E6%A0%AA%E5%BC%8F%E4%BC%9A%E7%A4%BEYostar%22&fmt=json&limit=100",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json"
+      },
+      "body": {
+        "count": 0,
+        "offset": 0,
+        "releases": []
+      }
+    }
+  ]
+}

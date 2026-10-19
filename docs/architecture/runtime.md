@@ -243,7 +243,8 @@ Metadata lookup jobs live in `adminImportLookups`, one record per import project
 holds its run number, state (`queued`, `running`, `retrying`, `complete`,
 `unavailable`, `stopped` or `superseded`), the granting administrator and a
 one-hour grant, the bound file set, the planned queries and progress, at most 25
-candidates (4 MiB of JSON together), the ranking (candidates plus ranking stay
+candidates (4 MiB of JSON together) and whether its searches were complete, the
+ranking (candidates plus ranking stay
 within 12 MiB, well under MongoDB's 16 MiB document limit), the applied
 candidate (or none) with its values, conflicts and flagged values (at most one
 of each per draft value) and a 180-second worker lease. The lookup worker

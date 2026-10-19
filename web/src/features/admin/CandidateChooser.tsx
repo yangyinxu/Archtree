@@ -16,14 +16,17 @@ const proposalText = (field: typeof fields[number], proposal: Proposal) => field
 /**
  * Chooses a release of the current lookup run, or none. While several matching groups tie, it lists each group's representative
  * with only the values that differ between the groups, plus its barcode, catalogue number, country and medium, and needs an
- * answer. Every candidate also stays selectable in a folded list, a non-matching one showing how it differs from the files.
- * Files whose duration or Disc Number is unknown are disclosed, since ranking never counts them as agreement. Choosing applies
- * at once (POST /lookup/choose).
+ * answer. The only matching group of a partial comparison, never applied unasked, is offered the same way with every value but
+ * needs no answer. Every candidate also stays selectable in a folded list, a non-matching one showing how it differs from the
+ * files. Files whose duration or Disc Number is unknown are disclosed, since ranking never counts them as agreement, and so is a
+ * comparison that did not include every release MusicBrainz found. Choosing applies at once (POST /lookup/choose); a release
+ * applied as a preselection stays choosable while a tie needs an answer.
  */
 export function CandidateChooser({ lookup, disabled, onChoose }: { lookup: ImportLookupView; disabled: boolean; onChoose: (candidateKey: string | null) => void }) {
-  const t = useAdminText(), id = useId(), tie = lookup.needsAnswer.tie;
-  const chosen = lookup.applied?.run === lookup.run ? lookup.applied.candidateKey : undefined;
-  const differing = fields.filter(field => new Set(lookup.groups.map(group => JSON.stringify(group.proposal[field]))).size > 1);
+  const t = useAdminText(), id = useId(), tie = lookup.needsAnswer.tie, single = lookup.groups.length === 1;
+  const offered = !tie && single && !lookup.preselection && lookup.disclosure?.partialComparison === true && lookup.applied?.run !== lookup.run;
+  const chosen = lookup.applied?.run === lookup.run && !(tie && lookup.applied.choice === 'preselected') ? lookup.applied.candidateKey : undefined;
+  const differing = single ? [...fields] : fields.filter(field => new Set(lookup.groups.map(group => JSON.stringify(group.proposal[field]))).size > 1);
   const representatives = lookup.groups.flatMap(group => lookup.candidates.filter(candidate => candidate.key === group.representativeKey).map(candidate => ({ candidate, proposal: group.proposal })));
   const fact = (key: string, value: string | null) => <div key={key}><dt>{t(key)}</dt><dd>{value || '—'}</dd></div>;
   // The tie view lists each group's representative with its proposal; the folded list every candidate with its status.
@@ -42,8 +45,9 @@ export function CandidateChooser({ lookup, disabled, onChoose }: { lookup: Impor
     </li>;
   })}</ul>;
   const disclosure = lookup.disclosure, unknown = disclosure ? ([['lookup.unknown_durations', disclosure.unknownLocalDurations], ['lookup.unknown_discs', disclosure.unknownLocalDiscNumbers]] as const).filter(([, count]) => count > 0) : [];
-  const disclosed = unknown.map(([key, count]) => <p key={key} className={styles.muted}>{t(key, { count })}</p>);
+  const disclosed = [...unknown.map(([key, count]) => <p key={key} className={styles.muted}>{t(key, { count })}</p>),
+    disclosure?.partialComparison && <p key="partial" className={styles.muted}>{t('lookup.partial_comparison')}</p>];
   const none = <div className={styles.actions}><button type="button" className={styles.button} disabled={disabled || (chosen === null && lookup.applied?.choice === 'none')} onClick={() => onChoose(null)}>{t('lookup.choose_none')}</button></div>;
-  const all = <details className={styles.details}><summary>{t('lookup.candidates', { count: lookup.candidates.length })}</summary>{list('a', lookup.candidates.map(candidate => ({ candidate, proposal: null })))}{!tie && none}</details>;
-  return tie ? <><section aria-labelledby={`${id}-tie`}><h3 id={`${id}-tie`}>{t('lookup.tie')}</h3>{disclosed}{list('t', representatives)}{none}</section>{all}</> : <>{disclosed}{all}</>;
+  const all = <details className={styles.details}><summary>{t('lookup.candidates', { count: lookup.candidates.length })}</summary>{list('a', lookup.candidates.map(candidate => ({ candidate, proposal: null })))}{!tie && !offered && none}</details>;
+  return tie || offered ? <><section aria-labelledby={`${id}-tie`}><h3 id={`${id}-tie`}>{t(tie ? 'lookup.tie' : 'lookup.single_choice')}</h3>{disclosed}{list('t', representatives)}{none}</section>{all}</> : <>{disclosed}{all}</>;
 }

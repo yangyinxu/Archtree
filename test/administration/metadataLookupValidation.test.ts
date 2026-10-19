@@ -266,7 +266,7 @@ test('URL builders produce the exact recorded URLs with normalized identifiers',
     assert.equal(musicBrainzUrls.release('24AE881F-7CB3-4C43-B80E-70332CD7C50D').href,
         'https://musicbrainz.org/ws/2/release/24ae881f-7cb3-4c43-b80e-70332cd7c50d?inc=artist-credits+labels+recordings+release-groups+isrcs&fmt=json');
     assert.equal(musicBrainzUrls.releaseSearch({ release: 'Hotel California', artist: 'Eagles' }).href,
-        'https://musicbrainz.org/ws/2/release?query=release%3A%22Hotel+California%22+AND+artist%3A%22Eagles%22&fmt=json&limit=25');
+        'https://musicbrainz.org/ws/2/release?query=release%3A%22Hotel+California%22+AND+artist%3A%22Eagles%22&fmt=json&limit=100');
     assert.equal(musicBrainzUrls.recordingSearch({ recording: 'Pandora Call' }).href,
         'https://musicbrainz.org/ws/2/recording?query=recording%3A%22Pandora+Call%22&fmt=json&limit=25');
     assert.equal(musicBrainzUrls.releaseGroupBrowse('836f349a-0434-3e8b-a0bc-261f77a9f99c').href,

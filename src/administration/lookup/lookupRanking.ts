@@ -3,7 +3,8 @@
  *   Types: LocalFileEvidence, LookupCandidate, LookupProposal, LookupMatchStatus, LookupDifference,
  *          LookupFileComparison, LookupComparison, RankedLookupCandidate, RankedLookupGroup,
  *          LookupPreselection, RankedLookup
- *   Functions: legacyDurationEvidence, proposalForRelease, lookupTrackAssignment, rankLookupCandidates
+ *   Functions: lookupTrackCountPlausible, legacyDurationEvidence, proposalForRelease, lookupTrackAssignment,
+ *              rankLookupCandidates
  * Internal
  *   Functions: clean, folded, canonical, groupKeyFor, byText, orderedFiles, compareRelease, artistMismatchFor,
  *              sharedIdentifier, usableRelease, distinctCandidates
@@ -18,7 +19,10 @@ import { isPlaceholderCredit, normalizeGtin, normalizeMusicBrainzId } from './lo
  * Pure ranking of lookup candidates against the import's selected files. It never makes a request:
  * calling it again with newly known durations re-ranks the stored candidates. Matching candidates
  * all score the same; those that would write identical draft values form one group. The result is
- * identical under any permutation of the inputs.
+ * identical under any permutation of the inputs. The only matching group is preselected only when
+ * the comparison is complete: a search that offered more releases than were compared
+ * (`searchComplete: false`) or an incomplete candidate that could match may hide another matching
+ * group, so the comparison is disclosed as partial and only an embedded identifier still preselects.
  */
 export type LocalFileEvidence = {
     slotId: string; order: number;
@@ -34,6 +38,10 @@ export type LookupCandidate = {
     summary: MusicBrainzReleaseSummary | null;
     /** Null when the release details could not be fetched: the candidate is incomplete. */
     release: MusicBrainzRelease | null;
+    /** The release total a search reported for a release found without a summary (a recording hit); absent when unknown. */
+    reportedTrackCount?: number | null;
+    /** The release no longer exists (its lookup answered 404), so, though incomplete, it cannot match. */
+    missing?: boolean;
 };
 export type LookupProposal = {
     albumTitle: string;
@@ -64,8 +72,13 @@ export type RankedLookup = {
     candidates: RankedLookupCandidate[];
     groups: RankedLookupGroup[];
     preselection: LookupPreselection | null;
-    disclosure: { unknownLocalDurations: number; unknownLocalDiscNumbers: number };
+    /** `partialComparison`: not every release the searches offered was compared, so a lone matching group is not proof. */
+    disclosure: { unknownLocalDurations: number; unknownLocalDiscNumbers: number; partialComparison: boolean };
 };
+
+/** A release whose reported track count is unknown (absent, not a positive integer) can still match; a known one must equal the file count. */
+export const lookupTrackCountPlausible = (reported: unknown, fileCount: number): boolean =>
+    !(Number.isSafeInteger(reported) && (reported as number) > 0) || reported === fileCount;
 
 /** Legacy durations are stored rounded to whole seconds (`m:ss` or `h:mm:ss`). */
 export const legacyDurationEvidence = (value: unknown): { durationMs: number; durationPrecisionMs: 1000 } | null => {
@@ -213,12 +226,16 @@ const distinctCandidates = (candidates: readonly LookupCandidate[]) => {
     return [...chosen.values()];
 };
 
+/**
+ * `searchComplete` false marks a comparison partial; left out, the searches count as complete (pure callers and tests). An
+ * incomplete candidate makes it partial too, unless it cannot match: it no longer exists or reported another track count.
+ */
 export const rankLookupCandidates = (candidates: readonly LookupCandidate[], files: readonly LocalFileEvidence[],
-    options: { toleranceMs?: number } = {}): RankedLookup => {
+    options: { toleranceMs?: number; searchComplete?: boolean } = {}): RankedLookup => {
     const toleranceMs = options.toleranceMs ?? METADATA_LOOKUP_LIMITS.durationToleranceMs;
-    const sorted = orderedFiles(files);
+    const sorted = orderedFiles(files), distinct = distinctCandidates(candidates);
     type Scored = RankedLookupCandidate & { order: number[]; frontArtwork: boolean; release: MusicBrainzRelease | null };
-    const scored: Scored[] = distinctCandidates(candidates).map(candidate => {
+    const scored: Scored[] = distinct.map(candidate => {
         const release = usableRelease(candidate);
         if (!release) return { key: candidate.key, releaseId: candidate.releaseId, status: 'incomplete', comparison: null, proposal: null,
             groupKey: null, artistMismatch: null, order: [], frontArtwork: false, release: null };
@@ -261,7 +278,9 @@ export const rankLookupCandidates = (candidates: readonly LookupCandidate[], fil
         const hits = matching.filter(candidate => matches(candidate, value));
         if (hits.length === 1) { preselection = select(hits[0], basis); break; }
     }
-    if (!preselection && groups.length === 1) preselection = select(groups[0].representative, 'onlyMatchingGroup');
+    const partialComparison = options.searchComplete === false || distinct.some(candidate => !usableRelease(candidate) && candidate.missing !== true
+        && lookupTrackCountPlausible(candidate.summary?.trackCount ?? candidate.reportedTrackCount, files.length));
+    if (!preselection && groups.length === 1 && !partialComparison) preselection = select(groups[0].representative, 'onlyMatchingGroup');
 
     return {
         candidates: ranked,
@@ -270,7 +289,8 @@ export const rankLookupCandidates = (candidates: readonly LookupCandidate[], fil
         preselection,
         disclosure: {
             unknownLocalDurations: files.filter(file => file.durationMs === null).length,
-            unknownLocalDiscNumbers: files.filter(file => file.discNumber === null).length
+            unknownLocalDiscNumbers: files.filter(file => file.discNumber === null).length,
+            partialComparison
         }
     };
 };

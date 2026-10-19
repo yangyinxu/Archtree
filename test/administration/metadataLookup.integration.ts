@@ -4,7 +4,7 @@
  *   Functions: mutation, code, projects, stored, lookup, later, tagged, project, slotOf, upload, v2, seeded,
  *              json, unavailable, mbid, searchUrl, releaseUrl, searchAnswer, releaseAnswer, fixtureClient,
  *              recordingGate, drain, onNextProjectRead, queue, submit, preparingPublication, syntheticAlbum,
- *              png, image, holdFirstSearch, hotelExchanges
+ *              png, image, holdFirstSearch
  *   Constants: guard, actor, other, by, byOther, contact, sharedFrames, albumQuery, albumDecision, hotelBase,
  *              hotelLengths
  *   Variables: harness
@@ -17,10 +17,10 @@
  *   - an upload replay catches up a missed run exactly once, and racing final confirmations queue one run
  *   - unconfigured lookup, locked, completed, review, newer-format and malformed projects queue nothing and get no fence
  *   - converting a legacy project by an edit never runs lookup, and the worker has nothing to claim
- *   - the worker ranks up to 25 Hotel California candidates without changing the revision, and a shared release ID preselects that edition
+ *   - the worker ranks up to 25 Hotel California candidates, nine-track editions first, without changing the revision; the comparison the bound cut short preselects only by a shared release ID
  *   - a lookup sends only allowed terms with Accept and User-Agent, and stores no link
  *   - a role loss, a deleted account or an expired grant stops the run, discarding the step that found it
- *   - an unavailable source is retried after 30 seconds, 2 and 5 minutes, then reported unavailable, never as no release, until a manual retry
+ *   - a rate-limited source is retried after its Retry-After within seconds, then after 2 and 5 minutes, then reported unavailable (sourceBusy), never as no release, until a manual retry
  *   - details that stay unavailable or are missing leave their candidates incomplete in a completed run
  *   - a submitted run is busy before it is sent, then waits; links, reviews, unconfigured lookup and active runs are refused
  *   - a worker that lost its lease writes nothing, and two workers on two imports share one deployment-wide gate
@@ -39,12 +39,13 @@
  *   - removing a bound file while its request is in flight supersedes the run in the cleanup and discards the late answer
  *   - a bound file replaced without lookup bookkeeping, as by a release before lookup jobs, is caught by the worker and by the next trigger
  *   - a refused query is skipped and a refused release lookup leaves its candidate incomplete, while the run completes
- *   - a timed-out or unexpected failure is retried, a longer Retry-After is kept up to a minute, and busy answers through every retry end the run busy
+ *   - a timed-out or unexpected failure is retried after 30 seconds, a throttled one within seconds, a refused gate keeps a longer Retry-After up to a minute, and busy answers through every retry end the run busy
  *   - a grant that expires between steps stops the run, keeping earlier candidates unranked and discarding the step that found it
  *   - a submission replaces an active run whose late answer is discarded, a retry repeats it, and malformed or closed requests are refused
  *   - a run whose stored progress cannot be advanced is retried after its lease and stays bounded by its grant
  *   - a manual retry replaces a run waiting for an automatic retry and waits for the gate, and a retry past the grant ends the run unavailable
  *   - a release-ID query answered by a merged release keeps the fetched release under its current ID and ranks it
+ *   - a submitted run's first 503 with Retry-After 0 is retried as busy within seconds and then waits, never 30 seconds
  * @end-catalog */
 
 /**
@@ -83,7 +84,7 @@ import {
     type MetadataLookupRequest, type MetadataLookupWorkerDependencies
 } from '../../src/administration/lookup/metadataLookupService';
 import { loadImportFixture } from '../support/adminImportFixtures';
-import { fixtureTransport, immediateGate, loadLookupFixture, loadLookupFixtures, type LookupExchange } from '../support/metadataLookupFixtures';
+import { fixtureTransport, hotelCaliforniaExchanges, immediateGate, loadLookupFixture, type LookupExchange } from '../support/metadataLookupFixtures';
 import { installNetworkGuard } from '../support/networkGuard';
 import { createPcmWav, withId3TextFrames } from '../support/pcmWav';
 
@@ -195,9 +196,7 @@ function holdFirstSearch(client: MusicBrainzClient) {
     return { musicBrainz, inFlight, release };
 }
 
-/** Hotel California: the recorded search, every recorded release lookup and the base edition's track lengths. */
-const hotelExchanges = () => [...loadLookupFixture('musicbrainz/release-search-hotel-california.json').exchanges,
-    ...[...loadLookupFixtures('musicbrainz').entries()].filter(([name]) => /^release-[0-9a-f-]{36}\.json$/.test(name)).flatMap(([, file]) => file.exchanges)];
+/** Hotel California: the base edition's track lengths (hotelCaliforniaExchanges serves its searches and every recorded release). */
 const hotelBase = '24ae881f-7cb3-4c43-b80e-70332cd7c50d';
 const hotelLengths = (loadLookupFixture(`musicbrainz/release-${hotelBase}.json`).exchanges.at(-1)!.body as { media: { tracks: { length: number }[] }[] }).media[0].tracks.map(track => track.length);
 
@@ -361,24 +360,28 @@ test('converting a legacy project by an edit never runs lookup, and the worker h
     assert.equal(await runMetadataLookupOnce({ musicBrainz: client.musicBrainz }), false);
 });
 
-test('the worker ranks up to 25 Hotel California candidates without changing the revision, and a shared release ID preselects that edition', async () => {
+test('the worker ranks up to 25 Hotel California candidates, nine-track editions first, without changing the revision; the comparison the bound cut short preselects only by a shared release ID', async () => {
     for (const releaseTag of [null, hotelBase]) {
         const id = await seeded(9, index => v2({ album: 'Hotel California', albumArtists: ['Eagles'], artists: ['Eagles'], durationMs: hotelLengths[index] }, { musicBrainzReleaseId: releaseTag }));
         assert.equal((await requestAutomaticMetadataLookup(by, id, 'upload')).reason, 'queued');
-        const revision = (await stored(id)).revision, client = fixtureClient(hotelExchanges()), gates: unknown[] = [];
+        const revision = (await stored(id)).revision, client = fixtureClient(hotelCaliforniaExchanges()), gates: unknown[] = [];
         const observed: MusicBrainzClient = { ...client.musicBrainz,
             async searchReleases(query, options) { gates.push((await stored(id)).lookupGate); return client.musicBrainz.searchReleases(query, options); } };
         await drain({ musicBrainz: observed });
         const record = (await lookup(id))!, doc = await stored(id);
         assert.deepEqual([record.state, record.outcome, record.issue, record.candidates.length, record.candidates.every(candidate => candidate.details === 'fetched')], ['complete', 'candidates', null, 25, true]);
         assert.equal(new Set(record.candidates.map(candidate => candidate.releaseId)).size, 25);
-        // One release lookup or none, one search, then the details of every candidate not fetched yet.
+        // The page's 20 nine-track editions (the 2013 digital one among them) are admitted before the others.
+        assert.deepEqual(record.candidates.slice(0, 20).map(candidate => candidate.release!.trackCount), Array(20).fill(9));
+        assert.ok(record.candidates.some(candidate => candidate.releaseId.startsWith('fa7d3357')));
+        // One release lookup or none, the credited search (the bound then stops the bare one), then every candidate's details not fetched yet.
         assert.equal(client.requests.length, 26);
         assert.deepEqual(gates, [{ fence: 2, run: 1, state: 'running', blocking: true }]);
         assert.deepEqual(doc.lookupGate, { fence: 3, run: 1, state: 'complete', blocking: false });
         assert.equal(doc.revision, revision);
         assert.ok(record.ranking!.groups.length >= 1);
         assert.ok(record.candidates.every(candidate => candidate.release!.media.every(medium => medium.tracks.every(track => track.isrcs.length === 0))));
+        assert.deepEqual([record.searchComplete, record.ranking!.disclosure.partialComparison], [false, true]);
         if (releaseTag) assert.deepEqual([record.ranking!.preselection?.candidateKey, record.ranking!.preselection?.basis], [`musicbrainz:${hotelBase}`, 'releaseId']);
         else assert.equal(record.ranking!.preselection, null);
     }
@@ -387,7 +390,7 @@ test('the worker ranks up to 25 Hotel California candidates without changing the
 test('a lookup sends only allowed terms with Accept and User-Agent, and stores no link', async () => {
     const storage = new Storage(), item = await project(['Disc 1/01 Zebra Secret.wav', 'Disc 1/02 Yak Secret.wav']);
     await upload((await upload(item, 0, { TALB: 'Hotel California', TPE2: 'Eagles' }, storage)).item, 1, { TALB: 'Hotel California', TPE2: 'Eagles' }, storage);
-    const client = fixtureClient(hotelExchanges());
+    const client = fixtureClient(hotelCaliforniaExchanges());
     await drain({ musicBrainz: client.musicBrainz });
     assert.ok(client.requests.length > 0);
     for (const request of client.requests) {
@@ -433,16 +436,17 @@ test('a role loss, a deleted account or an expired grant stops the run, discardi
     assert.deepEqual([late.record.state, late.record.issue, expired.requests.length, late.gate], ['stopped', 'grantExpired', 0, { fence: 2, run: 1, state: 'stopped', blocking: false }]);
 });
 
-test('an unavailable source is retried after 30 seconds, 2 and 5 minutes, then reported unavailable, never as no release, until a manual retry', async () => {
+test('a rate-limited source is retried after its Retry-After within seconds, then after 2 and 5 minutes, then reported unavailable (sourceBusy), never as no release, until a manual retry', async () => {
     const id = await seeded(1, () => v2({ album: 'Synthetic Album', albumArtists: ['Synthetic Ensemble'] }));
     await requestAutomaticMetadataLookup(by, id, 'upload');
+    // Every attempt answers 503 without a Retry-After: each call's three attempts end on the 5-second backoff it would have waited.
     const failing = fixtureClient(unavailable(searchUrl(albumQuery), 12));
     let now = new Date();
     const retryAts: number[] = [];
-    for (const delay of [30_000, 120_000, 300_000]) {
+    for (const delay of [5_000, 120_000, 300_000]) {
         await runMetadataLookupOnce({ musicBrainz: failing.musicBrainz, now: () => now });
         const record = (await lookup(id))!;
-        assert.deepEqual([record.state, record.issue, record.leaseOwner, record.outcome], ['retrying', 'sourceUnavailable', null, null]);
+        assert.deepEqual([record.state, record.issue, record.leaseOwner, record.outcome], ['retrying', 'sourceBusy', null, null]);
         assert.equal(record.retryAt!.getTime(), now.getTime() + delay);
         retryAts.push(record.retryAt!.getTime());
         assert.equal(await runMetadataLookupOnce({ musicBrainz: failing.musicBrainz, now: () => later(-1, record.retryAt!) }), false, 'not due yet');
@@ -451,7 +455,7 @@ test('an unavailable source is retried after 30 seconds, 2 and 5 minutes, then r
     await runMetadataLookupOnce({ musicBrainz: failing.musicBrainz, now: () => now });
     const gaveUp = (await lookup(id))!;
     assert.deepEqual([gaveUp.state, gaveUp.issue, gaveUp.outcome, gaveUp.ranking, gaveUp.attempts, failing.requests.length, (await stored(id)).lookupGate!.blocking],
-        ['unavailable', 'sourceUnavailable', null, null, { musicbrainz: 4 }, 12, false]);
+        ['unavailable', 'sourceBusy', null, null, { musicbrainz: 4 }, 12, false]);
     // Another administrator retries manually: the same queries run under that administrator's grant.
     const retried = await queue(byOther, id, () => ({ kind: 'retry', actorId: byOther, operationId: randomUUID() }));
     assert.deepEqual([retried.run, retried.grantSource, retried.actorId, retried.automatic, retried.automaticRuns, retried.queries], [2, 'retry', byOther, false, 1, gaveUp.queries]);
@@ -842,13 +846,14 @@ test('a refused query is skipped and a refused release lookup leaves its candida
         async lookupRelease(releaseId, options) { if (releaseId === mbid(2)) throw new MetadataLookupInputError('identifier'); return base.musicBrainz.lookupRelease(releaseId, options); } };
     await drain({ musicBrainz: refusing });
     const record = (await lookup(id))!;
-    assert.deepEqual([record.state, record.issue, record.outcome, record.queryIndex, record.attempts, record.candidates.map(candidate => candidate.details)],
-        ['complete', null, 'candidates', 2, { musicbrainz: 0 }, ['fetched', 'failed']]);
+    // The refused search counts as not sent, which leaves the comparison partial.
+    assert.deepEqual([record.state, record.issue, record.outcome, record.queryIndex, record.attempts, record.candidates.map(candidate => candidate.details), record.searchComplete],
+        ['complete', null, 'candidates', 2, { musicbrainz: 0 }, ['fetched', 'failed'], false]);
     assert.equal(record.ranking!.candidates.find(candidate => candidate.releaseId === mbid(2))!.status, 'incomplete');
     assert.deepEqual(base.requests.map(request => request.url), [searchUrl({ release: 'Synthetic Album' }), releaseUrl(mbid(1))]);
 });
 
-test('a timed-out or unexpected failure is retried, a longer Retry-After is kept up to a minute, and busy answers through every retry end the run busy', async () => {
+test('a timed-out or unexpected failure is retried after 30 seconds, a throttled one within seconds, a refused gate keeps a longer Retry-After up to a minute, and busy answers through every retry end the run busy', async () => {
     const failWith = async (failure: () => Error, ticks: number) => {
         // Earlier cases' retrying runs would become due at the advanced clock, so each case runs alone.
         await adminImportLookupCollection().deleteMany({});
@@ -871,9 +876,15 @@ test('a timed-out or unexpected failure is retried, a longer Retry-After is kept
         assert.deepEqual([record.state, record.issue, record.attempts, record.retryAt!.getTime() - start.getTime(), record.leaseOwner, calls],
             ['retrying', 'sourceUnavailable', { musicbrainz: 1 }, 30_000, null, 1], label);
     }
-    const limited = await failWith(() => new MetadataLookupSourceError('musicbrainz', 'rateLimited', 45_000), 1);
-    assert.deepEqual([limited.record.state, limited.record.issue, limited.record.retryAt!.getTime() - limited.start.getTime()], ['retrying', 'sourceUnavailable', 45_000]);
-    const clamped = await failWith(() => new MetadataLookupSourceError('musicbrainz', 'rateLimited', 600_000), 1);
+    // A throttled source (503/429) is busy, and its first retry follows the Retry-After within 2 to 10 seconds.
+    for (const [retryAfterMs, delay] of [[45_000, 10_000], [600_000, 10_000], [3_000, 3_000], [null, 2_000]] as const) {
+        const limited = await failWith(() => new MetadataLookupSourceError('musicbrainz', 'rateLimited', retryAfterMs), 1);
+        assert.deepEqual([limited.record.state, limited.record.issue, limited.record.retryAt!.getTime() - limited.start.getTime()], ['retrying', 'sourceBusy', delay], String(retryAfterMs));
+    }
+    // A refused gate keeps the 30-second schedule, or a longer Retry-After of at most a minute.
+    const refused = await failWith(() => new MetadataLookupSourceError('musicbrainz', 'busy', 45_000), 1);
+    assert.deepEqual([refused.record.issue, refused.record.retryAt!.getTime() - refused.start.getTime()], ['sourceBusy', 45_000]);
+    const clamped = await failWith(() => new MetadataLookupSourceError('musicbrainz', 'busy', 600_000), 1);
     assert.equal(clamped.record.retryAt!.getTime() - clamped.start.getTime(), 60_000);
     const busy = await failWith(() => new MetadataLookupSourceError('musicbrainz', 'busy'), 4);
     assert.deepEqual([busy.record.state, busy.record.issue, busy.record.outcome, busy.record.ranking, busy.record.attempts, busy.record.retryAt, busy.calls],
@@ -983,13 +994,23 @@ test('a manual retry replaces a run waiting for an automatic retry and waits for
     await drain({ musicBrainz: working.musicBrainz });
     assert.deepEqual([(await lookup(id))!.state, modes], ['complete', ['wait', 'wait', 'wait']]);
 
-    // Ten seconds before the grant ends, the first retry would come after it: retries count as exhausted and Publish stops waiting.
+    // Four seconds before the grant ends, even the throttled first retry (after 5 seconds) would come after it: retries count as
+    // exhausted and Publish stops waiting.
     const late = await seeded(1, syntheticAlbum);
     await requestAutomaticMetadataLookup(by, late, 'upload');
-    const nearEnd = later(-10_000, (await lookup(late))!.grantExpiresAt);
+    const nearEnd = later(-4_000, (await lookup(late))!.grantExpiresAt);
     await runMetadataLookupOnce({ musicBrainz: fixtureClient(unavailable(searchUrl(albumQuery), 3)).musicBrainz, now: () => nearEnd });
     const ended = (await lookup(late))!;
     assert.deepEqual([ended.state, ended.issue, ended.retryAt, ended.attempts, ended.outcome, (await stored(late)).lookupGate],
+        ['unavailable', 'sourceBusy', null, { musicbrainz: 1 }, null, { fence: 3, run: 1, state: 'unavailable', blocking: false }]);
+    // Ten seconds before the grant ends, an outage's 30-second retry would come after it too: the run ends unavailable at once.
+    const outage = await seeded(1, syntheticAlbum);
+    await requestAutomaticMetadataLookup(by, outage, 'upload');
+    const tenBefore = later(-10_000, (await lookup(outage))!.grantExpiresAt);
+    const down: MusicBrainzClient = { ...fixtureClient([]).musicBrainz, async searchReleases() { throw new MetadataLookupSourceError('musicbrainz', 'unavailable'); } };
+    await runMetadataLookupOnce({ musicBrainz: down, now: () => tenBefore });
+    const gone = (await lookup(outage))!;
+    assert.deepEqual([gone.state, gone.issue, gone.retryAt, gone.attempts, gone.outcome, (await stored(outage)).lookupGate],
         ['unavailable', 'sourceUnavailable', null, { musicbrainz: 1 }, null, { fence: 3, run: 1, state: 'unavailable', blocking: false }]);
 });
 
@@ -1005,4 +1026,23 @@ test('a release-ID query answered by a merged release keeps the fetched release 
         ['complete', [[mbid(2), 'fetched', 'releaseId']], ['matching'], 3]);
     // The old tagged ID does not preselect it by identifier; it is preselected as the only matching group.
     assert.deepEqual([record.ranking!.preselection?.candidateKey, record.ranking!.preselection?.basis], [`musicbrainz:${mbid(2)}`, 'onlyMatchingGroup']);
+});
+
+test('a submitted run\'s first 503 with Retry-After 0 is retried as busy within seconds and then waits, never 30 seconds', async () => {
+    const id = await seeded(2, () => v2({ durationMs: 1000 }));
+    const submitted = await queue(byOther, id, submit('Synthetic Album'));
+    assert.deepEqual(submitted.queries.map(query => (query as { query: MusicBrainzReleaseQuery }).query), [{ release: 'Synthetic Album' }]);
+    // As in the live smoke: MusicBrainz throttles the submitted run's first request, then answers.
+    const modes: string[] = [];
+    const client = fixtureClient([...loadLookupFixture('musicbrainz/synthetic-503-retry-after-0-then-200.json').exchanges, releaseAnswer(mbid(1), [1000, 1000])], recordingGate(modes));
+    const start = new Date();
+    await runMetadataLookupOnce({ musicBrainz: client.musicBrainz, now: () => start });
+    const waiting = (await lookup(id))!;
+    assert.deepEqual([waiting.state, waiting.issue, waiting.retryAt!.getTime() - start.getTime(), waiting.attempts, (await stored(id)).lookupGate!.blocking, client.requests.length],
+        ['retrying', 'sourceBusy', 2_000, { musicbrainz: 1 }, true, 1]);
+    assert.equal(await runMetadataLookupOnce({ musicBrainz: client.musicBrainz, now: () => later(1_999, start) }), false, 'not due yet');
+    await runMetadataLookupOnce({ musicBrainz: client.musicBrainz, now: () => waiting.retryAt! });
+    const done = (await lookup(id))!;
+    assert.deepEqual([done.state, done.issue, done.outcome, done.searchComplete, done.ranking!.preselection?.basis, modes, client.requests.length],
+        ['complete', null, 'candidates', true, 'onlyMatchingGroup', ['busy', 'wait', 'wait'], 3]);
 });

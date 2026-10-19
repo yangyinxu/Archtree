@@ -158,7 +158,8 @@ Review, Files and Publish sections, which stay available for manual work. It
 reads `GET /imports/:id/lookup` (the lookup view and the server's summary state,
 see [Lookup routes](#lookup-routes)) again whenever the project's revision or
 automatic values change, every 3 seconds while a lookup is queued or running
-and every 10 seconds while it waits for an automatic retry; a read that sees a
+or waits on a busy source (`sourceBusy`, whose throttled first retry comes
+within seconds), and every 10 seconds while it waits out an outage; a read that sees a
 newer saved project reloads the page's project read. The summary components
 (`ImportSummary.tsx`, `LookupBox.tsx`, `CandidateChooser.tsx` and the shared
 `ImportAnalysisConfirmation.tsx`) load lazily from the media panel, outside the
@@ -174,7 +175,10 @@ summary only presents it:
   beside it), superseded, no release or nothing to look up (Luna next, beside
   the name box), no matching release or none applied where nothing matched
   (Luna next; every candidate stays choosable), release details that could not
-  be fetched (retry first, Luna beside it), a tie, or the applied release.
+  be fetched (retry first, Luna beside it), a tie (no next step), one
+  matching release from a partial comparison that was not applied (no next
+  step; choosing it, another release or none is optional), or the applied
+  release.
   Where the server cannot run lookup (`lookupAvailable` false) the summary says
   it is not configured, before any run too, and offers neither a retry nor the
   name box. Stale files are counted.
@@ -191,7 +195,16 @@ summary only presents it:
   value). Identity questions stay in Review and the confirmation; the summary
   counts the rows the server says still need one. The candidate chooser
   discloses how many files have an unknown duration or Disc Number, which
-  ranking never counts as agreement.
+  ranking never counts as agreement, and says when not every release
+  MusicBrainz found was compared with the files.
+- **Offered, not needed.** The only matching group of a partial comparison
+  (see Planning and ranking under [Metadata lookup](#metadata-lookup)) is not
+  applied, since more matching releases may exist among those not compared.
+  Until a release or none is chosen for that run, the chooser shows it like a
+  tie, with every proposal value and **Use none of these**, but it is no tie:
+  it is not counted as an answer and never holds Publish. A release applied as
+  a preselection stays choosable while a tie needs an answer, so a re-rank
+  that leaves a tie can be answered with it.
 - **Flagged, never folded.** Values resting only on file tags (automatic and
   not on the applied candidate), a preselection whose artist matches no artist
   tag, and pending Luna suggestions with their ticks.
@@ -1232,6 +1245,17 @@ Later stages raise the oldest release that is safe to roll back to:
   automation replace applied values, and filters `lookup*` receipts out of the
   detail, so a lost lookup response there cannot be reconciled from receipts;
   reload open tabs.
+- Partial comparisons, 100-release search pages, normalized fallbacks and
+  quick throttled retries need no floor of their own. A release before them
+  runs a stored plan's fallback queries unconditionally (still at most six),
+  ignores `searchComplete` and stored reported track counts, may again
+  preselect and apply a truncated search's only matching group, and schedules
+  a throttled first retry after 30 seconds. Its Web schema refuses the new
+  `partialComparison` disclosure key, and this Web's schema requires it, so
+  reload open workbench tabs after deploying or rolling back across them. A
+  run that the release before them completed keeps its stored preselection and
+  applied values; only a re-rank on new evidence ranks it again, as a partial
+  comparison, which then offers its only matching group without unapplying it.
 - Luna ticks need no floor of their own: an approval applies them to ordinary
   suggestion decisions and draft values. A release before them refuses the
   `suggestionTicks` this Web sends as invalid input and holds an approval
@@ -1324,18 +1348,52 @@ in `src/administration/lookup/`.
 - **Planning and ranking.** Both are pure. The planner turns embedded
   identifiers shared by every file (release MBID, barcode, catalogue number and,
   for one file, an ISRC), then album or song text, then a cleaned folder name
-  into at most six MusicBrainz queries. It never accepts file names. Submitted
-  text is only normalized (NFC, collapsed whitespace), so a link, a name over
-  200 characters or a control or format character is reported instead of
-  planned; tag and folder text has format characters removed and control
-  characters turned into spaces. Ranking
-  pairs files with tracks by Disc Number, Track Number and upload order, or by
-  upload order alone when Disc Numbers are missing and Track Numbers repeat.
-  Discs are counted and numbered among the media that have tracks, so a DVD
-  without a tracklist is not a disc. A candidate matches when the track count,
-  any known disc count and every duration agree within 3 seconds, plus 1 second
-  for legacy `m:ss` durations. A candidate with any unknown local or
-  MusicBrainz duration is unverified and never preselected.
+  into at most six MusicBrainz queries, in that order, so the cap drops
+  trailing fallbacks first. It never accepts file names. Submitted text is only
+  normalized (NFC, collapsed whitespace), so a link, a name over 200 characters
+  or a control or format character is reported instead of planned; tag and
+  folder text has format characters removed and control characters turned into
+  spaces.
+  - Queries carry only the text and identifiers above. The number of selected
+    files is never sent: a run uses it locally to admit the releases whose
+    reported track count can equal it (or is unknown) before the others, and
+    to fetch their details first (see [Lookup runs](#lookup-runs)). A release
+    search asks for a page of 100 releases, so popular Albums with many
+    editions still offer their plausible editions to that admission; a
+    recording search asks for 25 recordings. Media counts and release-group
+    browse are not used.
+  - Album text plans the credited search (with the album-artist name or label
+    term, or the folder's "Artist - Album" split) and the bare search, then
+    fallbacks in the normalized spelling: the credited search respelled, then
+    the bare text respelled (not a folder's whole "Artist - Album" name, which
+    names no release). A song plans the credited and bare recording searches,
+    then both respelled as fallbacks. The fallbacks are sent together, and only
+    when the searches before them found no candidate, so one spelling alone
+    never narrows what is compared.
+  - The normalized spelling applies to tag and folder text only; submitted
+    text is sent as typed. It applies NFKC (full-width forms and `～` fold),
+    writes the wave dash `〜` as `~`, joins "Sound Track" (or "Sound-Track")
+    into "Soundtrack" and removes a trailing remaster note such as
+    `(2013 Remaster)`, `[Remastered]` or ` - Remastered 2009`; it is planned
+    only when it differs from the cleaned text.
+  - Ranking pairs files with tracks by Disc Number, Track Number and upload
+    order, or by upload order alone when Disc Numbers are missing and Track
+    Numbers repeat. Discs are counted and numbered among the media that have
+    tracks, so a DVD without a tracklist is not a disc. A candidate matches
+    when the track count, any known disc count and every duration agree within
+    3 seconds, plus 1 second for legacy `m:ss` durations. A candidate with any
+    unknown local or MusicBrainz duration is unverified and never preselected.
+  - The only matching group is preselected only when the comparison is
+    complete. It is partial (`partialComparison` in the disclosure) when a
+    search reported more hits than it returned, the candidate bound left out a
+    release a search offered that could match or ended the search before a
+    planned non-fallback query, a planned search was refused, or a candidate
+    that could match is incomplete. A release could match unless it reported a
+    track count other than the number of files or, for an incomplete
+    candidate, no longer exists (404). A partial comparison's only matching
+    group is offered but not applied, and needs no answer; two or more
+    matching groups are a tie as always. An identifier every file shares still
+    preselects the candidate it matches alone.
 - **Fixtures.** `npm run record:metadata-lookup-fixtures -- --live` re-records
   the trimmed public responses in `test/fixtures/metadataLookup/`. It contacts
   the live services with a recorder User-Agent and the contract rates, so only
@@ -1345,16 +1403,21 @@ in `src/administration/lookup/`.
 
 ### Lookup runs
 
-`src/administration/lookup/metadataLookupService.ts` runs the jobs, and
-`metadataLookupRecord.ts` beside it holds their pure model.
+`src/administration/lookup/metadataLookupService.ts` runs the jobs,
+`metadataLookupRecord.ts` beside it holds their pure model, and
+`lookupRunStep.ts` performs each step's request and decides, without a
+database, what the step stores and which request comes next.
 
 - **Record.** `adminImportLookups` keeps one record per import project (its
   `_id` is the project's): the run number, state, issue and outcome, the grant,
   the bound file set (`fileSetDigest` and each manifest slot's confirmed upload
   intent and SHA-256), the input (`tags`, `folder` or `submitted`), at most six
   planned queries with their progress, the MusicBrainz attempts, at most 25
-  candidates, the ranking with its groups, the applied candidate (or none) with
-  its values, conflicts and flags (see [Value application](#value-application)),
+  candidates, whether every release its searches offered was compared
+  (`searchComplete`; a record from an earlier release counts as partial when
+  it is re-ranked or resumed), the ranking with its groups, the applied
+  candidate (or none) with its values, conflicts and flags (see
+  [Value application](#value-application)),
   stale slots, the automatic-run count and whether a folder-name query was
   handed to the worker. A new run (an automatic rerun, a submitted name or a
   manual retry) replaces the previous run's results; only the
@@ -1363,14 +1426,23 @@ in `src/administration/lookup/`.
 - **States.** `queued`, `running` and `retrying` are active; `complete`,
   `unavailable`, `stopped` and `superseded` end a run. A stopped run's issue is
   `permissionLost` or `grantExpired`, an unavailable one's `sourceUnavailable`,
-  `sourceBusy` or `notConfigured`, and a superseded one's `fileSetChanged` or
+  `sourceBusy` (a refused gate, or a rate-limited source after its retries) or
+  `notConfigured`, and a superseded one's `fileSetChanged` or
   `projectClosed`. A completed run's outcome is `candidates`, `noRelease` or
   `noQuery` (nothing to look up, so nothing was sent); an unavailable run has
   no outcome and is never reported as no release.
 - **Steps.** The worker polls every 2 seconds, claims a due run with a
   180-second lease and advances it one MusicBrainz request per stored step: the
-  planned queries in order until 25 distinct releases are known, then each
-  candidate's release lookup, then ranking. Each step's transaction first
+  planned queries in order until 25 distinct releases are known, skipping the
+  fallbacks when a candidate is known as they start, then each candidate's
+  release lookup, then ranking. Releases whose reported track count can match
+  the files (or is unknown) are admitted first and their details fetched first,
+  so the bound is spent on plausible editions; a recording hit's reported track
+  count is stored with its candidate, since its release has no summary. A run
+  attempt sends at most 6 searches and 25
+  release lookups (31 requests); in wait mode each request is sent at most 3
+  times within one call for a 503 or 429, and a failed step is retried
+  automatically at most 3 times. Each step's transaction first
   rechecks the lease, the grant, the granting administrator's current role,
   that the project still accepts lookup and that no bound file changed. Requests
   run outside any transaction, each bounded by a 120-second step deadline. A
@@ -1381,7 +1453,14 @@ in `src/administration/lookup/`.
   [Value application](#value-application)).
 - **Retries.** A busy, rate-limited, unavailable or invalid answer, or the step
   deadline, schedules an automatic retry of the run after 30 seconds, 2 minutes
-  and 5 minutes, or after a longer Retry-After of at most 60 seconds. Automatic
+  and 5 minutes, or after a longer Retry-After of at most 60 seconds. A 503 or
+  429 that is the run's first failure is a throttled source rather than an
+  outage: the run waits as `retrying` with issue `sourceBusy`, and its first
+  retry follows the Retry-After within 2 to 10 seconds (2 seconds without one;
+  MusicBrainz's `Retry-After: 0` counts as 1 second), while the
+  deployment-wide gate still holds the source for a longer Retry-After; later
+  retries keep 2 and 5 minutes. A refused gate (`sourceBusy`), an outage or a
+  timeout (`sourceUnavailable`) keep 30 seconds, 2 and 5 minutes. Automatic
   runs, automatic reruns (also of submitted text) and manual retries wait for
   the source gate; a submitted run uses busy mode until its first failed
   attempt, then waits. When the third retry fails too, or the next retry would
@@ -1558,7 +1637,8 @@ fills only empty or automatic values that are still as it saw them.
   or more matching groups, no preselection and no choice for that run) or an
   unanswered conflict of the applied candidate, whatever the current run's
   state (`409 ADMIN_IMPORT_REVIEW_REQUIRED`). An append ignores Album
-  conflicts.
+  conflicts. The only matching group of a partial comparison is no tie and
+  never holds an approval; left unchosen, nothing from it is applied.
 - **Scope.** Value application writes only the import document and its
   lookup record, never a catalog collection. A published Album or MediaTrack
   and its search projection carry only the reviewed names and values, never
@@ -1596,8 +1676,9 @@ allowlist: the run, state, issue, outcome and input; at most 25 candidates
 (ranked order, else stored order as incomplete) with title, joined credit,
 label, catalogue number, barcode, country, date, at most 20 formats, track
 count, the comparison counts and differences, group and artist mismatch; at
-most 25 groups with their proposals; the preselection; the disclosure; the
-applied candidate's choice, value paths, conflicts (lookup value re-read
+most 25 groups with their proposals; the preselection; the disclosure (unknown
+local durations and Disc Numbers, and `partialComparison`); the applied
+candidate's choice, value paths, conflicts (lookup value re-read
 through the draft rules) and flags; stale files; and `needsAnswer` and
 `blocking`. It carries no URL, ISRC, recording ID, account, grant, lease,
 fence, file-set digest or query.
@@ -1631,8 +1712,9 @@ published track needs without a confirmed upload, is
   and artist; shared identifiers that pass their format checks; a submitted
   name; the cleaned folder name only when no usable tags exist, only for
   folder-chosen imports and automatically only once per project (a manual
-  retry of that run repeats it); and release MBIDs from earlier results of the
-  same run.
+  retry of that run repeats it); release MBIDs from earlier results of the
+  same run; and normalized spellings of tag or folder text as fallbacks. The
+  number of selected files is never sent; the run uses it only locally.
 - Never file names, relative path segments, account data (including any
   account's email address) or audio. The only contact sent is the operator
   contact configured in `FINITUDE_ADMIN_METADATA_LOOKUP_CONTACT`, in the

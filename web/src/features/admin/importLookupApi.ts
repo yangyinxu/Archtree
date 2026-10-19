@@ -50,7 +50,7 @@ export const lookupViewSchema = z.object({
   input: z.object({ trigger: z.enum(['tags', 'folder', 'submitted']), submitted: z.object({ kind: z.enum(['album', 'song']), text }).strict().nullable() }).strict(),
   candidates: z.array(candidateSchema).max(25), groups: z.array(groupSchema).max(25),
   preselection: z.object({ candidateKey, basis, artistMismatch: z.boolean() }).strict().nullable(),
-  disclosure: z.object({ unknownLocalDurations: integer, unknownLocalDiscNumbers: integer }).strict().nullable(),
+  disclosure: z.object({ unknownLocalDurations: integer, unknownLocalDiscNumbers: integer, partialComparison: z.boolean() }).strict().nullable(),
   applied: appliedSchema.nullable(), staleFiles: z.array(uuidSchema).max(100),
   needsAnswer: z.object({ tie: z.boolean(), conflicts: z.array(valuePath).max(305) }).strict(), blocking: z.boolean()
 }).strict();

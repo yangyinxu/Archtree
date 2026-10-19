@@ -13,10 +13,11 @@
  *   - shared release IDs and catalogue numbers are usable tags of several files, while an ISRC counts only for one file
  *   - lookup accepts only a writable Draft v2 import project that no publication locks and that has not completed
  *   - candidates are distinct after normalization, capped at 25 in a stable order, and a release found by ID is fetched
+ *   - admission prefers releases whose reported track count can match the files, and a search is complete only when every offered release that could match was admitted
  *   - details record missing, failed and compact fetched releases, and a release over the byte budget is omitted
  *   - ranking a record compares stored candidates with the current files and leaves incomplete ones unranked
  *   - candidates and ranking together stay within the record budget by omitting the largest fetched releases
- *   - automatic retries run after 30 seconds, 2 minutes and 5 minutes, or a longer Retry-After of at most a minute, then stop
+ *   - automatic retries run after 30 seconds, 2 minutes and 5 minutes, or a longer Retry-After of at most a minute, then stop; a first 503/429 within seconds
  *   - every fence write increments from absent, and only queued, running and retrying runs block
  *   - a new run replaces the previous results and carries only the automatic count, folder use and applied values
  *   - an automatic run intent is deterministic and UUID-shaped
@@ -41,10 +42,11 @@ import type { ImportAsset } from '../../src/administration/import/adminImportMed
 import type { AdminImportDocument } from '../../src/administration/import/adminImportService';
 import { METADATA_LOOKUP_JOB_LIMITS, type MusicBrainzRelease } from '../../src/administration/lookup/lookupContract';
 import {
-    automaticLookupOperationId, importLookupFileSet, isBlockingLookupState, lookupFileEvidence, lookupGateFor, lookupRetryAt,
+    automaticLookupOperationId, importLookupFileSet, isBlockingLookupState, lookupFileEvidence, lookupGateFor, lookupHitsAdmitted, lookupReportedTrackCount, lookupRetryAt,
     lookupStaleSlots, mergeLookupCandidates, planImportLookup, rankLookupRecord, rankLookupWithinBudget, recordLookupDetails, refreshLookupGrant, startLookupRun,
     type MetadataLookupRecord, type MetadataLookupState, type StoredLookupCandidate
 } from '../../src/administration/lookup/metadataLookupRecord';
+import { lookupTrackCountPlausible } from '../../src/administration/lookup/lookupRanking';
 import { metadataLookupAccepted, runMetadataLookupOnce, startMetadataLookupWorker } from '../../src/administration/lookup/metadataLookupService';
 import { parseMusicBrainzRelease } from '../../src/administration/lookup/musicBrainzClient';
 import { fixtureRoot, loadLookupFixture } from '../support/metadataLookupFixtures';
@@ -237,6 +239,33 @@ test('candidates are distinct after normalization, capped at 25 in a stable orde
     assert.deepEqual(mergeLookupCandidates(candidates, [{ releaseId: releaseId(99) }], 'folder'), candidates);
 });
 
+test('admission prefers releases whose reported track count can match the files, and a search is complete only when every offered release that could match was admitted', () => {
+    assert.deepEqual([lookupTrackCountPlausible(9, 9), lookupTrackCountPlausible(19, 9), lookupTrackCountPlausible(0, 9), lookupTrackCountPlausible(undefined, 9),
+        lookupTrackCountPlausible(null, 9), lookupTrackCountPlausible(2.5, 9), lookupTrackCountPlausible('9', 9)], [true, false, true, true, true, true, true]);
+    const summary = (index: number, trackCount: number) => ({ releaseId: releaseId(index), summary: { trackCount } as never });
+    // 30 offered releases, the implausible ones first: the 25 admitted are every plausible one, then implausible ones in their order.
+    const found = [...Array.from({ length: 10 }, (_unused, index) => summary(index, 19)), ...Array.from({ length: 20 }, (_unused, index) => summary(10 + index, 9))];
+    const merged = mergeLookupCandidates([], found, 'albumText', 9);
+    assert.deepEqual(merged.map(candidate => candidate.releaseId), [...Array.from({ length: 20 }, (_unused, index) => releaseId(10 + index)), ...Array.from({ length: 5 }, (_unused, index) => releaseId(index))]);
+    // The five left out report 19 tracks, so they cannot match nine files: the search stays complete. One plausible or unknown one more is not.
+    assert.equal(lookupHitsAdmitted(merged, found, 9), true);
+    assert.equal(lookupHitsAdmitted(merged, [...found, summary(50, 9)], 9), false);
+    assert.equal(lookupHitsAdmitted(merged, [...found, { releaseId: releaseId(51) }], 9), false);
+    assert.equal(lookupHitsAdmitted(merged, found, 19), false, 'for nineteen files the left-out releases could match');
+    // Without a file count, the found order is kept; a recording hit's release (no summary) keeps the count it reported.
+    assert.deepEqual(mergeLookupCandidates([], found, 'albumText').map(candidate => candidate.releaseId), found.slice(0, 25).map(item => item.releaseId));
+    const recordingHits = [{ releaseId: releaseId(40), trackCount: 15 }, { releaseId: releaseId(41), trackCount: null }, { releaseId: releaseId(42), trackCount: 1 }];
+    const songs = mergeLookupCandidates([], recordingHits, 'songText', 1);
+    assert.deepEqual(songs.map(candidate => [candidate.releaseId, candidate.reportedTrackCount, lookupReportedTrackCount(candidate)]),
+        [[releaseId(41), undefined, null], [releaseId(42), 1, 1], [releaseId(40), 15, 15]]);
+    assert.equal(lookupHitsAdmitted(songs, recordingHits, 1), true);
+    // A summary's count is not stored twice; an invalid reported count is unknown.
+    assert.deepEqual(mergeLookupCandidates([], [{ ...summary(60, 9), trackCount: 3 }, { releaseId: releaseId(61), trackCount: -2 }], 'albumText', 9)
+        .map(candidate => [candidate.reportedTrackCount, lookupReportedTrackCount(candidate)]), [[undefined, 9], [undefined, null]]);
+    // Invalid IDs are never candidates and never make a search partial; an already-known release counts as admitted.
+    assert.equal(lookupHitsAdmitted(merged, [{ releaseId: 'not-an-mbid' }, { releaseId: releaseId(10).toUpperCase() }], 9), true);
+});
+
 test('details record missing, failed and compact fetched releases, and a release over the byte budget is omitted', () => {
     const withIsrcs = releases.find(release => release.media.some(medium => medium.tracks.some(track => track.isrcs.length)))!;
     let candidates = mergeLookupCandidates([], [{ releaseId: withIsrcs.releaseId }, { releaseId: releaseId(1) }, { releaseId: releaseId(2) }], 'albumText');
@@ -261,10 +290,25 @@ test('ranking a record compares stored candidates with the current files and lea
     const manifest: ImportManifest = { rootLabel: '', files: base.media[0].tracks.map((_track, index) => ({ slotId: `0000000c-0000-4000-a000-${String(index).padStart(12, '0')}`, filename: `${index}.flac`, relativePath: `${index}.flac`, byteLength: null })) };
     const doc = project(manifest.files.map((file, index) => asset(file.slotId, tags({ durationMs: base.media[0].tracks[index].lengthMs }))), manifest);
     const candidates: StoredLookupCandidate[] = mergeLookupCandidates([], [{ releaseId: base.releaseId, release: base }, { releaseId: releaseId(5) }], 'albumText');
-    const now = new Date('2026-10-19T00:00:00Z'), ranking = rankLookupRecord(candidates, doc, now);
+    const now = new Date('2026-10-19T00:00:00Z'), ranking = rankLookupRecord(candidates, doc, now, { searchComplete: true });
     assert.deepEqual([ranking.rankedAt, ranking.files.length, ranking.candidates.map(candidate => [candidate.releaseId, candidate.status])],
         [now, 9, [[base.releaseId, 'matching'], [releaseId(5), 'incomplete']]]);
-    assert.equal(ranking.preselection?.candidateKey, `musicbrainz:${base.releaseId}`);
+    // The incomplete candidate might match too: the comparison is partial, so the one matching group is not preselected.
+    assert.deepEqual([ranking.preselection, ranking.disclosure.partialComparison], [null, true]);
+    // An incomplete candidate that cannot match hides nothing: a release that no longer exists (404), or one whose search or
+    // recording hit reported another track count, whether its details failed or were omitted.
+    const cannotMatch: StoredLookupCandidate[] = [candidates[0], recordLookupDetails(candidates, releaseId(5), null)[1],
+        { ...candidates[1], key: `musicbrainz:${releaseId(6)}`, releaseId: releaseId(6), summary: { trackCount: 3 } as never, details: 'failed' },
+        { ...candidates[1], key: `musicbrainz:${releaseId(7)}`, releaseId: releaseId(7), reportedTrackCount: 12, details: 'omitted' }];
+    const kept = rankLookupRecord(cannotMatch, doc, now, { searchComplete: true });
+    assert.deepEqual([cannotMatch.map(candidate => candidate.details), kept.disclosure.partialComparison, kept.preselection?.basis],
+        [['fetched', 'missing', 'failed', 'omitted'], false, 'onlyMatchingGroup']);
+    const unknown = rankLookupRecord([...cannotMatch, { ...candidates[1], key: `musicbrainz:${releaseId(8)}`, releaseId: releaseId(8), reportedTrackCount: 9, details: 'failed' }], doc, now, { searchComplete: true });
+    assert.deepEqual([unknown.disclosure.partialComparison, unknown.preselection], [true, null], 'one reporting the files\' track count could match');
+    const fetched = candidates.slice(0, 1);
+    assert.equal(rankLookupRecord(fetched, doc, now, { searchComplete: true }).preselection?.candidateKey, `musicbrainz:${base.releaseId}`);
+    const partial = rankLookupRecord(fetched, doc, now, { searchComplete: false });
+    assert.deepEqual([partial.groups.length, partial.preselection, partial.disclosure.partialComparison], [1, null, true]);
 });
 
 test('candidates and ranking together stay within the record budget by omitting the largest fetched releases', () => {
@@ -275,23 +319,31 @@ test('candidates and ranking together stay within the record budget by omitting 
     const long: MusicBrainzRelease = { ...base, releaseId: releaseId(6), media: base.media.map(medium => ({ ...medium, tracks: medium.tracks.map(track => ({ ...track, title: 'x'.repeat(2000) })) })) };
     const candidates = mergeLookupCandidates([], [{ releaseId: base.releaseId, release: base }, { releaseId: long.releaseId, release: long }], 'albumText');
     const now = new Date('2026-10-19T00:00:00Z'), bytes = (value: unknown) => Buffer.byteLength(JSON.stringify(value));
-    const roomy = rankLookupWithinBudget(candidates, doc, now);
-    assert.deepEqual([roomy.candidates, roomy.ranking], [candidates, rankLookupRecord(candidates, doc, now)]);
+    const roomy = rankLookupWithinBudget(candidates, doc, now, { searchComplete: true });
+    assert.deepEqual([roomy.candidates, roomy.ranking], [candidates, rankLookupRecord(candidates, doc, now, { searchComplete: true })]);
     assert.equal(roomy.ranking.groups.length, 2);
-    // Just too small for both: only the largest release is omitted, and the rest is ranked again.
+    // Just too small for both: only the largest release is omitted, and the rest is ranked again. The omitted release matched as
+    // its own group, so the comparison is partial and the remaining group is not preselected.
     const trimmed = candidates.map((candidate, index) => index === 1 ? { ...candidate, release: null, details: 'omitted' as const } : candidate);
-    const fits = bytes({ candidates: trimmed, ranking: rankLookupRecord(trimmed, doc, now) });
-    const bounded = rankLookupWithinBudget(candidates, doc, now, fits);
-    assert.deepEqual([bounded.candidates.map(candidate => candidate.details), bounded.ranking.candidates.map(candidate => candidate.status), bounded.ranking.preselection?.candidateKey],
-        [['fetched', 'omitted'], ['matching', 'incomplete'], `musicbrainz:${base.releaseId}`]);
+    const fits = bytes({ candidates: trimmed, ranking: rankLookupRecord(trimmed, doc, now, { searchComplete: true }) });
+    const bounded = rankLookupWithinBudget(candidates, doc, now, { searchComplete: true, budget: fits });
+    assert.deepEqual([bounded.candidates.map(candidate => candidate.details), bounded.ranking.candidates.map(candidate => candidate.status), bounded.ranking.groups.length,
+        bounded.ranking.preselection, bounded.ranking.disclosure.partialComparison], [['fetched', 'omitted'], ['matching', 'incomplete'], 1, null, true]);
     assert.ok(bytes(bounded) <= fits);
+    // An incomplete search is passed through every re-rank.
+    assert.equal(rankLookupWithinBudget(candidates, doc, now, { searchComplete: false }).ranking.disclosure.partialComparison, true);
     // A budget nothing fits leaves every candidate incomplete and nothing preselected.
-    const none = rankLookupWithinBudget(candidates, doc, now, 0);
+    const none = rankLookupWithinBudget(candidates, doc, now, { searchComplete: true, budget: 0 });
     assert.deepEqual([none.candidates.map(candidate => candidate.details), none.ranking.preselection], [['omitted', 'omitted'], null]);
 });
 
-test('automatic retries run after 30 seconds, 2 minutes and 5 minutes, or a longer Retry-After of at most a minute, then stop', () => {
+test('automatic retries run after 30 seconds, 2 minutes and 5 minutes, or a longer Retry-After of at most a minute, then stop; a first 503/429 within seconds', () => {
     const now = new Date('2026-10-19T00:00:00Z'), at = (failures: number, retryAfterMs: number | null = null) => lookupRetryAt(failures, now, retryAfterMs)?.getTime() ?? null;
+    const limited = (failures: number, retryAfterMs: number | null = null) => lookupRetryAt(failures, now, retryAfterMs, { rateLimited: true })?.getTime() ?? null;
+    // A throttled first attempt follows its Retry-After within 2 to 10 seconds (2 seconds without one), later ones the schedule.
+    assert.deepEqual([limited(1), limited(1, 1000), limited(1, 7000), limited(1, 45_000), limited(1, NaN), limited(1, -5000), limited(1, Infinity)],
+        [2_000, 2_000, 7_000, 10_000, 2_000, 2_000, 2_000].map(delay => now.getTime() + delay));
+    assert.deepEqual([limited(2, 1000), limited(3, 1000), limited(4, 1000), limited(0)], [now.getTime() + 120_000, now.getTime() + 300_000, null, null]);
     assert.deepEqual([at(1), at(2), at(3), at(4), at(0)], [now.getTime() + 30_000, now.getTime() + 120_000, now.getTime() + 300_000, null, null]);
     assert.deepEqual([at(1, 45_000), at(1, 5_000)], [now.getTime() + 45_000, now.getTime() + 30_000]);
     // A Retry-After counts for at most a minute; a negative or non-finite one counts as none.
@@ -315,16 +367,16 @@ test('a new run replaces the previous results and carries only the automatic cou
         automatic: true, input: { trigger: 'folder' as const, submitted: null }, queries: [query], fileSet, now };
     // Planning a folder run spends nothing: only the worker's step that hands out a folder query does.
     const first = startLookupRun(null, init);
-    assert.deepEqual([first.run, first.state, first.phase, first.outcome, first.automaticRuns, first.folderUsed, first.grantExpiresAt.getTime() - now.getTime(), first.fileSetDigest, first.files],
-        [1, 'queued', 'search', null, 1, false, METADATA_LOOKUP_JOB_LIMITS.grantMs, fileSet.digest, fileSet.files]);
+    assert.deepEqual([first.run, first.state, first.phase, first.outcome, first.automaticRuns, first.folderUsed, first.grantExpiresAt.getTime() - now.getTime(), first.fileSetDigest, first.files,
+        first.searchComplete], [1, 'queued', 'search', null, 1, false, METADATA_LOOKUP_JOB_LIMITS.grantMs, fileSet.digest, fileSet.files, true]);
     assert.equal(startLookupRun(first, init).folderUsed, false);
     const applied: MetadataLookupRecord['applied'] = { run: 1, candidateKey: `musicbrainz:${releaseId(1)}`, releaseId: releaseId(1), choice: 'preselected', basis: 'onlyMatchingGroup',
         actorId: '0000000000000000000000e1', operationId: null, at: now, paths: ['album.title'], values: [{ path: 'album.title', value: 'Synthetic Album', slotId: null }], conflicts: [], flagged: [] };
     const previous: MetadataLookupRecord = { ...first, state: 'complete', candidates: mergeLookupCandidates([], [{ releaseId: releaseId(1) }], 'albumText'), staleSlotIds: [slotA], applied,
-        attempts: { musicbrainz: 2 }, queryIndex: 1, folderUsed: true };
+        attempts: { musicbrainz: 2 }, queryIndex: 1, folderUsed: true, searchComplete: false };
     const second = startLookupRun(previous, { ...init, automatic: false, grantSource: 'submit', queries: [], input: { trigger: 'submitted', submitted: { kind: 'album', text: 'x' } } });
-    assert.deepEqual([second.run, second.state, second.phase, second.outcome, second.completedAt, second.automaticRuns, second.folderUsed, second.applied, second.candidates, second.staleSlotIds, second.attempts, second.queryIndex],
-        [2, 'complete', 'done', 'noQuery', now, 1, true, applied, [], [], { musicbrainz: 0 }, 0]);
+    assert.deepEqual([second.run, second.state, second.phase, second.outcome, second.completedAt, second.automaticRuns, second.folderUsed, second.applied, second.candidates, second.staleSlotIds, second.attempts, second.queryIndex,
+        second.searchComplete], [2, 'complete', 'done', 'noQuery', now, 1, true, applied, [], [], { musicbrainz: 0 }, 0, true]);
     const later = new Date(now.getTime() + 1000), granted = refreshLookupGrant(first, '0000000000000000000000e2', 'choose', later);
     assert.deepEqual([granted.actorId, granted.grantSource, granted.grantExpiresAt.getTime(), granted.run, granted.state], ['0000000000000000000000e2', 'choose', later.getTime() + METADATA_LOOKUP_JOB_LIMITS.grantMs, 1, 'queued']);
 });

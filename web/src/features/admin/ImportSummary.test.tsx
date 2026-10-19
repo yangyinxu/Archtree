@@ -178,6 +178,14 @@ test('a tie lists the values that differ with each release\'s barcode, catalogue
   fireEvent.click(within(all).getAllByRole('button', { name: 'Use this release' })[0]);
   expect(run.mock.calls.map(call => call[2])).toEqual([{ expectedRevision: 1, run: 1, candidateKey: key(2) }, { expectedRevision: 1, run: 1, candidateKey: null }, { expectedRevision: 1, run: 1, candidateKey: key(1) }]);
   cleanup();
+  // One matching release from a partial comparison is offered the same way, with its own heading, but never holds Publish.
+  const single = mount(detail(), lookupResponse({ lookup: view({ candidates: [candidate(1)], groups: [group(1, 'Synthetic Album')],
+    disclosure: { unknownLocalDurations: 0, unknownLocalDiscNumbers: 0, partialComparison: true } }) }));
+  const choice = await within(single.section()).findByRole('region', { name: /^One release matches these files/ });
+  fireEvent.click(within(choice).getByRole('button', { name: 'Use this release' }));
+  expect(single.run.mock.calls.map(call => call[2])).toEqual([{ expectedRevision: 1, run: 1, candidateKey: key(1) }]);
+  expect(await ready()).toBeEnabled(); expect(screen.queryByText(/Answers needed before publishing/)).not.toBeInTheDocument();
+  cleanup();
   // Without a tie every release stays selectable in a fold, and one that does not match says how it differs.
   const differing = candidate(2, { status: 'notMatching', groupKey: null, comparison: { trackCount: { local: 2, candidate: 3 }, discCount: { local: null, candidate: 1 }, differences: ['trackCount'], unknownLocalDurations: 0, unknownCandidateDurations: 0 } });
   mount(detail(), lookupResponse({ lookup: view({ candidates: [candidate(1), differing], groups: [group(1, 'Synthetic Album')], applied: applied() }) }));
@@ -205,11 +213,18 @@ test('the next step follows the lookup: a free retry first while busy or stopped
     // Releases whose details could not be fetched are no proof that nothing matches: a free retry first, Luna beside it.
     [{ candidates: [candidate(1, { status: 'incomplete', groupKey: null, comparison: null }), candidate(2, { status: 'notMatching', groupKey: null })] },
       'Release details could not be fetched, so no match was confirmed. Retry the lookup at no cost, or analyze with Luna.', ['Retry lookup', 'Analyze with Luna']],
-    [{ candidates: [candidate(1)], groups: [group(1, 'Synthetic Album')], applied: applied() }, 'Applied release: Synthetic Album 1', []]
+    [{ candidates: [candidate(1)], groups: [group(1, 'Synthetic Album')], applied: applied() }, 'Applied release: Synthetic Album 1', []],
+    // The only matching release of a partial comparison is offered, never applied unasked: no next step, and no answer needed.
+    [{ candidates: [candidate(1)], groups: [group(1, 'Synthetic Album')], disclosure: { unknownLocalDurations: 0, unknownLocalDiscNumbers: 0, partialComparison: true } },
+      'One release matches these files but was not applied, because not every release MusicBrainz found was compared. You can choose it, another release or none.', []],
+    // Once none is chosen for this run, it says so.
+    [{ candidates: [candidate(1)], groups: [group(1, 'Synthetic Album')], applied: { ...applied(), candidateKey: null, choice: 'none' },
+      disclosure: { unknownLocalDurations: 0, unknownLocalDiscNumbers: 0, partialComparison: true } }, 'No release is applied. Values from file tags are kept.', []]
   ];
   for (const [lookup, status, steps, extra] of cases) {
     const { section } = mount(detail(), lookupResponse({ lookup: lookup && view(lookup), summary: summary(extra) }));
-    expect(await within(section()).findByText(status)).toHaveAttribute('role', 'status');
+    // A choice's status also heads its region, so the status line is found as a paragraph.
+    expect(await within(section()).findByText(status, { selector: 'p' })).toHaveAttribute('role', 'status');
     const buttons = within(section()).queryAllByRole('button', { name: /^(Retry lookup|Analyze with Luna)$/ });
     expect(buttons.map(button => button.textContent)).toEqual(steps);
     // The next step is the primary action; the other is beside it.
@@ -293,10 +308,12 @@ test('visibility defaults to public and changes in place as one field save', asy
 });
 
 test('the summary polls while a lookup is queued, running or retrying, and a newer read refreshes the page\'s project', async () => {
-  const access = { viewerId: viewer, epoch: 0, generation: 1 }, interval = (state: string | null, online = true) =>
-    importSummaryQuery(access, detail(), online).refetchInterval({ state: { data: state ? lookupResponse({ lookup: view({ state }) }) as never : undefined } });
-  expect([interval('queued'), interval('running'), interval('retrying'), interval('complete'), interval('unavailable'), interval(null), interval('running', false)])
+  const access = { viewerId: viewer, epoch: 0, generation: 1 }, interval = (state: string | null, online = true, issue: string | null = null) =>
+    importSummaryQuery(access, detail(), online).refetchInterval({ state: { data: state ? lookupResponse({ lookup: view({ state, issue }) }) as never : undefined } });
+  expect([interval('queued'), interval('running'), interval('retrying', true, 'sourceUnavailable'), interval('complete'), interval('unavailable'), interval(null), interval('running', false)])
     .toEqual([3000, 3000, 10_000, false, false, false, false]);
+  // A busy source (a throttled one is retried within seconds) is polled as often as a running lookup, so its resumption shows soon.
+  expect([interval('retrying', true, 'sourceBusy'), interval('retrying', false, 'sourceBusy')]).toEqual([3000, false]);
   const { client } = mount(detail(), lookupResponse({ revision: 2, valueRevision: 1 }));
   const invalidate = vi.spyOn(client, 'invalidateQueries');
   await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: ['admin-imports', viewer, expect.any(Number), expect.any(Number), detail().id], exact: true }));

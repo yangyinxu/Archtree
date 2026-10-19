@@ -264,13 +264,14 @@ const rerankEvidence = (files: unknown) => Array.isArray(files)
  * Re-ranks a completed run's stored candidates when the import's ranking evidence changed (newly known durations, tags,
  * identifiers or files), then applies a new preselection as `actorId`. The run then binds the file set it re-ranked, so a stale
  * slot whose file was confirmed again is no longer stale (one still without a confirmed file stays stale), while `fileSetDigest`
- * keeps governing automatic reruns. Never makes a request; null when nothing needs re-ranking.
+ * keeps governing automatic reruns. A run whose searches were not complete (or that predates the record) stays a partial
+ * comparison. Never makes a request; null when nothing needs re-ranking.
  */
 export function rerankStoredLookup(doc: AdminImportDocument, record: MetadataLookupRecord, now: Date, actorId: string = record.actorId):
     { record: MetadataLookupRecord; changed: boolean } | null {
     if (record.state !== 'complete' || record.outcome !== 'candidates' || !isRecord(record.ranking) || !Array.isArray(record.candidates)) return null;
     if (sameDraftValue(rerankEvidence(lookupFileEvidence(doc)), rerankEvidence(record.ranking.files))) return null;
-    const ranked = rankLookupWithinBudget(record.candidates, doc, now), files = importLookupFileSet(doc).files;
+    const ranked = rankLookupWithinBudget(record.candidates, doc, now, { searchComplete: record.searchComplete === true }), files = importLookupFileSet(doc).files;
     const confirmed = new Set(files.filter(file => file.operationId !== null && file.sha256 !== null).map(file => file.slotId));
     const staleSlotIds = (Array.isArray(record.staleSlotIds) ? record.staleSlotIds : []).filter(slot => !confirmed.has(slot));
     return applyPreselectedLookup(doc, { ...record, files, staleSlotIds, candidates: ranked.candidates, ranking: ranked.ranking, updatedAt: now }, now, actorId);
@@ -278,8 +279,9 @@ export function rerankStoredLookup(doc: AdminImportDocument, record: MetadataLoo
 
 /**
  * What publication waits for besides an active run: a tie (a completed run with two or more matching groups, no preselection and
- * no explicit choice for that run) and the unanswered conflicts whose current value still differs from the lookup value. An
- * append ignores Album conflicts. Malformed stored items are ignored and never block.
+ * no explicit choice for that run) and the unanswered conflicts whose current value still differs from the lookup value. The only
+ * matching group of a partial comparison is not a tie: it is offered but never needs an answer. An append ignores Album
+ * conflicts. Malformed stored items are ignored and never block.
  */
 export function lookupAnswersNeeded(record: Partial<MetadataLookupRecord> | null | undefined, doc: AdminImportDocument, options: { append: boolean }):
     { tie: boolean; conflicts: ImportDraftPath[] } {

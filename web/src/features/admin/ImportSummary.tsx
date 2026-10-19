@@ -45,11 +45,11 @@ const valueText = (value: unknown) => Array.isArray(value) ? entriesByline(value
  * in Review included); this component only presents it, adding this browser's own upload queue and, for the placeholder-only
  * notice, a primary Artist entry the unsaved changes add, since Publish includes them. It shows the metadata lookup status with
  * its next step (a free retry or Luna, per the owner's next-step rules; no lookup step where this server cannot run lookup), the
- * name box, a tie or conflict that needs an answer, the values flagged as resting on file tags, an artist mismatch and the Luna
- * suggestions with their ticks (the administrator's toggles are kept in the workspace for the confirmation; an append marks its
- * Album ones as not applied), and folds every row that needs no answer. Its Publish opens the media panel's one-step
- * confirmation. Owner rules: docs/business-rules.md (Administrator Album Imports, Review and publish summary; Administrator
- * Metadata Lookup).
+ * name box, a tie or conflict that needs an answer, the lone matching release of a partial comparison as an optional choice, the
+ * values flagged as resting on file tags, an artist mismatch and the Luna suggestions with their ticks (the administrator's toggles
+ * are kept in the workspace for the confirmation; an append marks its Album ones as not applied), and folds every row that needs
+ * no answer. Its Publish opens the media panel's one-step confirmation. Owner rules: docs/business-rules.md (Administrator Album
+ * Imports, Review and publish summary; Administrator Metadata Lookup).
  */
 export function ImportSummary({ item, operation, uploads, disabled, publishDisabled, approval, onPublish }: {
   item: ImportDetail; operation: AdminMutation; uploads: ImportUploadQueueView; disabled: boolean; publishDisabled: boolean;
@@ -82,6 +82,8 @@ export function ImportSummary({ item, operation, uploads, disabled, publishDisab
     : lookup.state !== 'complete' ? [`lookup.${lookup.state}`, 'retry', 'luna']
     : lookup.outcome === 'noRelease' || lookup.outcome === 'noQuery' ? [lookup.outcome === 'noQuery' ? 'lookup.no_query' : 'lookup.no_release', 'luna', null]
     : tie ? ['lookup.tie', null, null]
+    // The only matching release of a partial comparison is offered, never applied unasked; it needs no answer.
+    : lookup.groups.length === 1 && !lookup.preselection && lookup.disclosure?.partialComparison && applied?.run !== lookup.run ? ['lookup.single_choice', null, null]
     : applied?.run === lookup.run && applied.choice !== 'none' ? ['lookup.applied', null, null]
     : lookup.groups.length ? ['lookup.applied_none', null, null]
     // Candidates whose details could not be fetched are no proof that nothing matches.
