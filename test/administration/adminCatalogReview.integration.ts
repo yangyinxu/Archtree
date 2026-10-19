@@ -285,7 +285,7 @@ test('reviews keep the last-administrator-receipt window for edits, adoption and
     assert.deepEqual(await runImportAutomation(String(actor), id), { ran: false, written: [], skipped: [], album: false });
     const doc = await importCollection().findOne({ _id }), json = JSON.stringify(await current(id));
     assert.deepEqual(['valueRevision' in doc!, 'automation' in doc!, 'draftOrigins' in doc!], [false, false, false]);
-    for (const key of ['valueRevision', 'automaticPaths', 'possibleLabelEntryKeys', 'approvalDigest', 'boundName']) assert.equal(json.includes(key), false, key);
+    for (const key of ['valueRevision', 'automaticPaths', 'lookupPaths', 'possibleLabelEntryKeys', 'approvalDigest', 'boundName']) assert.equal(json.includes(key), false, key);
 });
 
 test('a review saved in a newer draft format reads through the Draft v2 allowlist and admits only stopping its analysis', async () => {

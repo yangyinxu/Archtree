@@ -4,7 +4,7 @@
  *              resumeAdminImportPublication, startAdminImportPublisher
  * Internal
  *   Functions: target, cleanupCancelledPublication
- *   Constants: candidateProjection
+ *   Constants: candidateProjection, lookupGateProjection
  * @end-catalog */
 
 import { checkAdminWorker, startAdminWorker, type AdminWorkTracker } from '../adminWorkerLifecycle';
@@ -16,7 +16,7 @@ import { readyAudioStorageFilter } from '../../utils/audioStorageKey';
 import { sortTrackIdsByDiscAndTrackNumber } from '../../services/catalog/albumTrackLinkService';
 import { ADMIN_IMPORT_LIMITS, AdminImportError, IMPORT_APPROVAL_FIELDS, exact, importEnabled, objectId, record, uuid } from './adminImportContract';
 import { boundImportApproval, saveImportApproval } from './adminImportApproval';
-import { getAdminImport, importCandidateProjection, importCollection, importPurposeFilter, importCandidateRevision, mutateAdminImport, withImportAdmin } from './adminImportService';
+import { getAdminImport, importCandidateProjection, importCollection, importLookupRecord, importPurposeFilter, importCandidateRevision, mutateAdminImport, withImportAdmin } from './adminImportService';
 import { importPrivateStorageReady, importPublicationSupported, type ImportAsset, type ImportPublication } from './adminImportMediaTypes';
 import { hasOwn, sameDraftValue, type ImportDecisionV2 } from './adminImportDraft';
 import { importDraftV2View, importSuggestionsV2View } from './adminImportDraftCompat';
@@ -24,8 +24,12 @@ import { draftV2Paths, markAdministratorValues } from './adminImportValueState';
 import { defaultImportObjectStorage, importAssetTarget, type ImportObjectStorage, type ImportObjectTarget, type ImportObjectIdentity } from './adminImportStorage';
 import { assertImportPreselectionsCurrent, importIdentityCandidates, importIdentityPreselections, sameImportPreselections } from './adminImportIdentity';
 import { assertImportReusedRecordsReady, commitImportCatalogGraph, freezeImportIdentities, importAlbumCredits, importPublicationConflict as conflict, requireCurrentApproval as currentApproval, requireImportPublicationReady as ready } from './adminImportCatalogCommit';
+import { lookupAnswersNeeded } from '../lookup/lookupValueApplication';
+import { isBlockingLookupState, lookupGateFor } from '../lookup/metadataLookupRecord';
 
 const candidateProjection = importCandidateProjection;
+/** What the publish gate reads of the lookup record: the run and its state, whether it ranked a tie, and the applied values. */
+const lookupGateProjection = { run: 1, state: 1, 'ranking.preselection': 1, 'ranking.groups.groupKey': 1, applied: 1 } as const;
 
 /**
  * Explicit one-step approval `{operationId, expectedRevision, changes, decisions, selectedCoverSlotId, approvalDigest}` creates one
@@ -38,6 +42,9 @@ const candidateProjection = importCandidateProjection;
  * confirmation showed) any other set of preselections, is ADMIN_IMPORT_REVIEW_REQUIRED, writing nothing. A body without
  * the one-step fields or with decisions lacking bound names replays its stored receipt, or otherwise is refused with
  * ADMIN_IMPORT_RELOAD_REQUIRED (importPolicy). The raw body is fingerprinted as sent, so an earlier receipt still matches.
+ * Metadata lookup gates it in the same transaction: a queued, running or automatically retrying run is
+ * ADMIN_IMPORT_LOOKUP_ACTIVE, and an unanswered tie or conflict (Album conflicts not for an append) is
+ * ADMIN_IMPORT_REVIEW_REQUIRED; an admitted approval writes the lookup gate, so a run started concurrently conflicts with it.
  */
 export async function publishAdminImport(actor: string, id: string, raw: unknown) {
     const body = record(raw); exact(body, ['operationId', 'expectedRevision', ...IMPORT_APPROVAL_FIELDS, 'preselections']); if (!uuid(body.operationId) || !Number.isSafeInteger(body.expectedRevision) || (body.expectedRevision as number) < 1) throw new AdminImportError(400, 'ADMIN_IMPORT_INVALID_INPUT');
@@ -51,10 +58,15 @@ export async function publishAdminImport(actor: string, id: string, raw: unknown
             (doc.media.publicationHistory ??= []).push(structuredClone(doc.media.publication));
             delete doc.media.publication;
         }
-        const draft = await saveImportApproval(doc, body, actor, session);
+        // The lookup record is read in this transaction; the gate written below fences a run started concurrently.
+        const lookup = await importLookupRecord(doc._id, session, lookupGateProjection);
+        const draft = await saveImportApproval(doc, body, actor, session, lookup);
         // Only a pending suggestion the editor shows, and so can decide, holds the approval; one it cannot read never blocks it.
         const slots = new Set(doc.manifest.files.map(file => file.slotId)), shown = importSuggestionsV2View(doc.suggestions, doc.analysis.generation, slots, id);
         if (['queued', 'running'].includes(doc.analysis.state) || shown.some(suggestion => suggestion.decision === 'pending')) throw new AdminImportError(409, 'ADMIN_IMPORT_REVIEW_REQUIRED');
+        // A stopped, unavailable, superseded or completed run never holds the approval as active; a tie of the current run or an
+        // unanswered conflict of the applied candidate still does below, whatever the current run's state.
+        if (doc.lookupGate?.blocking === true || isBlockingLookupState(lookup?.state)) throw new AdminImportError(409, 'ADMIN_IMPORT_LOOKUP_ACTIVE');
         // The project is Draft v2 here (converted on admission). A stored value the editor cannot show (a v1 value over its bound
         // after NFC reads as empty there) is never frozen.
         if (!draft.album.title || !sameDraftValue(importDraftV2View(draft, doc.manifest, id), draft)) throw new AdminImportError(400, 'ADMIN_IMPORT_DRAFT_INCOMPLETE');
@@ -70,6 +82,9 @@ export async function publishAdminImport(actor: string, id: string, raw: unknown
         const albumDecision = decisions.find(decision => decision.scope === 'album'), append = albumDecision?.action === 'reuse';
         if (!append && !draft.album.artists.some(entry => entry.role === 'primary')) throw new AdminImportError(400, 'ADMIN_IMPORT_DRAFT_INCOMPLETE');
         if (!albumDecision || !['reuse', 'create-distinct'].includes(albumDecision.action)) throw new AdminImportError(409, 'ADMIN_IMPORT_REVIEW_REQUIRED');
+        // Lookup answers are read against the draft this approval saved, so a change that made a conflict equal answers it.
+        const needed = lookupAnswersNeeded(lookup, doc, { append });
+        if (needed.tie || needed.conflicts.length) throw new AdminImportError(409, 'ADMIN_IMPORT_REVIEW_REQUIRED');
         let existingAlbum: any = null;
         if (append) {
             existingAlbum = await getDb()!.collection('albums').findOne({ _id: new ObjectId(albumDecision.candidateId!), ...readyAlbumLifecycleFilter }, { session, projection: candidateProjection });
@@ -101,6 +116,7 @@ export async function publishAdminImport(actor: string, id: string, raw: unknown
         const coverId = coverAsset ? new ObjectId().toHexString() : null;
         // Every reviewed value included in the approval is the administrator's own.
         markAdministratorValues(doc.draftOrigins ??= {}, draftV2Paths(draft));
+        if (lookup || doc.lookupGate) doc.lookupGate = lookupGateFor(lookup ?? doc.lookupGate!, doc.lookupGate);
         doc.media.publication = { schemaVersion: 3, operationId: body.operationId as string, actorId: actor, approvedRevision: doc.revision, snapshot: structuredClone(draft), decisions: structuredClone(decisions), state: 'preparing', issue: null, grantExpiresAt: new Date(Date.now() + 24 * 3600000), ...identities, albumId: existingAlbum?._id.toHexString() ?? new ObjectId().toHexString(), newAlbum: !existingAlbum, albumRevision: existingAlbum ? albumDecision.candidateRevision : null, coverId, tracks, cover: coverId ? { slotId: coverAsset!.slotId, key: `images/${coverId}`, state: 'pending', versionId: null, etag: null } : null, bucket: process.env.S3_BUCKET_NAME!.trim(), leaseOwner: null, leaseUntil: null };
     });
     return result;

@@ -337,12 +337,12 @@ test('a legacy project converts to its Draft v2 view without touching its approv
 test('the import detail shows Draft v2 values, entry- and label-bound decisions and every published identity, and offers work for format 1 and 2 projects only', () => {
     for (const name of v1Fixtures) {
         const doc = load(name), detail = adminImportDetail(doc, actor, true), legacy = adminImportDto(doc, actor, true), view = importProjectV2View(doc)!;
-        const { draft: _a, suggestions: _b, decisions: _c, published, approvalDigest: _g, assets, valueRevision, automaticPaths, possibleLabelEntryKeys, ...shared } = detail;
+        const { draft: _a, suggestions: _b, decisions: _c, published, approvalDigest: _g, assets, valueRevision, automaticPaths, lookupPaths, possibleLabelEntryKeys, ...shared } = detail;
         const { draft: _d, suggestions: _e, decisions: _f, published: legacyPublished, assets: legacyAssets, ...v1 } = legacy;
         assert.deepEqual(shared, v1, name);
         // Every value of a project saved before value origins is the administrator's own, and its evidence reads as version 1 with
         // exactly its five v1 values and empty extended fields.
-        assert.deepEqual([valueRevision, automaticPaths, possibleLabelEntryKeys], [0, [], []], name);
+        assert.deepEqual([valueRevision, automaticPaths, lookupPaths, possibleLabelEntryKeys], [0, [], [], []], name);
         assert.deepEqual(assets.map(({ tags: _t, ...asset }) => asset), legacyAssets.map(({ tags: _t, ...asset }) => asset), name);
         assert.deepEqual(assets.map(asset => asset.tags), legacyAssets.map(asset => asset.tags && { version: 1, ...asset.tags, albumArtists: [], label: null, discNumber: null, durationMs: null,
             identifiers: { barcode: null, catalogNumber: null, isrc: null, musicBrainzReleaseId: null }, flagged: [] }), name);

@@ -3,7 +3,7 @@
  *   Types: LocalFileEvidence, LookupCandidate, LookupProposal, LookupMatchStatus, LookupDifference,
  *          LookupFileComparison, LookupComparison, RankedLookupCandidate, RankedLookupGroup,
  *          LookupPreselection, RankedLookup
- *   Functions: legacyDurationEvidence, proposalForRelease, rankLookupCandidates
+ *   Functions: legacyDurationEvidence, proposalForRelease, lookupTrackAssignment, rankLookupCandidates
  * Internal
  *   Functions: clean, folded, canonical, groupKeyFor, byText, orderedFiles, compareRelease, artistMismatchFor,
  *              sharedIdentifier, usableRelease, distinctCandidates
@@ -79,15 +79,23 @@ const featuring = /(?:^|[\s(（])(?:feat\.?|ft\.?|featuring)(?=$|[\s.)）])/i;
 const clean = (value: string) => value.normalize('NFC').trim();
 const folded = (value: string) => clean(value).toLowerCase();
 
-/** The draft values a release would write; placeholders and a `[no label]` label are never proposed. */
+/**
+ * The draft values a release would write; placeholders and a `[no label]` label are never proposed, and a credit that repeats an
+ * earlier one's MusicBrainz artist or folded name is dropped (only its first entry is kept). A dropped credit's join phrase is
+ * not moved, as with placeholders: a byline ignores a trailing phrase.
+ */
 export const proposalForRelease = (release: MusicBrainzRelease): LookupProposal => {
     let featured = false;
-    const artists: LookupProposal['artists'] = [];
+    const artists: LookupProposal['artists'] = [], seen = new Set<string>();
     for (const credit of release.artistCredit) {
         const role = featured ? 'featured' as const : 'primary' as const;
         // The entry after a featuring phrase, and every later entry, is featured.
         if (featuring.test(credit.joinPhrase)) featured = true;
         if (isPlaceholderCredit(credit.name, credit.artistId) || isPlaceholderCredit(credit.artistName)) continue;
+        const artistId = normalizeMusicBrainzId(credit.artistId), name = `name:${folded(credit.name)}`;
+        if ((artistId && seen.has(`id:${artistId}`)) || seen.has(name)) continue;
+        if (artistId) seen.add(`id:${artistId}`);
+        seen.add(name);
         // Join phrases keep their surrounding spaces: they are part of the byline presentation.
         const joinPhrase = credit.joinPhrase.normalize('NFC');
         artists.push({ name: clean(credit.name), role, joinPhrase: joinPhrase ? joinPhrase : null });
@@ -124,6 +132,18 @@ const orderedFiles = (files: readonly LocalFileEvidence[]) => {
         : (left.discNumber ?? 1) - (right.discNumber ?? 1)
         || (left.trackNumber ?? Number.POSITIVE_INFINITY) - (right.trackNumber ?? Number.POSITIVE_INFINITY))
         || left.order - right.order || byText(left.slotId, right.slotId));
+};
+
+/**
+ * The candidate track each local file takes when the track counts agree: the ranking's file order paired with the proposal's
+ * tracks in medium order (the flattening the comparison uses), with each track's Disc Number among the media that have tracks.
+ * Null when the counts differ. Pure.
+ */
+export const lookupTrackAssignment = (release: MusicBrainzRelease, files: readonly LocalFileEvidence[]):
+    { slotId: string; discNumber: number; trackNumber: number; title: string }[] | null => {
+    const tracks = proposalForRelease(release).tracks, ordered = orderedFiles(files);
+    if (!ordered.length || tracks.length !== ordered.length) return null;
+    return ordered.map((file, index) => ({ slotId: file.slotId, ...tracks[index] }));
 };
 
 const compareRelease = (release: MusicBrainzRelease, files: readonly LocalFileEvidence[], toleranceMs: number) => {

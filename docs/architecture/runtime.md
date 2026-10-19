@@ -244,8 +244,9 @@ holds its run number, state (`queued`, `running`, `retrying`, `complete`,
 `unavailable`, `stopped` or `superseded`), the granting administrator and a
 one-hour grant, the bound file set, the planned queries and progress, at most 25
 candidates (4 MiB of JSON together), the ranking (candidates plus ranking stay
-within 12 MiB, well under MongoDB's 16 MiB document limit) and a 180-second
-worker lease. The lookup worker
+within 12 MiB, well under MongoDB's 16 MiB document limit), the applied
+candidate (or none) with its values, conflicts and flagged values (at most one
+of each per draft value) and a 180-second worker lease. The lookup worker
 (`startMetadataLookupWorker` in
 `src/administration/lookup/metadataLookupService.ts`) starts after listen with
 the other administrator workers, polls every 2 seconds, is tracked by the server
@@ -257,10 +258,16 @@ creates the collection at startup, so no transaction ever creates it, and
 `requiredIndexRevision` is now `required-indexes-v10-metadata-lookups`. The
 application account needs insert/update on `adminImportLookups`. Import
 documents gain `lookupGate`, a never-projected fence written in the same
-transaction as every lookup run started and every lookup state change, which
-never changes the project's `revision`. It conflicts only with transactions
-that also write the import document, so a reader that must be fenced (the
-publish gate) also writes it.
+transaction as every lookup run started, every lookup state change and every
+re-rank of stored candidates, which never changes the project's `revision`. It
+conflicts only with transactions that also write the import document, so the
+publish gate, which reads it with the lookup record, also writes it. The step
+that completes a run, a re-rank of stored candidates and a choice or conflict
+answer write applied values to the import document in the same transaction as
+the record (and, for the worker and a re-rank, the gate). Automatic writes
+bump only `valueRevision`; a choice or an answer also takes its receipt's
+`revision`. File-tag automation reads the record's applied values in its own
+transaction, so it never replaces them; no index is added.
 
 Playback Audio/Video GETs that briefly overlap an older stream may wait up to two
 seconds for an existing admission slot. The pending pool is bounded to 32 per

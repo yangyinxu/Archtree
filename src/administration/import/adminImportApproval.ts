@@ -11,6 +11,7 @@ import { importCoverSelectable } from './adminImportMediaTypes';
 import { adminImportDetail, parseImportDecisions, reusesOneArtistTwice, type AdminImportDocument } from './adminImportService';
 import { shownPreselectionKey } from './adminImportIdentity';
 import { applyAdministratorChanges, boundDraftChanges, boundedJson, draftWithinSizeLimit, parseDraftChanges, storedDraftV2 } from './adminImportValueState';
+import type { MetadataLookupRecord } from '../lookup/metadataLookupRecord';
 
 /**
  * Bounds a publish body's approval fields before its intent is fingerprinted: changes as a field save bounds them (none allowed),
@@ -31,16 +32,17 @@ export function boundImportApproval(body: Record<string, unknown>): void {
 
 /**
  * Inside the publish transaction, after receipt lookup: requires every approval field, refuses a changed saved basis (409
- * ADMIN_IMPORT_APPROVAL_STALE), then saves decisions, changes and the cover exactly as /decisions, PATCH and /select-cover would,
- * in that order. Decisions carry the bound names shown, which must still be the saved names (409 ADMIN_IMPORT_DECISION_STALE), and
- * renaming an entry or the label in the same approval drops its decision. Returns the saved Draft v2; any refusal aborts the
- * transaction with nothing written.
+ * ADMIN_IMPORT_APPROVAL_STALE; the basis reads the lookup record the transaction read, as GET does), then saves decisions, changes
+ * and the cover exactly as /decisions, PATCH and /select-cover would, in that order. Decisions carry the bound names shown, which
+ * must still be the saved names (409 ADMIN_IMPORT_DECISION_STALE), and renaming an entry or the label in the same approval drops
+ * its decision. Returns the saved Draft v2; any refusal aborts the transaction with nothing written.
  */
-export async function saveImportApproval(doc: AdminImportDocument, body: Record<string, unknown>, actor: string, session: ClientSession): Promise<ImportDraftV2> {
+export async function saveImportApproval(doc: AdminImportDocument, body: Record<string, unknown>, actor: string, session: ClientSession,
+    lookup: Pick<MetadataLookupRecord, 'applied'> | null = null): Promise<ImportDraftV2> {
     if (!IMPORT_APPROVAL_FIELDS.every(key => hasOwn(body, key)) || !Array.isArray(body.changes) || !Array.isArray(body.decisions)
         || typeof body.approvalDigest !== 'string' || !/^[a-f0-9]{64}$/.test(body.approvalDigest)) return invalidImport();
     // The shown basis is the projection GET returned, read after any format-1 conversion admission performs (which keeps it).
-    if (adminImportDetail(doc, actor).approvalDigest !== body.approvalDigest) throw new AdminImportError(409, 'ADMIN_IMPORT_APPROVAL_STALE');
+    if (adminImportDetail(doc, actor, undefined, lookup).approvalDigest !== body.approvalDigest) throw new AdminImportError(409, 'ADMIN_IMPORT_APPROVAL_STALE');
     const draft = storedDraftV2(doc), before = structuredClone(draft);
     doc.decisions = await parseImportDecisions(doc, draft, body.decisions, session);
     if (body.changes.length) applyAdministratorChanges({ draft, draftOrigins: doc.draftOrigins ??= {} },

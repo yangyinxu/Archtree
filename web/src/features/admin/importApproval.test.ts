@@ -117,7 +117,7 @@ test('an append applies no entry or label, orders only the tracks it adds, and l
 
 test('the confirmation marks Artist entries and the label resting only on file tags and automatic entries named like a label, unless appended, changed or decided', () => {
   const item = saved(), decisions = [artist(1, { action: 'skip' }), label({ action: 'skip' }), album()];
-  const marks = { automaticPaths: ['album.artists', 'album.label', 'album.title'], possibleLabelEntryKeys: [entryKey(2)], changedPaths: [] as string[] };
+  const marks = { automaticPaths: ['album.artists', 'album.label', 'album.title'], lookupPaths: [] as string[], possibleLabelEntryKeys: [entryKey(2)], changedPaths: [] as string[] };
   const marked = approvalChecklist(item.draft, decisions, [], marks);
   expect([marked.artistsFromTags, marked.labelFromTags, marked.artists.map(entry => entry.possibleLabel)]).toEqual([true, true, [false, true, false]]);
   // An explicit identity decision shown with the approval, saved or unsaved, makes that value the administrator's own: any one
@@ -132,6 +132,11 @@ test('the confirmation marks Artist entries and the label resting only on file t
   // Empty entries or no label rest on nothing.
   const empty = approvalChecklist({ ...item.draft, album: { ...item.draft.album, artists: [], label: null } }, [album()], [], marks);
   expect([empty.artistsFromTags, empty.labelFromTags]).toEqual([false, false]);
+  // Automatic entries or a label that metadata lookup wrote rest on its evidence, not on file tags alone, as the server's digest says.
+  const looked = approvalChecklist(item.draft, decisions, [], { ...marks, lookupPaths: ['album.artists', 'album.label'] });
+  expect([looked.artistsFromTags, looked.labelFromTags, looked.artists.some(entry => entry.possibleLabel)]).toEqual([false, false, false]);
+  const labelLooked = approvalChecklist(item.draft, decisions, [], { ...marks, lookupPaths: ['album.label'] });
+  expect([labelLooked.artistsFromTags, labelLooked.labelFromTags]).toEqual([true, false]);
 });
 
 test('the publish body carries the shown changes and decisions with the saved cover, revision and approval digest', () => {
@@ -151,7 +156,7 @@ test('an append whose Album or member Track is no longer listed at its reviewed 
 
 test('preselected rows read New or Reuses and block nothing, while rows neither answered nor preselected block; preselections never clear the tags-only marks', () => {
   const item = saved(), member = { ...candidate('track', '4'.repeat(24), 'Stored Title'), match: 'sha256' as const };
-  const marks = { automaticPaths: ['album.artists', 'album.label'], possibleLabelEntryKeys: [] as string[], changedPaths: [] as string[] };
+  const marks = { automaticPaths: ['album.artists', 'album.label'], lookupPaths: [] as string[], possibleLabelEntryKeys: [] as string[], changedPaths: [] as string[] };
   // Lorem has a candidate and no answer; every other row is preselected.
   const preselections = [artist(2), artist(3), label(), album(), track(slotId), track(slotTwo)];
   const checklist = approvalChecklist(item.draft, [], [candidate('artist', '1'.repeat(24), 'Lorem')], marks, preselections);

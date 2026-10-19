@@ -52,8 +52,8 @@ function ImportProject({ id }: { id: string }) {
     refetchOnWindowFocus: 'always', refetchInterval: query => online && (['running', 'queued'].includes(query.state.data?.item.analysis.state ?? '') || query.state.data?.item.publication === 'preparing') ? 3000 : false
   });
   // A newer saved draft raises an editing conflict only when another administrator changed a path this editor edited: upload
-  // confirmations, automatic values from file tags (which an administrator save always overrides) and other administrators'
-  // saves of other paths rebase the unsaved edits, as the server would admit them.
+  // confirmations, automatic values from file tags or metadata lookup (which an administrator save always overrides; every one is
+  // in automaticPaths) and other administrators' saves of other paths rebase the unsaved edits, as the server would admit them.
   const accept = (item: ImportDetail) => {
     setConfirmed(previous => !previous || !newerImport(previous, item) ? item : previous);
     setEditor(previous => {
@@ -125,7 +125,7 @@ function ImportProject({ id }: { id: string }) {
       <div hidden={stage !== 'draft'} role="tabpanel" id="import-panel-draft" aria-labelledby="import-tab-draft">
       <form className={styles.panel} onSubmit={event => { event.preventDefault(); if (!locked && !conflict && changes.length) mutation.operation.run(path, 'PATCH', { expectedRevision: editor.revision, changes }); }}>
         <header className={styles.sectionHeader}><h2>{t('layout.metadata')}</h2></header>
-        <Suspense fallback={<p role="status">{t('common.loading')}</p>}><ImportDraftV2Editor draft={editor.draft} saved={editor.base} filenames={item.manifest.files} disabled={locked || publicationLocked} automaticPaths={item.automaticPaths} possibleLabels={item.possibleLabelEntryKeys}
+        <Suspense fallback={<p role="status">{t('common.loading')}</p>}><ImportDraftV2Editor draft={editor.draft} saved={editor.base} filenames={item.manifest.files} disabled={locked || publicationLocked} automaticPaths={item.automaticPaths} lookupPaths={item.lookupPaths} possibleLabels={item.possibleLabelEntryKeys}
           onChange={draft => setEditor({ ...editor, draft, dirty: true })} /></Suspense>
         <div className={styles.actions}><button className={`${styles.button} ${styles.primary}`} type="submit" disabled={locked || publicationLocked || !editor.dirty || conflict || !changes.length}>{t('action.save')}</button><span role="status">{t(editor.dirty ? 'common.unsaved' : 'common.saved')}</span></div>
       </form>

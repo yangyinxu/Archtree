@@ -20,9 +20,12 @@ be completed solely through application code.
 
 ## Administrator Metadata Lookup Rollout
 
-Status: Lookup jobs run on the server once an import's uploads complete, but no
-route, capability or Web control exposes them yet. Without the contact below,
-they send nothing.
+Status: Lookup jobs run on the server once an import's uploads complete and
+apply a preselected release's values to the draft; Publish waits while a run
+is active, a tie is unresolved or a conflict with an administrator's own value
+is unanswered. The import routes and the `metadataLookup.available` capability
+exist, but no Web control uses them yet. Without the contact below, nothing is
+sent and no lookup starts.
 
 - [ ] Set `FINITUDE_ADMIN_METADATA_LOOKUP_CONTACT` in production to an operator
       email address or https URL before metadata lookup is enabled for

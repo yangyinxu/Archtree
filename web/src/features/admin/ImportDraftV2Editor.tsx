@@ -18,14 +18,14 @@ import { ARTIST_ENTRY_LIMIT, addArtistEntry, artistEntryIssues, canMoveArtistEnt
 /**
  * The import project's Draft v2 editor: the shared draft fields, with ordered Artist entries and the label in place of the v1
  * Artist name. An invalid edited value blocks Save through native constraint validation, so no request is sent. Saved automatic
- * values (`automaticPaths`, written from file tags) are marked "From file tags" until edited, and automatic entries named like a
- * company (`possibleLabels`) say they may be a label.
+ * values written from file tags (`automaticPaths` apart from `lookupPaths`, which metadata lookup wrote) are marked "From file
+ * tags" until edited, and automatic entries named like a company (`possibleLabels`) say they may be a label.
  */
-export function ImportDraftV2Editor({ draft, saved, filenames, disabled, onChange, automaticPaths = [], possibleLabels = [] }: { draft: ImportDraftV2; saved: ImportDraftV2; filenames: ImportDetail['manifest']['files']; disabled: boolean; onChange: (draft: ImportDraftV2) => void; automaticPaths?: readonly string[]; possibleLabels?: readonly string[] }) {
+export function ImportDraftV2Editor({ draft, saved, filenames, disabled, onChange, automaticPaths = [], lookupPaths = [], possibleLabels = [] }: { draft: ImportDraftV2; saved: ImportDraftV2; filenames: ImportDetail['manifest']['files']; disabled: boolean; onChange: (draft: ImportDraftV2) => void; automaticPaths?: readonly string[]; lookupPaths?: readonly string[]; possibleLabels?: readonly string[] }) {
   const album = (patch: Partial<ImportDraftV2['album']>) => onChange({ ...draft, album: { ...draft.album, ...patch } });
   // Only an edited value is checked, as the server parses only the paths a save changes.
   const edited = new Set(draftChanges(saved, draft).map(change => change.path));
-  const automatic = new Set(automaticPaths.filter(path => !edited.has(path))), fromTags = automatic.has('album.artists');
+  const automatic = new Set(automaticPaths.filter(path => !edited.has(path) && !lookupPaths.includes(path))), fromTags = automatic.has('album.artists');
   return <ImportDraftEditor draft={draft} filenames={filenames} disabled={disabled} onChange={onChange} automatic={automatic} artists={<>
     <ArtistEntries entries={draft.album.artists} saved={saved.album.artists} validate={edited.has('album.artists')} fromTags={fromTags} possibleLabels={fromTags ? possibleLabels : []} onChange={artists => album({ artists })} />
     <LabelField label={draft.album.label} saved={saved.album.label} validate={edited.has('album.label')} fromTags={automatic.has('album.label')} onChange={label => album({ label })} />

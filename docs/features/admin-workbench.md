@@ -3,7 +3,8 @@
 The private administrator API is mounted at `/api/admin/v1`. It uses the current
 persisted `admin` role, same-origin cookie mutation protection, bounded parsers,
 account-viewer fencing and `no-store` responses. `GET /capabilities` advertises
-admission independently of the normal listener DTOs. Existing catalog edits,
+admission independently of the normal listener DTOs; `metadataLookup.available`
+says only whether metadata lookup is configured, never the contact or why not. Existing catalog edits,
 visibility changes, clearing a cover, existing-Album reviews and local MP3
 conversion need only that role and have no deployment flag. Choosing a new
 cover also requires `FINITUDE_ADMIN_IMPORT_PRIVATE_STORAGE_READY` and its
@@ -72,15 +73,15 @@ The Web import editor uses Draft, Review, Files and Publish sections.
 Section navigation retains account-fenced local work and does not dispatch a
 mutation. Saving sends only the values the administrator changed, each with
 the saved value the edit started from. A newer saved version (a later revision,
-or automatic values written from file tags at the same revision) that changed
-only other values carries the unsaved edits over, and so does one that changed
-an edited value automatically, because an administrator save always wins over
-automation; one where another administrator changed an edited value, or a
-refused stale save, loads the saved version for comparison. Compact value
-comparisons keep source evidence expandable; publication recovery has its own
-status and actions. Confirmation windows show the frozen named target and
-proposed change before secondary explanations. Technical IDs remain available
-in Details rather than leading normal catalog and Page rows.
+or automatic values written from file tags or metadata lookup at the same
+revision) that changed only other values carries the unsaved edits over, and so
+does one that changed an edited value automatically, because an administrator
+save always wins over automation; one where another administrator changed an
+edited value, or a refused stale save, loads the saved version for comparison.
+Compact value comparisons keep source evidence expandable; publication recovery
+has its own status and actions. Confirmation windows show the frozen named
+target and proposed change before secondary explanations. Technical IDs remain
+available in Details rather than leading normal catalog and Page rows.
 
 The Draft section lists the Artist entries in order. Each entry edits its
 name, its role (Primary or Featured) and, unless it is last, its join phrase,
@@ -111,8 +112,8 @@ primary entry (an append needs none); Save stays available. The entries save as 
 `album.artists` change. The label is one Organization name saved as
 `album.label`, and an empty label saves none. Each track edits its Disc Number
 beside its Track Number. A saved value written automatically from file tags and
-not yet reviewed (`automaticPaths`) shows "From file tags" in the visible and
-accessible label of the Album title, the release date, the Artist entries, the
+not yet reviewed (in `automaticPaths` but not `lookupPaths`) shows "From file
+tags" in the visible and accessible label of the Album title, the release date, the Artist entries, the
 label and each track's title, Disc Number and Track Number, until that value is
 edited; an automatic Artist entry whose name looks like a company says "This
 name looks like a label". In Files, a file whose tags had values left out says
@@ -177,7 +178,8 @@ the label, the Album title or, in an append, a track title) is not preselected,
 because its candidates were read for the saved name. The approval carries the
 preselections the confirmation shows, so the server freezes exactly those or
 asks for a fresh review. The Artist entries and the
-label are marked "From file tags only" while they are automatic and the
+label are marked "From file tags only" while they are automatic, not written
+by metadata lookup (`lookupPaths`), and the
 approval neither changes them nor shows an explicit identity decision for them,
 saved or unsaved (never for an append; a preselection is not one), and an
 automatic entry named like a company says it may be a label.
@@ -206,6 +208,8 @@ previews, import/catalog/Page editors or upload controls.
 - [Metadata lookup](#metadata-lookup)
   - [Lookup runs](#lookup-runs)
   - [Triggers and grants](#triggers-and-grants)
+  - [Value application](#value-application)
+  - [Lookup routes](#lookup-routes)
   - [What lookup sends](#what-lookup-sends)
 <!-- @end-catalog -->
 
@@ -334,17 +338,22 @@ Import routes (relative to `/api/admin/v1`):
   Draft v2 view. Value origins (`draftOrigins`) are stored, keyed by value
   path with `:` in place of `.` (`album:title`, `tracks:<slotId>:discNumber`),
   because MongoDB before 5.0 refuses dotted field names; they are returned only
-  as markers. `automaticPaths` lists the value paths written from file tags and
-  not yet reviewed, in draft path order; `possibleLabelEntryKeys` lists the
-  automatic Artist entries whose names look like a company (a possible label);
-  and `valueRevision` counts the automatic writes, which never change
-  `revision`. Each asset's `tags` is the tag evidence described under
+  as markers. `automaticPaths` lists the value paths written from file tags or
+  metadata lookup and not yet reviewed, in draft path order, so an unsaved edit
+  carries over every automatic write; `lookupPaths` lists those of them whose
+  value equals one the applied metadata lookup candidate wrote (the others
+  rest on file tags); `possibleLabelEntryKeys` lists the automatic Artist
+  entries that rest only on file tags and whose names look like a company (a
+  possible label); and `valueRevision` counts the automatic writes, which
+  never change `revision`. Each asset's `tags` is the tag evidence described under
   [Tag evidence and automatic values](#tag-evidence-and-automatic-values).
   `approvalDigest` is the SHA-256 hex digest of the key-sorted JSON of what a
   publication confirmation shows from the saved project: the Draft v2 view, the
   returned decisions with their bound names, `selectedCoverSlotId`, each
   returned asset's `slotId`, `state` and `sha256`, and whether the Artist
-  entries and the label rest only on file tags. Actor, capabilities, receipts,
+  entries and the label rest only on file tags (automatic values equal to a
+  value the applied metadata lookup candidate wrote do not). Actor,
+  capabilities, receipts,
   `revision`, `valueRevision`, analysis and suggestions do not count, and a
   format-1 project digests as its Draft v2 view, so converting it keeps the
   digest. A
@@ -422,8 +431,8 @@ Import routes (relative to `/api/admin/v1`):
   baseline is no longer the current value returns
   `409 ADMIN_IMPORT_FIELD_CONFLICT`, so an Artist suggestion never replaces
   entries that changed since its baseline, automatic ones included, while any
-  other current value written automatically from file tags after that baseline
-  is replaced, as a field save would replace it. Accepting an `artists`
+  other current value written automatically (from file tags or metadata lookup)
+  after that baseline is replaced, as a field save would replace it. Accepting an `artists`
   suggestion keeps the decisions of the entries whose key and name it leaves
   unchanged. Imports never suggest
   a stand-in Artist: a Luna Artist name such as Various Artists or `[unknown]`
@@ -529,6 +538,10 @@ Import routes (relative to `/api/admin/v1`):
   unseen (`409 ADMIN_IMPORT_REVISION_CONFLICT`). Uploads of other slots, Luna,
   automation and worker steps never make it stale.
 - `GET /imports/:id/assets/:slotId/preview`: protected staged artwork preview.
+- `GET /imports/:id/lookup` and `POST /imports/:id/lookup`, `/lookup/retry`,
+  `/lookup/choose` and `/lookup/resolve`: the import's metadata lookup view, a
+  submitted name, a manual retry, a candidate choice and conflict answers (see
+  [Lookup routes](#lookup-routes)).
 - `POST /imports/:id/publish`: explicit reviewed approval, then asynchronous
   fixed-identity publication; `/resume-publication` reconciles that approval's
   original operation ID rather than creating another Album. The body is
@@ -600,7 +613,16 @@ Import routes (relative to `/api/admin/v1`):
   A stored value the editor cannot show (it reads as empty there) is also
   `400 ADMIN_IMPORT_DRAFT_INCOMPLETE`, so it is never frozen, and only pending
   suggestions the editor shows hold the approval with
-  `409 ADMIN_IMPORT_REVIEW_REQUIRED`. The approval freezes the Draft v2
+  `409 ADMIN_IMPORT_REVIEW_REQUIRED`. Metadata lookup holds it too, read in the
+  same transaction: a queued, running or automatically retrying lookup is
+  `409 ADMIN_IMPORT_LOOKUP_ACTIVE`, and an unanswered tie or conflict (see
+  [Value application](#value-application)) is
+  `409 ADMIN_IMPORT_REVIEW_REQUIRED`, checked against the draft the approval
+  saved, so a change that makes a conflict equal answers it. An append ignores
+  conflicts on Album values. A stopped, unavailable, superseded or completed
+  run never holds it as active; a tie of the current run or an unanswered
+  conflict of the applied candidate still does, whatever the current run's
+  state. An admitted approval writes the lookup fence. The approval freezes the Draft v2
   snapshot with `schemaVersion` 3, its decisions, including each preselection
   it applied, and, for each Artist entry and the label, the reviewed record to
   reuse or an ID reserved for a new one,
@@ -678,8 +700,11 @@ one that is ready, pending or of unknown outcome is not staged again, and each
 import makes at most 16 automatic embedded stagings. Embedded assets that an
 earlier release staged under ordinary receipts keep them and their existing
 lifecycle. Automatic values written from file tags and automatic metadata
-lookup runs take no receipt of either kind, so they use neither the 256
-ordinary receipts nor the 16 automatic embedded stagings.
+lookup runs and applications take no receipt of either kind, so they use
+neither the 256 ordinary receipts nor the 16 automatic embedded stagings. A
+submitted lookup, a manual retry, a choice and conflict answers each take one
+ordinary receipt (`lookup`, `lookup-retry`, `lookup-choose`,
+`lookup-resolve`), which only the Draft v2 detail lists.
 The client receives a bounded recent receipt projection; the original publication
 UUID remains available through `publicationRecovery` for durable reconciliation.
 
@@ -899,9 +924,11 @@ cleanup can be reconciled by any current administrator without reattaching it.
 
 ## Tag evidence and automatic values
 
-Automation is the only automatic writer of an import's Draft v2 values
-(`src/administration/import/adminImportAutomation.ts`), and its evidence is
-read by `src/administration/import/adminImportTags.ts`.
+Tag automation (`src/administration/import/adminImportAutomation.ts`) and
+metadata lookup value application (see [Value application](#value-application))
+are the only automatic writers of an import's Draft v2 values; both write
+through `applyAutomaticValues`. Tag evidence is read by
+`src/administration/import/adminImportTags.ts`.
 
 - **Evidence.** A confirmed upload stores version-2 tag evidence
   (`version: 2`): `title` and `album` (at most 300 characters),
@@ -944,9 +971,14 @@ read by `src/administration/import/adminImportTags.ts`.
   automation read, an equal value is no write, and a write that would grow the
   draft past 48 KB is skipped alone. A written value becomes automatic; others
   are skipped, and the step's markers are set anyway (partial success).
-  Automatic values are never cleared. Each run that writes bumps
-  `valueRevision` once and never `revision`, receipts or the editing allowance;
-  decisions whose entry or label it replaced are dropped.
+  Tag automation never clears a value and never replaces one still resting on
+  the applied metadata lookup candidate (equal to a value it wrote), so files
+  confirmed after a lookup was applied or chosen leave its values as they are;
+  only applying another candidate, or none, returns values the earlier one
+  wrote to their tag values or empty (see
+  [Value application](#value-application)). Each run that writes
+  bumps `valueRevision` once and never `revision`, receipts or the editing
+  allowance; decisions whose entry or label it replaced are dropped.
 - **Triggers and guards.** A confirmed upload, a replay of its original intent
   and reconciliation ("Check again") run automation, so a run missed by a crash
   is caught up; reads never write. A run skipped because the triggering
@@ -1018,8 +1050,9 @@ reads live in `src/administration/import/adminImportDraftCompat.ts`.
   draft and suggestions, the decision, `published`, marker and asset tag
   fields described under `GET /imports/:id` (assets carry the version-2 tag
   allowlist), and the v1 fields everywhere else: assets, publication state and
-  receipts. A decision whose scope this release
-  does not know is dropped. Review responses copy the
+  receipts, whose kinds include the four lookup receipts; the lookup view is
+  its own allowlist (see [Lookup routes](#lookup-routes)). A decision whose
+  scope this release does not know is dropped. Review responses copy the
   Draft v2 fields of the draft and suggestions, the source with a Disc Number
   only on a track that captured one, and applied Track `discNumber` fields.
   The import workbench inventory copies only v1 fields, so a Draft v2 project's
@@ -1094,7 +1127,13 @@ Later stages raise the oldest release that is safe to roll back to:
   them, which ignores `adminImportLookups` and keeps each import document's
   `lookupGate` as it is, because it replaces documents as it read them. Its
   index revision is older, so it verifies its own indexes and leaves
-  `admin_import_lookup_worker` in place.
+  `admin_import_lookup_worker` in place. The release that runs lookup jobs but
+  applies no values reads a record's `applied` without using it, no longer
+  holds publication for a queued, running or retrying lookup, a tie or a
+  conflict, shows applied entries as resting on file tags, lets file-tag
+  automation replace applied values, and filters `lookup*` receipts out of the
+  detail, so a lost lookup response there cannot be reconciled from receipts;
+  reload open tabs.
 - After MusicBrainz IDs are stored, never roll back below the release before
   them; its index stays, and listener DTOs already drop unknown fields.
 - Credit join phrases and Disc Numbers have their own floor in the
@@ -1103,9 +1142,11 @@ Later stages raise the oldest release that is safe to roll back to:
 ## Metadata lookup
 
 A server worker runs MusicBrainz lookups for import projects automatically (see
-[Lookup runs](#lookup-runs)). No route, capability or Web control exposes them
-yet, and iTunes and Cover Art Archive are not queried yet. The source layer and
-the jobs live in `src/administration/lookup/`.
+[Lookup runs](#lookup-runs)) and applies a preselected candidate's values (see
+[Value application](#value-application)). [Routes](#lookup-routes) and the
+`metadataLookup` capability expose them; no Web control does until the import
+summary lands, and iTunes and Cover Art Archive are not queried yet. The source
+layer, the jobs and their routes live in `src/administration/lookup/`.
 
 - **Sources and hosts.** MusicBrainz (`https://musicbrainz.org/ws/2/` only), the
   iTunes Search API (`https://itunes.apple.com/search` and `/lookup`, in the
@@ -1205,10 +1246,11 @@ the jobs live in `src/administration/lookup/`.
   the bound file set (`fileSetDigest` and each manifest slot's confirmed upload
   intent and SHA-256), the input (`tags`, `folder` or `submitted`), at most six
   planned queries with their progress, the MusicBrainz attempts, at most 25
-  candidates, the ranking with its groups, the values applied from it (written
-  once value application exists), stale slots, the automatic-run count and
-  whether a folder-name query was handed to the worker. A new run (an automatic rerun, a submitted
-  name or a manual retry) replaces the previous run's results; only the
+  candidates, the ranking with its groups, the applied candidate (or none) with
+  its values, conflicts and flags (see [Value application](#value-application)),
+  stale slots, the automatic-run count and whether a folder-name query was
+  handed to the worker. A new run (an automatic rerun, a submitted name or a
+  manual retry) replaces the previous run's results; only the
   automatic-run count, the folder use and the applied values carry over. No
   history is kept, and records are never deleted.
 - **States.** `queued`, `running` and `retrying` are active; `complete`,
@@ -1228,7 +1270,8 @@ the jobs live in `src/administration/lookup/`.
   worker whose lease was taken over writes nothing, and search progress
   survives retries, takeovers and restarts. Stopping the server aborts the
   request in flight and releases the lease; the next claim resumes at the
-  stored step.
+  stored step. The step that ranks a run also applies its preselection (see
+  [Value application](#value-application)).
 - **Retries.** A busy, rate-limited, unavailable or invalid answer, or the step
   deadline, schedules an automatic retry of the run after 30 seconds, 2 minutes
   and 5 minutes, or after a longer Retry-After of at most 60 seconds. Automatic
@@ -1258,12 +1301,13 @@ the jobs live in `src/administration/lookup/`.
   `{ fence, run, state, blocking }` on the import document in the same
   transaction, the gate before the record, with `fence` incremented so the
   write always conflicts with a concurrent transaction that also writes the
-  document (the publish gate will read and write it). A transaction that only
-  reads the document does not conflict. A trigger that starts nothing, stale
-  marking of a finished run and progress steps do not write it. It never
-  changes `revision`, `valueRevision`, `updatedAt`, receipts or the editing
-  allowance, and it is never projected. `blocking` is true while a run is
-  active; the publish gate and value application will read it.
+  document. A re-rank of stored candidates writes it too, and the publish gate
+  reads and writes it. A transaction that only reads the document does not
+  conflict. A trigger that starts nothing, stale marking of a finished run and
+  progress steps do not write it. It never changes `revision`,
+  `valueRevision`, `updatedAt`, receipts or the editing allowance, and it is
+  never projected. `blocking` is true while a run is active; ties and
+  conflicts are computed from the record and the draft, not stored in it.
 
 ### Triggers and grants
 
@@ -1301,23 +1345,25 @@ the jobs live in `src/administration/lookup/`.
   | A reconcile confirming it | `reopen` | the reconciler |
   | A submitted name | `submit` | the submitter |
   | A manual retry | `retry` | the one retrying |
-  | Choosing a candidate (later) | `choose` | the one choosing |
+  | Choosing a candidate or none | `choose` | the one choosing |
 
-  Admitting a submitted or retried run rechecks that administrator's role in
-  the same transaction, and every stored step rechecks the grant and that
-  administrator's current role.
+  Admitting a submitted or retried run, a choice or conflict answers rechecks
+  that administrator's role in the same transaction, and every stored step
+  rechecks the grant and that administrator's current role. Choosing a
+  candidate or none moves the run's grant to the one choosing for another hour
+  without starting a run.
   A role loss, a deleted account or an expired grant stores nothing from that
   step and ends the run as `stopped`; earlier candidates stay as evidence and
   are never ranked or applied. A project that no longer accepts lookup (a
   publication lock, completion, a newer format or a malformed draft) ends it as
   `superseded` (`projectClosed`).
 - **Refusals.** Submitted and retried runs are admitted inside the caller's
-  administrator transaction, which later routes provide. They are refused with
-  503 `ADMIN_IMPORT_LOOKUP_UNAVAILABLE` while lookup is not configured, 400
-  `ADMIN_IMPORT_INVALID_INPUT` for an unknown request kind or a malformed
-  account or intent, 403 `ADMIN_IMPORT_ADMIN_REQUIRED` when the granting
-  account is not a current administrator, 409 `ADMIN_IMPORT_LOOKUP_REFUSED`
-  for a project that does not accept lookup, 400
+  administrator transaction, which the [routes](#lookup-routes) provide. They
+  are refused with 503 `ADMIN_IMPORT_LOOKUP_UNAVAILABLE` while lookup is not
+  configured, 400 `ADMIN_IMPORT_INVALID_INPUT` for an unknown request kind or
+  a malformed account or intent, 403 `ADMIN_IMPORT_ADMIN_REQUIRED` when the
+  granting account is not a current administrator, 409
+  `ADMIN_IMPORT_LOOKUP_REFUSED` for a project that does not accept lookup, 400
   `ADMIN_IMPORT_LOOKUP_INVALID_NAME` for a link or an empty, over-long or
   invisible-character name, 409 `ADMIN_IMPORT_LOOKUP_ACTIVE` for a retry while
   a run is queued or running, and 409 `ADMIN_IMPORT_LOOKUP_NOTHING_TO_RETRY`
@@ -1331,6 +1377,123 @@ the jobs live in `src/administration/lookup/`.
   never uses Luna's budget, and starting or stopping Luna keeps its record.
   While lookup is not configured the worker ends a queued run as `unavailable`
   (`notConfigured`) without a request; while imports are disabled it is idle.
+
+### Value application
+
+`src/administration/lookup/lookupValueApplication.ts` applies a candidate to
+the draft through the same compare-and-set path as file-tag automation, so it
+fills only empty or automatic values that are still as it saw them.
+
+- **When.** The worker step that completes a run applies its preselection in
+  the same transaction as the record and the gate; a re-rank that finds a new
+  preselection applies it too. An explicit choice of a candidate or none
+  (`/lookup/choose`) applies at once. A completed run's preselection replaces
+  an earlier application, an explicit one included, but never this run's own
+  explicit choice; a run without a preselection leaves the earlier application
+  as it is. Only a fetched candidate whose release has the candidate's own ID
+  is applied; one answered under another ID (such as a merged release) ranks
+  as incomplete and is never preselected or chosen. A role loss, an expired
+  grant or a publication lock at that step applies nothing.
+- **Values.** The Album title; the Artist entries in credit order with their
+  join phrases, where the entry after a featuring phrase (`feat.`,
+  `featuring`, `ft.`) and every later one is featured and a credit repeating an
+  earlier one's MusicBrainz artist or name (compared case-insensitively) is
+  dropped; the first listed label; the release group's first-release date at
+  its precision, else the release's own; and, only when the candidate's track
+  count equals the file count, each file's title, Disc and Track Number in the
+  ranking's file order (Disc Numbers count only media with tracks). An entry
+  keeps the key of the current entry with the same name, compared
+  case-insensitively, else a key derived from the project and the name, so
+  decisions on unchanged entries survive. No MusicBrainz ID is written yet.
+- **Left out.** Text is NFC and trimmed; a value with control, invisible
+  formatting or lone surrogate characters, over 300 (titles) or 200 (names)
+  characters, one bad Artist entry (including an invalid or over-16 join
+  phrase), more than 20 entries, a malformed date or number, or a write past
+  the 48 KB draft cap is not written and is flagged (`characters`, `length`,
+  `format`, `size`). A release that credits only placeholders is flagged
+  `placeholder`; placeholder credits and a `[no label]` label are never
+  written.
+- **Conflicts.** A value that differs from the administrator's own non-empty
+  value (Artist entries by name case-insensitively, role and join phrase; the
+  label by name case-insensitively; anything else exactly) is recorded as an
+  unanswered conflict and not written; an empty administrator value is filled.
+  A conflict needs no answer once the current value equals the lookup value,
+  and applying the same lookup value again keeps an earlier answer.
+- **Replacing.** Applying another candidate, or none, returns each value the
+  previous application wrote that is still automatic and unchanged, and that
+  the new candidate does not supply, to its file-tag value or to empty; an
+  emptied value loses its origin, so it is not marked automatic. File-tag
+  automation for files confirmed later never replaces a value still resting
+  on the applied candidate; it fills only the values lookup did not write.
+- **Evidence.** The record's `applied` keeps the run, candidate and release,
+  how it was chosen (`preselected` with its basis, `chosen` or `none`), the
+  administrator and intent, the paths written, each value resting on the
+  candidate (a track value names its manifest slot), the conflicts with their
+  answers and the flagged values. Automatic values equal to an applied value
+  are listed in the detail's `lookupPaths` and are not marked as resting only
+  on file tags.
+- **All or nothing.** A write bumps `valueRevision` once and keeps only
+  decisions still bound to their entry or label; `revision`, receipts and the
+  editing allowance never change. Applying the same candidate again writes
+  nothing. A failure in the worker step aborts values, gate and record
+  together, and the run resumes at its stored step after its lease.
+- **Re-ranking.** A confirmation that leaves the file set incomplete, or that
+  reaches the automatic-run limit, re-ranks a completed run's stored
+  candidates when their evidence changed (Disc and Track Numbers aside, which
+  an application writes in ranking order), with no request, writing the gate.
+  A new preselection is applied as the administrator whose confirmation
+  re-ranked it; the run's grant is unchanged. The run then binds the file set
+  it re-ranked: a stale slot whose replacement is confirmed is no longer
+  stale, one still without a confirmed file stays stale, and the stored
+  `fileSetDigest` still decides automatic reruns.
+- **Publish.** An approval waits while a run is queued, running or retrying
+  (`409 ADMIN_IMPORT_LOOKUP_ACTIVE`), and for a tie (a completed run with two
+  or more matching groups, no preselection and no choice for that run) or an
+  unanswered conflict of the applied candidate, whatever the current run's
+  state (`409 ADMIN_IMPORT_REVIEW_REQUIRED`). An append ignores Album
+  conflicts.
+- **Scope.** Value application writes only the import document and its
+  lookup record, never a catalog collection. A published Album or MediaTrack
+  and its search projection carry only the reviewed names and values, never
+  a release, recording or iTunes identifier.
+
+### Lookup routes
+
+All are under `/imports/:id`, behind the same administrator, current-viewer
+and `no-store` guards as every import route, parsed after those guards.
+Submissions, retries and choices accept at most 8 KB of JSON, whatever the
+path's letter case (Express matches routes case-insensitively); conflict
+answers keep the 96 KB limit. Changes run through the import mutation path, so
+each is one ordinary receipt that replays its intent, a changed body under the
+same `operationId` is `409 ADMIN_IMPORT_OPERATION_CONFLICT`, and the usual
+`PUBLICATION_LOCKED`, `OPERATION_LIMIT`, `RELOAD_REQUIRED` and
+`REVISION_CONFLICT` refusals apply. A submission and conflict answers admit any
+`expectedRevision` up to the current one, because each binds its own state; a
+retry or a choice must not predate the last `lookup`, `lookup-retry` or
+`lookup-choose` receipt, so one made before another administrator's lookup
+request is `409 ADMIN_IMPORT_REVISION_CONFLICT`. Field saves and automatic
+lookup runs never make them stale.
+
+| Route | Body | Success | Refusals |
+| --- | --- | --- | --- |
+| `GET /lookup` | — | `200 {lookup, revision, valueRevision}`; `lookup` is `null` before any run | `404 ADMIN_IMPORT_NOT_FOUND` for a review or a bad id |
+| `POST /lookup` | `{operationId, expectedRevision, kind, text}`, `kind` `album` or `song`, text at most 1000 characters | `202` import response, receipt `lookup` | `503 ADMIN_IMPORT_LOOKUP_UNAVAILABLE`, `400 ADMIN_IMPORT_LOOKUP_INVALID_NAME`, `409 ADMIN_IMPORT_LOOKUP_REFUSED` |
+| `POST /lookup/retry` | `{operationId, expectedRevision}` | `202`, receipt `lookup-retry` | `503 …UNAVAILABLE`, `409 …LOOKUP_ACTIVE`, `409 …NOTHING_TO_RETRY`, `409 …REFUSED` |
+| `POST /lookup/choose` | `{operationId, expectedRevision, run, candidateKey}`, key `musicbrainz:<mbid>` or `null` for none | `200`, receipt `lookup-choose` | `409 ADMIN_IMPORT_LOOKUP_STALE` (another run, an active run, an unknown candidate, a candidate before completion), `409 ADMIN_IMPORT_LOOKUP_CANDIDATE_INCOMPLETE` (no fetched details, or a release fetched under another ID), `409 …REFUSED` |
+| `POST /lookup/resolve` | `{operationId, expectedRevision, run, candidateKey, answers}`, 1 to 305 distinct `{path, answer, base}`, `answer` `mine` or `lookup` | `200`, receipt `lookup-resolve` | `409 …LOOKUP_STALE` (another application or a path that is no conflict), `409 ADMIN_IMPORT_FIELD_CONFLICT` (the current value is not `base`), `409 …REFUSED` (the project no longer accepts lookup or its draft cannot be read), `400 ADMIN_IMPORT_INVALID_INPUT` (an answer that grows the draft past 48 KB) |
+
+A malformed body is `400 ADMIN_IMPORT_INVALID_INPUT` before its intent is
+fingerprinted. Answering `lookup` writes the lookup value as the
+administrator's own; `mine` keeps the current value. The lookup view is an
+allowlist: the run, state, issue, outcome and input; at most 25 candidates
+(ranked order, else stored order as incomplete) with title, joined credit,
+label, catalogue number, barcode, country, date, at most 20 formats, track
+count, the comparison counts and differences, group and artist mismatch; at
+most 25 groups with their proposals; the preselection; the disclosure; the
+applied candidate's choice, value paths, conflicts (lookup value re-read
+through the draft rules) and flags; stale files; and `needsAnswer` and
+`blocking`. It carries no URL, ISRC, recording ID, account, grant, lease,
+fence, file-set digest or query.
 
 ### What lookup sends
 

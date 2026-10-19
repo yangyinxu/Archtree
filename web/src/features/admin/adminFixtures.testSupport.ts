@@ -4,7 +4,7 @@ export const viewer = 'aaaaaaaaaaaaaaaaaaaaaaaa';
 export const projectId = 'bbbbbbbbbbbbbbbbbbbbbbbb';
 export const slotId = '10000000-0000-4000-8000-000000000001';
 export const slotTwo = '10000000-0000-4000-8000-000000000002';
-export const capabilities = { schemaVersion: 1, admin: true, albumImports: { enabled: true, analysisAvailable: true, model: 'gpt-6-luna', maxFiles: 100 }, catalog: { editing: false, visibility: false } };
+export const capabilities = { schemaVersion: 1, admin: true, albumImports: { enabled: true, analysisAvailable: true, model: 'gpt-6-luna', maxFiles: 100 }, catalog: { editing: false, visibility: false }, metadataLookup: { available: false } };
 export const session = { user: { id: viewer, displayName: 'Synthetic Admin', avatarRevision: 0, avatar: null, email: 'synthetic@example.invalid', role: 'admin', emailVerified: true } };
 export function detail(): ImportDetail {
   return {
@@ -16,7 +16,7 @@ export function detail(): ImportDetail {
       { id: 'cccccccccccccccccccccccc', generation: 1, scope: 'album', slotId: null, field: 'title', baseline: '', value: 'Suggested Album', source: 'folder', evidence: 'Synthetic Album', decision: 'pending' },
       { id: 'dddddddddddddddddddddddd', generation: 1, scope: 'track', slotId, field: 'trackNumber', baseline: null, value: 1, source: 'filename', evidence: '01 First.mp3', decision: 'pending' }
     ], decisions: [], upload: { ready: 0, total: 2, available: false }, publication: 'notAvailable', capabilities: { analysis: true, upload: false, publish: false }, receipts: [],
-    approvalDigest: 'e'.repeat(64), valueRevision: 0, automaticPaths: [], possibleLabelEntryKeys: []
+    approvalDigest: 'e'.repeat(64), valueRevision: 0, automaticPaths: [], lookupPaths: [], possibleLabelEntryKeys: []
   };
 }
 /** One synthetic Artist entry, primary by default; a fixed key keeps saved and edited drafts comparable. */

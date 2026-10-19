@@ -23,7 +23,9 @@ export type ImportValue = string | number | ImportDate | null;
 export type ImportSuggestion = { id: string; generation: number; scope: 'album' | 'track'; slotId: string | null; field: ImportField; baseline: ImportValue; value: ImportValue; source: 'filename' | 'folder' | 'context'; evidence: string; decision: 'pending' | 'accepted' | 'rejected' };
 export type ImportAnalysisState = 'idle' | 'queued' | 'running' | 'complete' | 'cancelled' | 'needsAttention';
 export type ImportIssue = 'providerUnavailable' | 'providerRejected' | 'providerInvalidResponse' | 'providerOutcomeUnknown' | 'permissionLost' | 'grantExpired' | 'budgetExhausted' | null;
-export type ImportReceipt = { operationId: string; kind: 'create' | 'edit' | 'analyze' | 'adopt' | 'decisions' | 'cancel-analysis' | 'upload' | 'publish' | 'cleanup' | 'select-cover' | 'cancel-publication'; revision: number };
+/** The `lookup*` kinds (metadata lookup submit, retry, choose and resolve) appear only in the Draft v2 detail, never in the frozen v1 DTO. */
+export type ImportReceipt = { operationId: string; kind: 'create' | 'edit' | 'analyze' | 'adopt' | 'decisions' | 'cancel-analysis' | 'upload' | 'publish' | 'cleanup' | 'select-cover' | 'cancel-publication'
+    | 'lookup' | 'lookup-retry' | 'lookup-choose' | 'lookup-resolve'; revision: number };
 export type ImportEmbeddedTags = { title: string | null; album: string | null; artists: string[]; year: number | null; trackNumber: number | null };
 export type ImportTagField = 'title' | 'album' | 'artists' | 'albumArtists' | 'label' | 'barcode' | 'catalogNumber' | 'isrc' | 'musicBrainzReleaseId';
 /** A tag value left out of the evidence: it held control or invisible formatting characters, was too long or failed its format. */
@@ -69,8 +71,8 @@ export type ImportPublishedV2 = { albumId: string; artistIds: string[]; organiza
 export type AdminImportDetailV2 = Omit<AdminImportDetail, 'draft' | 'suggestions' | 'decisions' | 'published' | 'assets'> & {
     draft: ImportDraftV2; suggestions: ImportSuggestionV2[]; decisions: ImportDecisionDtoV2[]; published: ImportPublishedV2 | null; approvalDigest: string;
     assets: (Omit<AdminImportDetail['assets'][number], 'tags'> & { tags: ImportTagsView | null })[];
-    /** Automatic writes; never changes `revision`. */
-    valueRevision: number; automaticPaths: string[]; possibleLabelEntryKeys: string[] };
+    /** Automatic writes; never changes `revision`. `lookupPaths` are the automatic paths resting on the applied lookup candidate. */
+    valueRevision: number; automaticPaths: string[]; lookupPaths: string[]; possibleLabelEntryKeys: string[] };
 /** One-step approval fields of a publish body (adminImportApproval.ts); a body with none of them predates one-step approval. */
 export const IMPORT_APPROVAL_FIELDS = ['changes', 'decisions', 'selectedCoverSlotId', 'approvalDigest'] as const;
 export type AdminImportResponse = { item: AdminImportDetailV2; receipt: ImportReceipt | null };

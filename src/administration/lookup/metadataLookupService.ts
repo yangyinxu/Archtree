@@ -5,18 +5,20 @@
  *              noteMetadataLookupFiles, queueMetadataLookup, runMetadataLookupOnce, startMetadataLookupWorker
  * Internal
  *   Types: LookupAction, FoundRelease, LookupStepResult, LookupStep
- *   Functions: lookupConfiguration, writeLookupGate, reconcileLookupFiles, refuse, retryableInput,
- *              performLookupAction, endRun, proceedLookup, advanceLookup, releaseLookupLease,
+ *   Functions: lookupConfiguration, writeLookupGate, reconcileLookupFiles, rerankLookup, refuse,
+ *              retryableInput, performLookupAction, endRun, proceedLookup, advanceLookup, releaseLookupLease,
  *              defaultMusicBrainzClient
  *   Constants: lookups, transactionOptions, idle, maximumStepsPerTick
  * @end-catalog */
 
 /**
- * Metadata lookup jobs for import projects: the automatic trigger after the confirmation that completes the file set, stale
- * marking when a bound file is removed, admission of submitted and retried runs, and the persisted worker that advances one run
- * one MusicBrainz request per stored step. Starting a run and every state change write the import document's `lookupGate` in the
- * same transaction, never its `revision`; a trigger that starts nothing, stale marking of a finished run and progress steps do
- * not. Owner rules: the confirmed Administrator Metadata Lookup rules (they land with the summary).
+ * Metadata lookup jobs for import projects: the automatic trigger after the confirmation that completes the file set (or a re-rank
+ * of the stored candidates when it completes nothing new), stale marking when a bound file is removed, admission of submitted and
+ * retried runs, and the persisted worker that advances one run one MusicBrainz request per stored step and applies a completed
+ * run's preselection (lookupValueApplication.ts) in the step that completes it. Starting a run, every state change and a re-rank
+ * write the import document's `lookupGate` in the same transaction, and an application writes the document itself; neither ever
+ * changes its `revision`. A trigger that starts nothing, stale marking of a finished run and progress steps do not write it.
+ * Owner rules: the confirmed Administrator Metadata Lookup rules (they land with the summary).
  */
 import { randomUUID } from 'node:crypto';
 import { ObjectId, type ClientSession } from 'mongodb';
@@ -40,6 +42,7 @@ import type { PlannedLookupQuery } from './lookupQueryPlanner';
 import { createMongoLookupRateGate } from './lookupRateGate';
 import { createLookupResponseCache } from './lookupResponseCache';
 import { createMusicBrainzClient, type MusicBrainzClient } from './musicBrainzClient';
+import { applyPreselectedLookup, rerankStoredLookup } from './lookupValueApplication';
 import {
     automaticLookupOperationId, importLookupFileSet, isBlockingLookupState, lookupGateFor, lookupRetryAt, lookupStaleSlots,
     mergeLookupCandidates, planImportLookup, rankLookupWithinBudget, recordLookupDetails, startLookupRun,
@@ -87,10 +90,27 @@ async function reconcileLookupFiles(doc: AdminImportDocument, record: MetadataLo
 export type MetadataLookupTriggerOutcome = { queued: boolean; run: number | null;
     reason: 'queued' | 'noQuery' | 'unavailable' | 'closed' | 'incomplete' | 'current' | 'limit' | 'failed' };
 /**
+ * Re-ranks a completed run's stored candidates against newly known evidence without any request, in the trigger's transaction
+ * (whose administrator, rechecked there, applies a new preselection): the gate first (fencing the re-rank), then the document
+ * when a new preselection wrote values, then the record.
+ */
+async function rerankLookup(doc: AdminImportDocument, record: MetadataLookupRecord | null, actor: string, session: ClientSession, now: Date) {
+    const reranked = record && rerankStoredLookup(doc, record, now, actor);
+    if (!reranked) return;
+    await writeLookupGate(doc, reranked.record, session);
+    if (reranked.changed) {
+        const written = await importCollection().replaceOne({ _id: doc._id, revision: doc.revision }, doc, { session });
+        if (written.matchedCount !== 1) throw new Error('METADATA_LOOKUP_RERANK_CONFLICT');
+    }
+    await lookups().replaceOne({ _id: doc._id, run: reranked.record.run }, reranked.record, { session });
+}
+
+/**
  * Automatic trigger after an upload or reconcile confirmed a file, as `actor` (who must still hold the role). It queues a run once
  * every selected audio file is confirmed and the file set differs from the last run's, within the per-project automatic limit. A
- * replay, a second reconcile or a racing confirmation finds the same file set and queues nothing. Never throws; the confirmation
- * keeps its own result.
+ * replay, a second reconcile or a racing confirmation finds the same file set and queues nothing. A confirmation that leaves the
+ * file set incomplete, or reaches the limit, re-ranks a completed run's stored candidates instead when the evidence changed. Never
+ * throws; the confirmation keeps its own result.
  */
 export async function requestAutomaticMetadataLookup(actor: string, id: string, grant: 'upload' | 'reopen',
     options: { now?: Date; configuration?: () => MetadataLookupConfiguration } = {}): Promise<MetadataLookupTriggerOutcome> {
@@ -103,9 +123,9 @@ export async function requestAutomaticMetadataLookup(actor: string, id: string, 
             if (!doc || !metadataLookupAccepted(doc)) return outcome('closed');
             const fileSet = importLookupFileSet(doc);
             const record = await reconcileLookupFiles(doc, await lookups().findOne({ _id: doc._id }, { session }), fileSet.files, session, now);
-            if (!fileSet.complete) return outcome('incomplete');
+            if (!fileSet.complete) { await rerankLookup(doc, record, actor, session, now); return outcome('incomplete'); }
             if (record?.fileSetDigest === fileSet.digest) return outcome('current');
-            if ((record?.automaticRuns ?? 0) >= JOB.automaticRuns) return outcome('limit');
+            if ((record?.automaticRuns ?? 0) >= JOB.automaticRuns) { await rerankLookup(doc, record, actor, session, now); return outcome('limit'); }
             // A rerun after a submitted run repeats the submitted text; otherwise it plans from the current tags and folder.
             const submitted = record?.input?.trigger === 'submitted' && record.input.submitted ? record.input.submitted : undefined;
             const planned = planImportLookup(doc, { folderAvailable: record?.folderUsed !== true, submitted });
@@ -257,7 +277,7 @@ function proceedLookup(record: MetadataLookupRecord, doc: AdminImportDocument, r
     }
     const pending = next.candidates.find(candidate => candidate.details === 'pending');
     if (pending) return running({ kind: 'details', releaseId: pending.releaseId }, 'details');
-    // The single place where a completed run is ranked; value application extends it.
+    // The single place where a run is ranked as it completes; advanceLookup applies its preselection in the same step.
     const ranked = rankLookupWithinBudget(next.candidates, doc, now);
     return { next: endRun(next, 'complete', issue, now, { phase: 'done', outcome: next.candidates.length ? 'candidates' : 'noRelease',
         candidates: ranked.candidates, ranking: ranked.ranking }), step: idle };
@@ -266,6 +286,7 @@ function proceedLookup(record: MetadataLookupRecord, doc: AdminImportDocument, r
 /**
  * One stored step in one transaction: the lease, the grant, the actor's current role, the project and the bound file set are
  * checked before anything is stored. A lost lease writes nothing; a stop keeps earlier candidates but never this step's result.
+ * The step that completes a run applies its preselection: values, gate and record commit together or not at all.
  */
 async function advanceLookup(id: ObjectId, run: number, worker: string, now: Date, result: LookupStepResult | null,
     configuration: () => MetadataLookupConfiguration): Promise<LookupStep> {
@@ -277,7 +298,7 @@ async function advanceLookup(id: ObjectId, run: number, worker: string, now: Dat
             const record = await lookups().findOne({ _id: id, run, leaseOwner: worker }, { session });
             if (!record) return;
             const doc = await importCollection().findOne({ _id: id, ...importPurposeFilter }, { session });
-            let next: MetadataLookupRecord, permitted = true;
+            let next: MetadataLookupRecord, permitted = true, applied = false;
             if (record.grantExpiresAt instanceof Date && record.grantExpiresAt > now) {
                 // Role loss and a deleted account both fail this fence; the transaction itself stays usable.
                 try { await touchImportAdmin(record.actorId, session); } catch (error) { if (!(error instanceof AdminImportError)) throw error; permitted = false; }
@@ -291,8 +312,15 @@ async function advanceLookup(id: ObjectId, run: number, worker: string, now: Dat
             else if (!doc || !metadataLookupAccepted(doc)) next = endRun(record, 'superseded', 'projectClosed', now);
             else if ((staleSlots = stale()).length) next = endRun(record, 'superseded', 'fileSetChanged', now, { staleSlotIds: [...new Set([...(record.staleSlotIds ?? []), ...staleSlots])] });
             else if (!configuration().available) next = endRun(record, 'unavailable', 'notConfigured', now);
-            else ({ next, step } = proceedLookup(record, doc, result, now));
+            else {
+                ({ next, step } = proceedLookup(record, doc, result, now));
+                if (next.state === 'complete' && next.phase === 'done') ({ record: next, changed: applied } = applyPreselectedLookup(doc, next, now));
+            }
             if (next.state !== record.state && doc) await writeLookupGate(doc, next, session);
+            if (applied && doc) {
+                const values = await importCollection().replaceOne({ _id: doc._id, revision: doc.revision }, doc, { session });
+                if (values.matchedCount !== 1) throw new Error('METADATA_LOOKUP_STEP_CONFLICT');
+            }
             const written = await lookups().replaceOne({ _id: id, run, leaseOwner: worker }, next, { session });
             if (written.matchedCount !== 1) throw new Error('METADATA_LOOKUP_STEP_CONFLICT');
         }, transactionOptions);

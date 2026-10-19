@@ -64,7 +64,7 @@ routes ─▶ controllers ─▶ application ─▶ services / models / reposito
 | `src/infrastructure/` | Database and S3 clients, indexes, topology, readiness, diagnostics. | Depend on domain services; database startup arming avatar-mutation recovery is the one exception. |
 | `src/config/` | Environment-derived rollout switches, capacity limits and outbound client identity (the metadata lookup contact), read once at the edge of each feature. | Perform I/O. |
 | `src/realtime/` | The WebSocket room gateway, tickets, seats, and wind-down. | Bypass `application/rooms` for room state changes. |
-| `src/administration/` | Administrator workbench backend, grouped as `catalog/`, `import/`, `conversion/` and `lookup/` (metadata sources and lookup jobs), with shared admin flags and the pinned HTTPS fetcher (`adminPinnedHttps.ts`) at its root. | Be reachable without an administrator role guard. |
+| `src/administration/` | Administrator workbench backend, grouped as `catalog/`, `import/`, `conversion/` and `lookup/` (metadata sources, lookup jobs, value application and lookup requests), with shared admin flags and the pinned HTTPS fetcher (`adminPinnedHttps.ts`) at its root. | Be reachable without an administrator role guard. |
 | `src/views/` | Server-rendered HTML for the account, content-manager, admin, and portfolio pages. | Query the database directly. |
 | `src/public/` | Static browser assets for the server-rendered pages (CSS, small scripts, fonts). | Hold Finitude Web code, which belongs in `web/`. |
 | `src/utils/` | Pure helpers (keys, pagination, text encoding) without I/O. | Read the environment or the database. |

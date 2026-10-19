@@ -86,13 +86,13 @@ const identityOf = (decision: ImportDecision | undefined, kind: ImportCandidate[
   const candidate = candidates.find(item => item.kind === kind && item.id === decision.candidateId && item.revision === decision.candidateRevision);
   return candidate ? { kind: 'reused', label: candidate.label, hidden: candidate.visibility === 'hidden' } : { kind: 'changed' };
 };
-/** The saved project's automatic markers and the paths the approval's unsaved changes write. */
-export interface ApprovalMarks { automaticPaths: readonly string[]; possibleLabelEntryKeys: readonly string[]; changedPaths: readonly string[] }
+/** The saved project's automatic markers (`lookupPaths`: automatic values resting on applied metadata lookup) and the paths the approval's unsaved changes write. */
+export interface ApprovalMarks { automaticPaths: readonly string[]; lookupPaths: readonly string[]; possibleLabelEntryKeys: readonly string[]; changedPaths: readonly string[] }
 /**
  * The confirmation checklist of `draft` with the decisions it shows (shownDecisions) and the current duplicate candidates. A row
  * without an explicit decision reads its preselection (identityPreselections), so it is New or Reuses and blocks nothing; a row
- * neither answered nor preselected needs a decision. `marks` flag the Artist entries and the label that rest only on file tags,
- * and automatic entries named like a label; an append applies neither. A value the approval changes is the administrator's own,
+ * neither answered nor preselected needs a decision. `marks` flag the Artist entries and the label that rest only on file tags
+ * (automatic and not written by metadata lookup), and automatic entries named like a label; an append applies neither. A value the approval changes is the administrator's own,
  * and so are the label once it carries an explicit identity decision and the entries once any entry carries one (saved or
  * unsaved), so neither is marked then; a preselection never counts as one.
  */
@@ -100,7 +100,7 @@ export function approvalChecklist(draft: ImportDraftV2, decisions: readonly Impo
   const effective = (match: (decision: ImportDecision) => boolean) => decisions.find(match) ?? preselections.find(match);
   const albumDecision = effective(decision => decision.scope === 'album'), append = albumDecision?.action === 'reuse';
   const decided = (scope: 'artist' | 'label') => decisions.some(decision => decision.scope === scope && decision.action !== 'skip');
-  const fromTags = (path: string) => !append && Boolean(marks?.automaticPaths.includes(path) && !marks.changedPaths.includes(path));
+  const fromTags = (path: string) => !append && Boolean(marks?.automaticPaths.includes(path) && !marks.lookupPaths.includes(path) && !marks.changedPaths.includes(path));
   const artistsFromTags = fromTags('album.artists') && draft.album.artists.length > 0 && !decided('artist'), labelFromTags = fromTags('album.label') && draft.album.label !== null && !decided('label');
   const artists = draft.album.artists.map(({ key, name, role, joinPhrase }) => ({ key, name, role, joinPhrase, possibleLabel: artistsFromTags && Boolean(marks?.possibleLabelEntryKeys.includes(key)),
     identity: append ? notApplied : identityOf(effective(decision => decision.scope === 'artist' && decision.entryKey === key), 'artist', candidates) }));

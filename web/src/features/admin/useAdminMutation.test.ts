@@ -2,6 +2,7 @@ import { captureAccountOperation } from '../../api/accountEpoch';
 import { adminWorkspace } from './adminWorkspace';
 import { AdminMutation } from './useAdminMutation';
 import { detail, json, viewer } from './adminFixtures.testSupport';
+import { detailSchema } from './adminApi';
 
 beforeEach(() => { adminWorkspace.reset(); adminWorkspace.authorize(captureAccountOperation(viewer), true, true); adminWorkspace.select('admin'); });
 afterEach(() => { vi.unstubAllGlobals(); adminWorkspace.reset(); });
@@ -36,4 +37,18 @@ test('the primary-required code is that refusal only as a 409; another 409 stays
     await vi.waitFor(() => expect(conflict.getSnapshot().error).toBe('conflict'));
     expect(conflict.getSnapshot().intent).toBeNull();
   }
+});
+
+test('a lost metadata lookup response is confirmed by its lookup receipt in the reread import, as any other change is', async () => {
+  vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('synthetic network loss'); }));
+  const operation = new AdminMutation();
+  operation.run('/item/lookup/choose', 'POST', { expectedRevision: 1, run: 1, candidateKey: null });
+  await vi.waitFor(() => expect(operation.getSnapshot().error).toBe('unknown'));
+  const { operationId } = operation.getSnapshot().intent!;
+  // Another receipt confirms nothing; the reread detail carrying this intent's lookup receipt does.
+  operation.reconcile(detailSchema.parse({ ...detail(), revision: 2, receipts: [{ operationId: '40000000-0000-4000-8000-000000000009', kind: 'lookup', revision: 2 }] }));
+  expect(operation.getSnapshot()).toMatchObject({ running: false, error: 'unknown', intent: { operationId } });
+  const item = detailSchema.parse({ ...detail(), revision: 3, receipts: [{ operationId, kind: 'lookup-choose', revision: 3 }] });
+  operation.reconcile(item);
+  expect(operation.getSnapshot()).toEqual({ running: false, intent: null, error: null, result: { item, receipt: { operationId, kind: 'lookup-choose', revision: 3 } } });
 });

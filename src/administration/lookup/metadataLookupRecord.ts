@@ -2,7 +2,8 @@
  * Exports
  *   Types: MetadataLookupState, MetadataLookupIssue, MetadataLookupGrantSource, MetadataLookupSubmission,
  *          MetadataLookupInput, LookupFileIdentity, StoredLookupCandidate, StoredLookupRanking,
- *          MetadataLookupRecord, ImportLookupGate
+ *          LookupValueFlag, LookupAppliedValue, LookupConflict, LookupApplication, MetadataLookupRecord,
+ *          ImportLookupGate
  *   Functions: isBlockingLookupState, importLookupFileSet, lookupStaleSlots, planImportLookup,
  *              lookupFileEvidence, mergeLookupCandidates, recordLookupDetails, rankLookupRecord,
  *              rankLookupWithinBudget, lookupRetryAt, lookupGateFor, automaticLookupOperationId,
@@ -25,10 +26,11 @@ import { importDraftV2View } from '../import/adminImportDraftCompat';
 import type { ImportAsset } from '../import/adminImportMediaTypes';
 import type { AdminImportDocument } from '../import/adminImportService';
 import { importAssetDurationEvidence, importTagsV2View } from '../import/adminImportTags';
+import type { ImportDraftPath } from '../import/adminImportValueState';
 import { METADATA_LOOKUP_JOB_LIMITS, type MusicBrainzRelease, type MusicBrainzReleaseSummary } from './lookupContract';
 import { normalizeMusicBrainzId } from './lookupIdentifiers';
 import { planMetadataLookup, type LookupPlan, type LookupPlanInput, type PlannedLookupQuery } from './lookupQueryPlanner';
-import { rankLookupCandidates, type LocalFileEvidence, type RankedLookup } from './lookupRanking';
+import { rankLookupCandidates, type LocalFileEvidence, type LookupPreselection, type RankedLookup } from './lookupRanking';
 
 export type MetadataLookupState = 'queued' | 'running' | 'retrying' | 'complete' | 'unavailable' | 'stopped' | 'superseded';
 export type MetadataLookupIssue = 'permissionLost' | 'grantExpired' | 'notConfigured' | 'sourceUnavailable' | 'sourceBusy' | 'fileSetChanged' | 'projectClosed';
@@ -46,6 +48,22 @@ export type StoredLookupCandidate = {
     details: 'pending' | 'fetched' | 'missing' | 'failed' | 'omitted';
 };
 export type StoredLookupRanking = RankedLookup & { rankedAt: Date; files: LocalFileEvidence[] };
+/** A candidate value left out: control or invisible characters, over a length bound, a failed format, the draft cap, or only placeholder credits. */
+export type LookupValueFlag = { path: ImportDraftPath; reason: 'characters' | 'length' | 'format' | 'size' | 'placeholder' };
+/** A value resting on the applied candidate, in the draft's stored form; a track value names its local file (manifest slot). */
+export type LookupAppliedValue = { path: ImportDraftPath; value: unknown; slotId: string | null };
+/** A candidate value that differs from the administrator's own: nothing is preselected until the administrator keeps one. */
+export type LookupConflict = { path: ImportDraftPath; lookup: unknown; slotId: string | null; answer: 'mine' | 'lookup' | null };
+/**
+ * The candidate (or none) applied to the import's draft and its evidence: who applied it and how (a preselection, an explicit choice
+ * or none), the paths this application wrote, the values that rest on it, its unanswered or answered conflicts and the flagged values.
+ */
+export type LookupApplication = {
+    run: number; candidateKey: string | null; releaseId: string | null;
+    choice: 'preselected' | 'chosen' | 'none'; basis: LookupPreselection['basis'] | 'chosen' | null;
+    actorId: string; operationId: string | null; at: Date;
+    paths: ImportDraftPath[]; values: LookupAppliedValue[]; conflicts: LookupConflict[]; flagged: LookupValueFlag[];
+};
 export type MetadataLookupRecord = {
     _id: ObjectId; run: number; state: MetadataLookupState; issue: MetadataLookupIssue | null;
     outcome: 'candidates' | 'noRelease' | 'noQuery' | null;
@@ -55,8 +73,8 @@ export type MetadataLookupRecord = {
     /** Failed MusicBrainz attempts of this run; each one schedules an automatic retry until METADATA_LOOKUP_JOB_LIMITS.retryDelaysMs runs out. */
     attempts: { musicbrainz: number }; retryAt: Date | null;
     candidates: StoredLookupCandidate[]; ranking: StoredLookupRanking | null;
-    /** Written by value application (a later stage) only; carried over to every later run. */
-    applied: null | { run: number; candidateKey: string; paths: string[]; at: Date };
+    /** Written by value application (lookupValueApplication.ts) only; carried over to every later run. */
+    applied: LookupApplication | null;
     /**
      * `folderUsed` turns true when a step hands a folder-name query to the worker (stored before the request is sent), so a
      * folder run superseded, stopped or unconfigured before sending anything leaves the allowance for the next automatic run.
@@ -65,8 +83,9 @@ export type MetadataLookupRecord = {
     leaseOwner: string | null; leaseUntil: Date | null; createdAt: Date; updatedAt: Date; completedAt: Date | null;
 };
 /**
- * The import document's fence, never projected: written in the same transaction as every run a trigger or request starts and
- * every state change. A trigger that starts nothing, stale marking of a finished run and progress steps do not write it.
+ * The import document's fence, never projected: written in the same transaction as every run a trigger or request starts, every
+ * state change, every re-rank of stored candidates and every admitted publication approval (which reads it). A trigger that
+ * starts nothing, stale marking of a finished run and progress steps do not write it.
  */
 export type ImportLookupGate = { fence: number; run: number; state: MetadataLookupState; blocking: boolean };
 
@@ -80,7 +99,10 @@ const evidence = (asset: ImportAsset | undefined): ImportTagsView | null => {
     return tags?.version === 2 ? tags : null;
 };
 
-/** Queued, running and automatically retrying runs block publication (value application adds unanswered conflicts later). */
+/**
+ * Queued, running and automatically retrying runs block publication. Unanswered ties and conflicts block it too, but they are
+ * computed live from the record and the draft (lookupAnswersNeeded), so the gate's `blocking` stays state-only.
+ */
 export const isBlockingLookupState = (state: unknown) => state === 'queued' || state === 'running' || state === 'retrying';
 
 /** The manifest's audio slots in manifest order with their confirmed files; cover and embedded-artwork slots never count. */

@@ -6,6 +6,7 @@
  *   - the per-file step plans title, Disc and Track Numbers from version-2 evidence only where it has a value
  *   - evidence stored before S8, files already automated, unconfirmed files and files outside the manifest plan nothing
  *   - the album step plans the shared title, year, label and one primary entry once every file is confirmed, and only once
+ *   - file-tag values ignore the automation markers: per file from every confirmed version-2 file, the album values once every file is
  *   - a value the files disagree on or one file lacks stays empty, and an album artist must be the only one on every file, with none left out
  *   - placeholder credits never become entries or labels, and a company-like album artist is written and flagged as a possible label
  *   - automation for a malformed project ID is idle without reading anything
@@ -29,7 +30,7 @@ import type { ImportManifest } from '../../src/administration/import/adminImport
 import { defaultDraftV2, derivedEntryKey, type ImportDraftOrigins, type ImportDraftV2 } from '../../src/administration/import/adminImportDraft';
 import type { ImportAsset } from '../../src/administration/import/adminImportMediaTypes';
 import type { AdminImportDocument } from '../../src/administration/import/adminImportService';
-import { AUTOMATIC_ENTRY_SEED, discFromRelativePath, planImportAutomation, runImportAutomation } from '../../src/administration/import/adminImportAutomation';
+import { AUTOMATIC_ENTRY_SEED, discFromRelativePath, importTagValues, planImportAutomation, runImportAutomation } from '../../src/administration/import/adminImportAutomation';
 import { importAssetDurationEvidence, readImportEmbeddedTags } from '../../src/administration/import/adminImportTags';
 import { applyAdministratorChanges, applyAutomaticValues, importAutomationMarkers } from '../../src/administration/import/adminImportValueState';
 
@@ -98,6 +99,25 @@ test('the album step plans the shared title, year, label and one primary entry o
     assert.equal(planImportAutomation(project([asset(slotA, tags(shared)), asset(slotB, tags(shared))], { automation: { albumAt: new Date() } })).album, false);
 });
 
+test('file-tag values ignore the automation markers: per file from every confirmed version-2 file, the album values once every file is', () => {
+    const marked = { automatedAt: new Date() };
+    const all = importTagValues(project([asset(slotA, tags({ ...shared, title: 'Tagged One', trackNumber: 1 }), marked), asset(slotB, tags({ ...shared, discNumber: 3 }), marked)],
+        { automation: { albumAt: new Date() } }));
+    assert.deepEqual(Object.fromEntries(all), {
+        [`tracks.${slotA}.title`]: 'Tagged One', [`tracks.${slotA}.discNumber`]: 2, [`tracks.${slotA}.trackNumber`]: 1, [`tracks.${slotB}.discNumber`]: 3,
+        'album.title': 'Synthetic Album', 'album.releaseDate': { year: 2026, month: null, day: null }, 'album.label': { name: 'Synthetic Label', musicBrainzId: null },
+        'album.artists': [{ key: automaticKey, name: 'Synthetic Ensemble', role: 'primary', joinPhrase: null, musicBrainzId: null }]
+    });
+    // The planner still writes nothing it already ran: no per-file values for automated files and no album step after its marker.
+    assert.deepEqual(planImportAutomation(project([asset(slotA, tags(shared), marked), asset(slotB, tags(shared), marked)], { automation: { albumAt: new Date() } })),
+        { files: [], album: false, values: [] });
+    // Until every file is confirmed with version-2 evidence, only per-file values exist; nothing for reviews, older formats or no evidence.
+    assert.deepEqual([...importTagValues(project([asset(slotA, tags({ ...shared, title: 'Only' }))])).keys()], [`tracks.${slotA}.title`, `tracks.${slotA}.discNumber`]);
+    assert.equal(importTagValues(project([asset(slotA, tags(shared)), asset(slotB, tags(shared))], { purpose: 'catalogReview' } as Partial<AdminImportDocument>)).size, 0);
+    assert.equal(importTagValues(project([asset(slotA, tags(shared)), asset(slotB, tags(shared))], { draftVersion: null } as Partial<AdminImportDocument>)).size, 0);
+    assert.equal(importTagValues(project([asset(slotA, null), asset(slotB, { title: 'v1' })])).size, 0, 'no version-2 evidence, not even a path Disc Number');
+});
+
 test('a value the files disagree on or one file lacks stays empty, and an album artist must be the only one on every file, with none left out', () => {
     const albumPaths = (a: Record<string, unknown>, b: Record<string, unknown>) => planImportAutomation(project([asset(slotA, tags(a)), asset(slotB, tags(b))])).values.map(value => value.path).filter(path => path.startsWith('album.'));
     assert.deepEqual(albumPaths({ ...shared, album: 'Other Album' }, shared), ['album.releaseDate', 'album.label', 'album.artists']);
@@ -127,15 +147,15 @@ test('placeholder credits never become entries or labels, and a company-like alb
         const target = { draft: doc.draft as ImportDraftV2, draftOrigins: doc.draftOrigins! };
         assert.ok(applyAutomaticValues(target, planImportAutomation(doc).values).written.includes('album.artists'), name);
         assert.deepEqual(importAutomationMarkers(target.draft, target.draftOrigins), { automaticPaths: ['album.title', 'album.artists', 'album.label', 'album.releaseDate', `tracks.${slotA}.discNumber`],
-            possibleLabelEntryKeys: [automaticKey], tagOnly: { artists: true, label: true } }, name);
+            lookupPaths: [], possibleLabelEntryKeys: [automaticKey], tagOnly: { artists: true, label: true } }, name);
         // Once the entries are the administrator's own, nothing rests only on file tags and nothing is flagged.
         applyAdministratorChanges(target, [{ path: 'album.artists', base: target.draft.album.artists, value: target.draft.album.artists }]);
         assert.deepEqual(importAutomationMarkers(target.draft, target.draftOrigins).possibleLabelEntryKeys, [], name);
     }
-    assert.deepEqual(importAutomationMarkers(defaultDraftV2(manifest), undefined), { automaticPaths: [], possibleLabelEntryKeys: [], tagOnly: { artists: false, label: false } });
+    assert.deepEqual(importAutomationMarkers(defaultDraftV2(manifest), undefined), { automaticPaths: [], lookupPaths: [], possibleLabelEntryKeys: [], tagOnly: { artists: false, label: false } });
     // Automatic but empty entries and no label rest on nothing: the paths are listed, nothing is marked or flagged.
     assert.deepEqual(importAutomationMarkers(defaultDraftV2(manifest), { 'album:artists': 'automatic', 'album:label': 'automatic' }),
-        { automaticPaths: ['album.artists', 'album.label'], possibleLabelEntryKeys: [], tagOnly: { artists: false, label: false } });
+        { automaticPaths: ['album.artists', 'album.label'], lookupPaths: [], possibleLabelEntryKeys: [], tagOnly: { artists: false, label: false } });
 });
 
 test('automation for a malformed project ID is idle without reading anything', async () => {

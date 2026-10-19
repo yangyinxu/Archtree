@@ -1,0 +1,99 @@
+/**
+ * Administrator metadata lookup requests behind /imports/:id/lookup: reading the allowlisted lookup view, submitting a name,
+ * retrying, choosing a candidate (or none) and answering conflicts. Each change runs inside mutateAdminImport, so it is one
+ * receipt (`lookup`, `lookup-retry`, `lookup-choose` or `lookup-resolve`) and one transaction with the lookup record: a refusal
+ * writes nothing, and a lost response replays. Bodies are bounded and shaped before their intent is fingerprinted.
+ */
+import { ObjectId, type ClientSession } from 'mongodb';
+import { AdminImportError, exact, invalidImport, objectId, record } from '../import/adminImportContract';
+import { DRAFT_V2_LIMITS, hasOwn } from '../import/adminImportDraft';
+import {
+    importCollection, importLookupRecord, importPurposeFilter, mutateAdminImport, parseAdminProjectMutation, withImportAdmin
+} from '../import/adminImportService';
+import { boundedJson, parseDraftPath } from '../import/adminImportValueState';
+import { METADATA_LOOKUP_LIMITS } from './lookupContract';
+import { importLookupView, type ImportLookupView } from './lookupView';
+import { chooseLookupCandidate, isLookupValuePath, resolveLookupConflicts } from './lookupValueApplication';
+import { adminImportLookupCollection, metadataLookupAccepted, queueMetadataLookup } from './metadataLookupService';
+import type { MetadataLookupRecord } from './metadataLookupRecord';
+
+const candidateKeyPattern = /^musicbrainz:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+/** One answer per draft value: the five album paths and three per file. */
+const maximumAnswers = 5 + 3 * 100;
+const notFound = () => new AdminImportError(404, 'ADMIN_IMPORT_NOT_FOUND');
+/** A run number and a candidate key (or null for none), both present as own properties. */
+function boundRunAndCandidate(body: Record<string, unknown>) {
+    if (!hasOwn(body, 'run') || !hasOwn(body, 'candidateKey') || !Number.isSafeInteger(body.run) || (body.run as number) < 1
+        || (body.candidateKey !== null && (typeof body.candidateKey !== 'string' || !candidateKeyPattern.test(body.candidateKey)))) invalidImport();
+    return { run: body.run as number, candidateKey: body.candidateKey as string | null };
+}
+/** Stores a record replaced by a choice or an answer for the run it was read with; any other match is a conflict. */
+async function storeLookupRecord(next: MetadataLookupRecord, session: ClientSession) {
+    const written = await adminImportLookupCollection().replaceOne({ _id: next._id, run: next.run }, next, { session });
+    if (written.matchedCount !== 1) throw new AdminImportError(409, 'ADMIN_IMPORT_REVISION_CONFLICT');
+}
+
+export type ImportLookupResponse = { lookup: ImportLookupView | null; revision: number; valueRevision: number };
+/** The import's lookup view (null before any run), its revision and its automatic-write counter. */
+export async function getAdminImportLookup(actor: string, id: string): Promise<ImportLookupResponse> {
+    if (!objectId(id)) throw notFound();
+    return withImportAdmin(actor, async session => {
+        const doc = await importCollection().findOne({ _id: new ObjectId(id), ...importPurposeFilter }, { session });
+        if (!doc) throw notFound();
+        const stored = await importLookupRecord(doc._id, session);
+        return { lookup: stored ? importLookupView(stored, doc) : null, revision: doc.revision,
+            valueRevision: Number.isSafeInteger(doc.valueRevision) && doc.valueRevision! >= 0 ? doc.valueRevision! : 0 };
+    });
+}
+
+/** `{operationId, expectedRevision, kind, text}`: looks up a submitted Album or song name, replacing the previous run. */
+export function submitAdminImportLookup(actor: string, id: string, raw: unknown) {
+    const body = parseAdminProjectMutation(raw, ['kind', 'text']);
+    if ((body.kind !== 'album' && body.kind !== 'song') || typeof body.text !== 'string' || body.text.length > METADATA_LOOKUP_LIMITS.textLength) return invalidImport();
+    const submitted = { kind: body.kind as 'album' | 'song', text: body.text };
+    return mutateAdminImport(actor, id, body, 'lookup', async (doc, session) => {
+        await queueMetadataLookup(doc, { kind: 'submit', actorId: actor, operationId: body.operationId, submitted }, session);
+    });
+}
+
+/** `{operationId, expectedRevision}`: repeats the last run's queries as a new run. */
+export function retryAdminImportLookup(actor: string, id: string, raw: unknown) {
+    const body = parseAdminProjectMutation(raw, []);
+    return mutateAdminImport(actor, id, body, 'lookup-retry', async (doc, session) => {
+        await queueMetadataLookup(doc, { kind: 'retry', actorId: actor, operationId: body.operationId }, session);
+    });
+}
+
+/** `{operationId, expectedRevision, run, candidateKey}`: applies a candidate of the current run, or none (`candidateKey: null`). */
+export function chooseAdminImportLookup(actor: string, id: string, raw: unknown) {
+    const body = parseAdminProjectMutation(raw, ['run', 'candidateKey']), { run, candidateKey } = boundRunAndCandidate(body);
+    return mutateAdminImport(actor, id, body, 'lookup-choose', async (doc, session) => {
+        if (!metadataLookupAccepted(doc)) throw new AdminImportError(409, 'ADMIN_IMPORT_LOOKUP_REFUSED');
+        const stored = await adminImportLookupCollection().findOne({ _id: doc._id }, { session });
+        await storeLookupRecord(chooseLookupCandidate(doc, stored, { run, candidateKey, actorId: actor, operationId: body.operationId }, new Date()), session);
+    });
+}
+
+/**
+ * `{operationId, expectedRevision, run, candidateKey, answers}`: answers 1 to 305 conflicts of the applied candidate, each
+ * exactly `{path, answer, base}` on a distinct lookup value path (never visibility) of this manifest, `answer` `mine` or `lookup`
+ * and `base` the value the answer was made against.
+ */
+export function resolveAdminImportLookup(actor: string, id: string, raw: unknown) {
+    const body = parseAdminProjectMutation(raw, ['run', 'candidateKey', 'answers']), { run, candidateKey } = boundRunAndCandidate(body);
+    if (!Array.isArray(body.answers) || body.answers.length < 1 || body.answers.length > maximumAnswers) return invalidImport();
+    const seen = new Set<string>();
+    const answers = body.answers.map(item => {
+        const answer = record(item); exact(answer, ['path', 'answer', 'base']);
+        if (!hasOwn(answer, 'path') || !hasOwn(answer, 'answer') || !hasOwn(answer, 'base') || !isLookupValuePath(answer.path) || seen.has(answer.path)
+            || (answer.answer !== 'mine' && answer.answer !== 'lookup') || !boundedJson(answer.base, 2, DRAFT_V2_LIMITS.bytes)) return invalidImport();
+        seen.add(answer.path);
+        return { path: answer.path, answer: answer.answer as 'mine' | 'lookup', base: answer.base };
+    });
+    return mutateAdminImport(actor, id, body, 'lookup-resolve', async (doc, session) => {
+        if (!metadataLookupAccepted(doc)) throw new AdminImportError(409, 'ADMIN_IMPORT_LOOKUP_REFUSED');
+        const parsed = answers.map(answer => ({ ...answer, path: parseDraftPath(answer.path, doc.manifest) }));
+        const stored = await adminImportLookupCollection().findOne({ _id: doc._id }, { session });
+        await storeLookupRecord(resolveLookupConflicts(doc, stored, { run, candidateKey, answers: parsed }, new Date()), session);
+    });
+}

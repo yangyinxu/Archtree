@@ -20,6 +20,7 @@
  *   - renaming an entry and retyping its saved name restores the saved entry exactly, MusicBrainz ID included
  *   - retyping a saved label's name restores its MusicBrainz ID, and a renamed label drops it
  *   - saved automatic values are marked From file tags until edited, and an automatic entry named like a company may be a label
+ *   - automatic values metadata lookup wrote are not marked From file tags, while the rest still are
  * @end-catalog */
 
 import { useState } from 'react';
@@ -41,7 +42,7 @@ function savedDraft(artists: ImportArtistEntry[], label: ImportDraftV2['album'][
   const draft = detail().draft; draft.album.artists = artists; draft.album.label = label; return draft;
 }
 /** The editor inside a form like the import page's: Save submits only when native constraint validation passes. */
-function mount(saved: ImportDraftV2, disabled = false, marks: { automaticPaths?: string[]; possibleLabels?: string[] } = {}) {
+function mount(saved: ImportDraftV2, disabled = false, marks: { automaticPaths?: string[]; lookupPaths?: string[]; possibleLabels?: string[] } = {}) {
   const submit = vi.fn(), changes = vi.fn(), state = { draft: saved };
   function Harness() {
     const [draft, setDraft] = useState(saved); state.draft = draft;
@@ -272,4 +273,16 @@ test('saved automatic values are marked From file tags until edited, and an auto
   // Editing the entries removes their marker and the possible-label note.
   await user.type(screen.getByRole('textbox', { name: '1 · Artist name' }), 's');
   expect(screen.getByRole('group', { name: 'Artists' })).toBeVisible(); expect(screen.queryByText('This name looks like a label')).toBeNull();
+});
+
+test('automatic values metadata lookup wrote are not marked From file tags, while the rest still are', () => {
+  const saved = savedDraft([artistEntry('Synthetic Records')], labelEntry('Synthetic Label')), [first] = saved.tracks;
+  saved.album.title = 'Looked-up Album'; first.title = 'Tagged One'; first.discNumber = 1;
+  const automaticPaths = ['album.title', 'album.artists', 'album.label', `tracks.${first.slotId}.title`, `tracks.${first.slotId}.discNumber`];
+  mount(saved, false, { automaticPaths, lookupPaths: ['album.title', 'album.artists', 'album.label', `tracks.${first.slotId}.discNumber`], possibleLabels: [entryKey(1)] });
+  expect(screen.getByRole('textbox', { name: 'Title' })).toHaveValue('Looked-up Album');
+  expect(screen.getByRole('group', { name: 'Artists' })).toBeVisible(); expect(screen.getByRole('textbox', { name: 'Label' })).toHaveValue('Synthetic Label');
+  expect(screen.getByRole('spinbutton', { name: '1 · Disc number' })).toHaveValue(1);
+  expect(screen.queryByText('This name looks like a label')).toBeNull();
+  expect(screen.getByRole('textbox', { name: '1 · Title · From file tags' })).toHaveValue('Tagged One');
 });

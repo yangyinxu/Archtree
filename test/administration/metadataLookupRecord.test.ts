@@ -318,7 +318,8 @@ test('a new run replaces the previous results and carries only the automatic cou
     assert.deepEqual([first.run, first.state, first.phase, first.outcome, first.automaticRuns, first.folderUsed, first.grantExpiresAt.getTime() - now.getTime(), first.fileSetDigest, first.files],
         [1, 'queued', 'search', null, 1, false, METADATA_LOOKUP_JOB_LIMITS.grantMs, fileSet.digest, fileSet.files]);
     assert.equal(startLookupRun(first, init).folderUsed, false);
-    const applied = { run: 1, candidateKey: `musicbrainz:${releaseId(1)}`, paths: ['album.title'], at: now };
+    const applied: MetadataLookupRecord['applied'] = { run: 1, candidateKey: `musicbrainz:${releaseId(1)}`, releaseId: releaseId(1), choice: 'preselected', basis: 'onlyMatchingGroup',
+        actorId: '0000000000000000000000e1', operationId: null, at: now, paths: ['album.title'], values: [{ path: 'album.title', value: 'Synthetic Album', slotId: null }], conflicts: [], flagged: [] };
     const previous: MetadataLookupRecord = { ...first, state: 'complete', candidates: mergeLookupCandidates([], [{ releaseId: releaseId(1) }], 'albumText'), staleSlotIds: [slotA], applied,
         attempts: { musicbrainz: 2 }, queryIndex: 1, folderUsed: true };
     const second = startLookupRun(previous, { ...init, automatic: false, grantSource: 'submit', queries: [], input: { trigger: 'submitted', submitted: { kind: 'album', text: 'x' } } });

@@ -1,3 +1,5 @@
+import { metadataLookupConfiguration } from '../config/metadataLookup';
+
 /** Admission flags never relax public visibility enforcement for already hidden content. */
 const enabled = (value: string | undefined) => value === 'true';
 
@@ -7,6 +9,7 @@ export const isAdminImportsEnabled = () => enabled(process.env.FINITUDE_ADMIN_IM
  * Reports capabilities, never provider secrets or organization/project identifiers.
  * Catalog editing, visibility and local conversion need only the persisted admin role checked by the caller;
  * hidden media stays private because every byte is delivered through visibility-checked server routes.
+ * Metadata lookup reports only whether it is available, never the operator contact or why it is not.
  */
 export const getAdminCapabilities = () => ({
     schemaVersion: 1 as const,
@@ -27,5 +30,8 @@ export const getAdminCapabilities = () => ({
         replace: true as const,
         preset: 'mp3-320' as const,
         maxFiles: 100
+    },
+    metadataLookup: {
+        available: metadataLookupConfiguration().available
     }
 });

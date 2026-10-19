@@ -2,21 +2,22 @@
  * Exports
  *   Types: ProjectReceipt, AdminImportDocument, AdminProjectPolicy
  *   Functions: isDraftV2Document, importCollection, isImportProject, importDigest, importCreateHash,
- *              idleAnalysis, touchImportAdmin, withImportAdmin, initializeAdminImportStorage, adminImportDto,
- *              adminImportDetail, parseAdminProjectMutation, mutateAdminProject, mutateAdminImport,
- *              createAdminImport, getAdminImport, editAdminImport, listAdminImports, analyzeAdminImport,
- *              analyzeAdminProject, cancelAdminImportAnalysis, adoptAdminImportSuggestions,
- *              adoptAdminProjectSuggestions, adminImportDuplicateCandidates, reusesOneArtistTwice,
- *              parseImportDecisions, decideAdminImportDuplicates, runAdminImportWorkerOnce,
- *              startAdminImportWorker
+ *              idleAnalysis, touchImportAdmin, withImportAdmin, importLookupRecord,
+ *              initializeAdminImportStorage, adminImportDto, adminImportDetail, parseAdminProjectMutation,
+ *              mutateAdminProject, mutateAdminImport, createAdminImport, getAdminImport, editAdminImport,
+ *              listAdminImports, analyzeAdminImport, analyzeAdminProject, cancelAdminImportAnalysis,
+ *              adoptAdminImportSuggestions, adoptAdminProjectSuggestions, adminImportDuplicateCandidates,
+ *              reusesOneArtistTwice, parseImportDecisions, decideAdminImportDuplicates,
+ *              runAdminImportWorkerOnce, startAdminImportWorker
  *   Constants: importPurposeFilter, adminImportIndexes
  *   Re-exports: importCandidateProjection, importCandidateRevision
  * Internal
  *   Types: Receipt, Chunk, Analysis
  *   Functions: notFound, conflict, isActive, admit, idValue, importCapabilities, response, outdatedDecisions,
  *              revisionFloor, suggestionPath, acceptDraftV2Suggestion, boundedTags, reserveDailyAnalysisAttempt
- *   Constants: collection, digest, occupiedAnalysis, touchAdmin, withAdmin, importPolicy, mutation,
- *              slotBoundKinds, importRevisionFloors, readOnlyProjectKinds, mutate, filters
+ *   Constants: collection, digest, occupiedAnalysis, touchAdmin, withAdmin, IMPORT_V2_RECEIPT_KINDS,
+ *              importPolicy, mutation, slotBoundKinds, importRevisionFloors, readOnlyProjectKinds, mutate,
+ *              filters
  * @end-catalog */
 
 import { startAdminWorker, type AdminWorkTracker } from '../adminWorkerLifecycle';
@@ -32,7 +33,8 @@ import { importDraftV2FromV1, importDraftV2View, importDraftVersion, importDraft
 import { DRAFT_V2, DRAFT_V2_LIMITS, defaultDraftV2, draftBytes, draftV2Suggestion, hasOwn, importApprovalDigest, isDraftV2, retainBoundDecisions, sameDraftValue, type ImportDecisionV2, type ImportDraftOrigins, type ImportDraftV2, type ImportSuggestionV2 } from './adminImportDraft';
 import { applyAdministratorChanges, boundDraftChanges, boundedJson, convertLegacyImportProject, draftValueAt, draftWithinSizeLimit, importAutomationMarkers, markAdministratorValues, originOf, parseDraftChanges, parseDraftValue, setDraftValue, storedDraftV2, type ImportDraftPath } from './adminImportValueState';
 import { importTagsV2View } from './adminImportTags';
-import type { ImportLookupGate } from '../lookup/metadataLookupRecord';
+import { ADMIN_IMPORT_LOOKUP_COLLECTION } from '../lookup/lookupContract';
+import type { ImportLookupGate, MetadataLookupRecord } from '../lookup/metadataLookupRecord';
 import { IMPORT_CANDIDATE_COLLECTIONS, IMPORT_IDENTITY_FENCE_ID, importCandidateProjection, importCandidateRevision, importCandidateRow, importIdentityCandidates, readyImportCandidate } from './adminImportIdentity';
 
 export type ProjectReceipt = Omit<ImportReceipt, 'kind'> & { kind: ImportReceipt['kind'] | 'apply' } & { actorId: string; hash: string; at: Date; selection?: { generation: number; acceptedIds: string[]; rejectedIds: string[] } };
@@ -103,6 +105,15 @@ export async function withImportAdmin<T>(actorId: string, work: (session: Client
 }
 const withAdmin = withImportAdmin;
 
+/**
+ * The import's metadata lookup record, read in the caller's transaction (only the given fields when a projection is passed). It
+ * names the collection directly, so this module never loads the lookup service.
+ */
+export const importLookupRecord = (id: ObjectId, session: ClientSession, projection?: Record<string, 1>) =>
+    getDb()!.collection<MetadataLookupRecord>(ADMIN_IMPORT_LOOKUP_COLLECTION).findOne({ _id: id }, projection ? { session, projection } : { session }) as Promise<MetadataLookupRecord | null>;
+/** Receipt kinds the Draft v2 detail lists: the frozen v1 kinds and the metadata lookup kinds. */
+const IMPORT_V2_RECEIPT_KINDS: ReadonlySet<string> = new Set([...LEGACY_IMPORT_RECEIPT_KINDS, 'lookup', 'lookup-retry', 'lookup-choose', 'lookup-resolve']);
+
 /** Required indexes are exported so startup uses the repository's central index verifier. */
 export const adminImportIndexes = [
     { collection: 'adminAlbumImports', keys: { purpose: 1, createdAt: -1, _id: -1 }, options: { name: 'admin_project_purpose_inventory' }, required: true },
@@ -143,27 +154,34 @@ function importCapabilities(doc: AdminImportDocument, writable: boolean, provide
 /**
  * The import editor's Draft v2 projection: the v1 projection with an allowlisted Draft v2 draft and suggestions, only the
  * decisions still bound to their entry or label (each with its entryKey and bound name), every published identity, assets with
- * the version-2 tag view, the automatic value markers (paths, possible-label entries and `valueRevision`) and the approvalDigest
- * of what an approval confirmation shows from it (a publish body echoes it). A format this release does not know shows the
- * best-effort allowlist, whose decisions name no entry, marks nothing automatic and offers no work.
+ * the version-2 tag view, the automatic value markers (paths, possible-label entries and `valueRevision`; values the applied
+ * lookup candidate wrote, read from `lookup`, are listed in `lookupPaths` and never rest on file tags alone), receipts including
+ * the lookup kinds, and the
+ * approvalDigest of what an approval confirmation shows from it (a publish body echoes it). A format this release does not know
+ * shows the best-effort allowlist, whose decisions name no entry, marks nothing automatic and offers no work.
  */
-export function adminImportDetail(doc: AdminImportDocument, actorId: string, providerAvailable = Boolean(process.env.OPENAI_API_KEY?.trim())): AdminImportDetailV2 {
+export function adminImportDetail(doc: AdminImportDocument, actorId: string, providerAvailable = Boolean(process.env.OPENAI_API_KEY?.trim()),
+    lookup: Pick<MetadataLookupRecord, 'applied'> | null = null): AdminImportDetailV2 {
     const { draft: _draft, suggestions: _suggestions, decisions: legacyDecisions, published: _published, assets: _assets, ...item } = adminImportDto(doc, actorId, providerAvailable), id = doc._id.toHexString(), slots = new Set(item.manifest.files.map(file => file.slotId));
     const view = importProjectV2View(doc), draft = importDraftV2View(doc.draft, item.manifest, id), assets = legacyAssetsView(doc.media?.assets, slots, actorId, importTagsV2View);
-    const { automaticPaths, possibleLabelEntryKeys, tagOnly } = importAutomationMarkers(draft, view?.draftOrigins);
+    const lookupValues = lookup?.applied && typeof lookup.applied === 'object' && Array.isArray(lookup.applied.values) ? lookup.applied.values : [];
+    const { automaticPaths, lookupPaths, possibleLabelEntryKeys, tagOnly } = importAutomationMarkers(draft, view?.draftOrigins, lookupValues);
     const stored = view?.decisions.filter((decision): decision is ImportDecisionV2 => Boolean(decision) && typeof decision === 'object');
     const decisions = stored ? importDecisionsV2View(retainBoundDecisions(stored, draft), slots) : legacyDecisions.map(decision => ({ ...decision, entryKey: null, boundName: null }));
     return {
         ...item, draft, suggestions: importSuggestionsV2View(doc.suggestions, item.analysis.generation, slots, id), decisions, assets,
+        receipts: legacyReceiptsView([...doc.receipts, ...(doc.recoveryReceipts ?? [])].sort((a, b) => a.revision - b.revision).slice(-LIMITS.receipts), IMPORT_V2_RECEIPT_KINDS) as ImportReceipt[],
         published: importPublishedV2View(doc.media?.publication),
         capabilities: importCapabilities(doc, importDraftWritable(doc), providerAvailable),
-        valueRevision: Number.isSafeInteger(doc.valueRevision) && doc.valueRevision! >= 0 ? doc.valueRevision! : 0, automaticPaths, possibleLabelEntryKeys,
+        valueRevision: Number.isSafeInteger(doc.valueRevision) && doc.valueRevision! >= 0 ? doc.valueRevision! : 0, automaticPaths, lookupPaths, possibleLabelEntryKeys,
         approvalDigest: importApprovalDigest({ draft, decisions, selectedCoverSlotId: item.selectedCoverSlotId, assets, tagOnly })
     };
 }
-const response = (doc: AdminImportDocument, actor: string, receipt: ProjectReceipt | null = null): AdminImportResponse => {
+/** An import response; inside a transaction it reads the applied lookup values the automatic markers and the digest exclude. */
+const response = async (doc: AdminImportDocument, actor: string, receipt: ProjectReceipt | null = null, session?: ClientSession): Promise<AdminImportResponse> => {
     if (!isImportProject(doc) || receipt?.kind === 'apply') throw notFound();
-    return { item: adminImportDetail(doc, actor), receipt: receipt ? { operationId: receipt.operationId, kind: receipt.kind, revision: receipt.revision } : null };
+    const lookup = session ? await importLookupRecord(doc._id, session, { applied: 1 }) : null;
+    return { item: adminImportDetail(doc, actor, undefined, lookup), receipt: receipt ? { operationId: receipt.operationId, kind: receipt.kind, revision: receipt.revision } : null };
 };
 /** A decision item without entryKey or boundName comes from an editor that predates per-entry decisions or bound names. */
 const outdatedDecisions = (body: Record<string, unknown>) => Array.isArray(body.decisions)
@@ -185,12 +203,16 @@ const slotBoundKinds: ReadonlySet<Receipt['kind']> = new Set(['upload']);
  * approvalDigest and an adoption the generation and each suggestion's baseline; decisions bind each bound name and the last
  * saved decisions, a cover selection the last cover change, and stopping analysis the generation its analysis receipt started.
  * Every other kind (analysis, staged cleanup, publication cancellation) binds the last administrator receipt of any kind. Luna
- * ticks, upload transfers, publication-worker checkpoints and tag automation add no receipt, so they never make a change stale,
+ * ticks, upload transfers, publication-worker checkpoints, tag automation and automatic lookup runs and applications add no
+ * receipt, so they never make a change stale,
  * while another administrator's change of what it binds still does. `expectedRevision` stays required, in every intent's
  * fingerprint and never above the current revision.
  */
 const importRevisionFloors: ReadonlyMap<Receipt['kind'], readonly Receipt['kind'][]> = new Map<Receipt['kind'], Receipt['kind'][]>([
     ['upload', []], ['edit', []], ['publish', []], ['adopt', []],
+    // Lookup requests bind their own state (a submission replaces the run, a resolve binds the run, candidate and bases), and a
+    // retry or a choice also must not predate another lookup submission, retry or choice, which would replace what it acts on.
+    ['lookup', []], ['lookup-retry', ['lookup', 'lookup-retry', 'lookup-choose']], ['lookup-choose', ['lookup', 'lookup-retry', 'lookup-choose']], ['lookup-resolve', []],
     ['decisions', ['decisions', 'publish']], ['select-cover', ['select-cover', 'publish', 'cleanup']], ['cancel-analysis', ['analyze']]
 ]);
 /** The lowest `expectedRevision` a change of `kind` admits (importRevisionFloors; catalog reviews: the last ordinary receipt). */
@@ -250,14 +272,14 @@ export async function createAdminImport(actor: string, raw: unknown): Promise<Ad
     const draft = requested ? importDraftV2FromV1(requested, _id.toHexString()) : defaultDraftV2(manifest), draftOrigins = requested ? legacyAdministratorOrigins(draft) : {};
     return withAdmin(actor, async session => {
         const previous = await collection().findOne({ _id }, { session });
-        if (previous) { if (!isImportProject(previous)) throw notFound(); const receipt = previous.receipts[0]; if (receipt.hash !== hash || receipt.actorId !== actor) throw conflict('ADMIN_IMPORT_OPERATION_CONFLICT'); return response(previous, actor, receipt); }
+        if (previous) { if (!isImportProject(previous)) throw notFound(); const receipt = previous.receipts[0]; if (receipt.hash !== hash || receipt.actorId !== actor) throw conflict('ADMIN_IMPORT_OPERATION_CONFLICT'); return response(previous, actor, receipt, session); }
         admit();
         const now = new Date(), receipt: Receipt = { operationId, kind: 'create', revision: 1, hash, actorId: actor, at: now };
         const doc: AdminImportDocument = { _id, draftVersion: DRAFT_V2, actorId: actor, revision: 1, createdAt: now, updatedAt: now, manifest, draft, draftOrigins, analysis: idleAnalysis(), analysisHistory: [], attemptsUsed: 0, suggestions: [], decisions: [], receipts: [receipt] };
-        await collection().insertOne(doc, { session }); return response(doc, actor, receipt);
+        await collection().insertOne(doc, { session }); return response(doc, actor, receipt, session);
     });
 }
-export const getAdminImport = (actor: string, id: string) => withAdmin(actor, async session => { const doc = await collection().findOne({ _id: idValue(id), ...importPurposeFilter }, { session }); if (!doc) throw notFound(); return response(doc, actor); });
+export const getAdminImport = (actor: string, id: string) => withAdmin(actor, async session => { const doc = await collection().findOne({ _id: idValue(id), ...importPurposeFilter }, { session }); if (!doc) throw notFound(); return response(doc, actor, null, session); });
 /**
  * A field save `{operationId, expectedRevision, changes}` writes only the values the administrator changed. A whole-draft save
  * from an editor that predates Draft v2 is refused with a reload request right after receipt lookup (mutateAdminProject), so

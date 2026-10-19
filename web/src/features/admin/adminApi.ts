@@ -10,8 +10,11 @@ export type { AdminGuard } from './adminTransport';
 const id = z.string().regex(/^[a-f0-9]{24}$/);
 const uuid = z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
 const integer = z.number().int().nonnegative();
+/** Draft value paths in draft order: 5 album values and 3 per file. */
+const draftPaths = z.array(z.string().max(80)).max(305).default([]);
 export const manifestSchema = z.object({ rootLabel: z.string().max(200), files: z.array(z.object({ slotId: uuid, filename: z.string().max(255), relativePath: z.string().max(1024), byteLength: integer.nullable() }).strict()).min(1).max(100) }).strict();
-const receiptSchema = z.object({ operationId: uuid, kind: z.enum(['create', 'edit', 'analyze', 'adopt', 'decisions', 'cancel-analysis', 'cancel-publication', 'upload', 'publish', 'cleanup', 'select-cover']), revision: integer }).strict();
+const receiptSchema = z.object({ operationId: uuid, kind: z.enum(['create', 'edit', 'analyze', 'adopt', 'decisions', 'cancel-analysis', 'cancel-publication', 'upload', 'publish', 'cleanup', 'select-cover',
+  'lookup', 'lookup-retry', 'lookup-choose', 'lookup-resolve']), revision: integer }).strict();
 /** One identity decision: an Artist decision names its entry (entryKey) and both it and a label decision the name they were made for (boundName). */
 export const decisionSchema = z.object({ scope: z.enum(['artist', 'label', 'album', 'track']), slotId: uuid.nullable(), entryKey: uuid.nullable(), boundName: z.string().max(200).nullable(), action: z.enum(['reuse', 'skip', 'create-distinct']), candidateId: id.nullable(), candidateRevision: z.string().nullable() }).strict();
 const upload = z.object({ ready: integer, total: integer, available: z.boolean() }).strict();
@@ -33,8 +36,9 @@ export const detailSchema = z.object({ ...common, manifest: manifestSchema, draf
   capabilities: z.object({ analysis: z.boolean(), upload: z.boolean(), publish: z.boolean() }).strict(), receipts: z.array(receiptSchema).max(256),
   // The server's digest of what an approval confirmation shows from this saved project; a publish body echoes it.
   approvalDigest: z.string().regex(/^[a-f0-9]{64}$/),
-  // Automatic writes from file tags (never a revision), the paths they wrote and not yet reviewed, and entries named like a label.
-  valueRevision: integer.default(0), automaticPaths: z.array(z.string().max(80)).max(305).default([]), possibleLabelEntryKeys: z.array(uuid).max(20).default([])
+  // Automatic writes from file tags or metadata lookup (never a revision), the paths they wrote and not yet reviewed (those resting on
+  // the applied lookup candidate also in lookupPaths, so only the rest rest on file tags), and entries named like a label.
+  valueRevision: integer.default(0), automaticPaths: draftPaths, lookupPaths: draftPaths, possibleLabelEntryKeys: z.array(uuid).max(20).default([])
 }).strict().superRefine((item, ctx) => {
   if (item.publication === 'cancelled' && item.publicationRecovery === null || item.publicationRecovery?.cleanupPending && item.publication !== 'cancelled') ctx.addIssue({ code: 'custom', message: 'Invalid publication recovery' });
   const slots = new Set(item.manifest.files.map(file => file.slotId));

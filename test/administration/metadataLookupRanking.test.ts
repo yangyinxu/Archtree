@@ -20,6 +20,8 @@
  *   - a fetched release with another ID is incomplete, and a duplicate key keeps its complete entry in either order
  *   - a shared catalogue number preselects case-insensitively, and an identifier rule without exactly one matching hit falls through
  *   - an unverified candidate is never preselected, even by its own release ID
+ *   - a repeated credit keeps only its first entry, by MusicBrainz artist or by folded name, and a dropped entry moves no join phrase
+ *   - each file takes the candidate track at its ranking position: by Disc and Track Number, else by upload order, and nothing on a count mismatch
  * @end-catalog */
 
 import assert from 'node:assert/strict';
@@ -28,7 +30,7 @@ import path from 'node:path';
 import { after, test } from 'node:test';
 import type { MusicBrainzRelease } from '../../src/administration/lookup/lookupContract';
 import {
-    legacyDurationEvidence, proposalForRelease, rankLookupCandidates, type LocalFileEvidence, type LookupCandidate
+    legacyDurationEvidence, lookupTrackAssignment, proposalForRelease, rankLookupCandidates, type LocalFileEvidence, type LookupCandidate
 } from '../../src/administration/lookup/lookupRanking';
 import { parseMusicBrainzRelease } from '../../src/administration/lookup/musicBrainzClient';
 import { fixtureRoot, loadLookupFixture } from '../support/metadataLookupFixtures';
@@ -330,4 +332,46 @@ test('an unverified candidate is never preselected, even by its own release ID',
     const ranked = rankLookupCandidates([candidate(single)], [{ slotId: 'only', order: 0, durationMs: 217_000, durationPrecisionMs: 0, discNumber: null,
         trackNumber: null, artistTags: [], identifiers: { ...noIdentifiers, releaseId: single.releaseId } }]);
     assert.equal(ranked.candidates[0].status, 'unverified'); assert.equal(ranked.preselection, null); assert.deepEqual(ranked.groups, []);
+});
+
+test('a repeated credit keeps only its first entry, by MusicBrainz artist or by folded name, and a dropped entry moves no join phrase', () => {
+    const single = structuredClone(release('5302459e'));
+    const id = (n: number) => `00000000-0000-4000-8000-00000000000${n}`;
+    single.artistCredit = [
+        { name: 'Lead', joinPhrase: ' & ', artistId: id(1), artistName: 'Lead' },
+        { name: 'Lead (alias)', joinPhrase: ' with ', artistId: id(1).toUpperCase(), artistName: 'Lead' },
+        { name: 'Second', joinPhrase: ' feat. ', artistId: id(2), artistName: 'Second' },
+        { name: ' LEAD ', joinPhrase: ', ', artistId: id(3), artistName: 'Other Lead' },
+        { name: 'Guest', joinPhrase: '', artistId: id(4), artistName: 'Guest' }
+    ];
+    assert.deepEqual(proposalForRelease(single).artists, [
+        { name: 'Lead', role: 'primary', joinPhrase: ' & ' }, { name: 'Second', role: 'primary', joinPhrase: ' feat. ' }, { name: 'Guest', role: 'featured', joinPhrase: null }]);
+    // Two releases that differ only by a repeated credit propose the same values, so they group together.
+    const plain = structuredClone(single);
+    plain.artistCredit = [single.artistCredit[0], single.artistCredit[2], single.artistCredit[4]];
+    assert.deepEqual(proposalForRelease(plain), proposalForRelease(single));
+});
+
+test('each file takes the candidate track at its ranking position: by Disc and Track Number, else by upload order, and nothing on a count mismatch', () => {
+    const cd = release('8baecda4');
+    const byNumbers = filesFrom(cd, { discs: true }).reverse().map((file, index) => ({ ...file, order: index }));
+    const assigned = lookupTrackAssignment(cd, byNumbers)!;
+    assert.equal(assigned.length, 39);
+    // Ordered by the local Disc and Track Numbers, whatever the upload order.
+    assert.deepEqual(assigned.slice(0, 2).map(track => track.slotId), ['slot-00', 'slot-01']);
+    assert.deepEqual(assigned[20], { slotId: 'slot-20', discNumber: 2, trackNumber: 1, title: cd.media[1].tracks[0].title });
+    // Without Disc Numbers and with Track Numbers restarting per disc, upload order alone decides.
+    const byUpload = filesFrom(cd).map(file => ({ ...file, discNumber: null }));
+    const reversedUpload = [...byUpload].reverse().map((file, index) => ({ ...file, order: index }));
+    assert.deepEqual(lookupTrackAssignment(cd, reversedUpload)!.map(track => track.slotId), reversedUpload.map(file => file.slotId));
+    assert.deepEqual(lookupTrackAssignment(cd, reversedUpload)!.map(track => [track.discNumber, track.trackNumber]),
+        proposalForRelease(cd).tracks.map(track => [track.discNumber, track.trackNumber]));
+    // Unknown numbers sort last, then by upload order.
+    const partial = filesFrom(hotelBase).map((file, index) => ({ ...file, trackNumber: index < 2 ? null : file.trackNumber }));
+    assert.deepEqual(lookupTrackAssignment(hotelBase, partial)!.map(track => track.slotId).slice(-2), ['slot-00', 'slot-01']);
+    assert.equal(lookupTrackAssignment(hotelBase, filesFrom(hotelBase).slice(1)), null);
+    assert.equal(lookupTrackAssignment(release('5302459e'), []), null);
+    // A medium without tracks is skipped, as the comparison and the proposal skip it.
+    const withDvd: MusicBrainzRelease = { ...structuredClone(hotelBase), media: [{ position: 1, format: 'DVD', tracks: [] }, { ...hotelBase.media[0], position: 2 }] };
+    assert.ok(lookupTrackAssignment(withDvd, filesFrom(hotelBase))!.every(track => track.discNumber === 1));
 });

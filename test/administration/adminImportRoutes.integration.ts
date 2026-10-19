@@ -14,6 +14,8 @@
  *   - a field save accepts a body up to 160 KB while other import bodies keep the 96 KB limit
  *   - a field save bounds each base and value to a draft value before its intent is fingerprinted, writing nothing
  *   - an approval body up to 192 KB is parsed, its fields are bounded before the fingerprint, and an outdated or stale approval gets a bounded code
+ *   - metadata lookup routes guard authentication and the current admin before parsing, are no-store and bounded, and refuse malformed bodies without writing
+ *   - configured lookup routes answer a submission and a retry with 202 receipts that replay, a choice and the view with 200, and refusals with bounded codes
  * @end-catalog */
 
 import assert from 'node:assert/strict';
@@ -49,7 +51,7 @@ before(async () => {
 });
 beforeEach(async () => {
     objects.clear(); failHead = false; process.env.FINITUDE_ADMIN_IMPORTS_ENABLED = 'true'; delete process.env.OPENAI_API_KEY; delete process.env.FINITUDE_ADMIN_IMPORT_PRIVATE_STORAGE_READY;
-    for (const name of ['users', 'authSessions', 'adminAlbumImports', 'adminImportAnalysisSlots']) await getDb()!.collection(name).deleteMany({});
+    for (const name of ['users', 'authSessions', 'adminAlbumImports', 'adminImportAnalysisSlots', 'adminImportLookups']) await getDb()!.collection(name).deleteMany({});
     await getDb()!.collection('users').insertMany([{ _id: actor, role: 'admin', email: 'routes-admin@example.test' }, { _id: ordinary, role: 'user', email: 'routes-user@example.test' }]);
     await getDb()!.collection('authSessions').insertMany([{ _id: session, userId: actor.toHexString(), refreshTokenHash: 'synthetic', expiresAt: new Date(Date.now() + 600000) }, { _id: otherSession, userId: ordinary.toHexString(), refreshTokenHash: 'synthetic-other', expiresAt: new Date(Date.now() + 600000) }]);
     const sign = (userId: ObjectId, sessionId: ObjectId) => jwt.sign({ userId: userId.toHexString(), email: userId.equals(actor) ? 'routes-admin@example.test' : 'routes-user@example.test', sessionId: sessionId.toHexString(), tokenType: 'access' }, process.env.JWT_SECRET!, { expiresIn: 600 }); token = sign(actor, session); userToken = sign(ordinary, otherSession); await initializeAdminImportStorage(getDb()!);
@@ -198,4 +200,103 @@ test('an approval body up to 192 KB is parsed, its fields are bounded before the
     // The current basis passes the digest and reaches the draft checks.
     const incomplete = await request(publish, 'POST', approval()); assert.equal(incomplete.status, 400); assert.deepEqual(await incomplete.json(), { code: 'ADMIN_IMPORT_DRAFT_INCOMPLETE' });
     assert.deepEqual(await imports.findOne({ _id: new ObjectId(created.item.id) }), before);
+});
+
+test('metadata lookup routes guard authentication and the current admin before parsing, are no-store and bounded, and refuse malformed bodies without writing', async () => {
+    delete process.env.FINITUDE_ADMIN_METADATA_LOOKUP_CONTACT;
+    const created = await (await request('/api/admin/v1/imports', 'POST', body())).json(), path = `/api/admin/v1/imports/${created.item.id}/lookup`;
+    const imports = getDb()!.collection('adminAlbumImports'), before = await imports.findOne({ _id: new ObjectId(created.item.id) });
+    const routes: [string, string][] = [[path, 'GET'], [path, 'POST'], [`${path}/retry`, 'POST'], [`${path}/choose`, 'POST'], [`${path}/resolve`, 'POST']];
+    for (const [route, method] of routes) {
+        const raw = method === 'GET' ? undefined : '{broken';
+        const unauthenticated = await request(route, method, raw, ''); assert.equal(unauthenticated.status, 401, route); assert.equal(unauthenticated.headers.get('cache-control'), 'no-store');
+        const ordinaryUser = await request(route, method, raw, userToken); assert.equal(ordinaryUser.status, 403, route); assert.equal(ordinaryUser.headers.get('cache-control'), 'no-store');
+        if (raw) assert.equal((await request(route, method, raw)).status, 400, route);
+    }
+    const read = await request(path); assert.equal(read.status, 200); assert.equal(read.headers.get('cache-control'), 'no-store');
+    assert.deepEqual(await read.json(), { lookup: null, revision: 1, valueRevision: 0 });
+    assert.equal((await request('/api/admin/v1/imports/not-an-id/lookup')).status, 404);
+    const review = await (await request('/api/admin/v1/imports', 'POST', body())).json();
+    await imports.updateOne({ _id: new ObjectId(review.item.id) }, { $set: { purpose: 'catalogReview' } });
+    const hidden = await request(`/api/admin/v1/imports/${review.item.id}/lookup`); assert.equal(hidden.status, 404); assert.deepEqual(await hidden.json(), { code: 'ADMIN_IMPORT_NOT_FOUND' });
+    // Submissions, retries and choices are a few fields: 9 KB is too large. Conflict answers keep the 96 KB limit.
+    const intent = () => ({ operationId: randomUUID(), expectedRevision: 1 }), padding = 'p'.repeat(9 * 1024);
+    for (const route of [path, `${path}/retry`, `${path}/choose`]) assert.equal((await request(route, 'POST', { ...intent(), padding })).status, 413, route);
+    // Express routes ignore case, and so does the 8 KB limit: a case-changed path never gets the 96 KB parser.
+    const upper = path.replace(/lookup$/, 'LOOKUP');
+    for (const route of [upper, `${upper}/CHOOSE`, `${path.replace(/lookup$/, 'Lookup')}/Retry`]) assert.equal((await request(route, 'POST', { ...intent(), padding })).status, 413, route);
+    const answers = (base: unknown, count = 1) => Array.from({ length: count }, (_unused, index) => ({ path: index ? `album.title${index}` : 'album.label', answer: 'mine', base }));
+    const large = await request(`${path}/resolve`, 'POST', { ...intent(), run: 1, candidateKey: `musicbrainz:${'0'.repeat(8)}-0000-4000-8000-${'0'.repeat(12)}`, answers: answers('b'.repeat(40_000)) });
+    assert.equal(large.status, 409); assert.deepEqual(await large.json(), { code: 'ADMIN_IMPORT_LOOKUP_STALE' });
+    assert.equal((await request(`${path}/resolve`, 'POST', { ...intent(), run: 1, candidateKey: null, answers: answers('b'.repeat(100_000)) })).status, 413);
+    const invalid = async (route: string, value: unknown) => { const response = await request(route, 'POST', value); assert.equal(response.status, 400, JSON.stringify(value).slice(0, 80)); assert.deepEqual(await response.json(), { code: 'ADMIN_IMPORT_INVALID_INPUT' }); };
+    const key = `musicbrainz:0000000b-0000-4000-8000-000000000001`;
+    for (const value of [{ ...intent(), kind: 'artist', text: 'Name' }, { ...intent(), kind: 'album', text: 7 }, { ...intent(), kind: 'album', text: 'x'.repeat(1001) }, { ...intent(), kind: 'album' },
+        { ...intent(), kind: 'album', text: 'Name', extra: true }, { operationId: 'not-a-uuid', expectedRevision: 1, kind: 'album', text: 'Name' }]) await invalid(path, value);
+    await invalid(`${path}/retry`, { ...intent(), kind: 'album' });
+    for (const value of [{ ...intent(), run: 0, candidateKey: null }, { ...intent(), run: 1.5, candidateKey: null }, { ...intent(), run: 1 }, { ...intent(), run: 1, candidateKey: 'itunes:1' },
+        { ...intent(), run: 1, candidateKey: key.toUpperCase() }, { ...intent(), run: 1, candidateKey: null, padding: 1 }]) await invalid(`${path}/choose`, value);
+    const answer = { path: 'album.label', answer: 'mine', base: null };
+    for (const value of [{ ...intent(), run: 1, candidateKey: key, answers: [] }, { ...intent(), run: 1, candidateKey: key, answers: [answer, answer] },
+        { ...intent(), run: 1, candidateKey: key, answers: [{ ...answer, answer: 'theirs' }] }, { ...intent(), run: 1, candidateKey: key, answers: [{ path: 'album.label', answer: 'mine' }] },
+        { ...intent(), run: 1, candidateKey: key, answers: [{ ...answer, extra: 1 }] }, { ...intent(), run: 1, candidateKey: key, answers: [{ ...answer, base: [[['too deep']]] }] },
+        { ...intent(), run: 1, candidateKey: key, answers: [{ ...answer, path: 'x'.repeat(81) }] }, { ...intent(), run: 1, candidateKey: key, answers: answers(null, 306) },
+        { ...intent(), run: 1, candidateKey: key, answers: [{ ...answer, path: 'album.visibility' }] }]) await invalid(`${path}/resolve`, value);
+    assert.deepEqual(await imports.findOne({ _id: new ObjectId(created.item.id) }), before);
+    // Unconfigured lookup is unavailable; a choice without a run is stale. Neither writes anything.
+    for (const route of [path, `${path}/retry`]) {
+        const unavailable = await request(route, 'POST', { ...intent(), ...(route === path ? { kind: 'album', text: 'Synthetic Album' } : {}) });
+        assert.equal(unavailable.status, 503, route); assert.deepEqual(await unavailable.json(), { code: 'ADMIN_IMPORT_LOOKUP_UNAVAILABLE' });
+    }
+    const stale = await request(`${path}/choose`, 'POST', { ...intent(), run: 1, candidateKey: null }); assert.equal(stale.status, 409); assert.deepEqual(await stale.json(), { code: 'ADMIN_IMPORT_LOOKUP_STALE' });
+    assert.deepEqual(await imports.findOne({ _id: new ObjectId(created.item.id) }), before);
+    assert.equal(await getDb()!.collection('adminImportLookups').countDocuments({}), 0);
+});
+
+test('configured lookup routes answer a submission and a retry with 202 receipts that replay, a choice and the view with 200, and refusals with bounded codes', async () => {
+    process.env.FINITUDE_ADMIN_METADATA_LOOKUP_CONTACT = 'lookup-operator@example.test';
+    try {
+        const created = await (await request('/api/admin/v1/imports', 'POST', body())).json(), path = `/api/admin/v1/imports/${created.item.id}/lookup`;
+        const _id = new ObjectId(created.item.id), lookups = getDb()!.collection('adminImportLookups');
+        const refused = async (route: string, value: unknown, status: number, code: string) => {
+            const response = await request(route, 'POST', value); assert.equal(response.status, status, code); assert.deepEqual(await response.json(), { code });
+        };
+        await refused(`${path}/retry`, { operationId: randomUUID(), expectedRevision: 1 }, 409, 'ADMIN_IMPORT_LOOKUP_NOTHING_TO_RETRY');
+        await refused(path, { operationId: randomUUID(), expectedRevision: 1, kind: 'album', text: 'https://example.invalid/album' }, 400, 'ADMIN_IMPORT_LOOKUP_INVALID_NAME');
+        assert.equal(await lookups.countDocuments({}), 0);
+        const submission = { operationId: randomUUID(), expectedRevision: 1, kind: 'album', text: 'Synthetic Album' };
+        const submitted = await request(path, 'POST', submission); assert.equal(submitted.status, 202); assert.equal(submitted.headers.get('cache-control'), 'no-store');
+        const admitted = await submitted.json();
+        assert.deepEqual([admitted.receipt, admitted.item.receipts.at(-1)], [{ operationId: submission.operationId, kind: 'lookup', revision: 2 }, { operationId: submission.operationId, kind: 'lookup', revision: 2 }]);
+        const replay = await request(path, 'POST', submission); assert.equal(replay.status, 202); assert.deepEqual(await replay.json(), admitted);
+        // The view of the queued run is allowlisted; a run that may be sending refuses a retry and a choice.
+        const read = await request(path); assert.equal(read.status, 200);
+        const shown = await read.json();
+        assert.deepEqual([shown.revision, shown.valueRevision, shown.lookup.run, shown.lookup.state, shown.lookup.input, shown.lookup.applied, shown.lookup.blocking],
+            [2, 0, 1, 'queued', { trigger: 'submitted', submitted: { kind: 'album', text: 'Synthetic Album' } }, null, true]);
+        assert.equal(JSON.stringify(shown).includes('lookup-operator'), false);
+        await refused(`${path}/retry`, { operationId: randomUUID(), expectedRevision: 2 }, 409, 'ADMIN_IMPORT_LOOKUP_ACTIVE');
+        await refused(`${path}/choose`, { operationId: randomUUID(), expectedRevision: 2, run: 1, candidateKey: null }, 409, 'ADMIN_IMPORT_LOOKUP_STALE');
+        await lookups.updateOne({ _id }, { $set: { state: 'unavailable', issue: 'sourceUnavailable' } });
+        const retried = await request(`${path}/retry`, 'POST', { operationId: randomUUID(), expectedRevision: 2 }); assert.equal(retried.status, 202);
+        assert.deepEqual([(await retried.json()).receipt.kind, (await lookups.findOne({ _id }))!.run], ['lookup-retry', 2]);
+        // None for the finished current run is a 200 choice; an answer without an applied candidate is stale.
+        await lookups.updateOne({ _id }, { $set: { state: 'unavailable', issue: 'sourceUnavailable' } });
+        const none = await request(`${path}/choose`, 'POST', { operationId: randomUUID(), expectedRevision: 3, run: 2, candidateKey: null });
+        assert.equal(none.status, 200); assert.equal(none.headers.get('cache-control'), 'no-store');
+        assert.deepEqual([(await none.json()).receipt.kind, (await lookups.findOne({ _id }))!.applied.choice], ['lookup-choose', 'none']);
+        const key = `musicbrainz:0000000b-0000-4000-8000-000000000001`;
+        await refused(`${path}/resolve`, { operationId: randomUUID(), expectedRevision: 4, run: 2, candidateKey: key, answers: [{ path: 'album.label', answer: 'mine', base: null }] },
+            409, 'ADMIN_IMPORT_LOOKUP_STALE');
+        assert.deepEqual((await (await request(`/api/admin/v1/imports/${created.item.id}`)).json()).item.receipts.map((receipt: { kind: string }) => receipt.kind),
+            ['create', 'lookup', 'lookup-retry', 'lookup-choose']);
+        // A catalog review is no import project: every lookup change is not found there, writing nothing.
+        const review = await (await request('/api/admin/v1/imports', 'POST', body())).json();
+        await getDb()!.collection('adminAlbumImports').updateOne({ _id: new ObjectId(review.item.id) }, { $set: { purpose: 'catalogReview' } });
+        const reviewPath = `/api/admin/v1/imports/${review.item.id}/lookup`;
+        for (const [route, value] of [[reviewPath, { kind: 'album', text: 'Synthetic Album' }], [`${reviewPath}/retry`, {}], [`${reviewPath}/choose`, { run: 1, candidateKey: null }],
+            [`${reviewPath}/resolve`, { run: 1, candidateKey: key, answers: [{ path: 'album.label', answer: 'mine', base: null }] }]] as const)
+            await refused(route, { operationId: randomUUID(), expectedRevision: 1, ...value }, 404, 'ADMIN_IMPORT_NOT_FOUND');
+        assert.equal(await lookups.countDocuments({ _id: new ObjectId(review.item.id) }), 0);
+    } finally { delete process.env.FINITUDE_ADMIN_METADATA_LOOKUP_CONTACT; }
 });

@@ -45,7 +45,7 @@ export function ImportApprovalChecklist({ item, draft, changes, onChange }: {
   });
   const preselections = body && candidates.isSuccess ? identityPreselections(draft, item.draft, body.decisions, candidates.data) : [];
   const checklist = body && candidates.isSuccess ? approvalChecklist(draft, body.decisions, candidates.data.items,
-    { automaticPaths: item.automaticPaths, possibleLabelEntryKeys: item.possibleLabelEntryKeys, changedPaths: changes.map(change => change.path) }, preselections) : null;
+    { automaticPaths: item.automaticPaths, lookupPaths: item.lookupPaths, possibleLabelEntryKeys: item.possibleLabelEntryKeys, changedPaths: changes.map(change => change.path) }, preselections) : null;
   const ready = Boolean(checklist && checklist.blocked === 0 && !candidates.isFetching);
   // Reported again only when what it shows changes, so the dialog's state update never loops back here.
   const shown = JSON.stringify(preselections);

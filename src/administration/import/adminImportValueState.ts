@@ -160,14 +160,24 @@ export const draftV2Paths = (draft: ImportDraftV2): ImportDraftPath[] => [
     ...albumFields.map(field => `album.${field}` as const), ...draft.tracks.flatMap(track => trackFields.map(field => `tracks.${track.slotId}.${field}` as const))
 ];
 /**
- * What the editor and the publication confirmation mark: the paths whose value is automatic (written from file tags and not yet
- * reviewed), whether the Artist entries and the label rest only on file tags, and the automatic entries whose name looks like a
- * company (a possible label). Without stored origins nothing is automatic.
+ * What the editor and the publication confirmation mark: the paths whose value is automatic (written from file tags or metadata
+ * lookup and not yet reviewed; an administrator save wins over all of them), the subset resting on the applied lookup candidate
+ * (`lookupPaths`: automatic and equal to a value it wrote, `lookupValues`), whether the Artist entries and the label rest only on
+ * file tags (automatic and not in `lookupPaths`), and the tag-only entries whose name looks like a company (a possible label).
+ * Paths keep draft path order. Without stored origins nothing is automatic.
  */
-export function importAutomationMarkers(draft: ImportDraftV2, origins: ImportDraftOrigins | undefined): { automaticPaths: ImportDraftPath[]; possibleLabelEntryKeys: string[]; tagOnly: { artists: boolean; label: boolean } } {
+export function importAutomationMarkers(draft: ImportDraftV2, origins: ImportDraftOrigins | undefined, lookupValues: readonly { path: string; value: unknown }[] = []):
+    { automaticPaths: ImportDraftPath[]; lookupPaths: ImportDraftPath[]; possibleLabelEntryKeys: string[]; tagOnly: { artists: boolean; label: boolean } } {
     const automaticPaths = origins ? draftV2Paths(draft).filter(path => originOf(origins, path) === 'automatic') : [];
-    const artists = automaticPaths.includes('album.artists') && draft.album.artists.length > 0, label = automaticPaths.includes('album.label') && draft.album.label !== null;
-    return { automaticPaths, possibleLabelEntryKeys: artists ? draft.album.artists.filter(entry => isCompanyLikeName(entry.name)).map(entry => entry.key) : [], tagOnly: { artists, label } };
+    const fromLookup = new Set(lookupValues.filter(item => {
+        if (!item || typeof item !== 'object' || typeof item.path !== 'string' || !automaticPaths.includes(item.path as ImportDraftPath)) return false;
+        try { return sameDraftValue(draftValueAt(draft, item.path as ImportDraftPath), item.value); } catch { return false; }
+    }).map(item => item.path));
+    const lookupPaths = automaticPaths.filter(path => fromLookup.has(path));
+    const artists = automaticPaths.includes('album.artists') && !fromLookup.has('album.artists') && draft.album.artists.length > 0;
+    const label = automaticPaths.includes('album.label') && !fromLookup.has('album.label') && draft.album.label !== null;
+    return { automaticPaths, lookupPaths, possibleLabelEntryKeys: artists ? draft.album.artists.filter(entry => isCompanyLikeName(entry.name)).map(entry => entry.key) : [],
+        tagOnly: { artists, label } };
 }
 /** The 48 KB cap binds only a change that grows the draft, so a converted draft near the cap stays editable. */
 export const draftWithinSizeLimit = (before: unknown, after: unknown) => { const size = draftBytes(after); return size <= DRAFT_V2_LIMITS.bytes || size <= draftBytes(before); };

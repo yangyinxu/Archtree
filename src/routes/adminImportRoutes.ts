@@ -14,6 +14,7 @@ import { cleanupAdminImportAsset, importMediaMutationHeaders, uploadAdminImportA
 import { asyncHandler } from '../middleware/requestProtectionMiddleware';
 import { limitMediaConcurrencyFor } from '../middleware/mediaDeliveryMiddleware';
 import { publishAdminImport, resumeAdminImportPublication, cancelAdminImportPublication } from '../administration/import/adminImportPublisher';
+import { chooseAdminImportLookup, getAdminImportLookup, resolveAdminImportLookup, retryAdminImportLookup, submitAdminImportLookup } from '../administration/lookup/metadataLookupRequests';
 
 /** Mount behind app-level pre-body auth/origin/size guards; defense-in-depth guards remain here. */
 export function createAdminImportRouter(storage: ImportObjectStorage = defaultImportObjectStorage) {
@@ -29,10 +30,13 @@ export function createAdminImportRouter(storage: ImportObjectStorage = defaultIm
         return requireCurrentAccountViewer(req, res, next);
     });
     // A field save carries each changed value and its base, so up to two copies of a 48 KB draft; an approval carries a field save's
-    // changes plus up to 122 decisions; other bodies stay at 96 KB.
+    // changes plus up to 122 decisions; a lookup submission, retry or choice is a few fields (8 KB); other bodies, lookup conflict
+    // answers included, stay at 96 KB. Express routes ignore case, so the lookup selector does too (`/LOOKUP/CHOOSE` stays at 8 KB).
     const json = express.json({ limit: '96kb', strict: true }), fieldSaveJson = express.json({ limit: '160kb', strict: true }), approvalJson = express.json({ limit: '192kb', strict: true });
+    const lookupJson = express.json({ limit: '8kb', strict: true });
     router.use('/imports', (req, res, next) => (req.method === 'PATCH' && /^\/[^/]+\/?$/.test(req.path) ? fieldSaveJson
-        : req.method === 'POST' && /^\/[^/]+\/publish\/?$/.test(req.path) ? approvalJson : json)(req, res, next));
+        : req.method === 'POST' && /^\/[^/]+\/publish\/?$/.test(req.path) ? approvalJson
+            : req.method === 'POST' && /^\/[^/]+\/lookup(?:\/(?:retry|choose))?\/?$/i.test(req.path) ? lookupJson : json)(req, res, next));
     const run = (handler: (actor: string, req: express.Request) => Promise<unknown>, status = 200): express.RequestHandler => async (req, res) => {
         try { const result = await runRequestWork(req, () => handler((req as AuthenticatedRequest).auth!.userId, req)); if (!res.destroyed) res.status(status).json(result); }
         catch (error) { const known = error instanceof AdminImportError; res.status(known ? error.status : 503).json({ code: known ? error.code : 'ADMIN_IMPORT_UNAVAILABLE' }); }
@@ -48,6 +52,11 @@ export function createAdminImportRouter(storage: ImportObjectStorage = defaultIm
     router.get('/imports/:id/duplicate-candidates', asyncHandler(run((actor, req) => adminImportDuplicateCandidates(actor, req.params.id))));
     router.post('/imports/:id/publish', asyncHandler(run((actor, req) => publishAdminImport(actor, req.params.id, req.body), 202)));
     router.post('/imports/:id/cancel-publication', asyncHandler(run((actor, req) => cancelAdminImportPublication(actor, req.params.id, req.body, storage))));
+    router.get('/imports/:id/lookup', asyncHandler(run((actor, req) => getAdminImportLookup(actor, req.params.id))));
+    router.post('/imports/:id/lookup', asyncHandler(run((actor, req) => submitAdminImportLookup(actor, req.params.id, req.body), 202)));
+    router.post('/imports/:id/lookup/retry', asyncHandler(run((actor, req) => retryAdminImportLookup(actor, req.params.id, req.body), 202)));
+    router.post('/imports/:id/lookup/choose', asyncHandler(run((actor, req) => chooseAdminImportLookup(actor, req.params.id, req.body))));
+    router.post('/imports/:id/lookup/resolve', asyncHandler(run((actor, req) => resolveAdminImportLookup(actor, req.params.id, req.body))));
     router.post('/imports/:id/resume-publication', asyncHandler(run((actor, req) => {
         if (!req.body || Object.keys(req.body).length !== 1 || typeof req.body.operationId !== 'string') throw new AdminImportError(400, 'ADMIN_IMPORT_INVALID_INPUT');
         return resumeAdminImportPublication(actor, req.params.id, req.body.operationId, storage);
