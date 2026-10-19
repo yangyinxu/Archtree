@@ -17,13 +17,14 @@
  *   - an approval's Luna tick state is bounded before the fingerprint: exact fields, a generation and at most 204 distinct suggestion IDs, writing nothing
  *   - metadata lookup routes guard authentication and the current admin before parsing, are no-store and bounded, and refuse malformed bodies without writing
  *   - configured lookup routes answer a submission and a retry with 202 receipts that replay, a choice and the view with 200, and refusals with bounded codes
+ *   - another current administrator retries a failed automatic cover cleanup through the asset DELETE route with its original intent
  * @end-catalog */
 
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import sharp from 'sharp';
 import { readFile } from 'node:fs/promises';
-import type { ImportObjectStorage, ImportObjectTarget, ImportObjectIdentity } from '../../src/administration/import/adminImportStorage';
+import { importAssetTarget, type ImportObjectStorage, type ImportObjectTarget, type ImportObjectIdentity } from '../../src/administration/import/adminImportStorage';
 import type { Server } from 'node:http';
 import { before, beforeEach, after, test } from 'node:test';
 import express from 'express';
@@ -33,6 +34,8 @@ import { getDb } from '../../src/infrastructure/database';
 import { createAdminImportRouter } from '../../src/routes/adminImportRoutes';
 import { initializeAdminImportStorage } from '../../src/administration/import/adminImportService';
 import { startMongoReplicaSet, type MongoReplicaSetHarness } from '../support/mongoReplicaSet';
+import { loadImportFixture } from '../support/adminImportFixtures';
+import { runAutomaticImportCoverCleanupOnce } from '../../src/administration/import/adminImportCoverCleanup';
 
 let harness: MongoReplicaSetHarness, server: Server, base: string, token: string, userToken: string;
 const objects = new Map<string, { target: ImportObjectTarget; bytes: Buffer; identity: ImportObjectIdentity }>(); let failHead = false;
@@ -318,4 +321,26 @@ test('configured lookup routes answer a submission and a retry with 202 receipts
             await refused(route, { operationId: randomUUID(), expectedRevision: 1, ...value }, 404, 'ADMIN_IMPORT_NOT_FOUND');
         assert.equal(await lookups.countDocuments({ _id: new ObjectId(review.item.id) }), 0);
     } finally { delete process.env.FINITUDE_ADMIN_METADATA_LOOKUP_CONTACT; }
+});
+
+test('another current administrator retries a failed automatic cover cleanup through the asset DELETE route with its original intent', async () => {
+    process.env.FINITUDE_ADMIN_IMPORT_PRIVATE_STORAGE_READY = 'true'; process.env.ADMIN_IMPORT_S3_BUCKET_NAME = 'synthetic-private-imports'; process.env.S3_BUCKET_NAME = 'synthetic-catalog';
+    // A completed import whose publisher has since lost the role, so completion could not clean its unselected candidate.
+    const doc = loadImportFixture('adminImport', 'v1-publication-complete.json'), id = doc._id.toHexString(), [unselected] = doc.media!.assets.filter(asset => asset.slotId.startsWith('embedded-'));
+    await getDb()!.collection('users').insertOne({ _id: new ObjectId(doc.media!.publication!.actorId), role: 'user', email: 'routes-publisher@example.test' });
+    for (const asset of doc.media!.assets) objects.set(asset.key, { target: importAssetTarget(id, asset), bytes: Buffer.alloc(0), identity: { etag: asset.etag!, versionId: asset.versionId } });
+    await getDb()!.collection('adminAlbumImports').insertOne(doc);
+    assert.equal(await runAutomaticImportCoverCleanupOnce(storage, id), true);
+    const shown = (await (await request(`/api/admin/v1/imports/${id}`)).json()).item, failed = shown.assets.find((asset: { slotId: string }) => asset.slotId === unselected.slotId);
+    assert.equal(failed.state, 'cleanupFailed'); assert.deepEqual(Object.keys(failed.recovery), ['operationId', 'expectedRevision', 'kind', 'startedByMe']);
+    assert.deepEqual([failed.recovery.kind, failed.recovery.startedByMe], ['cleanup', false]); assert.deepEqual([shown.coverChoice, shown.selectedCoverSlotId], ['explicit', doc.media!.selectedCoverSlotId]);
+    const path = `/api/admin/v1/imports/${id}/assets/${unselected.slotId}`, intent = { 'Idempotency-Key': failed.recovery.operationId, 'If-Match': String(failed.recovery.expectedRevision) };
+    assert.equal((await request(path, 'DELETE', undefined, userToken, intent)).status, 403);
+    const fresh = await request(path, 'DELETE', undefined, token, { 'Idempotency-Key': randomUUID(), 'If-Match': String(shown.revision) });
+    assert.equal(fresh.status, 409); assert.deepEqual(await fresh.json(), { code: 'ADMIN_IMPORT_ASSET_CLEANUP_EXISTS' });
+    const retried = await request(path, 'DELETE', undefined, token, intent); assert.equal(retried.status, 200); assert.equal(retried.headers.get('cache-control'), 'no-store');
+    const receipt = (await retried.json()).receipt; assert.deepEqual(receipt, { operationId: failed.recovery.operationId, kind: 'cleanup', revision: failed.recovery.expectedRevision + 1 });
+    const stored = await getDb()!.collection('adminAlbumImports').findOne({ _id: doc._id });
+    assert.equal(stored!.media.assets.find((asset: { slotId: string }) => asset.slotId === unselected.slotId).state, 'deleted'); assert.equal(objects.has(unselected.key), false);
+    assert.deepEqual((await (await request(path, 'DELETE', undefined, token, intent)).json()).receipt, receipt);
 });

@@ -24,6 +24,7 @@
  *   - cover grant is rechecked after HEAD and before dispatch; reserved cancellation safely releases the source pin
  *   - a source import saved in a newer draft format admits no new cover pin or copy, while an existing pin is still released
  *   - tag automation after a cover pick was reviewed changes no source revision, so the reviewed pick is still admitted
+ *   - an automatic candidate pinned by a cover operation is kept at completion and cleaned once the pin is released
  * @end-catalog */
 
 import assert from 'node:assert/strict';
@@ -35,9 +36,11 @@ import { getDb } from '../../src/infrastructure/database';
 import { startMongoReplicaSet, type MongoReplicaSetHarness } from '../support/mongoReplicaSet';
 import { getAdminCatalogItem } from '../../src/administration/catalog/adminCatalogService';
 import { clearAdminCatalogCover, replaceAdminCatalogCover, reconcileAdminCatalogCover, listAdminCatalogCoverOperations, runAdminCatalogCoverOnce, cancelAdminCatalogCover } from '../../src/administration/catalog/adminCatalogCoverService';
-import { createAdminImport, getAdminImport, initializeAdminImportStorage } from '../../src/administration/import/adminImportService';
+import { createAdminImport, getAdminImport, initializeAdminImportStorage, type AdminImportDocument } from '../../src/administration/import/adminImportService';
+import { runAutomaticImportCoverCleanupOnce } from '../../src/administration/import/adminImportCoverCleanup';
 import { uploadAdminImportAsset, cleanupAdminImportAsset, reconcileAdminImportAsset, type ImportObjectIdentity, type ImportObjectStorage, type ImportObjectTarget } from '../../src/administration/import/adminImportStorage';
 import { createPcmWav, withId3TextFrames } from '../support/pcmWav';
+import { loadImportFixture } from '../support/adminImportFixtures';
 
 let harness: MongoReplicaSetHarness; const actor = new ObjectId(), other = new ObjectId(), artist = new ObjectId(), oldImage = new ObjectId();
 class Storage implements ImportObjectStorage {
@@ -325,4 +328,27 @@ test('tag automation after a cover pick was reviewed changes no source revision,
     assert.deepEqual([checked.draft.tracks[0].title, checked.draft.tracks[0].discNumber, checked.valueRevision, checked.revision], ['Tagged Source', 2, 1, reviewed.revision]);
     const result = await replaceAdminCatalogCover(by, 'artist', artist.toHexString(), body, { storage, cleanup });
     assert.equal(result.coverOperation.state, 'complete'); assert.equal(storage.copies, 1);
+});
+test('an automatic candidate pinned by a cover operation is kept at completion and cleaned once the pin is released', async () => {
+    // A completed import from before automatic covers: its first file's candidate is unselected, its second one published.
+    const storage = new Storage(), fixtureAdmin = new ObjectId('0000000000000000000000a1'), imports = getDb()!.collection<AdminImportDocument>('adminAlbumImports');
+    await getDb()!.collection('users').insertOne({ _id: fixtureAdmin, role: 'admin', email: 'fixture-admin@example.test' });
+    const doc = loadImportFixture('adminImport', 'v1-publication-complete.json'), id = doc._id.toHexString(), source = doc.media!.assets.find(asset => asset.slotId.startsWith('embedded-'))!;
+    for (const asset of doc.media!.assets) storage.objects.set(asset.key, { etag: asset.etag!, versionId: asset.versionId }); await imports.insertOne(doc);
+    const owner = await getAdminCatalogItem(actor.toHexString(), 'artist', artist.toHexString()), operationId = randomUUID(); storage.failBefore = true;
+    const pinned = await replaceAdminCatalogCover(actor.toHexString(), 'artist', artist.toHexString(), { operationId, expectedRevision: owner.item.revision, importId: id, slotId: source.slotId, expectedSourceRevision: doc.revision }, { storage, cleanup });
+    assert.equal(pinned.coverOperation.state, 'needsAttention');
+    // The unknown copy keeps the candidate pinned, so the sweep keeps it and looks again a day later.
+    const swept = Date.now(); assert.equal(await runAutomaticImportCoverCleanupOnce(storage), true);
+    let current = (await imports.findOne({ _id: doc._id }))!, candidate = current.media!.assets.find(asset => asset.slotId === source.slotId)!;
+    assert.deepEqual([candidate.state, candidate.coverConsumers!.length, current.media!.coverCleanup!.state], ['ready', 1, 'pending']);
+    assert.ok(current.media!.coverCleanup!.leaseUntil!.getTime() >= swept + 24 * 3600_000); assert.equal(await runAutomaticImportCoverCleanupOnce(storage), false);
+    // The late copy lands; attaching it releases the pin and re-arms the sweep, which then cleans the candidate.
+    const op = (await getDb()!.collection('adminCatalogCoverOperations').findOne({ operationId }))!; storage.failBefore = false; storage.objects.set(op.target.key, { etag: '"canonical"', versionId: 'canonical-version' });
+    assert.equal((await reconcileAdminCatalogCover(actor.toHexString(), 'artist', artist.toHexString(), operationId, { storage, cleanup })).coverOperation.state, 'complete');
+    current = (await imports.findOne({ _id: doc._id }))!; candidate = current.media!.assets.find(asset => asset.slotId === source.slotId)!;
+    assert.deepEqual([candidate.coverConsumers, current.media!.coverCleanup], [[], undefined]);
+    assert.equal(await runAutomaticImportCoverCleanupOnce(storage), true);
+    candidate = (await imports.findOne({ _id: doc._id }))!.media!.assets.find(asset => asset.slotId === source.slotId)!;
+    assert.equal(candidate.state, 'deleted'); assert.equal(storage.objects.has(source.key), false);
 });

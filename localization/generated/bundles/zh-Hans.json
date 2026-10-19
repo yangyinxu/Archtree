@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "locale": "zh-Hans",
-  "revision": "sha256-uDBiNFNROa_FYl4fUELLCKE7YHVlesAm3AFaIMOVl0I",
+  "revision": "sha256-ebyxfgniwkpVwVWx30GxKilnUCDpCm8EZyHyzqOzrZA",
   "messages": {
     "account.common.back_account": "← 返回账户",
     "account.common.checking": "正在检查你的账户…",
@@ -510,6 +510,8 @@
     "admin.media.confirm_remove": "移除此暂存文件？",
     "admin.media.confirm_upload": "确认私有上传",
     "admin.media.copy": "所选文件逐个私密上传，每个文件都有独立结果。只有明确发布审核后的专辑时，上传文件才会进入目录。",
+    "admin.media.cover_automatic": "已自动选择：每首曲目都内嵌的同一张图像。在此选择任一选项将取代自动选择。",
+    "admin.media.cover_automatic_none": "未自动选择封面。请在此选择。",
     "admin.media.cover_candidate": "私有封面候选",
     "admin.media.invalid": "请选择名称和大小一致的原始文件。",
     "admin.media.manual_cover": "手动选择的封面",
@@ -624,6 +626,7 @@
     "admin.state.unknown": "结果待确认",
     "admin.summary.artist_mismatch": "已应用的发行署名的艺术家与这些文件的艺术家标签都不一致。发布前请核对艺术家条目。",
     "admin.summary.conflicts": "与你的值不同的查找值",
+    "admin.summary.cover_automatic": "自动选择",
     "admin.summary.flagged": "需要核对的值",
     "admin.summary.identities": "身份决定",
     "admin.summary.identities_saved": "已保存的决定：{count}。发布确认会列出每条新建或复用的记录。",

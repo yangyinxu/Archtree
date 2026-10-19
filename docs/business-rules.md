@@ -1540,9 +1540,19 @@ The wire protocol and operational bounds are documented in
   never moves to another Album. When appending, a file whose bytes match a
   MediaTrack on that Album is preselected as reuse, a name-only match needs an
   explicit choice, and a file with no candidate is preselected as a new member.
-- Embedded images are validated and completely decoded like other covers and
-  staged under the same staged-upload lifecycle; identical ones are staged
-  once, and each import stages a bounded number of them.
+- A new Album's cover is chosen automatically only while the administrator has
+  made no cover choice; an explicit choice, including No cover, always wins. A
+  single embedded image shared by every track is selected, re-evaluated whenever
+  the file set changes while the cover choice is automatic. Embedded images are
+  validated and completely decoded like other covers and staged under the same
+  staged-upload lifecycle; identical ones are staged once, and each import
+  stages a bounded number of them. While the cover choice is automatic, any
+  Album decision other than create deselects every automatic cover. Unless it is
+  selected or a publication uses or locks it, an automatically staged cover
+  candidate is cleaned up automatically through the existing cleanup lifecycle
+  once the import completes. A cleaned-up candidate's record remains until
+  deletion is confirmed, a retry uses the original intent, and a failure becomes
+  needs attention.
 - Publishing a new Album requires at least one primary Artist entry, and
   appending requires a target Album that has a primary Artist Credit. It creates
   the Album's Credits in draft order: each Artist entry as an Album primary or

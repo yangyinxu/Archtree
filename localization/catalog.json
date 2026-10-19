@@ -3631,6 +3631,20 @@
       ],
       "variables": {}
     },
+    "admin.media.cover_automatic": {
+      "description": "Administrator workbench: import files, note under the cover choice while the cover is chosen automatically as the one image embedded in every track.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.media.cover_automatic_none": {
+      "description": "Administrator workbench: import files, note under the cover choice while the choice is automatic and selects no image.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.media.cover_candidate": {
       "description": "Private cover candidate",
       "delivery": [
@@ -4446,6 +4460,13 @@
     },
     "admin.summary.conflicts": {
       "description": "Administrator workbench: import summary, heading of metadata lookup values that differ from the administrator's own.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.summary.cover_automatic": {
+      "description": "Administrator workbench: import summary and approval confirmation, mark after a cover that was chosen automatically.",
       "delivery": [
         "runtime"
       ],

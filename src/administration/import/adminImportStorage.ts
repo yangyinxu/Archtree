@@ -2,12 +2,11 @@
  * Exports
  *   Types: ImportObjectIdentity, ImportObjectTarget, ImportObjectStorage
  *   Functions: importAssetTarget, importMediaMutationHeaders, uploadAdminImportAsset,
- *              reconcileAdminImportAsset, cleanupAdminImportAsset, selectAdminImportCover,
- *              previewAdminImportAsset
+ *              reconcileAdminImportAsset, cleanupAdminImportAsset, deleteReservedImportAsset,
+ *              selectAdminImportCover, previewAdminImportAsset
  *   Constants: defaultImportObjectStorage
  * Internal
- *   Functions: identity, metadata, storageReady, fileDigest, transferImportAsset, embeddedOperationId,
- *              stageEmbeddedArtwork
+ *   Functions: identity, metadata, storageReady, fileDigest, transferImportAsset, stageEmbeddedArtwork
  * @end-catalog */
 
 import { DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
@@ -29,6 +28,7 @@ import { extractImportArtwork } from './adminImportArtwork';
 import { importDraftWritable } from './adminImportDraftCompat';
 import { runImportAutomation } from './adminImportAutomation';
 import { readImportEmbeddedTags } from './adminImportTags';
+import { automaticCoverCleanupOperationId, chooseImportCover, embeddedImportOperationId, replacedEmbeddedCandidateCleanable } from './adminImportCoverAutomation';
 import { noteMetadataLookupFiles, requestAutomaticMetadataLookup } from '../lookup/metadataLookupService';
 
 export type ImportObjectIdentity = { etag: string; versionId: string | null };
@@ -103,9 +103,11 @@ async function fileDigest(file: Express.Multer.File) {
 }
 
 /**
- * Reserves the only object identity before PUT; admission binds slot state and intent, never the project revision. A confirmed
- * audio file (including a replay of an intent already confirmed) then runs tag automation and the automatic metadata lookup
- * trigger, so a crash between confirmation and either is caught up by the original intent's replay.
+ * Reserves the only object identity before PUT; admission binds slot state and intent, never the project revision, and records the
+ * SHA-256 of the validated embedded image an audio file carries (or null) with the admitted asset, so an upload confirmed later by
+ * reconciliation still shows which image it carries (adminImportCoverAutomation.ts). A confirmed audio file (including a replay of
+ * an intent already confirmed) then runs tag automation, the automatic metadata lookup trigger and embedded staging, so a crash
+ * between confirmation and any of them is caught up by the original intent's replay.
  */
 export async function uploadAdminImportAsset(actor: string, id: string, slotId: string, intent: { operationId: string; expectedRevision: number }, file: Express.Multer.File, storage: ImportObjectStorage = defaultImportObjectStorage): Promise<AdminImportResponse> {
     storageReady();
@@ -114,7 +116,7 @@ export async function uploadAdminImportAsset(actor: string, id: string, slotId: 
     const current = await getAdminImport(actor, id); const manifest = current.item.manifest.files.find(file => file.slotId === slotId);
     if (!imageSlot && (!manifest || normalizeUtf8Text(file.originalname) !== manifest.filename || (manifest.byteLength !== null && manifest.byteLength !== file.size))) throw new AdminImportError(400, 'ADMIN_IMPORT_FILE_CHANGED');
     let duration: string | null = null, format: string | null = null, representation: ImportAsset['representation'] = null;
-    let tags: ImportEmbeddedTagsV2 | null = null;
+    let tags: ImportEmbeddedTagsV2 | null = null, artwork: Express.Multer.File | null = null, artworkSha256: string | null = null;
     if (imageSlot) { try { await validateCoverArtFile(file); } catch { throw new AdminImportError(400, 'ADMIN_IMPORT_INVALID_COVER'); } }
     else {
         if (!/^audio\/[a-zA-Z0-9.+-]+$/.test(file.mimetype)) throw new AdminImportError(400, 'ADMIN_IMPORT_INVALID_AUDIO');
@@ -125,6 +127,8 @@ export async function uploadAdminImportAsset(actor: string, id: string, slotId: 
             tags = readImportEmbeddedTags(metadata);
             representation = await prepareMediaRepresentation(file, `imports/${id}/${slotId}/${intent.operationId}`, 'audio');
         } catch { throw new AdminImportError(400, 'ADMIN_IMPORT_INVALID_AUDIO'); }
+        // Extraction never throws and returns only a completely decoded image; its digest is evidence only, outside the intent hash.
+        artwork = await extractImportArtwork(file); artworkSha256 = artwork ? await fileDigest(artwork) : null;
     }
     const sha256 = await fileDigest(file);
     const admitted = await mutateAdminImport(actor, id, { ...intent, slotId, sha256, byteLength: file.size, contentType: file.mimetype }, 'upload', async doc => {
@@ -133,13 +137,13 @@ export async function uploadAdminImportAsset(actor: string, id: string, slotId: 
         // Only removed bytes or a failure that reconciliation confirmed may be replaced by a new intent.
         if (previous && previous.state !== 'deleted' && !(previous.state === 'failed' && previous.failureConfirmedAt)) throw new AdminImportError(409, 'ADMIN_IMPORT_ASSET_EXISTS');
         if (previous) { doc.media.assetHistory ??= []; doc.media.assetHistory.push(previous); doc.media.assets = doc.media.assets.filter(asset => asset !== previous); }
-        doc.media.assets.push({ slotId, operationId: intent.operationId, actorId: actor, bucket: process.env.ADMIN_IMPORT_S3_BUCKET_NAME!.trim(), key: `imports/${id}/${slotId}/${intent.operationId}`, sha256, byteLength: file.size, contentType: file.mimetype, filename: normalizeUtf8Text(file.originalname), state: 'pending', versionId: null, etag: null, updatedAt: new Date(), leaseOwner: null, leaseUntil: null, transferDeadline: null, failureConfirmedAt: null, duration, format, representation, tags, recovery: { ...intent, kind: 'upload', actorId: actor } });
+        doc.media.assets.push({ slotId, operationId: intent.operationId, actorId: actor, bucket: process.env.ADMIN_IMPORT_S3_BUCKET_NAME!.trim(), key: `imports/${id}/${slotId}/${intent.operationId}`, sha256, byteLength: file.size, contentType: file.mimetype, filename: normalizeUtf8Text(file.originalname), state: 'pending', versionId: null, etag: null, updatedAt: new Date(), leaseOwner: null, leaseUntil: null, transferDeadline: null, failureConfirmedAt: null, duration, format, representation, tags, ...(imageSlot ? {} : { artworkSha256 }), recovery: { ...intent, kind: 'upload', actorId: actor } });
     });
     const state = await transferImportAsset(actor, id, slotId, intent.operationId, sha256, file, storage);
     if (state === 'ready' && !imageSlot) {
         await runImportAutomation(actor, id);
         await requestAutomaticMetadataLookup(actor, id, 'upload');
-        await stageEmbeddedArtwork(actor, id, slotId, intent.operationId, file, storage);
+        if (artwork) await stageEmbeddedArtwork(actor, id, slotId, intent.operationId, artwork, artworkSha256!, storage);
     }
     return { ...(await getAdminImport(actor, id)), receipt: admitted.receipt };
 }
@@ -170,41 +174,58 @@ async function transferImportAsset(actor: string, id: string, slotId: string, op
     return state;
 }
 
-/** Embedded artwork keeps the UUID derived from its audio upload intent, so an audio replay stages nothing new. */
-const embeddedOperationId = (audioOperationId: string, audioSlotId: string) => {
-    const hash = importDigest({ operationId: audioOperationId, embedded: audioSlotId });
-    return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-4${hash.slice(13, 16)}-8${hash.slice(17, 20)}-${hash.slice(20, 32)}`;
-};
-
-/** Automatic embedded artwork: deduplicated by SHA-256, bounded per import, receipted outside the ordinary allowance. */
-async function stageEmbeddedArtwork(actor: string, id: string, audioSlotId: string, audioOperationId: string, audio: Express.Multer.File, storage: ImportObjectStorage): Promise<void> {
+/**
+ * Automatic embedded artwork (extracted and digested at admission): deduplicated by SHA-256, bounded per import, receipted outside
+ * the ordinary allowance under the UUID derived from its audio upload intent, so an audio replay stages nothing new. When the slot
+ * still holds the automatically staged candidate of a replaced upload that nothing else needs (replacedEmbeddedCandidateCleanable),
+ * admission first reserves its cleanup as completion does (an automatic `cleanup` receipt naming the uploader), deletes it under
+ * the uploader's fresh check and admits once more after it is deleted. A failed deletion needs attention and leaves the new image
+ * unstaged; a replay of the audio intent resumes a reservation a crash left.
+ */
+async function stageEmbeddedArtwork(actor: string, id: string, audioSlotId: string, audioOperationId: string, artwork: Express.Multer.File, sha256: string, storage: ImportObjectStorage): Promise<void> {
     try {
-        const artwork = await extractImportArtwork(audio); if (!artwork) return;
-        const sha256 = await fileDigest(artwork), slotId = `embedded-${audioSlotId}`, operationId = embeddedOperationId(audioOperationId, audioSlotId);
+        const slotId = `embedded-${audioSlotId}`, operationId = embeddedImportOperationId(audioOperationId, audioSlotId);
         const hash = importDigest({ kind: 'embedded', body: { operationId, slotId, sha256, byteLength: artwork.size, contentType: artwork.mimetype } });
-        const admitted = await withImportAdmin(actor, async session => {
+        // True admits this staging, false refuses it, and an asset is the replaced candidate whose cleanup is reserved.
+        const admit = () => withImportAdmin(actor, async (session): Promise<boolean | ImportAsset> => {
             const doc = await importCollection().findOne({ ...importPurposeFilter, _id: new ObjectId(id) }, { session }); if (!doc) return false;
-            const prior = [...doc.receipts, ...(doc.recoveryReceipts ?? []), ...(doc.automaticReceipts ?? [])].find(receipt => receipt.operationId === operationId);
+            const receipts = [...doc.receipts, ...(doc.recoveryReceipts ?? []), ...(doc.automaticReceipts ?? [])];
+            const prior = receipts.find(receipt => receipt.operationId === operationId);
             if (prior) return prior.hash === hash;
             // A project saved in a newer draft format admits no new automatic staging; an admitted one still completes.
             if (!importDraftWritable(doc)) return false;
-            const assets = doc.media?.assets ?? [];
+            const assets = doc.media?.assets ?? [], observed = doc.revision, now = new Date();
+            // Identical images are staged once; the bound counts stagings, never automatic cleanups.
             if (importSourcesLocked(doc.media) || !assets.some(asset => asset.slotId === audioSlotId && asset.operationId === audioOperationId && asset.state === 'ready')
-                // A legacy per-file candidate keeps its own lifecycle; identical images are staged once.
-                || assets.some(asset => asset.slotId === slotId && asset.state !== 'deleted')
                 || assets.some(asset => asset.slotId.startsWith('embedded-') && asset.sha256 === sha256 && ['pending', 'unknown', 'ready'].includes(asset.state))
-                || (doc.automaticReceipts?.length ?? 0) >= LIMITS.embeddedCovers) return false;
+                || (doc.automaticReceipts ?? []).filter(receipt => receipt.kind === 'upload').length >= LIMITS.embeddedCovers) return false;
+            const occupant = assets.find(asset => asset.slotId === slotId && asset.state !== 'deleted');
+            if (occupant) {
+                const cleanupId = automaticCoverCleanupOperationId(occupant);
+                if (occupant.state === 'deleting' && occupant.recovery?.kind === 'cleanup' && occupant.recovery.operationId === cleanupId) return occupant;
+                // A candidate staged under an ordinary receipt by an earlier release keeps its own lifecycle, and a UUID another intent
+                // already holds is never reused.
+                if (!doc.automaticReceipts?.some(receipt => receipt.kind === 'upload' && receipt.operationId === occupant.operationId)
+                    || !replacedEmbeddedCandidateCleanable(doc, occupant, audioSlotId, audioOperationId, now) || receipts.some(receipt => receipt.operationId === cleanupId)) return false;
+                occupant.state = 'deleting'; occupant.updatedAt = now; occupant.recovery = { operationId: cleanupId, expectedRevision: observed, kind: 'cleanup', actorId: actor };
+                // The body cleanupAdminImportAsset fingerprints ({...intent, slotId}), so an administrator's retry replays it.
+                (doc.automaticReceipts ??= []).push({ operationId: cleanupId, kind: 'cleanup', revision: observed + 1, actorId: actor, at: now,
+                    hash: importDigest({ kind: 'cleanup', body: { operationId: cleanupId, expectedRevision: observed, slotId } }) });
+                doc.revision++; doc.updatedAt = now;
+                return (await importCollection().replaceOne({ _id: doc._id, revision: observed }, doc, { session })).matchedCount === 1 && occupant;
+            }
             doc.media ??= { assets: [] };
             const previous = doc.media.assets.find(asset => asset.slotId === slotId);
             if (previous) { doc.media.assetHistory ??= []; doc.media.assetHistory.push(previous); doc.media.assets = doc.media.assets.filter(asset => asset !== previous); }
-            const observed = doc.revision, now = new Date();
             doc.media.assets.push({ slotId, operationId, actorId: actor, bucket: process.env.ADMIN_IMPORT_S3_BUCKET_NAME!.trim(), key: `imports/${id}/${slotId}/${operationId}`, sha256, byteLength: artwork.size, contentType: artwork.mimetype, filename: normalizeUtf8Text(artwork.originalname), state: 'pending', versionId: null, etag: null, updatedAt: now, leaseOwner: null, leaseUntil: null, transferDeadline: null, failureConfirmedAt: null, duration: null, format: null, representation: null, tags: null, recovery: { operationId, expectedRevision: observed, kind: 'upload', actorId: actor } });
             doc.revision++; doc.updatedAt = now;
             (doc.automaticReceipts ??= []).push({ operationId, kind: 'upload', revision: doc.revision, actorId: actor, hash, at: now });
             return (await importCollection().replaceOne({ _id: doc._id, revision: observed }, doc, { session })).matchedCount === 1;
         });
-        if (admitted) await transferImportAsset(actor, id, slotId, operationId, sha256, artwork, storage);
-    } catch { /* Audio success is independent; an admitted candidate retains its own lifecycle evidence. */ }
+        let admitted = await admit();
+        if (typeof admitted === 'object') admitted = await deleteReservedImportAsset(actor, id, admitted, automaticCoverCleanupOperationId(admitted), storage) === 'deleted' && await admit() === true;
+        if (admitted === true) await transferImportAsset(actor, id, slotId, operationId, sha256, artwork, storage);
+    } catch { /* Audio success is independent; an admitted candidate or reserved cleanup retains its own lifecycle evidence. */ }
 }
 
 /**
@@ -254,7 +275,11 @@ export async function reconcileAdminImportAsset(actor: string, id: string, slotI
     return { item: (await getAdminImport(actor, id)).item, receipt: claim.receipt };
 }
 
-/** Explicit stage cleanup preserves the record until the exact inventoried object version is removed. */
+/**
+ * Explicit stage cleanup preserves the record until the exact inventoried object version is removed. It is also the retry of an
+ * automatic completion cleanup (adminImportCoverCleanup.ts): that intent replays from `automaticReceipts` for any current
+ * administrator, who then deletes under their own fresh role check.
+ */
 export async function cleanupAdminImportAsset(actor: string, id: string, slotId: string, intent: { operationId: string; expectedRevision: number }, storage: ImportObjectStorage = defaultImportObjectStorage) {
     const admitted = await mutateAdminImport(actor, id, { ...intent, slotId }, 'cleanup', async (doc, session) => {
         const asset = doc.media?.assets.find(asset => asset.slotId === slotId); if (!asset) throw new AdminImportError(404, 'ADMIN_IMPORT_ASSET_NOT_FOUND');
@@ -273,11 +298,20 @@ export async function cleanupAdminImportAsset(actor: string, id: string, slotId:
     const doc = await importCollection().findOne({ ...importPurposeFilter, _id: new ObjectId(id) }); const asset = doc?.media?.assets.find(asset => asset.slotId === slotId && asset.recovery?.operationId === intent.operationId);
     if (!asset) { if (doc?.media?.assetHistory?.some(asset => asset.slotId === slotId && asset.recovery?.operationId === intent.operationId && asset.state === 'deleted')) return { ...(await getAdminImport(actor, id)), receipt: admitted.receipt }; throw new AdminImportError(409, 'ADMIN_IMPORT_ASSET_CONFLICT'); }
     if (asset.state === 'deleted') return admitted;
+    await deleteReservedImportAsset(actor, id, asset, intent.operationId, storage);
+    return { ...(await getAdminImport(actor, id)), receipt: admitted.receipt };
+}
+
+/**
+ * Deletes one reserved stage object by its exact recorded or observed identity under `actor`'s fresh administrator check before each
+ * storage step, then records `deleted` or `cleanupFailed` (failed/unknown evidence is kept for a same-intent retry). Never throws for
+ * a storage or authorization failure.
+ */
+export async function deleteReservedImportAsset(actor: string, id: string, asset: ImportAsset, operationId: string, storage: ImportObjectStorage): Promise<ImportAsset['state']> {
+    const slotId = asset.slotId, reserved = { $elemMatch: { slotId, operationId: asset.operationId, 'recovery.operationId': operationId, state: { $in: ['deleting', 'cleanupFailed'] } } };
     let state: ImportAsset['state'] = 'cleanupFailed';
     const authorize = () => withImportAdmin(actor, async session => {
-        const current = await importCollection().findOne({ ...importPurposeFilter, _id: new ObjectId(id), 'media.assets': { $elemMatch: {
-            slotId, operationId: asset.operationId, 'recovery.operationId': intent.operationId, state: { $in: ['deleting', 'cleanupFailed'] }
-        } } }, { session });
+        const current = await importCollection().findOne({ ...importPurposeFilter, _id: new ObjectId(id), 'media.assets': reserved }, { session });
         if (!current) throw new AdminImportError(409, 'ADMIN_IMPORT_ASSET_CONFLICT');
     });
     try {
@@ -286,15 +320,16 @@ export async function cleanupAdminImportAsset(actor: string, id: string, slotId:
         if (stored) { await authorize(); await storage.delete({ ...target, ...stored }); }
         await authorize(); if (await storage.head(target)) throw new Error(); state = 'deleted';
     } catch { /* Retain failed/unknown cleanup evidence for the same-key retry. */ }
-    await importCollection().updateOne({ _id: new ObjectId(id), 'media.assets': { $elemMatch: { slotId, operationId: asset.operationId, 'recovery.operationId': intent.operationId, state: { $in: ['deleting', 'cleanupFailed'] } } } }, { $set: { 'media.assets.$.state': state, 'media.assets.$.updatedAt': new Date(), updatedAt: new Date() }, $inc: { revision: 1 } });
-    return { ...(await getAdminImport(actor, id)), receipt: admitted.receipt };
+    await importCollection().updateOne({ _id: new ObjectId(id), 'media.assets': reserved }, { $set: { 'media.assets.$.state': state, 'media.assets.$.updatedAt': new Date(), updatedAt: new Date() }, $inc: { revision: 1 } });
+    return state;
 }
 
 /**
- * Selecting artwork is an explicit draft mutation; extracted candidates never select themselves. It binds the cover state the
- * administrator saw: no cover selection, approval or staged cleanup since `expectedRevision` (mutateAdminProject), and a chosen
- * slot holding a ready image admitted no later than that revision, so a replaced image is never selected unseen. Uploads of
- * other slots, Luna, automation and worker steps never make it stale.
+ * Choosing artwork (a ready image or No cover) is an explicit draft mutation and makes the cover choice explicit for good; until
+ * then importCoverChoice selects the embedded image every confirmed file shares. It binds the cover state the administrator saw:
+ * no cover selection, approval or staged cleanup since `expectedRevision` (mutateAdminProject), and a chosen slot holding a ready
+ * image admitted no later than that revision, so a replaced image is never selected unseen. Uploads of other slots, Luna,
+ * automation and worker steps never make it stale.
  */
 export function selectAdminImportCover(actor: string, id: string, raw: unknown) {
     const body = record(raw); exact(body, ['operationId', 'expectedRevision', 'slotId']);
@@ -304,7 +339,7 @@ export function selectAdminImportCover(actor: string, id: string, raw: unknown) 
         const chosen = body.slotId === null ? undefined : doc.media?.assets.find(asset => asset.slotId === body.slotId && asset.state === 'ready');
         const admission = chosen && [...doc.receipts, ...(doc.automaticReceipts ?? [])].find(receipt => receipt.operationId === chosen.operationId && receipt.kind === 'upload');
         if (admission && admission.revision > (body.expectedRevision as number)) throw new AdminImportError(409, 'ADMIN_IMPORT_REVISION_CONFLICT');
-        doc.media ??= { assets: [] }; doc.media.selectedCoverSlotId = body.slotId;
+        doc.media ??= { assets: [] }; chooseImportCover(doc.media, body.slotId as string | null);
     });
 }
 

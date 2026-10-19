@@ -18,7 +18,7 @@
  *              revisionFloor, boundedTags, dailyAnalysisSlot, reserveDailyAnalysisAttempt
  *   Constants: collection, digest, occupiedAnalysis, touchAdmin, withAdmin, IMPORT_V2_RECEIPT_KINDS,
  *              importPolicy, mutation, slotBoundKinds, importRevisionFloors, readOnlyProjectKinds, mutate,
- *              filters
+ *              filters, LIST_ROW_COVER
  * @end-catalog */
 
 import { startAdminWorker, type AdminWorkTracker } from '../adminWorkerLifecycle';
@@ -34,6 +34,7 @@ import { importDraftV2FromV1, importDraftV2View, importDraftVersion, importDraft
 import { DRAFT_V2, DRAFT_V2_LIMITS, defaultDraftV2, draftBytes, draftV2Suggestion, hasOwn, importApprovalDigest, isDraftV2, retainBoundDecisions, sameDraftValue, type ImportDecisionV2, type ImportDraftOrigins, type ImportDraftV2, type ImportSuggestionV2 } from './adminImportDraft';
 import { applyAdministratorChanges, boundDraftChanges, boundedJson, convertLegacyImportProject, draftValueAt, draftWithinSizeLimit, importAutomationMarkers, markAdministratorValues, originOf, parseDraftChanges, parseDraftValue, setDraftValue, storedDraftV2, type ImportDraftPath } from './adminImportValueState';
 import { importTagsV2View } from './adminImportTags';
+import { importCoverChoice, type ImportCoverChoice } from './adminImportCoverAutomation';
 import { ADMIN_IMPORT_LOOKUP_COLLECTION } from '../lookup/lookupContract';
 import type { ImportLookupGate, MetadataLookupRecord } from '../lookup/metadataLookupRecord';
 import { IMPORT_CANDIDATE_COLLECTIONS, IMPORT_IDENTITY_FENCE_ID, importCandidateProjection, importCandidateRevision, importCandidateRow, importIdentityCandidates, readyImportCandidate } from './adminImportIdentity';
@@ -132,9 +133,11 @@ export async function initializeAdminImportStorage(db: Db) {
 
 /**
  * Allowlisted v1 projection of a stored project. A valid v1 document projects exactly as it always has; a document written
- * in a newer format degrades to values a v1 client can parse and offers no analysis, upload or publication.
+ * in a newer format degrades to values a v1 client can parse and offers no analysis, upload or publication. Its
+ * `selectedCoverSlotId` is the effective cover choice, explicit or automatic (importCoverChoice, unless the caller passes it).
  */
-export function adminImportDto(doc: AdminImportDocument, actorId: string, providerAvailable = Boolean(process.env.OPENAI_API_KEY?.trim())): AdminImportDetail {
+export function adminImportDto(doc: AdminImportDocument, actorId: string, providerAvailable = Boolean(process.env.OPENAI_API_KEY?.trim()),
+    cover: ImportCoverChoice = importCoverChoice(doc)): AdminImportDetail {
     const manifest = legacyManifestView(doc.manifest), slots = new Set(manifest.files.map(file => file.slotId));
     const analysis = legacyAnalysisView(doc), assets = legacyAssetsView(doc.media?.assets, slots, actorId), storage = importEnabled() && importPrivateStorageReady();
     return {
@@ -142,7 +145,7 @@ export function adminImportDto(doc: AdminImportDocument, actorId: string, provid
         manifest, draft: legacyDraftView(doc.draft, manifest), analysis,
         suggestions: legacySuggestionsView(doc.suggestions, analysis.generation, slots), decisions: legacyDecisionsView(doc.decisions, slots),
         upload: { ready: assets.filter(asset => slots.has(asset.slotId) && asset.state === 'ready').length, total: manifest.files.length, available: storage },
-        ...legacyPublicationView(doc.media?.publication, actorId), assets, selectedCoverSlotId: legacySelectedCover(doc.media?.selectedCoverSlotId, assets),
+        ...legacyPublicationView(doc.media?.publication, actorId), assets, selectedCoverSlotId: legacySelectedCover(cover.slotId, assets),
         // The frozen v1 contract: only a format-1 project offers work through this projection.
         capabilities: importCapabilities(doc, importDraftVersion(doc) === 1, providerAvailable),
         receipts: legacyReceiptsView([...doc.receipts, ...(doc.recoveryReceipts ?? [])].sort((a, b) => a.revision - b.revision).slice(-LIMITS.receipts), LEGACY_IMPORT_RECEIPT_KINDS) as ImportReceipt[]
@@ -157,13 +160,14 @@ function importCapabilities(doc: AdminImportDocument, writable: boolean, provide
  * decisions still bound to their entry or label (each with its entryKey and bound name), every published identity, assets with
  * the version-2 tag view, the automatic value markers (paths, possible-label entries and `valueRevision`; values the applied
  * lookup candidate wrote, read from `lookup`, are listed in `lookupPaths` and never rest on file tags alone), receipts including
- * the lookup kinds, and the
+ * the lookup kinds, the cover choice (`coverChoice`, with `selectedCoverSlotId` as its slot), and the
  * approvalDigest of what an approval confirmation shows from it (a publish body echoes it). A format this release does not know
  * shows the best-effort allowlist, whose decisions name no entry, marks nothing automatic and offers no work.
  */
 export function adminImportDetail(doc: AdminImportDocument, actorId: string, providerAvailable = Boolean(process.env.OPENAI_API_KEY?.trim()),
     lookup: Pick<MetadataLookupRecord, 'applied'> | null = null): AdminImportDetailV2 {
-    const { draft: _draft, suggestions: _suggestions, decisions: legacyDecisions, published: _published, assets: _assets, ...item } = adminImportDto(doc, actorId, providerAvailable), id = doc._id.toHexString(), slots = new Set(item.manifest.files.map(file => file.slotId));
+    const cover = importCoverChoice(doc);
+    const { draft: _draft, suggestions: _suggestions, decisions: legacyDecisions, published: _published, assets: _assets, ...item } = adminImportDto(doc, actorId, providerAvailable, cover), id = doc._id.toHexString(), slots = new Set(item.manifest.files.map(file => file.slotId));
     const view = importProjectV2View(doc), draft = importDraftV2View(doc.draft, item.manifest, id), assets = legacyAssetsView(doc.media?.assets, slots, actorId, importTagsV2View);
     const lookupValues = lookup?.applied && typeof lookup.applied === 'object' && Array.isArray(lookup.applied.values) ? lookup.applied.values : [];
     const { automaticPaths, lookupPaths, possibleLabelEntryKeys, tagOnly } = importAutomationMarkers(draft, view?.draftOrigins, lookupValues);
@@ -175,6 +179,7 @@ export function adminImportDetail(doc: AdminImportDocument, actorId: string, pro
         published: importPublishedV2View(doc.media?.publication),
         capabilities: importCapabilities(doc, importDraftWritable(doc), providerAvailable),
         valueRevision: Number.isSafeInteger(doc.valueRevision) && doc.valueRevision! >= 0 ? doc.valueRevision! : 0, automaticPaths, lookupPaths, possibleLabelEntryKeys,
+        coverChoice: cover.mode,
         approvalDigest: importApprovalDigest({ draft, decisions, selectedCoverSlotId: item.selectedCoverSlotId, assets, tagOnly })
     };
 }
@@ -305,6 +310,8 @@ const filters: Record<ImportWorkbenchFilter, Record<string, unknown>> = {
     all: {}, analyzing: { 'analysis.state': { $in: ['queued', 'running'] } }, awaitingReview: { $or: [{ 'media.publication': { $exists: false } }, { 'media.publication.state': 'cancelled' }] },
     needsAttention: { $or: [{ 'analysis.state': 'needsAttention' }, { 'media.publication.state': 'needsAttention' }, { 'media.publication.state': 'cancelled', 'media.publication.cleanupPending': true }, { 'media.assets.state': { $in: ['failed', 'unknown', 'cleanupFailed'] } }] }, completed: { 'media.publication.state': 'complete' }
 };
+/** Stands in for the cover choice a list row never shows. */
+const LIST_ROW_COVER: ImportCoverChoice = { mode: 'explicit', slotId: null };
 export async function listAdminImports(actor: string, query: Record<string, unknown>): Promise<ImportWorkbenchResponse> {
     exact(query, ['filter', 'startedByMe', 'q', 'limit', 'cursor']);
     const filter = query.filter ?? 'all'; if (!Object.keys(filters).includes(filter as string)) return invalidImport();
@@ -322,7 +329,7 @@ export async function listAdminImports(actor: string, query: Record<string, unkn
         for (const [name, selector] of Object.entries(filters)) counts[name as ImportWorkbenchFilter] = await collection().countDocuments({ $and: [base, selector] }, { session, maxTimeMS: 3_000 });
         const docs = await collection().find({ $and: [base, filters[filter as ImportWorkbenchFilter], page] }, { session }).sort({ createdAt: -1, _id: -1 }).limit(limit + 1).maxTimeMS(3_000).toArray();
         const hasMore = docs.length > limit; docs.splice(limit); const last = docs[docs.length - 1];
-        return { counts, items: docs.map(doc => { const item = adminImportDto(doc, actor); return { id: item.id, revision: item.revision, createdAt: item.createdAt, updatedAt: item.updatedAt, startedByMe: item.startedByMe, analysis: item.analysis, upload: item.upload, publication: item.publication, title: item.draft.album.title, artistName: item.draft.album.artistName, rootLabel: item.manifest.rootLabel, visibility: item.draft.album.visibility, pendingSuggestions: importSuggestionsV2View(doc.suggestions, item.analysis.generation, new Set(item.manifest.files.map(file => file.slotId)), item.id).filter(s => s.decision === 'pending').length }; }), nextCursor: hasMore && last ? Buffer.from(JSON.stringify({ id: last._id.toHexString(), at: last.createdAt.toISOString(), scope: digest({ filter, mine: query.startedByMe === 'true', q }) })).toString('base64url') : null };
+        return { counts, items: docs.map(doc => { const item = adminImportDto(doc, actor, undefined, LIST_ROW_COVER); return { id: item.id, revision: item.revision, createdAt: item.createdAt, updatedAt: item.updatedAt, startedByMe: item.startedByMe, analysis: item.analysis, upload: item.upload, publication: item.publication, title: item.draft.album.title, artistName: item.draft.album.artistName, rootLabel: item.manifest.rootLabel, visibility: item.draft.album.visibility, pendingSuggestions: importSuggestionsV2View(doc.suggestions, item.analysis.generation, new Set(item.manifest.files.map(file => file.slotId)), item.id).filter(s => s.decision === 'pending').length }; }), nextCursor: hasMore && last ? Buffer.from(JSON.stringify({ id: last._id.toHexString(), at: last.createdAt.toISOString(), scope: digest({ filter, mine: query.startedByMe === 'true', q }) })).toString('base64url') : null };
     });
 }
 

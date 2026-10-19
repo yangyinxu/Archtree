@@ -27,7 +27,7 @@
  *   - a hidden draft appended to a public Album publishes public tracks: appended tracks take the target Album's visibility
  *   - an append is never blocked by a saved Artist reuse decision that went stale, while a new Album still refuses that decision
  *   - legacy ready defaults tolerate reference touches, and hidden Artist Album can be appended privately
- *   - embedded cover becomes a private unselected candidate, while its tags fill only empty or automatic values
+ *   - the embedded cover of the only file is chosen automatically, while its tags fill only empty or automatic values
  *   - shutdown after one bounded copy checkpoints it and admits no next cover copy or final publication
  *   - publication grant expiry after a copy retains its checkpoint and stops later copies and final catalog commit
  *   - publication rechecks grant between destination HEAD and new copy dispatch
@@ -64,7 +64,7 @@
  *   - once a confirmed failure is replaced, replaying the earlier intent cannot touch the newer upload
  *   - two slots uploading at once both admit against their own slot without a revision conflict
  *   - an automatic staging of unknown outcome reconciles without an ordinary receipt and is retried only through its audio intent
- *   - an existing embedded candidate keeps its lifecycle when its audio is replaced, and a cleaned one is staged again
+ *   - replacing an audio file first cleans the candidate its earlier upload staged, then stages the new image, and a removed one is staged again
  *   - no request can stage bytes into an embedded slot directly; only extracted artwork is staged there
  *   - an append that keeps the public default into a hidden Album publishes tracks the Album hides, and a concurrently changed Album is reported as stale
  *   - an approval that records format 1 explicitly commits like one that records no format
@@ -340,7 +340,7 @@ test('legacy ready defaults tolerate reference touches, and hidden Artist Album 
     await publishAdminImport(actor.toHexString(), hidden.item.id, approvalBody(edited.item)); await runAdminImportPublicationOnce(storage); assert.equal((await getAdminImport(actor.toHexString(), hidden.item.id)).item.publication, 'complete');
     assert.equal((await getDb()!.collection('artists').findOne({ _id: new ObjectId(existing.artistId) }))!.visibility, 'hidden');
 });
-test('embedded cover becomes a private unselected candidate, while its tags fill only empty or automatic values', async () => {
+test('the embedded cover of the only file is chosen automatically, while its tags fill only empty or automatic values', async () => {
     const png = await sharp({ create: { width: 2, height: 2, channels: 3, background: '#fa8' } }).png().toBuffer();
     const apic = Buffer.concat([Buffer.from([3]), Buffer.from('image/png\0'), Buffer.from([3, 0]), png]), frame = Buffer.alloc(10); frame.write('APIC'); frame.writeUInt32BE(apic.length, 4);
     const tags = Buffer.concat([frame, apic]), id3 = Buffer.from([73, 68, 51, 3, 0, 0, 0, 0, 0, 0]); for (let i = 0; i < 4; i++) id3[9 - i] = (tags.length >>> (i * 7)) & 127;
@@ -349,10 +349,13 @@ test('embedded cover becomes a private unselected candidate, while its tags fill
     const audio = { ...file(), buffer: bytes, size: bytes.length }, slotId = randomUUID(), storage = new Storage();
     const created = await createAdminImport(actor.toHexString(), { operationId: randomUUID(), manifest: { rootLabel: 'Embedded source', files: [{ slotId, filename: audio.originalname, relativePath: audio.originalname, byteLength: bytes.length }] } });
     const uploaded = await uploadAdminImportAsset(actor.toHexString(), created.item.id, slotId, mutation(1), audio, storage);
-    assert.equal(uploaded.item.assets.length, 2); assert.equal(uploaded.item.assets[1].slotId, `embedded-${slotId}`); assert.equal(uploaded.item.selectedCoverSlotId, null); assert.equal(uploaded.item.upload.ready, 1); assert.equal(uploaded.item.draft.album.title, ''); assert.equal(storage.puts, 2);
+    assert.equal(uploaded.item.assets.length, 2); assert.equal(uploaded.item.assets[1].slotId, `embedded-${slotId}`); assert.equal(uploaded.item.upload.ready, 1);
+    // The image every confirmed file carries is selected without an administrator choice, which is never stored.
+    assert.deepEqual([uploaded.item.coverChoice, uploaded.item.selectedCoverSlotId], ['automatic', `embedded-${slotId}`]); assert.equal('selectedCoverSlotId' in (await stored(created.item.id)).media!, false); assert.equal(uploaded.item.draft.album.title, ''); assert.equal(storage.puts, 2);
     // The automatic staging keeps its own lifecycle receipt outside the ordinary allowance.
     const persisted = await stored(created.item.id); assert.equal(persisted.automaticReceipts!.length, 1); assert.equal(persisted.receipts.length, 2); assert.equal(uploaded.item.receipts.length, 2);
-    const chosen = await selectAdminImportCover(actor.toHexString(), created.item.id, { ...mutation(uploaded.item.revision), slotId: `embedded-${slotId}` }); assert.equal(chosen.item.selectedCoverSlotId, `embedded-${slotId}`);
+    const chosen = await selectAdminImportCover(actor.toHexString(), created.item.id, { ...mutation(uploaded.item.revision), slotId: `embedded-${slotId}` });
+    assert.deepEqual([chosen.item.coverChoice, chosen.item.selectedCoverSlotId], ['explicit', `embedded-${slotId}`]);
 });
 test('shutdown after one bounded copy checkpoints it and admits no next cover copy or final publication', async () => {
     const storage = new Storage(), project = await prepared(storage), png = await sharp({ create: { width: 1, height: 1, channels: 3, background: '#f80' } }).png().toBuffer();
@@ -918,19 +921,23 @@ test('an automatic staging of unknown outcome reconciles without an ordinary rec
     assert.equal(state(replay.item, embedded), 'ready'); assert.equal(storage.objects.size, 2); assert.equal(storage.puts, 3);
     assert.equal(doc.automaticReceipts!.length, 1); assert.equal(doc.receipts.length, 2);
 });
-test('an existing embedded candidate keeps its lifecycle when its audio is replaced, and a cleaned one is staged again', async () => {
+test('replacing an audio file first cleans the candidate its earlier upload staged, then stages the new image, and a removed one is staged again', async () => {
     const storage = new Storage(), { id, slotId, audio } = await taggedProject(), embedded = `embedded-${slotId}`, [first, second] = [await pngOf('#fa8'), await pngOf('#08a')];
     let project = await uploadAdminImportAsset(actor.toHexString(), id, slotId, mutation(1), audio(first), storage);
     const original = project.item.assets.find(asset => asset.slotId === embedded)!; assert.equal(original.state, 'ready');
     project = await cleanupAdminImportAsset(actor.toHexString(), id, slotId, mutation(project.item.revision), storage);
     project = await uploadAdminImportAsset(actor.toHexString(), id, slotId, mutation(1), audio(second), storage);
-    // A different image does not replace the candidate still at this slot.
-    assert.deepEqual(project.item.assets.find(asset => asset.slotId === embedded), original); assert.equal((await stored(id)).automaticReceipts!.length, 1);
-    for (const slot of [embedded, slotId]) project = await cleanupAdminImportAsset(actor.toHexString(), id, slot, mutation(project.item.revision), storage);
-    project = await uploadAdminImportAsset(actor.toHexString(), id, slotId, mutation(1), audio(second), storage);
-    const restaged = project.item.assets.find(asset => asset.slotId === embedded)!, doc = await stored(id);
-    assert.equal(restaged.state, 'ready'); assert.notEqual(restaged.sha256, original.sha256); assert.equal(doc.automaticReceipts!.length, 2);
+    // The candidate still at this slot goes through its own automatic cleanup first, so the different image takes the slot.
+    let restaged = project.item.assets.find(asset => asset.slotId === embedded)!, doc = await stored(id);
+    assert.equal(restaged.state, 'ready'); assert.notEqual(restaged.sha256, original.sha256);
+    assert.deepEqual(doc.automaticReceipts!.map(receipt => receipt.kind), ['upload', 'cleanup', 'upload']); assert.equal(doc.receipts.length, 3);
     assert.equal(doc.media!.assetHistory!.filter(asset => asset.slotId === embedded && asset.state === 'deleted').length, 1); assert.equal(storage.objects.size, 2);
+    // A candidate removed with its file is staged again by the next upload of that slot.
+    for (const slot of [embedded, slotId]) project = await cleanupAdminImportAsset(actor.toHexString(), id, slot, mutation(project.item.revision), storage);
+    project = await uploadAdminImportAsset(actor.toHexString(), id, slotId, mutation(1), audio(first), storage);
+    restaged = project.item.assets.find(asset => asset.slotId === embedded)!; doc = await stored(id);
+    assert.equal(restaged.state, 'ready'); assert.equal(restaged.sha256, original.sha256); assert.equal(doc.automaticReceipts!.filter(receipt => receipt.kind === 'upload').length, 3);
+    assert.equal(doc.media!.assetHistory!.filter(asset => asset.slotId === embedded && asset.state === 'deleted').length, 2); assert.equal(storage.objects.size, 2);
 });
 test('no request can stage bytes into an embedded slot directly; only extracted artwork is staged there', async () => {
     const storage = new Storage(), { id, slotId } = await taggedProject(), png = await pngOf('#0a8');

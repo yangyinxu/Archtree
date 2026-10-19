@@ -24,6 +24,7 @@
  *   - the Draft v2 decision view keeps one readable decision per entry, label, Album and track, each naming its entry or none and its bound name
  *   - the editor asset view allowlists version-2 tag evidence and reads evidence stored before it as version 1; the v1 DTO keeps five tag fields
  *   - the published view lists every credited Artist and the label of a format-3 approval, maps a legacy Artist to one entry, and is null when malformed
+ *   - a stored cover selection is an explicit choice, while a project with none shows the automatic shared embedded image to v1 clients too
  * @end-catalog */
 
 /**
@@ -37,7 +38,7 @@ import { after, before, test } from 'node:test';
 import '../../src/infrastructure/database';
 import { uuid } from '../../src/administration/import/adminImportContract';
 import { importPublicationSupported, importPublicationVersion } from '../../src/administration/import/adminImportMediaTypes';
-import { adminImportDto, importDigest, type AdminImportDocument } from '../../src/administration/import/adminImportService';
+import { adminImportDetail, adminImportDto, importDigest, type AdminImportDocument } from '../../src/administration/import/adminImportService';
 import {
     catalogReviewAppliedView, catalogReviewSourceDisc, catalogReviewSourceView, importDecisionsV2View, importDraftV2FromV1, importDraftV2View, importDraftVersion, importDraftWritable, importProjectV2View,
     importPublishedV2View, importSuggestionsV2View, legacyArtistEntryKey, legacyAssetsView, legacyAssetVisible, legacyDraftView, legacyPublicationView, writableDraftFilter, type ImportProjectV2View
@@ -431,4 +432,19 @@ test('the published view lists every credited Artist and the label of a format-3
         ['a malformed Album', { ...v3, albumId: 'x' }], ['a malformed mirror Artist', { ...v3, artistId: 'x' }]
     ] as const) assert.equal(importPublishedV2View(value as typeof legacy), null, label);
     assert.equal(importPublishedV2View(undefined), null);
+});
+
+test('a stored cover selection is an explicit choice, while a project with none shows the automatic shared embedded image to v1 clients too', () => {
+    // The newer-format fixture stores a slot this release cannot show: it stays explicit and reads as No cover.
+    const v2 = adminImportDetail(loadV2(), actor, true);
+    assert.deepEqual([v2.coverChoice, v2.selectedCoverSlotId], ['explicit', null]);
+    // Both per-file candidates carry one image and the third file records it at admission, so with no stored choice it is automatic.
+    const doc = load('v1-assets-reviewed.json'), [first, second] = doc.media!.assets.filter(asset => asset.slotId.startsWith('embedded-'));
+    second.sha256 = first.sha256; doc.media!.assets.find(asset => asset.slotId === doc.manifest.files[2].slotId)!.artworkSha256 = first.sha256;
+    const explicit = adminImportDetail(doc, actor, true); assert.deepEqual([explicit.coverChoice, explicit.selectedCoverSlotId], ['explicit', second.slotId]);
+    delete doc.media!.selectedCoverSlotId;
+    assert.equal(adminImportDto(doc, actor, true).selectedCoverSlotId, first.slotId);
+    const automatic = adminImportDetail(doc, actor, true); assert.deepEqual([automatic.coverChoice, automatic.selectedCoverSlotId], ['automatic', first.slotId]);
+    // The v1 DTO adds no field for the choice.
+    assert.equal('coverChoice' in adminImportDto(doc, actor, true), false);
 });

@@ -146,7 +146,8 @@ export function ImportSummary({ item, operation, uploads, disabled, publishDisab
         <div><dt><label htmlFor={`${id}-visibility`}>{t('field.visibility')}</label></dt><dd><select id={`${id}-visibility`} value={draft.album.visibility} disabled={disabled || append || locked}
           onChange={event => operation.run(path, 'PATCH', { expectedRevision: item.revision, changes: [{ path: 'album.visibility', base: item.draft.album.visibility, value: event.target.value }] })}>
           {(['public', 'hidden'] as const).map(value => <option key={value} value={value}>{t(`field.${value}`)}</option>)}</select>{append && ` · ${t('publication.not_applied')}`}</dd></div>
-        <div><dt>{t('layout.selected_cover')}</dt><dd>{notApplied(cover === null ? t('media.no_cover') : cover === 'cover' ? t('media.manual_cover') : t('media.cover_candidate'))}</dd></div>
+        <div><dt>{t('layout.selected_cover')}</dt><dd>{notApplied([cover === null ? t('media.no_cover') : cover === 'cover' ? t('media.manual_cover') : t('media.cover_candidate'),
+          item.coverChoice === 'automatic' && cover !== null && t('summary.cover_automatic')].filter(Boolean).join(' · '))}</dd></div>
         <div><dt>{t('summary.tracks')}</dt><dd><ol>{approvalTrackOrder(draft.tracks).map(track => <li key={track.slotId}>{[t('publication.track_position', { disc: String(track.discNumber ?? 1), track: track.trackNumber === null ? '—' : String(track.trackNumber) }), track.title || t('common.untitled')].join(' · ')}</li>)}</ol></dd></div>
         <div><dt>{t('summary.identities')}</dt><dd>{t('summary.identities_saved', { count: item.decisions.length })}</dd></div>
         <div><dt>{t('stage.upload')}</dt><dd>{t('summary.uploads', { ready: item.upload.ready, total: item.upload.total })}{uploads.running ? ` · ${t('upload.uploading')}` : ''}</dd></div>

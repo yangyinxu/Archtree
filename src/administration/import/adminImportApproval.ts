@@ -8,6 +8,7 @@ import { AdminImportError, IMPORT_APPROVAL_FIELDS, invalidImport } from './admin
 import { DRAFT_V2_LIMITS, hasOwn, retainBoundDecisions, type ImportDraftV2 } from './adminImportDraft';
 import { importDraftV2View } from './adminImportDraftCompat';
 import { importCoverSelectable } from './adminImportMediaTypes';
+import { chooseImportCover, importAlbumNotCreated, importCoverChoice } from './adminImportCoverAutomation';
 import { adminImportDetail, parseImportDecisions, reusesOneArtistTwice, type AdminImportDocument } from './adminImportService';
 import { shownPreselectionKey } from './adminImportIdentity';
 import { applyAdministratorChanges, boundDraftChanges, boundedJson, draftWithinSizeLimit, parseDraftChanges, storedDraftV2 } from './adminImportValueState';
@@ -33,9 +34,10 @@ export function boundImportApproval(body: Record<string, unknown>): void {
 /**
  * Inside the publish transaction, after receipt lookup: requires every approval field, refuses a changed saved basis (409
  * ADMIN_IMPORT_APPROVAL_STALE; the basis reads the lookup record the transaction read, as GET does), then saves decisions, changes
- * and the cover exactly as /decisions, PATCH and /select-cover would, in that order. Decisions carry the bound names shown, which
- * must still be the saved names (409 ADMIN_IMPORT_DECISION_STALE), and renaming an entry or the label in the same approval drops
- * its decision. Returns the saved Draft v2; any refusal aborts the transaction with nothing written.
+ * and the cover exactly as /decisions, PATCH and /select-cover would, in that order, unless the cover is the automatic one the
+ * confirmation showed and the approval's own decisions still select it or append, which stays automatic. Decisions carry the
+ * bound names shown, which must still be the saved names (409 ADMIN_IMPORT_DECISION_STALE), and renaming an entry or the label in
+ * the same approval drops its decision. Returns the saved Draft v2; any refusal aborts the transaction with nothing written.
  */
 export async function saveImportApproval(doc: AdminImportDocument, body: Record<string, unknown>, actor: string, session: ClientSession,
     lookup: Pick<MetadataLookupRecord, 'applied'> | null = null): Promise<ImportDraftV2> {
@@ -43,6 +45,7 @@ export async function saveImportApproval(doc: AdminImportDocument, body: Record<
         || typeof body.approvalDigest !== 'string' || !/^[a-f0-9]{64}$/.test(body.approvalDigest)) return invalidImport();
     // The shown basis is the projection GET returned, read after any format-1 conversion admission performs (which keeps it).
     if (adminImportDetail(doc, actor, undefined, lookup).approvalDigest !== body.approvalDigest) throw new AdminImportError(409, 'ADMIN_IMPORT_APPROVAL_STALE');
+    const shown = importCoverChoice(doc);
     const draft = storedDraftV2(doc), before = structuredClone(draft);
     doc.decisions = await parseImportDecisions(doc, draft, body.decisions, session);
     if (body.changes.length) applyAdministratorChanges({ draft, draftOrigins: doc.draftOrigins ??= {} },
@@ -50,6 +53,10 @@ export async function saveImportApproval(doc: AdminImportDocument, body: Record<
     if (!draftWithinSizeLimit(before, draft)) invalidImport();
     doc.decisions = retainBoundDecisions(doc.decisions, draft);
     if (!importCoverSelectable(doc.media, body.selectedCoverSlotId)) throw new AdminImportError(409, 'ADMIN_IMPORT_ASSET_CONFLICT');
-    doc.media ??= { assets: [] }; doc.media.selectedCoverSlotId = body.selectedCoverSlotId;
+    // The approval saves the cover it shows: it stays automatic only while the automatic choice, re-evaluated with the approval's
+    // own decisions, still selects that cover (an append shows a cover it never applies); any other cover is an explicit choice.
+    const keepsAutomatic = shown.mode === 'automatic' && body.selectedCoverSlotId === shown.slotId
+        && (importAlbumNotCreated(doc.decisions) || importCoverChoice(doc).slotId === body.selectedCoverSlotId);
+    if (!keepsAutomatic) chooseImportCover(doc.media ??= { assets: [] }, body.selectedCoverSlotId);
     return draft;
 }

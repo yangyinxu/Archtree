@@ -10,7 +10,10 @@
  *   - reselection mismatches never dispatch, and a matched file waits for the explicit Resume approval
  *   - 202 publication admission is not completion and source cleanup remains possible after confirmed publication
  *   - embedded artwork requires explicit selection and unavailable upload never dispatches
+ *   - an automatic cover is checked and explained until an option is chosen, and choosing it or No cover posts an explicit choice
+ *   - with no automatic cover, no option is checked and the note says so
  *   - another current administrator retries staging cleanup with the original operation and revision
+ *   - after completion, another current administrator retries a failed automatic cover cleanup with its original intent
  *   - cancelling publication confirms the project and captures its current revision and original approval
  *   - cancelled cleanup uses the original approval and blocks media changes until exact cleanup is confirmed
  *   - a completed publication cannot be cancelled
@@ -145,6 +148,28 @@ test('embedded artwork requires explicit selection and unavailable upload never 
   expect(run).not.toHaveBeenCalled(); expect(screen.getByLabelText('Choose Album cover')).toBeDisabled(); expect(screen.getByRole('button', { name: 'Resume upload' })).toBeDisabled(); expect(screen.getByRole('radio', { name: 'No cover selected' })).toBeChecked(); fireEvent.click(screen.getByRole('radio', { name: /01 First.mp3/ })); expect(run).toHaveBeenCalledWith('/bbbbbbbbbbbbbbbbbbbbbbbb/select-cover', 'POST', { expectedRevision: 1, slotId: `embedded-${slotId}` });
 });
 
+test('an automatic cover is checked and explained until an option is chosen, and choosing it or No cover posts an explicit choice', () => {
+  const item = detail(), embedded = `embedded-${slotId}`; item.coverChoice = 'automatic'; item.selectedCoverSlotId = embedded;
+  item.assets = [{ slotId: embedded, state: 'ready', byteLength: 100, sha256: 'a'.repeat(64), contentType: 'image/jpeg', tags: null, recovery: null }];
+  const operation = new AdminMutation(), run = vi.spyOn(operation, 'run').mockImplementation(() => {}), view = mount(item, operation);
+  const candidate = screen.getByRole('radio', { name: /01 First.mp3/ }), none = screen.getByRole('radio', { name: 'No cover selected' });
+  expect(candidate).toBeChecked(); expect(none).not.toBeChecked();
+  expect(screen.getByText('Chosen automatically: the one image embedded in every track. Choosing an option here replaces the automatic choice.')).toBeVisible();
+  // Choosing the image already chosen automatically, a checked radio that fires no change, makes it the explicit choice.
+  fireEvent.click(candidate); expect(run).toHaveBeenCalledTimes(1); expect(run).toHaveBeenLastCalledWith(`/${item.id}/select-cover`, 'POST', { expectedRevision: 1, slotId: embedded });
+  fireEvent.click(none); expect(run).toHaveBeenLastCalledWith(`/${item.id}/select-cover`, 'POST', { expectedRevision: 1, slotId: null });
+  // Once explicit, choosing the checked image again posts nothing.
+  run.mockClear(); act(() => view.rerender(view.element({ ...item, coverChoice: 'explicit' }))); fireEvent.click(screen.getByRole('radio', { name: /01 First.mp3/ })); expect(run).not.toHaveBeenCalled();
+});
+
+test('with no automatic cover, no option is checked and the note says so', () => {
+  const item = detail(), embedded = `embedded-${slotId}`; item.coverChoice = 'automatic';
+  item.assets = [{ slotId: embedded, state: 'ready', byteLength: 100, sha256: 'a'.repeat(64), contentType: 'image/jpeg', tags: null, recovery: null }]; mount(item);
+  expect(screen.getAllByRole('radio').map(radio => (radio as HTMLInputElement).checked)).toEqual([false, false]);
+  expect(screen.getByText('No cover is chosen automatically. Choose one here.')).toBeVisible();
+  expect(screen.queryByText(/^Chosen automatically/)).toBeNull();
+});
+
 test('another current administrator retries staging cleanup with the original operation and revision', async () => {
   const item = detail(); item.publication = 'notStarted';
   const recovery = { operationId: '30000000-0000-4000-8000-000000000003', expectedRevision: 2, kind: 'cleanup' as const, startedByMe: false };
@@ -161,6 +186,25 @@ test('another current administrator retries staging cleanup with the original op
   operation.retry();
   await vi.waitFor(() => expect(requests).toHaveLength(2));
   expect(requests[1].headers).toEqual(requests[0].headers);
+});
+
+test('after completion, another current administrator retries a failed automatic cover cleanup with its original intent', async () => {
+  const item = detail(), embedded = `embedded-${slotId}`; item.publication = 'complete';
+  item.published = { albumId: '111111111111111111111111', artistIds: ['222222222222222222222222'], organizationId: null, trackIds: [] };
+  // Completion reserved this cleanup under the publisher, who could not finish it; it needs attention until an administrator retries.
+  const recovery = { operationId: '30000000-0000-4000-8000-000000000004', expectedRevision: 5, kind: 'cleanup' as const, startedByMe: false };
+  item.assets = [{ slotId: embedded, state: 'cleanupFailed', byteLength: 100, sha256: 'a'.repeat(64), contentType: 'image/png', tags: null, recovery }];
+  const requests: { path: string; init: RequestInit }[] = [];
+  stubFetch(vi.fn(async (path: string, init: RequestInit) => { requests.push({ path, init }); throw new TypeError('offline'); }));
+  const operation = new AdminMutation(); mount(item, operation);
+  const row = screen.getByText('Private cover candidate · 01 First.mp3').closest('li')!;
+  expect(within(row).getByText('Cleanup needs attention')).toBeVisible(); expect(screen.queryByRole('radio')).toBeNull();
+  fireEvent.click(within(row).getByRole('button', { name: 'Remove file' }));
+  fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Remove file' }));
+  await vi.waitFor(() => expect(operation.getSnapshot().error).toBe('unknown'));
+  expect(requests[0].path).toMatch(new RegExp(`/imports/${item.id}/assets/${embedded}$`)); expect(requests[0].init.method).toBe('DELETE');
+  expect(new Headers(requests[0].init.headers).get('Idempotency-Key')).toBe(recovery.operationId);
+  expect(new Headers(requests[0].init.headers).get('If-Match')).toBe('5');
 });
 
 test('cancelling publication confirms the project and captures its current revision and original approval', () => {
@@ -523,7 +567,11 @@ test('the checklist names an embedded cover by its file and says when there is n
   const embedded = `embedded-${slotTwo}`;
   mount({ ...item, selectedCoverSlotId: embedded, assets: [{ slotId: embedded, state: 'ready', byteLength: 100, sha256: 'c'.repeat(64), contentType: 'image/jpeg', tags: null, recovery: null }] }, new AdminMutation(), 'publication');
   fireEvent.click(screen.getByRole('button', { name: 'Publish Album' })); await approve();
-  expect(value('Album cover')).toHaveTextContent('02 Second.mp3'); cleanup();
+  expect(value('Album cover')).toHaveTextContent(/^02 Second.mp3$/); cleanup();
+  // The same image chosen automatically, as approving it keeps it, is marked so.
+  mount({ ...item, coverChoice: 'automatic', selectedCoverSlotId: embedded, assets: [{ slotId: embedded, state: 'ready', byteLength: 100, sha256: 'c'.repeat(64), contentType: 'image/jpeg', tags: null, recovery: null }] }, new AdminMutation(), 'publication');
+  fireEvent.click(screen.getByRole('button', { name: 'Publish Album' })); await approve();
+  expect(value('Album cover')).toHaveTextContent(/^02 Second.mp3 · Chosen automatically$/); cleanup();
   mount({ ...item, selectedCoverSlotId: null, draft: { ...item.draft, album: { ...item.draft.album, label: null } }, decisions: item.decisions.filter(decision => decision.scope !== 'label') }, new AdminMutation(), 'publication');
   fireEvent.click(screen.getByRole('button', { name: 'Publish Album' })); await approve();
   expect(value('Label')).toHaveTextContent('No label'); expect(value('Album cover')).toHaveTextContent('No cover selected'); cleanup();

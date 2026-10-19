@@ -19,6 +19,7 @@
  *   - the status names an unconfigured, replaced or none-applied lookup and counts stale files, and the Luna step needs analysis access, budget and an idle analysis
  *   - answered conflicts fold with their answer, an artist mismatch is flagged only for a preselection applied in this run, and neither unsaved nor appended Album values are flagged as file tags
  *   - a suggestion whose value an unsaved change writes cannot be ticked, and the fold lists the shown tracks in approved order with decisions, cover and upload progress
+ *   - the fold marks a cover chosen automatically, never an explicit one, and an append marks it not applied
  *   - the Analyze confirmation focuses Cancel, closes on Escape without starting anything, and cannot be confirmed while its budget is loading, failed or too small for one more run
  * @end-catalog */
 
@@ -438,6 +439,17 @@ test('a suggestion whose value an unsaved change writes cannot be ticked, and th
   const access = { viewerId: viewer, epoch: 0, generation: 1 };
   expect(importSummaryQuery(access, { ...item, revision: 2 }).queryKey).not.toEqual(importSummaryQuery(access, item).queryKey);
   expect(importSummaryQuery(access, { ...item, valueRevision: 1 }).queryKey).not.toEqual(importSummaryQuery(access, item).queryKey);
+});
+
+test('the fold marks a cover chosen automatically, never an explicit one, and an append marks it not applied', async () => {
+  const item = detail(), embedded = `embedded-${slotId}`; item.coverChoice = 'automatic'; item.selectedCoverSlotId = embedded;
+  item.assets = [{ slotId: embedded, state: 'ready', byteLength: 100, sha256: 'a'.repeat(64), contentType: 'image/png', tags: null, recovery: null }];
+  const cover = () => within(screen.getByText('Values that need no answer').closest('details')!).getByText('Album cover', { selector: 'dt' }).nextElementSibling!;
+  mount(item); await ready(); expect(cover()).toHaveTextContent(/^Private cover candidate · Chosen automatically$/); cleanup();
+  mount({ ...item, coverChoice: 'explicit' }); await ready(); expect(cover()).toHaveTextContent(/^Private cover candidate$/); cleanup();
+  mount(item, lookupResponse({ summary: summary({ append: true }) })); await ready(); expect(cover()).toHaveTextContent(/^Private cover candidate · Chosen automatically · Not applied$/); cleanup();
+  // No image shared and nothing chosen: No cover selected, without the mark.
+  mount({ ...item, selectedCoverSlotId: null }); await ready(); expect(cover()).toHaveTextContent(/^No cover selected$/);
 });
 
 test('the Analyze confirmation focuses Cancel, closes on Escape without starting anything, and cannot be confirmed while its budget is loading, failed or too small for one more run', async () => {

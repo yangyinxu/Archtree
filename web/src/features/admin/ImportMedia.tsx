@@ -53,7 +53,8 @@ const refusal: Record<string, string> = { content_changed: 'upload.refused_chang
  * and approving sends them with the shown decisions, cover and Luna ticks (`publishDisabled` gates only this; other actions need a
  * saved draft). When ticked suggestions rename rows that then need a decision, the checklist may instead apply them to the saved
  * draft, which closes the confirmation. The `summary` view is the Review and publish summary, whose Publish opens the same
- * confirmation.
+ * confirmation. The cover choice is automatic (the server selects the one image embedded in every track, if any) until a radio is
+ * chosen, the image already chosen automatically included, which makes it explicit.
  */
 export function ImportMedia({ item, operation, uploads, disabled, publishDisabled = disabled, approval = { draft: item.draft, changes: [] }, view, active = true }: {
   item: ImportDetail; operation: AdminMutation; uploads: ImportUploadQueueView; disabled: boolean; publishDisabled?: boolean;
@@ -94,7 +95,7 @@ export function ImportMedia({ item, operation, uploads, disabled, publishDisable
     } catch { /* The row keeps its unknown state; the transport handles permission and reload failures, and the next check retries a failed engine load. */ }
     finally { setChecking(null); }
   };
-  const covers = item.assets.filter(asset => asset.contentType.startsWith('image/') && asset.state === 'ready');
+  const covers = item.assets.filter(asset => asset.contentType.startsWith('image/') && asset.state === 'ready'), automatic = item.coverChoice === 'automatic';
   // Extracted images have their own lifecycle and remain removable even after preview readiness is lost.
   const mediaRows = [
     ...item.manifest.files.map(file => ({ slotId: file.slotId, label: file.relativePath, kind: 'audio' as const })),
@@ -169,8 +170,11 @@ export function ImportMedia({ item, operation, uploads, disabled, publishDisable
       </li>;
     })}</ul>
     {covers.length > 0 && <fieldset disabled={disabled || publicationLocked} className={styles.editor}><legend>{t('layout.selected_cover')}</legend>
-      <label><input type="radio" name="selected-cover" checked={item.selectedCoverSlotId === null} onChange={() => operation.run(`${path}/select-cover`, 'POST', { expectedRevision: item.revision, slotId: null })} />{t('media.no_cover')}</label>
-      {covers.map(asset => <label key={asset.slotId} className={styles.artworkChoice}><input type="radio" name="selected-cover" checked={item.selectedCoverSlotId === asset.slotId} onChange={() => operation.run(`${path}/select-cover`, 'POST', { expectedRevision: item.revision, slotId: asset.slotId })} />
+      {automatic && <p className={styles.muted}>{t(item.selectedCoverSlotId === null ? 'media.cover_automatic_none' : 'media.cover_automatic')}</p>}
+      <label><input type="radio" name="selected-cover" checked={!automatic && item.selectedCoverSlotId === null} onChange={() => operation.run(`${path}/select-cover`, 'POST', { expectedRevision: item.revision, slotId: null })} />{t('media.no_cover')}</label>
+      {/* A checked radio fires no change, so choosing the image already chosen automatically is a click that makes it explicit. */}
+      {covers.map(asset => <label key={asset.slotId} className={styles.artworkChoice}><input type="radio" name="selected-cover" checked={item.selectedCoverSlotId === asset.slotId} onChange={() => operation.run(`${path}/select-cover`, 'POST', { expectedRevision: item.revision, slotId: asset.slotId })}
+        onClick={() => { if (automatic && item.selectedCoverSlotId === asset.slotId) operation.run(`${path}/select-cover`, 'POST', { expectedRevision: item.revision, slotId: asset.slotId }); }} />
         <img alt={t('media.cover_candidate')} src={active ? `/api/admin/v1/imports/${item.id}/assets/${encodeURIComponent(asset.slotId)}/preview?viewer=${encodeURIComponent(access.viewerId)}` : undefined} width={96} height={96} />
         <span>{asset.slotId === 'cover' ? t('media.manual_cover') : item.manifest.files.find(file => `embedded-${file.slotId}` === asset.slotId)?.filename}</span>
       </label>)}

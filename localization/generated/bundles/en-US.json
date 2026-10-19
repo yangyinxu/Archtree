@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "locale": "en-US",
-  "revision": "sha256-rlpHIi9p0GhgOWId3SU61FBhP6osMYsy-KwTq0q0yNA",
+  "revision": "sha256-Ug0Lp_r1SY-xjN3AMvcTRXHJYB7fqFn-7kKMKO-iwWo",
   "messages": {
     "account.common.back_account": "← Back to Account",
     "account.common.checking": "Checking your account…",
@@ -510,6 +510,8 @@
     "admin.media.confirm_remove": "Remove this staged file?",
     "admin.media.confirm_upload": "Confirm private upload",
     "admin.media.copy": "Selected files upload privately one at a time, each with its own result. Uploads remain private until you explicitly publish the reviewed Album.",
+    "admin.media.cover_automatic": "Chosen automatically: the one image embedded in every track. Choosing an option here replaces the automatic choice.",
+    "admin.media.cover_automatic_none": "No cover is chosen automatically. Choose one here.",
     "admin.media.cover_candidate": "Private cover candidate",
     "admin.media.invalid": "Choose the original file with the same filename and size.",
     "admin.media.manual_cover": "Manually selected cover",
@@ -624,6 +626,7 @@
     "admin.state.unknown": "Outcome unknown",
     "admin.summary.artist_mismatch": "The applied release credits an artist that no artist tag of these files names. Check the Artist entries before publishing.",
     "admin.summary.conflicts": "Lookup values that differ from yours",
+    "admin.summary.cover_automatic": "Chosen automatically",
     "admin.summary.flagged": "Values to check",
     "admin.summary.identities": "Identity decisions",
     "admin.summary.identities_saved": "Saved decisions: {count}. The publication confirmation lists each new or reused record.",

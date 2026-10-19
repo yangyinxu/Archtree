@@ -161,7 +161,8 @@ response. Actual service failures and shutdown admission failures retain their
 normal error handling; already-admitted business work remains tracked until it settles.
 
 After the listener opens, startup starts the administrator background workers:
-Luna analysis, import publication, existing-catalog covers and metadata lookup.
+Luna analysis, import publication (which also cleans up automatic cover
+candidates of completed imports), existing-catalog covers and metadata lookup.
 Each polls every two seconds and runs at most one pass at a time through the
 lifecycle tracker, so that pass counts as admitted business work. Draining
 aborts each worker's signal, which cancels an in-flight metadata lookup

@@ -180,6 +180,8 @@ test('the server Draft v2 projection parses strictly with its approval digest, b
     published: null,
     assets: [{"slotId": "00000009-0000-4000-a000-000000000001", "state": "ready", "byteLength": 4096, "sha256": "719b383821e6441a28fd740b613e025e2e8cae1240f47297cef590f888c1cb31", "contentType": "audio/mpeg", "tags": {"version": 1, "title": "Synthetic Opening", "album": "Synthetic Compat Album", "year": 2026, "trackNumber": 1, "artists": ["Synthetic Primary", "Synthetic Guest"], "albumArtists": [], "label": null, "discNumber": null, "durationMs": null, "identifiers": {"barcode": null, "catalogNumber": null, "isrc": null, "musicBrainzReleaseId": null}, "flagged": []}, "recovery": {"operationId": "00000009-0000-4000-8000-000000000003", "expectedRevision": 2, "kind": "upload", "startedByMe": true}}, {"slotId": "embedded-00000009-0000-4000-a000-000000000001", "state": "ready", "byteLength": 3073, "sha256": "59353ff2c987657686b1510ce52d67a888c1704ffc9c4185ddf33dd1caeae2b4", "contentType": "image/jpeg", "tags": null, "recovery": {"operationId": "00000009-0000-4000-8000-000000000030", "expectedRevision": 4, "kind": "upload", "startedByMe": true}}],
     selectedCoverSlotId: null,
+    // The fixture stores a cover choice, so it is explicit.
+    coverChoice: 'explicit',
     capabilities: {"analysis": true, "upload": true, "publish": true},
     // The server's approvalDigest of this projection (adminImportDetail of the fixture); the Web echoes it and never hashes.
     approvalDigest: "e3fe4303d00be9a0834356a317c65c1e8c7417618fc51471f9fe55284f6d9df9",
@@ -201,6 +203,10 @@ test('the server Draft v2 projection parses strictly with its approval digest, b
   const { valueRevision: _value, automaticPaths: _paths, lookupPaths: _lookup, possibleLabelEntryKeys: _labels, ...unmarked } = projected;
   expect(detailSchema.parse(unmarked)).toMatchObject({ valueRevision: 0, automaticPaths: [], lookupPaths: [], possibleLabelEntryKeys: [] });
   expect(detailSchema.parse({ ...projected, lookupPaths: ['album.artists', 'album.label'] }).lookupPaths).toEqual(['album.artists', 'album.label']);
+  // A projection from before automatic covers only had explicit choices; an automatic one names its selected candidate.
+  const { coverChoice: _choice, ...beforeAutomatic } = projected;
+  expect(detailSchema.parse(beforeAutomatic).coverChoice).toBe('explicit');
+  expect(detailSchema.parse({ ...projected, coverChoice: 'automatic', selectedCoverSlotId: projected.assets[1].slotId })).toMatchObject({ coverChoice: 'automatic', selectedCoverSlotId: projected.assets[1].slotId });
   // A completed publication lists every credited Artist and the label; a legacy single artistId is refused.
   const published = { albumId: 'a'.repeat(24), artistIds: ['b'.repeat(24), 'c'.repeat(24)], organizationId: 'd'.repeat(24), trackIds: ['e'.repeat(24)] };
   for (const value of [published, { ...published, organizationId: null }, { ...published, artistIds: [published.artistIds[0]] }]) expect(detailSchema.safeParse({ ...projected, published: value }).success).toBe(true);
@@ -225,6 +231,7 @@ test('the server Draft v2 projection parses strictly with its approval digest, b
     { ...projected, assets: [{ ...audio, tags: { ...tags, identifiers: { ...tags.identifiers, extra: null } } }, projected.assets[1]] },
     { ...projected, automaticPaths: Array(306).fill('album.title') }, { ...projected, lookupPaths: Array(306).fill('album.title') }, { ...projected, lookupPaths: ['x'.repeat(81)] },
     { ...projected, possibleLabelEntryKeys: ['not-a-key'] }, { ...projected, valueRevision: -1 },
+    { ...projected, coverChoice: 'auto' }, { ...projected, coverChoice: null },
     { ...projected, draft: { album: { title: album.title, artistName: 'Synthetic Primary', releaseDate: album.releaseDate, visibility: album.visibility }, tracks: tracks.map(({ discNumber: _disc, ...track }) => track) } },
     { ...projected, draft: { ...projected.draft, album: { ...album, artists: [{ ...album.artists[0], extra: true }, album.artists[1]] } } },
     { ...projected, draft: { ...projected.draft, album: { ...album, label: { name: 'Synthetic Label', musicBrainzId: 'not-an-id' } } } },

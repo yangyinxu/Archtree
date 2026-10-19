@@ -117,7 +117,12 @@ tags" in the visible and accessible label of the Album title, the release date, 
 label and each track's title, Disc Number and Track Number, until that value is
 edited; an automatic Artist entry whose name looks like a company says "This
 name looks like a label". In Files, a file whose tags had values left out says
-how many beside its tag evidence.
+how many beside its tag evidence. Once a staged image is ready, the cover
+choice offers No cover and each ready image, manual or embedded. While the
+choice is automatic, a note says so and only the image chosen automatically is
+checked (nothing is checked when no image is); choosing any option, No cover
+and the image already chosen automatically included, makes the choice explicit
+for good.
 Review shows an Artist suggestion as its byline
 followed by each entry with its role. Review's existing-content check has one
 Artist row per entry, in draft order and named with its role, and a Label row
@@ -210,10 +215,10 @@ summary only presents it:
   tag, and pending Luna suggestions with their ticks.
 - **Folded.** Every other row: title, Artist entries with roles and join
   phrases, label, date, visibility (changed in place by a field save, public by
-  default), cover, the disc and track order, saved identity decisions, upload
-  progress, answered conflicts, and all candidates when there is no tie. An
-  append marks the Album values, their conflicts and Album Luna suggestions
-  not applied.
+  default), cover (one chosen automatically says so), the disc and track
+  order, saved identity decisions, upload progress, answered conflicts, and
+  all candidates when there is no tie. An append marks the Album values, their
+  conflicts and Album Luna suggestions not applied.
 - **Publish.** Disabled while the server says it waits for uploads, lookup or
   analysis or this browser is still uploading, while a tie, a conflict or an
   identity row (`identityAnswers`) needs an answer, or while a new Album's
@@ -441,9 +446,19 @@ Import routes (relative to `/api/admin/v1`):
   possible label); and `valueRevision` counts the automatic writes, which
   never change `revision`. Each asset's `tags` is the tag evidence described under
   [Tag evidence and automatic values](#tag-evidence-and-automatic-values).
+  `selectedCoverSlotId` is the selected staged image or `null`; `coverChoice`
+  is `automatic` until an administrator chooses (`/select-cover`, or an
+  approval saving a cover its own decisions would not select automatically;
+  see `POST /imports/:id/publish`) and `explicit` after (see
+  `POST /imports/:id/select-cover`). A stored `selectedCoverSlotId`, including
+  those saved by earlier releases and by every earlier one-step approval, is
+  explicit. Once a publication is active or complete, an automatic choice shows
+  the cover that publication froze (none for an append). The v1 projection
+  shows the same `selectedCoverSlotId` without `coverChoice`.
   `approvalDigest` is the SHA-256 hex digest of the key-sorted JSON of what a
   publication confirmation shows from the saved project: the Draft v2 view, the
-  returned decisions with their bound names, `selectedCoverSlotId`, each
+  returned decisions with their bound names, the selected cover
+  (`selectedCoverSlotId`, automatic or explicit), each
   returned asset's `slotId`, `state` and `sha256`, and whether the Artist
   entries and the label rest only on file tags (automatic values equal to a
   value the applied metadata lookup candidate wrote do not). Actor,
@@ -623,13 +638,26 @@ Import routes (relative to `/api/admin/v1`):
   removal of a file that a lookup run bound lists its slot in `staleSlotIds`
   and supersedes that run while it is active (see
   [Triggers and grants](#triggers-and-grants)).
-- `POST /imports/:id/select-cover`: explicitly select a ready manual or embedded
-  artwork slot; uploading artwork alone never selects it. It binds the cover
-  state the administrator saw: `expectedRevision` must not predate the last
-  cover selection, approval or staged cleanup, and a chosen slot must hold a
-  ready image admitted no later than that revision, so a stale tab never
-  overwrites another administrator's choice or selects a replaced image
-  unseen (`409 ADMIN_IMPORT_REVISION_CONFLICT`). Uploads of other slots, Luna,
+- `POST /imports/:id/select-cover`: explicitly choose a ready manual or embedded
+  artwork slot, or `null` for No cover. Choosing makes the cover choice explicit
+  for good; nothing turns it back to automatic. Until then the choice is
+  automatic: each audio upload records at admission the SHA-256 of its validated
+  embedded front image, or none, and the import selects the ready `embedded-*`
+  candidate, first in manifest order, of the one image every confirmed audio
+  file carries, ignoring files whose saved track decision is `skip` (they
+  become no track). It selects nothing when such a file carries none, carries
+  another image or has no evidence (an upload admitted before automatic covers
+  has evidence only through its own per-file candidate), when that image has no
+  ready candidate (the staging bound kept it out, its staging is unresolved, or
+  the candidate was removed), or when the saved Album decision is `reuse` or
+  `skip`. The automatic choice is stored nowhere and recomputed on every read,
+  so a changed file set (an upload, a reconcile, a removal or a replacement)
+  re-evaluates it. Uploading a manual cover never selects it. A choice binds the
+  cover state the administrator saw: `expectedRevision` must not predate the
+  last cover selection, approval or staged cleanup, and a chosen slot must hold
+  a ready image admitted no later than that revision, so a stale tab never
+  overwrites another administrator's choice or selects a replaced image unseen
+  (`409 ADMIN_IMPORT_REVISION_CONFLICT`). Uploads of other slots, Luna,
   automation and worker steps never make it stale.
 - `GET /imports/:id/assets/:slotId/preview`: protected staged artwork preview.
 - `GET /imports/:id/lookup` and `POST /imports/:id/lookup`, `/lookup/retry`,
@@ -642,7 +670,8 @@ Import routes (relative to `/api/admin/v1`):
   `{operationId, expectedRevision, changes, decisions, selectedCoverSlotId,
   approvalDigest, suggestionTicks}`: the confirmation's unsaved field changes
   in the `PATCH` shape (possibly none), the whole decision set it shows in the
-  `/decisions` shape, the cover it shows (`null` or a staged slot), the
+  `/decisions` shape, the cover it shows (`null` or a staged slot, which the
+  approval freezes), the
   `approvalDigest` of the saved project it was built on and the Luna ticks it
   shows (below); each decision carries its `boundName`. The Web also sends
   the optional `preselections`: the rows the confirmation shows as
@@ -671,9 +700,14 @@ Import routes (relative to `/api/admin/v1`):
   changes as `PATCH` saves them, decisions whose entry or label the changes
   renamed or removed are dropped (so that entry needs a new decision,
   `409 ADMIN_IMPORT_REVIEW_REQUIRED`), and the cover as `/select-cover` saves
-  it (`409 ADMIN_IMPORT_ASSET_CONFLICT` unless it is no cover or a ready
-  image), before the checks below run and the approval is frozen. A body with
-  none of the four fields comes from an editor that predates one-step
+  it (`409 ADMIN_IMPORT_ASSET_CONFLICT` unless it is no cover or a ready image),
+  before the checks below run and the approval is frozen. A cover equal to the
+  automatic selection the saved project showed, which the approval's own
+  decisions still select or which they append, is not saved as a choice, so it
+  stays automatic; any other cover is saved as an explicit choice (for example
+  No cover shown for a saved `skip` that the approval changes to a new Album).
+  The approval freezes the cover it shows (an append freezes no cover). A
+  body with none of the four fields comes from an editor that predates one-step
   approval, and one whose decisions lack `entryKey` or `boundName` from one that
   predates bound names: a lost response replays its stored receipt, and a new
   one is `409 ADMIN_IMPORT_RELOAD_REQUIRED` right after receipt lookup, before
@@ -808,16 +842,69 @@ ordinary mutation allowance.
 Automatic embedded-cover staging, which follows a ready audio upload, likewise
 has its own bounded lifecycle receipts. An embedded image whose SHA-256 matches
 one that is ready, pending or of unknown outcome is not staged again, and each
-import makes at most 16 automatic embedded stagings. Embedded assets that an
-earlier release staged under ordinary receipts keep them and their existing
-lifecycle. Automatic values written from file tags and automatic metadata
-lookup runs and applications take no receipt of either kind, so they use
-neither the 256 ordinary receipts nor the 16 automatic embedded stagings. A
-submitted lookup, a manual retry, a choice and conflict answers each take one
-ordinary receipt (`lookup`, `lookup-retry`, `lookup-choose`,
+import makes at most 16 automatic embedded stagings (automatic cleanups do not
+count). A replaced file's image goes in that file's own `embedded-<slotId>`
+slot. When the slot still holds the candidate the earlier upload staged under
+an automatic receipt, that candidate is first cleaned up through the cleanup
+lifecycle like a completed import's (below, with the uploader as actor),
+unless it is explicitly chosen, pinned, still settling, or holds an image
+another file's current upload carries; the new image is then staged once it is
+deleted. Otherwise the new image is not staged, and a failed cleanup needs
+attention. A later staging of that slot resumes a cleanup that stopped before
+deleting. Embedded assets that an earlier release staged under ordinary
+receipts keep them and their existing lifecycle until the import completes,
+when unselected ones are cleaned up like any automatic candidate (below).
+Automatic values written from file tags and automatic metadata lookup runs and
+applications take no receipt of either kind, so they use neither the 256
+ordinary receipts nor the 16 automatic embedded stagings. A submitted lookup, a manual retry, a choice and conflict answers each
+take one ordinary receipt (`lookup`, `lookup-retry`, `lookup-choose`,
 `lookup-resolve`), which only the Draft v2 detail lists.
 The client receives a bounded recent receipt projection; the original publication
 UUID remains available through `publicationRecovery` for durable reconciliation.
+
+**Automatic cover cleanup.** Once an import completes, each automatically
+staged `embedded-*` candidate is cleaned up through the staged cleanup
+lifecycle unless it is the published cover (which is where an approved
+automatic cover lives), an explicitly chosen cover, pinned by an
+existing-catalog cover operation (`coverConsumers`), or already being cleaned
+or removed. That includes the per-file duplicates that releases before
+embedded deduplication staged, and imports completed before automatic cleanup
+existed; an image the files would select automatically but the publication
+never used, such as the first of those duplicates, is cleaned too. A manual
+cover is never cleaned automatically. The automatic choice is computed in
+`src/administration/import/adminImportCoverAutomation.ts`, and this cleanup
+runs in `adminImportCoverCleanup.ts` beside it.
+
+- **Reservation.** Right after its commit, the publication worker reserves the
+  candidates as a system lifecycle step with no role fence that deletes
+  nothing. Each becomes `deleting` with a cleanup `recovery` naming the
+  publisher, under an operation ID derived from the candidate version. Each
+  takes one `cleanup` receipt among the automatic lifecycle receipts, never an
+  ordinary or recovery receipt, so it uses neither allowance and the detail
+  lists none of them.
+- **Deletion.** Each candidate is then deleted under the publisher's fresh
+  administrator check, exactly as `DELETE /imports/:id/assets/:slotId`
+  deletes.
+- **Failure.** A failed deletion, including one after the publisher lost the
+  role, leaves the candidate `cleanupFailed`, which counts as needs attention.
+  Nothing retries it automatically. Any current administrator retries it with
+  `DELETE …/assets/:slotId` carrying the asset's `recovery` (its `operationId`
+  as `Idempotency-Key` and its `expectedRevision` as `If-Match`); that replays
+  the automatic receipt and deletes under the retrying administrator's own
+  check, adding no receipt.
+- **Waits and pins.** A candidate whose staging may still land (pending or
+  unknown before its transfer deadline, or leased) waits until it settles. A
+  pinned candidate is kept, and releasing the pin re-arms the cleanup; the
+  sweep also checks a pinned candidate again a day later, so a release whose
+  pin release does not re-arm it never strands it.
+- **Sweep.** A completed import keeps its cleanup state in
+  `media.coverCleanup`, which is never projected and never changes `revision`.
+  On ticks that publish nothing, the publication worker sweeps the oldest
+  completed import whose cleanup is not done, which covers crash recovery,
+  waiting and re-armed candidates, and imports completed before this release.
+  It skips projects saved in a newer draft format, and looks again a day later
+  at an approval format this release cannot read. A stopped pass resumes the
+  same reserved intents once its five-minute lease expires.
 
 The Web upload queue starts when the create action succeeds, or when an
 administrator resumes an import after reselecting its files; no file asks for
@@ -1158,11 +1245,12 @@ reads live in `src/administration/import/adminImportDraftCompat.ts`.
   cleanup, audio and image storage reconciliation fails closed instead of
   classifying objects.
 - **Allowlisted DTOs.** Import responses copy only the Draft v2 fields of the
-  draft and suggestions, the decision, `published`, marker and asset tag
-  fields described under `GET /imports/:id` (assets carry the version-2 tag
-  allowlist), and the v1 fields everywhere else: assets, publication state and
-  receipts, whose kinds include the four lookup receipts; the lookup view is
-  its own allowlist (see [Lookup routes](#lookup-routes)). A decision whose
+  draft and suggestions, the decision, `published`, `coverChoice`, marker and
+  asset tag fields described under `GET /imports/:id` (assets carry the
+  version-2 tag allowlist), and the v1 fields everywhere else: assets,
+  publication state and receipts, whose kinds include the four lookup
+  receipts; the lookup view is its own allowlist (see
+  [Lookup routes](#lookup-routes)). A decision whose
   scope this release does not know is dropped. Review responses copy the
   Draft v2 fields of the draft and suggestions, the source with a Disc Number
   only on a track that captured one, and applied Track `discNumber` fields.
@@ -1263,6 +1351,17 @@ Later stages raise the oldest release that is safe to roll back to:
   parse a lookup read without its `summary` (from a release before them), so
   its Review and publish summary shows an error and its confirmation cannot be
   approved while a suggestion is pending; reload open workbench tabs after
+  deploying or rolling back across them.
+- Automatic covers need no floor of their own. A release before them shows and
+  publishes only a stored, explicit `selectedCoverSlotId`, so an import whose
+  choice is still automatic shows No cover there and publishes no cover unless
+  an approval already froze one. It ignores `artworkSha256` and
+  `media.coverCleanup`, runs no automatic cleanup, and counts automatic
+  cleanup receipts toward the 16 embedded stagings. A reserved automatic
+  cleanup (`deleting` or `cleanupFailed`) still retries there with its
+  original intent, because that release also finds receipts among the
+  automatic lifecycle receipts. A Web tab opened before them cannot parse a
+  detail that carries `coverChoice`, so reload open workbench tabs after
   deploying or rolling back across them.
 - After MusicBrainz IDs are stored, never roll back below the release before
   them; its index stays, and listener DTOs already drop unknown fields.

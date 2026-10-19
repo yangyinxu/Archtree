@@ -28,6 +28,7 @@
  *   - a lookup value that differs from the administrator's own is answered from the keyboard, and the summary reflows at 320, 768 and 1440 px
  *   - an unavailable lookup offers Luna first beside a free retry, a retry that stays unavailable keeps them, and Luna runs only after its confirmation shows the budget
  *   - without a folder or usable tags the summary offers Luna beside an empty name box, which looks up a typed name from the keyboard
+ *   - an image every file shares is chosen automatically until the administrator chooses, and the summary and confirmation show the choice
  * @end-catalog */
 
 import { expect, test, type Page, type Request } from '@playwright/test';
@@ -152,7 +153,7 @@ async function setup(page: Page, admin = true, media = false, publication?: Publ
       return route.fulfill({ json: { item, receipt: { operationId: body.operationId, kind: 'create', revision: item.revision } }, status: 201, headers });
     }
     if (path === '/api/admin/v1/imports') {
-      const { manifest, draft, suggestions, decisions: _decisions, capabilities: _capabilities, receipts: _receipts, assets: _assets, published: _published, publicationRecovery: _recovery, selectedCoverSlotId: _selectedCover, approvalDigest: _approvalDigest, valueRevision: _valueRevision, automaticPaths: _automaticPaths, lookupPaths: _lookupPaths, possibleLabelEntryKeys: _possibleLabels, ...common } = item;
+      const { manifest, draft, suggestions, decisions: _decisions, capabilities: _capabilities, receipts: _receipts, assets: _assets, published: _published, publicationRecovery: _recovery, selectedCoverSlotId: _selectedCover, coverChoice: _coverChoice, approvalDigest: _approvalDigest, valueRevision: _valueRevision, automaticPaths: _automaticPaths, lookupPaths: _lookupPaths, possibleLabelEntryKeys: _possibleLabels, ...common } = item;
       return route.fulfill({ json: { items: [{ ...common, title: draft.album.title, rootLabel: manifest.rootLabel, artistName: draft.album.artists[0]?.name ?? '', visibility: draft.album.visibility, pendingSuggestions: suggestions.filter(s => s.decision === 'pending').length }], counts: { all: 1, analyzing: 0, awaitingReview: 1, needsAttention: 0, completed: 0 }, nextCursor: null }, headers });
     }
     if (item.publication === 'preparing' && (publication ? publicationComplete : ++publicationReads > 1)) { item.publication = 'complete'; item.published = { albumId: '111111111111111111111111', artistIds: ['222222222222222222222222'], organizationId: null, trackIds: ['333333333333333333333333'] }; item.revision++; }
@@ -985,5 +986,42 @@ test('without a folder or usable tags the summary offers Luna beside an empty na
   expect(server.writes.map(write => write.action)).toEqual(['lookup']);
   // The name box keeps no history: nothing is stored by the lookup.
   expect(await storage()).toEqual(before);
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+});
+
+test('an image every file shares is chosen automatically until the administrator chooses, and the summary and confirmation show the choice', async ({ page }) => {
+  await setup(page);
+  const item = uploadedProject(), embedded = `embedded-${slotId}`;
+  item.assets = [...item.assets, { slotId: embedded, state: 'ready', byteLength: 68, sha256: 'b'.repeat(64), contentType: 'image/png', tags: null, recovery: null }];
+  item.coverChoice = 'automatic'; item.selectedCoverSlotId = embedded;
+  const server = await summaryProject(page, item, (state, action, body) => {
+    if (action === 'select-cover') {
+      expect(body).toEqual({ operationId: expect.any(String), expectedRevision: state.item.revision, slotId: null });
+      state.item = { ...state.item, coverChoice: 'explicit', selectedCoverSlotId: null }; return 'select-cover';
+    }
+    expect(action).toBe('publish'); return 'publish';
+  });
+  // Registered last, so it answers the candidate's preview before the project route.
+  const pixel = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+  await page.route('**/assets/**/preview**', route => route.fulfill({ body: pixel, contentType: 'image/png', headers: { 'Cache-Control': 'no-store' } }));
+  await page.goto(`/finitude/admin/imports/${projectId}`); await page.getByRole('button', { name: 'Switch to Admin view' }).click();
+  await expect(summaryRegion(page).getByText('Private cover candidate · Chosen automatically', { exact: true })).toBeAttached();
+  await page.getByRole('tab', { name: 'Files', exact: true }).click();
+  const choice = page.getByRole('group', { name: 'Album cover', exact: true }), note = choice.getByText('Chosen automatically: the one image embedded in every track. Choosing an option here replaces the automatic choice.', { exact: true });
+  await expect(choice.getByRole('radio', { name: /01 First\.mp3/ })).toBeChecked(); await expect(note).toBeVisible();
+  await expect(choice.getByRole('radio', { name: 'No cover selected', exact: true })).not.toBeChecked();
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+  // Choosing No cover is the administrator's explicit choice; the automatic note and mark go away.
+  await choice.getByRole('radio', { name: 'No cover selected', exact: true }).check();
+  await expect.poll(() => server.writes.map(write => write.action)).toEqual(['select-cover']);
+  await expect(note).toHaveCount(0); await expect(choice.getByRole('radio', { name: 'No cover selected', exact: true })).toBeChecked();
+  await expect(summaryRegion(page).getByText('No cover selected', { exact: true })).toBeAttached();
+  await expect(summaryRegion(page).getByText(/Chosen automatically/)).toHaveCount(0);
+  await publishFromSummary(page).click();
+  const dialog = page.getByRole('dialog'), checklist = dialog.getByRole('region', { name: 'What becomes catalog content', exact: true });
+  await expect(checklist.getByText('Album cover', { exact: true }).locator('xpath=following-sibling::dd')).toHaveText('No cover selected');
+  await dialog.getByRole('button', { name: 'Publish Album', exact: true }).click();
+  await expect.poll(() => server.writes.map(write => write.action)).toEqual(['select-cover', 'publish']);
+  expect(server.writes[1].body.selectedCoverSlotId).toBeNull();
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
 });

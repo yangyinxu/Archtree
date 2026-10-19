@@ -28,6 +28,7 @@ import { assertImportPreselectionsCurrent, importIdentityCandidates, importIdent
 import { assertImportReusedRecordsReady, commitImportCatalogGraph, freezeImportIdentities, importAlbumCredits, importPublicationConflict as conflict, requireCurrentApproval as currentApproval, requireImportPublicationReady as ready } from './adminImportCatalogCommit';
 import { lookupAnswersNeeded } from '../lookup/lookupValueApplication';
 import { isBlockingLookupState, lookupGateFor } from '../lookup/metadataLookupRecord';
+import { runAutomaticImportCoverCleanupOnce } from './adminImportCoverCleanup';
 
 const candidateProjection = importCandidateProjection;
 /** What the publish gate reads of the lookup record: the run and its state, whether it ranked a tie, and the applied values. */
@@ -52,6 +53,7 @@ const lookupGateProjection = { run: 1, state: 1, 'ranking.preselection': 1, 'ran
  * Metadata lookup gates it in the same transaction: a queued, running or automatically retrying run is
  * ADMIN_IMPORT_LOOKUP_ACTIVE, and an unanswered tie or conflict (Album conflicts not for an append) is
  * ADMIN_IMPORT_REVIEW_REQUIRED; an admitted approval writes the lookup gate, so a run started concurrently conflicts with it.
+ * The publication freezes the cover the confirmation showed; a cover chosen automatically stays automatic.
  */
 export async function publishAdminImport(actor: string, id: string, raw: unknown) {
     const body = record(raw); exact(body, ['operationId', 'expectedRevision', ...IMPORT_APPROVAL_FIELDS, 'preselections', 'suggestionTicks']); if (!uuid(body.operationId) || !Number.isSafeInteger(body.expectedRevision) || (body.expectedRevision as number) < 1) throw new AdminImportError(400, 'ADMIN_IMPORT_INVALID_INPUT');
@@ -111,8 +113,9 @@ export async function publishAdminImport(actor: string, id: string, raw: unknown
                 if (!target || importCandidateRevision(target) !== decision.candidateRevision || !existingAlbum.audioTrackIds.includes(target._id.toHexString()) || [...reused.values()].some(value => value._id.equals(target._id))) throw new AdminImportError(409, 'ADMIN_IMPORT_TRACK_BELONGS_TO_ALBUM'); reused.set(track.slotId, target);
             } else { const asset = doc.media?.assets.find(asset => asset.slotId === track.slotId); if (!asset || asset.state !== 'ready' || !asset.etag) throw new AdminImportError(409, 'ADMIN_IMPORT_UPLOAD_INCOMPLETE'); }
         }
-        // An append never changes the target Album's cover: the selected cover is shown as not applied and is not copied.
-        const coverAsset = append ? undefined : doc.media?.assets.find(asset => asset.slotId === doc.media?.selectedCoverSlotId);
+        // The cover the approval showed (saveImportApproval checked it is no cover or a ready image): an explicit choice, or the
+        // automatic one, which stays automatic. An append never changes the target Album's cover, so it copies none.
+        const coverAsset = append ? undefined : doc.media?.assets.find(asset => asset.slotId === body.selectedCoverSlotId);
         if (coverAsset && (coverAsset.state !== 'ready' || !coverAsset.etag)) throw new AdminImportError(409, 'ADMIN_IMPORT_UPLOAD_INCOMPLETE');
         const identities = await freezeImportIdentities(draft, decisions, existingAlbum, session);
         // The reviewed join phrases already satisfy the Credit rules; a refusal here means the draft cannot be published as shown.
@@ -238,7 +241,7 @@ export async function runAdminImportPublicationOnce(storage: ImportObjectStorage
             { $set: { 'media.publication.cleanupPending': true, 'media.publication.issue': 'storageUnknown', 'media.publication.leaseOwner': null, 'media.publication.leaseUntil': null, updatedAt: new Date() }, $inc: { revision: 1 } }); }
         return true;
     }
-    let issue: ImportPublication['issue'] = null;
+    let issue: ImportPublication['issue'] = null, completed = false;
     try {
         ready(); if (publication.bucket !== process.env.S3_BUCKET_NAME?.trim()) throw new Error('configuration'); currentApproval(publication);
         await withImportAdmin(publication.actorId, async session => {
@@ -282,13 +285,15 @@ export async function runAdminImportPublicationOnce(storage: ImportObjectStorage
             });
         }
         checkAdminWorker(signal);
-        if (!issue) await commitImportCatalogGraph(id, worker, signal);
+        if (!issue) { await commitImportCatalogGraph(id, worker, signal); completed = true; }
     } catch (error) {
         issue = error instanceof AdminImportError && error.code === 'ADMIN_IMPORT_PUBLICATION_UNSUPPORTED' ? 'unsupportedVersion'
             : error instanceof AdminImportError && error.code === 'ADMIN_IMPORT_IDENTITY_CONFLICT' ? 'identityConflict'
             : error instanceof AdminImportError && error.status === 403 ? 'permissionLost' : error instanceof AdminImportError && error.status === 409 ? 'catalogConflict' : 'storageUnknown';
     }
     if (issue) await importCollection().updateOne({ _id: doc._id, 'media.publication.leaseOwner': worker, 'media.publication.state': { $nin: ['complete', 'cancelled'] } }, { $set: { 'media.publication.state': 'needsAttention', 'media.publication.issue': issue, 'media.publication.leaseOwner': null, 'media.publication.leaseUntil': null, updatedAt: new Date() }, $inc: { revision: 1 } });
+    // Outside the publication's own try: a cleanup problem never turns a complete publication into needs attention.
+    if (completed) await runAutomaticImportCoverCleanupOnce(storage, id, signal);
     return true;
 }
 
@@ -304,6 +309,10 @@ export async function resumeAdminImportPublication(actor: string, id: string, op
     await runAdminImportPublicationOnce(storage, id, undefined, operationId, actor);
     return { ...(await getAdminImport(actor, id)), receipt };
 }
+/**
+ * The publication worker: a tick that publishes nothing sweeps one completed import whose automatic cover cleanup is not done
+ * (crash recovery, imports completed before automatic covers, and candidates that were waiting or pinned).
+ */
 export function startAdminImportPublisher(storage: ImportObjectStorage = defaultImportObjectStorage, intervalMs = 2_000, track?: AdminWorkTracker): () => Promise<void> {
-    return startAdminWorker(signal => runAdminImportPublicationOnce(storage, undefined, signal), intervalMs, track);
+    return startAdminWorker(async signal => await runAdminImportPublicationOnce(storage, undefined, signal) || await runAutomaticImportCoverCleanupOnce(storage, undefined, signal), intervalMs, track);
 }

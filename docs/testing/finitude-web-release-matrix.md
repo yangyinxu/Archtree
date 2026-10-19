@@ -90,7 +90,10 @@ that its matches load without a find step, that the entry, the label, the Album
 and each track are collapsed as preselected new records with no decision asked,
 that the confirmation lists each as New, and that the single publish request
 carries no decisions, only the preselections the confirmation showed, with axe
-scans of the page and the confirmation.
+scans of the page and the confirmation. Another loads an import whose files
+share one embedded image and checks that Files and the summary show it chosen
+automatically, that choosing No cover makes the choice explicit, and that the
+one publish request carries the cover the confirmation shows.
 The Review and publish summary tests create an import from a folder, upload it,
 and check that values prefilled from file tags are flagged while a fixture
 lookup runs and Publish waits, that the one matching release is preselected and
@@ -446,6 +449,13 @@ player control still works.
   whose album tags disagree and with a Various Artists album artist, and
   confirm those values stay empty and no Artist entry is written. Repeat with
   a screen reader at 320 CSS px.
+- As an administrator, create an import from audio files that all embed the
+  same cover image. Once every file is confirmed, confirm Files and the
+  summary show that image chosen automatically, that saving an append to an
+  existing Album in Review deselects it and that saving a new Album again
+  restores it. Repeat with files whose images differ: confirm no cover is
+  chosen, choose one, publish, and confirm Files then lists only the chosen
+  image and the Album shows it.
 - As an administrator, with metadata lookup configured against MusicBrainz in a
   development environment, create imports from a folder of a tagged Album with
   one matching release, of an Album with several matching editions, and of

@@ -51,10 +51,11 @@ const currentApproval = (op: CoverOperation) => {
     if (op.grantExpiresAt <= new Date()) fail(409, 'ADMIN_CATALOG_APPROVAL_EXPIRED');
 };
 const effectiveActor = (op: CoverOperation) => op.cancellation?.actor ?? op.actor;
+/** Releasing a pin also re-arms a completed import's automatic cover cleanup, which kept the pinned candidate (adminImportCoverCleanup.ts). */
 async function releaseSourcePin(op: CoverOperation, session: ClientSession) {
     if (op.sourceImportId) await importCollection().updateOne({ _id: new ObjectId(op.sourceImportId),
         'media.assets': { $elemMatch: { operationId: op.source!.operationId, coverConsumers: op._id.toHexString() } } },
-        { $pull: { 'media.assets.$.coverConsumers': op._id.toHexString() }, $inc: { revision: 1 } } as any, { session });
+        { $pull: { 'media.assets.$.coverConsumers': op._id.toHexString() }, $unset: { 'media.coverCleanup': '' }, $inc: { revision: 1 } } as any, { session });
 }
 
 /** Exact approval and both old/new storage identities survive browser aborts and ambiguous S3/Mongo outcomes. */

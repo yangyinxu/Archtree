@@ -12,6 +12,9 @@ export interface ImportAsset {
     tags: ImportEmbeddedTags | ImportEmbeddedTagsV2 | null;
     /** Per-file automation ran for this confirmed upload (adminImportAutomation.ts); never projected. */
     automatedAt?: Date | null;
+    /** SHA-256 of the validated embedded image this audio upload carries, or null; absent on older uploads (adminImportCoverAutomation.ts). Never projected. */
+    artworkSha256?: string | null;
+    /** Existing-catalog cover operations using this staged image (adminCatalogCoverService.ts); a pinned candidate is never cleaned. */
     coverConsumers?: string[];
     /** No PUT for this admission can land after this time; legacy records fall back to updatedAt plus the settle window. */
     transferDeadline?: Date | null;
@@ -41,7 +44,14 @@ export interface ImportPublication {
     cover: { slotId: string; key: string; state: 'pending' | 'ready' | 'unknown'; versionId: string | null; etag: string | null; cleanupComplete?: boolean } | null;
     bucket: string; leaseOwner: string | null; leaseUntil: Date | null;
 }
-export interface ImportMedia { assets: ImportAsset[]; assetHistory?: ImportAsset[]; selectedCoverSlotId?: string | null; publication?: ImportPublication; publicationHistory?: ImportPublication[] }
+export interface ImportMedia {
+    assets: ImportAsset[]; assetHistory?: ImportAsset[];
+    /** Present (a slot, or null for No cover) once a cover was chosen explicitly; absent while the choice is automatic. Never assign undefined. */
+    selectedCoverSlotId?: string | null;
+    publication?: ImportPublication; publicationHistory?: ImportPublication[];
+    /** Automatic cover cleanup bookkeeping (adminImportCoverCleanup.ts): pending until a pass leaves nothing to wait for; never projected, never bumps revision. */
+    coverCleanup?: { state: 'pending' | 'done'; leaseOwner?: string | null; leaseUntil?: Date | null };
+}
 /** Stored format number: absent or null is the original format 1; anything but a positive safe integer is unrecognized (null). */
 export const importFormatVersion = (value: unknown): number | null => value === undefined || value === null ? 1 : Number.isSafeInteger(value) && (value as number) > 0 ? value as number : null;
 export const importPublicationVersion = (publication: { schemaVersion?: unknown }): number | null => importFormatVersion(publication.schemaVersion);

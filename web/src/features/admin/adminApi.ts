@@ -30,7 +30,8 @@ export const detailSchema = z.object({ ...common, manifest: manifestSchema, draf
   publicationRecovery: z.object({ operationId: uuid, cleanupPending: z.boolean(), startedByMe: z.boolean() }).strict().nullable().default(null),
   suggestions: z.array(importSuggestionV2Schema).max(1000), decisions: z.array(decisionSchema).max(122),
   assets: z.array(z.object({ slotId: z.string(), state: z.enum(['pending', 'ready', 'failed', 'unknown', 'deleting', 'cleanupFailed', 'deleted']), byteLength: integer, sha256: z.string().regex(/^[a-f0-9]{64}$/), contentType: z.string(), recovery: assetRecoverySchema.nullable().default(null), tags: tagsSchema.nullable().default(null) }).strict()).max(201).default([]),
-  selectedCoverSlotId: z.string().nullable().default(null),
+  // The selected cover and whether it is the automatic choice (no administrator choice yet) or an explicit one.
+  selectedCoverSlotId: z.string().nullable().default(null), coverChoice: z.enum(['automatic', 'explicit']).default('explicit'),
   // Every credited Artist in Credit order and the label Organization of a completed publication.
   published: z.object({ albumId: id, artistIds: z.array(id).min(1).max(50), organizationId: id.nullable(), trackIds: z.array(id).max(100) }).strict().nullable().default(null),
   capabilities: z.object({ analysis: z.boolean(), upload: z.boolean(), publish: z.boolean() }).strict(), receipts: z.array(receiptSchema).max(256),

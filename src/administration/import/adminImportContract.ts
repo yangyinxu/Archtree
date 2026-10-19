@@ -72,7 +72,9 @@ export type AdminImportDetailV2 = Omit<AdminImportDetail, 'draft' | 'suggestions
     draft: ImportDraftV2; suggestions: ImportSuggestionV2[]; decisions: ImportDecisionDtoV2[]; published: ImportPublishedV2 | null; approvalDigest: string;
     assets: (Omit<AdminImportDetail['assets'][number], 'tags'> & { tags: ImportTagsView | null })[];
     /** Automatic writes; never changes `revision`. `lookupPaths` are the automatic paths resting on the applied lookup candidate. */
-    valueRevision: number; automaticPaths: string[]; lookupPaths: string[]; possibleLabelEntryKeys: string[] };
+    valueRevision: number; automaticPaths: string[]; lookupPaths: string[]; possibleLabelEntryKeys: string[];
+    /** Whether `selectedCoverSlotId` is the automatic choice (no administrator choice yet: the embedded image every confirmed file shares, or null) or an explicit one. */
+    coverChoice: 'automatic' | 'explicit' };
 /** One-step approval fields of a publish body (adminImportApproval.ts); a body with none of them predates one-step approval. */
 export const IMPORT_APPROVAL_FIELDS = ['changes', 'decisions', 'selectedCoverSlotId', 'approvalDigest'] as const;
 export type AdminImportResponse = { item: AdminImportDetailV2; receipt: ImportReceipt | null };
