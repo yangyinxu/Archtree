@@ -734,8 +734,9 @@ The wire protocol and operational bounds are documented in
   position, and active Room session; returning to User view restores listener
   navigation and controls.
 - The Web workbench exposes management of existing Albums and a separate catalog
-  review queue. A completed import links to its confirmed catalog Album and
-  Artist for subsequent edits; it never unlocks or republishes its old approval.
+  review queue. A completed import links to its confirmed catalog Album,
+  Artists and label Organization for subsequent edits; it never unlocks or
+  republishes its old approval.
 - The Web catalog inventories present artwork and names as a single detail entry
   for Albums, Artists, MediaTracks and Organizations. Artist portraits are
   circular; Organizations use their name mark, matching listener details.
@@ -1478,14 +1479,33 @@ The wire protocol and operational bounds are documented in
   automatic paid replay; administrators may continue manual review.
   The deployment-wide daily allowance resets at UTC midnight; budget exhaustion
   becomes needs attention without dispatching another provider request.
-- Name matches and identical bytes are candidates, not proof of Artist identity,
-  Album edition, or recording identity. Administrators explicitly choose reuse,
-  skip, append missing members, or create a distinct entry. No automatic merge,
-  deletion, media replacement, or reassignment of a Track to a different Album
-  is permitted. Unhashed historical assets remain unverified.
+- Name matches, identical bytes, external identifiers and matching durations are
+  candidates, not proof of Artist or Organization identity, Album edition, or
+  recording identity. Unless the import appends to an existing Album, each draft
+  Artist entry and any label need their own decision, and two entries cannot
+  reuse one Artist. A decision binds its entry and that entry's name: reordering
+  the entry or changing its role or join phrase keeps it, while renaming or
+  removing the entry or the label clears it. Applying a replacement Artist list
+  keeps decisions only for unchanged entries. Administrators explicitly choose
+  reuse, skip, append missing members, or create a distinct entry. Luna never
+  chooses or preselects an identity. No automatic merge, deletion of catalog
+  content, catalog media or uploaded source audio, media replacement, or
+  reassignment of a Track to a different Album is permitted. Unhashed historical
+  assets remain unverified.
 - Embedded images are validated and completely decoded like other covers and
   staged under the same staged-upload lifecycle; identical ones are staged
   once, and each import stages a bounded number of them.
+- Publishing a new Album requires at least one primary Artist entry, and
+  appending requires a target Album that has a primary Artist Credit. It creates
+  the Album's Credits in draft order: each Artist entry as an Album primary or
+  featured Artist Credit with its join phrase, then the label as an Album Credit
+  with role `label` whose subject is an Organization. A new label Organization
+  has the label type and a reused one keeps its own; the label is never an
+  Artist or a plain text field. The MediaTracks of a new Album receive its
+  ordered primary Artist Credits with their join phrases; featured entries and
+  the label stay on the Album. New Artists and Organizations take the draft's
+  visibility. Imports do not yet support an Album without a primary Artist, such
+  as a compilation, and never suggest a stand-in Artist for one.
 - A new import's visibility defaults to public and can be changed before
   publishing.
 - Publication is a separate explicit approval of the reviewed draft and duplicate
@@ -1495,27 +1515,34 @@ The wire protocol and operational bounds are documented in
   upload/copy, partial failure, retry, cleanup and reconciliation step. Unknown
   outcomes never discard the sole lifecycle evidence or mint new identities
   silently. Successful catalog publication and its receipt commit together.
-- A current administrator may explicitly cancel an unconfirmed import publication
-  after its active worker lease ends, including when the original approval has
-  expired or its initiating administrator lost permission. Cancellation binds
-  the original approval, never changes existing catalog content and cannot undo
-  a completed publication. Unused copied files remain traceable until exact
-  cleanup is confirmed; unknown outcomes are not treated as successful cleanup.
-  Administrators may edit and review the private draft during cancelled cleanup,
-  while source changes, analysis and a new publication approval remain blocked.
-  Confirmed cleanup permits a newly reviewed approval with independent identities
-  and retains the cancelled approval's recovery history. Each import admits at
-  most sixteen publication approvals; reaching that bound does not prevent
-  reviewing the private draft or cancelling and cleaning existing work.
+- A current administrator may explicitly cancel an unconfirmed import
+  publication after its active worker lease ends, including when the original
+  approval has expired or its initiating administrator lost permission.
+  Cancellation binds the original approval, never changes existing catalog
+  content and cannot undo a completed publication. Unused copied files remain
+  traceable until exact cleanup is confirmed; unknown outcomes are not treated
+  as successful cleanup. Administrators may edit and review the private draft
+  during cancelled cleanup, while source changes, analysis and a new publication
+  approval remain blocked. Confirmed cleanup permits a newly reviewed approval
+  with independent identities and retains the cancelled approval's recovery
+  history. Each import admits at most sixteen publication approvals; reaching
+  that bound does not prevent reviewing the private draft, cancelling and
+  cleaning existing work, or starting a new import of the same files.
 - Required cleanup and cancellation remain available when the ordinary editing
   allowance is exhausted. Repeated recovery uses the original intent and cannot
   silently restart a destructive step or lose lifecycle evidence.
-- Publishing an import that reuses an existing Artist or Album does not overwrite
-  that entity's metadata, artwork, Credits or visibility. Such corrections require
-  a separate existing-catalog edit. Appending preserves all current members and
-  only adds approved missing members. A hidden Album continues to hide its Tracks
-  until its own visibility changes; a newly created hidden Artist is not exposed
-  by publishing a private import.
+- Publishing an import that reuses an existing Artist, Organization or Album
+  does not overwrite that entity's metadata, artwork, Credits or visibility.
+  Corrections require a separate existing-catalog edit. Appending preserves all
+  current members and only adds approved missing members. It never changes the
+  Album's own values or Credits: the draft's Album values, cover, Artist entries
+  and label are shown as not applied and need no identity decision or conflict
+  answer, and appending creates no Artist or Organization. Appended MediaTracks
+  receive that Album's primary Artist Credits, in its order and with its join
+  phrases, and join its automatic order by their Disc and Track Numbers. A
+  hidden Album continues to hide its Tracks until its own visibility changes; a
+  newly created hidden Artist or Organization is not exposed by publishing a
+  private import.
 - An unconfirmed existing-catalog cover approval may be explicitly cancelled by
   a current administrator after its active worker lease ends. Cancellation leaves
   the saved cover unchanged and retains the unused object's identity and source

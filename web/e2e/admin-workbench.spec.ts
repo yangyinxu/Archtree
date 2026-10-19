@@ -17,6 +17,7 @@
  *   - files chosen without a folder need no folder name
  *   - a new import starts public, and the create request carries no draft
  *   - Artist entries reorder by keyboard with an announced move and kept focus, save as one value, and reflow at 320, 768 and 1440 px
+ *   - several Artist entries and a label are decided one row each, publish, and link every confirmed identity
  * @end-catalog */
 
 import { expect, test, type Page, type Request } from '@playwright/test';
@@ -127,7 +128,7 @@ async function setup(page: Page, admin = true, media = false, publication?: Publ
       const { manifest, draft, suggestions, decisions: _decisions, capabilities: _capabilities, receipts: _receipts, assets: _assets, published: _published, publicationRecovery: _recovery, selectedCoverSlotId: _selectedCover, ...common } = item;
       return route.fulfill({ json: { items: [{ ...common, title: draft.album.title, rootLabel: manifest.rootLabel, artistName: draft.album.artists[0]?.name ?? '', visibility: draft.album.visibility, pendingSuggestions: suggestions.filter(s => s.decision === 'pending').length }], counts: { all: 1, analyzing: 0, awaitingReview: 1, needsAttention: 0, completed: 0 }, nextCursor: null }, headers });
     }
-    if (item.publication === 'preparing' && (publication ? publicationComplete : ++publicationReads > 1)) { item.publication = 'complete'; item.published = { albumId: '111111111111111111111111', artistId: '222222222222222222222222', trackIds: ['333333333333333333333333'] }; item.revision++; }
+    if (item.publication === 'preparing' && (publication ? publicationComplete : ++publicationReads > 1)) { item.publication = 'complete'; item.published = { albumId: '111111111111111111111111', artistIds: ['222222222222222222222222'], organizationId: null, trackIds: ['333333333333333333333333'] }; item.revision++; }
     return route.fulfill({ json: { item, receipt: null }, headers });
   });
   return writes;
@@ -555,4 +556,44 @@ test('Artist entries reorder by keyboard with an announced move and kept focus, 
     }
     expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
   }
+});
+
+test('several Artist entries and a label are decided one row each, publish, and link every confirmed identity', async ({ page }) => {
+  await setup(page);
+  let item = detail(); const artists = [{ ...artistEntry('Lorem'), joinPhrase: ' & ' }, artistEntry('Ipsum', entryKey(2)), artistEntry('Dolor', entryKey(3), 'featured')];
+  Object.assign(item.draft.album, { title: 'Synthetic Album', artists, label: labelEntry('Lorem Records') }); item.capabilities.publish = true; item.publication = 'notStarted';
+  const published = { albumId: '1'.repeat(24), artistIds: ['2'.repeat(24), '3'.repeat(24), '4'.repeat(24)], organizationId: '5'.repeat(24), trackIds: [] };
+  const writes: Array<{ path: string; body: Record<string, any> }> = [], headers = { 'X-Finitude-Account-Viewer': viewer, 'Cache-Control': 'no-store' };
+  // Only this project's reads, candidates, decisions and approval; every other admin path keeps setup's mock.
+  await page.route(`**/api/admin/v1/imports/${projectId}**`, async route => {
+    const path = new URL(route.request().url()).pathname;
+    if (path.endsWith('/duplicate-candidates')) return route.fulfill({ json: { items: [] }, headers });
+    if (route.request().method() !== 'POST') return route.fulfill({ json: { item, receipt: null }, headers });
+    const body = route.request().postDataJSON(); writes.push({ path, body });
+    const kind = path.endsWith('/publish') ? 'publish' : 'decisions';
+    item = { ...item, revision: item.revision + 1, ...(kind === 'publish' ? { publication: 'complete' as const, published } : { decisions: body.decisions }) };
+    return route.fulfill({ json: { item, receipt: { operationId: body.operationId, kind, revision: item.revision } }, headers });
+  });
+  await page.goto(`/finitude/admin/imports/${projectId}`);
+  await page.getByRole('button', { name: 'Switch to Admin view' }).click();
+  await page.getByRole('tab', { name: 'Review', exact: true }).click();
+  await page.getByRole('button', { name: 'Find matches', exact: true }).click();
+  for (const [index, text] of ['Artist · Lorem · Primary', 'Artist · Ipsum · Primary', 'Artist · Dolor · Featured', 'Label · Lorem Records', 'Album · Synthetic Album'].entries()) {
+    const row = page.getByRole('combobox', { name: `${index + 1} · Decision`, exact: true });
+    await expect(page.locator('label').filter({ has: row })).toContainText(text);
+    await row.selectOption('create-distinct');
+  }
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+  await page.getByRole('button', { name: 'Save decisions', exact: true }).click();
+  await expect.poll(() => writes.length).toBe(1);
+  const fresh = { action: 'create-distinct', candidateId: null, candidateRevision: null };
+  expect(writes[0].body.decisions).toEqual([...artists.map(entry => ({ scope: 'artist', slotId: null, entryKey: entry.key, ...fresh })), { scope: 'label', slotId: null, entryKey: null, ...fresh }, { scope: 'album', slotId: null, entryKey: null, ...fresh }]);
+  await page.getByRole('tab', { name: 'Publish', exact: true }).click();
+  await page.getByRole('button', { name: 'Publish Album', exact: true }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Publish Album', exact: true }).click();
+  await expect(page.getByRole('link', { name: 'Edit published Album', exact: true })).toHaveAttribute('href', `/finitude/admin/catalog/album/${published.albumId}`);
+  for (const [index, artistId] of published.artistIds.entries()) await expect(page.getByRole('link', { name: `Edit Artist ${index + 1}`, exact: true })).toHaveAttribute('href', `/finitude/admin/catalog/artist/${artistId}`);
+  await expect(page.getByRole('link', { name: 'Edit label', exact: true })).toHaveAttribute('href', `/finitude/admin/catalog/organization/${published.organizationId}`);
+  expect(writes.map(write => write.path.split('/').at(-1))).toEqual(['decisions', 'publish']);
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
 });

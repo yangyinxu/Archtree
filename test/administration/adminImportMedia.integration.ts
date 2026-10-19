@@ -22,7 +22,7 @@
  *   - append keeps the target Album disc order and imported tracks store no Disc Number
  *   - append revalidates reviewed Album after storage copy and refuses concurrent catalog edits
  *   - verified byte candidates bind SHA to current object version and identify only matching manifest slots
- *   - append rejects hidden draft into public target without changing draft visibility
+ *   - a hidden draft appended to a public Album publishes public tracks: appended tracks take the target Album's visibility
  *   - legacy ready defaults tolerate reference touches, and hidden Artist Album can be appended privately
  *   - embedded cover becomes a private unselected candidate, while its tags never overwrite the saved draft
  *   - shutdown after one bounded copy checkpoints it and admits no next cover copy or final publication
@@ -63,7 +63,7 @@
  *   - an automatic staging of unknown outcome reconciles without an ordinary receipt and is retried only through its audio intent
  *   - an existing embedded candidate keeps its lifecycle when its audio is replaced, and a cleaned one is staged again
  *   - no request can stage bytes into an embedded slot directly; only extracted artwork is staged there
- *   - an append that keeps the public default into a hidden Album is a visibility mismatch, and a concurrently changed Album is reported as stale first
+ *   - an append that keeps the public default into a hidden Album publishes tracks the Album hides, and a concurrently changed Album is reported as stale
  *   - an approval that records format 1 explicitly commits like one that records no format
  *   - a legacy approval whose captured Album revision changed needs attention, mints no identity and keeps its copy evidence
  *   - an approval frozen in an unknown format needs attention without any copy, catalog write or identity, and resuming it changes nothing
@@ -76,14 +76,14 @@
  *   - saving duplicate decisions or a cover selection on a project saved before Draft v2 converts it, binds the legacy entry and starts no analysis
  *   - a newer-format project refuses new uploads before any PUT but still reconciles and cleans its staged objects
  *   - a project saved in a newer format during an upload keeps its audio, stages no new embedded cover, and completes an admitted one
- *   - a Draft v2 approval of one primary entry publishes in reviewed Disc order with Disc Numbers and its join phrase, frozen as format 2
+ *   - a Draft v2 approval of one primary entry publishes in reviewed Disc order with Disc Numbers and its join phrase on the Album Credit, frozen as format 3
  *   - an unknown Disc Number writes no Disc Number, and an append with a reviewed Disc Number re-derives the target order
- *   - a Draft v2 approval with several Artist entries, a label or no primary entry is refused before freezing, writing nothing
+ *   - a new Album without a primary Artist entry is refused before freezing, writing nothing
  *   - a stored value the editor cannot show is never frozen, and only a pending suggestion the editor shows holds the approval
  *   - a legacy approval commits its frozen v1 snapshot unchanged on a project already converted to Draft v2
- *   - reconciliation reserves the copies of an unresolved Draft v2 approval
- *   - a project reviewed before Draft v2 converts at approval and publishes with its saved Artist decision as format 2, without Disc Numbers
- *   - a preparing Draft v2 approval locks the draft against field saves while an outdated whole-draft save asks for a reload; its cancellation is clean and the next approval is format 2 again
+ *   - reconciliation reserves the copies of unresolved format-3 approvals, including several Artist entries and a label
+ *   - a project reviewed before Draft v2 converts at approval and publishes with its saved Artist decision as format 3, without Disc Numbers
+ *   - a preparing Draft v2 approval locks the draft against field saves while an outdated whole-draft save asks for a reload; its cancellation is clean and the next approval is format 3 again
  *   - the first upload to a project saved before Draft v2 converts it with that admitted upload, keeping its values as the administrator's own
  * @end-catalog */
 
@@ -99,8 +99,9 @@ import { createAdminImport, editAdminImport, getAdminImport, decideAdminImportDu
 import { cleanupAdminImportAsset, uploadAdminImportAsset, reconcileAdminImportAsset, selectAdminImportCover, previewAdminImportAsset, importAssetTarget, type ImportObjectIdentity, type ImportObjectStorage, type ImportObjectTarget } from '../../src/administration/import/adminImportStorage';
 import { publishAdminImport, resumeAdminImportPublication, runAdminImportPublicationOnce, cancelAdminImportPublication } from '../../src/administration/import/adminImportPublisher';
 import { loadAdminCanonicalReservations } from '../../src/administration/adminCanonicalReservationService';
+import { getListenerAlbum } from '../../src/services/listener/listenerContentService';
 import { loadImportFixture } from '../support/adminImportFixtures';
-import { artistEntries, editImportDraft } from '../support/adminImportDraftChanges';
+import { artistEntries, editImportDraft, withEntryKeys } from '../support/adminImportDraftChanges';
 import { convertLegacyImportProject } from '../../src/administration/import/adminImportValueState';
 import { importDraftV2FromV1, legacyAdministratorOrigins, legacyArtistEntryKey, legacyDraftView } from '../../src/administration/import/adminImportDraftCompat';
 import type { ImportDecisionV2, ImportDraftV2 } from '../../src/administration/import/adminImportDraft';
@@ -146,7 +147,7 @@ const create = async () => { const slotId = randomUUID(); return createAdminImpo
 async function prepared(storage: Storage, visibility: 'public' | 'hidden' = 'public') {
     const created = await create(); const slotId = created.item.manifest.files[0].slotId; const uploaded = await uploadAdminImportAsset(actor.toHexString(), created.item.id, slotId, mutation(1), file(), storage);
     const edited = await editImportDraft(actor.toHexString(), created.item.id, uploaded.item, draft => { Object.assign(draft.album, { title: 'Synthetic Album', artists: artistEntries('Synthetic Artist'), releaseDate: { year: 2026, month: 10, day: null }, visibility }); draft.tracks[0].title = 'Synthetic Recording'; draft.tracks[0].trackNumber = 4; });
-    return decideAdminImportDuplicates(actor.toHexString(), created.item.id, { ...mutation(edited.item.revision), decisions: [{ scope: 'artist', slotId: null, action: 'create-distinct', candidateId: null, candidateRevision: null }, { scope: 'album', slotId: null, action: 'create-distinct', candidateId: null, candidateRevision: null }, { scope: 'track', slotId, action: 'create-distinct', candidateId: null, candidateRevision: null }] });
+    return decideAdminImportDuplicates(actor.toHexString(), created.item.id, { ...mutation(edited.item.revision), decisions: withEntryKeys(edited.item.draft, [{ scope: 'artist', slotId: null, action: 'create-distinct', candidateId: null, candidateRevision: null }, { scope: 'album', slotId: null, action: 'create-distinct', candidateId: null, candidateRevision: null }, { scope: 'track', slotId, action: 'create-distinct', candidateId: null, candidateRevision: null }]) });
 }
 test('private storage requires separate configured bucket, and real byte metadata precedes durable PUT', async () => {
     const created = await create(), storage = new Storage(); const slotId = created.item.manifest.files[0].slotId;
@@ -175,7 +176,7 @@ test('explicit publish allocates fixed IDs then commits complete catalog graph a
     storage.afterCopy = async () => { assert.equal(await getDb()!.collection('albums').countDocuments(), 0); };
     await runAdminImportPublicationOnce(storage); const done = await getAdminImport(actor.toHexString(), project.item.id); assert.equal(done.item.publication, 'complete'); assert.equal(done.item.published!.trackIds.length, 1); assert.equal(storage.copies, 1);
     const album = await getDb()!.collection('albums').findOne({ _id: new ObjectId(done.item.published!.albumId) }), track = await getDb()!.collection('audioTracks').findOne({ _id: new ObjectId(done.item.published!.trackIds[0]) });
-    assert.equal(track!.albumId, album!._id.toHexString()); assert.deepEqual(album!.audioTrackIds, [track!._id.toHexString()]); assert.equal(track!.trackNumber, 4); assert.equal(track!.format.type, 'WAV'); assert.equal(track!.mediaRepresentation.versionId, 'canonical-version'); assert.equal(track!.credits[0].subjectId, done.item.published!.artistId);
+    assert.equal(track!.albumId, album!._id.toHexString()); assert.deepEqual(album!.audioTrackIds, [track!._id.toHexString()]); assert.equal(track!.trackNumber, 4); assert.equal(track!.format.type, 'WAV'); assert.equal(track!.mediaRepresentation.versionId, 'canonical-version'); assert.equal(track!.credits[0].subjectId, done.item.published!.artistIds[0]);
     const replay = await publishAdminImport(actor.toHexString(), project.item.id, intent); assert.equal(replay.item.published!.albumId, done.item.published!.albumId); assert.equal(await runAdminImportPublicationOnce(storage), false);
 });
 test('unknown copied acknowledgement is reconciled at original target with no second object or graph', async () => {
@@ -224,11 +225,16 @@ test('private artwork rechecks role after bytes arrive, withholding late respons
     storage.read = async () => { await getDb()!.collection('users').updateOne({ _id: actor }, { $set: { role: 'user' } }); return png; };
     await assert.rejects(previewAdminImportAsset(actor.toHexString(), created.item.id, 'cover', storage), code('ADMIN_IMPORT_ADMIN_REQUIRED'));
 });
-async function existingProject(storage: Storage) { const original = await prepared(storage); await publishAdminImport(actor.toHexString(), original.item.id, mutation(original.item.revision)); await runAdminImportPublicationOnce(storage); return (await getAdminImport(actor.toHexString(), original.item.id)).item.published!; }
+/** Publishes one new Album of one primary Artist; artistId is its only published Artist. */
+async function existingProject(storage: Storage) {
+    const original = await prepared(storage); await publishAdminImport(actor.toHexString(), original.item.id, mutation(original.item.revision)); await runAdminImportPublicationOnce(storage);
+    const published = (await getAdminImport(actor.toHexString(), original.item.id)).item.published!; assert.equal(published.artistIds.length, 1); return { ...published, artistId: published.artistIds[0] };
+}
+/** Reviews an append to the existing Album; its Artist decision is saved but an append credits the target Album's own primaries. */
 async function appendProject(storage: Storage, existing: { albumId: string; artistId: string; trackIds: string[] }, reuseTrack = false) {
     const project = await prepared(storage), candidates = (await adminImportDuplicateCandidates(actor.toHexString(), project.item.id)).items;
     const decision = (scope: 'artist' | 'album' | 'track', id: string, slotId: string | null = null) => ({ scope, slotId, action: 'reuse', candidateId: id, candidateRevision: candidates.find(item => item.kind === scope && item.id === id)!.revision });
-    return decideAdminImportDuplicates(actor.toHexString(), project.item.id, { ...mutation(project.item.revision), decisions: [decision('artist', existing.artistId), decision('album', existing.albumId), reuseTrack ? decision('track', existing.trackIds[0], project.item.manifest.files[0].slotId) : { scope: 'track', slotId: project.item.manifest.files[0].slotId, action: 'create-distinct', candidateId: null, candidateRevision: null }] });
+    return decideAdminImportDuplicates(actor.toHexString(), project.item.id, { ...mutation(project.item.revision), decisions: withEntryKeys(project.item.draft, [decision('artist', existing.artistId), decision('album', existing.albumId), reuseTrack ? decision('track', existing.trackIds[0], project.item.manifest.files[0].slotId) : { scope: 'track', slotId: project.item.manifest.files[0].slotId, action: 'create-distinct', candidateId: null, candidateRevision: null }]) });
 }
 test('append adds only new members, preserves existing metadata and protected old tracks, and same-album reuse is no replacement', async () => {
     const storage = new Storage(), existing = await existingProject(storage);
@@ -265,12 +271,13 @@ test('verified byte candidates bind SHA to current object version and identify o
     await getDb()!.collection('audioTracks').updateOne({ _id: new ObjectId(existing.trackIds[0]) }, { $set: { 'mediaRepresentation.versionId': 'replacement' } });
     assert.equal((await adminImportDuplicateCandidates(actor.toHexString(), project.item.id)).items.some(item => item.id === existing.trackIds[0]), false);
 });
-test('append rejects hidden draft into public target without changing draft visibility', async () => {
+test('a hidden draft appended to a public Album publishes public tracks: appended tracks take the target Album\'s visibility', async () => {
     const storage = new Storage(), existing = await existingProject(storage), project = await appendProject(storage, existing);
     const edited = await editImportDraft(actor.toHexString(), project.item.id, project.item, draft => { draft.album.visibility = 'hidden'; });
-    await assert.rejects(publishAdminImport(actor.toHexString(), project.item.id, mutation(edited.item.revision)), code('ADMIN_IMPORT_APPEND_VISIBILITY_MISMATCH')); assert.equal((await getAdminImport(actor.toHexString(), project.item.id)).item.draft.album.visibility, 'hidden');
-    // The refusal happens inside the approval transaction: no approval, receipt or revision is written.
-    const refused = await stored(project.item.id); assert.equal(refused.media?.publication, undefined); assert.equal(refused.revision, edited.item.revision); assert.equal(refused.receipts.some(receipt => receipt.kind === 'publish'), false);
+    await publishAdminImport(actor.toHexString(), project.item.id, mutation(edited.item.revision)); await runAdminImportPublicationOnce(storage);
+    const done = (await getAdminImport(actor.toHexString(), project.item.id)).item; assert.equal(done.publication, 'complete'); assert.equal(done.draft.album.visibility, 'hidden');
+    const appended = await getDb()!.collection('audioTracks').findOne({ _id: new ObjectId(done.published!.trackIds[0]) }), album = await getDb()!.collection('albums').findOne({ _id: new ObjectId(existing.albumId) });
+    assert.deepEqual([appended!.visibility, album!.visibility], ['public', 'public']);
 });
 test('legacy ready defaults tolerate reference touches, and hidden Artist Album can be appended privately', async () => {
     const storage = new Storage(), existing = await existingProject(storage);
@@ -415,7 +422,7 @@ test('unknown sent copy retains cancelled source pins until the exact late objec
     assert.equal(cancelled.item.publicationRecovery!.cleanupPending, true); assert.equal(storage.copies, 1);
     const record = await getDb()!.collection('adminAlbumImports').findOne({ _id: new ObjectId(project.item.id) }), publication = record!.media.publication;
     // A cancelled Draft v2 approval computes its pending cleanup like any other format.
-    assert.equal(publication.schemaVersion, 2);
+    assert.equal(publication.schemaVersion, 3);
     assert.deepEqual(await loadAdminCanonicalReservations('synthetic-catalog'), new Set([publication.tracks[0].key]));
     cancelled = await editImportDraft(actor.toHexString(), project.item.id, cancelled.item, draft => { draft.album.title = 'Reviewed while cleanup waits'; });
     cancelled = await decideAdminImportDuplicates(actor.toHexString(), project.item.id, { ...mutation(cancelled.item.revision), decisions: cancelled.item.decisions });
@@ -574,6 +581,9 @@ test('sixteen approvals preserve bounded history and reject the seventeenth befo
         assert.equal(cleaned.item.assets[0].state, 'deleted');
         assert.equal(storage.objects.size, finalState === 'complete' ? 1 : 0);
     }
+    // The bound is per import: a new import of the same files stages and approves independently.
+    const storage = new Storage(), again = await prepared(storage), approved = await publishAdminImport(actor.toHexString(), again.item.id, mutation(again.item.revision));
+    assert.deepEqual([approved.item.publication, approved.item.capabilities.publish], ['preparing', true]);
 });
 const analysisProvider = { configured: () => true, analyze: async () => [] };
 const later = () => new Date(Date.now() + 181_000);
@@ -774,7 +784,7 @@ test('receipt budget: 100 files with shared or distinct covers, re-uploads after
             });
         }
         const fresh = (scope: 'artist' | 'album' | 'track', slotId: string | null = null) => ({ scope, slotId, action: 'create-distinct', candidateId: null, candidateRevision: null });
-        project = await decideAdminImportDuplicates(actor.toHexString(), id, { ...mutation(project.item.revision), decisions: [fresh('artist'), fresh('album'), ...project.item.manifest.files.map(file => fresh('track', file.slotId))] });
+        project = await decideAdminImportDuplicates(actor.toHexString(), id, { ...mutation(project.item.revision), decisions: withEntryKeys(project.item.draft, [fresh('artist'), fresh('album'), ...project.item.manifest.files.map(file => fresh('track', file.slotId))]) });
         project = await publishAdminImport(actor.toHexString(), id, mutation(project.item.revision)); assert.equal(project.item.publication, 'preparing');
         const doc = await stored(id);
         assert.equal(doc.receipts.length, 1 + 100 + failing.size + 10 + 1 + 1); assert.ok(doc.receipts.length < 256);
@@ -874,7 +884,7 @@ test('no request can stage bytes into an embedded slot directly; only extracted 
     const doc = await stored(id); assert.equal(doc.media, undefined); assert.equal(doc.receipts.length, 1); assert.equal(storage.puts, 0);
 });
 
-test('an append that keeps the public default into a hidden Album is a visibility mismatch, and a concurrently changed Album is reported as stale first', async () => {
+test('an append that keeps the public default into a hidden Album publishes tracks the Album hides, and a concurrently changed Album is reported as stale', async () => {
     const storage = new Storage(), existing = await existingProject(storage), albumId = new ObjectId(existing.albumId);
     await getDb()!.collection('albums').updateOne({ _id: albumId }, { $set: { visibility: 'hidden' } });
     // The import keeps the visibility a new import starts with; only its names and titles are reviewed.
@@ -882,14 +892,18 @@ test('an append that keeps the public default into a hidden Album is a visibilit
     const uploaded = await uploadAdminImportAsset(actor.toHexString(), id, slotId, mutation(1), file(), storage);
     const edited = await editImportDraft(actor.toHexString(), id, uploaded.item, draft => { Object.assign(draft.album, { title: 'Synthetic Album', artists: artistEntries('Synthetic Artist') }); draft.tracks[0].title = 'Synthetic Recording'; }), candidates = (await adminImportDuplicateCandidates(actor.toHexString(), id)).items;
     const reuse = (scope: 'artist' | 'album', candidateId: string) => ({ scope, slotId: null, action: 'reuse', candidateId, candidateRevision: candidates.find(item => item.kind === scope && item.id === candidateId)!.revision });
-    const reviewed = await decideAdminImportDuplicates(actor.toHexString(), id, { ...mutation(edited.item.revision), decisions: [reuse('artist', existing.artistId), reuse('album', existing.albumId), { scope: 'track', slotId, action: 'create-distinct', candidateId: null, candidateRevision: null }] });
+    const reviewed = await decideAdminImportDuplicates(actor.toHexString(), id, { ...mutation(edited.item.revision), decisions: withEntryKeys(edited.item.draft, [reuse('artist', existing.artistId), reuse('album', existing.albumId), { scope: 'track', slotId, action: 'create-distinct', candidateId: null, candidateRevision: null }]) });
+    // A stale Album is refused inside the approval transaction, writing nothing.
     const before = await stored(id), approval = mutation(reviewed.item.revision);
-    await assert.rejects(publishAdminImport(actor.toHexString(), id, approval), code('ADMIN_IMPORT_APPEND_VISIBILITY_MISMATCH'));
-    assert.deepEqual(await stored(id), before);
-    // A stale Album is reported before the visibility difference, for the same not yet admitted intent.
     await getDb()!.collection('albums').updateOne({ _id: albumId }, { $set: { title: 'Changed by another admin' } });
     await assert.rejects(publishAdminImport(actor.toHexString(), id, approval), code('ADMIN_IMPORT_DUPLICATE_STALE'));
     assert.deepEqual(await stored(id), before); assert.equal(storage.copies, 1);
+    await getDb()!.collection('albums').updateOne({ _id: albumId }, { $set: { title: 'Synthetic Album' } });
+    await publishAdminImport(actor.toHexString(), id, approval); await runAdminImportPublicationOnce(storage);
+    const done = (await getAdminImport(actor.toHexString(), id)).item, appended = await getDb()!.collection('audioTracks').findOne({ _id: new ObjectId(done.published!.trackIds[0]) });
+    // The track is stored public like every import track, and the hidden Album hides it from listeners.
+    assert.deepEqual([done.publication, done.draft.album.visibility, appended!.visibility, (await getDb()!.collection('albums').findOne({ _id: albumId }))!.visibility], ['complete', 'public', 'public', 'hidden']);
+    assert.equal(await getListenerAlbum(existing.albumId), null);
 });
 
 const fixtureAdmin = new ObjectId('0000000000000000000000a1');
@@ -1087,7 +1101,7 @@ test('saving duplicate decisions or a cover selection on a project saved before 
     for (const work of ['decisions', 'select-cover'] as const) {
         const doc = loadImportFixture('adminImport', 'v1-assets-reviewed.json'); doc._id = new ObjectId(); const id = doc._id.toHexString(), entryKey = legacyArtistEntryKey(id);
         await getDb()!.collection<AdminImportDocument>('adminAlbumImports').insertOne(doc);
-        const result = work === 'decisions' ? await decideAdminImportDuplicates(by, id, { ...mutation(doc.revision), decisions: [artist] }) : await selectAdminImportCover(by, id, { ...mutation(doc.revision), slotId: null });
+        const result = work === 'decisions' ? await decideAdminImportDuplicates(by, id, { ...mutation(doc.revision), decisions: [{ ...artist, entryKey }] }) : await selectAdminImportCover(by, id, { ...mutation(doc.revision), slotId: null });
         const converted = await stored(id), bound = (converted.decisions as ImportDecisionV2[]).find(decision => decision.scope === 'artist')!;
         assert.deepEqual([converted.draftVersion, converted.receipts.at(-1)!.kind, result.item.draft.album.artists.map(value => [value.key, value.name, value.role])], [2, work, [[entryKey, 'Synthetic Artist', 'primary']]], work);
         assert.deepEqual([bound.entryKey, bound.boundName, converted.draftOrigins!['album:artists']], [entryKey, 'Synthetic Artist', 'administrator'], work);
@@ -1133,29 +1147,34 @@ async function discProject(storage: Storage) {
     return item;
 }
 const fresh = (scope: 'artist' | 'album' | 'track', slotId: string | null = null) => ({ scope, slotId, action: 'create-distinct', candidateId: null, candidateRevision: null });
-test('a Draft v2 approval of one primary entry publishes in reviewed Disc order with Disc Numbers and its join phrase, frozen as format 2', async () => {
+test('a Draft v2 approval of one primary entry publishes in reviewed Disc order with Disc Numbers and its join phrase on the Album Credit, frozen as format 3', async () => {
     const storage = new Storage(), uploaded = await discProject(storage), id = uploaded.id, slots = uploaded.manifest.files.map(value => value.slotId);
     // Reviewed positions (disc, track): file 0 is (2, 1), file 1 is (1, 2) and file 2 is (1, 1).
     const reviewed = await editImportDraft(actor.toHexString(), id, uploaded, draft => {
         Object.assign(draft.album, { title: 'Synthetic Discs', artists: [{ ...artistEntries('Lorem Ensemble')[0], joinPhrase: ' & ' }] });
         draft.tracks.forEach((track, index) => Object.assign(track, { title: `Recording ${index}`, discNumber: [2, 1, 1][index], trackNumber: [1, 2, 1][index] }));
     });
-    const decided = await decideAdminImportDuplicates(actor.toHexString(), id, { ...mutation(reviewed.item.revision), decisions: [fresh('artist'), fresh('album'), ...slots.map(slot => fresh('track', slot))] });
-    const approved = await publishAdminImport(actor.toHexString(), id, mutation(decided.item.revision)), frozen = (await stored(id));
+    const decided = await decideAdminImportDuplicates(actor.toHexString(), id, { ...mutation(reviewed.item.revision), decisions: withEntryKeys(reviewed.item.draft, [fresh('artist'), fresh('album'), ...slots.map(slot => fresh('track', slot))]) });
+    const approved = await publishAdminImport(actor.toHexString(), id, mutation(decided.item.revision)), frozen = (await stored(id)), publication = frozen.media!.publication!;
     assert.equal(approved.item.publication, 'preparing');
-    assert.deepEqual([frozen.media!.publication!.schemaVersion, frozen.media!.publication!.snapshot], [2, reviewed.item.draft]);
+    assert.deepEqual([publication.schemaVersion, publication.snapshot], [3, reviewed.item.draft]);
+    // The single new Artist is frozen for its entry and mirrored as the approval's Artist; there is no label.
+    assert.deepEqual([publication.artists, publication.label, publication.newArtist], [[{ entryKey: reviewed.item.draft.album.artists[0].key, artistId: publication.artistId, newArtist: true, candidateRevision: null }], null, true]);
     assert.deepEqual((frozen.media!.publication!.decisions as { scope: string; entryKey: string | null }[]).find(value => value.scope === 'artist')!.entryKey, reviewed.item.draft.album.artists[0].key);
     // Every reviewed value included in the approval is the administrator's own.
     assert.equal(Object.keys(frozen.draftOrigins!).length, 5 + 3 * slots.length); assert.ok(Object.values(frozen.draftOrigins!).every(origin => origin === 'administrator'));
     await runAdminImportPublicationOnce(storage);
     const done = (await getAdminImport(actor.toHexString(), id)).item; assert.equal(done.publication, 'complete');
-    const album = await getDb()!.collection('albums').findOne({ _id: new ObjectId(done.published!.albumId) }), artist = await getDb()!.collection('artists').findOne({ _id: new ObjectId(done.published!.artistId) });
+    const [artistId] = done.published!.artistIds; assert.deepEqual(done.published!.artistIds, [publication.artistId]); assert.equal(done.published!.organizationId, null);
+    const album = await getDb()!.collection('albums').findOne({ _id: new ObjectId(done.published!.albumId) }), artist = await getDb()!.collection('artists').findOne({ _id: new ObjectId(artistId) });
     const slotOf = (trackId: string) => slots.indexOf(frozen.media!.publication!.tracks.find(track => track.id === trackId)!.slotId);
     assert.deepEqual(album!.audioTrackIds.map(slotOf), [2, 1, 0]);
-    assert.deepEqual([album!.title, artist!.name, album!.credits], ['Synthetic Discs', 'Lorem Ensemble', [{ creditId: `import_primary_${done.published!.artistId}`, subjectType: 'artist', subjectId: done.published!.artistId, role: 'primary', order: 0, joinPhrase: ' & ' }]]);
+    // A single primary entry writes exactly the Album Credits a format-2 approval wrote.
+    assert.deepEqual([album!.title, artist!.name, album!.credits], ['Synthetic Discs', 'Lorem Ensemble', [{ creditId: `import_primary_${artistId}`, subjectType: 'artist', subjectId: artistId, role: 'primary', order: 0, joinPhrase: ' & ' }]]);
     for (const trackId of album!.audioTrackIds) {
         const track = await getDb()!.collection('audioTracks').findOne({ _id: new ObjectId(trackId) }), index = slotOf(trackId);
-        assert.deepEqual([track!.title, track!.discNumber, track!.discNumberSource, track!.trackNumber, track!.trackNumberSource, track!.credits[0].joinPhrase], [`Recording ${index}`, [2, 1, 1][index], 'admin-import', [1, 2, 1][index], 'admin-import', ' & ']);
+        // A MediaTrack keeps a phrase only before another primary, so the only primary's trailing phrase stays on the Album.
+        assert.deepEqual([track!.title, track!.discNumber, track!.discNumberSource, track!.trackNumber, track!.trackNumberSource, track!.credits[0].joinPhrase], [`Recording ${index}`, [2, 1, 1][index], 'admin-import', [1, 2, 1][index], 'admin-import', undefined]);
     }
 });
 test('an unknown Disc Number writes no Disc Number, and an append with a reviewed Disc Number re-derives the target order', async () => {
@@ -1170,11 +1189,9 @@ test('an unknown Disc Number writes no Disc Number, and an append with a reviewe
     const appended = await getDb()!.collection('audioTracks').findOne({ _id: new ObjectId(appendedId) });
     assert.deepEqual([appended!.discNumber, appended!.discNumberSource, appended!.trackNumber], [2, 'admin-import', 1]);
 });
-test('a Draft v2 approval with several Artist entries, a label or no primary entry is refused before freezing, writing nothing', async () => {
+test('a new Album without a primary Artist entry is refused before freezing, writing nothing', async () => {
     const storage = new Storage(); let project = await prepared(storage); const id = project.item.id;
     for (const [label, edit, expected] of [
-        ['two entries', (draft: typeof project.item.draft) => { draft.album.artists.push({ key: randomUUID(), name: 'Synthetic Guest', role: 'featured', joinPhrase: null, musicBrainzId: null }); }, 'ADMIN_IMPORT_PUBLICATION_UNSUPPORTED'],
-        ['a label', (draft: typeof project.item.draft) => { draft.album.label = { name: 'Synthetic Label', musicBrainzId: null }; }, 'ADMIN_IMPORT_PUBLICATION_UNSUPPORTED'],
         ['a featured entry only', (draft: typeof project.item.draft) => { draft.album.artists[0].role = 'featured'; }, 'ADMIN_IMPORT_DRAFT_INCOMPLETE'],
         ['no entry', (draft: typeof project.item.draft) => { draft.album.artists = []; }, 'ADMIN_IMPORT_DRAFT_INCOMPLETE']
     ] as const) {
@@ -1185,7 +1202,7 @@ test('a Draft v2 approval with several Artist entries, a label or no primary ent
     }
     // Removing the entry dropped its Artist decision; decided again for the restored entry, the draft publishes.
     await assert.rejects(publishAdminImport(actor.toHexString(), id, mutation(project.item.revision)), code('ADMIN_IMPORT_REVIEW_REQUIRED'));
-    project = await decideAdminImportDuplicates(actor.toHexString(), id, { ...mutation(project.item.revision), decisions: [fresh('artist'), fresh('album'), fresh('track', project.item.manifest.files[0].slotId)] });
+    project = await decideAdminImportDuplicates(actor.toHexString(), id, { ...mutation(project.item.revision), decisions: withEntryKeys(project.item.draft, [fresh('artist'), fresh('album'), fresh('track', project.item.manifest.files[0].slotId)]) });
     await publishAdminImport(actor.toHexString(), id, mutation(project.item.revision)); await runAdminImportPublicationOnce(storage);
     assert.equal((await getAdminImport(actor.toHexString(), id)).item.publication, 'complete');
 });
@@ -1218,47 +1235,54 @@ test('a legacy approval commits its frozen v1 snapshot unchanged on a project al
     for (const part of publication.tracks) assert.equal('discNumber' in (await getDb()!.collection('audioTracks').findOne({ _id: new ObjectId(part.id) }))!, false);
     const after = await stored(id); assert.deepEqual([after.media!.publication!.snapshot, after.draft, after.draftOrigins], [publication.snapshot, before.draft, before.draftOrigins]);
 });
-test('reconciliation reserves the copies of an unresolved Draft v2 approval', async () => {
+test('reconciliation reserves the copies of unresolved format-3 approvals, including several Artist entries and a label', async () => {
     const storage = new Storage(), project = await prepared(storage); await publishAdminImport(actor.toHexString(), project.item.id, mutation(project.item.revision)); storage.failCopyBefore = true;
     await runAdminImportPublicationOnce(storage); const approval = (await stored(project.item.id)).media!.publication!;
-    assert.deepEqual([approval.schemaVersion, approval.state], [2, 'needsAttention']);
+    assert.deepEqual([approval.schemaVersion, approval.state], [3, 'needsAttention']);
     assert.deepEqual(await loadAdminCanonicalReservations('synthetic-catalog'), new Set([approval.tracks[0].key]));
+    // A preparing approval of two primaries, a featured entry and a label reserves its keys too: the projection reads its frozen Artists.
+    const several = await prepared(storage), entries = [...several.item.draft.album.artists, { key: randomUUID(), name: 'Synthetic Second', role: 'primary' as const, joinPhrase: null, musicBrainzId: null }, { key: randomUUID(), name: 'Synthetic Guest', role: 'featured' as const, joinPhrase: null, musicBrainzId: null }];
+    const edited = await editImportDraft(actor.toHexString(), several.item.id, several.item, draft => { draft.album.artists = entries; draft.album.label = { name: 'Synthetic Label', musicBrainzId: null }; });
+    const decided = await decideAdminImportDuplicates(actor.toHexString(), several.item.id, { ...mutation(edited.item.revision), decisions: [...entries.map(entry => ({ ...fresh('artist'), entryKey: entry.key })), { ...fresh('album'), entryKey: null }, { scope: 'label', slotId: null, entryKey: null, action: 'create-distinct', candidateId: null, candidateRevision: null }, { ...fresh('track', several.item.manifest.files[0].slotId), entryKey: null }] });
+    await publishAdminImport(actor.toHexString(), several.item.id, mutation(decided.item.revision)); const preparing = (await stored(several.item.id)).media!.publication!;
+    assert.deepEqual([preparing.schemaVersion, preparing.state, preparing.artists!.length, preparing.label!.newOrganization], [3, 'preparing', 3, true]);
+    assert.deepEqual(await loadAdminCanonicalReservations('synthetic-catalog'), new Set([approval.tracks[0].key, preparing.tracks[0].key]));
 });
 
-test('a project reviewed before Draft v2 converts at approval and publishes with its saved Artist decision as format 2, without Disc Numbers', async () => {
+test('a project reviewed before Draft v2 converts at approval and publishes with its saved Artist decision as format 3, without Disc Numbers', async () => {
     await getDb()!.collection('users').updateOne({ _id: fixtureAdmin }, { $set: { email: 'fixture-admin@example.test', role: 'admin' } }, { upsert: true });
     const storage = new Storage(), doc = loadImportFixture('adminImport', 'v1-assets-reviewed.json'), id = doc._id.toHexString();
     for (const asset of doc.media!.assets) storage.objects.set(`${asset.bucket}/${asset.key}`, { target: importAssetTarget(id, asset), identity: { etag: asset.etag!, versionId: asset.versionId } });
     await getDb()!.collection<AdminImportDocument>('adminAlbumImports').insertOne(doc);
     const approved = await publishAdminImport(fixtureAdmin.toHexString(), id, mutation(doc.revision)), frozen = await stored(id), publication = frozen.media!.publication!;
     const entryKey = legacyArtistEntryKey(id), entry = { key: entryKey, name: 'Synthetic Artist', role: 'primary', joinPhrase: null, musicBrainzId: null };
-    assert.deepEqual([approved.item.publication, frozen.draftVersion, publication.schemaVersion], ['preparing', 2, 2]);
+    assert.deepEqual([approved.item.publication, frozen.draftVersion, publication.schemaVersion], ['preparing', 2, 3]);
     assert.deepEqual([(publication.snapshot as ImportDraftV2).album.artists, (publication.snapshot as ImportDraftV2).tracks.map(track => track.discNumber)], [[entry], [null, null, null]]);
     // The saved Artist decision applies to the converted entry because its name is unchanged.
     assert.deepEqual((publication.decisions as ImportDecisionV2[]).find(decision => decision.scope === 'artist'), { ...doc.decisions[0], entryKey, boundName: 'Synthetic Artist' });
     assert.equal(await runAdminImportPublicationOnce(storage), true);
     const done = (await getAdminImport(fixtureAdmin.toHexString(), id)).item; assert.equal(done.publication, 'complete');
-    const album = await getDb()!.collection('albums').findOne({ _id: new ObjectId(done.published!.albumId) }), artist = await getDb()!.collection('artists').findOne({ _id: new ObjectId(done.published!.artistId) });
+    const album = await getDb()!.collection('albums').findOne({ _id: new ObjectId(done.published!.albumId) }), artist = await getDb()!.collection('artists').findOne({ _id: new ObjectId(done.published!.artistIds[0]) });
     assert.deepEqual([album!.title, artist!.name, 'joinPhrase' in album!.credits[0]], ['Synthetic Album', 'Synthetic Artist', false]);
     const tracks = await Promise.all(album!.audioTrackIds.map((trackId: string) => getDb()!.collection('audioTracks').findOne({ _id: new ObjectId(trackId) })));
     // Unknown Disc Numbers write no Disc Number; the Album orders by Track Number alone.
     assert.deepEqual(tracks.map(track => [track!.title, track!.trackNumber, 'discNumber' in track!, 'discNumberSource' in track!]), [['Lorem Opening', 1, false, false], ['Ipsum Interlude', 2, false, false], ['Dolor Finale', 3, false, false]]);
 });
 
-test('a preparing Draft v2 approval locks the draft against field saves while an outdated whole-draft save asks for a reload; its cancellation is clean and the next approval is format 2 again', async () => {
+test('a preparing Draft v2 approval locks the draft against field saves while an outdated whole-draft save asks for a reload; its cancellation is clean and the next approval is format 3 again', async () => {
     const storage = new Storage(), project = await prepared(storage), id = project.item.id;
     const approved = await publishAdminImport(actor.toHexString(), id, mutation(project.item.revision)), frozen = await stored(id);
-    assert.equal(frozen.media!.publication!.schemaVersion, 2);
+    assert.equal(frozen.media!.publication!.schemaVersion, 3);
     // The lock refuses a field save; an editor that predates Draft v2 is asked to reload before the lock is checked. Neither writes.
     await assert.rejects(editAdminImport(actor.toHexString(), id, { ...mutation(approved.item.revision), changes: [{ path: 'album.title', base: 'Synthetic Album', value: 'Changed while approved' }] }), code('ADMIN_IMPORT_PUBLICATION_LOCKED'));
     await assert.rejects(editAdminImport(actor.toHexString(), id, { ...mutation(approved.item.revision), draft: legacyDraftView(frozen.draft, frozen.manifest) }), code('ADMIN_IMPORT_RELOAD_REQUIRED'));
     assert.deepEqual(await stored(id), frozen);
     const cancelled = await cancelAdminImportPublication(other.toHexString(), id, cancelPublication(approved.item), storage), held = await stored(id);
-    assert.deepEqual([cancelled.item.publication, cancelled.item.publicationRecovery!.cleanupPending, held.media!.publication!.schemaVersion, storage.copies], ['cancelled', false, 2, 0]);
+    assert.deepEqual([cancelled.item.publication, cancelled.item.publicationRecovery!.cleanupPending, held.media!.publication!.schemaVersion, storage.copies], ['cancelled', false, 3, 0]);
     const edited = await editImportDraft(other.toHexString(), id, cancelled.item, draft => { draft.album.title = 'Reviewed again'; });
     const next = await publishAdminImport(other.toHexString(), id, mutation(edited.item.revision)), reapproved = await stored(id);
     assert.notEqual(next.item.publicationRecovery!.operationId, approved.item.publicationRecovery!.operationId);
-    assert.deepEqual([reapproved.media!.publication!.schemaVersion, (reapproved.media!.publication!.snapshot as ImportDraftV2).album.title, reapproved.media!.publicationHistory!.map(value => value.schemaVersion)], [2, 'Reviewed again', [2]]);
+    assert.deepEqual([reapproved.media!.publication!.schemaVersion, (reapproved.media!.publication!.snapshot as ImportDraftV2).album.title, reapproved.media!.publicationHistory!.map(value => value.schemaVersion)], [3, 'Reviewed again', [3]]);
     await runAdminImportPublicationOnce(storage, id);
     const done = (await getAdminImport(other.toHexString(), id)).item;
     assert.equal(done.publication, 'complete'); assert.equal((await getDb()!.collection('albums').findOne({ _id: new ObjectId(done.published!.albumId) }))!.title, 'Reviewed again');

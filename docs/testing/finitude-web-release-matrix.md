@@ -71,7 +71,10 @@ visibility and that saving the draft sends only the changed fields. It also
 moves an Artist entry with the keyboard, checking that the move is announced
 and keeps focus on the moved entry and that the reordered entries and a new
 label save as just `album.artists` and `album.label`, with axe scans and
-reflow at 320, 768 and 1440 px.
+reflow at 320, 768 and 1440 px. Another test publishes an import with two
+primary Artists, a featured Artist and a new label, deciding each entry and
+the label on its own row, and checks the links to the Album, each Artist and
+the label Organization, with axe scans.
 
 The catalog reviews spec checks that an existing-Album review shows the Album's
 Artist Credits and label read-only and applies a Disc Number change.
@@ -372,8 +375,17 @@ player control still works.
   Artist entries to an import draft, move one up and down, make one Featured,
   and set a join phrase, a label and a Disc Number, then save. Confirm each
   move is announced with the entry's new position, focus stays on the moved
-  entry, no primary entry follows a featured one, and Publish explains that
-  several entries or a label cannot be published yet. Repeat at 320 CSS px.
+  entry and no primary entry follows a featured one. Repeat at 320 CSS px.
+- As an administrator, publish an import with two primary Artists, a featured
+  Artist and a new label. Confirm Review asks for one decision per entry and
+  for the label, refuses reusing one Artist for two entries, and that the
+  completed import links to the Album, each Artist and the label
+  Organization. In User view, confirm the Album byline keeps the join phrases,
+  the tracks credit only the primary Artists, the Album appears in each
+  primary Artist's Discography, the featured Artist's Collaborations and the
+  label's Releases. Then append one more file to that Album and confirm the
+  draft's Album values, entries, label and cover are shown as not applied and
+  the new track takes the Album's primary Artists, order and visibility.
 
 ## Media Session observations
 

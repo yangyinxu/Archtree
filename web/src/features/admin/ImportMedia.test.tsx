@@ -4,6 +4,8 @@
  * Tests
  *   - the Files section identifies its own task and leaves publication actions in Publish
  *   - a completed publication links confirmed catalog identities without reopening or publishing the historical import
+ *   - several published Artists are linked in Credit order by number, beside the label Organization
+ *   - an import that appends to an existing Album says before publishing which draft values are not applied
  *   - reselection mismatches never dispatch, and a matched file waits for the explicit Resume approval
  *   - 202 publication admission is not completion and source cleanup remains possible after confirmed publication
  *   - embedded artwork requires explicit selection and unavailable upload never dispatches
@@ -53,17 +55,39 @@ test('the Files section identifies its own task and leaves publication actions i
 });
 test('a completed publication links confirmed catalog identities without reopening or publishing the historical import', () => {
   const item = detail(); item.publication = 'complete'; item.capabilities.publish = true;
-  item.published = { albumId: '111111111111111111111111', artistId: '222222222222222222222222', trackIds: [] };
+  item.published = { albumId: '111111111111111111111111', artistIds: ['222222222222222222222222'], organizationId: null, trackIds: [] };
   const operation = new AdminMutation(), run = vi.spyOn(operation, 'run').mockImplementation(() => {});
   mount(item, operation, 'publication');
   expect(screen.getByRole('link', { name: 'Edit published Album' })).toHaveAttribute('href', '/admin/catalog/album/111111111111111111111111');
   expect(screen.getByRole('link', { name: 'Edit Artist' })).toHaveAttribute('href', '/admin/catalog/artist/222222222222222222222222');
+  // Without a label there is no label link.
+  expect(screen.queryByRole('link', { name: 'Edit label' })).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Publish Album' })).not.toBeInTheDocument();
   expect(run).not.toHaveBeenCalled();
 });
+test('several published Artists are linked in Credit order by number, beside the label Organization', () => {
+  const item = detail(); item.publication = 'complete';
+  item.published = { albumId: '111111111111111111111111', artistIds: ['222222222222222222222222', '333333333333333333333333', '444444444444444444444444'], organizationId: '555555555555555555555555', trackIds: [] };
+  mount(item, new AdminMutation(), 'publication');
+  expect([1, 2, 3].map(number => screen.getByRole('link', { name: `Edit Artist ${number}` }).getAttribute('href'))).toEqual(['/admin/catalog/artist/222222222222222222222222', '/admin/catalog/artist/333333333333333333333333', '/admin/catalog/artist/444444444444444444444444']);
+  expect(screen.queryByRole('link', { name: 'Edit Artist' })).not.toBeInTheDocument();
+  expect(screen.getByRole('link', { name: 'Edit label' })).toHaveAttribute('href', '/admin/catalog/organization/555555555555555555555555');
+});
+test('an import that appends to an existing Album says before publishing which draft values are not applied', () => {
+  const note = "This import adds tracks to an existing Album. Its Album title, release date, visibility, cover, Artist entries and label are not applied; the new tracks take that Album's primary Artists, track order and visibility.";
+  const item = detail(); item.publication = 'notStarted'; item.capabilities.publish = true;
+  item.decisions = [{ scope: 'album', slotId: null, entryKey: null, action: 'reuse', candidateId: '111111111111111111111111', candidateRevision: 'r' }];
+  const view = mount(item, new AdminMutation(), 'publication');
+  expect(screen.getByRole('note')).toHaveTextContent(note);
+  // A new Album, or a completed append, shows no note.
+  act(() => view.rerender(view.element({ ...item, decisions: [{ ...item.decisions[0], action: 'create-distinct', candidateId: null, candidateRevision: null }] })));
+  expect(screen.queryByRole('note')).not.toBeInTheDocument();
+  act(() => view.rerender(view.element({ ...item, publication: 'complete', published: { albumId: '111111111111111111111111', artistIds: ['222222222222222222222222'], organizationId: null, trackIds: [] } })));
+  expect(screen.queryByRole('note')).not.toBeInTheDocument();
+});
 test.each(['notStarted', 'complete'] as const)('catalog edit links require complete publication and its confirmed identities (%s)', publication => {
   const item = detail(); item.publication = publication;
-  item.published = publication === 'complete' ? null : { albumId: '111111111111111111111111', artistId: '222222222222222222222222', trackIds: [] };
+  item.published = publication === 'complete' ? null : { albumId: '111111111111111111111111', artistIds: ['222222222222222222222222'], organizationId: null, trackIds: [] };
   mount(item, new AdminMutation(), 'publication');
   expect(screen.queryByRole('link', { name: 'Edit published Album' })).not.toBeInTheDocument();
   expect(screen.queryByRole('link', { name: 'Edit Artist' })).not.toBeInTheDocument();
@@ -85,7 +109,7 @@ test('202 publication admission is not completion and source cleanup remains pos
   const item = detail(); item.capabilities.publish = true; item.publication = 'notStarted'; const operation = new AdminMutation(); const run = vi.spyOn(operation, 'run').mockImplementation(() => {}); const view = mount(item, operation);
   fireEvent.click(screen.getByRole('button', { name: 'Publish Album' })); expect(run).not.toHaveBeenCalled(); fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Publish Album' })); expect(run).toHaveBeenCalledWith('/bbbbbbbbbbbbbbbbbbbbbbbb/publish', 'POST', { expectedRevision: 1 });
   act(() => view.rerender(view.element({ ...item, publication: 'preparing' }))); expect(screen.queryByText('The Album publication is confirmed.')).not.toBeInTheDocument(); expect(screen.queryByRole('button', { name: 'Publish Album' })).not.toBeInTheDocument();
-  const complete = { ...item, publication: 'complete' as const, published: { albumId: '111111111111111111111111', artistId: '222222222222222222222222', trackIds: ['333333333333333333333333'] }, assets: [{ slotId, state: 'ready' as const, byteLength: 100, sha256: 'a'.repeat(64), contentType: 'audio/mpeg', tags: null, recovery: null }] };
+  const complete = { ...item, publication: 'complete' as const, published: { albumId: '111111111111111111111111', artistIds: ['222222222222222222222222'], organizationId: null, trackIds: ['333333333333333333333333'] }, assets: [{ slotId, state: 'ready' as const, byteLength: 100, sha256: 'a'.repeat(64), contentType: 'audio/mpeg', tags: null, recovery: null }] };
   act(() => view.rerender(view.element(complete))); expect(screen.getByText('The Album publication is confirmed.')).toBeVisible(); expect(screen.getByRole('button', { name: 'Remove file' })).toBeEnabled();
 });
 test('embedded artwork requires explicit selection and unavailable upload never dispatches', () => {

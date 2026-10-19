@@ -18,15 +18,17 @@
  *   - a stale administrator-owned path refuses the whole save; an automatic one is overwritten; a matching value never conflicts
  *   - automation writes only empty or automatic values it still sees, never administrator values, and skips invalid ones
  *   - an Artist decision stays bound while its entry keeps its key and name; reordering, roles and phrases keep it
+ *   - each Artist entry and the label keep their own decision: reordering, roles and phrases keep it; renaming or removing clears only it
  *   - a Luna Artist name becomes a one-entry primary Artist suggestion against the Draft v2 baseline
  *   - a legacy project converts to its Draft v2 view without touching its approval, histories, assets or analysis progress
- *   - the import detail shows Draft v2 values and only entry-bound decisions, and offers work for format 1 and 2 projects only
+ *   - the import detail shows Draft v2 values, entry- and label-bound decisions and every published identity, and offers work for format 1 and 2 projects only
  *   - an approval is format 2 only with one primary Artist entry, no label and a discNumber field (a Disc Number or null) on every track
  *   - every value path a draft has is addressable, so an absent origin always means the administrator
  *   - name and title bounds hold for the stored NFC form, so a saved value is never dropped from the editor view
  *   - a field save body is bounded before its fingerprint: item count, exact keys, path length, and each base and value as a draft value
  *   - value origins are stored under keys without dots, which every supported MongoDB release accepts
  *   - a stored value the editor view cannot show is replaced by a save from the shown value, while any other base stays stale
+ *   - an approval is format 3 with entries of a key, name and primary or featured role, a named label or none, Disc Number fields, and 1 to 50 frozen Artists
  *   - a format-2 approval may leave every Disc Number unknown, as long as each track has the field
  * @end-catalog */
 
@@ -41,7 +43,7 @@ import { after, before, test } from 'node:test';
 import '../../src/infrastructure/database';
 import { AdminImportError, uuid, type ImportManifest } from '../../src/administration/import/adminImportContract';
 import {
-    boundArtistDecision, defaultDraftV2, derivedEntryKey, draftV2Suggestion, foldImportName, isDraftV2, originKey, parseArtistEntries, parseDraftV2, parseImportName, parseLabelEntry,
+    boundArtistDecision, boundLabelDecision, defaultDraftV2, derivedEntryKey, draftV2Suggestion, foldImportName, isDraftV2, originKey, parseArtistEntries, parseDraftV2, parseImportName, parseLabelEntry,
     retainBoundDecisions, sameDraftValue, type ImportArtistEntry, type ImportDecisionV2, type ImportDraftOrigins, type ImportDraftV2
 } from '../../src/administration/import/adminImportDraft';
 import {
@@ -251,6 +253,27 @@ test('an Artist decision stays bound while its entry keeps its key and name; reo
     assert.equal(boundArtistDecision(decisions, entry(1, 'A')), decisions[0]); assert.equal(boundArtistDecision(decisions, entry(1, 'B')), undefined);
 });
 
+test('each Artist entry and the label keep their own decision: reordering, roles and phrases keep it; renaming or removing clears only it', () => {
+    const decision = (scope: ImportDecisionV2['scope'], extra: Partial<ImportDecisionV2> = {}): ImportDecisionV2 => ({ scope, slotId: scope === 'track' ? slotA : null, action: 'create-distinct', candidateId: null, candidateRevision: null, entryKey: null, boundName: null, ...extra });
+    const label = { name: 'Sit Records', musicBrainzId: null };
+    const decisions = [decision('artist', { entryKey: key(1), boundName: 'A' }), decision('artist', { entryKey: key(2), boundName: 'B' }), decision('artist', { entryKey: key(3), boundName: 'C' }), decision('label', { boundName: 'Sit Records' }), decision('album'), decision('track')];
+    const keep = (change: Partial<ImportDraftV2['album']>) => retainBoundDecisions(decisions, withAlbum(change)).map(value => value.entryKey ?? value.scope);
+    const all = [entry(1, 'A'), entry(2, 'B'), entry(3, 'C', 'featured')];
+    assert.deepEqual(keep({ artists: all, label }), [key(1), key(2), key(3), 'label', 'album', 'track']);
+    assert.deepEqual(keep({ artists: [entry(2, 'B'), entry(1, 'A', 'primary', { joinPhrase: ' & ' }), entry(3, 'C', 'featured')], label }), [key(1), key(2), key(3), 'label', 'album', 'track'], 'reordered with a new phrase');
+    assert.deepEqual(keep({ artists: [entry(1, 'A'), entry(2, 'B', 'featured'), entry(3, 'C', 'featured')], label }), [key(1), key(2), key(3), 'label', 'album', 'track'], 'a role change');
+    assert.deepEqual(keep({ artists: [entry(1, 'A'), entry(2, 'B renamed'), entry(3, 'C', 'featured')], label }), [key(1), key(3), 'label', 'album', 'track'], 'one entry renamed');
+    assert.deepEqual(keep({ artists: [entry(1, 'A'), entry(3, 'C', 'featured')], label }), [key(1), key(3), 'label', 'album', 'track'], 'one entry removed');
+    assert.deepEqual(keep({ artists: all, label: { name: 'Sit Records Ltd', musicBrainzId: null } }), [key(1), key(2), key(3), 'album', 'track'], 'the label renamed');
+    assert.deepEqual(keep({ artists: all, label: { name: 'sit records', musicBrainzId: null } }), [key(1), key(2), key(3), 'album', 'track'], 'a label case change is a rename');
+    assert.deepEqual(keep({ artists: all, label: null }), [key(1), key(2), key(3), 'album', 'track'], 'the label removed');
+    // A replacement list keeps decisions only for unchanged entries (same key and name); a reused name under a new key is a new entry.
+    assert.deepEqual(keep({ artists: [entry(1, 'A'), entry(4, 'B'), entry(5, 'D', 'featured')], label }), [key(1), 'label', 'album', 'track'], 'a replacement list');
+    assert.equal(boundLabelDecision(decisions, label), decisions[3]);
+    assert.equal(boundLabelDecision(decisions, { name: 'Other', musicBrainzId: null }), undefined); assert.equal(boundLabelDecision(decisions, null), undefined);
+    assert.equal(boundArtistDecision(decisions, entry(2, 'B')), decisions[1]);
+});
+
 test('a Luna Artist name becomes a one-entry primary Artist suggestion against the Draft v2 baseline', () => {
     const raw = { scope: 'album' as const, slotId: null, field: 'artistName' as const, baseline: 'ignored v1 baseline', value: 'Ipsum Quartet', source: 'folder' as const, evidence: 'Synthetic Folder' };
     const single = draftV2Suggestion(raw, draft(), { importId: 'a', suggestionId: 'b' })!;
@@ -263,6 +286,8 @@ test('a Luna Artist name becomes a one-entry primary Artist suggestion against t
         assert.notEqual(derived, value({ importId: 'a', suggestionId: 'c' }));
     }
     assert.equal(draftV2Suggestion({ ...raw, value: 'Ipsum\u200BQuartet' }, draft(), {}), null, 'a format character drops the suggestion');
+    // Imports never suggest a stand-in Artist: a placeholder credit is dropped, whatever its case or spacing.
+    for (const value of ['Various Artists', 'VA', '[unknown]', '  various   artists ']) assert.equal(draftV2Suggestion({ ...raw, value }, draft(), {}), null, value);
     // Other fields keep their value and read their baseline from the Draft v2 baseline.
     assert.deepEqual(draftV2Suggestion({ ...raw, field: 'title', baseline: 'stale', value: 'Retitled' }, draft(), {}), { ...raw, field: 'title', baseline: 'Synthetic Album', value: 'Retitled' });
     assert.deepEqual(draftV2Suggestion({ ...raw, field: 'releaseDate', value: { year: 2020, month: null, day: null } }, draft(), {})!.baseline, draft().album.releaseDate);
@@ -294,28 +319,37 @@ test('a legacy project converts to its Draft v2 view without touching its approv
     for (const doc of [{ ...load('v1-draft.json'), purpose: 'catalogReview' as const }, loadV2(), { ...loadV2(), draftVersion: 3 }]) { const copy = JSON.stringify(doc); convertLegacyImportProject(doc); assert.equal(JSON.stringify(doc), copy); }
 });
 
-test('the import detail shows Draft v2 values and only entry-bound decisions, and offers work for format 1 and 2 projects only', () => {
+test('the import detail shows Draft v2 values, entry- and label-bound decisions and every published identity, and offers work for format 1 and 2 projects only', () => {
     for (const name of v1Fixtures) {
         const doc = load(name), detail = adminImportDetail(doc, actor, true), legacy = adminImportDto(doc, actor, true), view = importProjectV2View(doc)!;
-        const { draft: _a, suggestions: _b, decisions: _c, ...shared } = detail, { draft: _d, suggestions: _e, decisions: _f, ...v1 } = legacy;
+        const { draft: _a, suggestions: _b, decisions: _c, published, ...shared } = detail, { draft: _d, suggestions: _e, decisions: _f, published: legacyPublished, ...v1 } = legacy;
         assert.deepEqual(shared, v1, name);
         assert.deepEqual(detail.draft, view.draft, name);
         assert.deepEqual(detail.suggestions, view.suggestions.filter(suggestion => suggestion.generation === legacy.analysis.generation), name);
-        const unbound = !doc.draft.album.artistName.trim();
-        assert.deepEqual(detail.decisions, legacy.decisions.filter(decision => decision.scope !== 'artist' || !unbound), name);
+        // A legacy Artist decision names the legacy entry; every other decision names none.
+        const unbound = !doc.draft.album.artistName.trim(), legacyKey = legacyArtistEntryKey(doc._id.toHexString());
+        assert.deepEqual(detail.decisions, legacy.decisions.filter(decision => decision.scope !== 'artist' || !unbound).map(decision => ({ ...decision, entryKey: decision.scope === 'artist' ? legacyKey : null })), name);
+        // A legacy approval's single Artist is listed as the only published Artist, with no label.
+        assert.deepEqual(published, legacyPublished && { albumId: legacyPublished.albumId, artistIds: [legacyPublished.artistId], organizationId: null, trackIds: legacyPublished.trackIds }, name);
     }
     const doc = loadV2(), item = adminImportDetail(doc, actor, true), [slot1, slot2] = doc.manifest.files.map(file => file.slotId);
     assert.deepEqual(item.draft, { album: { title: 'Synthetic Compat Album', artists: doc.draft.album.artists, label: { name: 'Synthetic Label', musicBrainzId: null }, releaseDate: { year: 2026, month: 3, day: null }, visibility: 'public' },
         tracks: [{ slotId: slot1, title: 'Synthetic Opening', discNumber: 1, trackNumber: 1 }, { slotId: slot2, title: 'Synthetic Reprise', discNumber: 2, trackNumber: 1 }] });
     // The lookup-sourced suggestion is outside the v1 source vocabulary and is left out.
     assert.deepEqual(item.suggestions.map(({ field, value }) => [field, value]), [['artists', doc.suggestions[0].value], ['title', 'Synthetic Compat Album (Deluxe)']]);
-    assert.deepEqual(item.decisions.map(({ scope, slotId }) => [scope, slotId]), [['artist', null], ['album', null], ['track', slot1], ['track', slot2]]);
+    // Each entry and the label keep their own decision, which names its entry (or none) and never shows its bound name.
+    const [e1, e2] = doc.draft.album.artists.map(value => value.key);
+    assert.deepEqual(item.decisions.map(({ scope, slotId, entryKey }) => [scope, slotId, entryKey]), [['artist', null, e1], ['artist', null, e2], ['label', null, null], ['album', null, null], ['track', slot1, null], ['track', slot2, null]]);
     assert.deepEqual(item.capabilities, { analysis: true, upload: true, publish: true });
     const json = JSON.stringify(item);
-    for (const sentinel of ['futureAlbumField', 'draftOrigins', 'draftVersion', 'entryKey', 'boundName', 'futureTopLevel', 'albumArtist', 'identifiers', 'lookup-', 'automatic']) assert.equal(json.includes(sentinel), false, sentinel);
-    // A newer format shows the best-effort allowlist and offers no work.
+    for (const sentinel of ['futureAlbumField', 'draftOrigins', 'draftVersion', 'boundName', 'futureTopLevel', 'albumArtist', 'identifiers', 'lookup-', 'automatic']) assert.equal(json.includes(sentinel), false, sentinel);
+    // Renaming the label clears only its decision; removing an entry clears only that entry's.
+    const renamed = adminImportDetail({ ...doc, draft: { ...doc.draft, album: { ...doc.draft.album, label: { name: 'Renamed Label', musicBrainzId: null }, artists: [doc.draft.album.artists[0]] } } } as AdminImportDocument, actor, true);
+    assert.deepEqual(renamed.decisions.map(({ scope, entryKey }) => [scope, entryKey]), [['artist', e1], ['album', null], ['track', null], ['track', null]]);
+    // A newer format shows the best-effort allowlist, whose decisions name no entry, and offers no work.
     const newer = adminImportDetail({ ...doc, draftVersion: 3 }, actor, true);
     assert.deepEqual([newer.draft, newer.capabilities], [item.draft, { analysis: false, upload: false, publish: false }]);
+    assert.ok(newer.decisions.every(decision => decision.entryKey === null && decision.scope !== 'label'));
     const garbage = adminImportDetail({ ...load('v1-draft.json'), draftVersion: 3, draft: { album: 'x', tracks: 'y' } } as unknown as AdminImportDocument, actor, true);
     const empty = defaultDraftV2(garbage.manifest); assert.deepEqual(garbage.draft, { ...empty, album: { ...empty.album, visibility: 'hidden' } });
     // This release writes Draft v2 catalog reviews: the same work as the import is offered, and a newer format offers none.
@@ -333,7 +367,9 @@ test('an approval is format 2 only with one primary Artist entry, no label and a
         ['featured only', withAlbum({ artists: [entry(1, 'A', 'featured')] })], ['no entries', withAlbum({ artists: [] })],
         ['a missing Disc Number', { ...snapshot, tracks: [snapshot.tracks[0], { slotId: slotB, title: '', trackNumber: null }] }], ['an artistName beside entries', { ...snapshot, album: { ...snapshot.album, artistName: 'A' } }]
     ] as const) assert.equal(importPublicationFormat({ schemaVersion: 2, snapshot: value }), null, label);
+    // Format 3 needs its frozen Artists, so a format-2 shape recorded as 3 (or a v1 snapshot recorded as 3) is unknown.
     for (const schemaVersion of [undefined, 1, 3]) assert.equal(importPublicationFormat({ schemaVersion, snapshot }), null, String(schemaVersion));
+    assert.equal(importPublicationFormat({ schemaVersion: 3, snapshot: v1Snapshot, artists: [{ artistId: 'a'.repeat(24) }], label: null }), null, 'a v1 snapshot recorded as 3');
     assert.equal(sameDraftValue({ a: 1, b: [{ c: 2, d: 3 }] }, { b: [{ d: 3, c: 2 }], a: 1 }), true); assert.equal(sameDraftValue([1, 2], [2, 1]), false);
 });
 
@@ -397,6 +433,26 @@ test('a stored value the editor view cannot show is replaced by a save from the 
     assert.deepEqual([changed, target.draft.album.artists.map(value => value.name), target.draft.tracks[0].title], [['album.artists', `tracks.${slotA}.title`], ['Typed Artist'], 'Short']);
     // A value the view shows unchanged is compared as before.
     assert.deepEqual(importDraftV2View(draft(), manifest, 'a'.repeat(24)), draft());
+});
+
+test('an approval is format 3 with entries of a key, name and primary or featured role, a named label or none, Disc Number fields, and 1 to 50 frozen Artists', () => {
+    const frozen = { artists: [{ entryKey: key(1), artistId: 'a'.repeat(24), newArtist: true, candidateRevision: null }], label: null };
+    const several = withAlbum({ artists: [entry(1, 'A'), entry(2, 'B'), entry(3, 'C', 'featured')], label: { name: 'Label', musicBrainzId: null } });
+    for (const [label, snapshot] of [['one primary', draft()], ['several entries and a label', several], ['no entries (an append)', withAlbum({ artists: [] })], ['featured only', withAlbum({ artists: [entry(1, 'A', 'featured')] })]] as const) {
+        assert.equal(importPublicationFormat({ schemaVersion: 3, snapshot, ...frozen }), 3, label); assert.equal(importPublicationSupported({ schemaVersion: 3, snapshot, ...frozen }), true, label);
+    }
+    assert.equal(importPublicationFormat({ schemaVersion: 3, snapshot: several, ...frozen, label: { organizationId: 'b'.repeat(24), newOrganization: true, candidateRevision: null } }), 3);
+    const fifty = Array.from({ length: 50 }, () => frozen.artists[0]);
+    assert.equal(importPublicationFormat({ schemaVersion: 3, snapshot: draft(), artists: fifty, label: null }), 3);
+    const tracks = draft().tracks;
+    for (const [label, value] of [
+        ['no frozen Artists', { snapshot: draft(), label: null }], ['an empty Artist list', { snapshot: draft(), artists: [], label: null }], ['51 Artists', { snapshot: draft(), artists: [...fifty, frozen.artists[0]], label: null }],
+        ['an Artist that is not a record', { snapshot: draft(), artists: ['a'.repeat(24)], label: null }], ['no frozen label', { snapshot: draft(), artists: frozen.artists }], ['a label that is not a record', { snapshot: draft(), ...frozen, label: 'x' }],
+        ['an entry without a key', { snapshot: withAlbum({ artists: [{ ...entry(1, 'A'), key: undefined as unknown as string }] }), ...frozen }], ['an unknown role', { snapshot: withAlbum({ artists: [{ ...entry(1, 'A'), role: 'performer' as 'primary' }] }), ...frozen }],
+        ['an unnamed label', { snapshot: withAlbum({ label: { musicBrainzId: null } as unknown as ImportDraftV2['album']['label'] }), ...frozen }], ['a missing Disc Number', { snapshot: { ...draft(), tracks: [tracks[0], { slotId: slotB, title: '', trackNumber: null }] }, ...frozen }],
+        ['an artistName beside entries', { snapshot: { ...draft(), album: { ...draft().album, artistName: 'A' } }, ...frozen }]
+    ] as const) assert.equal(importPublicationFormat({ schemaVersion: 3, ...value } as Parameters<typeof importPublicationFormat>[0]), null, label);
+    assert.equal(importPublicationFormat({ schemaVersion: 4, snapshot: draft(), ...frozen }), null, 'a newer format');
 });
 
 test('a format-2 approval may leave every Disc Number unknown, as long as each track has the field', () => {

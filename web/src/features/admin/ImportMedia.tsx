@@ -89,6 +89,8 @@ export function ImportMedia({ item, operation, uploads, disabled, view, active =
     || (confirmation.kind === 'cancelPublication' && confirmation.publicationOperationId !== publishOperation)));
   const confirmationLocked = confirmationStale || (confirmation?.kind === 'remove' ? deletionLocked : confirmation?.kind === 'cancelPublication' ? disabled || !canCancelPublication : disabled || publicationLocked || !item.capabilities.publish);
   const label = item.draft.album.title || item.manifest.rootLabel || t('common.untitled');
+  // An append applies none of the draft's Album values, cover, entries or label; the Publish view says so before approval.
+  const appendDecided = item.decisions.some(decision => decision.scope === 'album' && decision.action === 'reuse');
   const badge = (queued: UploadFileStatus | undefined, asset: ImportDetail['assets'][number] | undefined) => queued && ['queued', 'uploading'].includes(queued.state) ? t(`upload.${queued.state}`)
     : asset ? t(`asset.${asset.state}`) : queued && ['ready', 'unknown', 'failed'].includes(queued.state) ? t(`asset.${queued.state}`) : t('asset.not_started');
   return <section className={styles.panel}>
@@ -132,10 +134,12 @@ export function ImportMedia({ item, operation, uploads, disabled, view, active =
     {['preparing', 'needsAttention'].includes(item.publication) && <p><strong>{t(`state.${item.publication === 'needsAttention' ? 'failed' : item.publication}`)}</strong></p>}
     {item.publication === 'cancelled' && <p role="status">{t(publicationCleanup ? 'publication.cancelled_cleanup' : 'publication.cancelled')}</p>}
     {item.publication === 'complete' && item.published && <p role="status">{t('media.published')}</p>}
+    {appendDecided && item.publication !== 'complete' && <p role="note">{t('publication.append_not_applied')}</p>}
     <div className={styles.actions}>
     {item.publication === 'complete' && item.published && <>
       <Link className={styles.link} to={`/admin/catalog/album/${item.published.albumId}`}>{t('published.edit_album')}</Link>
-      <Link className={styles.link} to={`/admin/catalog/artist/${item.published.artistId}`}>{t('published.edit_artist')}</Link>
+      {item.published.artistIds.map((artistId, index, all) => <Link key={artistId} className={styles.link} to={`/admin/catalog/artist/${artistId}`}>{all.length === 1 ? t('published.edit_artist') : t('published.edit_artist_numbered', { number: index + 1 })}</Link>)}
+      {item.published.organizationId && <Link className={styles.link} to={`/admin/catalog/organization/${item.published.organizationId}`}>{t('published.edit_label')}</Link>}
     </>}
     {!publicationLocked && <button className={`${styles.button} ${styles.primary}`} disabled={disabled || !item.capabilities.publish} onClick={() => setConfirmation({ kind: 'publish', importId: item.id, revision: item.revision, label })}>{t('action.publish')}</button>}
     {!publicationLocked && !item.capabilities.publish && <p role="status">{t('publication.unavailable')}</p>}

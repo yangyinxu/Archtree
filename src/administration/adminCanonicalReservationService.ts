@@ -9,7 +9,7 @@ export async function loadAdminCanonicalReservations(bucket: string, limit = 50_
             { 'media.publication.state': 'cancelled', 'media.publication.cleanupPending': true },
             // A newer-format approval may be unresolved in a state this release does not know.
             { 'media.publication.schemaVersion': { $nin: [null, 1] }, 'media.publication.state': { $nin: ['complete', 'cancelled'] } }] },
-            { projection: { 'media.publication.schemaVersion': 1, 'media.publication.snapshot': 1, 'media.publication.tracks': 1, 'media.publication.cover': 1 } }).limit(limit + 1).maxTimeMS(3_000).toArray(),
+            { projection: { 'media.publication.schemaVersion': 1, 'media.publication.snapshot': 1, 'media.publication.artists': 1, 'media.publication.label': 1, 'media.publication.tracks': 1, 'media.publication.cover': 1 } }).limit(limit + 1).maxTimeMS(3_000).toArray(),
         db.collection('adminCatalogCoverOperations').find({ 'target.bucket': bucket, $or: [{ state: { $nin: ['complete', 'cancelled'] } }, { cleanupPending: true }] },
             { projection: { 'target.key': 1 } }).limit(limit + 1).maxTimeMS(3_000).toArray()
     ]);

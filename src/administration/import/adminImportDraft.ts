@@ -4,18 +4,20 @@
  *          ImportSuggestionV2, ImportDecisionV2
  *   Functions: originKey, defaultDraftV2, foldImportName, sameDraftValue, isDraftV2, draftBytes, hasOwn,
  *              parseImportName, parseArtistEntries, parseLabelEntry, parseDraftTitle, parseDraftVisibility,
- *              parseDraftV2, derivedEntryKey, retainBoundDecisions, boundArtistDecision, draftV2Suggestion
+ *              parseDraftV2, derivedEntryKey, retainBoundDecisions, boundArtistDecision, boundLabelDecision,
+ *              draftV2Suggestion
  *   Constants: DRAFT_V2, DRAFT_V2_LIMITS, parseDiscNumber, parseTrackNumber
  * Internal
+ *   Types: Bindable
  *   Functions: canonical, exactly, normalizedText, parseJoinPhrase, parseKeptMusicBrainzId, position,
- *              bindsEntry
+ *              bindsEntry, bindsLabel
  * @end-catalog */
 
 /** Draft v2 values and their parsers; owner rules live in docs/business-rules.md. */
 import { createHash } from 'node:crypto';
-import { cleanText, exact, invalidImport, parseImportDate, record, uuid, type ImportDate, type ImportDuplicateDecision, type ImportManifest, type ImportSuggestion, type ImportValue } from './adminImportContract';
+import { cleanText, exact, invalidImport, parseImportDate, record, uuid, type ImportDate, type ImportDecisionScopeV2, type ImportDuplicateDecision, type ImportManifest, type ImportSuggestion, type ImportValue } from './adminImportContract';
 import { normalizeJoinPhrase } from '../../models/catalogCredit';
-import { normalizeMusicBrainzId } from '../lookup/lookupIdentifiers';
+import { isPlaceholderCredit, normalizeMusicBrainzId } from '../lookup/lookupIdentifiers';
 import type { AnalysisSuggestion } from './adminImportProvider';
 
 export type ImportArtistEntry = { key: string; name: string; role: 'primary' | 'featured'; joinPhrase: string | null; musicBrainzId: string | null };
@@ -33,11 +35,15 @@ export type ImportDraftOrigins = Record<string, ImportValueOrigin>;
  */
 export const originKey = (path: string) => path.split('.').join(':');
 export type ImportSuggestionV2 = Omit<ImportSuggestion, 'field' | 'baseline' | 'value'> & { field: 'title' | 'artists' | 'releaseDate' | 'trackNumber'; baseline: ImportValue | ImportArtistEntry[]; value: ImportValue | ImportArtistEntry[] };
-/** An artist decision binds one entry by key and the name it was decided for; other scopes bind none. */
-export type ImportDecisionV2 = ImportDuplicateDecision & { entryKey: string | null; boundName: string | null };
+/**
+ * An Artist decision binds one entry by key and the name it was decided for; a label decision binds the label's name (entryKey
+ * null); Album and track decisions bind neither.
+ */
+export type ImportDecisionV2 = Omit<ImportDuplicateDecision, 'scope'> & { scope: ImportDecisionScopeV2; entryKey: string | null; boundName: string | null };
 
 export const DRAFT_V2 = 2;
-export const DRAFT_V2_LIMITS = Object.freeze({ artists: 20, name: 200, title: 300, disc: 999, track: 9999, bytes: 48_000 });
+/** `decisions` is one per entry, the label, the Album and each of at most 100 tracks. */
+export const DRAFT_V2_LIMITS = Object.freeze({ artists: 20, name: 200, title: 300, disc: 999, track: 9999, bytes: 48_000, decisions: 122 });
 
 /** Empty Draft v2 of a draftless create: unknown numbers, no entries or label, and public visibility (owner rule). */
 export const defaultDraftV2 = (manifest: ImportManifest): ImportDraftV2 => ({
@@ -142,25 +148,37 @@ export function derivedEntryKey(seed: unknown): string {
     return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-4${hash.slice(13, 16)}-8${hash.slice(17, 20)}-${hash.slice(20, 32)}`;
 }
 
-const bindsEntry = (decision: ImportDuplicateDecision, entry: ImportArtistEntry) =>
-    (decision as ImportDecisionV2).entryKey === entry.key && (decision as ImportDecisionV2).boundName === entry.name;
-/** Keeps every non-artist decision and each artist decision whose entry still exists under the name it was decided for. */
-export const retainBoundDecisions = <T extends ImportDuplicateDecision>(decisions: readonly T[], draft: ImportDraftV2): T[] =>
-    decisions.filter(decision => decision.scope !== 'artist' || draft.album.artists.some(entry => bindsEntry(decision, entry)));
+type Bindable = { scope: string };
+const bindsEntry = (decision: Bindable, entry: ImportArtistEntry) =>
+    (decision as Partial<ImportDecisionV2>).entryKey === entry.key && (decision as Partial<ImportDecisionV2>).boundName === entry.name;
+const bindsLabel = (decision: Bindable, label: ImportLabelEntry | null) => label !== null && (decision as Partial<ImportDecisionV2>).boundName === label.name;
+/**
+ * Keeps every Album and track decision, each Artist decision whose entry still exists under the name it was decided for, and a
+ * label decision while the label keeps the name it was decided for. Reordering an entry or changing its role or join phrase keeps
+ * its decision; renaming or removing the entry or the label clears it.
+ */
+export const retainBoundDecisions = <T extends Bindable>(decisions: readonly T[], draft: ImportDraftV2): T[] =>
+    decisions.filter(decision => decision.scope === 'artist' ? draft.album.artists.some(entry => bindsEntry(decision, entry))
+        : decision.scope === 'label' ? bindsLabel(decision, draft.album.label) : true);
 /** The artist decision bound to this entry, if any. */
-export const boundArtistDecision = <T extends ImportDuplicateDecision>(decisions: readonly T[], entry: ImportArtistEntry): T | undefined =>
+export const boundArtistDecision = <T extends Bindable>(decisions: readonly T[], entry: ImportArtistEntry): T | undefined =>
     decisions.find(decision => decision.scope === 'artist' && bindsEntry(decision, entry));
+/** The label decision bound to this label under its current name, if any. */
+export const boundLabelDecision = <T extends Bindable>(decisions: readonly T[], label: ImportLabelEntry | null): T | undefined =>
+    decisions.find(decision => decision.scope === 'label' && bindsLabel(decision, label));
 
 /**
  * Maps one Luna suggestion onto Draft v2 until Luna proposes Draft v2 values (S15). Its baseline is the v2 baseline value at
  * the path. An artistName becomes a one-entry primary Artist suggestion that reuses the baseline's single entry key, or a
- * key derived from the seed; a name that fails the name rules yields null (dropped).
+ * key derived from the seed; a name that fails the name rules, or a placeholder such as Various Artists (imports never suggest a
+ * stand-in Artist), yields null (dropped).
  */
 export function draftV2Suggestion(raw: AnalysisSuggestion, baseline: ImportDraftV2, seed: unknown): Omit<ImportSuggestionV2, 'id' | 'generation' | 'decision'> | null {
     const { scope, slotId, source, evidence } = raw;
     if (raw.field === 'artistName') {
         if (scope !== 'album') return null;
         let name: string; try { name = parseImportName(raw.value); } catch { return null; }
+        if (isPlaceholderCredit(name)) return null;
         const current = baseline.album.artists, key = current.length === 1 ? current[0].key : derivedEntryKey(seed);
         return { scope, slotId, field: 'artists', baseline: structuredClone(current), value: [{ key, name, role: 'primary', joinPhrase: null, musicBrainzId: null }], source, evidence };
     }

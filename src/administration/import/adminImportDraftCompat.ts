@@ -4,10 +4,11 @@
  *   Functions: importDraftVersion, importDraftWritable, legacyArtistEntryKey, importDraftV2FromV1,
  *              legacyAdministratorOrigins, importProjectV2View, legacyManifestView, legacyDraftView,
  *              legacySuggestionView, legacySuggestionsView, importDraftV2View, importSuggestionV2View,
- *              importSuggestionsV2View, legacyDecisionView, legacyDecisionsView, legacyAssetVisible,
- *              legacyTagsView, legacyAssetsView, legacySelectedCover, legacyAnalysisState, legacyAnalysisIssue,
- *              legacyAnalysisView, legacyPublicationState, legacyPublishedView, legacyPublicationView,
- *              legacyReceiptsView, catalogReviewSourceDisc, catalogReviewSourceView, catalogReviewAppliedView
+ *              importSuggestionsV2View, legacyDecisionView, legacyDecisionsView, importDecisionsV2View,
+ *              legacyAssetVisible, legacyTagsView, legacyAssetsView, legacySelectedCover, legacyAnalysisState,
+ *              legacyAnalysisIssue, legacyAnalysisView, legacyPublicationState, legacyPublishedView,
+ *              importPublishedV2View, legacyPublicationView, legacyReceiptsView, catalogReviewSourceDisc,
+ *              catalogReviewSourceView, catalogReviewAppliedView
  *   Constants: writableDraftFilter, LEGACY_IMPORT_RECEIPT_KINDS, LEGACY_REVIEW_RECEIPT_KINDS
  *   Re-exports: ImportArtistEntry, ImportLabelEntry, ImportDraftV2, ImportValueOrigin, ImportDraftOrigins,
  *               ImportSuggestionV2, ImportDecisionV2
@@ -25,10 +26,10 @@
  * pure: they never write back and never mutate their input, and every projection is total (it never throws).
  */
 import { createHash } from 'node:crypto';
-import { ADMIN_IMPORT_LIMITS as LIMITS, objectId, parseImportDate, uuid, type AdminImportDetail, type ImportAnalysisState, type ImportDate, type ImportDraft, type ImportDuplicateDecision, type ImportEmbeddedTags, type ImportIssue, type ImportManifest, type ImportReceipt, type ImportSuggestion, type ImportValue } from './adminImportContract';
+import { ADMIN_IMPORT_LIMITS as LIMITS, objectId, parseImportDate, uuid, type AdminImportDetail, type ImportAnalysisState, type ImportDate, type ImportDecisionDtoV2, type ImportDraft, type ImportDuplicateDecision, type ImportEmbeddedTags, type ImportIssue, type ImportManifest, type ImportPublishedV2, type ImportReceipt, type ImportSuggestion, type ImportValue } from './adminImportContract';
 import { importFormatVersion, type ImportAsset, type ImportPublication } from './adminImportMediaTypes';
-import { normalizeMusicBrainzId } from '../lookup/lookupIdentifiers';
-import { hasOwn, originKey, type ImportArtistEntry, type ImportDecisionV2, type ImportDraftOrigins, type ImportDraftV2, type ImportLabelEntry, type ImportSuggestionV2 } from './adminImportDraft';
+import { isPlaceholderCredit, normalizeMusicBrainzId } from '../lookup/lookupIdentifiers';
+import { DRAFT_V2_LIMITS, hasOwn, originKey, type ImportArtistEntry, type ImportDecisionV2, type ImportDraftOrigins, type ImportDraftV2, type ImportLabelEntry, type ImportSuggestionV2 } from './adminImportDraft';
 import type { AdminImportDocument } from './adminImportService';
 import { CATALOG_REVIEW_MAX_FIELDS, type CatalogReviewApplied, type CatalogReviewField, type CatalogReviewSource } from '../catalog/adminCatalogReviewContract';
 
@@ -196,11 +197,15 @@ export function importDraftV2View(raw: unknown, manifest: ImportManifest, import
     return { album: { title: text(album.title, 300), artists: entriesView(album.artists, false) ?? [], label: labelView(album.label), releaseDate: date(album.releaseDate),
         visibility: oneOf(album.visibility, ['public', 'hidden'] as const) ? album.visibility : 'hidden' }, tracks };
 }
-/** A Draft v2 suggestion of the current generation on a valid path; an Artist suggestion is album-scoped and every entry readable. */
+/**
+ * A Draft v2 suggestion of the current generation on a valid path; an Artist suggestion is album-scoped and every entry readable.
+ * An Artist suggestion that proposes a placeholder such as Various Artists is hidden: imports never suggest a stand-in Artist.
+ */
 export function importSuggestionV2View(raw: unknown, generation: number, slots: ReadonlySet<string>, importId: string): ImportSuggestionV2 | null {
     const value: unknown = suggestionV2(raw, legacyArtistEntryKey(importId));
     if (!isRecord(value) || value.field !== 'artists') return legacySuggestionView(value, generation, slots) as ImportSuggestionV2 | null;
     const baseline = entriesView(value.baseline, true), entries = entriesView(value.value, true);
+    if (entries?.some(entry => isPlaceholderCredit(entry.name))) return null;
     // The shared fields are checked as a v1 album title suggestion would be.
     const shell = value.scope === 'album' ? legacySuggestionView({ ...value, field: 'title', baseline: '', value: '' }, generation, slots) : null;
     return shell && baseline && entries ? { ...shell, field: 'artists', baseline, value: entries } : null;
@@ -226,6 +231,24 @@ export function legacyDecisionsView(raw: unknown, slots: ReadonlySet<string>): I
         seen.add(`${decision.scope}:${decision.slotId}`); decisions.push(decision);
     }
     return decisions.slice(0, 102);
+}
+
+/**
+ * The editor's Draft v2 decisions: an Artist decision names a UUID entry key, a label or Album decision names none, and a track
+ * decision names a manifest slot. One per scope, slot and entry (the first stored one), within the request bound.
+ */
+export function importDecisionsV2View(raw: unknown, slots: ReadonlySet<string>): ImportDecisionDtoV2[] {
+    const seen = new Set<string>(), decisions: ImportDecisionDtoV2[] = [];
+    for (const value of list(raw)) {
+        if (!isRecord(value)) continue;
+        const { scope, slotId, entryKey, action, candidateId, candidateRevision } = value;
+        if (!oneOf(scope, ['artist', 'label', 'album', 'track'] as const) || !oneOf(action, ['reuse', 'skip', 'create-distinct'] as const)) continue;
+        if (scope === 'artist' ? !uuid(entryKey) || slotId !== null : scope === 'track' ? typeof slotId !== 'string' || !slots.has(slotId) || entryKey !== null : slotId !== null || entryKey !== null) continue;
+        if ((candidateId !== null && !objectId(candidateId)) || (candidateRevision !== null && typeof candidateRevision !== 'string')) continue;
+        const key = `${scope}:${slotId}:${entryKey}`; if (seen.has(key)) continue; seen.add(key);
+        decisions.push({ scope, slotId: slotId as string | null, entryKey: entryKey as string | null, action, candidateId: candidateId as string | null, candidateRevision: candidateRevision as string | null });
+    }
+    return decisions.slice(0, DRAFT_V2_LIMITS.decisions);
 }
 
 /** Only assets on a v1 slot, in a v1 state and lifecycle, with a valid identity are shown to a v1 client. */
@@ -276,6 +299,18 @@ export function legacyPublishedView(publication?: ImportPublication): AdminImpor
     if (!publication || publication.state !== 'complete' || !objectId(publication.albumId) || !objectId(publication.artistId) || !Array.isArray(publication.tracks) || publication.tracks.length > LIMITS.files
         || publication.tracks.some(track => !isRecord(track) || !objectId(track.id))) return null;
     return { albumId: publication.albumId, artistId: publication.artistId, trackIds: publication.tracks.map(track => track.id) };
+}
+/**
+ * Published identities for the editor: format 3 lists every credited Artist (in Credit order, once each) and the label; formats 1
+ * and 2 map their Artist to [artistId]; anything malformed is null.
+ */
+export function importPublishedV2View(publication?: ImportPublication): ImportPublishedV2 | null {
+    const legacy = legacyPublishedView(publication); if (!legacy || !publication) return null;
+    const artists: unknown = publication.artists, label: unknown = publication.label;
+    if (!Array.isArray(artists)) return { albumId: legacy.albumId, artistIds: [legacy.artistId], organizationId: null, trackIds: legacy.trackIds };
+    if (artists.length < 1 || artists.length > 50 || !artists.every(artist => isRecord(artist) && objectId(artist.artistId))) return null;
+    if (label !== null && !(isRecord(label) && objectId(label.organizationId))) return null;
+    return { albumId: legacy.albumId, artistIds: [...new Set(artists.map(artist => artist.artistId as string))], organizationId: isRecord(label) ? label.organizationId as string : null, trackIds: legacy.trackIds };
 }
 /** Publication state, recovery and catalog identities as a v1 client reads them; cleanup is pending only while cancelled. */
 export function legacyPublicationView(publication: ImportPublication | undefined, actorId: string): Pick<AdminImportDetail, 'publication' | 'publicationRecovery' | 'published'> {

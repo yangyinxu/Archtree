@@ -47,10 +47,15 @@ therefore fails type checking even when the difference is an optional field.
   permission for the server to send private fields. Existing server projection and
   lifecycle integration tests remain required security checks.
 
-`contracts/listener/v1/fixtures/album-legacy.json` and `album-current.json` are
-credential-free, database-independent JSON examples that native consumers can
-load unchanged. The compatibility test reads both through the current parser and
-reads the current fixture through an independent frozen baseline parser.
+`contracts/listener/v1/fixtures/album-legacy.json`, `album-current.json` and
+`album-multi-artist-label.json` are credential-free, database-independent JSON
+examples that native consumers can load unchanged. The third is an imported
+Album with two primary Artists, a featured Artist and a label, frozen from
+server output with synthetic IDs: the Album's Credits keep their roles and
+order, its byline carries the join phrases, its tracks carry only the primary
+Artists, every `artistNames` list is unique, and it adds no field. The
+compatibility test reads all three through the current parser and reads both
+current-shape fixtures through an independent frozen baseline parser.
 
 The frozen parser establishes the forward-compatible reader introduced by this
 change. It does not retroactively change already-open historical Web clients

@@ -11,7 +11,7 @@ export type ImportAnalysisState = 'idle' | 'queued' | 'running' | 'complete' | '
 export type ImportIssue = 'providerUnavailable' | 'providerRejected' | 'providerInvalidResponse' | 'providerOutcomeUnknown' | 'permissionLost' | 'grantExpired' | 'budgetExhausted' | null;
 export type ImportReceipt = { operationId: string; kind: 'create' | 'edit' | 'analyze' | 'adopt' | 'decisions' | 'cancel-analysis' | 'upload' | 'publish' | 'cleanup' | 'select-cover' | 'cancel-publication'; revision: number };
 export type ImportEmbeddedTags = { title: string | null; album: string | null; artists: string[]; year: number | null; trackNumber: number | null };
-export type ImportDuplicateCandidate = { kind: 'artist' | 'album' | 'track'; id: string; label: string; revision: string; albumId: string | null; visibility: 'public' | 'hidden'; match: 'name' | 'sha256'; matchedSlotIds: string[]; automaticReuse: false };
+export type ImportDuplicateCandidate = { kind: 'artist' | 'organization' | 'album' | 'track'; id: string; label: string; revision: string; albumId: string | null; visibility: 'public' | 'hidden'; match: 'name' | 'sha256'; matchedSlotIds: string[]; automaticReuse: false };
 export type ImportDuplicateDecision = { scope: 'artist' | 'album' | 'track'; slotId: string | null; action: 'reuse' | 'skip' | 'create-distinct'; candidateId: string | null; candidateRevision: string | null };
 export type AdminImportDetail = {
     id: string; revision: number; createdAt: string; updatedAt: string; startedByMe: boolean;
@@ -25,8 +25,13 @@ export type AdminImportDetail = {
     published: { albumId: string; artistId: string; trackIds: string[] } | null;
     capabilities: { analysis: boolean; upload: boolean; publish: boolean }; receipts: ImportReceipt[];
 };
-/** The import editor's DTO: the frozen v1 detail with a Draft v2 draft and suggestions; decisions keep their v1 fields. */
-export type AdminImportDetailV2 = Omit<AdminImportDetail, 'draft' | 'suggestions'> & { draft: ImportDraftV2; suggestions: ImportSuggestionV2[] };
+export type ImportDecisionScopeV2 = 'artist' | 'label' | 'album' | 'track';
+/** The editor's decision DTO and request item: an Artist decision names its entry, every other scope has entryKey null. */
+export type ImportDecisionDtoV2 = { scope: ImportDecisionScopeV2; slotId: string | null; entryKey: string | null; action: 'reuse' | 'skip' | 'create-distinct'; candidateId: string | null; candidateRevision: string | null };
+/** Published identities for the editor; a legacy approval's single Artist is [artistId]. */
+export type ImportPublishedV2 = { albumId: string; artistIds: string[]; organizationId: string | null; trackIds: string[] };
+/** The import editor's DTO: the frozen v1 detail with a Draft v2 draft and suggestions, entry- and label-bound decisions and every published identity. */
+export type AdminImportDetailV2 = Omit<AdminImportDetail, 'draft' | 'suggestions' | 'decisions' | 'published'> & { draft: ImportDraftV2; suggestions: ImportSuggestionV2[]; decisions: ImportDecisionDtoV2[]; published: ImportPublishedV2 | null };
 export type AdminImportResponse = { item: AdminImportDetailV2; receipt: ImportReceipt | null };
 export type ImportWorkbenchFilter = 'all' | 'analyzing' | 'awaitingReview' | 'needsAttention' | 'completed';
 export type ImportWorkbenchItem = Pick<AdminImportDetail, 'id' | 'revision' | 'createdAt' | 'updatedAt' | 'startedByMe' | 'analysis' | 'upload' | 'publication'> & { title: string; rootLabel: string; artistName: string; visibility: 'public' | 'hidden'; pendingSuggestions: number };

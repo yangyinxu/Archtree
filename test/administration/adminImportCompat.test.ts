@@ -20,6 +20,9 @@
  *   - catalog review sources keep known fields and a captured Disc Number, applied evidence keeps disc fields and is never dropped
  *   - the Draft v2 editor view keeps only readable entries, label and values, one track per slot in stored order, and never throws
  *   - the Draft v2 suggestion view maps legacy Artist names, keeps readable album Artist suggestions whole and drops any other
+ *   - the Draft v2 suggestion view hides an Artist suggestion that proposes a placeholder such as Various Artists
+ *   - the Draft v2 decision view keeps one readable decision per entry, label, Album and track, each naming its entry or none
+ *   - the published view lists every credited Artist and the label of a format-3 approval, maps a legacy Artist to one entry, and is null when malformed
  * @end-catalog */
 
 /**
@@ -35,8 +38,8 @@ import { uuid } from '../../src/administration/import/adminImportContract';
 import { importPublicationSupported, importPublicationVersion } from '../../src/administration/import/adminImportMediaTypes';
 import { adminImportDto, importDigest, type AdminImportDocument } from '../../src/administration/import/adminImportService';
 import {
-    catalogReviewAppliedView, catalogReviewSourceDisc, catalogReviewSourceView, importDraftV2FromV1, importDraftV2View, importDraftVersion, importDraftWritable, importProjectV2View,
-    importSuggestionsV2View, legacyArtistEntryKey, legacyAssetVisible, legacyDraftView, legacyPublicationView, writableDraftFilter, type ImportProjectV2View
+    catalogReviewAppliedView, catalogReviewSourceDisc, catalogReviewSourceView, importDecisionsV2View, importDraftV2FromV1, importDraftV2View, importDraftVersion, importDraftWritable, importProjectV2View,
+    importPublishedV2View, importSuggestionsV2View, legacyArtistEntryKey, legacyAssetVisible, legacyDraftView, legacyPublicationView, writableDraftFilter, type ImportProjectV2View
 } from '../../src/administration/import/adminImportDraftCompat';
 import type { CatalogReviewApplied, CatalogReviewSource } from '../../src/administration/catalog/adminCatalogReviewContract';
 import { loadImportFixture } from '../support/adminImportFixtures';
@@ -183,7 +186,7 @@ test('draft and publication format versions accept only absent, null or a positi
         assert.equal(importDraftVersion(doc), expected, String(value)); assert.equal(importDraftWritable(doc), expected === 1 || expected === 2, String(value));
         // This release writes Draft v2 catalog reviews too, so format 2 is writable whatever the purpose.
         for (const purpose of ['import', null, 'catalogReview']) assert.equal(importDraftWritable({ ...doc, purpose }), expected === 1 || expected === 2, `${String(value)} ${purpose}`);
-        // A v1 snapshot is format 1 only: a format-2 approval must freeze a Draft v2 snapshot.
+        // A v1 snapshot is format 1 only: a format-2 or format-3 approval must freeze a Draft v2 snapshot.
         assert.equal(importPublicationVersion(publication), expected, String(value)); assert.equal(importPublicationSupported(publication), expected === 1, String(value));
         const view = importProjectV2View({ ...load('v1-draft.json'), ...doc } as AdminImportDocument);
         assert.equal(view === null, expected === null || expected > 2, String(value));
@@ -347,4 +350,51 @@ test('the Draft v2 suggestion view maps legacy Artist names, keeps readable albu
     assert.deepEqual(view([{ ...artists, value: [{ ...lorem, futureEntryField: true }] }]), [artists]);
     assert.deepEqual(view([legacy]), [{ ...legacy, field: 'artists', baseline: [], value: [{ key: legacyArtistEntryKey(importId), name: 'Ipsum', role: 'primary', joinPhrase: null, musicBrainzId: null }] }]);
     assert.equal(view(Array.from({ length: 1001 }, (_, index) => ({ ...title, id: String(index).padStart(24, '0') }))).length, 1000);
+});
+
+test('the Draft v2 suggestion view hides an Artist suggestion that proposes a placeholder such as Various Artists', () => {
+    const importId = '0000000000000000000000c2', generation = 1, slots = new Set<string>();
+    const lorem = { key: '00000009-0000-4000-8000-0000000000c1', name: 'Lorem', role: 'primary', joinPhrase: null, musicBrainzId: null };
+    const artists = { scope: 'album', slotId: null, field: 'artists', baseline: [], value: [lorem], source: 'folder', evidence: 'Synthetic Folder', id: 'a'.repeat(24), generation, decision: 'pending' };
+    const hidden = [
+        { ...artists, id: 'b'.repeat(24), value: [{ ...lorem, name: 'Various Artists' }] }, { ...artists, id: 'c'.repeat(24), value: [lorem, { ...lorem, key: '00000009-0000-4000-8000-0000000000c2', name: '[unknown]', role: 'featured' }] },
+        { ...artists, id: 'd'.repeat(24), field: 'artistName', baseline: '', value: 'VA' }
+    ];
+    assert.deepEqual(importSuggestionsV2View([artists, ...hidden], generation, slots, importId).map(suggestion => suggestion.id), [artists.id]);
+    // A placeholder in the baseline (the current value) does not hide a suggestion that replaces it.
+    assert.deepEqual(importSuggestionsV2View([{ ...artists, baseline: [{ ...lorem, name: 'Various Artists' }] }], generation, slots, importId).length, 1);
+});
+
+test('the Draft v2 decision view keeps one readable decision per entry, label, Album and track, each naming its entry or none', () => {
+    const slot = '00000009-0000-4000-a000-0000000000e1', slots = new Set([slot]), e1 = '00000009-0000-4000-8000-0000000000e1', e2 = '00000009-0000-4000-8000-0000000000e2', id = 'a'.repeat(24);
+    const decision = (scope: string, extra: object = {}) => ({ scope, slotId: scope === 'track' ? slot : null, entryKey: null, action: 'create-distinct', candidateId: null, candidateRevision: null, boundName: 'never shown', ...extra });
+    const kept = [decision('artist', { entryKey: e1 }), decision('artist', { entryKey: e2, action: 'reuse', candidateId: id, candidateRevision: 'r' }), decision('label', { action: 'skip' }), decision('album'), decision('track')];
+    const dropped = [
+        decision('artist'), decision('artist', { entryKey: 'not-a-key' }), decision('artist', { entryKey: e1, slotId: slot }), decision('label', { entryKey: e1 }), decision('album', { slotId: slot }),
+        decision('track', { slotId: '00000009-0000-4000-a000-0000000000ff' }), decision('track', { entryKey: e1 }), decision('organization'), decision('album', { action: 'merge' }),
+        decision('album', { candidateId: 'not-an-id' }), decision('album', { candidateRevision: 7 }), null, 'x', [decision('album')]
+    ];
+    const view = importDecisionsV2View([...kept, ...dropped, decision('artist', { entryKey: e1, action: 'skip' }), decision('label'), decision('track', { action: 'skip' })], slots);
+    // The first stored decision of each scope, slot and entry wins; extra fields (the bound name) are never shown.
+    assert.deepEqual(view, kept.map(({ boundName: _boundName, ...value }) => value));
+    assert.equal(importDecisionsV2View('not a list', slots).length, 0);
+    const many = Array.from({ length: 130 }, (_, index) => decision('artist', { entryKey: `00000009-0000-4000-8000-${String(index).padStart(12, '0')}` }));
+    assert.equal(importDecisionsV2View(many, slots).length, 122);
+});
+
+test('the published view lists every credited Artist and the label of a format-3 approval, maps a legacy Artist to one entry, and is null when malformed', () => {
+    const complete = load('v1-publication-complete.json'), legacy = complete.media!.publication!, trackIds = legacy.tracks.map(track => track.id);
+    assert.deepEqual(importPublishedV2View(legacy), { albumId: legacy.albumId, artistIds: [legacy.artistId], organizationId: null, trackIds });
+    assert.deepEqual(importPublishedV2View({ ...legacy, schemaVersion: 2 }), { albumId: legacy.albumId, artistIds: [legacy.artistId], organizationId: null, trackIds });
+    const [a1, a2, a3, org] = ['0000000000000000000000f1', '0000000000000000000000f2', '0000000000000000000000f3', '0000000000000000000000f4'];
+    const artists = [a1, a2, a3].map(artistId => ({ entryKey: null, artistId, newArtist: false, candidateRevision: null }));
+    const v3 = { ...legacy, schemaVersion: 3, artistId: a1, artists, label: { organizationId: org, newOrganization: true, candidateRevision: null } };
+    assert.deepEqual(importPublishedV2View(v3), { albumId: legacy.albumId, artistIds: [a1, a2, a3], organizationId: org, trackIds });
+    assert.deepEqual(importPublishedV2View({ ...v3, label: null }), { albumId: legacy.albumId, artistIds: [a1, a2, a3], organizationId: null, trackIds });
+    for (const [label, value] of [
+        ['not complete', { ...v3, state: 'preparing' }], ['no Artists', { ...v3, artists: [] }], ['51 Artists', { ...v3, artists: Array.from({ length: 51 }, () => artists[0]) }],
+        ['a malformed Artist', { ...v3, artists: [...artists, { artistId: 'x' }] }], ['a malformed label', { ...v3, label: { organizationId: 'x' } }], ['a missing label', { ...v3, label: undefined }],
+        ['a malformed Album', { ...v3, albumId: 'x' }], ['a malformed mirror Artist', { ...v3, artistId: 'x' }]
+    ] as const) assert.equal(importPublishedV2View(value as typeof legacy), null, label);
+    assert.equal(importPublishedV2View(undefined), null);
 });

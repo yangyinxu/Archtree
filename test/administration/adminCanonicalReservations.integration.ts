@@ -70,3 +70,13 @@ test('an unresolved approval of an unknown publication format fails reconciliati
     await imports.insertOne(approval({ schemaVersion: 2, state: 'cancelled', cleanupPending: false }));
     assert.deepEqual(await loadAdminCanonicalReservations('catalog'), new Set([audio, image]));
 });
+test('a preparing format-3 approval of several Artists and a label reserves its keys, while one missing its frozen Artists fails closed', async () => {
+    const imports = getDb()!.collection('adminAlbumImports');
+    const v2Snapshot = { album: { title: 'Synthetic Album', artists: [{ key: randomUUID(), name: 'Lorem Ensemble', role: 'primary' }, { key: randomUUID(), name: 'Dolor Soloist', role: 'featured' }], label: { name: 'Sit Records' }, releaseDate: null, visibility: 'hidden' }, tracks: [{ slotId: randomUUID(), discNumber: null }] };
+    const frozen = { artists: [{ entryKey: null, artistId: 'a'.repeat(24), newArtist: true, candidateRevision: null }, { entryKey: null, artistId: 'b'.repeat(24), newArtist: true, candidateRevision: null }], label: { organizationId: 'c'.repeat(24), newOrganization: true, candidateRevision: null } };
+    const approval = (value: Record<string, unknown>) => ({ media: { publication: { schemaVersion: 3, bucket: 'catalog', state: 'preparing', snapshot: v2Snapshot, tracks: [{ key: audio, reused: false }], cover: { key: image }, ...value } } });
+    await imports.insertOne(approval(frozen));
+    assert.deepEqual(await loadAdminCanonicalReservations('catalog'), new Set([audio, image]));
+    await imports.insertOne(approval({ label: null }));
+    await assert.rejects(loadAdminCanonicalReservations('catalog'), /newer import publication format/);
+});

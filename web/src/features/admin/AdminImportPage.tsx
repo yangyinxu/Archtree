@@ -78,9 +78,8 @@ function ImportProject({ id }: { id: string }) {
     mutation.operation.acknowledge();
     void query.refetch();
   }, [mutation.result]);
-  // A refused save (another administrator changed a saved path) loads the newer saved draft, so the conflict panel offers it. An
-  // unsupported refusal rereads too: from /decisions it means another save added entries or a label this page does not show yet.
-  useEffect(() => { if (mutation.error === 'conflict' || mutation.error === 'publication_unsupported') void query.refetch(); }, [mutation.error]);
+  // A refused save (another administrator changed a saved path) loads the newer saved draft, so the conflict panel offers it.
+  useEffect(() => { if (mutation.error === 'conflict') void query.refetch(); }, [mutation.error]);
   useEffect(() => { if (editor) adminWorkspace.retain(bufferKey, editor, access); }, [editor]);
   useEffect(() => { adminWorkspace.retain(`stage:${id}`, stage, access); }, [stage]);
   // Keep candidate search state mounted after its first visit while deferring the initial review bundle.

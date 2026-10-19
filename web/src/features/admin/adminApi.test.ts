@@ -10,14 +10,14 @@
  *   - an outdated strict schema asks for a reload, while a receipt mismatch stays an unconfirmed retryable intent
  *   - AdminMutation and AdminCommand show a reload state with no retryable intent for an outdated response
  *   - a server refusal of a newer-format project asks for a reload of that action only, with no retryable intent
- *   - an append visibility mismatch is its own definite refusal, distinct from a revision conflict
  *   - the server Draft v2 projection parses strictly, while v1 drafts, unknown entry keys, track Artist suggestions and Disc Number 1000 are refused
+ *   - duplicate candidates parse label Organizations and up to 460 items, and refuse unknown kinds
  * @end-catalog */
 
 import { z } from 'zod';
 import { advanceAccountEpoch, captureAccountOperation } from '../../api/accountEpoch';
 import { adminWorkspace } from './adminWorkspace';
-import { ADMIN_IMPORT_APPEND_VISIBILITY_MISMATCH, ADMIN_IMPORT_RELOAD_REQUIRED, adminRequest, detailSchema, responseSchema } from './adminApi';
+import { ADMIN_IMPORT_RELOAD_REQUIRED, adminRequest, candidatesSchema, detailSchema, responseSchema } from './adminApi';
 import { ADMIN_RELOAD_REQUIRED } from './adminTransport';
 import { AdminCommand } from './useAdminCommand';
 import { AdminMutation } from './useAdminMutation';
@@ -152,16 +152,6 @@ test('a server refusal of a newer-format project asks for a reload of that actio
   expect(command.getSnapshot().intent).toBeNull(); expect(adminWorkspace.getSnapshot().reloadRequired).toBe(false);
 });
 
-test('an append visibility mismatch is its own definite refusal, distinct from a revision conflict', async () => {
-  vi.stubGlobal('fetch', vi.fn(async () => json({ code: ADMIN_IMPORT_APPEND_VISIBILITY_MISMATCH }, 409)));
-  const operation = new AdminMutation(); operation.run('/item/publish', 'POST', { expectedRevision: 1 });
-  await vi.waitFor(() => expect(operation.getSnapshot().error).toBe('visibility_mismatch'));
-  expect(operation.getSnapshot().intent).toBeNull(); expect(adminWorkspace.getSnapshot().reloadRequired).toBe(false);
-  vi.stubGlobal('fetch', vi.fn(async () => json({ code: 'ADMIN_IMPORT_REVISION_CONFLICT' }, 409)));
-  const other = new AdminMutation(); other.run('/item/publish', 'POST', { expectedRevision: 1 });
-  await vi.waitFor(() => expect(other.getSnapshot().error).toBe('conflict'));
-});
-
 test('the server Draft v2 projection parses strictly, while v1 drafts, unknown entry keys, track Artist suggestions and Disc Number 1000 are refused', () => {
   // The server's Draft v2 projection of the synthetic fixture (test/fixtures/adminImportCompat/v2-draft-project.json).
   const projected = {
@@ -172,7 +162,7 @@ test('the server Draft v2 projection parses strictly, while v1 drafts, unknown e
     startedByMe: true,
     manifest: {"rootLabel": "Synthetic Primary - Synthetic Compat Album", "files": [{"slotId": "00000009-0000-4000-a000-000000000001", "filename": "01 - Synthetic Opening.mp3", "relativePath": "Disc 1/01 - Synthetic Opening.mp3", "byteLength": 4096}, {"slotId": "00000009-0000-4000-a000-000000000002", "filename": "01 - Synthetic Reprise.mp3", "relativePath": "Disc 2/01 - Synthetic Reprise.mp3", "byteLength": null}]},
     analysis: {"state": "queued", "generation": 1, "operationId": "00000009-0000-4000-8000-000000000004", "completedChunks": 1, "totalChunks": 2, "attemptsUsed": 1, "maxAttempts": 22, "issue": null},
-    decisions: [{"scope": "artist", "slotId": null, "action": "create-distinct", "candidateId": null, "candidateRevision": null}, {"scope": "album", "slotId": null, "action": "create-distinct", "candidateId": null, "candidateRevision": null}, {"scope": "track", "slotId": "00000009-0000-4000-a000-000000000001", "action": "create-distinct", "candidateId": null, "candidateRevision": null}, {"scope": "track", "slotId": "00000009-0000-4000-a000-000000000002", "action": "create-distinct", "candidateId": null, "candidateRevision": null}],
+    decisions: [{"scope": "artist", "slotId": null, "entryKey": "00000009-0000-4000-8000-0000000000e1", "action": "create-distinct", "candidateId": null, "candidateRevision": null}, {"scope": "artist", "slotId": null, "entryKey": "00000009-0000-4000-8000-0000000000e2", "action": "create-distinct", "candidateId": null, "candidateRevision": null}, {"scope": "label", "slotId": null, "entryKey": null, "action": "create-distinct", "candidateId": null, "candidateRevision": null}, {"scope": "album", "slotId": null, "entryKey": null, "action": "create-distinct", "candidateId": null, "candidateRevision": null}, {"scope": "track", "slotId": "00000009-0000-4000-a000-000000000001", "entryKey": null, "action": "create-distinct", "candidateId": null, "candidateRevision": null}, {"scope": "track", "slotId": "00000009-0000-4000-a000-000000000002", "entryKey": null, "action": "create-distinct", "candidateId": null, "candidateRevision": null}],
     upload: {"ready": 1, "total": 2, "available": true},
     publication: "notStarted",
     publicationRecovery: null,
@@ -186,8 +176,18 @@ test('the server Draft v2 projection parses strictly, while v1 drafts, unknown e
   };
   expect(detailSchema.safeParse(projected).success).toBe(true);
   expect(responseSchema.safeParse({ item: projected, receipt: null }).success).toBe(true);
-  const { album, tracks } = projected.draft, [artists] = projected.suggestions;
+  const { album, tracks } = projected.draft, [artists] = projected.suggestions, [decision] = projected.decisions;
+  // A completed publication lists every credited Artist and the label; a legacy single artistId is refused.
+  const published = { albumId: 'a'.repeat(24), artistIds: ['b'.repeat(24), 'c'.repeat(24)], organizationId: 'd'.repeat(24), trackIds: ['e'.repeat(24)] };
+  for (const value of [published, { ...published, organizationId: null }, { ...published, artistIds: [published.artistIds[0]] }]) expect(detailSchema.safeParse({ ...projected, published: value }).success).toBe(true);
   for (const changed of [
+    { ...projected, published: { albumId: published.albumId, artistId: published.artistIds[0], trackIds: published.trackIds } },
+    { ...projected, published: { ...published, artistIds: [] } }, { ...projected, published: { ...published, artistIds: Array(51).fill(published.artistIds[0]) } },
+    { ...projected, published: { ...published, organizationId: undefined } },
+    // A decision without entryKey (an outdated shape), or one on an unknown scope, is refused.
+    { ...projected, decisions: [{ scope: decision.scope, slotId: decision.slotId, action: decision.action, candidateId: decision.candidateId, candidateRevision: decision.candidateRevision }] },
+    { ...projected, decisions: [{ ...decision, scope: 'organization' }] }, { ...projected, decisions: [{ ...decision, entryKey: 'not-a-key' }] },
+    { ...projected, decisions: Array(123).fill(decision) },
     { ...projected, draft: { album: { title: album.title, artistName: 'Synthetic Primary', releaseDate: album.releaseDate, visibility: album.visibility }, tracks: tracks.map(({ discNumber: _disc, ...track }) => track) } },
     { ...projected, draft: { ...projected.draft, album: { ...album, artists: [{ ...album.artists[0], extra: true }, album.artists[1]] } } },
     { ...projected, draft: { ...projected.draft, album: { ...album, label: { name: 'Synthetic Label', musicBrainzId: 'not-an-id' } } } },
@@ -195,6 +195,13 @@ test('the server Draft v2 projection parses strictly, while v1 drafts, unknown e
     { ...projected, suggestions: [{ ...artists, scope: 'track', slotId: tracks[0].slotId }] },
     { ...projected, suggestions: [{ ...artists, value: 'Synthetic Primary' }] }
   ]) expect(detailSchema.safeParse(changed).success).toBe(false);
-  expect([ADMIN_IMPORT_RELOAD_REQUIRED, ADMIN_IMPORT_APPEND_VISIBILITY_MISMATCH]).toEqual(['ADMIN_IMPORT_RELOAD_REQUIRED', 'ADMIN_IMPORT_APPEND_VISIBILITY_MISMATCH']);
+  expect(ADMIN_IMPORT_RELOAD_REQUIRED).toBe('ADMIN_IMPORT_RELOAD_REQUIRED');
   expect(ADMIN_IMPORT_RELOAD_REQUIRED).not.toBe(ADMIN_RELOAD_REQUIRED);
+});
+
+test('duplicate candidates parse label Organizations and up to 460 items, and refuse unknown kinds', () => {
+  const candidate = { kind: 'organization', id: 'a'.repeat(24), label: 'Sit Records', revision: 'r', albumId: null, visibility: 'hidden', match: 'name', matchedSlotIds: [], automaticReuse: false };
+  expect(candidatesSchema.parse({ items: [candidate] }).items[0].kind).toBe('organization');
+  expect(candidatesSchema.safeParse({ items: Array(460).fill(candidate) }).success).toBe(true);
+  for (const items of [Array(461).fill(candidate), [{ ...candidate, kind: 'label' }], [{ ...candidate, automaticReuse: true }]]) expect(candidatesSchema.safeParse({ items }).success).toBe(false);
 });

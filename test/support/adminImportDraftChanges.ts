@@ -5,6 +5,13 @@ import type { ImportArtistEntry, ImportDraftV2 } from '../../src/administration/
 /** One primary Artist entry with a fresh key, as the Web editor creates it from a typed name. */
 export const artistEntries = (name: string, key: string = randomUUID()): ImportArtistEntry[] => name ? [{ key, name, role: 'primary', joinPhrase: null, musicBrainzId: null }] : [];
 
+/**
+ * Decision body items as the Web editor sends them: an Artist decision names the draft's first entry (or `entryKey` when it
+ * already names one), and every other scope names none.
+ */
+export const withEntryKeys = <T extends { scope: string; entryKey?: string | null }>(draft: ImportDraftV2, decisions: readonly T[]) =>
+    decisions.map(decision => ({ ...decision, entryKey: decision.scope === 'artist' ? decision.entryKey ?? draft.album.artists[0]?.key ?? null : null }));
+
 /** The field-patch changes from a saved draft to an edited one: album paths, then tracks in saved order, changed values only. */
 export function draftChanges(base: ImportDraftV2, draft: ImportDraftV2) {
     const same = (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right), changes: { path: string; base: unknown; value: unknown }[] = [];

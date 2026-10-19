@@ -3,44 +3,32 @@
  *   Functions: publishAdminImport, cancelAdminImportPublication, runAdminImportPublicationOnce,
  *              resumeAdminImportPublication, startAdminImportPublisher
  * Internal
- *   Types: CommitValues
- *   Functions: conflict, ready, credits, date, currentApproval, target, cleanupCancelledPublication,
- *              legacyCommitValues, draftV2CommitValues, commitPublication, commitApprovedGraph
+ *   Functions: target, cleanupCancelledPublication
  *   Constants: candidateProjection
  * @end-catalog */
 
 import { checkAdminWorker, startAdminWorker, type AdminWorkTracker } from '../adminWorkerLifecycle';
 import { randomUUID } from 'node:crypto';
 import { ObjectId } from 'mongodb';
-import { getDatabaseClient, getDb } from '../../infrastructure/database';
-import { catalogSearchProjection } from '../../utils/catalogSearch';
-import { normalizeCatalogCredits, validateAttribution } from '../../models/catalogCredit';
-import { requireCatalogCreditWrites } from '../../config/catalogCreditRollout';
-import { readyArtistLifecycleFilter, touchReadyArtistReferences } from '../../services/catalog/artistReferenceFenceService';
-import { readyAlbumLifecycleFilter, touchReadyAlbumReferences } from '../../services/catalog/albumReferenceFenceService';
-import { touchReadyAudioTrackReferences } from '../../services/audio/audioTrackReferenceFenceService';
+import { getDb } from '../../infrastructure/database';
+import { readyAlbumLifecycleFilter } from '../../services/catalog/albumReferenceFenceService';
 import { readyAudioStorageFilter } from '../../utils/audioStorageKey';
 import { sortTrackIdsByDiscAndTrackNumber } from '../../services/catalog/albumTrackLinkService';
-import { ADMIN_IMPORT_LIMITS, AdminImportError, exact, importEnabled, objectId, record, uuid, type ImportDate, type ImportDraft } from './adminImportContract';
-import { getAdminImport, importCandidateProjection, importCollection, importPurposeFilter, importCandidateRevision, mutateAdminImport, touchImportAdmin, withImportAdmin } from './adminImportService';
-import { importPrivateStorageReady, importPublicationFormat, importPublicationSupported, type ImportAsset, type ImportPublication } from './adminImportMediaTypes';
-import { boundArtistDecision, sameDraftValue, type ImportDecisionV2, type ImportDraftV2 } from './adminImportDraft';
+import { ADMIN_IMPORT_LIMITS, AdminImportError, exact, importEnabled, objectId, record, uuid } from './adminImportContract';
+import { getAdminImport, importCandidateProjection, importCollection, importPurposeFilter, importCandidateRevision, mutateAdminImport, withImportAdmin } from './adminImportService';
+import { importPrivateStorageReady, importPublicationSupported, type ImportAsset, type ImportPublication } from './adminImportMediaTypes';
+import { sameDraftValue, type ImportDecisionV2 } from './adminImportDraft';
 import { importDraftV2View, importSuggestionsV2View } from './adminImportDraftCompat';
 import { draftV2Paths, markAdministratorValues, storedDraftV2 } from './adminImportValueState';
 import { defaultImportObjectStorage, importAssetTarget, type ImportObjectStorage, type ImportObjectTarget, type ImportObjectIdentity } from './adminImportStorage';
+import { assertImportReusedRecordsReady, commitImportCatalogGraph, freezeImportIdentities, importAlbumCredits, importPublicationConflict as conflict, requireCurrentApproval as currentApproval, requireImportPublicationReady as ready } from './adminImportCatalogCommit';
 
-const conflict = () => new AdminImportError(409, 'ADMIN_IMPORT_PUBLICATION_CONFLICT');
-const ready = () => { if (!importEnabled() || !importPrivateStorageReady() || !process.env.S3_BUCKET_NAME?.trim()) throw new AdminImportError(503, 'ADMIN_IMPORT_STORAGE_UNAVAILABLE'); requireCatalogCreditWrites(); };
-/** The single primary Artist Credit; an entry's join phrase is kept with it, as every entry is created with its phrase. */
-const credits = (artistId: string, joinPhrase: string | null) => normalizeCatalogCredits([{ creditId: `import_primary_${artistId}`, subjectType: 'artist', subjectId: artistId, role: 'primary', order: 0, ...(joinPhrase ? { joinPhrase } : {}) }]);
-const date = (value: { year: number; month: number | null; day: number | null } | null) => value ? { year: value.year, ...(value.month === null ? {} : { month: value.month }), ...(value.day === null ? {} : { day: value.day }) } : {};
 const candidateProjection = importCandidateProjection;
-// Approval expiry gates each new S3 step and the final transaction, not recording a completed step's evidence.
-const currentApproval = (publication: ImportPublication) => {
-    if (publication.grantExpiresAt <= new Date()) throw new AdminImportError(409, 'ADMIN_IMPORT_APPROVAL_EXPIRED');
-};
 
-/** Explicit approval creates one Album or appends only missing tracks to the exact reviewed existing Album. */
+/**
+ * Explicit approval creates one Album or appends only missing tracks to the exact reviewed existing Album. It freezes the
+ * reviewed draft, decisions and identities as format 3: every credited Artist and the label are fixed here.
+ */
 export async function publishAdminImport(actor: string, id: string, raw: unknown) {
     const body = record(raw); exact(body, ['operationId', 'expectedRevision']); if (!uuid(body.operationId) || !Number.isSafeInteger(body.expectedRevision) || (body.expectedRevision as number) < 1) throw new AdminImportError(400, 'ADMIN_IMPORT_INVALID_INPUT');
     const result = await mutateAdminImport(actor, id, body as typeof body & { operationId: string; expectedRevision: number }, 'publish', async (doc, session) => {
@@ -55,40 +43,37 @@ export async function publishAdminImport(actor: string, id: string, raw: unknown
         // Only a pending suggestion the editor shows, and so can decide, holds the approval; one it cannot read never blocks it.
         const slots = new Set(doc.manifest.files.map(file => file.slotId)), shown = importSuggestionsV2View(doc.suggestions, doc.analysis.generation, slots, id);
         if (['queued', 'running'].includes(doc.analysis.state) || shown.some(suggestion => suggestion.decision === 'pending')) throw new AdminImportError(409, 'ADMIN_IMPORT_REVIEW_REQUIRED');
-        // The project is Draft v2 here (converted on admission). This release publishes one primary Artist entry and no label (S7a: more).
-        const draft = storedDraftV2(doc), [entry] = draft.album.artists;
-        // A stored value the editor cannot show (a v1 value over its bound after NFC reads as empty there) is never frozen.
-        if (!draft.album.title || !entry || !sameDraftValue(importDraftV2View(draft, doc.manifest, id), draft)) throw new AdminImportError(400, 'ADMIN_IMPORT_DRAFT_INCOMPLETE');
-        if (draft.album.artists.length > 1 || draft.album.label) throw new AdminImportError(409, 'ADMIN_IMPORT_PUBLICATION_UNSUPPORTED');
-        if (entry.role !== 'primary') throw new AdminImportError(400, 'ADMIN_IMPORT_DRAFT_INCOMPLETE');
-        const artistDecision = boundArtistDecision(doc.decisions, entry);
-        if (!artistDecision || !['reuse', 'create-distinct'].includes(artistDecision.action)) throw new AdminImportError(409, 'ADMIN_IMPORT_REVIEW_REQUIRED');
-        const albumDecision = doc.decisions.find(decision => decision.scope === 'album'); if (!albumDecision || !['reuse', 'create-distinct'].includes(albumDecision.action)) throw new AdminImportError(409, 'ADMIN_IMPORT_REVIEW_REQUIRED');
+        // The project is Draft v2 here (converted on admission). A stored value the editor cannot show (a v1 value over its bound
+        // after NFC reads as empty there) is never frozen.
+        const draft = storedDraftV2(doc), decisions = doc.decisions as ImportDecisionV2[];
+        if (!draft.album.title || !sameDraftValue(importDraftV2View(draft, doc.manifest, id), draft)) throw new AdminImportError(400, 'ADMIN_IMPORT_DRAFT_INCOMPLETE');
+        // A new Album needs a primary Artist entry; an append credits the target Album's own primaries instead.
+        const albumDecision = decisions.find(decision => decision.scope === 'album'), append = albumDecision?.action === 'reuse';
+        if (!append && !draft.album.artists.some(entry => entry.role === 'primary')) throw new AdminImportError(400, 'ADMIN_IMPORT_DRAFT_INCOMPLETE');
+        if (!albumDecision || !['reuse', 'create-distinct'].includes(albumDecision.action)) throw new AdminImportError(409, 'ADMIN_IMPORT_REVIEW_REQUIRED');
         let existingAlbum: any = null;
-        if (albumDecision.action === 'reuse') {
+        if (append) {
             existingAlbum = await getDb()!.collection('albums').findOne({ _id: new ObjectId(albumDecision.candidateId!), ...readyAlbumLifecycleFilter }, { session, projection: candidateProjection });
-            if (!existingAlbum || importCandidateRevision(existingAlbum) !== albumDecision.candidateRevision || artistDecision.action !== 'reuse' || !Array.isArray(existingAlbum.credits) || !existingAlbum.credits.some((credit: any) => credit.subjectType === 'artist' && credit.role === 'primary' && credit.subjectId === artistDecision.candidateId)) throw new AdminImportError(409, 'ADMIN_IMPORT_DUPLICATE_STALE');
-            // Temporary until appends take the target Album's visibility (S7a); a stale Album is reported first.
-            if ((existingAlbum.visibility ?? 'public') !== draft.album.visibility) throw new AdminImportError(409, 'ADMIN_IMPORT_APPEND_VISIBILITY_MISMATCH');
+            if (!existingAlbum || importCandidateRevision(existingAlbum) !== albumDecision.candidateRevision) throw new AdminImportError(409, 'ADMIN_IMPORT_DUPLICATE_STALE');
             if (!Array.isArray(existingAlbum.audioTrackIds) || existingAlbum.audioTrackIds.length > 5000) throw new AdminImportError(409, 'ADMIN_IMPORT_TARGET_TOO_LARGE');
         }
-        const selected = draft.tracks.filter(track => doc.decisions.find(decision => decision.scope === 'track' && decision.slotId === track.slotId)?.action !== 'skip');
+        const selected = draft.tracks.filter(track => decisions.find(decision => decision.scope === 'track' && decision.slotId === track.slotId)?.action !== 'skip');
         if ((!selected.length && !existingAlbum) || selected.some(track => !track.title)) throw new AdminImportError(400, 'ADMIN_IMPORT_DRAFT_INCOMPLETE');
         const reused = new Map<string, any>();
         for (const track of selected) {
-            const decision = doc.decisions.find(decision => decision.scope === 'track' && decision.slotId === track.slotId);
+            const decision = decisions.find(decision => decision.scope === 'track' && decision.slotId === track.slotId);
             if (!decision || !['reuse', 'create-distinct'].includes(decision.action)) throw new AdminImportError(409, 'ADMIN_IMPORT_REVIEW_REQUIRED');
             if (decision.action === 'reuse') {
                 const target = existingAlbum && await getDb()!.collection('audioTracks').findOne({ _id: new ObjectId(decision.candidateId!), albumId: existingAlbum._id.toHexString(), ...readyAudioStorageFilter }, { session, projection: candidateProjection });
                 if (!target || importCandidateRevision(target) !== decision.candidateRevision || !existingAlbum.audioTrackIds.includes(target._id.toHexString()) || [...reused.values()].some(value => value._id.equals(target._id))) throw new AdminImportError(409, 'ADMIN_IMPORT_TRACK_BELONGS_TO_ALBUM'); reused.set(track.slotId, target);
             } else { const asset = doc.media?.assets.find(asset => asset.slotId === track.slotId); if (!asset || asset.state !== 'ready' || !asset.etag) throw new AdminImportError(409, 'ADMIN_IMPORT_UPLOAD_INCOMPLETE'); }
         }
-        const coverAsset = doc.media?.assets.find(asset => asset.slotId === doc.media?.selectedCoverSlotId); if (coverAsset && existingAlbum) throw new AdminImportError(409, 'ADMIN_IMPORT_EXISTING_COVER_PRESERVED'); if (coverAsset && (coverAsset.state !== 'ready' || !coverAsset.etag)) throw new AdminImportError(409, 'ADMIN_IMPORT_UPLOAD_INCOMPLETE');
-        let artistId = new ObjectId().toHexString();
-        if (artistDecision.action === 'reuse') {
-            const existing = await getDb()!.collection('artists').findOne({ _id: new ObjectId(artistDecision.candidateId!), ...readyArtistLifecycleFilter }, { session, projection: candidateProjection });
-            if (!existing || importCandidateRevision(existing) !== artistDecision.candidateRevision) throw new AdminImportError(409, 'ADMIN_IMPORT_DUPLICATE_STALE'); artistId = existing._id.toHexString();
-        }
+        // An append never changes the target Album's cover: the selected cover is shown as not applied and is not copied.
+        const coverAsset = append ? undefined : doc.media?.assets.find(asset => asset.slotId === doc.media?.selectedCoverSlotId);
+        if (coverAsset && (coverAsset.state !== 'ready' || !coverAsset.etag)) throw new AdminImportError(409, 'ADMIN_IMPORT_UPLOAD_INCOMPLETE');
+        const identities = await freezeImportIdentities(draft, decisions, existingAlbum, session);
+        // The reviewed join phrases already satisfy the Credit rules; a refusal here means the draft cannot be published as shown.
+        if (!existingAlbum) { try { importAlbumCredits(draft.album.artists, identities.artists, identities.label); } catch { throw new AdminImportError(400, 'ADMIN_IMPORT_DRAFT_INCOMPLETE'); } }
         doc.media ??= { assets: [] };
         const tracks: ImportPublication['tracks'] = selected.map(track => { const reusedTrack = reused.get(track.slotId); const id = reusedTrack?._id.toHexString() ?? new ObjectId().toHexString(); return { slotId: track.slotId, id, key: reusedTrack ? '' : `audio/${id}/${new ObjectId().toHexString()}`, reused: Boolean(reusedTrack), candidateRevision: reusedTrack ? importCandidateRevision(reusedTrack) : null, state: reusedTrack ? 'ready' : 'pending', versionId: null, etag: null }; });
         // The approved order is the catalog rule: reviewed Disc Number, then Track Number; an existing Album's order is re-derived from its stored rows at commit.
@@ -97,7 +82,7 @@ export async function publishAdminImport(actor: string, id: string, raw: unknown
         const coverId = coverAsset ? new ObjectId().toHexString() : null;
         // Every reviewed value included in the approval is the administrator's own.
         markAdministratorValues(doc.draftOrigins ??= {}, draftV2Paths(draft));
-        doc.media.publication = { schemaVersion: 2, operationId: body.operationId as string, actorId: actor, approvedRevision: doc.revision, snapshot: structuredClone(draft), decisions: structuredClone(doc.decisions) as ImportDecisionV2[], state: 'preparing', issue: null, grantExpiresAt: new Date(Date.now() + 24 * 3600000), artistId, newArtist: artistDecision.action === 'create-distinct', albumId: existingAlbum?._id.toHexString() ?? new ObjectId().toHexString(), newAlbum: !existingAlbum, albumRevision: existingAlbum ? albumDecision.candidateRevision : null, coverId, tracks, cover: coverId ? { slotId: coverAsset!.slotId, key: `images/${coverId}`, state: 'pending', versionId: null, etag: null } : null, bucket: process.env.S3_BUCKET_NAME!.trim(), leaseOwner: null, leaseUntil: null };
+        doc.media.publication = { schemaVersion: 3, operationId: body.operationId as string, actorId: actor, approvedRevision: doc.revision, snapshot: structuredClone(draft), decisions: structuredClone(decisions), state: 'preparing', issue: null, grantExpiresAt: new Date(Date.now() + 24 * 3600000), ...identities, albumId: existingAlbum?._id.toHexString() ?? new ObjectId().toHexString(), newAlbum: !existingAlbum, albumRevision: existingAlbum ? albumDecision.candidateRevision : null, coverId, tracks, cover: coverId ? { slotId: coverAsset!.slotId, key: `images/${coverId}`, state: 'pending', versionId: null, etag: null } : null, bucket: process.env.S3_BUCKET_NAME!.trim(), leaseOwner: null, leaseUntil: null };
     });
     return result;
 }
@@ -210,7 +195,7 @@ export async function runAdminImportPublicationOnce(storage: ImportObjectStorage
         ready(); if (publication.bucket !== process.env.S3_BUCKET_NAME?.trim()) throw new Error('configuration'); currentApproval(publication);
         await withImportAdmin(publication.actorId, async session => {
             const current = await importCollection().findOne({ _id: doc._id, 'media.publication.leaseOwner': worker }, { session }); if (!current?.media?.publication) throw conflict(); currentApproval(current.media.publication);
-            if (!publication.newArtist && !await getDb()!.collection('artists').findOne({ _id: new ObjectId(publication.artistId), ...readyArtistLifecycleFilter }, { session, projection: { _id: 1 } })) throw conflict();
+            await assertImportReusedRecordsReady(current.media.publication, session);
         });
         const copies = [...publication.tracks.filter(track => !track.reused).map(track => ({ slotId: track.slotId, key: track.key, value: track, isCover: false })), ...(publication.cover ? [{ slotId: publication.cover.slotId, key: publication.cover.key, value: publication.cover, isCover: true }] : [])];
         for (const copy of copies) {
@@ -248,71 +233,13 @@ export async function runAdminImportPublicationOnce(storage: ImportObjectStorage
             });
         }
         checkAdminWorker(signal);
-        if (!issue) await commitPublication(id, worker, signal, publication);
+        if (!issue) await commitImportCatalogGraph(id, worker, signal);
     } catch (error) {
         issue = error instanceof AdminImportError && error.code === 'ADMIN_IMPORT_PUBLICATION_UNSUPPORTED' ? 'unsupportedVersion'
             : error instanceof AdminImportError && error.status === 403 ? 'permissionLost' : error instanceof AdminImportError && error.status === 409 ? 'catalogConflict' : 'storageUnknown';
     }
     if (issue) await importCollection().updateOne({ _id: doc._id, 'media.publication.leaseOwner': worker, 'media.publication.state': { $nin: ['complete', 'cancelled'] } }, { $set: { 'media.publication.state': 'needsAttention', 'media.publication.issue': issue, 'media.publication.leaseOwner': null, 'media.publication.leaseUntil': null, updatedAt: new Date() }, $inc: { revision: 1 } });
     return true;
-}
-
-/** The reviewed values one approval format contributes to the catalog graph. */
-type CommitValues = {
-    artistName: string; joinPhrase: string | null; album: { title: string; releaseDate: ImportDate | null; visibility: 'public' | 'hidden' };
-    track(slotId: string): { title: string; trackNumber: number | null; discNumber: number | null };
-};
-/** Format 1, unchanged: no join phrase and no Disc Numbers, so its writes are exactly the pre-Draft v2 writes. */
-const legacyCommitValues = (publication: ImportPublication): CommitValues => {
-    const snapshot = publication.snapshot as ImportDraft;
-    return { artistName: snapshot.album.artistName, joinPhrase: null, album: snapshot.album,
-        track: slotId => { const track = snapshot.tracks.find(item => item.slotId === slotId)!; return { title: track.title, trackNumber: track.trackNumber, discNumber: null }; } };
-};
-/** Format 2: the single primary entry's name and join phrase, and each track's reviewed Disc Number. */
-const draftV2CommitValues = (publication: ImportPublication): CommitValues => {
-    const snapshot = publication.snapshot as ImportDraftV2, [entry] = snapshot.album.artists;
-    return { artistName: entry.name, joinPhrase: entry.joinPhrase, album: snapshot.album,
-        track: slotId => { const track = snapshot.tracks.find(item => item.slotId === slotId)!; return { title: track.title, trackNumber: track.trackNumber, discNumber: track.discNumber }; } };
-};
-/** Commits by approval format; a format this release does not know is refused before a catalog write. */
-async function commitPublication(id: string, worker: string, signal: AbortSignal | undefined, publication: ImportPublication) {
-    const format = importPublicationFormat(publication);
-    if (format === null) throw new AdminImportError(409, 'ADMIN_IMPORT_PUBLICATION_UNSUPPORTED');
-    await commitApprovedGraph(id, worker, signal, format === 1 ? legacyCommitValues : draftV2CommitValues);
-}
-/** Catalog graph and publication receipt commit together; S3 work never holds a Mongo transaction. */
-async function commitApprovedGraph(id: string, worker: string, signal: AbortSignal | undefined, valuesOf: (publication: ImportPublication) => CommitValues) {
-    const session = getDatabaseClient().startSession();
-    try {
-        await session.withTransaction(async () => {
-            const doc = await importCollection().findOne({ ...importPurposeFilter, _id: new ObjectId(id), 'media.publication.leaseOwner': worker }, { session }); const publication = doc?.media?.publication; if (!doc || !publication) throw conflict();
-            checkAdminWorker(signal); await touchImportAdmin(publication.actorId, session); ready(); currentApproval(publication);
-            if (publication.tracks.some(track => track.state !== 'ready') || (publication.cover && publication.cover.state !== 'ready')) throw conflict();
-            const values = valuesOf(publication), primary = credits(publication.artistId, values.joinPhrase); validateAttribution('documented', primary);
-            let existingAlbum: any = null;
-            if (!publication.newAlbum) { existingAlbum = await getDb()!.collection('albums').findOne({ _id: new ObjectId(publication.albumId) }, { session, projection: candidateProjection }); if (!existingAlbum || importCandidateRevision(existingAlbum) !== publication.albumRevision) throw conflict(); await touchReadyAlbumReferences([publication.albumId], session); }
-            if (publication.newArtist) await getDb()!.collection('artists').insertOne({ _id: new ObjectId(publication.artistId), name: values.artistName, bio: '', birthDate: {}, coverArtUrl: '', albumIds: [publication.albumId], createdBy: publication.actorId, lifecycleStatus: 'ready', lifecycleUpdatedAt: new Date(), lifecycleError: null, referenceRevision: 0, visibility: values.album.visibility, ...catalogSearchProjection(values.artistName) }, { session });
-            else {
-                const artist = await getDb()!.collection('artists').findOne({ _id: new ObjectId(publication.artistId), ...readyArtistLifecycleFilter }, { session, projection: candidateProjection });
-                const decision = publication.decisions.find(decision => decision.scope === 'artist' && decision.action === 'reuse'); if (!artist || !decision || importCandidateRevision(artist) !== decision.candidateRevision) throw conflict();
-                await touchReadyArtistReferences([publication.artistId], session);
-                await getDb()!.collection('artists').updateOne({ _id: artist._id }, { $addToSet: { albumIds: publication.albumId } }, { session });
-            }
-            const cover = publication.coverId ? { coverArtId: publication.coverId, coverArtUrl: `/content/images/${publication.coverId}` } : { coverArtUrl: '' };
-            if (!existingAlbum) await getDb()!.collection('albums').insertOne({ _id: new ObjectId(publication.albumId), title: values.album.title, ...cover, audioTrackIds: publication.tracks.map(track => track.id), releaseDate: date(values.album.releaseDate), createdBy: publication.actorId, visibility: values.album.visibility, lifecycleStatus: 'ready', lifecycleUpdatedAt: new Date(), lifecycleError: null, referenceRevision: 0, credits: primary, attributionStatus: 'documented', creditRevision: 1, ...catalogSearchProjection(values.album.title) }, { session });
-            for (const track of publication.tracks) {
-                if (track.reused) { await touchReadyAudioTrackReferences([track.id], session); const current = await getDb()!.collection('audioTracks').findOne({ _id: new ObjectId(track.id), albumId: publication.albumId }, { session, projection: candidateProjection }); if (!current || importCandidateRevision(current) !== track.candidateRevision || !existingAlbum?.audioTrackIds.includes(track.id)) throw conflict(); continue; }
-                const source = doc.media!.assets.find(asset => asset.slotId === track.slotId)!, draft = values.track(track.slotId);
-                if (!source.representation || !source.duration || !source.format) throw conflict();
-                await getDb()!.collection('audioTracks').insertOne({ _id: new ObjectId(track.id), title: draft.title, artistIds: [publication.artistId], genres: [], albumId: publication.albumId, releaseDate: date(values.album.releaseDate), duration: source.duration, format: { type: source.format }, coverArtUrl: '', createdBy: publication.actorId, originalFileName: source.filename, contentType: source.contentType, mediaType: 'audio', s3Key: track.key, visibility: 'public', uploadStatus: 'ready', uploadUpdatedAt: new Date(), uploadError: null, publicationStatus: 'ready', publicationUpdatedAt: new Date(), publicationError: null, playlistReferenceRevision: 0, contentReferenceRevision: 0, credits: primary, attributionStatus: 'documented', creditRevision: 1, ...(draft.trackNumber === null ? {} : { trackNumber: draft.trackNumber, trackNumberSource: 'admin-import' }), ...(draft.discNumber === null ? {} : { discNumber: draft.discNumber, discNumberSource: 'admin-import' }), mediaRepresentation: { ...source.representation, objectKey: track.key, etag: track.etag, versionId: track.versionId }, mediaByteHash: { algorithm: 'sha256', value: source.sha256, byteLength: source.byteLength, objectKey: track.key, etag: track.etag, versionId: track.versionId }, ...catalogSearchProjection(draft.title) }, { session });
-            }
-            if (existingAlbum) { const ids = [...new Set([...existingAlbum.audioTrackIds, ...publication.tracks.map(track => track.id)])] as string[]; const rows = await getDb()!.collection('audioTracks').find({ _id: { $in: ids.map(id => new ObjectId(id)) } }, { session, projection: { trackNumber: 1, discNumber: 1 } }).limit(5101).toArray(); const order = sortTrackIdsByDiscAndTrackNumber(ids, new Map(rows.map(row => [row._id.toHexString(), { discNumber: row.discNumber, trackNumber: row.trackNumber }]))); await getDb()!.collection('albums').updateOne({ _id: existingAlbum._id }, { $set: { audioTrackIds: order } }, { session }); }
-            if (publication.cover && publication.coverId) { const source = doc.media!.assets.find(asset => asset.slotId === publication.cover!.slotId)!; await getDb()!.collection('imageAssets').insertOne({ _id: new ObjectId(publication.coverId), ownerType: 'album', ownerId: publication.albumId, createdBy: publication.actorId, originalFileName: source.filename, contentType: source.contentType, s3Key: publication.cover.key, uploadStatus: 'ready', uploadUpdatedAt: new Date(), uploadError: null, uploadOutcomeUnknown: false, storageIdentity: { etag: publication.cover.etag, versionId: publication.cover.versionId } }, { session }); }
-            checkAdminWorker(signal); currentApproval(publication);
-            publication.state = 'complete'; publication.issue = null; publication.leaseOwner = null; publication.leaseUntil = null; doc.revision++; doc.updatedAt = new Date();
-            await importCollection().replaceOne({ _id: doc._id, revision: doc.revision - 1, 'media.publication.leaseOwner': worker }, doc, { session });
-        }, { readConcern: { level: 'snapshot' }, writeConcern: { w: 'majority' }, maxCommitTimeMS: 10_000 });
-    } finally { await session.endSession(); }
 }
 
 /** Explicit same-intent resume reconciles existing copies before continuing the retained approval. */

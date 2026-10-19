@@ -1896,6 +1896,13 @@
       ],
       "variables": {}
     },
+    "admin.common.append_primary_required": {
+      "description": "Administrator workbench: publishing was refused because the existing Album an import appends to has no primary Artist Credit.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.common.back": {
       "description": "Administrator workbench: common back.",
       "delivery": [
@@ -1949,13 +1956,6 @@
     },
     "admin.common.permission_lost": {
       "description": "Administrator permission is unavailable. Private data has been cleared.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
-    "admin.common.publication_unsupported": {
-      "description": "Administrator workbench: publishing or an Artist decision was refused because this release decides and publishes only one primary Artist entry without a label.",
       "delivery": [
         "runtime"
       ],
@@ -2026,13 +2026,6 @@
     },
     "admin.common.untitled": {
       "description": "Administrator workbench: common untitled.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
-    "admin.common.visibility_mismatch": {
-      "description": "Administrator workbench: publishing an append was refused because the import visibility differs from the existing Album.",
       "delivery": [
         "runtime"
       ],
@@ -2614,8 +2607,22 @@
       ],
       "variables": {}
     },
+    "admin.duplicates.label": {
+      "description": "Administrator workbench: identity decision row for the draft label.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.duplicates.name": {
       "description": "Name match",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.duplicates.not_applied": {
+      "description": "Administrator workbench: an Artist entry or label row of an import that appends to an existing Album, which needs no identity decision.",
       "delivery": [
         "runtime"
       ],
@@ -2770,7 +2777,7 @@
       "variables": {}
     },
     "admin.entries.no_primary": {
-      "description": "Administrator import editor: note that publishing needs at least one primary Artist entry, shown when every entry is featured.",
+      "description": "Administrator import editor: note that publishing a new Album needs at least one primary Artist entry (an append needs none), shown when every entry is featured.",
       "delivery": [
         "runtime"
       ],
@@ -3449,6 +3456,13 @@
       ],
       "variables": {}
     },
+    "admin.publication.append_not_applied": {
+      "description": "Administrator workbench: note before publishing an import that appends to an existing Album, naming the draft values that are not applied.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.publication.cancel": {
       "description": "Cancel unconfirmed publication",
       "delivery": [
@@ -3528,6 +3542,22 @@
     },
     "admin.published.edit_artist": {
       "description": "Edit Artist",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.published.edit_artist_numbered": {
+      "description": "Administrator workbench: link to edit one of several published Artists, numbered in Credit order.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "number": "number"
+      }
+    },
+    "admin.published.edit_label": {
+      "description": "Administrator workbench: link to edit the published label Organization.",
       "delivery": [
         "runtime"
       ],

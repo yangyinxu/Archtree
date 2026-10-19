@@ -11,8 +11,9 @@
  *   Constants: importPurposeFilter, adminImportIndexes, importCandidateProjection
  * Internal
  *   Types: Receipt, Chunk, Analysis
- *   Functions: notFound, conflict, isActive, admit, idValue, importCapabilities, response, suggestionPath,
- *              acceptDraftV2Suggestion, candidate, readyCandidate, boundedTags, reserveDailyAnalysisAttempt
+ *   Functions: notFound, conflict, isActive, admit, idValue, importCapabilities, response, outdatedDecisions,
+ *              suggestionPath, acceptDraftV2Suggestion, named, candidate, readyCandidate, boundedTags,
+ *              reserveDailyAnalysisAttempt
  *   Constants: collection, digest, occupiedAnalysis, touchAdmin, withAdmin, importPolicy, mutation,
  *              slotBoundKinds, importRevisionFreeKinds, readOnlyProjectKinds, mutate, filters,
  *              candidateProjection, candidateCollection
@@ -25,13 +26,14 @@ import { getDatabaseClient, getDb } from '../../infrastructure/database';
 import { readyAudioStorageFilter } from '../../utils/audioStorageKey';
 import { readyArtistLifecycleFilter } from '../../services/catalog/artistReferenceFenceService';
 import { readyAlbumLifecycleFilter } from '../../services/catalog/albumReferenceFenceService';
+import { readyOrganizationLifecycleFilter } from '../../services/catalog/organizationReferenceFenceService';
 import { ADMIN_IMPORT_LIMITS as LIMITS, AdminImportError, cleanText, exact, importEnabled, invalidImport, legacyDefaultDraftV1, objectId, parseDraft, parseManifest, record, uuid, type AdminImportDetail, type AdminImportDetailV2, type AdminImportResponse, type ImportAnalysisState, type ImportDraft, type ImportDuplicateCandidate, type ImportDuplicateDecision, type ImportEmbeddedTags, type ImportIssue, type ImportManifest, type ImportReceipt, type ImportSuggestion, type ImportWorkbenchFilter, type ImportWorkbenchResponse } from './adminImportContract';
 import { type AnalysisInput, type ImportAnalysisProvider, ImportProviderError, OpenAiImportAnalysisProvider } from './adminImportProvider';
 import type { CatalogReviewSource, CatalogReviewApplied } from '../catalog/adminCatalogReviewContract';
 import type { ImportMedia } from './adminImportMediaTypes';
 import { importPrivateStorageReady } from './adminImportMediaTypes';
-import { importDraftV2FromV1, importDraftV2View, importDraftVersion, importDraftWritable, importSuggestionsV2View, LEGACY_IMPORT_RECEIPT_KINDS, legacyAdministratorOrigins, legacyAnalysisView, legacyAssetsView, legacyDecisionsView, legacyDraftView, legacyManifestView, legacyPublicationView, legacyReceiptsView, legacySelectedCover, legacySuggestionsView, importProjectV2View, writableDraftFilter } from './adminImportDraftCompat';
-import { DRAFT_V2, defaultDraftV2, draftBytes, draftV2Suggestion, hasOwn, isDraftV2, retainBoundDecisions, sameDraftValue, type ImportDecisionV2, type ImportDraftOrigins, type ImportDraftV2, type ImportSuggestionV2 } from './adminImportDraft';
+import { importDraftV2FromV1, importDraftV2View, importDraftVersion, importDraftWritable, importSuggestionsV2View, LEGACY_IMPORT_RECEIPT_KINDS, legacyAdministratorOrigins, importDecisionsV2View, importPublishedV2View, legacyAnalysisView, legacyAssetsView, legacyDecisionsView, legacyDraftView, legacyManifestView, legacyPublicationView, legacyReceiptsView, legacySelectedCover, legacySuggestionsView, importProjectV2View, writableDraftFilter } from './adminImportDraftCompat';
+import { DRAFT_V2, DRAFT_V2_LIMITS, defaultDraftV2, draftBytes, draftV2Suggestion, hasOwn, isDraftV2, retainBoundDecisions, sameDraftValue, type ImportDecisionV2, type ImportDraftOrigins, type ImportDraftV2, type ImportSuggestionV2 } from './adminImportDraft';
 import { applyAdministratorChanges, boundDraftChanges, boundedJson, convertLegacyImportProject, draftValueAt, draftWithinSizeLimit, markAdministratorValues, parseDraftChanges, parseDraftValue, setDraftValue, storedDraftV2, type ImportDraftPath } from './adminImportValueState';
 
 export type ProjectReceipt = Omit<ImportReceipt, 'kind'> & { kind: ImportReceipt['kind'] | 'apply' } & { actorId: string; hash: string; at: Date; selection?: { generation: number; acceptedIds: string[]; rejectedIds: string[] } };
@@ -131,17 +133,18 @@ function importCapabilities(doc: AdminImportDocument, writable: boolean, provide
     return { analysis: writable && importEnabled() && providerAvailable, upload: writable && storage, publish: writable && storage && (doc.media?.publicationHistory?.length ?? 0) + (doc.media?.publication ? 1 : 0) < LIMITS.publications };
 }
 /**
- * The import editor's Draft v2 projection: the v1 projection with an allowlisted Draft v2 draft and suggestions, and only the
- * decisions still bound to an entry (with their v1 fields). A format this release does not know shows the best-effort
- * allowlist and offers no work.
+ * The import editor's Draft v2 projection: the v1 projection with an allowlisted Draft v2 draft and suggestions, only the
+ * decisions still bound to their entry or label (each with its entryKey), and every published identity. A format this release
+ * does not know shows the best-effort allowlist, whose decisions name no entry, and offers no work.
  */
 export function adminImportDetail(doc: AdminImportDocument, actorId: string, providerAvailable = Boolean(process.env.OPENAI_API_KEY?.trim())): AdminImportDetailV2 {
-    const { draft: _draft, suggestions: _suggestions, ...item } = adminImportDto(doc, actorId, providerAvailable), id = doc._id.toHexString(), slots = new Set(item.manifest.files.map(file => file.slotId));
+    const { draft: _draft, suggestions: _suggestions, decisions: legacyDecisions, published: _published, ...item } = adminImportDto(doc, actorId, providerAvailable), id = doc._id.toHexString(), slots = new Set(item.manifest.files.map(file => file.slotId));
     const view = importProjectV2View(doc), draft = importDraftV2View(doc.draft, item.manifest, id);
     const decisions = view?.decisions.filter((decision): decision is ImportDecisionV2 => Boolean(decision) && typeof decision === 'object');
     return {
         ...item, draft, suggestions: importSuggestionsV2View(doc.suggestions, item.analysis.generation, slots, id),
-        decisions: decisions ? legacyDecisionsView(retainBoundDecisions(decisions, draft), slots) : item.decisions,
+        decisions: decisions ? importDecisionsV2View(retainBoundDecisions(decisions, draft), slots) : legacyDecisions.map(decision => ({ ...decision, entryKey: null })),
+        published: importPublishedV2View(doc.media?.publication),
         capabilities: importCapabilities(doc, importDraftWritable(doc), providerAvailable)
     };
 }
@@ -149,8 +152,11 @@ const response = (doc: AdminImportDocument, actor: string, receipt: ProjectRecei
     if (!isImportProject(doc) || receipt?.kind === 'apply') throw notFound();
     return { item: adminImportDetail(doc, actor), receipt: receipt ? { operationId: receipt.operationId, kind: receipt.kind, revision: receipt.revision } : null };
 };
+/** A decision item without entryKey comes from an editor that predates per-entry and label decisions. */
+const outdatedDecisions = (body: Record<string, unknown>) => Array.isArray(body.decisions)
+    && body.decisions.some(item => item !== null && typeof item === 'object' && !Array.isArray(item) && !hasOwn(item, 'entryKey'));
 // A whole-draft import save comes from an editor that predates Draft v2 field saves.
-const importPolicy: AdminProjectPolicy<AdminImportResponse> = { purpose: 'import', response, reloadRequired: (kind, body) => kind === 'edit' && hasOwn(body, 'draft'), convert: convertLegacyImportProject };
+const importPolicy: AdminProjectPolicy<AdminImportResponse> = { purpose: 'import', response, reloadRequired: (kind, body) => (kind === 'edit' && hasOwn(body, 'draft')) || (kind === 'decisions' && outdatedDecisions(body)), convert: convertLegacyImportProject };
 export function parseAdminProjectMutation(raw: unknown, extra: string[]) { const body = record(raw); exact(body, ['operationId', 'expectedRevision', ...extra]); if (!uuid(body.operationId) || !Number.isSafeInteger(body.expectedRevision) || (body.expectedRevision as number) < 1) return invalidImport(); return body as typeof body & { operationId: string; expectedRevision: number }; }
 
 const mutation = parseAdminProjectMutation;
@@ -258,7 +264,7 @@ export async function listAdminImports(actor: string, query: Record<string, unkn
         for (const [name, selector] of Object.entries(filters)) counts[name as ImportWorkbenchFilter] = await collection().countDocuments({ $and: [base, selector] }, { session, maxTimeMS: 3_000 });
         const docs = await collection().find({ $and: [base, filters[filter as ImportWorkbenchFilter], page] }, { session }).sort({ createdAt: -1, _id: -1 }).limit(limit + 1).maxTimeMS(3_000).toArray();
         const hasMore = docs.length > limit; docs.splice(limit); const last = docs[docs.length - 1];
-        return { counts, items: docs.map(doc => { const item = adminImportDto(doc, actor); return { id: item.id, revision: item.revision, createdAt: item.createdAt, updatedAt: item.updatedAt, startedByMe: item.startedByMe, analysis: item.analysis, upload: item.upload, publication: item.publication, title: item.draft.album.title, artistName: item.draft.album.artistName, rootLabel: item.manifest.rootLabel, visibility: item.draft.album.visibility, pendingSuggestions: (importDraftWritable(doc) ? doc.suggestions : importSuggestionsV2View(doc.suggestions, item.analysis.generation, new Set(item.manifest.files.map(file => file.slotId)), item.id)).filter(s => s.decision === 'pending').length }; }), nextCursor: hasMore && last ? Buffer.from(JSON.stringify({ id: last._id.toHexString(), at: last.createdAt.toISOString(), scope: digest({ filter, mine: query.startedByMe === 'true', q }) })).toString('base64url') : null };
+        return { counts, items: docs.map(doc => { const item = adminImportDto(doc, actor); return { id: item.id, revision: item.revision, createdAt: item.createdAt, updatedAt: item.updatedAt, startedByMe: item.startedByMe, analysis: item.analysis, upload: item.upload, publication: item.publication, title: item.draft.album.title, artistName: item.draft.album.artistName, rootLabel: item.manifest.rootLabel, visibility: item.draft.album.visibility, pendingSuggestions: importSuggestionsV2View(doc.suggestions, item.analysis.generation, new Set(item.manifest.files.map(file => file.slotId)), item.id).filter(s => s.decision === 'pending').length }; }), nextCursor: hasMore && last ? Buffer.from(JSON.stringify({ id: last._id.toHexString(), at: last.createdAt.toISOString(), scope: digest({ filter, mine: query.startedByMe === 'true', q }) })).toString('base64url') : null };
     });
 }
 
@@ -311,6 +317,11 @@ export function adoptAdminProjectSuggestions<T>(actor: string, id: string, raw: 
         if (doc.analysis.generation !== body.generation) throw conflict('ADMIN_IMPORT_SUGGESTION_STALE');
         const targets = [...selected, ...rejected].map(id => doc.suggestions.find(s => s.id === id && s.generation === body.generation && s.decision === 'pending'));
         if (targets.some(s => !s)) throw conflict('ADMIN_IMPORT_SUGGESTION_STALE');
+        // An import accepts only a suggestion its editor shows; a hidden one (such as a stand-in Artist) may still be rejected.
+        if (isImportProject(doc)) {
+            const shown = new Set(importSuggestionsV2View(doc.suggestions, doc.analysis.generation, new Set(doc.manifest.files.map(file => file.slotId)), doc._id.toHexString()).map(s => s.id));
+            if (selected.some(id => !shown.has(id))) throw conflict('ADMIN_IMPORT_SUGGESTION_STALE');
+        }
         // Every admitted project is Draft v2 here: policy.convert stored a format-1 project before this change.
         const draft = storedDraftV2(doc), before = structuredClone(draft);
         for (const suggestion of targets as (ImportSuggestion | ImportSuggestionV2)[]) {
@@ -333,62 +344,76 @@ export const importCandidateRevision = (doc: Record<string, any>): string => {
     const stable = (value: any): any => value instanceof ObjectId ? value.toHexString() : value instanceof Date ? value.toISOString() : Array.isArray(value) ? value.map(stable) : value && typeof value === 'object' ? Object.fromEntries(Object.keys(value).sort().filter(key => value[key] !== undefined).map(key => [key, stable(value[key])])) : value;
     return digest(stable({ ...doc, lifecycleStatus: doc.lifecycleStatus ?? 'ready', visibility: doc.visibility ?? 'public' }));
 };
+/** Artists and Organizations are matched by name; Albums and Tracks by title. */
+const named = (kind: ImportDuplicateCandidate['kind']) => kind === 'artist' || kind === 'organization';
 function candidate(kind: ImportDuplicateCandidate['kind'], doc: Record<string, any>): ImportDuplicateCandidate {
     if (doc.visibility !== undefined && doc.visibility !== 'public' && doc.visibility !== 'hidden') return invalidImport();
-    return { kind, id: doc._id.toHexString(), label: cleanText(kind === 'artist' ? doc.name : doc.title, 300), revision: importCandidateRevision(doc), albumId: typeof doc.albumId === 'string' && objectId(doc.albumId) ? doc.albumId : null, visibility: doc.visibility === 'hidden' ? 'hidden' : 'public', match: 'name', matchedSlotIds: [], automaticReuse: false };
+    return { kind, id: doc._id.toHexString(), label: cleanText(named(kind) ? doc.name : doc.title, 300), revision: importCandidateRevision(doc), albumId: typeof doc.albumId === 'string' && objectId(doc.albumId) ? doc.albumId : null, visibility: doc.visibility === 'hidden' ? 'hidden' : 'public', match: 'name', matchedSlotIds: [], automaticReuse: false };
 }
-const candidateCollection = { artist: 'artists', album: 'albums', track: 'audioTracks' };
-const readyCandidate = (kind: ImportDuplicateCandidate['kind']) => kind === 'track' ? { $and: [readyAudioStorageFilter, { $or: [{ mediaType: 'audio' }, { mediaType: { $exists: false } }] }] } : kind === 'artist' ? readyArtistLifecycleFilter : readyAlbumLifecycleFilter;
+const candidateCollection = { artist: 'artists', organization: 'organizations', album: 'albums', track: 'audioTracks' };
+const readyCandidate = (kind: ImportDuplicateCandidate['kind']) => kind === 'track' ? { $and: [readyAudioStorageFilter, { $or: [{ mediaType: 'audio' }, { mediaType: { $exists: false } }] }] }
+    : kind === 'artist' ? readyArtistLifecycleFilter : kind === 'organization' ? readyOrganizationLifecycleFilter : readyAlbumLifecycleFilter;
+/**
+ * Exact case-insensitive name candidates: one query of at most 20 rows per distinct Artist entry name (so one common name cannot
+ * hide another entry's candidates), one for the label among ready Organizations, one for the Album title and one for track
+ * titles and verified bytes: at most 20 * 20 + 3 * 20 = 460 items. Names are never unique identity keys.
+ */
 export async function adminImportDuplicateCandidates(actor: string, id: string) {
     return withAdmin(actor, async session => {
         const doc = await collection().findOne({ _id: idValue(id), ...importPurposeFilter }, { session }); if (!doc) throw notFound(); const items: ImportDuplicateCandidate[] = [];
-        // Candidates read the same projected v1 draft the workbench shows, whatever format stored it.
-        const manifest = legacyManifestView(doc.manifest), draft = legacyDraftView(doc.draft, manifest);
-        const labels = { artist: [draft.album.artistName], album: [draft.album.title], track: draft.tracks.map(track => track.title) };
+        // Candidates read the same Draft v2 view the editor shows, whatever format stored it.
+        const manifest = legacyManifestView(doc.manifest), draft = importDraftV2View(doc.draft, manifest, doc._id.toHexString());
+        const groups: { kind: ImportDuplicateCandidate['kind']; values: string[] }[] = [
+            ...[...new Set(draft.album.artists.map(entry => entry.name))].map(name => ({ kind: 'artist' as const, values: [name] })),
+            { kind: 'organization', values: draft.album.label ? [draft.album.label.name] : [] }, { kind: 'album', values: [draft.album.title] }, { kind: 'track', values: draft.tracks.map(track => track.title) }];
         const hashes = new Set((doc.media?.assets ?? []).filter(asset => asset.state === 'ready' && manifest.files.some(file => file.slotId === asset.slotId)).map(asset => asset.sha256));
-        for (const kind of ['artist', 'album', 'track'] as const) {
-            const values = [...new Set(labels[kind].filter(Boolean))].slice(0, 100); if (!values.length && (kind !== 'track' || !hashes.size)) continue;
-            // Exact case-insensitive candidates only, bounded per kind; names are never unique identity keys.
+        for (const { kind, values: labels } of groups) {
+            const values = [...new Set(labels.filter(Boolean))].slice(0, 100); if (!values.length && (kind !== 'track' || !hashes.size)) continue;
             const patterns = values.map(value => new RegExp(`^${value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i'));
-            const matches: Record<string, unknown>[] = [{ [kind === 'artist' ? 'name' : 'title']: { $in: patterns } }];
+            const matches: Record<string, unknown>[] = [{ [named(kind) ? 'name' : 'title']: { $in: patterns } }];
             if (kind === 'track' && hashes.size) matches.push({ 'mediaByteHash.value': { $in: [...hashes] } });
             const rows = await getDb()!.collection(candidateCollection[kind]).find({ $and: [readyCandidate(kind), { $or: matches }] }, { session, projection: candidateProjection }).sort({ _id: 1 }).limit(20).maxTimeMS(3_000).toArray();
             for (const row of rows) { try {
                 const hash = row.mediaByteHash, representation = row.mediaRepresentation;
                 const verified = kind === 'track' && typeof hash?.objectKey === 'string' && hash.objectKey.length > 0 && Number.isSafeInteger(hash.byteLength) && hash.byteLength > 0 && typeof hash.etag === 'string' && /^"[^"\r\n]{1,200}"$/.test(hash.etag) && (hash.versionId === null || (typeof hash.versionId === 'string' && hash.versionId.length > 0 && hash.versionId.length <= 1024)) && hash?.algorithm === 'sha256' && /^[a-f0-9]{64}$/.test(hash?.value) && hashes.has(hash.value) && hash.objectKey === row.s3Key && hash.objectKey === representation?.objectKey && hash.byteLength === representation?.byteLength && hash.etag === representation?.etag && hash.versionId === representation?.versionId;
-                if (!verified && !values.some(value => value.toLocaleLowerCase() === String(kind === 'artist' ? row.name : row.title).toLocaleLowerCase())) continue;
+                if (!verified && !values.some(value => value.toLocaleLowerCase() === String(named(kind) ? row.name : row.title).toLocaleLowerCase())) continue;
                 items.push({ ...candidate(kind, row), match: verified ? 'sha256' : 'name', matchedSlotIds: kind === 'track' ? draft.tracks.filter(track => verified ? doc.media?.assets.some(asset => asset.slotId === track.slotId && asset.state === 'ready' && asset.sha256 === hash.value && asset.byteLength === hash.byteLength) : track.title.toLocaleLowerCase() === String(row.title).toLocaleLowerCase()).map(track => track.slotId) : [] });
             } catch { /* Malformed legacy metadata cannot become a selectable identity. */ } }
         }
         return { items };
     });
 }
+/**
+ * Saves the review's identity decisions `{scope, slotId, entryKey, action, candidateId, candidateRevision}` as one set: one per
+ * Artist entry (by entryKey), the label, the Album and each track. An Artist decision binds its entry's key and name and a label
+ * decision the label's name; an explicit Artist or label decision makes that value the administrator's own. Two entries cannot
+ * reuse one Artist. A body item without entryKey comes from an outdated editor and asks for a reload (importPolicy).
+ */
 export function decideAdminImportDuplicates(actor: string, id: string, raw: unknown) {
     // Each item is bounded before the intent is fingerprinted: a decision is one flat record of short strings or nulls.
-    const body = mutation(raw, ['decisions']); if (!Array.isArray(body.decisions) || body.decisions.length > 102 || body.decisions.some(item => !boundedJson(item, 1, 1_000))) return invalidImport();
+    const body = mutation(raw, ['decisions']); if (!Array.isArray(body.decisions) || body.decisions.length > DRAFT_V2_LIMITS.decisions || body.decisions.some(item => !boundedJson(item, 1, 1_000))) return invalidImport();
+    const reusedArtists = (body.decisions as Record<string, unknown>[]).filter(item => item?.scope === 'artist' && item.action === 'reuse').map(item => item.candidateId);
+    if (new Set(reusedArtists).size !== reusedArtists.length) return invalidImport();
     return mutate(actor, id, body, 'decisions', async (doc, session) => {
         const seen = new Set<string>(); const decisions: ImportDecisionV2[] = [], draft = storedDraftV2(doc);
         for (const rawDecision of body.decisions as unknown[]) {
-            const decision = record(rawDecision); exact(decision, ['scope', 'slotId', 'action', 'candidateId', 'candidateRevision']);
-            if (!['artist', 'album', 'track'].includes(decision.scope as string) || !['reuse', 'skip', 'create-distinct'].includes(decision.action as string)) return invalidImport();
-            const scope = decision.scope as ImportDuplicateDecision['scope']; if (scope === 'track' ? typeof decision.slotId !== 'string' || !doc.manifest.files.some(file => file.slotId === decision.slotId) : decision.slotId !== null) return invalidImport();
-            const key = `${scope}:${decision.slotId}`; if (seen.has(key)) return invalidImport(); seen.add(key);
+            const decision = record(rawDecision); exact(decision, ['scope', 'slotId', 'entryKey', 'action', 'candidateId', 'candidateRevision']);
+            if (!['artist', 'label', 'album', 'track'].includes(decision.scope as string) || !['reuse', 'skip', 'create-distinct'].includes(decision.action as string)) return invalidImport();
+            const scope = decision.scope as ImportDecisionV2['scope']; if (scope === 'track' ? typeof decision.slotId !== 'string' || !doc.manifest.files.some(file => file.slotId === decision.slotId) : decision.slotId !== null) return invalidImport();
+            // An Artist decision names a current entry; every other scope names none, and a label decision needs a label.
+            const entry = scope === 'artist' && uuid(decision.entryKey) ? draft.album.artists.find(item => item.key === (decision.entryKey as string).toLowerCase()) : undefined;
+            if (scope === 'artist' ? !entry : decision.entryKey !== null || (scope === 'label' && !draft.album.label)) return invalidImport();
+            const key = `${scope}:${decision.slotId}:${entry?.key ?? null}`; if (seen.has(key)) return invalidImport(); seen.add(key);
             if (decision.action === 'reuse') {
                 if (!objectId(decision.candidateId) || typeof decision.candidateRevision !== 'string' || !/^[a-f0-9]{64}$/.test(decision.candidateRevision)) return invalidImport();
-                const target = await getDb()!.collection(candidateCollection[scope]).findOne({ _id: new ObjectId(decision.candidateId), ...readyCandidate(scope) }, { session, projection: candidateProjection });
-                if (!target || candidate(scope, target).revision !== decision.candidateRevision) throw conflict('ADMIN_IMPORT_DUPLICATE_STALE');
+                const kind = scope === 'label' ? 'organization' : scope;
+                const target = await getDb()!.collection(candidateCollection[kind]).findOne({ _id: new ObjectId(decision.candidateId), ...readyCandidate(kind) }, { session, projection: candidateProjection });
+                if (!target || candidate(kind, target).revision !== decision.candidateRevision) throw conflict('ADMIN_IMPORT_DUPLICATE_STALE');
                 if (scope === 'track' && target.albumId) { const album = (body.decisions as Record<string, unknown>[]).find(d => d.scope === 'album' && d.action === 'reuse'); if (!album || album.candidateId !== target.albumId) throw conflict('ADMIN_IMPORT_TRACK_BELONGS_TO_ALBUM'); }
             } else if (decision.candidateId !== null || decision.candidateRevision !== null) return invalidImport();
-            // An Artist decision binds the draft's single Artist entry by key and name; S7a decides several entries and a label.
-            let entry: ImportDraftV2['album']['artists'][number] | null = null;
-            if (scope === 'artist') {
-                if (!draft.album.artists.length) throw new AdminImportError(400, 'ADMIN_IMPORT_DRAFT_INCOMPLETE');
-                if (draft.album.artists.length > 1 || draft.album.label) throw conflict('ADMIN_IMPORT_PUBLICATION_UNSUPPORTED');
-                entry = draft.album.artists[0];
-                if (decision.action !== 'skip') markAdministratorValues(doc.draftOrigins ??= {}, ['album.artists']);
-            }
-            const { slotId, action, candidateId, candidateRevision } = decision as unknown as ImportDuplicateDecision;
-            decisions.push({ scope, slotId, action, candidateId, candidateRevision, entryKey: entry?.key ?? null, boundName: entry?.name ?? null });
+            if ((scope === 'artist' || scope === 'label') && decision.action !== 'skip') markAdministratorValues(doc.draftOrigins ??= {}, [scope === 'artist' ? 'album.artists' : 'album.label']);
+            const { slotId, action, candidateId, candidateRevision } = decision as unknown as ImportDecisionV2;
+            decisions.push({ scope, slotId, action, candidateId, candidateRevision, entryKey: entry?.key ?? null, boundName: entry?.name ?? (scope === 'label' ? draft.album.label!.name : null) });
         }
         doc.decisions = decisions;
     });

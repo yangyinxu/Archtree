@@ -33,7 +33,7 @@ afterEach(cleanup);
 const help = 'Primary Artists come before featured Artists. Use Move up and Move down to reorder within a group, and change a role to move an entry to the other group.';
 const phraseHelp = 'Shown between this name and the next one. Leave empty for a comma.', labelHelp = 'An optional record label or other Organization. Leave empty for no label.';
 const messages = { required: 'Enter a name, or remove this Artist entry.', duplicate: 'Another Artist entry already has this name (ignoring case).', invalid: 'Remove control or invisible formatting characters from this name.', tooLong: 'Shorten this name to 200 characters.', phrase: 'Use visible text without control or invisible characters, or leave empty for a comma.' };
-const noPrimary = 'Publishing needs at least one primary Artist entry.';
+const noPrimary = 'Publishing a new Album needs at least one primary Artist entry.';
 
 /** A saved draft holding these entries and label. */
 function savedDraft(artists: ImportArtistEntry[], label: ImportDraftV2['album']['label'] = null): ImportDraftV2 {

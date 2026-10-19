@@ -103,16 +103,22 @@ it is marked, control or invisible formatting characters left after trimming,
 more than 200 characters after normalization, an invalid join phrase) blocks
 Save with its message; an empty name is marked only after its field loses
 focus or a Save attempt, and unedited saved values are not checked. When no
-entry is primary, a note says publishing needs at least one primary entry;
-Save stays available. The entries save as one `album.artists` change. The
-label is one Organization name saved as `album.label`, and an empty label
-saves none. Each track edits its Disc Number beside its Track Number. Review
-shows an Artist suggestion as its byline followed by each entry with its role.
-A draft with several entries, a label or no primary entry saves normally, but
-Review offers it no Artist decision, and publishing several entries or a label
-is refused until a later release (see `POST /imports/:id/publish`). Saving
-duplicate decisions while Review offers no Artist decision drops the saved
-Artist decision; decide the Artist again after returning to one primary entry.
+entry is primary, a note says publishing a new Album needs at least one
+primary entry (an append needs none); Save stays available. The entries save as one
+`album.artists` change. The label is one Organization name saved as
+`album.label`, and an empty label saves none. Each track edits its Disc Number
+beside its Track Number. Review shows an Artist suggestion as its byline
+followed by each entry with its role. Review's existing-content check has one
+Artist row per entry, in draft order and named with its role, and a Label row
+when the draft has a label; each row lists only the candidates found for its
+own name. An Artist that another entry already reuses cannot be chosen again,
+and a save in which two entries reuse the same Artist is refused. While the
+Album row reuses an existing Album, each Artist and Label row says it is not
+applied and needs no decision, and Publish notes that the draft's Album title,
+release date, visibility, cover, Artist entries and label are not applied: the
+new tracks take that Album's primary Artists, track order and visibility. A
+completed import links to its Album, each of its Artists and its label
+Organization.
 
 The workbench is Web-only. Finitude iOS and Android expose listener features even
 for administrator accounts; they do not load administrator capabilities, private
@@ -235,9 +241,18 @@ Import routes (relative to `/api/admin/v1`):
   entry is `{key, name, role, joinPhrase, musicBrainzId}` with a UUID `key`
   unique in the draft and a `role` of `primary` or `featured`; the label is
   `null` or `{name, musicBrainzId}`. Suggestions are Draft v2, where an
-  `artists` suggestion proposes the whole entry list; decisions keep their v1
-  fields and include an Artist decision only while the entry it was made for
-  keeps its key and name. A project still stored in format 1 reads as its
+  `artists` suggestion proposes the whole entry list. A decision is
+  `{scope, slotId, entryKey, action, candidateId, candidateRevision}`, where
+  `scope` is `artist`, `label`, `album` or `track`, and `slotId` names the
+  track of a `track` decision and `entryKey` the entry of an `artist`
+  decision, each `null` otherwise. An Artist decision is returned only while
+  its entry keeps its key and name, and a label decision only while the label
+  keeps its name. `published` stays `null` until the publication is complete,
+  then is `{albumId, artistIds, organizationId, trackIds}`: the Artist of
+  every entry in draft order and the label's Organization or `null`, or for
+  an append the target Album's primary Artists and `null`. An approval frozen
+  before this release reads as `artistIds: [artistId]` and
+  `organizationId: null`. A project still stored in format 1 reads as its
   Draft v2 view. Value origins (`draftOrigins`) are stored, not returned; each
   is keyed by its value path with `:` in place of `.` (`album:title`,
   `tracks:<slotId>:discNumber`), because MongoDB before 5.0 refuses dotted
@@ -297,17 +312,38 @@ Import routes (relative to `/api/admin/v1`):
   An accepted suggestion becomes the administrator's own; accepting one whose
   baseline is no longer the current value returns
   `409 ADMIN_IMPORT_FIELD_CONFLICT`, so an Artist suggestion never replaces
-  entries that changed. An Artist decision binds the draft's single Artist
-  entry and its name, and a reuse or create-distinct decision makes the
-  entries the administrator's own: without an entry it is
-  `400 ADMIN_IMPORT_DRAFT_INCOMPLETE`, and with several entries or a label
-  `409 ADMIN_IMPORT_PUBLICATION_UNSUPPORTED`. Each decision must be one flat
-  record of at most 1 KB before the intent is fingerprinted. Publishing needs a
-  reuse or create-distinct Artist decision still bound to that entry under that
-  name, so renaming or removing the entry makes publishing return
-  `409 ADMIN_IMPORT_REVIEW_REQUIRED` until the Artist is decided again.
+  entries that changed. Accepting an `artists` suggestion keeps the decisions
+  of the entries whose key and name it leaves unchanged. Imports never suggest
+  a stand-in Artist: a Luna Artist name such as Various Artists or `[unknown]`
+  is dropped, and a stored one is hidden, never holds the approval and is not
+  counted as pending in the workbench list. Accepting a suggestion the editor
+  does not show, such as that hidden one, returns
+  `409 ADMIN_IMPORT_SUGGESTION_STALE`; rejecting it is allowed.
+  `/decisions` replaces the whole list with at most 122 decisions, at most one
+  per Artist entry, the label, the Album and each track, and each decision
+  must be one flat record of at most 1 KB before the intent is fingerprinted.
+  An `artist` decision binds the entry its `entryKey` names and that entry's
+  name; a `label` decision binds the label's name. An `artist` decision for an
+  entry the draft does not have, a `label` decision without a label, or two
+  entries reusing one Artist is `400 ADMIN_IMPORT_INVALID_INPUT` and writes
+  nothing. A reuse names a ready record at its reviewed revision, for the label
+  an Organization of any type, or the save is
+  `409 ADMIN_IMPORT_DUPLICATE_STALE`. A body whose decisions lack `entryKey`
+  comes from an editor that predates several entries and returns
+  `409 ADMIN_IMPORT_RELOAD_REQUIRED` right after receipt lookup, so a lost
+  response of an older body still replays. A reuse or create-distinct decision
+  makes the Artist entries, or the label, the administrator's own; a skip does
+  not. Unless the Album decision appends, publishing needs a reuse or
+  create-distinct decision still bound to every entry and to the label, so
+  renaming an entry or the label makes publishing return
+  `409 ADMIN_IMPORT_REVIEW_REQUIRED` until it is decided again.
 - `GET /imports/:id/duplicate-candidates`: bounded candidates; a name match is
-  never verified identity or automatic reuse.
+  never verified identity or automatic reuse. Candidates are read from the
+  Draft v2 view, and each distinct Artist entry name and the label's name are
+  matched on their own, exactly and case-insensitively: at most 20 ready
+  Artists per name (kind `artist`) and 20 ready Organizations of any type for
+  the label (kind `organization`, `albumId` `null`), beside at most 20 Album
+  and 20 Track candidates, so at most 460 items.
 - `POST /imports/:id/assets/:slotId`: one multipart `file`; `Idempotency-Key`
   and numeric `If-Match` form the upload intent, which reserves its private
   object identity before S3 work. Admission binds slot state and that intent,
@@ -342,27 +378,43 @@ Import routes (relative to `/api/admin/v1`):
 - `GET /imports/:id/assets/:slotId/preview`: protected staged artwork preview.
 - `POST /imports/:id/publish`: explicit reviewed approval, then asynchronous
   fixed-identity publication; `/resume-publication` reconciles that approval's
-  original operation ID rather than creating another Album. Appending to an
-  existing Album whose visibility differs from the draft's returns
-  `409 ADMIN_IMPORT_APPEND_VISIBILITY_MISMATCH` and writes no approval, receipt
-  or revision; a stale Album reports `ADMIN_IMPORT_DUPLICATE_STALE` first.
-  The Web then asks the administrator to match that Album's visibility, save
-  and approve again. Rolled back below this release, the same mismatch reports
-  `409 ADMIN_IMPORT_DUPLICATE_STALE` instead. This release publishes one
-  primary Artist entry and no label: a draft without a title or Artist entry, or
-  whose only entry is featured, is `400 ADMIN_IMPORT_DRAFT_INCOMPLETE`, and
-  several entries or a label are `409 ADMIN_IMPORT_PUBLICATION_UNSUPPORTED`,
-  both before an approval is frozen. A stored value the editor cannot show
-  (it reads as empty there) is also `400 ADMIN_IMPORT_DRAFT_INCOMPLETE`, so it
-  is never frozen, and only pending suggestions the editor shows hold the
-  approval with `409 ADMIN_IMPORT_REVIEW_REQUIRED`. The approval freezes the Draft v2
-  snapshot with `schemaVersion` 2 and makes every draft value the
-  administrator's own; the entry's join phrase is kept on its Credits. The Web
-  shows `ADMIN_IMPORT_PUBLICATION_UNSUPPORTED`, from this route or
-  `/decisions`, as its own message instead of a conflict: this release
-  publishes one primary Artist and no label, the saved draft is kept and
-  reread, no retry is offered, and keeping one primary entry, clearing the
-  label and deciding that Artist in Review makes it publishable.
+  original operation ID rather than creating another Album. A refusal writes
+  no approval, receipt or revision. Every approval needs an Album title, and a
+  new Album also at least one primary Artist entry, or it is
+  `400 ADMIN_IMPORT_DRAFT_INCOMPLETE` before anything is frozen. A new Album's
+  entries and label need the decisions described under `/decisions`
+  (`409 ADMIN_IMPORT_REVIEW_REQUIRED`), and a reused Artist or Organization
+  must still be ready at its reviewed revision
+  (`409 ADMIN_IMPORT_DUPLICATE_STALE`). An append needs neither a primary entry
+  nor those decisions: its target Album must still hold a primary Artist
+  Credit, or the approval is `409 ADMIN_IMPORT_APPEND_PRIMARY_REQUIRED`, which
+  the Web shows as its own message without a retry, and those Artists must be
+  ready (`409 ADMIN_IMPORT_DUPLICATE_STALE`). The draft's Album values,
+  visibility, Artist entries, label and cover are not applied to an append,
+  and a selected cover is not copied. The appended tracks follow that Album's
+  visibility: they are stored public and the Album hides them while it is
+  hidden, so a draft visibility that differs is no longer refused. Rolled back
+  below this release, every append again needs the draft visibility to equal
+  the target Album's (`409 ADMIN_IMPORT_APPEND_VISIBILITY_MISMATCH`), and a
+  draft with several Artist entries or a label is again refused with
+  `409 ADMIN_IMPORT_PUBLICATION_UNSUPPORTED`.
+  A stored value the editor cannot show (it reads as empty there) is also
+  `400 ADMIN_IMPORT_DRAFT_INCOMPLETE`, so it is never frozen, and only pending
+  suggestions the editor shows hold the approval with
+  `409 ADMIN_IMPORT_REVIEW_REQUIRED`. The approval freezes the Draft v2
+  snapshot with `schemaVersion` 3, its decisions and, for each Artist entry
+  and the label, the reviewed record to reuse or an ID reserved for a new one,
+  so a retry or resume never mints another identity. `artists` lists
+  `{entryKey, artistId, newArtist, candidateRevision}` in Credit order, for an
+  append the target Album's primary Artists with `entryKey` `null`; `label` is
+  `{organizationId, newOrganization, candidateRevision}` or `null`; and the
+  top-level `artistId` and `newArtist` mirror the first Artist. The approval
+  makes every draft value the administrator's own; each entry's join phrase
+  is kept on its Album Credit, and on a MediaTrack's Credit only while the
+  next Album Credit is also a primary. No route returns
+  `ADMIN_IMPORT_PUBLICATION_UNSUPPORTED` any more; the worker keeps it only as
+  its internal signal for an approval format it cannot commit
+  (`unsupportedVersion`).
 - `POST /imports/:id/cancel-publication`: explicit cancellation with
   `{operationId, expectedRevision, publicationOperationId}`. The new operation
   UUID binds the exact original publication UUID. An active worker lease or a
@@ -543,6 +595,13 @@ with `discNumberSource: 'admin-import'`. A track whose Disc Number is unknown,
 including every track of a format-1 approval, stores none and orders as disc 1.
 Appending to an existing Album re-derives its whole order from the stored
 numbers of all its MediaTracks, so existing disc groupings are kept.
+`src/administration/import/adminImportCatalogCommit.ts` freezes a new
+approval's identities and commits a format-3 approval as described in
+[Import publication](../architecture/catalog.md#import-publication); formats
+1 and 2 keep their earlier commit. Before the first copy, the worker checks
+that every reused Artist and Organization and an append's target Album is
+still ready, and the commit checks them again; otherwise the publication
+needs attention (`catalogConflict`) without minting identities.
 Audio/artwork reconciliation includes unresolved canonical copy reservations
 from import and cover operations before reporting orphan candidates. Completed
 history does not mask later unreferenced objects; unresolved cleanup evidence
@@ -607,17 +666,22 @@ reads live in `src/administration/import/adminImportDraftCompat.ts`.
 
 - **Format numbers.** A project's `draftVersion` and a publication approval's
   `schemaVersion` are absent, `null` or `1` for the original format. This
-  release writes `draftVersion` 2 for import projects and `schemaVersion` 2 for
-  their approvals, reads formats 1 and 2, and treats 3 and higher, or any value
-  that is not a positive whole number, as newer. Catalog reviews are written as
+  release writes `draftVersion` 2 for import projects and `schemaVersion` 3 for
+  their approvals. It reads draft formats 1 and 2 and approval formats 1 to 3,
+  and treats a higher number, or any value that is not a positive whole
+  number, as newer. Catalog reviews are written as
   format 2 too: a format-1 review is shown converted and stored as format 2 at
   its first admitted change other than stopping analysis, and 3 or higher is
   newer. An approval is format 1 only with a v1
-  snapshot (a string `artistName`, no artist entries and no Disc Numbers), and
+  snapshot (a string `artistName`, no artist entries and no Disc Numbers),
   format 2 only with a Draft v2 snapshot of one primary Artist entry, no label
-  and a `discNumber` field (a Disc Number or null) on every track; anything
-  else is treated as newer. A later release must write a higher number for any
-  other shape.
+  and a `discNumber` field (a Disc Number or null) on every track, and format 3
+  only with a Draft v2 snapshot whose entries each have a key, a name and a
+  primary or featured role, a label that is null or named, a `discNumber` field
+  on every track, 1 to 50 frozen `artists` and a frozen `label` that is null or
+  a record; anything else is treated as newer, and deeper inconsistencies are a
+  catalog conflict at commit. A later release must write a higher number for
+  any other shape.
 - **Read-only newer drafts.** A project saved in a newer draft format admits
   only staged cleanup and upload reconciliation, publication recovery and
   cancellation, and analysis cancellation, plus replays of stored receipts.
@@ -640,8 +704,10 @@ reads live in `src/administration/import/adminImportDraftCompat.ts`.
   cleanup, audio and image storage reconciliation fails closed instead of
   classifying objects.
 - **Allowlisted DTOs.** Import responses copy only the Draft v2 fields of the
-  draft and suggestions and the v1 fields everywhere else: decisions, assets
-  and their tags, publication state and receipts. Review responses copy the
+  draft and suggestions, the decision and `published` fields described under
+  `GET /imports/:id`, and the v1 fields everywhere else: assets and their
+  tags, publication state and receipts. A decision whose scope this release
+  does not know is dropped. Review responses copy the
   Draft v2 fields of the draft and suggestions, the source with a Disc Number
   only on a track that captured one, and applied Track `discNumber` fields.
   The import workbench inventory copies only v1 fields, so a Draft v2 project's
@@ -661,10 +727,13 @@ reads live in `src/administration/import/adminImportDraftCompat.ts`.
 
 Later stages raise the oldest release that is safe to roll back to:
 
-- This release saves Draft v2 projects and format-2 approvals, so never roll
-  back below the release before it, the first that keeps such projects
-  read-only and holds their approvals in needs attention instead of misreading
-  them. That release reads `discNumberSource: 'admin-import'` without issue.
+- This release saves Draft v2 projects and format-3 approvals and still reads
+  format-2 ones, so never roll back below the release before it, the first
+  that keeps such projects read-only and holds their approvals in needs
+  attention instead of misreading them. That release reads
+  `discNumberSource: 'admin-import'` without issue, and it links a completed
+  import of several Artists or a label only to its Album and first Artist,
+  which the approval mirrors as `artistId`.
   Every project this release creates is stored as Draft v2 at creation, so
   after a rollback it is read-only even if it was never edited. The release
   before refuses this release's field saves as invalid input and never replays

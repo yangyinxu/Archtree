@@ -27,6 +27,10 @@ Product behavior remains defined in [business-rules.md](../business-rules.md).
   - [Disc Number storage](#disc-number-storage)
   - [Sort key](#sort-key)
   - [Verification](#verification-4)
+- [Import publication](#import-publication)
+  - [Credits and identities](#credits-and-identities)
+  - [Appending to an Album](#appending-to-an-album)
+  - [Verification](#verification-5)
 <!-- @end-catalog -->
 
 ## Catalog application and presentation boundaries
@@ -308,8 +312,11 @@ byte-for-byte unchanged.
   existing list applies the [successor rule](#phrase-successors). Album
   publication, the Credit migration and new MediaTrack saves build new lists,
   whose only phrases are inherited ones (see
-  [Content Manager inheritance](#content-manager-inheritance)). Outcome-unknown
-  confirmation compares phrases, so retrying the same intent stays idempotent.
+  [Content Manager inheritance](#content-manager-inheritance)). Import
+  publication builds a new Album's lists from the reviewed Artist entries and
+  stores their phrases, while an append inherits (see
+  [Import publication](#import-publication)). Outcome-unknown confirmation
+  compares phrases, so retrying the same intent stays idempotent.
 - Listener v1 and legacy public Credits carry neither `joinPhrase` nor
   `creditId`; see
   [Native client compatibility](listener.md#native-client-compatibility).
@@ -425,8 +432,9 @@ revisions stay unchanged.
   the upload record, so a publication retry keeps it.
 - Import publication stores each new MediaTrack's reviewed draft Disc Number
   with `discNumberSource: 'admin-import'`; an unknown one, and every track of
-  a format-1 approval, stores neither key. An append to an existing Album
-  re-derives the whole order from the stored numbers of every member.
+  a format-1 approval, stores neither key. An appended MediaTrack stores its
+  reviewed Disc and Track Numbers the same way, and an append to an existing
+  Album re-derives the whole order from the stored numbers of every member.
 - An applied existing-Album review writes a selected Disc Number as a catalog
   edit does (`discNumberSource: 'admin-catalog'`, or neither key for a cleared
   one) and re-derives the Album order in the same transaction. Only a Track
@@ -475,3 +483,89 @@ Draft v2 import's Disc Numbers, and `test/listener/listenerDtoShape.test.ts`
 keeps both numbers out of listener and legacy public responses.
 `test/administration/adminCatalogReview.integration.ts` covers an applied
 review's Disc Numbers and Album order committing with its receipt.
+
+## Import publication
+
+Product behavior is defined in [business-rules.md](../business-rules.md) under
+Administrator Album Imports. This section records how an approved import
+writes the catalog; its routes are described in
+[admin-workbench.md](../features/admin-workbench.md).
+
+### Credits and identities
+
+`src/administration/import/adminImportCatalogCommit.ts` writes the graph of an
+approval frozen with `schemaVersion` 3 in one MongoDB transaction with the
+publication receipt; format-1 and format-2 approvals keep their one-Artist
+commit. The commit never resolves names.
+
+- The approval freezes one identity for each Artist entry and the label: the
+  reviewed record to reuse, bound to its revision, or an ID reserved for a new
+  record. Retries and resumes reuse those IDs, so they never mint another
+  record, and two entries never share one Artist.
+- A new Album's Credits follow the draft: each Artist entry in order as a
+  `primary` or `featured` Artist Credit with its join phrase and the
+  `creditId` `import_<role>_<artistId>`, then the label as an Organization
+  Credit with role `label` and the `creditId`
+  `import_label_<organizationId>`. An empty label adds no Credit. A single
+  primary entry without a label writes the same Album Credits as a format-2
+  approval.
+- Each new MediaTrack of a new Album receives the Album's primary Credits in
+  order, with the same `creditId`s; featured entries and the label stay on the
+  Album. As in [Content Manager inheritance](#content-manager-inheritance), a
+  primary Credit keeps its join phrase only while the next Album Credit is
+  also a primary, so a phrase that led into a featured Artist or the label is
+  not stored on the MediaTrack (a format-2 approval still copies its single
+  Credit's phrase). The MediaTrack's legacy `artistIds` come from
+  `legacyTrackArtistIdsFromCredits`.
+- A new Artist or label Organization takes the draft's visibility and gets its
+  catalog search projection; a new Organization has `organizationType`
+  `label` and an empty description. A reused Artist or Organization is fenced
+  with `touchReadyArtistReferences` or `touchReadyOrganizationReferences` and
+  keeps its type, metadata, artwork and visibility.
+- Only primary Artists, new or reused, gain the Album in their legacy
+  `albumIds`. Discography, Collaborations and Organization Releases derive
+  from the Credits as for any Album.
+- New MediaTracks of a new Album are stored public, and the Album's own
+  visibility hides them while it is hidden.
+- The worker checks that every reused Artist, Organization and Track, and an
+  append's target Album, is still ready before its first copy; a reused Track
+  must also still belong to the target Album with ready, published storage. The commit
+  reads each of them again before its first write, at its reviewed revision
+  where one was reviewed, and fences it. A record that is no longer ready or
+  has changed turns the publication into needs attention (`catalogConflict`)
+  without minting identities.
+
+### Appending to an Album
+
+An append writes no Album value or Credit, creates no Artist or Organization
+and adds the Album to no Artist's `albumIds`. Its target Album must hold a
+primary Artist Credit whose Artists are ready; the commit reads it at its
+reviewed revision and fences it with `touchReadyAlbumReferences`. Appended
+MediaTracks inherit that Album's ordered primary Credits through
+`inheritedAlbumPrimaryCredits`, as in
+[Content Manager inheritance](#content-manager-inheritance), so a phrase is
+kept only before another inherited Credit. They take the Album's release date,
+reduced to a simple date of valid integer parts, and are stored public, so the
+Album's own visibility hides them while it is hidden, as for a new Album's
+MediaTracks, and reveals them with its other MediaTracks once it is public.
+They store their reviewed Disc and Track Numbers, and join its order by Disc Number, Track
+Number and MediaTrack ID ([Sort key](#sort-key)). A selected cover is not
+copied.
+
+### Verification
+
+`test/administration/adminImportCatalogCommit.test.ts` covers the Credit
+builders: draft order, roles and phrases, primary-only MediaTrack Credits, the
+format-2 equivalence, append inheritance and mismatched frozen Artists.
+`test/administration/adminImportCatalogCommit.integration.ts` publishes two
+primary Artists, a featured Artist and a new label and checks Credit order,
+roles and phrases, primary-only `albumIds`, MediaTrack Credits, Organization
+Releases, Discography, Collaborations, Follow eligibility, the frozen listener
+fixture, hidden imports and untouched reused records. It also covers decision
+binding, appends, a target without a primary Credit, same-intent retries, a
+crash between copy and commit, unknown copies, permission loss, cancellation
+with independent identities and reused records that change.
+`test/administration/adminImportMedia.integration.ts` covers append
+visibility and the sixteen-approval bound with a new import of the same files,
+and `web/src/api/listenerContractCompatibility.test.ts` parses
+`contracts/listener/v1/fixtures/album-multi-artist-label.json`.
