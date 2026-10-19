@@ -25,9 +25,13 @@ const view = () => ({
   staleFiles: [slotTwo], needsAnswer: { tie: false, conflicts: ['album.label', `tracks.${slotTwo}.trackNumber`] }, blocking: true
 });
 
+/** The summary state as src/administration/import/adminImportSummary.ts returns it. */
+const summary = () => ({ append: false, waiting: { uploads: false, lookup: true, analysis: false }, placeholderOnly: false,
+  luna: [{ id: 'c'.repeat(24), tick: 'ticked' }, { id: 'd'.repeat(24), tick: 'conflict' }], analysis: { runs: 1, attempts: 20, daily: 218 }, lookupAvailable: true, identityAnswers: 2 });
+
 test('a server-shaped lookup view parses strictly, before any run as null too', () => {
-  expect(lookupResponseSchema.safeParse({ lookup: view(), revision: 7, valueRevision: 3 }).success).toBe(true);
-  expect(lookupResponseSchema.safeParse({ lookup: null, revision: 1, valueRevision: 0 }).success).toBe(true);
+  expect(lookupResponseSchema.safeParse({ lookup: view(), revision: 7, valueRevision: 3, summary: summary() }).success).toBe(true);
+  expect(lookupResponseSchema.safeParse({ lookup: null, revision: 1, valueRevision: 0, summary: summary() }).success).toBe(true);
   expect(lookupViewSchema.safeParse({ ...view(), applied: null, preselection: null, disclosure: null, candidates: [], groups: [] }).success).toBe(true);
 });
 
@@ -49,5 +53,18 @@ test('extra keys, links, forged paths, unknown states and oversized lists are re
   refused({ ...item, candidates: [{ ...item.candidates[0], formats: Array.from({ length: 21 }, () => 'CD') }] });
   refused({ ...item, candidates: [{ ...item.candidates[0], title: 't'.repeat(1001) }] });
   refused({ ...item, applied: { ...item.applied, flagged: Array.from({ length: 306 }, () => item.applied.flagged[0]) } });
-  expect(lookupResponseSchema.safeParse({ lookup: item, revision: 1, valueRevision: 0, records: [] }).success).toBe(false);
+  expect(lookupResponseSchema.safeParse({ lookup: item, revision: 1, valueRevision: 0, summary: summary(), records: [] }).success).toBe(false);
+});
+
+test('the summary state is strict: no missing or extra field, unknown tick or forged suggestion ID', () => {
+  const refused = (value: unknown) => expect(lookupResponseSchema.safeParse({ lookup: null, revision: 1, valueRevision: 0, summary: value }).success).toBe(false);
+  const item = summary();
+  expect(lookupResponseSchema.safeParse({ lookup: null, revision: 1, valueRevision: 0 }).success).toBe(false);
+  refused({ ...item, publishable: true });
+  refused({ ...item, waiting: { ...item.waiting, cover: true } });
+  refused({ ...item, luna: [{ id: 'c'.repeat(24), tick: 'maybe' }] });
+  refused({ ...item, luna: [{ id: '__proto__', tick: 'ticked' }] });
+  refused({ ...item, analysis: { runs: -1, attempts: 0, daily: 0 } });
+  refused({ ...item, placeholderOnly: undefined });
+  refused({ ...item, lookupAvailable: undefined }); refused({ ...item, identityAnswers: 1.5 }); refused({ ...item, identityAnswers: -1 });
 });

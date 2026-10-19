@@ -153,6 +153,83 @@ new tracks take that Album's primary Artists, track order and visibility. A
 completed import links to its Album, each of its Artists and its label
 Organization.
 
+The import page opens on the **Review and publish** summary, above its Draft,
+Review, Files and Publish sections, which stay available for manual work. It
+reads `GET /imports/:id/lookup` (the lookup view and the server's summary state,
+see [Lookup routes](#lookup-routes)) again whenever the project's revision or
+automatic values change, every 3 seconds while a lookup is queued or running
+and every 10 seconds while it waits for an automatic retry; a read that sees a
+newer saved project reloads the page's project read. The summary components
+(`ImportSummary.tsx`, `LookupBox.tsx`, `CandidateChooser.tsx` and the shared
+`ImportAnalysisConfirmation.tsx`) load lazily from the media panel, outside the
+import route's initial JavaScript. The server decides what holds Publish; the
+summary only presents it:
+
+- **Status and next step.** Not run yet while uploads are awaited, not run
+  although every needed file is uploaded (its automatic trigger failed; Luna
+  next, beside the name box), looking up (queued or running), retrying (busy or
+  unavailable, next step the free **Retry lookup**, Luna beside it),
+  unavailable after the automatic retries (next step **Analyze with Luna**, the
+  retry beside it), not configured (Luna next), stopped (retry first, Luna
+  beside it), superseded, no release or nothing to look up (Luna next, beside
+  the name box), no matching release or none applied where nothing matched
+  (Luna next; every candidate stays choosable), release details that could not
+  be fetched (retry first, Luna beside it), a tie, or the applied release.
+  Where the server cannot run lookup (`lookupAvailable` false) the summary says
+  it is not configured, before any run too, and offers neither a retry nor the
+  name box. Stale files are counted.
+- **Name box.** An Album or song name; a folder-name run prefills the folder
+  name for editing, a submitted run its name. A link is refused in place
+  (`Enter a name, not a link`), and the box has no autocomplete and stores
+  nothing. It is a plain form, never the search landmark, and the
+  administration layout still has no global search.
+- **Needs an answer.** A tie lists each group's representative with only the
+  proposal values that differ (title, Artist entries, label, date, tracks) and
+  its barcode, catalogue number, country and medium, plus **Use none of
+  these**; a conflict with the administrator's own value shows both values with
+  **Keep mine** and **Use lookup value** (`/lookup/resolve` bound to the saved
+  value). Identity questions stay in Review and the confirmation; the summary
+  counts the rows the server says still need one. The candidate chooser
+  discloses how many files have an unknown duration or Disc Number, which
+  ranking never counts as agreement.
+- **Flagged, never folded.** Values resting only on file tags (automatic and
+  not on the applied candidate), a preselection whose artist matches no artist
+  tag, and pending Luna suggestions with their ticks.
+- **Folded.** Every other row: title, Artist entries with roles and join
+  phrases, label, date, visibility (changed in place by a field save, public by
+  default), cover, the disc and track order, saved identity decisions, upload
+  progress, answered conflicts, and all candidates when there is no tie. An
+  append marks the Album values, their conflicts and Album Luna suggestions
+  not applied.
+- **Publish.** Disabled while the server says it waits for uploads, lookup or
+  analysis or this browser is still uploading, while a tie, a conflict or an
+  identity row (`identityAnswers`) needs an answer, or while a new Album's
+  credit rests only on a placeholder (said at once, unless the unsaved changes
+  Publish includes add a primary Artist entry); otherwise it opens the same
+  one-step confirmation as the Publish section.
+- **Luna ticks.** The summary state gives each pending suggestion the editor
+  shows a tick state: `ticked` for an empty value or one resting only on file
+  tags, `unticked` for any other, `resolved` when it already equals the current
+  value (Artist entries by name, role and join phrase), or `conflict` when its
+  value changed since analysis and is the administrator's own (Artist entries
+  whenever they changed), which cannot be ticked. Toggles are kept in the
+  workspace for the confirmation; unticking leaves the current value, and
+  **Apply ticked suggestions now** accepts the ticked ones and rejects the rest
+  through `/adopt`. A ticked suggestion that renames the Album or the Artist
+  entries has no candidate read yet, so its rows need a decision in the
+  confirmation; there the confirmation offers the same **Apply ticked
+  suggestions now**, which saves them to the draft and closes it, so the next
+  confirmation reads candidates, and preselects, for the saved names. A
+  suggestion equal to the current value is hidden from the summary but stays
+  pending in storage, and Review still lists it as already matching, until an
+  approval accepts it. **Analyze with Luna** opens the same confirmation as the
+  Draft section's Analyze, which shows the runs and AI calls left for the
+  project and the AI calls left today and starts nothing until confirmed.
+- **Refusals.** Each lookup refusal (`ADMIN_IMPORT_LOOKUP_ACTIVE`,
+  `…_UNAVAILABLE`, `…_REFUSED`, `…_INVALID_NAME`, `…_NOTHING_TO_RETRY`,
+  `…_STALE`, `…_CANDIDATE_INCOMPLETE`) has its own message, is never
+  retried, and reloads the project and the summary.
+
 Publishing is one step. Publish stays available while the draft has unsaved
 edits, while cover selection, file removal and cancelling an approval still wait
 for a save. Review decisions cannot change while the draft has unsaved edits, so
@@ -167,6 +244,10 @@ visibility, the cover, and the identity of the Album, each entry and the label:
 New, Reuses a named record (marked Hidden when it is), Needs a decision, Match
 changed (the reused record is not listed at its reviewed revision), or Not
 applied for an append, whose title, date, visibility and cover rows say so too.
+Pending Luna suggestions are written into the shown draft as the summary
+ticks them (a suggestion whose path the unsaved changes also write stays
+unticked), and a row a ticked suggestion renames needs a decision like an
+unsaved rename. A Luna row counts the suggestions applied and kept.
 The tracks the approval adds follow in approved order, Disc Number (unknown as
 1), then Track Number (unknown last), then draft order, followed by an existing
 Album's members, named by their catalog title (or draft title while the match
@@ -188,8 +269,8 @@ is neither answered nor preselected, or holds a changed match, and while
 Review's unsaved decisions are in conflict as described above. Only a changed
 approval digest makes an open confirmation stale, so Luna, uploads and
 automatic values that change nothing it shows leave it current. Approving
-sends the unsaved changes and Review's unsaved decisions with the approval; a
-refused approval keeps both, and a confirmed one
+sends the unsaved changes, Review's unsaved decisions and the summary's Luna
+ticks with the approval; a refused approval keeps all three, and a confirmed one
 leaves the editor showing the saved draft. If the Web was updated after the page
 loaded and the confirmation cannot load its checklist, it asks for a reload and
 Approve stays disabled, while the page and its unsaved edits stay open.
@@ -546,19 +627,23 @@ Import routes (relative to `/api/admin/v1`):
   fixed-identity publication; `/resume-publication` reconciles that approval's
   original operation ID rather than creating another Album. The body is
   `{operationId, expectedRevision, changes, decisions, selectedCoverSlotId,
-  approvalDigest}`: the confirmation's unsaved field changes in the `PATCH`
-  shape (possibly none), the whole decision set it shows in the `/decisions`
-  shape, the cover it shows (`null` or a staged slot) and the `approvalDigest`
-  of the saved project it was built on; each decision carries its
-  `boundName`. The Web also sends the optional `preselections`: the rows the
-  confirmation shows as preselected, each in the decision shape without
+  approvalDigest, suggestionTicks}`: the confirmation's unsaved field changes
+  in the `PATCH` shape (possibly none), the whole decision set it shows in the
+  `/decisions` shape, the cover it shows (`null` or a staged slot), the
+  `approvalDigest` of the saved project it was built on and the Luna ticks it
+  shows (below); each decision carries its `boundName`. The Web also sends
+  the optional `preselections`: the rows the confirmation shows as
+  preselected, each in the decision shape without
   `preselected`. Before the intent is fingerprinted,
   `changes` and `decisions` are bounded as `PATCH` and `/decisions` bound them
   (so two entries reusing one Artist are refused here), the cover and
   digest to 64 characters, and `preselections` to at most 122 well-formed
   items (each identifier at most 300 characters or `null`, `action`
   `create-distinct` or `reuse`), or the body is
-  `400 ADMIN_IMPORT_INVALID_INPUT`.
+  `400 ADMIN_IMPORT_INVALID_INPUT`. The Web always sends `suggestionTicks`
+  `{generation, ticked, unticked}`: the analysis generation and every pending
+  suggestion it shows, ticked or unticked, at most 204 distinct suggestion IDs
+  in all, bounded the same way.
   One transaction under one ordinary `publish` receipt then saves and freezes
   the approval. It is admitted at any project revision up to the current one:
   `approvalDigest` is its binding, so Luna, the publication worker and
@@ -610,10 +695,22 @@ Import routes (relative to `/api/admin/v1`):
   (`409 ADMIN_IMPORT_APPEND_VISIBILITY_MISMATCH`), and a draft with several
   Artist entries or a label is again refused with
   `409 ADMIN_IMPORT_PUBLICATION_UNSUPPORTED`.
-  A stored value the editor cannot show (it reads as empty there) is also
-  `400 ADMIN_IMPORT_DRAFT_INCOMPLETE`, so it is never frozen, and only pending
-  suggestions the editor shows hold the approval with
-  `409 ADMIN_IMPORT_REVIEW_REQUIRED`. Metadata lookup holds it too, read in the
+  Right after the changes are saved, the tick state is applied
+  (`adminImportLunaTicks.ts`): each pending suggestion the editor shows that
+  does not already equal its current value must be listed as ticked or
+  unticked (`409 ADMIN_IMPORT_REVIEW_REQUIRED` otherwise), each listed one must
+  still be shown pending in that generation
+  (`409 ADMIN_IMPORT_SUGGESTION_STALE`), and a ticked one whose value changed
+  since analysis is `409 ADMIN_IMPORT_FIELD_CONFLICT`. Ticked suggestions are
+  accepted as `/adopt` accepts them, unticked ones rejected and resolved ones
+  accepted, in the same transaction, so identities are read for the values
+  they write. A body without `suggestionTicks` comes from an editor that
+  predates ticks: it is admitted only when nothing is left to answer, and
+  otherwise is `409 ADMIN_IMPORT_RELOAD_REQUIRED`. Pending suggestions never
+  hold the approval; a queued or running analysis still does
+  (`409 ADMIN_IMPORT_REVIEW_REQUIRED`). A stored value the editor cannot show
+  (it reads as empty there) is also `400 ADMIN_IMPORT_DRAFT_INCOMPLETE`, so it
+  is never frozen. Metadata lookup holds it too, read in the
   same transaction: a queued, running or automatically retrying lookup is
   `409 ADMIN_IMPORT_LOOKUP_ACTIVE`, and an unanswered tie or conflict (see
   [Value application](#value-application)) is
@@ -690,10 +787,11 @@ Ordinary import mutations retain their 256-receipt admission limit. Each
 admitted file upload takes one ordinary receipt and its replays take none, so a
 100-file import leaves room for re-uploads after confirmed failures, draft
 edits, decisions and the approval. An approval takes one ordinary receipt,
-including the draft changes, decisions and cover it saves. Required asset
-cleanup and publication cancellation use separate lifecycle receipts tied to
-each admitted asset version or approved publication, preserving exact replay and
-UUID-collision checks without consuming the ordinary mutation allowance.
+including the draft changes, decisions, cover and Luna answers it saves.
+Required asset cleanup and publication cancellation use separate lifecycle
+receipts tied to each admitted asset version or approved publication,
+preserving exact replay and UUID-collision checks without consuming the
+ordinary mutation allowance.
 Automatic embedded-cover staging, which follows a ready audio upload, likewise
 has its own bounded lifecycle receipts. An embedded image whose SHA-256 matches
 one that is ready, pending or of unknown outcome is not staged again, and each
@@ -1134,6 +1232,14 @@ Later stages raise the oldest release that is safe to roll back to:
   automation replace applied values, and filters `lookup*` receipts out of the
   detail, so a lost lookup response there cannot be reconciled from receipts;
   reload open tabs.
+- Luna ticks need no floor of their own: an approval applies them to ordinary
+  suggestion decisions and draft values. A release before them refuses the
+  `suggestionTicks` this Web sends as invalid input and holds an approval
+  while a shown suggestion is pending, and a Web tab opened after them cannot
+  parse a lookup read without its `summary` (from a release before them), so
+  its Review and publish summary shows an error and its confirmation cannot be
+  approved while a suggestion is pending; reload open workbench tabs after
+  deploying or rolling back across them.
 - After MusicBrainz IDs are stored, never roll back below the release before
   them; its index stays, and listener DTOs already drop unknown fields.
 - Credit join phrases and Disc Numbers have their own floor in the
@@ -1144,9 +1250,10 @@ Later stages raise the oldest release that is safe to roll back to:
 A server worker runs MusicBrainz lookups for import projects automatically (see
 [Lookup runs](#lookup-runs)) and applies a preselected candidate's values (see
 [Value application](#value-application)). [Routes](#lookup-routes) and the
-`metadataLookup` capability expose them; no Web control does until the import
-summary lands, and iTunes and Cover Art Archive are not queried yet. The source
-layer, the jobs and their routes live in `src/administration/lookup/`.
+`metadataLookup` capability expose them, and the import's Review and publish
+summary (see the import page above) is their Web control. iTunes and Cover Art
+Archive are not queried yet. The source layer, the jobs and their routes live
+in `src/administration/lookup/`.
 
 - **Sources and hosts.** MusicBrainz (`https://musicbrainz.org/ws/2/` only), the
   iTunes Search API (`https://itunes.apple.com/search` and `/lookup`, in the
@@ -1476,7 +1583,7 @@ lookup runs never make them stale.
 
 | Route | Body | Success | Refusals |
 | --- | --- | --- | --- |
-| `GET /lookup` | — | `200 {lookup, revision, valueRevision}`; `lookup` is `null` before any run | `404 ADMIN_IMPORT_NOT_FOUND` for a review or a bad id |
+| `GET /lookup` | — | `200 {lookup, revision, valueRevision, summary}`; `lookup` is `null` before any run | `404 ADMIN_IMPORT_NOT_FOUND` for a review or a bad id |
 | `POST /lookup` | `{operationId, expectedRevision, kind, text}`, `kind` `album` or `song`, text at most 1000 characters | `202` import response, receipt `lookup` | `503 ADMIN_IMPORT_LOOKUP_UNAVAILABLE`, `400 ADMIN_IMPORT_LOOKUP_INVALID_NAME`, `409 ADMIN_IMPORT_LOOKUP_REFUSED` |
 | `POST /lookup/retry` | `{operationId, expectedRevision}` | `202`, receipt `lookup-retry` | `503 …UNAVAILABLE`, `409 …LOOKUP_ACTIVE`, `409 …NOTHING_TO_RETRY`, `409 …REFUSED` |
 | `POST /lookup/choose` | `{operationId, expectedRevision, run, candidateKey}`, key `musicbrainz:<mbid>` or `null` for none | `200`, receipt `lookup-choose` | `409 ADMIN_IMPORT_LOOKUP_STALE` (another run, an active run, an unknown candidate, a candidate before completion), `409 ADMIN_IMPORT_LOOKUP_CANDIDATE_INCOMPLETE` (no fetched details, or a release fetched under another ID), `409 …REFUSED` |
@@ -1494,6 +1601,28 @@ applied candidate's choice, value paths, conflicts (lookup value re-read
 through the draft rules) and flags; stale files; and `needsAnswer` and
 `blocking`. It carries no URL, ISRC, recording ID, account, grant, lease,
 fence, file-set digest or query.
+
+The `summary` is the import's Review and publish state, computed by
+`src/administration/import/adminImportSummary.ts` from the same snapshot:
+`append` (a saved Album reuse), `waiting` (`uploads` while any staged upload,
+a file's or a cover's, is still in flight, pending with a transfer that can
+still land, or any manifest file whose track is neither skipped nor reused
+lacks a confirmed upload; `lookup` while a run is queued, running or
+retrying; `analysis` while Luna is queued or running), `placeholderOnly` (no
+Album reuse, no primary Artist entry, and every file's album-level credit,
+album artists else artists, is a placeholder such as Various Artists, or the
+applied candidate was flagged `placeholder`), `luna` (each pending suggestion
+the editor shows with its tick state), `analysis` (`runs`, `attempts` and
+`daily`: what is left of the project's two runs and 22 calls and of the
+deployment's 220 calls today), `lookupAvailable` (whether this server's
+configuration lets lookup run) and `identityAnswers` (the identity rows of the
+saved draft that neither a saved decision nor a preselection answers, read
+with the same candidates as Review). The lookup view's `needsAnswer` remains
+the list of lookup answers Publish waits for. A stored manifest in a shape this
+release does not know is read through its sanitized view. The publish
+transaction rechecks all of it; an upload still in flight, or a file a
+published track needs without a confirmed upload, is
+`409 ADMIN_IMPORT_UPLOAD_INCOMPLETE`, writing nothing.
 
 ### What lookup sends
 

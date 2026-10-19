@@ -24,6 +24,7 @@ and Finitude clients. Update it whenever an agreed business rule changes.
 - [Background and System Playback](#background-and-system-playback)
 - [Offline Downloads](#offline-downloads)
 - [Administrator Album Imports](#administrator-album-imports)
+- [Administrator Metadata Lookup](#administrator-metadata-lookup)
 - [Web Administrator Local MP3 Conversion](#web-administrator-local-mp3-conversion)
 - [Page Items](#page-items)
 - [MediaTrack Artwork](#mediatrack-artwork)
@@ -759,7 +760,7 @@ The wire protocol and operational bounds are documented in
   private Album title/date and Track titles, Disc Numbers and Track Numbers,
   then explicitly select saved fields for a separate catalog confirmation. The
   ordered Artist Credits with their join phrases and the label are read-only
-  review context.
+  review context; metadata lookup is not part of existing-Album reviews.
 - Applying an existing-Album review validates every captured catalog revision,
   membership, readiness and filename/media identity. A replacement or external
   edit prevents applying the stale project, rather than silently rebasing it.
@@ -1437,20 +1438,20 @@ The wire protocol and operational bounds are documented in
   Leaving Admin view, losing the role, or a publication that locks the import's
   sources stops the queue after the current file, and navigation never restarts
   it. Files chosen without a folder need no typed folder name, and no folder
-  name is then sent to Luna.
+  name is then sent to Luna or metadata lookup.
 - The import draft holds the Album title, ordered Artist entries, an optional
   label, the release date and visibility, and each track's title, Disc Number
   and Track Number. Each Artist entry has a name, a role of primary or
   featured, and an optional join phrase connecting it to the next entry. Every
   primary entry precedes every featured entry, and two entries cannot share a
   name compared case-insensitively. A role changes only by an administrator
-  edit or an accepted suggestion; editing a join phrase never changes it. An
-  empty label adds no label Credit, and unknown Disc and Track Numbers stay
-  empty.
-- Each draft value is either automatic, written from file tags and not yet
-  reviewed, or the administrator's own: typed, accepted, included in a
-  publication approval or, for the label, carrying an explicit identity
-  decision. The Artist entries count as one value, which becomes the
+  edit, an accepted suggestion or applied metadata lookup values; editing a join
+  phrase never changes it. An empty label adds no label Credit, and unknown Disc
+  and Track Numbers stay empty.
+- Each draft value is either automatic, written from file tags or metadata
+  lookup and not yet reviewed, or the administrator's own: typed, accepted,
+  included in a publication approval or, for the label, carrying an explicit
+  identity decision. The Artist entries count as one value, which becomes the
   administrator's own once any entry carries an explicit identity decision.
   Automation writes only empty or automatic values, and only while a value is
   still the one it last saw. An administrator save writes only the values that
@@ -1460,8 +1461,8 @@ The wire protocol and operational bounds are documented in
   Automatic text is normalized and trimmed like typed text; a value with control
   or invisible formatting characters, or over a length limit, is left out and
   shown, never stripped or truncated. Automatic writes do not use the import's
-  ordinary editing allowance. The publication confirmation marks Artist and
-  label entries that rest only on file tags.
+  ordinary editing allowance. The summary and the publication confirmation mark
+  Artist and label entries that rest only on file tags.
 - A confirmed upload keeps bounded, cleaned evidence from the file's embedded
   tags: title, Album, artist and album artist, label, year, Disc and Track
   Numbers, duration, and identifiers such as a barcode, catalogue number, ISRC
@@ -1482,9 +1483,9 @@ The wire protocol and operational bounds are documented in
   entry while the name is unchanged. A pending Artist-name suggestion becomes a
   one-entry Artist suggestion that can still be rejected; accepting it after the
   entries changed reports a conflict instead of replacing them. This conversion
-  alone never starts analysis. A save from an editor that predates these fields
-  is refused with a reload request and never removes Artist entries, the label
-  or Disc Numbers.
+  alone never starts analysis or metadata lookup. A save from an editor that
+  predates these fields is refused with a reload request and never removes
+  Artist entries, the label or Disc Numbers.
 - An approval made before these fields existed keeps its frozen snapshot. It
   commits that snapshot unchanged while its captured revisions still verify;
   otherwise it becomes needs attention without minting identities or changing
@@ -1492,11 +1493,14 @@ The wire protocol and operational bounds are documented in
   captured earlier may need one fresh review and are never silently rebased.
   Retrying an import creation with its original operation intent still
   resolves to the original project.
-- Luna proposes supported values with source evidence. Unknown facts stay empty
-  and partial release dates retain their precision. Analysis never publishes,
-  edits existing catalog records, or silently overwrites manual draft changes.
-  Administrators see baseline/current/proposed values and can accept or reject
-  individual suggestions. Adoption changes only the saved private draft.
+- Luna proposes supported draft values with source evidence; metadata lookup
+  applies values as described in Administrator Metadata Lookup. Unknown facts
+  stay empty and partial release dates retain their precision. Analysis never
+  publishes, edits existing catalog records, or silently overwrites manual draft
+  changes, and metadata lookup likewise never does. Administrators see
+  baseline/current/proposed values and can accept or reject individual
+  suggestions; a suggestion that equals the current value is resolved
+  automatically. Adoption changes only the saved private draft.
 - Accepted analysis runs on the server after a browser closes or changes page.
   Reopening observes existing status and results; it does not start another
   paid generation. Local file transfer may require reselection of incomplete
@@ -1550,16 +1554,28 @@ The wire protocol and operational bounds are documented in
   the label stay on the Album. New Artists and Organizations take the draft's
   visibility. Imports do not yet support an Album without a primary Artist, such
   as a compilation, and never suggest a stand-in Artist for one.
-- A new import's visibility defaults to public and can be changed before
-  publishing.
+- After uploads and metadata lookup, an import opens on one Review and publish
+  summary. It shows the draft values, the Artist entries with their roles and
+  join phrases, the label, the disc and track order, identity decisions, the
+  cover, upload progress and visibility, which defaults to public and can be
+  changed in place. Rows that need no answer are collapsed; values resting on
+  file tags or Luna are flagged and never collapsed. Only a choice among tied
+  matching groups, a conflict with the administrator's own value or an identity
+  candidate that is not preselected needs an answer. Publish stays unavailable
+  until each is answered and while any upload, lookup, value application or
+  analysis is queued or running. When the files or the applied release credit
+  only a placeholder such as Various Artists and a new Album has no primary
+  Artist entry, the summary says at once that the import cannot be published
+  yet. The Draft, Review, Files and Publish sections remain available for manual
+  work.
 - The publication confirmation lists everything that becomes catalog content:
   the title, the ordered Artist entries with their roles and join phrases, the
   label, the date, the full disc and track list with titles, the cover, the
   visibility, and each new or reused Artist, Organization and Album, with each
   reused record that is hidden marked. Approving it saves the shown draft,
-  identity decisions and cover choice and freezes the approval as one step bound
-  to exactly what was shown; a failed approval leaves at most the saved draft,
-  never a partial approval.
+  identity decisions, cover choice and answers to Luna suggestions and freezes
+  the approval as one step bound to exactly what was shown; a failed approval
+  leaves at most the saved draft, never a partial approval.
 - Publication is a separate explicit approval of the reviewed draft and duplicate
   decisions. It freezes the approval snapshot, rechecks current role, revisions,
   memberships, visibility and asset readiness, and reports confirmed per-item
@@ -1604,6 +1620,127 @@ The wire protocol and operational bounds are documented in
 - Expiring grants prevent new copy/attachment/publication steps. Cleanup of a
   confirmed detached or explicitly cancelled object remains recoverable after
   grant expiry, with current administrator checks and exact storage identity.
+
+## Administrator Metadata Lookup
+
+- Metadata lookup serves the administrator's personal, non-commercial library,
+  whose audio comes only from the administrator's own files. The Web import
+  editor looks up metadata for those files by name. It runs automatically once
+  the upload of every selected audio file is confirmed, from the album and
+  album-artist tags the files share or, for a one-file import, its title and
+  artist tags, and it runs when the administrator submits an Album or song name.
+  Without usable tags, it runs once from the selected folder's name, when there
+  is one, which the name box shows for editing. Typing, saving and navigation
+  never run metadata lookup, and reopening a project runs it only when its
+  reconciliation confirms the last selected upload. Existing-Album reviews, iOS
+  and Android do not offer it.
+- Metadata lookup accepts names, not links. The server queries only fixed,
+  server-chosen services and never fetches an administrator-supplied URL. It
+  sends only the submitted text, cleaned tag text or a cleaned folder name,
+  terms taken from earlier results of the same lookup, and embedded identifiers;
+  every identifier or barcode used in a query must match its expected format. An
+  automatic lookup never sends file names, sends a folder name only when no
+  usable tags exist, and no lookup sends account data or audio. The server
+  follows no link found in a lookup response. Metadata lookup never downloads
+  audio, audio previews or streams from any service, and audio-preview and store
+  links are discarded before results are stored. The lookup box is not listener
+  Search: it keeps no search history and does not restore global music search to
+  the administration layout.
+- Metadata lookup uses these sources in order:
+  - MusicBrainz is the primary source.
+  - Deezer, Spotify and other services are not used.
+- Metadata lookup responses are untrusted data. Each source is bounded in time
+  and size, and its request-rate and concurrency bounds apply across the whole
+  deployment; automatic lookups wait for them, and a submitted lookup that
+  reaches them is reported as busy rather than sent in a burst. Every response
+  is completely validated before use, and its text follows the rules for
+  automatic draft values in Administrator Album Imports.
+- A failed, timed-out, rate-limited or unavailable source is reported as
+  unavailable, never as no match, and the remaining sources still run. A
+  busy or unavailable source is retried automatically a limited number of times
+  within a bounded period, then reported as unavailable with a manual retry. A
+  candidate whose details could not be fetched is shown as incomplete and
+  unranked rather than as non-matching. Metadata lookup never uses Luna's paid
+  budget and is never required: its failure does not block manual editing,
+  uploads, Luna analysis or review, and Publish waits for it only while it is
+  queued, running or retried automatically.
+- Candidates are releases; a song-name query finds releases that contain that
+  song. Metadata lookup ranks candidates by how closely their track count,
+  disc count and per-track durations agree with the import's selected audio
+  files. A candidate matches only when every selected file's duration is known
+  and the track count, every duration within a small tolerance and any known
+  disc count agree. Unknown local durations or Disc Numbers are disclosed rather
+  than counted as agreement, and newly known durations re-rank stored candidates
+  without new requests.
+- Ranking is evidence, not proof. Every matching candidate scores the same.
+  Matching candidates that would write identical draft values form one group,
+  represented by a deterministically chosen member that prefers front artwork;
+  the others stay in evidence. Metadata lookup preselects the matching candidate
+  that an embedded identifier shared by every file matches alone, and otherwise
+  the only matching group. A preselection whose credited artist agrees with no
+  non-empty artist tag of the files is flagged and never collapsed. A
+  preselection is a proposal that the publication approval confirms. An
+  incomplete or unranked candidate is never preselected. When several matching
+  groups remain, the administrator chooses one from a view of the values that
+  differ and each candidate's barcode, catalogue number, country and medium.
+  Without a matching candidate nothing is preselected and no choice is needed.
+  Every candidate stays selectable, one that does not match shows its
+  differences, and the administrator may choose none.
+- Applying a candidate, automatically when it is preselected or when the
+  administrator chooses it, writes all its supported values in one step: the
+  Album title, Artist entries, label and date, and each matched file's track
+  title, Disc Number and Track Number. It fills only empty or automatic values.
+  Where the administrator's own value differs, the summary shows both with
+  nothing preselected, and publication waits until the administrator keeps one.
+  Each applied value keeps its source evidence, such as the MusicBrainz release
+  ID and the match basis, and each track value names its local file. Applying
+  another candidate replaces the values the earlier one wrote that are still
+  automatic, and choosing none returns them to their values from file tags or
+  leaves them empty. Applying stores its complete set of values or nothing, and
+  retrying the same intent is idempotent. Placeholder credits such as Various
+  Artists or [unknown], and a [no label] label, are never written.
+- Metadata lookup runs on the server and finishes after the browser closes or
+  changes page; reopening shows its result without running it again. It runs
+  under an expiring grant from the administrator's import creation, uploads,
+  reopening that confirms the last selected upload, submission, manual retry or
+  choice of a candidate, and every stored step rechecks the current
+  administrator role and binds the file set it ranked. A role loss or an expired
+  grant stores nothing and ends that lookup and its value application: the
+  summary reports it as stopped, with a manual retry as the next step and Luna
+  beside it, and Publish never waits for it. A changed file set runs one
+  automatic lookup again, within a small per-project limit, and replacing,
+  removing or reselecting a file marks its match evidence stale without
+  reverting values. Metadata lookup is independent of Luna generations: starting
+  or stopping Luna does not discard its results, and a lookup does not discard
+  Luna's.
+- Applied Artist entries keep the release's credited names, name order and join
+  phrases. The entry after a featuring phrase such as `feat.`, and every later
+  entry, is featured and the others are primary; the summary and the publication
+  confirmation show each role, and the administrator can still change it. Only
+  this proposal reads a featuring phrase; a stored or edited join phrase never
+  sets a role. The label is the release's first listed label, and any others
+  stay evidence. The Album date is the release group's first-release date at its
+  known precision; the release's own date stays evidence and is used only when
+  the group has none. Romanized or alternate titles enter the catalog only as
+  draft values and never become Search aliases. Release and recording
+  identifiers remain private import evidence.
+- When metadata lookup finds no release or no matching release, or cannot run
+  because no usable tags, folder name or submitted name exist, the summary
+  offers Luna analysis as the next step beside the name box. When lookup is
+  unavailable or busy, the next step is the free retry and Luna is a secondary
+  choice until the automatic retries are exhausted; Luna is then offered as the
+  next step beside the manual retry. Luna remains an explicitly confirmed paid
+  step that shows the remaining project and daily budget; offering it starts
+  nothing, a lookup result never starts it, and it may also run beside applied
+  lookup values. Luna suggestions return to the summary labelled as Luna and are
+  never collapsed: those for empty values or values from file tags arrive
+  ticked, the others arrive unticked and keep the current value unless ticked,
+  unticking rejects one, and none is applied until the administrator accepts it
+  or approves the publication with it ticked. Luna receives the current draft
+  values whatever their source. Luna never chooses an identity, selects a
+  release or presents its values as lookup evidence.
+- Metadata lookup results and evidence are bounded private project data that
+  only current administrators can read.
 
 ## Web Administrator Local MP3 Conversion
 

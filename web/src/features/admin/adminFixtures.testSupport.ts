@@ -55,3 +55,16 @@ export function fieldSaveEndpoint(initial: ImportDetail, candidates: ImportCandi
 }
 export const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json', 'X-Finitude-Account-Viewer': viewer } });
 export function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(done => { resolve = done; }); return { promise, resolve }; }
+/**
+ * The summary read (GET …/lookup) of a project before any lookup on a server that can run it: nothing to wait for, no identity
+ * row to answer, some budget left, and, as the server lists them, each pending suggestion of `item` with its tick state (here
+ * unticked; without `item`, none).
+ */
+export const lookupResponse = (overrides: Record<string, unknown> = {}, item?: Pick<ImportDetail, 'suggestions'>) => ({ lookup: null, revision: 0, valueRevision: 0,
+  summary: { append: false, waiting: { uploads: false, lookup: false, analysis: false }, placeholderOnly: false,
+    luna: (item?.suggestions ?? []).filter(suggestion => suggestion.decision === 'pending').map(suggestion => ({ id: suggestion.id, tick: 'unticked' })),
+    analysis: { runs: 1, attempts: 20, daily: 200 }, lookupAvailable: true, identityAnswers: 0 }, ...overrides });
+/** A fetch stub that answers the summary read with `response` and passes every other request to `fetch`, which never sees it. */
+export function withLookup(fetch: (path: string, init: RequestInit) => unknown, response: () => unknown = () => lookupResponse()) {
+  return (path: string, init?: RequestInit) => /\/lookup$/.test(String(path)) && (!init?.method || init.method === 'GET') ? json(response()) : fetch(path, init as RequestInit);
+}

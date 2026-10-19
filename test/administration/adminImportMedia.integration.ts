@@ -82,7 +82,7 @@
  *   - a Draft v2 approval of one primary entry publishes in reviewed Disc order with Disc Numbers and its join phrase on the Album Credit, frozen as format 3
  *   - an unknown Disc Number writes no Disc Number, and an append with a reviewed Disc Number re-derives the target order
  *   - a new Album without a primary Artist entry is refused before freezing, writing nothing
- *   - a stored value the editor cannot show is never frozen, and only a pending suggestion the editor shows holds the approval
+ *   - a stored value the editor cannot show is never frozen, and only a pending suggestion the editor shows needs an answer in the approval's ticks
  *   - a legacy approval commits its frozen v1 snapshot unchanged on a project already converted to Draft v2
  *   - reconciliation reserves the copies of unresolved format-3 approvals, including several Artist entries and a label
  *   - a project reviewed before Draft v2 converts at approval and publishes with its saved Artist decision as format 3, without Disc Numbers
@@ -1261,7 +1261,7 @@ test('a new Album without a primary Artist entry is refused before freezing, wri
     await runAdminImportPublicationOnce(storage);
     assert.equal((await getAdminImport(actor.toHexString(), id)).item.publication, 'complete');
 });
-test('a stored value the editor cannot show is never frozen, and only a pending suggestion the editor shows holds the approval', async () => {
+test('a stored value the editor cannot show is never frozen, and only a pending suggestion the editor shows needs an answer in the approval\'s ticks', async () => {
     const storage = new Storage(), project = await prepared(storage), id = project.item.id, projects = getDb()!.collection('adminAlbumImports');
     // A converted v1 project can hold values over a bound after NFC (U+0958 stores two code units): the editor shows them empty.
     const nukta = String.fromCodePoint(0x958), set = (fields: Record<string, unknown>) => projects.updateOne({ _id: new ObjectId(id) }, { $set: fields });
@@ -1272,7 +1272,9 @@ test('a stored value the editor cannot show is never frozen, and only a pending 
     const suggestion = (name: string) => ({ id: 'f'.repeat(24), generation: 0, scope: 'album', slotId: null, field: 'artists', baseline: [], value: [{ key: randomUUID(), name, role: 'primary', joinPhrase: null, musicBrainzId: null }], source: 'folder', evidence: 'Synthetic Album', decision: 'pending' });
     await set({ 'draft.tracks.0.title': 'Synthetic Recording', suggestions: [suggestion('Readable Artist')] });
     const shown = await stored(id); assert.equal((await getAdminImport(actor.toHexString(), id)).item.suggestions.length, 1);
-    await assert.rejects(approveImport(actor.toHexString(), id), code('ADMIN_IMPORT_REVIEW_REQUIRED'));
+    // An editor that predates ticks cannot answer it, and a tick state that leaves it out is refused.
+    await assert.rejects(approveImport(actor.toHexString(), id), code('ADMIN_IMPORT_RELOAD_REQUIRED'));
+    await assert.rejects(approveImport(actor.toHexString(), id, { suggestionTicks: { generation: 0, ticked: [], unticked: [] } }), code('ADMIN_IMPORT_REVIEW_REQUIRED'));
     assert.deepEqual(await stored(id), shown);
     // An unreadable pending suggestion is not shown, so it can never be decided and does not hold the approval.
     await set({ suggestions: [suggestion(nukta.repeat(150).normalize('NFC'))] });

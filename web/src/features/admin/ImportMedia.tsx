@@ -4,7 +4,7 @@
  * Internal
  *   Types: AssetRecovery, ReviewedMedia, MediaConfirmation
  *   Functions: ChecklistUnavailable, assetStamp
- *   Constants: ImportApprovalChecklist, refusal
+ *   Constants: ImportApprovalChecklist, ImportSummary, refusal
  * @end-catalog */
 
 import { lazy, Suspense, useRef, useState, type ComponentProps, type ComponentType } from 'react';
@@ -14,6 +14,7 @@ import type { ImportDetail, ImportDraftV2 } from './adminApi';
 import { importPath } from './adminApi';
 import type { ImportDraftChange } from './importDraftPatch';
 import type { ApprovalState, ImportApprovalChecklist as ApprovalChecklist } from './ImportApprovalChecklist';
+import type { ImportSummary as Summary } from './ImportSummary';
 import { useAdminAccess, useAdminText } from './AdminAccess';
 import { adminWorkspace } from './adminWorkspace';
 import { useOnline } from './useAdminOnline';
@@ -29,6 +30,9 @@ function ChecklistUnavailable() { const t = useAdminText(); return <p role="aler
 // failed load stays inside the dialog, so the page and its unsaved edits survive.
 const ImportApprovalChecklist = lazy<ComponentType<ComponentProps<typeof ApprovalChecklist>>>(() => import('./ImportApprovalChecklist')
   .then(module => ({ default: module.ImportApprovalChecklist }), () => ({ default: ChecklistUnavailable })));
+// The Review and publish summary loads on its own, as the checklist does, and opens this panel's publication confirmation.
+const ImportSummary = lazy<ComponentType<ComponentProps<typeof Summary>>>(() => import('./ImportSummary')
+  .then(module => ({ default: module.ImportSummary }), () => ({ default: ChecklistUnavailable })));
 
 type AssetRecovery = NonNullable<ImportDetail['assets'][number]['recovery']>;
 interface ReviewedMedia { importId: string; revision: number; label: string }
@@ -46,11 +50,14 @@ const refusal: Record<string, string> = { content_changed: 'upload.refused_chang
  * Uploads run in the one-approval queue; this section shows each file's outcome and its explicit recovery actions.
  * The import page owns the queue subscription and passes it in, which keeps the queue engine out of this panel's bundle.
  * Publishing is one step: the confirmation freezes the project, the editor's draft and its unsaved changes as Publish is chosen,
- * and approving sends them with the shown decisions and cover (`publishDisabled` gates only this; other actions need a saved draft).
+ * and approving sends them with the shown decisions, cover and Luna ticks (`publishDisabled` gates only this; other actions need a
+ * saved draft). When ticked suggestions rename rows that then need a decision, the checklist may instead apply them to the saved
+ * draft, which closes the confirmation. The `summary` view is the Review and publish summary, whose Publish opens the same
+ * confirmation.
  */
 export function ImportMedia({ item, operation, uploads, disabled, publishDisabled = disabled, approval = { draft: item.draft, changes: [] }, view, active = true }: {
   item: ImportDetail; operation: AdminMutation; uploads: ImportUploadQueueView; disabled: boolean; publishDisabled?: boolean;
-  approval?: { draft: ImportDraftV2; changes: ImportDraftChange[] }; view?: 'files' | 'publication'; active?: boolean;
+  approval?: { draft: ImportDraftV2; changes: ImportDraftChange[] }; view?: 'summary' | 'files' | 'publication'; active?: boolean;
 }) {
   const t = useAdminText(), access = useAdminAccess(), online = useOnline();
   const [confirmation, setConfirmation] = useState<MediaConfirmation | null>(null);
@@ -114,6 +121,23 @@ export function ImportMedia({ item, operation, uploads, disabled, publishDisable
   const appendDecided = item.decisions.some(decision => decision.scope === 'album' && decision.action === 'reuse');
   const badge = (queued: UploadFileStatus | undefined, asset: ImportDetail['assets'][number] | undefined) => queued && ['queued', 'uploading'].includes(queued.state) ? t(`upload.${queued.state}`)
     : asset ? t(`asset.${asset.state}`) : queued && ['ready', 'unknown', 'failed'].includes(queued.state) ? t(`asset.${queued.state}`) : t('asset.not_started');
+  const dialog = confirmation && <ModalDialog title={t(confirmation.kind === 'cancelPublication' ? 'publication.cancel_confirm' : confirmation.kind === 'remove' ? 'media.confirm_remove' : 'media.confirm_publish')} description={t(confirmation.kind === 'cancelPublication' ? 'publication.cancel_confirm_copy' : confirmation.kind === 'publish' ? 'media.confirm_publish_copy' : 'media.confirm_copy')} headerContent={<div className={styles.target}><strong>{confirmation.label}</strong></div>} initialFocusRef={focus} onClose={closeConfirmation}>
+      {confirmation.kind === 'publish' && <Suspense fallback={<p role="status">{t('common.loading')}</p>}>
+        <ImportApprovalChecklist item={confirmation.item} draft={confirmation.draft} changes={confirmation.changes} onChange={setApproved}
+          onAdopt={body => { operation.run(`${path}/adopt`, 'POST', { expectedRevision: item.revision, ...body }); closeConfirmation(); }} /></Suspense>}
+      {confirmationStale && <p role="alert">{t('common.conflict')}</p>}
+      <div className={styles.dialogActions}><button ref={focus} className={styles.button} onClick={closeConfirmation}>{t(confirmation.kind === 'cancelPublication' ? 'action.keep_reviewing' : 'common.cancel')}</button>
+        <button className={`${styles.button} ${styles.primary}`} disabled={confirmationLocked} onClick={() => {
+          if (confirmationLocked) return;
+          const reviewedPath = importPath(confirmation.importId);
+          if (confirmation.kind === 'remove') { forgetSource(confirmation.slotId); operation.cleanup(`${reviewedPath}/assets/${encodeURIComponent(confirmation.slotId)}`, confirmation.revision, confirmation.recovery); }
+          else if (confirmation.kind === 'cancelPublication') operation.run(`${reviewedPath}/cancel-publication`, 'POST', { expectedRevision: confirmation.revision, publicationOperationId: confirmation.publicationOperationId });
+          else if (approved) operation.run(`${reviewedPath}/publish`, 'POST', approved.body);
+          closeConfirmation();
+        }}>{t(confirmation.kind === 'cancelPublication' ? 'action.cancel_approval' : confirmation.kind === 'remove' ? 'action.cleanup' : 'action.publish')}</button></div>
+    </ModalDialog>;
+  if (view === 'summary') return <><Suspense fallback={null}><ImportSummary item={item} operation={operation} uploads={uploads} disabled={disabled}
+    publishDisabled={publishDisabled || publicationLocked || !item.capabilities.publish} approval={approval} onPublish={openPublication} /></Suspense>{dialog}</>;
   return <section className={styles.panel}>
     <header className={styles.sectionHeader}><div><h2>{t(view ? `section.${view}` : 'media.title')}</h2>{view !== 'publication' && <p className={styles.muted}>{t(item.capabilities.upload ? 'media.copy' : 'import.no_upload')}</p>}</div></header>
     {view !== 'publication' && <>
@@ -169,19 +193,6 @@ export function ImportMedia({ item, operation, uploads, disabled, publishDisable
     {canCancelPublication && <button className={styles.button} disabled={disabled} onClick={() => { if (publishOperation) setConfirmation({ kind: 'cancelPublication', importId: item.id, revision: item.revision, label, publicationOperationId: publishOperation }); }}>{t('action.cancel_approval')}</button>}
     {publicationCleanup && publishOperation && <button className={styles.button} disabled={disabled} onClick={() => operation.resume(`${path}/resume-publication`, publishOperation)}>{t('action.recover')}</button>}
     </div></div>}
-    {confirmation && <ModalDialog title={t(confirmation.kind === 'cancelPublication' ? 'publication.cancel_confirm' : confirmation.kind === 'remove' ? 'media.confirm_remove' : 'media.confirm_publish')} description={t(confirmation.kind === 'cancelPublication' ? 'publication.cancel_confirm_copy' : confirmation.kind === 'publish' ? 'media.confirm_publish_copy' : 'media.confirm_copy')} headerContent={<div className={styles.target}><strong>{confirmation.label}</strong></div>} initialFocusRef={focus} onClose={closeConfirmation}>
-      {confirmation.kind === 'publish' && <Suspense fallback={<p role="status">{t('common.loading')}</p>}>
-        <ImportApprovalChecklist item={confirmation.item} draft={confirmation.draft} changes={confirmation.changes} onChange={setApproved} /></Suspense>}
-      {confirmationStale && <p role="alert">{t('common.conflict')}</p>}
-      <div className={styles.dialogActions}><button ref={focus} className={styles.button} onClick={closeConfirmation}>{t(confirmation.kind === 'cancelPublication' ? 'action.keep_reviewing' : 'common.cancel')}</button>
-        <button className={`${styles.button} ${styles.primary}`} disabled={confirmationLocked} onClick={() => {
-          if (confirmationLocked) return;
-          const reviewedPath = importPath(confirmation.importId);
-          if (confirmation.kind === 'remove') { forgetSource(confirmation.slotId); operation.cleanup(`${reviewedPath}/assets/${encodeURIComponent(confirmation.slotId)}`, confirmation.revision, confirmation.recovery); }
-          else if (confirmation.kind === 'cancelPublication') operation.run(`${reviewedPath}/cancel-publication`, 'POST', { expectedRevision: confirmation.revision, publicationOperationId: confirmation.publicationOperationId });
-          else if (approved) operation.run(`${reviewedPath}/publish`, 'POST', approved.body);
-          closeConfirmation();
-        }}>{t(confirmation.kind === 'cancelPublication' ? 'action.cancel_approval' : confirmation.kind === 'remove' ? 'action.cleanup' : 'action.publish')}</button></div>
-    </ModalDialog>}
+    {dialog}
   </section>;
 }

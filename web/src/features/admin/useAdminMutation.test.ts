@@ -1,3 +1,5 @@
+import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { join } from 'node:path';
 import { captureAccountOperation } from '../../api/accountEpoch';
 import { adminWorkspace } from './adminWorkspace';
 import { AdminMutation } from './useAdminMutation';
@@ -51,4 +53,38 @@ test('a lost metadata lookup response is confirmed by its lookup receipt in the 
   const item = detailSchema.parse({ ...detail(), revision: 3, receipts: [{ operationId, kind: 'lookup-choose', revision: 3 }] });
   operation.reconcile(item);
   expect(operation.getSnapshot()).toEqual({ running: false, intent: null, error: null, result: { item, receipt: { operationId, kind: 'lookup-choose', revision: 3 } } });
+});
+
+test('each metadata lookup refusal is a definite refusal with its own message, never an edit conflict to reread or an outcome to retry', async () => {
+  const refusals = [['ADMIN_IMPORT_LOOKUP_ACTIVE', 409, 'lookup_active'], ['ADMIN_IMPORT_LOOKUP_UNAVAILABLE', 503, 'lookup_unavailable'], ['ADMIN_IMPORT_LOOKUP_REFUSED', 409, 'lookup_refused'],
+    ['ADMIN_IMPORT_LOOKUP_INVALID_NAME', 400, 'lookup_invalid_name'], ['ADMIN_IMPORT_LOOKUP_NOTHING_TO_RETRY', 409, 'lookup_nothing_to_retry'], ['ADMIN_IMPORT_LOOKUP_STALE', 409, 'lookup_stale'],
+    ['ADMIN_IMPORT_LOOKUP_CANDIDATE_INCOMPLETE', 409, 'lookup_candidate_incomplete']] as const;
+  for (const [code, status, error] of refusals) {
+    const fetch = vi.fn(async () => json({ code }, status)); vi.stubGlobal('fetch', fetch);
+    const operation = new AdminMutation(), completed = vi.fn();
+    operation.run('/item/lookup/retry', 'POST', { expectedRevision: 1 }, completed);
+    await vi.waitFor(() => expect(operation.getSnapshot().error).toBe(error));
+    expect(operation.getSnapshot()).toEqual({ running: false, intent: null, error, result: null });
+    operation.retry(); expect(fetch).toHaveBeenCalledOnce(); expect(completed).not.toHaveBeenCalled();
+  }
+  // Publishing while a lookup runs is that same refusal; an unrelated 503 stays an unknown outcome to retry.
+  vi.stubGlobal('fetch', vi.fn(async () => json({ code: 'SERVICE_UNAVAILABLE' }, 503)));
+  const unknown = new AdminMutation(); unknown.run('/item/publish', 'POST', { expectedRevision: 1 });
+  await vi.waitFor(() => expect(unknown.getSnapshot().error).toBe('unknown'));
+  expect(unknown.getSnapshot().intent).not.toBeNull();
+});
+
+test('every refusal the server throws with a message of its own (each metadata lookup code and the append primary refusal) has that message in the catalog', () => {
+  // Read from the server source and the English locale (relative to the web workspace the tests run in), so a code added on the
+  // server without its message fails here; nothing of this reaches the bundle.
+  const root = '..', codes = new Set<string>();
+  const walk = (directory: string): void => { for (const name of readdirSync(directory)) {
+    const path = join(directory, name);
+    if (statSync(path).isDirectory()) walk(path);
+    else if (name.endsWith('.ts')) for (const match of readFileSync(path, 'utf8').matchAll(/'ADMIN_IMPORT_(LOOKUP_[A-Z_]+|APPEND_PRIMARY_REQUIRED)'/g)) codes.add(match[1]);
+  } };
+  walk(join(root, 'src'));
+  const messages = JSON.parse(readFileSync(join(root, 'localization/locales/en-US.json'), 'utf8')) as Record<string, string>;
+  expect(codes.size).toBeGreaterThanOrEqual(8);
+  for (const code of codes) expect(messages[`admin.common.${code.toLowerCase()}`], code).toEqual(expect.any(String));
 });

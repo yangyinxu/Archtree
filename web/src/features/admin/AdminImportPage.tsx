@@ -4,7 +4,7 @@
  * Internal
  *   Types: EditorBuffer
  *   Functions: loadDraftEditor, saved, ImportProject
- *   Constants: ImportDraftV2Editor, ImportAnalysisControls, ImportMedia, ImportReview, ImportDuplicates
+ *   Constants: ImportDraftV2Editor, ImportAnalysisControls, ImportMedia, ImportReview, ImportDuplicates, stages
  * @end-catalog */
 
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
@@ -27,6 +27,8 @@ const ImportMedia = lazy(() => import('./ImportMedia').then(module => ({ default
 const ImportReview = lazy(() => import('./ImportReview').then(module => ({ default: module.ImportReview })));
 const ImportDuplicates = lazy(() => import('./ImportDuplicates').then(module => ({ default: module.ImportDuplicates })));
 
+/** The import sections in tab order. */
+const stages = ['draft', 'review', 'files', 'publication'] as const;
 /** `base` is the saved draft the unsaved edits started from; a newer saved state (revision, then automatic writes) rebases them path by path (rebaseDraft). A save sends only the paths that differ from `base`. */
 interface EditorBuffer { draft: ImportDraftV2; base: ImportDraftV2; revision: number; valueRevision: number; dirty: boolean; selected: string[] }
 const saved = (item: ImportDetail, selected: string[] = []): EditorBuffer => ({ draft: item.draft, base: item.draft, revision: item.revision, valueRevision: item.valueRevision, dirty: false, selected });
@@ -106,6 +108,9 @@ function ImportProject({ id }: { id: string }) {
   const active = item && ['queued', 'running'].includes(item.analysis.state);
   const publicationCleanup = item?.publication === 'cancelled' && Boolean(item.publicationRecovery?.cleanupPending);
   const mutate = (action: string, payload: object) => { if (item) mutation.operation.run(`${path}/${action}`, 'POST', { expectedRevision: item.revision, ...payload }); };
+  // The Review and publish summary (above the sections) and the Files and Publish sections share one media panel and its confirmation.
+  const media = (view: 'summary' | 'files' | 'publication') => <Suspense fallback={<p role="status">{t('common.loading')}</p>}><ImportMedia view={view} active={stage === view} item={item!} operation={mutation.operation} uploads={uploads} disabled={locked || editor!.dirty || conflict || Boolean(active)}
+    publishDisabled={locked || conflict || Boolean(active)} approval={{ draft: editor!.draft, changes }} /></Suspense>;
   return <section className={styles.page}><AdminNav />
     <Link className={styles.back} to="/admin/imports">{t('common.back')}</Link>
     <header className={styles.header}><div><h1 className={styles.title}>{item?.draft.album.title || item?.manifest.rootLabel || t('common.untitled')}</h1>{item && item.draft.album.artists.length > 0 && <p className={styles.meta}>{artistByline(item.draft)}</p>}</div>
@@ -117,7 +122,8 @@ function ImportProject({ id }: { id: string }) {
     {item && editor && <>
       <ImportStages item={item} />
       <p className={styles.meta}>{t('common.last_updated', { date: new Date(item.updatedAt).toLocaleString() })}</p>
-      <div role="tablist" aria-label={t('workbench.title')} className={styles.filters}>{(['draft', 'review', 'files', 'publication'] as const).map(value => <button key={value} id={`import-tab-${value}`} role="tab" type="button" className={styles.filter} aria-selected={stage === value} tabIndex={stage === value ? 0 : -1} onKeyDown={event => { const stages = ['draft', 'review', 'files', 'publication'] as const; const index = stages.indexOf(value); const next = event.key === 'ArrowRight' ? stages[(index + 1) % stages.length] : event.key === 'ArrowLeft' ? stages[(index + stages.length - 1) % stages.length] : event.key === 'Home' ? stages[0] : event.key === 'End' ? stages[3] : null; if (next) { event.preventDefault(); setStage(next); document.getElementById(`import-tab-${next}`)?.focus(); } }} aria-controls={`import-panel-${value}`} onClick={() => setStage(value)}>{t(`section.${value}`)}</button>)}</div>
+      {media('summary')}
+      <div role="tablist" aria-label={t('workbench.title')} className={styles.filters}>{stages.map(value => <button key={value} id={`import-tab-${value}`} role="tab" type="button" className={styles.filter} aria-selected={stage === value} tabIndex={stage === value ? 0 : -1} onKeyDown={event => { const index = stages.indexOf(value); const next = event.key === 'ArrowRight' ? stages[(index + 1) % stages.length] : event.key === 'ArrowLeft' ? stages[(index + stages.length - 1) % stages.length] : event.key === 'Home' ? stages[0] : event.key === 'End' ? stages[3] : null; if (next) { event.preventDefault(); setStage(next); document.getElementById(`import-tab-${next}`)?.focus(); } }} aria-controls={`import-panel-${value}`} onClick={() => setStage(value)}>{t(`section.${value}`)}</button>)}</div>
       {conflict && <section role="alert" className={styles.error}><p>{t('common.conflict')}</p>
         <details><summary>{t('review.saved_version')}</summary><pre className={styles.rawDraft}>{JSON.stringify(item.draft, null, 2)}</pre></details>
         <button className={styles.button} onClick={() => setEditor(saved(item))}>{t('review.load_saved')}</button>
@@ -140,8 +146,7 @@ function ImportProject({ id }: { id: string }) {
       </div>
       {(['files', 'publication'] as const).map(value => <div key={value} hidden={stage !== value} role="tabpanel" id={`import-panel-${value}`} aria-labelledby={`import-tab-${value}`}>
       {/* Publishing includes unsaved edits (one-step approval); cover, cleanup and cancellation still act on the saved draft. */}
-      <Suspense fallback={<p role="status">{t('common.loading')}</p>}><ImportMedia view={value} active={stage === value} item={item} operation={mutation.operation} uploads={uploads} disabled={locked || editor.dirty || conflict || Boolean(active)}
-        publishDisabled={locked || conflict || Boolean(active)} approval={{ draft: editor.draft, changes }} /></Suspense>
+      {media(value)}
       </div>)}
     </>}
   </section>;

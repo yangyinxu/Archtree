@@ -16,7 +16,7 @@ import { expect, test, type Page } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { capabilities, detail, session, viewer } from '../src/features/admin/adminFixtures.testSupport';
+import { capabilities, detail, lookupResponse, session, viewer } from '../src/features/admin/adminFixtures.testSupport';
 
 /** An original synthetic tone fixture exercises the full decoder without music rights or external services. */
 function wave(seconds = 2) {
@@ -231,6 +231,8 @@ test('a conversion-created import uploads its MP3s through the same one-approval
       item = { ...item, revision: item.revision + 1, assets: [...item.assets, { slotId: slot, state: 'ready', byteLength: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex'), contentType: 'audio/mpeg', tags: null, recovery: { operationId, expectedRevision: Number(request.headers()['if-match']), kind: 'upload', startedByMe: true } }] };
       active--; return route.fulfill({ json: { item, receipt: { operationId, kind: 'upload', revision: item.revision } }, headers });
     }
+    // The Review and publish summary reads its own shape; every other import read answers the project.
+    if (request.method() === 'GET' && path.endsWith('/lookup')) return route.fulfill({ json: lookupResponse({}, item), headers });
     if (path.startsWith('/api/admin/v1/imports/')) return route.fulfill({ json: { item, receipt: null }, headers });
     return route.fulfill({ status: 503, json: { code: 'synthetic_unavailable' }, headers });
   });

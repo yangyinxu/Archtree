@@ -19,7 +19,9 @@ import { boundImportApproval, saveImportApproval } from './adminImportApproval';
 import { getAdminImport, importCandidateProjection, importCollection, importLookupRecord, importPurposeFilter, importCandidateRevision, mutateAdminImport, withImportAdmin } from './adminImportService';
 import { importPrivateStorageReady, importPublicationSupported, type ImportAsset, type ImportPublication } from './adminImportMediaTypes';
 import { hasOwn, sameDraftValue, type ImportDecisionV2 } from './adminImportDraft';
-import { importDraftV2View, importSuggestionsV2View } from './adminImportDraftCompat';
+import { importDraftV2View } from './adminImportDraftCompat';
+import { applySuggestionTicks, boundSuggestionTicks } from './adminImportLunaTicks';
+import { importUploadsWaiting } from './adminImportSummary';
 import { draftV2Paths, markAdministratorValues } from './adminImportValueState';
 import { defaultImportObjectStorage, importAssetTarget, type ImportObjectStorage, type ImportObjectTarget, type ImportObjectIdentity } from './adminImportStorage';
 import { assertImportPreselectionsCurrent, importIdentityCandidates, importIdentityPreselections, sameImportPreselections } from './adminImportIdentity';
@@ -32,7 +34,8 @@ const candidateProjection = importCandidateProjection;
 const lookupGateProjection = { run: 1, state: 1, 'ranking.preselection': 1, 'ranking.groups.groupKey': 1, applied: 1 } as const;
 
 /**
- * Explicit one-step approval `{operationId, expectedRevision, changes, decisions, selectedCoverSlotId, approvalDigest}` creates one
+ * Explicit one-step approval `{operationId, expectedRevision, changes, decisions, selectedCoverSlotId, approvalDigest,
+ * suggestionTicks}` creates one
  * Album or appends only missing tracks to the exact reviewed existing Album. It is admitted at any project revision up to the
  * current one: the approvalDigest is its binding, so Luna, the publication worker and tag automation never make it stale unless
  * they changed what the confirmation showed. One transaction and one receipt save what the confirmation showed (adminImportApproval.ts) and freeze
@@ -42,13 +45,17 @@ const lookupGateProjection = { run: 1, state: 1, 'ranking.preselection': 1, 'ran
  * confirmation showed) any other set of preselections, is ADMIN_IMPORT_REVIEW_REQUIRED, writing nothing. A body without
  * the one-step fields or with decisions lacking bound names replays its stored receipt, or otherwise is refused with
  * ADMIN_IMPORT_RELOAD_REQUIRED (importPolicy). The raw body is fingerprinted as sent, so an earlier receipt still matches.
+ * The Luna tick state the confirmation showed is applied right after the shown changes (applySuggestionTicks): pending
+ * suggestions never hold the approval, while a queued or running analysis still does (ADMIN_IMPORT_REVIEW_REQUIRED). An upload
+ * still in flight, or a file a published track needs without a confirmed upload, is ADMIN_IMPORT_UPLOAD_INCOMPLETE
+ * (importUploadsWaiting, the summary's own upload wait).
  * Metadata lookup gates it in the same transaction: a queued, running or automatically retrying run is
  * ADMIN_IMPORT_LOOKUP_ACTIVE, and an unanswered tie or conflict (Album conflicts not for an append) is
  * ADMIN_IMPORT_REVIEW_REQUIRED; an admitted approval writes the lookup gate, so a run started concurrently conflicts with it.
  */
 export async function publishAdminImport(actor: string, id: string, raw: unknown) {
-    const body = record(raw); exact(body, ['operationId', 'expectedRevision', ...IMPORT_APPROVAL_FIELDS, 'preselections']); if (!uuid(body.operationId) || !Number.isSafeInteger(body.expectedRevision) || (body.expectedRevision as number) < 1) throw new AdminImportError(400, 'ADMIN_IMPORT_INVALID_INPUT');
-    boundImportApproval(body);
+    const body = record(raw); exact(body, ['operationId', 'expectedRevision', ...IMPORT_APPROVAL_FIELDS, 'preselections', 'suggestionTicks']); if (!uuid(body.operationId) || !Number.isSafeInteger(body.expectedRevision) || (body.expectedRevision as number) < 1) throw new AdminImportError(400, 'ADMIN_IMPORT_INVALID_INPUT');
+    boundImportApproval(body); if (hasOwn(body, 'suggestionTicks')) boundSuggestionTicks(body.suggestionTicks);
     const result = await mutateAdminImport(actor, id, body as typeof body & { operationId: string; expectedRevision: number }, 'publish', async (doc, session) => {
         ready();
         if ((doc.media?.publicationHistory?.length ?? 0) + (doc.media?.publication ? 1 : 0) >= ADMIN_IMPORT_LIMITS.publications) throw new AdminImportError(409, 'ADMIN_IMPORT_PUBLICATION_APPROVAL_LIMIT');
@@ -61,9 +68,9 @@ export async function publishAdminImport(actor: string, id: string, raw: unknown
         // The lookup record is read in this transaction; the gate written below fences a run started concurrently.
         const lookup = await importLookupRecord(doc._id, session, lookupGateProjection);
         const draft = await saveImportApproval(doc, body, actor, session, lookup);
-        // Only a pending suggestion the editor shows, and so can decide, holds the approval; one it cannot read never blocks it.
-        const slots = new Set(doc.manifest.files.map(file => file.slotId)), shown = importSuggestionsV2View(doc.suggestions, doc.analysis.generation, slots, id);
-        if (['queued', 'running'].includes(doc.analysis.state) || shown.some(suggestion => suggestion.decision === 'pending')) throw new AdminImportError(409, 'ADMIN_IMPORT_REVIEW_REQUIRED');
+        // Ticked Luna suggestions apply after the shown changes, so identities below are read for the values they write.
+        applySuggestionTicks(doc, draft, hasOwn(body, 'suggestionTicks') ? body.suggestionTicks : undefined);
+        if (['queued', 'running'].includes(doc.analysis.state)) throw new AdminImportError(409, 'ADMIN_IMPORT_REVIEW_REQUIRED');
         // A stopped, unavailable, superseded or completed run never holds the approval as active; a tie of the current run or an
         // unanswered conflict of the applied candidate still does below, whatever the current run's state.
         if (doc.lookupGate?.blocking === true || isBlockingLookupState(lookup?.state)) throw new AdminImportError(409, 'ADMIN_IMPORT_LOOKUP_ACTIVE');
@@ -78,6 +85,8 @@ export async function publishAdminImport(actor: string, id: string, raw: unknown
         const preselections = importIdentityPreselections(draft, explicit, candidates);
         if (hasOwn(body, 'preselections') && !sameImportPreselections(body.preselections as unknown[], preselections)) throw new AdminImportError(409, 'ADMIN_IMPORT_REVIEW_REQUIRED');
         const decisions = [...explicit, ...preselections];
+        // As the summary waits: no upload may still be in flight, and every file a published track needs is confirmed.
+        if (importUploadsWaiting(doc, decisions, new Date())) throw new AdminImportError(409, 'ADMIN_IMPORT_UPLOAD_INCOMPLETE');
         // A new Album needs a primary Artist entry; an append credits the target Album's own primaries instead.
         const albumDecision = decisions.find(decision => decision.scope === 'album'), append = albumDecision?.action === 'reuse';
         if (!append && !draft.album.artists.some(entry => entry.role === 'primary')) throw new AdminImportError(400, 'ADMIN_IMPORT_DRAFT_INCOMPLETE');

@@ -4,8 +4,8 @@ import { artistEntrySchema, importDateSchema, labelEntrySchema, uuidSchema } fro
 /**
  * The strict schema of an import's metadata lookup view (GET /api/admin/v1/imports/:id/lookup), mirroring the server's allowlist
  * (src/administration/lookup/lookupView.ts): bounded candidate evidence, groups, the preselection, the applied values with their
- * conflicts and flags, and what Publish waits for. No route imports it yet; the import summary lazy-loads it, so the import page's
- * initial bundle never carries it.
+ * conflicts and flags, and what Publish waits for; and the import's summary state (src/administration/import/adminImportSummary.ts).
+ * The summary read (importSummaryQuery.ts) loads it with the read, so no chunk that shares that query carries it.
  */
 const integer = z.number().int().nonnegative();
 const run = z.number().int().min(1);
@@ -54,7 +54,18 @@ export const lookupViewSchema = z.object({
   applied: appliedSchema.nullable(), staleFiles: z.array(uuidSchema).max(100),
   needsAnswer: z.object({ tie: z.boolean(), conflicts: z.array(valuePath).max(305) }).strict(), blocking: z.boolean()
 }).strict();
-/** The lookup view (null before any run) with the import's revision and automatic-write counter. */
-export const lookupResponseSchema = z.object({ lookup: lookupViewSchema.nullable(), revision: integer, valueRevision: integer }).strict();
+/**
+ * What the server decided for the summary: an append, the work Publish waits for, a new Album credited only by a placeholder,
+ * each shown Luna suggestion's tick state, the analysis budget left (project runs and calls, and calls today), whether this
+ * server can run metadata lookup and how many identity rows of the saved draft no decision or preselection answers.
+ */
+const summarySchema = z.object({
+  append: z.boolean(), waiting: z.object({ uploads: z.boolean(), lookup: z.boolean(), analysis: z.boolean() }).strict(), placeholderOnly: z.boolean(),
+  luna: z.array(z.object({ id: z.string().regex(/^[a-f0-9]{24}$/), tick: z.enum(['ticked', 'unticked', 'resolved', 'conflict']) }).strict()).max(1000),
+  analysis: z.object({ runs: integer, attempts: integer, daily: integer }).strict(), lookupAvailable: z.boolean(), identityAnswers: integer.max(1000)
+}).strict();
+/** The lookup view (null before any run) with the import's revision, automatic-write counter and summary state. */
+export const lookupResponseSchema = z.object({ lookup: lookupViewSchema.nullable(), revision: integer, valueRevision: integer, summary: summarySchema }).strict();
 export type ImportLookupView = z.infer<typeof lookupViewSchema>;
 export type ImportLookupResponse = z.infer<typeof lookupResponseSchema>;
+export type ImportSummaryState = z.infer<typeof summarySchema>;

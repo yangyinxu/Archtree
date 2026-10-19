@@ -25,7 +25,11 @@
  *   - a skipped decision, or a missing one for an entry or label that has a candidate, is no identity: publishing a new Album needs one for each, writing nothing
  *   - an append whose target has a primary Artist that is not ready is stale, and one whose Credits cannot be read needs a primary, both writing nothing
  *   - a reused label that stops being ready is refused before any copy, and an approval rewritten to credit one Artist twice is refused at commit, minting nothing
- *   - a stored Various Artists suggestion is hidden and never holds the approval, while a shown pending suggestion still does
+ *   - a stored Various Artists suggestion is hidden and never answered, while a shown pending suggestion is answered by the approval's ticks
+ *   - a ticked Luna suggestion is applied by the approval itself, all or nothing, and a running analysis still holds it
+ *   - a ticked suggestion that conflicts with the administrator's value refuses the whole approval writing nothing, and an admitted approval with ticks replays without applying twice
+ *   - a ticked Artist-entries suggestion replaces the entries and drops their decisions, so the approval must show the new entry's preselection
+ *   - a file whose track is explicitly skipped is not waited for: the summary stops waiting for its upload and the approval publishes without it, but not while its upload is in flight
  *   - one approval carries every entry, label, Album and track decision without a separate save, while two entries reusing one Artist are refused writing nothing
  *   - an import with no candidates publishes with no decision: every entry, the label, the Album and the track are frozen as preselected creates
  *   - a name candidate created after review requires a fresh review at approval, writing nothing, and its explicit answer then publishes
@@ -57,6 +61,7 @@ import { AdminImportError, type AdminImportDetailV2, type ImportDecisionDtoV2, t
 import { adminImportDuplicateCandidates, adoptAdminImportSuggestions, createAdminImport, decideAdminImportDuplicates, getAdminImport, initializeAdminImportStorage, listAdminImports, type AdminImportDocument } from '../../src/administration/import/adminImportService';
 import { selectAdminImportCover, uploadAdminImportAsset, type ImportObjectIdentity, type ImportObjectStorage, type ImportObjectTarget } from '../../src/administration/import/adminImportStorage';
 import { cancelAdminImportPublication, publishAdminImport, resumeAdminImportPublication, runAdminImportPublicationOnce } from '../../src/administration/import/adminImportPublisher';
+import { getAdminImportLookup } from '../../src/administration/lookup/metadataLookupRequests';
 import { approvalBody } from '../support/adminImportApproval';
 import type { ImportArtistEntry, ImportDecisionV2, ImportDraftV2 } from '../../src/administration/import/adminImportDraft';
 import { catalogSearchProjection } from '../../src/utils/catalogSearch';
@@ -460,7 +465,7 @@ test('a reused label that stops being ready is refused before any copy, and an a
     assert.deepEqual(await counts(), { artists: 0, organizations: 1, albums: 0, audioTracks: 0, imageAssets: 0 });
 });
 
-test('a stored Various Artists suggestion is hidden and never holds the approval, while a shown pending suggestion still does', async () => {
+test('a stored Various Artists suggestion is hidden and never answered, while a shown pending suggestion is answered by the approval\'s ticks', async () => {
     const storage = new Storage(), item = await decided(await reviewed(storage)), generation = item.analysis.generation;
     const shell = { scope: 'album', slotId: null, source: 'folder', evidence: 'Synthetic Folder', generation, decision: 'pending' };
     const placeholder = { ...shell, id: 'a'.repeat(24), field: 'artists', baseline: [], value: [{ key: randomUUID(), name: 'Various Artists', role: 'primary', joinPhrase: null, musicBrainzId: null }] };
@@ -470,17 +475,119 @@ test('a stored Various Artists suggestion is hidden and never holds the approval
     const pending = async () => (await listAdminImports(by, {})).items.find(value => value.id === item.id)!.pendingSuggestions;
     assert.equal(await pending(), 1, 'the workbench counts only the shown suggestion');
     const before = await stored(item.id);
-    await assert.rejects(publishAdminImport(by, item.id, approvalBody(item)), code('ADMIN_IMPORT_REVIEW_REQUIRED'));
+    // An editor that predates ticks shows no tick state for the pending suggestion, so its approval asks for a reload.
+    await assert.rejects(publishAdminImport(by, item.id, approvalBody(item)), code('ADMIN_IMPORT_RELOAD_REQUIRED'));
+    // A tick state that leaves the shown suggestion unanswered, or that answers the hidden one, is refused.
+    await assert.rejects(publishAdminImport(by, item.id, approvalBody(item, { suggestionTicks: { generation, ticked: [], unticked: [] } })), code('ADMIN_IMPORT_REVIEW_REQUIRED'));
+    await assert.rejects(publishAdminImport(by, item.id, approvalBody(item, { suggestionTicks: { generation, ticked: [placeholder.id], unticked: [title.id] } })), code('ADMIN_IMPORT_SUGGESTION_STALE'));
     assert.deepEqual(await stored(item.id), before);
     // The hidden placeholder cannot be accepted through /adopt (an editor opened before this release might still send it).
     await assert.rejects(adoptAdminImportSuggestions(by, item.id, { ...mutation(item.revision), generation, selectedIds: [placeholder.id], rejectIds: [] }), code('ADMIN_IMPORT_SUGGESTION_STALE'));
     assert.deepEqual(await stored(item.id), before);
-    // Once the shown suggestion is decided, the hidden one still pending in storage does not hold the approval or count as pending.
-    await imports().updateOne({ _id: new ObjectId(item.id) }, { $set: { 'suggestions.1.decision': 'rejected' } });
-    assert.deepEqual((await getAdminImport(by, item.id)).item.suggestions.map(value => [value.id, value.decision]), [[title.id, 'rejected']]);
-    assert.equal(await pending(), 0);
-    const done = await publishNow(storage, item);
+    // Approving with the shown suggestion unticked rejects it in the same step and keeps the current title; the hidden one stays as stored.
+    await publishAdminImport(by, item.id, approvalBody(item, { suggestionTicks: { generation, ticked: [], unticked: [title.id] } }));
+    const approved = await stored(item.id);
+    assert.deepEqual(approved.suggestions.map(value => [value.id, value.decision]), [[placeholder.id, 'pending'], [title.id, 'rejected']]);
+    assert.deepEqual([approved.media!.publication!.snapshot.album.title, await pending()], ['Amet Collection', 0]);
+    await runAdminImportPublicationOnce(storage, item.id);
+    const done = (await getAdminImport(by, item.id)).item;
     assert.equal(done.publication, 'complete'); assert.equal(await db().collection('artists').countDocuments({ name: 'Various Artists' }), 0);
+});
+
+test('a ticked Luna suggestion is applied by the approval itself, all or nothing, and a running analysis still holds it', async () => {
+    const storage = new Storage(), item = await decided(await reviewed(storage)), generation = item.analysis.generation;
+    const shell = { scope: 'album', slotId: null, source: 'folder', evidence: 'Synthetic Folder', generation, decision: 'pending' };
+    const date = { ...shell, id: 'c'.repeat(24), field: 'releaseDate', baseline: releaseDate, value: { year: 2025, month: null, day: null } };
+    const track = { ...shell, id: 'd'.repeat(24), scope: 'track', slotId: item.draft.tracks[0].slotId, field: 'trackNumber', baseline: 1, value: 1 };
+    await imports().updateOne({ _id: new ObjectId(item.id) }, { $set: { suggestions: [date, track] as unknown as AdminImportDocument['suggestions'] } });
+    const before = await stored(item.id), ticks = { generation, ticked: [date.id], unticked: [] };
+    await imports().updateOne({ _id: new ObjectId(item.id) }, { $set: { 'analysis.state': 'running' } });
+    await assert.rejects(publishAdminImport(by, item.id, approvalBody(item, { suggestionTicks: ticks })), code('ADMIN_IMPORT_REVIEW_REQUIRED'));
+    assert.deepEqual(await stored(item.id), { ...before, analysis: { ...before.analysis, state: 'running' } });
+    await imports().updateOne({ _id: new ObjectId(item.id) }, { $set: { 'analysis.state': before.analysis.state } });
+    // The equal track-number suggestion resolves itself and needs no tick; the ticked date is written and frozen with the approval.
+    await publishAdminImport(by, item.id, approvalBody(item, { suggestionTicks: ticks }));
+    const approved = await stored(item.id);
+    assert.deepEqual(approved.suggestions.map(value => value.decision), ['accepted', 'accepted']);
+    assert.deepEqual([(approved.draft as ImportDraftV2).album.releaseDate, approved.media!.publication!.snapshot.album.releaseDate], [date.value, date.value]);
+    await runAdminImportPublicationOnce(storage, item.id);
+    assert.equal((await row('albums', (await getAdminImport(by, item.id)).item.published!.albumId))!.releaseDate.year, 2025);
+});
+
+test('a ticked suggestion that conflicts with the administrator\'s value refuses the whole approval writing nothing, and an admitted approval with ticks replays without applying twice', async () => {
+    const storage = new Storage(), item = await decided(await reviewed(storage)), generation = item.analysis.generation;
+    const shell = { scope: 'album', slotId: null, source: 'folder', evidence: 'Synthetic Folder', generation, decision: 'pending' };
+    // The title changed after analysis (its baseline is not the administrator's current title); the date did not. The date is
+    // stored first, so the refused approval below has already applied it in its transaction when the title is refused.
+    const title = { ...shell, id: 'c'.repeat(24), field: 'title', baseline: 'Earlier Title', value: 'Luna Title' };
+    const date = { ...shell, id: 'd'.repeat(24), field: 'releaseDate', baseline: releaseDate, value: { year: 2025, month: null, day: null } };
+    await imports().updateOne({ _id: new ObjectId(item.id) }, { $set: { suggestions: [date, title] as unknown as AdminImportDocument['suggestions'] } });
+    // The server's tick state: the administrator's own date arrives unticked, the changed title is a conflict.
+    assert.deepEqual((await getAdminImportLookup(by, item.id)).summary.luna, [{ id: date.id, tick: 'unticked' }, { id: title.id, tick: 'conflict' }]);
+    const before = await stored(item.id);
+    await assert.rejects(publishAdminImport(by, item.id, approvalBody(item, { suggestionTicks: { generation, ticked: [date.id, title.id], unticked: [] } })), code('ADMIN_IMPORT_FIELD_CONFLICT'));
+    assert.deepEqual(await stored(item.id), before, 'the ticked date applied before the refusal is rolled back with it');
+    // Unticked, the conflict is rejected and the ticked date is written in the same step.
+    const body = approvalBody(item, { suggestionTicks: { generation, ticked: [date.id], unticked: [title.id] } });
+    const first = await publishAdminImport(by, item.id, body), approved = await stored(item.id);
+    assert.deepEqual([approved.suggestions.map(value => value.decision), (approved.draft as ImportDraftV2).album.title, approved.media!.publication!.snapshot.album.releaseDate],
+        [['accepted', 'rejected'], 'Amet Collection', date.value]);
+    // A lost response replays the receipt and applies nothing again; the same operation with other ticks is another intent.
+    const replay = await publishAdminImport(by, item.id, body);
+    assert.deepEqual([first.receipt?.kind, replay.receipt, await stored(item.id)], ['publish', first.receipt, approved]);
+    await assert.rejects(publishAdminImport(by, item.id, { ...body, suggestionTicks: { generation, ticked: [], unticked: [title.id, date.id] } }), code('ADMIN_IMPORT_OPERATION_CONFLICT'));
+    assert.deepEqual(await stored(item.id), approved);
+});
+
+test('a ticked Artist-entries suggestion replaces the entries and drops their decisions, so the approval must show the new entry\'s preselection', async () => {
+    const storage = new Storage(), item = await decided(await reviewed(storage)), generation = item.analysis.generation;
+    const artists = { id: 'e'.repeat(24), generation, scope: 'album', slotId: null, field: 'artists', baseline: item.draft.album.artists, value: [entry('Luna Lead', 'primary')],
+        source: 'folder', evidence: 'Synthetic Folder', decision: 'pending' };
+    await imports().updateOne({ _id: new ObjectId(item.id) }, { $set: { suggestions: [artists] as unknown as AdminImportDocument['suggestions'] } });
+    assert.deepEqual((await getAdminImportLookup(by, item.id)).summary.luna, [{ id: artists.id, tick: 'unticked' }]);
+    const ticks = { generation, ticked: [artists.id], unticked: [] }, before = await stored(item.id);
+    // A confirmation that showed the ticked entry without a preselection (its name was never read for candidates) is refused.
+    await assert.rejects(publishAdminImport(by, item.id, approvalBody(item, { suggestionTicks: ticks, preselections: [] })), code('ADMIN_IMPORT_REVIEW_REQUIRED'));
+    assert.deepEqual(await stored(item.id), before);
+    await publishAdminImport(by, item.id, approvalBody(item, { suggestionTicks: ticks }));
+    const approved = await stored(item.id), publication = approved.media!.publication!;
+    assert.deepEqual([approved.suggestions[0].decision, (publication.snapshot as ImportDraftV2).album.artists.map(value => value.name)], ['accepted', ['Luna Lead']]);
+    // The decisions bound to the replaced entries are gone; the new entry is frozen as a preselected create.
+    assert.deepEqual(approved.decisions.filter(value => value.scope === 'artist'), []);
+    assert.deepEqual((publication.decisions as ImportDecisionV2[]).filter(value => value.scope === 'artist').map(value => [value.boundName, value.action, value.preselected]), [['Luna Lead', 'create-distinct', true]]);
+    await runAdminImportPublicationOnce(storage, item.id);
+    assert.deepEqual((await db().collection('artists').find().toArray()).map(value => value.name), ['Luna Lead']);
+});
+
+test('a file whose track is explicitly skipped is not waited for: the summary stops waiting for its upload and the approval publishes without it, but not while its upload is in flight', async () => {
+    const storage = new Storage(), slots = [randomUUID(), randomUUID()];
+    const created = await createAdminImport(by, { operationId: randomUUID(), manifest: { rootLabel: 'Synthetic Amet', files: [{ slotId: slots[0], filename: file().originalname, relativePath: file().originalname, byteLength: file().size },
+        { slotId: slots[1], filename: '02 - Synthetic.wav', relativePath: '02 - Synthetic.wav', byteLength: file().size }] } });
+    const waiting = async () => (await getAdminImportLookup(by, created.item.id)).summary.waiting.uploads;
+    assert.equal(await waiting(), true);
+    const uploaded = await uploadAdminImportAsset(by, created.item.id, slots[0], mutation(1), file(), storage);
+    const item = (await editImportDraft(by, created.item.id, uploaded.item, draft => {
+        Object.assign(draft.album, { title: 'Amet Collection', artists: [entry('Lorem Ensemble', 'primary')] }); draft.tracks[0].title = 'Consectetur';
+    })).item;
+    // The second file has neither a confirmed upload nor a decision, so Publish waits for it.
+    assert.equal(await waiting(), true);
+    const skipped = await decided(item, { [slots[1]]: { action: 'skip' } });
+    assert.equal(await waiting(), false);
+    // An upload of the skipped file that is still in flight (a live lease, its transfer deadline ahead) can still land: the
+    // summary waits for it, and the approval is refused writing nothing until no transfer can land.
+    const confirmed = (await stored(item.id)).media!.assets[0], soon = new Date(Date.now() + 60_000), past = new Date(Date.now() - 1);
+    await imports().updateOne({ _id: new ObjectId(item.id) }, { $push: { 'media.assets': { ...confirmed, slotId: slots[1], operationId: randomUUID(), key: `imports/${item.id}/${slots[1]}/x`, state: 'pending',
+        versionId: null, etag: null, updatedAt: new Date(), leaseOwner: 'synthetic-lease', leaseUntil: soon, transferDeadline: soon } } });
+    assert.equal(await waiting(), true);
+    const before = await stored(item.id);
+    await assert.rejects(publishAdminImport(by, item.id, approvalBody((await getAdminImport(by, item.id)).item)), code('ADMIN_IMPORT_UPLOAD_INCOMPLETE'));
+    assert.deepEqual(await stored(item.id), before);
+    await imports().updateOne({ _id: new ObjectId(item.id), 'media.assets.slotId': slots[1] }, { $set: { 'media.assets.$.leaseOwner': null, 'media.assets.$.leaseUntil': past, 'media.assets.$.transferDeadline': past } });
+    assert.equal(await waiting(), false);
+    await publishAdminImport(by, item.id, approvalBody((await getAdminImport(by, item.id)).item));
+    assert.deepEqual((await stored(item.id)).media!.publication!.tracks.map(track => track.slotId), [slots[0]]);
+    await runAdminImportPublicationOnce(storage, item.id);
+    assert.deepEqual(await counts(), { artists: 1, organizations: 0, albums: 1, audioTracks: 1, imageAssets: 0 });
 });
 
 test('one approval carries every entry, label, Album and track decision without a separate save, while two entries reusing one Artist are refused writing nothing', async () => {

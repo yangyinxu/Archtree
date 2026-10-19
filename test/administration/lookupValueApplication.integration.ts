@@ -19,7 +19,7 @@
  *   - answering a conflict: mine keeps the value, lookup writes it as the administrator's own, a stale base or application is refused writing nothing
  *   - newly confirmed files re-rank stored candidates without a request: an incomplete set updates the ranking, the automatic limit also applies a new preselection
  *   - the publish gate refuses a queued, running or retrying lookup, admits a stopped, unavailable or superseded one, and an admitted approval writes the gate
- *   - an unanswered conflict holds publication until answered or made equal by the approval's own changes; an append ignores Album conflicts, not Luna
+ *   - an unanswered conflict holds publication until answered or made equal by the approval's own changes; an append ignores Album conflicts, and its Luna suggestion is answered by the approval's ticks
  *   - a trigger committed inside an approval makes the approval retry and refuse an active lookup; an approval committed inside a trigger closes it
  *   - lookup writes nothing outside the import project, and a published lookup import keeps no release, recording or iTunes identifier in the catalog
  *   - an administrator value saved while the completing step runs wins: the step retries against it and records an unanswered conflict instead
@@ -33,6 +33,8 @@
  *   - a retry or a choice made before another administrator's lookup submission, retry or choice is a revision conflict that writes nothing
  *   - a failed write inside a choice or an answer stores neither the import document nor the lookup record
  *   - files confirmed after a lookup choice keep the chosen values: file-tag automation fills only what lookup did not write, and none returns tag values
+ *   - Luna tick defaults follow each value's origin: a suggestion for a lookup value arrives unticked, ticked once choosing none returns the file-tag value, and the approval applies it
+ *   - a release crediting only Various Artists writes no Artist entry, and the summary says at once that the new Album cannot be published until a primary entry is added
  * @end-catalog */
 
 /**
@@ -435,7 +437,7 @@ test('the publish gate refuses a queued, running or retrying lookup, admits a st
     assert.equal((await stored(plain)).lookupGate, undefined);
 });
 
-test('an unanswered conflict holds publication until answered or made equal by the approval\'s own changes; an append ignores Album conflicts, not Luna', async () => {
+test('an unanswered conflict holds publication until answered or made equal by the approval\'s own changes; an append ignores Album conflicts, and its Luna suggestion is answered by the approval\'s ticks', async () => {
     const storage = new Storage(), mine = async () => {
         const id = await seeded(2, timed);
         await editAdminImport(by, id, { operationId: randomUUID(), expectedRevision: 1, changes: [{ path: 'album.label', base: null, value: { name: 'Mine', musicBrainzId: null } }] });
@@ -459,9 +461,10 @@ test('an unanswered conflict holds publication until answered or made equal by t
     const generation = (await stored(append)).analysis.generation;
     await projects().updateOne({ _id: new ObjectId(append) }, { $set: { suggestions: [{ id: 'b'.repeat(24), generation, scope: 'album', slotId: null, field: 'title', baseline: 'Synthetic Album',
         value: 'Synthetic Album (Deluxe)', source: 'folder', evidence: 'Synthetic Folder', decision: 'pending' }] as unknown as AdminImportDocument['suggestions'] } });
-    await assert.rejects(approve(append, { decisions }), code('ADMIN_IMPORT_REVIEW_REQUIRED'), 'a shown pending Luna suggestion still holds an append');
-    await projects().updateOne({ _id: new ObjectId(append) }, { $set: { suggestions: [] } });
-    assert.equal((await approve(append, { decisions })).item.publication, 'preparing');
+    // A shown pending Luna suggestion needs the tick state the confirmation showed; unticked, the approval rejects it in the same step.
+    await assert.rejects(approve(append, { decisions }), code('ADMIN_IMPORT_RELOAD_REQUIRED'), 'an editor without ticks cannot answer it');
+    assert.equal((await approve(append, { decisions, suggestionTicks: { generation, ticked: [], unticked: ['b'.repeat(24)] } })).item.publication, 'preparing');
+    assert.equal((await stored(append)).suggestions[0].decision, 'rejected');
 });
 
 test('a trigger committed inside an approval makes the approval retry and refuse an active lookup; an approval committed inside a trigger closes it', async t => {
@@ -740,4 +743,51 @@ test('files confirmed after a lookup choice keep the chosen values: file-tag aut
     const none = (await choose(id, 1, null)).item;
     assert.deepEqual([none.draft.album.title, none.draft.album.artists.map(entry => entry.name), none.draft.tracks.map(track => track.title), none.lookupPaths],
         ['Tagged Album', ['Tagged Ensemble'], ['Tagged 0', 'Tagged 1'], []]);
+});
+
+test('Luna tick defaults follow each value\'s origin: a suggestion for a lookup value arrives unticked, ticked once choosing none returns the file-tag value, and the approval applies it', async () => {
+    const tagged = (index: number) => v2({ title: `Tagged ${index}`, album: 'Tagged Album', albumArtists: ['Tagged Ensemble'], durationMs: lengths[index] });
+    const id = await seeded(2, tagged, 1), summary = async () => (await getAdminImportLookup(by, id)).summary;
+    await submit(id);
+    // Publish waits for the second file's upload and for the submitted lookup while it is queued.
+    assert.deepEqual((await summary()).waiting, { uploads: true, lookup: true, analysis: false });
+    const queries = (await lookup(id)).queries.map(query => (query as { query: MusicBrainzReleaseQuery }).query);
+    await drain({ musicBrainz: fixtureClient([...queries.map((query, index) => searchAnswer(query, index ? [] : [mbid(1)])), releaseAnswer(mbid(1))]).musicBrainz });
+    const chosen = (await choose(id, 1, keyOf(1))).item, file = chosen.manifest.files[1], { automatedAt: _automated, ...pending } = asset(id, file.slotId, file.filename, tagged(1));
+    await projects().updateOne({ _id: new ObjectId(id) }, { $push: { 'media.assets': pending } } as never);
+    await runImportAutomation(by, id);
+    assert.deepEqual((await summary()).waiting.uploads, false);
+    const generation = (await stored(id)).analysis.generation, slotId = chosen.draft.tracks[0].slotId;
+    const suggestion = (digit: string, field: 'title', baseline: string, value: string, slot: string | null) =>
+        ({ id: digit.repeat(24), generation, scope: slot ? 'track' : 'album', slotId: slot, field, baseline, value, source: 'folder', evidence: 'Synthetic Folder', decision: 'pending' });
+    const title = suggestion('1', 'title', 'Synthetic Album', 'Luna Album', null), song = suggestion('2', 'title', 'Synthetic Track 1', 'Luna Song', slotId);
+    await projects().updateOne({ _id: new ObjectId(id) }, { $set: { suggestions: [title, song] as unknown as AdminImportDocument['suggestions'] } });
+    // Lookup wrote both values, so their suggestions arrive unticked and keep the current value unless ticked.
+    assert.deepEqual((await summary()).luna, [{ id: title.id, tick: 'unticked' }, { id: song.id, tick: 'unticked' }]);
+    // Choosing none returns both to their file-tag values: the same suggestions now arrive ticked.
+    await choose(id, 1, null);
+    const reverted = await item(id);
+    assert.deepEqual([reverted.draft.album.title, reverted.draft.tracks[0].title, reverted.lookupPaths], ['Tagged Album', 'Tagged 0', []]);
+    assert.deepEqual((await summary()).luna, [{ id: title.id, tick: 'ticked' }, { id: song.id, tick: 'ticked' }]);
+    // Approved with the ticks it showed, the approval writes both suggestions and freezes them.
+    await approve(id, { suggestionTicks: { generation, ticked: [title.id, song.id], unticked: [] } });
+    const approved = await stored(id), snapshot = approved.media!.publication!.snapshot as ImportDraftV2;
+    assert.deepEqual([approved.suggestions.map(value => value.decision), snapshot.album.title, snapshot.tracks.find(track => track.slotId === slotId)!.title],
+        [['accepted', 'accepted'], 'Luna Album', 'Luna Song']);
+});
+
+test('a release crediting only Various Artists writes no Artist entry, and the summary says at once that the new Album cannot be published until a primary entry is added', async () => {
+    const id = await seeded(2, timed), summary = async () => (await getAdminImportLookup(by, id)).summary;
+    const record = await looked(id, [mbid(1)], [releaseAnswer(mbid(1), { credits: [['Various Artists', '']] })]);
+    assert.deepEqual([record.applied?.candidateKey, record.applied!.flagged.filter(flag => flag.path === 'album.artists')], [keyOf(1), [{ path: 'album.artists', reason: 'placeholder' }]]);
+    assert.deepEqual([draftOf(await stored(id)).album.title, draftOf(await stored(id)).album.artists], ['Synthetic Album', []]);
+    assert.deepEqual([(await summary()).placeholderOnly, (await summary()).waiting], [true, { uploads: false, lookup: false, analysis: false }]);
+    // The approval itself refuses a new Album without a primary entry, writing nothing.
+    const before = await stored(id);
+    await assert.rejects(publishAdminImport(by, id, approvalBody(await item(id))), code('ADMIN_IMPORT_DRAFT_INCOMPLETE'));
+    assert.deepEqual(await stored(id), before);
+    // A primary entry the administrator adds ends it.
+    await editAdminImport(by, id, { operationId: randomUUID(), expectedRevision: (await item(id)).revision,
+        changes: [{ path: 'album.artists', base: [], value: [{ key: randomUUID(), name: 'Typed Artist', role: 'primary', joinPhrase: null, musicBrainzId: null }] }] });
+    assert.equal((await summary()).placeholderOnly, false);
 });

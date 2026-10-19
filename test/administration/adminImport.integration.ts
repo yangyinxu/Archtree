@@ -51,6 +51,7 @@
  *   - an analysis queued before Draft v2 completes on its v1 project, and its Artist-name suggestion is accepted as one primary entry
  *   - at the receipt limit a field save is refused and an outdated whole-draft save asks for a reload, without a write or conversion, while an earlier save still replays
  *   - a legacy value over its bound after NFC reads as empty, and a save from that shown value converts the project and replaces it
+ *   - the summary state is computed by the server: a public default changed in place, what Publish waits for, Luna ticks, lookup and identity answers, an append, the lookup configuration and the budget left
  * @end-catalog */
 
 import assert from 'node:assert/strict';
@@ -65,6 +66,7 @@ import { importDraftV2FromV1, legacyAdministratorOrigins, legacyArtistEntryKey, 
 import { ImportProviderError, type AnalysisInput, type ImportAnalysisProvider } from '../../src/administration/import/adminImportProvider';
 import { createAdminImport, getAdminImport, editAdminImport, idleAnalysis, importCandidateProjection, importCandidateRevision, listAdminImports, analyzeAdminImport, cancelAdminImportAnalysis, adoptAdminImportSuggestions, adminImportDuplicateCandidates, decideAdminImportDuplicates, importCreateHash, importDigest, initializeAdminImportStorage, runAdminImportWorkerOnce, type AdminImportDocument } from '../../src/administration/import/adminImportService';
 import { publishAdminImport } from '../../src/administration/import/adminImportPublisher';
+import { getAdminImportLookup } from '../../src/administration/lookup/metadataLookupRequests';
 import { approvalBody } from '../support/adminImportApproval';
 import { selectAdminImportCover } from '../../src/administration/import/adminImportStorage';
 import { loadImportFixture } from '../support/adminImportFixtures';
@@ -80,7 +82,7 @@ const deferred = () => { let resolve!: () => void; const promise = new Promise<v
 before(async () => { harness = await startMongoReplicaSet('archtree-admin-import-test'); });
 beforeEach(async () => {
     process.env.FINITUDE_ADMIN_IMPORTS_ENABLED = 'true'; const db = getDb()!;
-    for (const name of ['users', 'adminAlbumImports', 'adminImportAnalysisSlots', 'artists', 'organizations', 'albums', 'audioTracks']) await db.collection(name).deleteMany({});
+    for (const name of ['users', 'adminAlbumImports', 'adminImportAnalysisSlots', 'adminImportLookups', 'artists', 'organizations', 'albums', 'audioTracks']) await db.collection(name).deleteMany({});
     await db.collection('users').insertMany([{ _id: actor, email: 'admin-import@example.test', role: 'admin' }, { _id: other, email: 'other-import@example.test', role: 'admin' }, { _id: ordinary, email: 'ordinary-import@example.test', role: 'user' }]); await initializeAdminImportStorage(db);
 });
 after(async () => { delete process.env.FINITUDE_ADMIN_IMPORTS_ENABLED; await harness?.stop(); });
@@ -835,4 +837,50 @@ test('a legacy value over its bound after NFC reads as empty, and a save from th
     const saved = await editImportDraft(by, id, opened.item, draft => { draft.album.artists = artistEntries('Typed Artist'); draft.tracks.find(track => track.slotId === slot)!.title = 'Short title'; });
     const converted = await stored(id), track = v2(converted).tracks.find(value => value.slotId === slot)!;
     assert.deepEqual([converted!.draftVersion, v2(converted).album.artists.map(value => value.name), track.title, saved.item.draft.album.artists.map(value => value.name)], [2, ['Typed Artist'], 'Short title', ['Typed Artist']]);
+});
+
+test('the summary state is computed by the server: a public default changed in place, what Publish waits for, Luna ticks, lookup and identity answers, an append, the lookup configuration and the budget left', async () => {
+    const by = actor.toHexString(), created = await create(), id = created.item.id;
+    assert.equal(created.item.draft.album.visibility, 'public');
+    const summary = async () => (await getAdminImportLookup(by, id)).summary;
+    // Nothing is named yet, so the new Album and its track are preselected and no identity row needs an answer. Without an
+    // operator contact this server cannot run metadata lookup.
+    assert.deepEqual(await summary(), { append: false, waiting: { uploads: true, lookup: false, analysis: false }, placeholderOnly: false, luna: [], analysis: { runs: 2, attempts: 22, daily: 220 },
+        lookupAvailable: false, identityAnswers: 0 });
+    assert.equal((await getAdminImportLookup(by, id, () => ({ available: true, userAgent: 'Synthetic/1.0' }))).summary.lookupAvailable, true);
+    // Visibility is changed in place by an ordinary field save, and back.
+    const hidden = await editAdminImport(by, id, { ...mutation(1), changes: [{ path: 'album.visibility', base: 'public', value: 'hidden' }] });
+    assert.equal(hidden.item.draft.album.visibility, 'hidden');
+    const shown = await editAdminImport(by, id, { ...mutation(hidden.item.revision), changes: [{ path: 'album.visibility', base: 'hidden', value: 'public' }] });
+    const analyzed = await analyzeAdminImport(by, id, mutation(shown.item.revision), provider);
+    assert.equal((await summary()).waiting.analysis, true);
+    await settle(provider);
+    const done = await getAdminImport(by, id), title = done.item.suggestions.find(value => value.field === 'title')!;
+    // The empty title's suggestion arrives ticked; two provider calls are spent from the project and the day.
+    assert.deepEqual(await summary(), { append: false, waiting: { uploads: true, lookup: false, analysis: false }, placeholderOnly: false, luna: [{ id: title.id, tick: 'ticked' }], analysis: { runs: 1, attempts: 20, daily: 218 },
+        lookupAvailable: false, identityAnswers: 0 });
+    assert.equal(analyzed.item.analysis.generation, 1);
+    // A ready Album already named like the saved title is a candidate: the Album is no longer preselected, nor is its track.
+    await getDb()!.collection('albums').insertOne({ _id: new ObjectId(), title: 'Mine', audioTrackIds: [], visibility: 'public', lifecycleStatus: 'ready' });
+    const saved = await editAdminImport(by, id, { ...mutation(done.item.revision), changes: [{ path: 'album.title', base: '', value: 'Mine' }] });
+    assert.deepEqual([(await summary()).luna, (await summary()).identityAnswers], [[{ id: title.id, tick: 'conflict' }], 2]);
+    // A conflict with the administrator's own title needs an answer until an explicit Album reuse makes the import an append.
+    const lookups = getDb()!.collection('adminImportLookups');
+    await lookups.insertOne({ _id: new ObjectId(id), run: 1, state: 'complete', issue: null, outcome: 'candidates', input: { trigger: 'submitted', submitted: { kind: 'album', text: 'Mine' } }, candidates: [], ranking: null, staleSlotIds: [],
+        applied: { run: 1, candidateKey: `musicbrainz:${'0'.repeat(8)}-0000-4000-8000-${'0'.repeat(12)}`, releaseId: null, choice: 'chosen', basis: 'chosen', values: [], flagged: [],
+            conflicts: [{ path: 'album.title', lookup: 'Lookup Title', slotId: null, answer: null }, { path: `tracks.${saved.item.draft.tracks[0].slotId}.title`, lookup: 'Lookup Song', slotId: saved.item.draft.tracks[0].slotId, answer: null }] } } as never);
+    // A stored conflict needs an answer while the draft value differs from the lookup value, an empty value included, and
+    // still does once the administrator saves another value of their own.
+    const track = `tracks.${saved.item.draft.tracks[0].slotId}.title` as const;
+    assert.deepEqual((await getAdminImportLookup(by, id)).lookup!.needsAnswer, { tie: false, conflicts: ['album.title', track] });
+    const song = await editAdminImport(by, id, { ...mutation(saved.item.revision), changes: [{ path: track, base: '', value: 'My Song' }] });
+    assert.deepEqual((await getAdminImportLookup(by, id)).lookup!.needsAnswer, { tie: false, conflicts: ['album.title', track] });
+    // A saved Album reuse (an append to an existing Album) applies no Album value, so its title conflict needs no answer.
+    await rewrite(id, doc => { doc.decisions = [{ scope: 'album', slotId: null, entryKey: null, boundName: null, action: 'reuse', candidateId: new ObjectId().toHexString(), candidateRevision: 'f'.repeat(64) } as ImportDecisionV2]; });
+    const appended = await getAdminImportLookup(by, id);
+    // The target has no member like the file, so its track is preselected as a new member and no identity row needs an answer.
+    assert.deepEqual([appended.summary.append, appended.lookup!.needsAnswer.conflicts, appended.summary.identityAnswers], [true, [track], 0]);
+    // Saving the lookup's own value answers the track conflict without an explicit answer.
+    await editAdminImport(by, id, { ...mutation(song.item.revision), changes: [{ path: track, base: 'My Song', value: 'Lookup Song' }] });
+    assert.deepEqual((await getAdminImportLookup(by, id)).lookup!.needsAnswer.conflicts, []);
 });

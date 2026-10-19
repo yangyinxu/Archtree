@@ -3,9 +3,10 @@
  *   Functions: ImportDraftV2Editor, ImportAnalysisControls
  * Internal
  *   Functions: ArtistEntries, LabelField
+ *   Constants: ImportAnalysisConfirmation
  * @end-catalog */
 
-import { useId, useLayoutEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useId, useLayoutEffect, useRef, useState } from 'react';
 import { useLocalization } from '../../localization/LocalizationProvider';
 import type { MessageKey } from '../../localization/contract';
 import type { ImportArtistEntry, ImportDetail, ImportDraftV2, ImportLabelEntry } from './adminApi';
@@ -32,13 +33,20 @@ export function ImportDraftV2Editor({ draft, saved, filenames, disabled, onChang
   </>} />;
 }
 
-/** The Draft tab's analysis controls, loaded with this editor so the import route stays inside its initial JavaScript budget. */
+const ImportAnalysisConfirmation = lazy(() => import('./ImportAnalysisConfirmation').then(module => ({ default: module.ImportAnalysisConfirmation })));
+
+/**
+ * The Draft tab's analysis controls, loaded with this editor so the import route stays inside its initial JavaScript budget.
+ * Analyze opens the paid-analysis confirmation with its budget; only confirming it starts analysis.
+ */
 export function ImportAnalysisControls({ item, available, active, startDisabled, stopDisabled, onAction }: { item: ImportDetail; available: boolean; active: boolean; startDisabled: boolean; stopDisabled: boolean; onAction: (action: 'analyze' | 'cancel-analysis') => void }) {
-  const t = useAdminText();
+  const t = useAdminText(), [confirming, setConfirming] = useState(false);
+  const blocked = startDisabled || !available || item.analysis.generation >= 2 || item.analysis.issue === 'providerOutcomeUnknown';
   return <section className={styles.panel}>
     <header className={styles.sectionHeader}><h2>{t('stage.analysis')}</h2></header>
+    {confirming && <Suspense fallback={null}><ImportAnalysisConfirmation item={item} disabled={blocked || active} onClose={() => setConfirming(false)} onConfirm={() => { setConfirming(false); onAction('analyze'); }} /></Suspense>}
     <div className={styles.actions}>
-      {!active && <button className={styles.button} disabled={startDisabled || !available || item.analysis.generation >= 2 || item.analysis.issue === 'providerOutcomeUnknown'} onClick={() => onAction('analyze')}>{t(item.analysis.generation ? 'action.reanalyze' : 'action.analyze')}</button>}
+      {!active && <button className={styles.button} disabled={blocked} onClick={() => setConfirming(true)}>{t(item.analysis.generation ? 'action.reanalyze' : 'action.analyze')}</button>}
       {active && <button className={styles.button} disabled={stopDisabled} onClick={() => onAction('cancel-analysis')}>{t('analysis.stop')}</button>}
     </div>
     {!available && <p>{t('analysis.unavailable')}</p>}

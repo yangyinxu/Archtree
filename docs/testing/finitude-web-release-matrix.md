@@ -91,6 +91,19 @@ and each track are collapsed as preselected new records with no decision asked,
 that the confirmation lists each as New, and that the single publish request
 carries no decisions, only the preselections the confirmation showed, with axe
 scans of the page and the confirmation.
+The Review and publish summary tests create an import from a folder, upload it,
+and check that values prefilled from file tags are flagged while a fixture
+lookup runs and Publish waits, that the one matching release is preselected and
+applied, and that one confirmation publishes it with no decision and no Luna
+tick; that a tie lists only the values that differ with each release's barcode,
+catalogue number, country and medium and is chosen from the keyboard; that a
+conflict with the administrator's label is kept from the keyboard while the
+summary reflows at 320, 768 and 1440 px; that an unavailable lookup offers Luna
+first beside a free retry, that a retry that stays unavailable keeps both, and
+that Luna starts only after its confirmation shows the budget, its suggestion
+for an empty title then arriving ticked; and that an import without a folder or
+usable tags offers Luna beside an empty name box that looks up a typed name
+from the keyboard and stores nothing, with axe scans throughout.
 
 The catalog reviews spec checks that an existing-Album review shows the Album's
 Artist Credits and label read-only and applies a Disc Number change.
@@ -433,6 +446,29 @@ player control still works.
   whose album tags disagree and with a Various Artists album artist, and
   confirm those values stay empty and no Artist entry is written. Repeat with
   a screen reader at 320 CSS px.
+- As an administrator, with metadata lookup configured against MusicBrainz in a
+  development environment, create imports from a folder of a tagged Album with
+  one matching release, of an Album with several matching editions, and of
+  files without usable tags chosen without a folder. Confirm each opens on the
+  Review and publish summary; that the first shows Looking up, then the applied
+  release with nothing to answer, and publishes after one confirmation; that the
+  second lists only the values that differ with each edition's barcode,
+  catalogue number, country and medium, and that Publish waits until one or
+  none is chosen; and that the third offers Luna beside an empty name box.
+  Type a name of your own for one Artist entry or the label before the lookup
+  applies and confirm Keep mine and Use lookup value appear and Publish waits
+  for the answer. Make lookup unavailable and confirm Retry lookup comes first,
+  then Analyze with Luna once the automatic retries end, and that Analyze shows
+  the project and daily budget and starts nothing until confirmed; confirm
+  Luna's suggestions for empty or tag values arrive ticked, others unticked, and
+  that unticking keeps the current value at approval. With no tags and no
+  match, let Luna suggest the Album title and confirm the publication
+  confirmation offers Apply ticked suggestions now instead of a dead end, and
+  that the next confirmation preselects the new Album. Confirm the name box
+  refuses a link, keeps no history and that no global search appears. Without
+  an operator contact, confirm the summary says lookup is not configured, offers
+  Luna and shows neither a retry nor the name box. Repeat with a screen reader
+  at 320 CSS px.
 
 ## Media Session observations
 

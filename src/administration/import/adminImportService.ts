@@ -6,15 +6,16 @@
  *              initializeAdminImportStorage, adminImportDto, adminImportDetail, parseAdminProjectMutation,
  *              mutateAdminProject, mutateAdminImport, createAdminImport, getAdminImport, editAdminImport,
  *              listAdminImports, analyzeAdminImport, analyzeAdminProject, cancelAdminImportAnalysis,
- *              adoptAdminImportSuggestions, adoptAdminProjectSuggestions, adminImportDuplicateCandidates,
+ *              suggestionPath, acceptDraftV2Suggestion, adoptAdminImportSuggestions,
+ *              adoptAdminProjectSuggestions, adminImportDuplicateCandidates, importSavedIdentity,
  *              reusesOneArtistTwice, parseImportDecisions, decideAdminImportDuplicates,
- *              runAdminImportWorkerOnce, startAdminImportWorker
+ *              dailyAnalysisAttemptsUsed, runAdminImportWorkerOnce, startAdminImportWorker
  *   Constants: importPurposeFilter, adminImportIndexes
  *   Re-exports: importCandidateProjection, importCandidateRevision
  * Internal
  *   Types: Receipt, Chunk, Analysis
  *   Functions: notFound, conflict, isActive, admit, idValue, importCapabilities, response, outdatedDecisions,
- *              revisionFloor, suggestionPath, acceptDraftV2Suggestion, boundedTags, reserveDailyAnalysisAttempt
+ *              revisionFloor, boundedTags, dailyAnalysisSlot, reserveDailyAnalysisAttempt
  *   Constants: collection, digest, occupiedAnalysis, touchAdmin, withAdmin, IMPORT_V2_RECEIPT_KINDS,
  *              importPolicy, mutation, slotBoundKinds, importRevisionFloors, readOnlyProjectKinds, mutate,
  *              filters
@@ -353,7 +354,7 @@ export function analyzeAdminProject<T>(actor: string, id: string, raw: unknown, 
 export const cancelAdminImportAnalysis = (actor: string, id: string, raw: unknown) => mutate(actor, id, mutation(raw, []), 'cancel-analysis', async doc => { if (isActive(doc)) doc.analysis.state = 'cancelled'; });
 
 /** The Draft v2 path a suggestion proposes a value for, or null for a field Draft v2 does not suggest. */
-function suggestionPath(suggestion: ImportSuggestion | ImportSuggestionV2): ImportDraftPath | null {
+export function suggestionPath(suggestion: ImportSuggestion | ImportSuggestionV2): ImportDraftPath | null {
     if (suggestion.scope === 'album') return ['title', 'artists', 'releaseDate'].includes(suggestion.field) ? `album.${suggestion.field as 'title' | 'artists' | 'releaseDate'}` : null;
     return typeof suggestion.slotId === 'string' && ['title', 'trackNumber'].includes(suggestion.field) ? `tracks.${suggestion.slotId}.${suggestion.field as 'title' | 'trackNumber'}` : null;
 }
@@ -364,7 +365,7 @@ function suggestionPath(suggestion: ImportSuggestion | ImportSuggestionV2): Impo
  * legacy-project rule). In an import the value becomes the administrator's own; a catalog review records no value origins
  * (automation never writes its draft).
  */
-function acceptDraftV2Suggestion(doc: AdminImportDocument, draft: ImportDraftV2, suggestion: ImportSuggestion | ImportSuggestionV2) {
+export function acceptDraftV2Suggestion(doc: AdminImportDocument, draft: ImportDraftV2, suggestion: ImportSuggestion | ImportSuggestionV2) {
     const path = suggestionPath(suggestion); if (!path) throw conflict('ADMIN_IMPORT_SUGGESTION_STALE');
     const automatic = isImportProject(doc) && path !== 'album.artists' && originOf(doc.draftOrigins, path) === 'automatic';
     if (!sameDraftValue(draftValueAt(draft, path), suggestion.baseline) && !automatic) throw conflict('ADMIN_IMPORT_FIELD_CONFLICT');
@@ -412,13 +413,19 @@ export { importCandidateProjection, importCandidateRevision };
 export async function adminImportDuplicateCandidates(actor: string, id: string) {
     return withAdmin(actor, async session => {
         const doc = await collection().findOne({ _id: idValue(id), ...importPurposeFilter }, { session }); if (!doc) throw notFound();
-        // Candidates read the same Draft v2 view the editor shows, whatever format stored it.
-        const manifest = legacyManifestView(doc.manifest), draft = importDraftV2View(doc.draft, manifest, doc._id.toHexString());
-        // The saved append target as the editor shows it (adminImportDetail): decisions saved before Draft v2 name no entry key.
-        const view = importProjectV2View(doc), slots = new Set(manifest.files.map(file => file.slotId));
-        const decisions = view ? importDecisionsV2View(view.decisions, slots) : legacyDecisionsView(doc.decisions, slots);
-        return importIdentityCandidates({ manifest, draft, assets: doc.media?.assets ?? [], decisions }, session);
+        return (await importSavedIdentity(doc, session)).candidates;
     });
+}
+/**
+ * The saved draft as the editor shows it (its Draft v2 view, whatever format stored it), its saved decisions as the editor shows
+ * them (adminImportDetail; decisions saved before Draft v2 name no entry key) and their identity candidates read in `session`,
+ * for the duplicate-candidates read and the summary's count of identity rows left to answer.
+ */
+export async function importSavedIdentity(doc: AdminImportDocument, session: ClientSession) {
+    const manifest = legacyManifestView(doc.manifest), draft = importDraftV2View(doc.draft, manifest, doc._id.toHexString());
+    const view = importProjectV2View(doc), slots = new Set(manifest.files.map(file => file.slotId));
+    const decisions = (view ? importDecisionsV2View(view.decisions, slots) : legacyDecisionsView(doc.decisions, slots)) as ImportDecisionV2[];
+    return { draft, decisions, candidates: await importIdentityCandidates({ manifest, draft, assets: doc.media?.assets ?? [], decisions }, session) };
 }
 /** Two Artist entries of one decision set cannot reuse one Artist. */
 export const reusesOneArtistTwice = (raw: readonly unknown[]) => {
@@ -484,12 +491,19 @@ export function decideAdminImportDuplicates(actor: string, id: string, raw: unkn
 /** Embedded tags are secondary untrusted evidence and have a separate prompt-size allowance. */
 function boundedTags(tags: NonNullable<Analysis['tags']>, slots: string[]) { let bytes = 0; return tags.filter(item => slots.includes(item.slotId)).filter(item => { bytes += Buffer.byteLength(JSON.stringify(item)); return bytes <= 12_000; }); }
 
+/** The deployment-wide daily allowance document of `now`'s UTC day. */
+const dailyAnalysisSlot = (now: Date) => `daily:${now.toISOString().slice(0, 10)}`;
+/** Provider calls reserved today (UTC) across the deployment; the Analyze confirmation shows what is left of the daily allowance. */
+export async function dailyAnalysisAttemptsUsed(now: Date, session: ClientSession): Promise<number> {
+    const budget = await getDb()!.collection<{ _id: string; attempts?: number }>('adminImportAnalysisSlots').findOne({ _id: dailyAnalysisSlot(now) }, { session });
+    return Number.isSafeInteger(budget?.attempts) ? budget!.attempts! : 0;
+}
 /** Serialize deployment-wide reservations before dispatch; uncertain or stopped reservations are not refunded. */
 async function reserveDailyAnalysisAttempt(now: Date, session: ClientSession): Promise<boolean> {
     const slots = getDb()!.collection<{ _id: string; revision?: number; attempts?: number }>('adminImportAnalysisSlots');
     const gate = await slots.updateOne({ _id: 'admission' }, { $inc: { revision: 1 } }, { session });
     if (!gate.matchedCount) return false;
-    const _id = `daily:${now.toISOString().slice(0, 10)}`;
+    const _id = dailyAnalysisSlot(now);
     const budget = await slots.findOne({ _id }, { session });
     if ((budget?.attempts ?? 0) >= LIMITS.dailyAttempts) return false;
     await slots.updateOne({ _id }, { $inc: { attempts: 1 } }, { session, upsert: true });

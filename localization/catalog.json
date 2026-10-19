@@ -1011,8 +1011,41 @@
       ],
       "variables": {}
     },
+    "admin.analysis.budget_daily": {
+      "description": "Administrator workbench: Luna analysis confirmation, what is left today across the deployment.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "daily": "number"
+      }
+    },
+    "admin.analysis.budget_project": {
+      "description": "Administrator workbench: Luna analysis confirmation, what is left for this project.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "attempts": "number",
+        "runs": "number"
+      }
+    },
     "admin.analysis.confirm": {
       "description": "Send the selected filenames and folder context to Luna for analysis? This may incur a provider charge.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.analysis.confirm_action": {
+      "description": "Administrator workbench: Luna analysis confirmation, starts the paid analysis.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.analysis.confirm_title": {
+      "description": "Administrator workbench: Luna analysis confirmation title.",
       "delivery": [
         "runtime"
       ],
@@ -1942,6 +1975,55 @@
     },
     "admin.common.loading": {
       "description": "Administrator workbench: common loading.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.common.lookup_active": {
+      "description": "Administrator workbench: refusal: metadata lookup is still queued or running.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.common.lookup_candidate_incomplete": {
+      "description": "Administrator workbench: refusal: the chosen release has no fetched details.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.common.lookup_invalid_name": {
+      "description": "Administrator workbench: refusal: the submitted lookup name was a link, empty, too long or had invisible characters.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.common.lookup_nothing_to_retry": {
+      "description": "Administrator workbench: refusal: there is no earlier lookup to retry.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.common.lookup_refused": {
+      "description": "Administrator workbench: refusal: this project no longer accepts metadata lookup.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.common.lookup_stale": {
+      "description": "Administrator workbench: refusal: the lookup changed since it was shown.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.common.lookup_unavailable": {
+      "description": "Administrator workbench: refusal: metadata lookup is not available on this server.",
       "delivery": [
         "runtime"
       ],
@@ -3174,6 +3256,318 @@
       ],
       "variables": {}
     },
+    "admin.lookup.active": {
+      "description": "Administrator workbench: import summary, metadata lookup is queued or running.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.lookup.applied": {
+      "description": "Administrator workbench: import summary, the release whose values were applied.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "title": "string"
+      }
+    },
+    "admin.lookup.applied_none": {
+      "description": "Administrator workbench: import summary, no release is applied; values from file tags stay.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.lookup.barcode": {
+      "description": "Administrator workbench: candidate chooser, barcode.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.lookup.box": {
+      "description": "Administrator workbench: import summary, the name box legend.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.lookup.candidates": {
+      "description": "Administrator workbench: candidate chooser, folded list of every release found.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.lookup.catalog_number": {
+      "description": "Administrator workbench: candidate chooser, catalogue number.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.lookup.choose": {
+      "description": "Administrator workbench: candidate chooser, applies this release.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.lookup.choose_none": {
+      "description": "Administrator workbench: candidate chooser, applies no release.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.lookup.chosen": {
+      "description": "Administrator workbench: candidate chooser, this release is applied.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.lookup.country": {
+      "description": "Administrator workbench: candidate chooser, release country.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.lookup.difference_disc_count": {
+      "description": "Administrator workbench: candidate chooser, disc counts differ.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "candidate": "string",
+        "local": "string"
+      }
+    },
+    "admin.lookup.difference_duration": {
+      "description": "Administrator workbench: candidate chooser, track durations differ.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.lookup.difference_track_count": {
+      "description": "Administrator workbench: candidate chooser, track counts differ.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "candidate": "string",
+        "local": "string"
+      }
+    },
+    "admin.lookup.incomplete": {
+      "description": "Administrator workbench: import summary, releases were found but none of their details could be fetched.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.lookup.kind_album": {
+      "description": "Administrator workbench: import summary name box, the name is an Album name.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.lookup.kind_song": {
+      "description": "Administrator workbench: import summary name box, the name is a song name.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.lookup.link_refused": {
+      "description": "Administrator workbench: import summary name box, a link was entered instead of a name.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.lookup.luna": {
+      "description": "Administrator workbench: import summary, opens the Luna analysis confirmation.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.lookup.medium": {
+      "description": "Administrator workbench: candidate chooser, release medium.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.lookup.name": {
+      "description": "Administrator workbench: import summary name box, the name field.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.lookup.no_match": {
+      "description": "Administrator workbench: import summary, releases were found but none matches the files.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.lookup.no_query": {
+      "description": "Administrator workbench: import summary, nothing could be looked up from tags or the folder name.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.lookup.no_release": {
+      "description": "Administrator workbench: import summary, metadata lookup found no release.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.lookup.not_configured": {
+      "description": "Administrator workbench: import summary, metadata lookup is not configured on this server.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.lookup.not_run": {
+      "description": "Administrator workbench: import summary, no metadata lookup has run yet.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.lookup.not_started": {
+      "description": "Administrator workbench: import summary, every needed file is uploaded but no metadata lookup run exists.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.lookup.retry": {
+      "description": "Administrator workbench: import summary, manual free retry of metadata lookup.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.lookup.retrying": {
+      "description": "Administrator workbench: import summary, the lookup source was busy or unavailable and is retried automatically.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.lookup.stale_files": {
+      "description": "Administrator workbench: import summary, files replaced or removed since the lookup ranked them.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.lookup.status_incomplete": {
+      "description": "Administrator workbench: candidate chooser, the release details could not be fetched.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.lookup.status_matching": {
+      "description": "Administrator workbench: candidate chooser, the release matches the files.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.lookup.status_not_matching": {
+      "description": "Administrator workbench: candidate chooser, the release does not match the files.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.lookup.status_unverified": {
+      "description": "Administrator workbench: candidate chooser, durations are unknown so the match is unverified.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.lookup.stopped": {
+      "description": "Administrator workbench: import summary, metadata lookup stopped after a permission loss or an expired grant.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.lookup.submit": {
+      "description": "Administrator workbench: import summary name box, submits the name for metadata lookup.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.lookup.superseded": {
+      "description": "Administrator workbench: import summary, the lookup was replaced because the files changed or the import closed.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.lookup.tie": {
+      "description": "Administrator workbench: import summary, several matching releases need a choice.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.lookup.track_count": {
+      "description": "Administrator workbench: candidate chooser, number of tracks on the release.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.lookup.unavailable": {
+      "description": "Administrator workbench: import summary, metadata lookup stayed unavailable after its automatic retries.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.lookup.unknown_discs": {
+      "description": "Administrator workbench: candidate chooser, files whose Disc Number is unknown and so never count as agreement.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.lookup.unknown_durations": {
+      "description": "Administrator workbench: candidate chooser, files whose duration is unknown and so never count as agreement.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
     "admin.media.choose_cover": {
       "description": "Choose Album cover",
       "delivery": [
@@ -3595,6 +3989,23 @@
         "phrase": "string"
       }
     },
+    "admin.publication.luna_names": {
+      "description": "Administrator workbench: publication confirmation, ticked Luna suggestions rename rows that then need a decision; offers to apply them first.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.publication.luna_ticks": {
+      "description": "Administrator workbench: publication confirmation, Luna suggestions this approval applies and keeps.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "ticked": "number",
+        "unticked": "number"
+      }
+    },
     "admin.publication.needs_decision": {
       "description": "Administrator workbench: publication confirmation, an identity that has no decision yet; approval waits for one in Review.",
       "delivery": [
@@ -4007,6 +4418,207 @@
     },
     "admin.state.unknown": {
       "description": "Administrator workbench: state unknown.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.summary.artist_mismatch": {
+      "description": "Administrator workbench: import summary, the preselected release credits an artist that no artist tag of the files names.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.summary.conflicts": {
+      "description": "Administrator workbench: import summary, heading of metadata lookup values that differ from the administrator's own.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.summary.flagged": {
+      "description": "Administrator workbench: import summary, accessible name of the list of flagged values.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.summary.identities": {
+      "description": "Administrator workbench: import summary, identity decisions row.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.summary.identities_saved": {
+      "description": "Administrator workbench: import summary, number of saved identity decisions; the confirmation lists each new or reused record.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.summary.identity_answers": {
+      "description": "Administrator workbench: import summary, identity rows without a decision or preselection, answered in the Review section.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.summary.keep_mine": {
+      "description": "Administrator workbench: import summary, keep the administrator's value in a lookup conflict.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.summary.kept_mine": {
+      "description": "Administrator workbench: import summary, an answered lookup conflict kept the administrator's value.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.summary.lookup_value": {
+      "description": "Administrator workbench: import summary, the metadata lookup value in a conflict.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.summary.luna": {
+      "description": "Administrator workbench: import summary and publication confirmation, Luna suggestions.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.summary.luna_apply": {
+      "description": "Administrator workbench: import summary, apply ticked Luna suggestions to the draft now and keep current values for the others.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.summary.luna_help": {
+      "description": "Administrator workbench: import summary, how Luna suggestion ticks work.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.summary.luna_mark": {
+      "description": "Administrator workbench: import summary, marks a value suggested by Luna.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.summary.needs_answers": {
+      "description": "Administrator workbench: import summary, number of lookup questions to answer before Publish.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.summary.placeholder_only": {
+      "description": "Administrator workbench: import summary, the files or the applied release credit only a placeholder and a new Album has no primary Artist entry.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.summary.publish": {
+      "description": "Administrator workbench: import summary, opens the one-step publication confirmation.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.summary.title": {
+      "description": "Administrator workbench: import Review and publish summary heading.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.summary.track_field": {
+      "description": "Administrator workbench: import summary, one file's value, by its position in the draft.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "field": "string",
+        "position": "number"
+      }
+    },
+    "admin.summary.tracks": {
+      "description": "Administrator workbench: import summary and candidate chooser, the disc and track order.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.summary.uploads": {
+      "description": "Administrator workbench: import summary, confirmed uploads.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "ready": "number",
+        "total": "number"
+      }
+    },
+    "admin.summary.use_lookup": {
+      "description": "Administrator workbench: import summary, use the metadata lookup value in a conflict.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.summary.used_lookup": {
+      "description": "Administrator workbench: import summary, an answered lookup conflict used the lookup value.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.summary.values": {
+      "description": "Administrator workbench: import summary, folded rows that need no answer.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.summary.waiting_analysis": {
+      "description": "Administrator workbench: import summary, Publish waits for Luna analysis.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.summary.waiting_lookup": {
+      "description": "Administrator workbench: import summary, Publish waits for metadata lookup.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.summary.waiting_uploads": {
+      "description": "Administrator workbench: import summary, Publish waits for uploads.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.summary.yours": {
+      "description": "Administrator workbench: import summary, the administrator's own value in a lookup conflict.",
       "delivery": [
         "runtime"
       ],
