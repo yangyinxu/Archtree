@@ -23,6 +23,7 @@
  *   - newly approved cover survives older cancelled cleanup debt and its original-key replays
  *   - cover grant is rechecked after HEAD and before dispatch; reserved cancellation safely releases the source pin
  *   - a source import saved in a newer draft format admits no new cover pin or copy, while an existing pin is still released
+ *   - tag automation after a cover pick was reviewed changes no source revision, so the reviewed pick is still admitted
  * @end-catalog */
 
 import assert from 'node:assert/strict';
@@ -35,13 +36,14 @@ import { startMongoReplicaSet, type MongoReplicaSetHarness } from '../support/mo
 import { getAdminCatalogItem } from '../../src/administration/catalog/adminCatalogService';
 import { clearAdminCatalogCover, replaceAdminCatalogCover, reconcileAdminCatalogCover, listAdminCatalogCoverOperations, runAdminCatalogCoverOnce, cancelAdminCatalogCover } from '../../src/administration/catalog/adminCatalogCoverService';
 import { createAdminImport, getAdminImport, initializeAdminImportStorage } from '../../src/administration/import/adminImportService';
-import { uploadAdminImportAsset, cleanupAdminImportAsset, type ImportObjectIdentity, type ImportObjectStorage, type ImportObjectTarget } from '../../src/administration/import/adminImportStorage';
+import { uploadAdminImportAsset, cleanupAdminImportAsset, reconcileAdminImportAsset, type ImportObjectIdentity, type ImportObjectStorage, type ImportObjectTarget } from '../../src/administration/import/adminImportStorage';
+import { createPcmWav, withId3TextFrames } from '../support/pcmWav';
 
 let harness: MongoReplicaSetHarness; const actor = new ObjectId(), other = new ObjectId(), artist = new ObjectId(), oldImage = new ObjectId();
 class Storage implements ImportObjectStorage {
-    objects = new Map<string, ImportObjectIdentity>(); copies = 0; failBefore = false; failAfter = false; afterCopy?: () => Promise<void>; failDelete = false; failDeleteAfter = false;
+    objects = new Map<string, ImportObjectIdentity>(); copies = 0; failBefore = false; failAfter = false; afterCopy?: () => Promise<void>; failDelete = false; failDeleteAfter = false; afterPut?: () => Promise<void>;
     async head(target: ImportObjectTarget) { return this.objects.get(target.key) ?? null; }
-    async put(target: ImportObjectTarget) { const identity = { etag: '"private"', versionId: 'private-version' }; this.objects.set(target.key, identity); return identity; }
+    async put(target: ImportObjectTarget) { const identity = { etag: '"private"', versionId: 'private-version' }; this.objects.set(target.key, identity); const hook = this.afterPut; this.afterPut = undefined; await hook?.(); return identity; }
     async copy(_source: ImportObjectTarget & ImportObjectIdentity, target: ImportObjectTarget) { this.copies++; if (this.failBefore) throw new Error(); const identity = { etag: '"canonical"', versionId: 'canonical-version' }; this.objects.set(target.key, identity); await this.afterCopy?.(); if (this.failAfter) throw new Error(); return identity; }
     async delete(target: ImportObjectTarget & ImportObjectIdentity) { if (this.failDelete) throw new Error(); this.objects.delete(target.key); if (this.failDeleteAfter) throw new Error(); }
 }
@@ -304,4 +306,23 @@ test('a source import saved in a newer draft format admits no new cover pin or c
     const released = await imports.findOne({ _id: source });
     assert.deepEqual(released!.media.assets[0].coverConsumers, []); assert.equal(released!.revision, pinned!.revision + 1); assert.equal(released!.draftVersion, 3);
     assert.equal(storage.copies, 1); assert.equal((await ownerRecord())!.coverArtId, oldImage.toHexString());
+});
+
+test('tag automation after a cover pick was reviewed changes no source revision, so the reviewed pick is still admitted', async () => {
+    const storage = new Storage(), slotId = randomUUID(), by = actor.toHexString();
+    const created = await createAdminImport(by, { operationId: randomUUID(), manifest: { rootLabel: 'Private artwork', files: [{ slotId, filename: 'tagged.wav', relativePath: 'Disc 2/tagged.wav', byteLength: null }] } });
+    const png = await sharp({ create: { width: 1, height: 1, channels: 3, background: '#f80' } }).png().toBuffer();
+    await uploadAdminImportAsset(by, created.item.id, 'cover', { operationId: randomUUID(), expectedRevision: 1 }, { originalname: 'cover.png', buffer: png, size: png.length, mimetype: 'image/png' } as Express.Multer.File, storage);
+    // Another administrator's audio upload is confirmed after that administrator lost the role, so its tags wait for a check.
+    storage.afterPut = async () => { await getDb()!.collection('users').updateOne({ _id: other }, { $set: { role: 'user' } }); };
+    const wav = withId3TextFrames(createPcmWav(200), { TIT2: 'Tagged Source', TRCK: '1' }), intent = { operationId: randomUUID(), expectedRevision: 1 };
+    await assert.rejects(uploadAdminImportAsset(other.toHexString(), created.item.id, slotId, intent, { originalname: 'tagged.wav', buffer: wav, size: wav.length, mimetype: 'audio/wav' } as Express.Multer.File, storage));
+    const reviewed = (await getAdminImport(by, created.item.id)).item, owner = await getAdminCatalogItem(by, 'artist', artist.toHexString());
+    assert.deepEqual([reviewed.draft.tracks[0].title, reviewed.valueRevision], ['', 0]);
+    const body = { operationId: randomUUID(), expectedRevision: owner.item.revision, importId: created.item.id, slotId: 'cover', expectedSourceRevision: reviewed.revision };
+    // The check prefills the track as a current administrator: only valueRevision moves, never the revision a pick binds.
+    const checked = (await reconcileAdminImportAsset(by, created.item.id, slotId, { operationId: intent.operationId }, storage)).item;
+    assert.deepEqual([checked.draft.tracks[0].title, checked.draft.tracks[0].discNumber, checked.valueRevision, checked.revision], ['Tagged Source', 2, 1, reviewed.revision]);
+    const result = await replaceAdminCatalogCover(by, 'artist', artist.toHexString(), body, { storage, cleanup });
+    assert.equal(result.coverOperation.state, 'complete'); assert.equal(storage.copies, 1);
 });

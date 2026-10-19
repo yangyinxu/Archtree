@@ -19,6 +19,7 @@
  *   - the disabled editor disables every entry control and the label
  *   - renaming an entry and retyping its saved name restores the saved entry exactly, MusicBrainz ID included
  *   - retyping a saved label's name restores its MusicBrainz ID, and a renamed label drops it
+ *   - saved automatic values are marked From file tags until edited, and an automatic entry named like a company may be a label
  * @end-catalog */
 
 import { useState } from 'react';
@@ -40,12 +41,12 @@ function savedDraft(artists: ImportArtistEntry[], label: ImportDraftV2['album'][
   const draft = detail().draft; draft.album.artists = artists; draft.album.label = label; return draft;
 }
 /** The editor inside a form like the import page's: Save submits only when native constraint validation passes. */
-function mount(saved: ImportDraftV2, disabled = false) {
+function mount(saved: ImportDraftV2, disabled = false, marks: { automaticPaths?: string[]; possibleLabels?: string[] } = {}) {
   const submit = vi.fn(), changes = vi.fn(), state = { draft: saved };
   function Harness() {
     const [draft, setDraft] = useState(saved); state.draft = draft;
     return <form onSubmit={event => { event.preventDefault(); submit(draft); }}>
-      <ImportDraftV2Editor draft={draft} saved={saved} filenames={detail().manifest.files} disabled={disabled} onChange={next => { changes(next); setDraft(next); }} />
+      <ImportDraftV2Editor draft={draft} saved={saved} filenames={detail().manifest.files} disabled={disabled} onChange={next => { changes(next); setDraft(next); }} {...marks} />
       <button type="submit">Save</button>
     </form>;
   }
@@ -248,4 +249,27 @@ test('retyping a saved label\'s name restores its MusicBrainz ID, and a renamed 
   await user.clear(field); await user.type(field, 'LOREM RECORDS'); expect(state.draft.album.label).toEqual({ ...label, name: 'LOREM RECORDS' });
   await user.clear(field); await user.type(field, 'Lorem Records');
   expect(state.draft.album.label).toEqual(label); expect(draftChanges(saved, state.draft)).toEqual([]);
+});
+
+test('saved automatic values are marked From file tags until edited, and an automatic entry named like a company may be a label', async () => {
+  const saved = savedDraft([artistEntry('Synthetic Records')], labelEntry('Synthetic Label')), [first] = saved.tracks;
+  saved.album.title = 'Tagged Album'; saved.album.releaseDate = { year: 2026, month: null, day: null }; first.title = 'Tagged One'; first.discNumber = 2;
+  const automaticPaths = ['album.title', 'album.artists', 'album.label', 'album.releaseDate', `tracks.${first.slotId}.title`, `tracks.${first.slotId}.discNumber`];
+  const { user } = mount(saved, false, { automaticPaths, possibleLabels: [entryKey(1)] });
+  expect(screen.getByRole('textbox', { name: 'Title · From file tags' })).toHaveValue('Tagged Album');
+  expect(screen.getByRole('group', { name: 'Artists · From file tags' })).toBeVisible();
+  expect(screen.getByRole('group', { name: 'Release date · From file tags' })).toBeVisible();
+  expect(screen.getByRole('textbox', { name: 'Label · From file tags' })).toHaveValue('Synthetic Label');
+  expect(screen.getByRole('textbox', { name: '1 · Title · From file tags' })).toHaveValue('Tagged One');
+  expect(screen.getByRole('spinbutton', { name: '1 · Disc number · From file tags' })).toHaveValue(2);
+  // A value automation never wrote is not marked.
+  expect(screen.getByRole('spinbutton', { name: '1 · Track number' })).toBeVisible(); expect(screen.getByRole('textbox', { name: '2 · Title' })).toBeVisible();
+  expect(screen.getByText('This name looks like a label')).toBeVisible();
+  // Editing a value removes its marker, while untouched automatic values keep theirs.
+  await user.type(screen.getByRole('textbox', { name: '1 · Title · From file tags' }), '!');
+  expect(screen.getByRole('textbox', { name: '1 · Title' })).toHaveValue('Tagged One!');
+  expect(screen.getByRole('textbox', { name: 'Title · From file tags' })).toBeVisible();
+  // Editing the entries removes their marker and the possible-label note.
+  await user.type(screen.getByRole('textbox', { name: '1 · Artist name' }), 's');
+  expect(screen.getByRole('group', { name: 'Artists' })).toBeVisible(); expect(screen.queryByText('This name looks like a label')).toBeNull();
 });

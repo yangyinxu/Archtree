@@ -2565,6 +2565,13 @@
       ],
       "variables": {}
     },
+    "admin.draft.from_tags": {
+      "description": "Administrator import editor: marks a draft value written automatically from the files' embedded tags and not yet reviewed.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.duplicates.album": {
       "description": "Album",
       "delivery": [
@@ -2785,6 +2792,13 @@
     },
     "admin.entries.phrase_invalid": {
       "description": "Administrator import editor: validation error for a join phrase the server would refuse.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.entries.possible_label": {
+      "description": "Administrator import editor and publication confirmation: note on an Artist entry written from file tags whose name looks like a company, so it may be a label rather than an Artist.",
       "delivery": [
         "runtime"
       ],
@@ -3256,6 +3270,15 @@
       ],
       "variables": {}
     },
+    "admin.media.tags_left_out": {
+      "description": "Administrator import files: note under a file's tag evidence giving how many tag fields had values left out, and why.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
     "admin.media.title": {
       "description": "Files and publication",
       "delivery": [
@@ -3599,6 +3622,13 @@
       "variables": {
         "name": "string"
       }
+    },
+    "admin.publication.tags_only": {
+      "description": "Administrator publication confirmation: marks the Artist entries or the label as resting only on the files' embedded tags (not reviewed or decided).",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
     },
     "admin.publication.track_position": {
       "description": "Administrator workbench: publication confirmation, one track position; an unknown Disc Number shows as 1 and an unknown Track Number as a dash.",

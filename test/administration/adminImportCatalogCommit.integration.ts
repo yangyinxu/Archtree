@@ -101,10 +101,10 @@ type Choice = Partial<Pick<ImportDecisionDtoV2, 'action' | 'candidateId' | 'cand
 async function decided(item: AdminImportDetailV2, choose: Record<string, Choice | null> = {}): Promise<AdminImportDetailV2> {
     const fresh = { action: 'create-distinct' as const, candidateId: null, candidateRevision: null }, kept = (key: string) => choose[key] !== null;
     const decisions = [
-        ...item.draft.album.artists.filter(value => kept(value.name)).map(value => ({ scope: 'artist', slotId: null, entryKey: value.key, ...fresh, ...choose[value.name] })),
-        ...(item.draft.album.label && kept('label') ? [{ scope: 'label', slotId: null, entryKey: null, ...fresh, ...choose.label }] : []),
-        ...(kept('album') ? [{ scope: 'album', slotId: null, entryKey: null, ...fresh, ...choose.album }] : []),
-        ...item.draft.tracks.filter(track => kept(track.slotId)).map(track => ({ scope: 'track', slotId: track.slotId, entryKey: null, ...fresh, ...choose[track.slotId] }))
+        ...item.draft.album.artists.filter(value => kept(value.name)).map(value => ({ scope: 'artist', slotId: null, entryKey: value.key, boundName: value.name, ...fresh, ...choose[value.name] })),
+        ...(item.draft.album.label && kept('label') ? [{ scope: 'label', slotId: null, entryKey: null, boundName: item.draft.album.label.name, ...fresh, ...choose.label }] : []),
+        ...(kept('album') ? [{ scope: 'album', slotId: null, entryKey: null, boundName: null, ...fresh, ...choose.album }] : []),
+        ...item.draft.tracks.filter(track => kept(track.slotId)).map(track => ({ scope: 'track', slotId: track.slotId, entryKey: null, boundName: null, ...fresh, ...choose[track.slotId] }))
     ];
     return (await decideAdminImportDuplicates(by, item.id, { ...mutation(item.revision), decisions })).item;
 }
@@ -468,8 +468,8 @@ test('a stored Various Artists suggestion is hidden and never holds the approval
 test('one approval carries every entry, label, Album and track decision without a separate save, while two entries reusing one Artist are refused writing nothing', async () => {
     const storage = new Storage(), item = await reviewed(storage), existing = new ObjectId(), fresh = { action: 'create-distinct', candidateId: null, candidateRevision: null } as const;
     await db().collection('artists').insertOne({ _id: existing, name: 'Lorem Ensemble', bio: '', albumIds: [], visibility: 'public', lifecycleStatus: 'ready' });
-    const decisions = [...item.draft.album.artists.map(value => ({ scope: 'artist', slotId: null, entryKey: value.key, ...fresh })), { scope: 'label', slotId: null, entryKey: null, ...fresh },
-        { scope: 'album', slotId: null, entryKey: null, ...fresh }, ...item.draft.tracks.map(track => ({ scope: 'track', slotId: track.slotId, entryKey: null, ...fresh }))];
+    const decisions = [...item.draft.album.artists.map(value => ({ scope: 'artist', slotId: null, entryKey: value.key, boundName: value.name, ...fresh })), { scope: 'label', slotId: null, entryKey: null, boundName: item.draft.album.label!.name, ...fresh },
+        { scope: 'album', slotId: null, entryKey: null, boundName: null, ...fresh }, ...item.draft.tracks.map(track => ({ scope: 'track', slotId: track.slotId, entryKey: null, boundName: null, ...fresh }))];
     assert.deepEqual(item.decisions, []);
     const artist = await candidate(item, 'artist', 'Lorem Ensemble'), before = await stored(item.id);
     const twice = decisions.map((value, index) => index < 2 ? { ...value, action: 'reuse', candidateId: artist.id, candidateRevision: artist.revision } : value);

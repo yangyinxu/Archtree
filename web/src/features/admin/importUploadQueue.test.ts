@@ -29,6 +29,7 @@
  *   - a publication lock met while reconciling keeps that upload unknown and stops before any bytes are sent
  *   - reopening stops reconciling at a permission failure and never retries later uploads
  *   - a Resume during reopen reconciliation waits for it and then sends only the files still incomplete
+ *   - the newest project state is ordered by revision, then by automatic writes at the same revision
  * @end-catalog */
 
 import { createRequire } from 'node:module';
@@ -367,4 +368,18 @@ test('a Resume during reopen reconciliation waits for it and then sends only the
   gate.resolve(); await opening; await settle(queue);
   expect(server.requests.map(request => [request.slot, request.reconcile])).toEqual([[slotId, true], [slotTwo, false]]);
   expect(queue.getSnapshot().files[slotId]).toEqual({ state: 'ready', code: null, operationId: original }); expect(queue.getSnapshot().files[slotTwo].state).toBe('ready');
+});
+
+test('the newest project state is ordered by revision, then by automatic writes at the same revision', () => {
+  const item = project(), queue = importUploadQueue(item.id);
+  queue.observe({ ...item, revision: 3, valueRevision: 1 });
+  queue.observe({ ...item, revision: 3, valueRevision: 0 });
+  expect([queue.getSnapshot().latest?.revision, queue.getSnapshot().latest?.valueRevision]).toEqual([3, 1]);
+  // Automatic values written after an upload response arrive at the same revision and replace it.
+  queue.observe({ ...item, revision: 3, valueRevision: 2 });
+  expect(queue.getSnapshot().latest?.valueRevision).toBe(2);
+  queue.observe({ ...item, revision: 2, valueRevision: 9 });
+  expect([queue.getSnapshot().latest?.revision, queue.getSnapshot().latest?.valueRevision]).toEqual([3, 2]);
+  queue.observe({ ...item, revision: 4, valueRevision: 0 });
+  expect([queue.getSnapshot().latest?.revision, queue.getSnapshot().latest?.valueRevision]).toEqual([4, 0]);
 });

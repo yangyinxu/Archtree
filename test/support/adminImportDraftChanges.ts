@@ -7,10 +7,14 @@ export const artistEntries = (name: string, key: string = randomUUID()): ImportA
 
 /**
  * Decision body items as the Web editor sends them: an Artist decision names the draft's first entry (or `entryKey` when it
- * already names one), and every other scope names none.
+ * already names one) and that entry's name, a label decision the label's name, and every other scope names neither.
  */
 export const withEntryKeys = <T extends { scope: string; entryKey?: string | null }>(draft: ImportDraftV2, decisions: readonly T[]) =>
-    decisions.map(decision => ({ ...decision, entryKey: decision.scope === 'artist' ? decision.entryKey ?? draft.album.artists[0]?.key ?? null : null }));
+    decisions.map(decision => {
+        const entryKey = decision.scope === 'artist' ? decision.entryKey ?? draft.album.artists[0]?.key ?? null : null;
+        const boundName = decision.scope === 'artist' ? draft.album.artists.find(entry => entry.key === entryKey)?.name ?? null : decision.scope === 'label' ? draft.album.label?.name ?? null : null;
+        return { ...decision, entryKey, boundName };
+    });
 
 /** The field-patch changes from a saved draft to an edited one: album paths, then tracks in saved order, changed values only. */
 export function draftChanges(base: ImportDraftV2, draft: ImportDraftV2) {

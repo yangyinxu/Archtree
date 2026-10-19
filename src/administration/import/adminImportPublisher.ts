@@ -28,10 +28,12 @@ const candidateProjection = importCandidateProjection;
 
 /**
  * Explicit one-step approval `{operationId, expectedRevision, changes, decisions, selectedCoverSlotId, approvalDigest}` creates one
- * Album or appends only missing tracks to the exact reviewed existing Album. One transaction and one receipt save what the
- * confirmation showed (adminImportApproval.ts) and freeze the reviewed draft, decisions and identities as format 3: every credited
- * Artist and the label are fixed here. A body without the one-step fields replays its stored receipt, or otherwise is refused
- * with ADMIN_IMPORT_RELOAD_REQUIRED (importPolicy). The raw body is fingerprinted as sent, so an earlier receipt still matches.
+ * Album or appends only missing tracks to the exact reviewed existing Album. It is admitted at any project revision up to the
+ * current one: the approvalDigest is its binding, so Luna, the publication worker and tag automation never make it stale unless
+ * they changed what the confirmation showed. One transaction and one receipt save what the confirmation showed (adminImportApproval.ts) and freeze
+ * the reviewed draft, decisions and identities as format 3: every credited Artist and the label are fixed here. A body without
+ * the one-step fields or with decisions lacking bound names replays its stored receipt, or otherwise is refused with
+ * ADMIN_IMPORT_RELOAD_REQUIRED (importPolicy). The raw body is fingerprinted as sent, so an earlier receipt still matches.
  */
 export async function publishAdminImport(actor: string, id: string, raw: unknown) {
     const body = record(raw); exact(body, ['operationId', 'expectedRevision', ...IMPORT_APPROVAL_FIELDS]); if (!uuid(body.operationId) || !Number.isSafeInteger(body.expectedRevision) || (body.expectedRevision as number) < 1) throw new AdminImportError(400, 'ADMIN_IMPORT_INVALID_INPUT');

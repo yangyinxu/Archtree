@@ -15,7 +15,7 @@ export function detail(): ImportDetail {
       { id: 'cccccccccccccccccccccccc', generation: 1, scope: 'album', slotId: null, field: 'title', baseline: '', value: 'Suggested Album', source: 'folder', evidence: 'Synthetic Album', decision: 'pending' },
       { id: 'dddddddddddddddddddddddd', generation: 1, scope: 'track', slotId, field: 'trackNumber', baseline: null, value: 1, source: 'filename', evidence: '01 First.mp3', decision: 'pending' }
     ], decisions: [], upload: { ready: 0, total: 2, available: false }, publication: 'notAvailable', capabilities: { analysis: true, upload: false, publish: false }, receipts: [],
-    approvalDigest: 'e'.repeat(64)
+    approvalDigest: 'e'.repeat(64), valueRevision: 0, automaticPaths: [], possibleLabelEntryKeys: []
   };
 }
 /** One synthetic Artist entry, primary by default; a fixed key keeps saved and edited drafts comparable. */

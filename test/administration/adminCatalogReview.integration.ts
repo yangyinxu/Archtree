@@ -19,6 +19,7 @@
  *   - ambiguous provider outcome persists and blocks paid replay but allows explicit manual apply
  *   - permission loss and expired analysis grants prevent new provider calls and catalog writes
  *   - separate review inventory supports scoped pagination/counts and terminal applied filtering
+ *   - reviews keep the last-administrator-receipt window for edits, adoption and stopping analysis, and never gain automatic values
  *   - a review saved in a newer draft format reads through the Draft v2 allowlist and admits only stopping its analysis
  *   - reviews store Draft v2 with read-only context through edit, analysis and adoption, and review edits bind to the last administrator change
  *   - review context comes from ordered Credits with phrases and the first ready label; it is read-only and Artist suggestions stay hints
@@ -47,6 +48,7 @@ import { adminImportIndexes, createAdminImport, getAdminImport, listAdminImports
 import { publishAdminImport, resumeAdminImportPublication, cancelAdminImportPublication } from '../../src/administration/import/adminImportPublisher';
 import { cleanupAdminImportAsset, previewAdminImportAsset, selectAdminImportCover, uploadAdminImportAsset, type ImportObjectStorage } from '../../src/administration/import/adminImportStorage';
 import { ADMIN_IMPORT_LIMITS } from '../../src/administration/import/adminImportContract';
+import { runImportAutomation } from '../../src/administration/import/adminImportAutomation';
 import { derivedEntryKey, draftBytes } from '../../src/administration/import/adminImportDraft';
 import { legacyArtistEntryKey } from '../../src/administration/import/adminImportDraftCompat';
 import { ImportProviderError, type ImportAnalysisProvider } from '../../src/administration/import/adminImportProvider';
@@ -261,6 +263,31 @@ test('separate review inventory supports scoped pagination/counts and terminal a
     await apply(await edit(a, draft => { draft.album.title = 'Finished'; }));
     const completed = await listCatalogReviews(String(actor), { filter: 'completed' }); assert.equal(completed.items.length, 1); assert.equal(completed.counts.awaitingReview, 2);
 });
+test('reviews keep the last-administrator-receipt window for edits, adoption and stopping analysis, and never gain automatic values', async () => {
+    let review = await create(); const id = review.item.id, _id = new ObjectId(id);
+    review = await analyzeCatalogReview(String(actor), id, mutation(review.item.revision), provider);
+    const opened = review; await runAdminImportWorkerOnce(provider);
+    // Another administrator's edit closes the window on every revision seen before it, for each kind imports now admit at any revision.
+    const draft = structuredClone(opened.item.draft); draft.album.title = 'Other administrator title';
+    const moved = await editCatalogReview(String(other), id, { ...mutation(opened.item.revision), draft });
+    const suggestion = (await current(id)).item.suggestions[0], before = await importCollection().findOne({ _id });
+    for (const [label, work] of [
+        ['an edit', () => edit(opened, value => { value.tracks[0].title = 'Stale edit'; })],
+        ['an adoption', () => adoptCatalogReview(String(actor), id, { ...mutation(opened.item.revision), generation: 1, selectedIds: [], rejectIds: [suggestion.id] })],
+        ['stopping analysis', () => cancelCatalogReviewAnalysis(String(actor), id, mutation(opened.item.revision))]
+    ] as const) await assert.rejects(work(), code('ADMIN_IMPORT_REVISION_CONFLICT'), label);
+    assert.deepEqual(await importCollection().findOne({ _id }), before);
+    // A worker tick never closes it: the revision of the last administrator change is still admitted after one.
+    await runAdminImportWorkerOnce(provider); assert.ok((await current(id)).item.revision > moved.item.revision);
+    const rejected = await adoptCatalogReview(String(actor), id, { ...mutation(moved.item.revision), generation: 1, selectedIds: [], rejectIds: [suggestion.id] });
+    assert.equal(rejected.receipt!.kind, 'adopt');
+    // Tag automation never reads a review, and a review never stores or shows automatic values.
+    assert.deepEqual(await runImportAutomation(String(actor), id), { ran: false, written: [], skipped: [], album: false });
+    const doc = await importCollection().findOne({ _id }), json = JSON.stringify(await current(id));
+    assert.deepEqual(['valueRevision' in doc!, 'automation' in doc!, 'draftOrigins' in doc!], [false, false, false]);
+    for (const key of ['valueRevision', 'automaticPaths', 'possibleLabelEntryKeys', 'approvalDigest', 'boundName']) assert.equal(json.includes(key), false, key);
+});
+
 test('a review saved in a newer draft format reads through the Draft v2 allowlist and admits only stopping its analysis', async () => {
     let review = await create(); review = await analyzeCatalogReview(String(actor), review.item.id, mutation(1), provider);
     assert.equal(review.item.capabilities.apply, true);

@@ -21,7 +21,8 @@
  *   - the Draft v2 editor view keeps only readable entries, label and values, one track per slot in stored order, and never throws
  *   - the Draft v2 suggestion view maps legacy Artist names, keeps readable album Artist suggestions whole and drops any other
  *   - the Draft v2 suggestion view hides an Artist suggestion that proposes a placeholder such as Various Artists
- *   - the Draft v2 decision view keeps one readable decision per entry, label, Album and track, each naming its entry or none
+ *   - the Draft v2 decision view keeps one readable decision per entry, label, Album and track, each naming its entry or none and its bound name
+ *   - the editor asset view allowlists version-2 tag evidence and reads evidence stored before it as version 1; the v1 DTO keeps five tag fields
  *   - the published view lists every credited Artist and the label of a format-3 approval, maps a legacy Artist to one entry, and is null when malformed
  * @end-catalog */
 
@@ -39,8 +40,9 @@ import { importPublicationSupported, importPublicationVersion } from '../../src/
 import { adminImportDto, importDigest, type AdminImportDocument } from '../../src/administration/import/adminImportService';
 import {
     catalogReviewAppliedView, catalogReviewSourceDisc, catalogReviewSourceView, importDecisionsV2View, importDraftV2FromV1, importDraftV2View, importDraftVersion, importDraftWritable, importProjectV2View,
-    importPublishedV2View, importSuggestionsV2View, legacyArtistEntryKey, legacyAssetVisible, legacyDraftView, legacyPublicationView, writableDraftFilter, type ImportProjectV2View
+    importPublishedV2View, importSuggestionsV2View, legacyArtistEntryKey, legacyAssetsView, legacyAssetVisible, legacyDraftView, legacyPublicationView, writableDraftFilter, type ImportProjectV2View
 } from '../../src/administration/import/adminImportDraftCompat';
+import { importTagsV2View } from '../../src/administration/import/adminImportTags';
 import type { CatalogReviewApplied, CatalogReviewSource } from '../../src/administration/catalog/adminCatalogReviewContract';
 import { loadImportFixture } from '../support/adminImportFixtures';
 
@@ -365,7 +367,7 @@ test('the Draft v2 suggestion view hides an Artist suggestion that proposes a pl
     assert.deepEqual(importSuggestionsV2View([{ ...artists, baseline: [{ ...lorem, name: 'Various Artists' }] }], generation, slots, importId).length, 1);
 });
 
-test('the Draft v2 decision view keeps one readable decision per entry, label, Album and track, each naming its entry or none', () => {
+test('the Draft v2 decision view keeps one readable decision per entry, label, Album and track, each naming its entry or none and its bound name', () => {
     const slot = '00000009-0000-4000-a000-0000000000e1', slots = new Set([slot]), e1 = '00000009-0000-4000-8000-0000000000e1', e2 = '00000009-0000-4000-8000-0000000000e2', id = 'a'.repeat(24);
     const decision = (scope: string, extra: object = {}) => ({ scope, slotId: scope === 'track' ? slot : null, entryKey: null, action: 'create-distinct', candidateId: null, candidateRevision: null, boundName: 'never shown', ...extra });
     const kept = [decision('artist', { entryKey: e1 }), decision('artist', { entryKey: e2, action: 'reuse', candidateId: id, candidateRevision: 'r' }), decision('label', { action: 'skip' }), decision('album'), decision('track')];
@@ -375,11 +377,43 @@ test('the Draft v2 decision view keeps one readable decision per entry, label, A
         decision('album', { candidateId: 'not-an-id' }), decision('album', { candidateRevision: 7 }), null, 'x', [decision('album')]
     ];
     const view = importDecisionsV2View([...kept, ...dropped, decision('artist', { entryKey: e1, action: 'skip' }), decision('label'), decision('track', { action: 'skip' })], slots);
-    // The first stored decision of each scope, slot and entry wins; extra fields (the bound name) are never shown.
-    assert.deepEqual(view, kept.map(({ boundName: _boundName, ...value }) => value));
+    // The first stored decision of each scope, slot and entry wins; an Artist or label decision shows the name it was made for, an
+    // Album or track decision none.
+    assert.deepEqual(view, kept.map(value => ({ ...value, boundName: value.scope === 'artist' || value.scope === 'label' ? 'never shown' : null })));
+    // An unreadable bound name (not text, or over 200 characters) is shown as none, which a decision save can never echo back.
+    assert.deepEqual(importDecisionsV2View([decision('artist', { entryKey: e1, boundName: 'n'.repeat(201) }), decision('label', { boundName: 7 }), decision('album', { boundName: 'x' })], slots).map(item => item.boundName), [null, null, null]);
     assert.equal(importDecisionsV2View('not a list', slots).length, 0);
     const many = Array.from({ length: 130 }, (_, index) => decision('artist', { entryKey: `00000009-0000-4000-8000-${String(index).padStart(12, '0')}` }));
     assert.equal(importDecisionsV2View(many, slots).length, 122);
+});
+
+test('the editor asset view allowlists version-2 tag evidence and reads evidence stored before it as version 1; the v1 DTO keeps five tag fields', () => {
+    const slot = '00000009-0000-4000-a000-0000000000e1', slots = new Set([slot]);
+    const asset = (tags: unknown) => ({ slotId: slot, operationId: '00000009-0000-4000-8000-0000000000e1', actorId: actor, state: 'ready', byteLength: 10, sha256: 'a'.repeat(64), contentType: 'audio/wav', tags });
+    const v2 = { version: 2, title: 'Synthetic Title', album: 'Synthetic Album', artists: ['Synthetic Artist'], albumArtists: Array.from({ length: 12 }, (_, index) => `Album Artist ${index}`), label: 'Synthetic Label',
+        year: 2026, discNumber: 2, trackNumber: 3, durationMs: 251_400, identifiers: { barcode: '4006381333931', catalogNumber: 'SYN-001', isrc: 'USABC2600001', musicBrainzReleaseId: '00000009-0000-4000-8000-0000000000f2', extra: 'x' },
+        flagged: [{ field: 'title', reason: 'characters' }, { field: 'title', reason: 'characters' }, { field: 'label', reason: 'unknown' }, { field: 'unknown', reason: 'length' }], futureField: 'x' };
+    const [shown] = legacyAssetsView([asset(v2)], slots, actor, importTagsV2View);
+    // Lists are bounded at 10, unknown flag fields and reasons and repeated flags are dropped, and unknown keys never appear.
+    assert.deepEqual(shown.tags, { version: 2, title: 'Synthetic Title', album: 'Synthetic Album', artists: ['Synthetic Artist'], albumArtists: v2.albumArtists.slice(0, 10), label: 'Synthetic Label', year: 2026,
+        discNumber: 2, trackNumber: 3, durationMs: 251_400, identifiers: { barcode: '4006381333931', catalogNumber: 'SYN-001', isrc: 'USABC2600001', musicBrainzReleaseId: '00000009-0000-4000-8000-0000000000f2' },
+        flagged: [{ field: 'title', reason: 'characters' }] });
+    // A stored value over its bound, with an invisible character or in another format is shown as empty, never cut.
+    const [bad] = legacyAssetsView([asset({ ...v2, title: 't'.repeat(301), album: 'Lorem\u200bIpsum', label: 'l'.repeat(201), discNumber: 1000, durationMs: 86_400_001,
+        identifiers: { barcode: '4006381333932', catalogNumber: 'c'.repeat(101), isrc: 'us-abc-26-00001', musicBrainzReleaseId: 'not-an-id' }, artists: ['ok', 7, 'n'.repeat(201)] })], slots, actor, importTagsV2View);
+    assert.deepEqual([bad.tags!.title, bad.tags!.album, bad.tags!.label, bad.tags!.discNumber, bad.tags!.durationMs, bad.tags!.identifiers, bad.tags!.artists],
+        [null, null, null, null, null, { barcode: null, catalogNumber: null, isrc: null, musicBrainzReleaseId: null }, ['ok']]);
+    // Evidence without `version: 2` (stored before S8, or an unknown version) reads as version 1 with empty extended fields.
+    for (const version of [undefined, 1, 3, '2']) {
+        const [legacy] = legacyAssetsView([asset({ ...v2, version })], slots, actor, importTagsV2View);
+        assert.deepEqual(legacy.tags, { version: 1, title: 'Synthetic Title', album: 'Synthetic Album', artists: ['Synthetic Artist'], year: 2026, trackNumber: 3, albumArtists: [], label: null, discNumber: null, durationMs: null,
+            identifiers: { barcode: null, catalogNumber: null, isrc: null, musicBrainzReleaseId: null }, flagged: [] }, String(version));
+    }
+    assert.equal(legacyAssetsView([asset(null)], slots, actor, importTagsV2View)[0].tags, null);
+    // The frozen v1 DTO of a version-2 tagged asset keeps exactly its five v1 tag fields.
+    const doc = load('v1-assets-reviewed.json'); doc.media!.assets[0].tags = v2 as never;
+    const v1 = adminImportDto(doc, actor, true).assets.find(item => item.slotId === doc.media!.assets[0].slotId)!;
+    assert.deepEqual(v1.tags, { title: 'Synthetic Title', album: 'Synthetic Album', artists: ['Synthetic Artist'], year: 2026, trackNumber: 3 });
 });
 
 test('the published view lists every credited Artist and the label of a format-3 approval, maps a legacy Artist to one entry, and is null when malformed', () => {

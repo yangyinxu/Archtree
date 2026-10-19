@@ -1447,6 +1447,34 @@ The wire protocol and operational bounds are documented in
   edit or an accepted suggestion; editing a join phrase never changes it. An
   empty label adds no label Credit, and unknown Disc and Track Numbers stay
   empty.
+- Each draft value is either automatic, written from file tags and not yet
+  reviewed, or the administrator's own: typed, accepted, included in a
+  publication approval or, for the label, carrying an explicit identity
+  decision. The Artist entries count as one value, which becomes the
+  administrator's own once any entry carries an explicit identity decision.
+  Automation writes only empty or automatic values, and only while a value is
+  still the one it last saw. An administrator save writes only the values that
+  administrator changed: it always wins over automation for those values, is
+  never refused merely because automation wrote other values meanwhile, and
+  never erases automatic values it did not change, so nothing is rebased.
+  Automatic text is normalized and trimmed like typed text; a value with control
+  or invisible formatting characters, or over a length limit, is left out and
+  shown, never stripped or truncated. Automatic writes do not use the import's
+  ordinary editing allowance. The publication confirmation marks Artist and
+  label entries that rest only on file tags.
+- A confirmed upload keeps bounded, cleaned evidence from the file's embedded
+  tags: title, Album, artist and album artist, label, year, Disc and Track
+  Numbers, duration, and identifiers such as a barcode, catalogue number, ISRC
+  or MusicBrainz release ID, each kept only when it matches its format. Once a
+  file's upload is confirmed, its empty or automatic track title, Disc Number
+  and Track Number are filled from its tags; without a disc tag, a disc folder
+  or prefix in its relative path, such as `Disc 2` or `CD2`, may supply the Disc
+  Number. Once every selected file is confirmed, the empty or automatic Album
+  title, year, label and one primary Artist entry from the album artist are
+  filled in one step from the values all files share; a value on which files
+  disagree stays empty. Placeholder artists such as Various Artists or Unknown
+  Artist never become Artist entries, and a company-like artist name is flagged
+  as a possible label.
 - A project saved before Artist entries, labels and Disc Numbers existed opens
   with its Artist name as one primary entry, no label and unknown Disc
   Numbers. Its existing values count as the administrator's own, and its staged

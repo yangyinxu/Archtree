@@ -21,12 +21,14 @@ import { prepareMediaRepresentation } from '../../services/media/mediaRepresenta
 import { validateCoverArtFile, maxCoverArtInputBytes } from '../../services/image/imageStorageService';
 import { maxAudioUploadMb } from '../../middleware/audioUpload';
 import { normalizeUtf8Text } from '../../utils/textEncoding';
-import { ADMIN_IMPORT_LIMITS as LIMITS, AdminImportError, exact, importEnabled, objectId, record, uuid, type AdminImportResponse, type ImportEmbeddedTags } from './adminImportContract';
+import { ADMIN_IMPORT_LIMITS as LIMITS, AdminImportError, exact, importEnabled, objectId, record, uuid, type AdminImportResponse, type ImportEmbeddedTagsV2 } from './adminImportContract';
 import { getAdminImport, importCollection, importPurposeFilter, importDigest, mutateAdminImport, withImportAdmin } from './adminImportService';
 import { importCoverSelectable, importPrivateStorageReady, importSourcesLocked, importUploadSettled, type ImportAsset } from './adminImportMediaTypes';
 import { adminWorkerSignal } from '../adminWorkerLifecycle';
 import { extractImportArtwork } from './adminImportArtwork';
 import { importDraftWritable } from './adminImportDraftCompat';
+import { runImportAutomation } from './adminImportAutomation';
+import { readImportEmbeddedTags } from './adminImportTags';
 
 export type ImportObjectIdentity = { etag: string; versionId: string | null };
 export interface ImportObjectTarget { bucket: string; key: string; sha256: string; byteLength: number; contentType: string; importId: string; slotId: string; operationId: string }
@@ -99,7 +101,11 @@ async function fileDigest(file: Express.Multer.File) {
     if (bytes !== file.size) throw new AdminImportError(400, 'ADMIN_IMPORT_FILE_CHANGED'); return hash.digest('hex');
 }
 
-/** Reserves the only object identity before PUT; admission binds slot state and intent, never the project revision. */
+/**
+ * Reserves the only object identity before PUT; admission binds slot state and intent, never the project revision. A confirmed
+ * audio file (including a replay of an intent already confirmed) then runs tag automation, so a crash between confirmation and
+ * automation is caught up by the original intent's replay.
+ */
 export async function uploadAdminImportAsset(actor: string, id: string, slotId: string, intent: { operationId: string; expectedRevision: number }, file: Express.Multer.File, storage: ImportObjectStorage = defaultImportObjectStorage): Promise<AdminImportResponse> {
     storageReady();
     const imageSlot = slotId === 'cover';
@@ -107,7 +113,7 @@ export async function uploadAdminImportAsset(actor: string, id: string, slotId: 
     const current = await getAdminImport(actor, id); const manifest = current.item.manifest.files.find(file => file.slotId === slotId);
     if (!imageSlot && (!manifest || normalizeUtf8Text(file.originalname) !== manifest.filename || (manifest.byteLength !== null && manifest.byteLength !== file.size))) throw new AdminImportError(400, 'ADMIN_IMPORT_FILE_CHANGED');
     let duration: string | null = null, format: string | null = null, representation: ImportAsset['representation'] = null;
-    let tags: ImportEmbeddedTags | null = null;
+    let tags: ImportEmbeddedTagsV2 | null = null;
     if (imageSlot) { try { await validateCoverArtFile(file); } catch { throw new AdminImportError(400, 'ADMIN_IMPORT_INVALID_COVER'); } }
     else {
         if (!/^audio\/[a-zA-Z0-9.+-]+$/.test(file.mimetype)) throw new AdminImportError(400, 'ADMIN_IMPORT_INVALID_AUDIO');
@@ -115,8 +121,7 @@ export async function uploadAdminImportAsset(actor: string, id: string, slotId: 
             const metadata = file.path ? await readAudioMetadata(file) : await parseBuffer(Uint8Array.from(file.buffer), { mimeType: file.mimetype, path: file.originalname, size: file.size }, { duration: true, skipCovers: true }); const audio = metadata.format;
             if (!Number.isFinite(audio.duration) || audio.duration! <= 0 || audio.duration! > 86400 || !audio.sampleRate || !audio.numberOfChannels || audio.hasVideo === true || audio.trackInfo?.some(track => track.type === 1)) throw new Error();
             duration = formatDuration(audio.duration); format = inferAudioFormat(file.originalname, file.mimetype, audio.container);
-            const safeTag = (value: unknown) => typeof value === 'string' ? value.replace(/[\u0000-\u001f\u007f-\u009f]/g, '').trim().slice(0, 200) || null : null;
-            tags = { title: safeTag(metadata.common.title), album: safeTag(metadata.common.album), artists: (metadata.common.artists ?? (metadata.common.artist ? [metadata.common.artist] : [])).slice(0, 10).map(safeTag).filter((value): value is string => Boolean(value)), year: Number.isInteger(metadata.common.year) && metadata.common.year! > 0 && metadata.common.year! <= 9999 ? metadata.common.year! : null, trackNumber: Number.isInteger(metadata.common.track?.no) && metadata.common.track.no! > 0 && metadata.common.track.no! <= 9999 ? metadata.common.track.no : null };
+            tags = readImportEmbeddedTags(metadata);
             representation = await prepareMediaRepresentation(file, `imports/${id}/${slotId}/${intent.operationId}`, 'audio');
         } catch { throw new AdminImportError(400, 'ADMIN_IMPORT_INVALID_AUDIO'); }
     }
@@ -130,7 +135,7 @@ export async function uploadAdminImportAsset(actor: string, id: string, slotId: 
         doc.media.assets.push({ slotId, operationId: intent.operationId, actorId: actor, bucket: process.env.ADMIN_IMPORT_S3_BUCKET_NAME!.trim(), key: `imports/${id}/${slotId}/${intent.operationId}`, sha256, byteLength: file.size, contentType: file.mimetype, filename: normalizeUtf8Text(file.originalname), state: 'pending', versionId: null, etag: null, updatedAt: new Date(), leaseOwner: null, leaseUntil: null, transferDeadline: null, failureConfirmedAt: null, duration, format, representation, tags, recovery: { ...intent, kind: 'upload', actorId: actor } });
     });
     const state = await transferImportAsset(actor, id, slotId, intent.operationId, sha256, file, storage);
-    if (state === 'ready' && !imageSlot) await stageEmbeddedArtwork(actor, id, slotId, intent.operationId, file, storage);
+    if (state === 'ready' && !imageSlot) { await runImportAutomation(actor, id); await stageEmbeddedArtwork(actor, id, slotId, intent.operationId, file, storage); }
     return { ...(await getAdminImport(actor, id)), receipt: admitted.receipt };
 }
 
@@ -197,7 +202,10 @@ async function stageEmbeddedArtwork(actor: string, id: string, audioSlotId: stri
     } catch { /* Audio success is independent; an admitted candidate retains its own lifecycle evidence. */ }
 }
 
-/** Reconciles an upload of unknown outcome against storage without bytes; only the original intent; any current admin. */
+/**
+ * Reconciles an upload of unknown outcome against storage without bytes; only the original intent; any current admin. A ready
+ * result (found now or earlier) runs tag automation as the reconciling administrator, so a missed run is caught up here.
+ */
 export async function reconcileAdminImportAsset(actor: string, id: string, slotId: string, raw: unknown, storage: ImportObjectStorage = defaultImportObjectStorage, now = new Date()): Promise<AdminImportResponse> {
     const body = record(raw); exact(body, ['operationId']);
     const embeddedSlot = typeof slotId === 'string' && slotId.startsWith('embedded-') && uuid(slotId.slice(9));
@@ -209,7 +217,7 @@ export async function reconcileAdminImportAsset(actor: string, id: string, slotI
         if (!asset || (asset.recovery?.kind ?? 'upload') !== 'upload' || (asset.recovery?.operationId ?? asset.operationId) !== body.operationId) throw new AdminImportError(409, 'ADMIN_IMPORT_ASSET_CONFLICT');
         const original = doc.receipts.find(receipt => receipt.operationId === body.operationId && receipt.kind === 'upload');
         const receipt = original ? { operationId: original.operationId, kind: 'upload' as const, revision: original.revision } : null;
-        if (asset.state === 'ready' || (asset.state === 'failed' && asset.failureConfirmedAt)) return { receipt, asset: null };
+        if (asset.state === 'ready' || (asset.state === 'failed' && asset.failureConfirmedAt)) return { receipt, asset: null, ready: asset.state === 'ready' };
         if (!['pending', 'unknown', 'failed'].includes(asset.state)) throw new AdminImportError(409, 'ADMIN_IMPORT_ASSET_CONFLICT');
         if (importSourcesLocked(doc.media)) throw new AdminImportError(409, 'ADMIN_IMPORT_PUBLICATION_LOCKED');
         if (asset.leaseUntil && asset.leaseUntil > now) return { receipt, asset: null };
@@ -221,6 +229,7 @@ export async function reconcileAdminImportAsset(actor: string, id: string, slotI
         await importCollection().replaceOne({ _id: doc._id, revision: doc.revision }, doc, { session });
         return { receipt, asset: { ...asset }, settled, previous };
     });
+    let ready = 'ready' in claim && claim.ready === true;
     if (claim.asset) {
         let confirmed: ImportObjectIdentity | null = null, state: ImportAsset['state'] = 'unknown', failureConfirmedAt: Date | null = null;
         // Only an exact identity is ready; a binding mismatch or storage error stays unknown with all evidence kept.
@@ -231,7 +240,9 @@ export async function reconcileAdminImportAsset(actor: string, id: string, slotI
         if (changed) Object.assign(set, { 'media.assets.$.state': state, 'media.assets.$.failureConfirmedAt': failureConfirmedAt, 'media.assets.$.updatedAt': now, updatedAt: now });
         if (confirmed) Object.assign(set, { 'media.assets.$.etag': confirmed.etag, 'media.assets.$.versionId': confirmed.versionId });
         await importCollection().updateOne({ _id: new ObjectId(id), 'media.assets': { $elemMatch: { slotId, operationId: claim.asset.operationId, leaseOwner: worker } } }, { $set: set, ...(changed ? { $inc: { revision: 1 } } : {}) });
+        ready = state === 'ready';
     }
+    if (ready) await runImportAutomation(actor, id);
     return { item: (await getAdminImport(actor, id)).item, receipt: claim.receipt };
 }
 
@@ -269,12 +280,20 @@ export async function cleanupAdminImportAsset(actor: string, id: string, slotId:
     return { ...(await getAdminImport(actor, id)), receipt: admitted.receipt };
 }
 
-/** Selecting artwork is an explicit draft mutation; extracted candidates never select themselves. */
+/**
+ * Selecting artwork is an explicit draft mutation; extracted candidates never select themselves. It binds the cover state the
+ * administrator saw: no cover selection, approval or staged cleanup since `expectedRevision` (mutateAdminProject), and a chosen
+ * slot holding a ready image admitted no later than that revision, so a replaced image is never selected unseen. Uploads of
+ * other slots, Luna, automation and worker steps never make it stale.
+ */
 export function selectAdminImportCover(actor: string, id: string, raw: unknown) {
     const body = record(raw); exact(body, ['operationId', 'expectedRevision', 'slotId']);
     if (!uuid(body.operationId) || !Number.isSafeInteger(body.expectedRevision) || (body.expectedRevision as number) < 1 || (body.slotId !== null && typeof body.slotId !== 'string')) throw new AdminImportError(400, 'ADMIN_IMPORT_INVALID_INPUT');
     return mutateAdminImport(actor, id, body as typeof body & { operationId: string; expectedRevision: number }, 'select-cover', async doc => {
         if (!importCoverSelectable(doc.media, body.slotId)) throw new AdminImportError(409, 'ADMIN_IMPORT_ASSET_CONFLICT');
+        const chosen = body.slotId === null ? undefined : doc.media?.assets.find(asset => asset.slotId === body.slotId && asset.state === 'ready');
+        const admission = chosen && [...doc.receipts, ...(doc.automaticReceipts ?? [])].find(receipt => receipt.operationId === chosen.operationId && receipt.kind === 'upload');
+        if (admission && admission.revision > (body.expectedRevision as number)) throw new AdminImportError(409, 'ADMIN_IMPORT_REVISION_CONFLICT');
         doc.media ??= { assets: [] }; doc.media.selectedCoverSlotId = body.slotId;
     });
 }

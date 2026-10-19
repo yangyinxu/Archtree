@@ -8,7 +8,7 @@ import { boundImportApproval } from '../../src/administration/import/adminImport
 import { importCoverSelectable, type ImportAsset, type ImportMedia } from '../../src/administration/import/adminImportMediaTypes';
 
 const operationId = '00000009-0000-4000-8000-0000000000b1';
-const decision = { scope: 'album', slotId: null, entryKey: null, action: 'create-distinct', candidateId: null, candidateRevision: null };
+const decision = { scope: 'album', slotId: null, entryKey: null, boundName: null, action: 'create-distinct', candidateId: null, candidateRevision: null };
 const change = { path: 'album.title', base: 'Synthetic Album', value: 'Retitled' };
 const valid = { operationId, expectedRevision: 3, changes: [change], decisions: [decision], selectedCoverSlotId: 'cover', approvalDigest: 'a'.repeat(64) };
 const invalid = (body: Record<string, unknown>, label: string) => assert.throws(() => boundImportApproval(body),
@@ -18,6 +18,8 @@ test('a publish body from before one-step approval and every bounded approval pa
     boundImportApproval({ operationId, expectedRevision: 3 });
     boundImportApproval(valid); boundImportApproval({ ...valid, changes: [], decisions: [], selectedCoverSlotId: null });
     boundImportApproval({ ...valid, changes: Array.from({ length: 305 }, () => change), decisions: Array.from({ length: 122 }, () => decision), selectedCoverSlotId: `embedded-${operationId}` });
+    // The longest bound name, in three-byte characters, still fits a reuse decision's 1 KB bound.
+    boundImportApproval({ ...valid, decisions: [{ ...decision, scope: 'artist', entryKey: '00000009-0000-4000-8000-0000000000e1', boundName: '名'.repeat(200), action: 'reuse', candidateId: 'f'.repeat(24), candidateRevision: 'c'.repeat(64) }] });
     // A partial body or a malformed digest passes here and is refused after receipt lookup, so a stored receipt of that operation
     // still answers it as an operation conflict.
     const { approvalDigest: _digest, ...partial } = valid;

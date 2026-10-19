@@ -1,5 +1,5 @@
 import type { MediaRepresentation } from '../../models/mediaRepresentation';
-import { ADMIN_IMPORT_LIMITS, type ImportDraft, type ImportDuplicateDecision, type ImportEmbeddedTags } from './adminImportContract';
+import { ADMIN_IMPORT_LIMITS, type ImportDraft, type ImportDuplicateDecision, type ImportEmbeddedTags, type ImportEmbeddedTagsV2 } from './adminImportContract';
 import type { ImportDecisionV2, ImportDraftV2 } from './adminImportDraft';
 
 /** Stage objects are never AudioTrack rows, so ordinary publication recovery cannot expose a draft. */
@@ -8,7 +8,10 @@ export interface ImportAsset {
     state: 'pending' | 'ready' | 'failed' | 'unknown' | 'deleting' | 'cleanupFailed' | 'deleted';
     versionId: string | null; etag: string | null; updatedAt: Date; leaseOwner: string | null; leaseUntil: Date | null;
     duration: string | null; format: string | null; representation: MediaRepresentation | null;
-    tags: ImportEmbeddedTags | null;
+    /** Version-2 evidence from uploads admitted from S8 on; earlier uploads keep their v1 evidence and are never re-read. */
+    tags: ImportEmbeddedTags | ImportEmbeddedTagsV2 | null;
+    /** Per-file automation ran for this confirmed upload (adminImportAutomation.ts); never projected. */
+    automatedAt?: Date | null;
     coverConsumers?: string[];
     /** No PUT for this admission can land after this time; legacy records fall back to updatedAt plus the settle window. */
     transferDeadline?: Date | null;

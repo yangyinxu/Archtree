@@ -58,13 +58,14 @@ const canonical = (value: unknown): unknown => Array.isArray(value) ? value.map(
 /** Value equality independent of key order, as stored values and client bases are compared. */
 export const sameDraftValue = (left: unknown, right: unknown) => JSON.stringify(canonical(left)) === JSON.stringify(canonical(right));
 /**
- * Digest of what an approval confirmation shows from the saved project: its Draft v2 view, bound decisions, selected cover and each
- * staged asset's slot, state and bytes. Key order never matters; actor, capabilities, receipts, revision and analysis do not count.
+ * Digest of what an approval confirmation shows from the saved project: its Draft v2 view, bound decisions (with the names they
+ * were made for), selected cover, each staged asset's slot, state and bytes, and the "from file tags only" marks of the Artist
+ * entries and the label. Key order never matters; actor, capabilities, receipts, revisions and analysis do not count.
  */
 export const importApprovalDigest = (shown: { draft: ImportDraftV2; decisions: readonly unknown[]; selectedCoverSlotId: string | null;
-    assets: readonly { slotId: string; state: string; sha256: string }[] }): string =>
+    assets: readonly { slotId: string; state: string; sha256: string }[]; tagOnly: { artists: boolean; label: boolean } }): string =>
     createHash('sha256').update(JSON.stringify(canonical({ draft: shown.draft, decisions: shown.decisions, selectedCoverSlotId: shown.selectedCoverSlotId,
-        assets: shown.assets.map(({ slotId, state, sha256 }) => ({ slotId, state, sha256 })) }))).digest('hex');
+        assets: shown.assets.map(({ slotId, state, sha256 }) => ({ slotId, state, sha256 })), tagOnly: { artists: shown.tagOnly.artists, label: shown.tagOnly.label } }))).digest('hex');
 /** Structural Draft v2 check: an Artist entry list and no v1 artistName. */
 export const isDraftV2 = (value: unknown): value is ImportDraftV2 => {
     const draft = value as { album?: Record<string, unknown> } | null;

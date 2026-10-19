@@ -237,6 +237,19 @@ test('automation writes only empty or automatic values it still sees, never admi
     assert.deepEqual(result, { written: [`tracks.${slotB}.title`, 'album.releaseDate', 'album.label'], skipped: [{ path: 'album.title', reason: 'administrator' }, { path: `tracks.${slotA}.trackNumber`, reason: 'changed' }, { path: `tracks.${slotB}.discNumber`, reason: 'invalid' }] });
     assert.deepEqual([target.draft.tracks[1].title, target.draft.album.releaseDate, target.draft.album.title, target.draft.tracks[0].trackNumber, target.draft.album.label], ['Tagged Two', { year: 2024, month: null, day: null }, 'Synthetic Album', 1, { name: 'Tagged Label', musicBrainzId: null }]);
     assert.deepEqual(target.draftOrigins, { 'album:releaseDate': 'automatic', [`tracks:${slotA}:trackNumber`]: 'automatic', [`tracks:${slotB}:title`]: 'automatic', 'album:label': 'automatic' });
+    // A value equal to the current one is not a write and keeps its origin, even an empty administrator value.
+    const same = { draft: draft(), draftOrigins: {} as ImportDraftOrigins };
+    assert.deepEqual(applyAutomaticValues(same, [{ path: `tracks.${slotB}.title`, seen: '', value: ' ' }, { path: `tracks.${slotB}.discNumber`, seen: null, value: null }]),
+        { written: [], skipped: [{ path: `tracks.${slotB}.title`, reason: 'unchanged' }, { path: `tracks.${slotB}.discNumber`, reason: 'unchanged' }] });
+    assert.deepEqual(same.draftOrigins, {});
+    // A write that would grow the draft past 48 KB is reverted alone; the other values are still written.
+    const full = { draft: draft(), draftOrigins: {} as ImportDraftOrigins }; full.draft.album.title = 'x'.repeat(47_900 - JSON.stringify({ ...full.draft, album: { ...full.draft.album, title: '' } }).length);
+    assert.deepEqual(applyAutomaticValues(full, [{ path: `tracks.${slotB}.title`, seen: '', value: 't'.repeat(300) }, { path: `tracks.${slotB}.trackNumber`, seen: null, value: 2 }]),
+        { written: [`tracks.${slotB}.trackNumber`], skipped: [{ path: `tracks.${slotB}.title`, reason: 'size' }] });
+    assert.deepEqual([full.draft.tracks[1].title, full.draft.tracks[1].trackNumber, full.draftOrigins], ['', 2, { [`tracks:${slotB}:trackNumber`]: 'automatic' }]);
+    // Over the cap (a converted draft), a write that shrinks the draft is still admitted.
+    const over = { draft: draft(), draftOrigins: { 'album:title': 'automatic' } as ImportDraftOrigins }; over.draft.album.title = 'x'.repeat(49_000);
+    assert.deepEqual(applyAutomaticValues(over, [{ path: 'album.title', seen: over.draft.album.title, value: 'Short' }]), { written: ['album.title'], skipped: [] });
 });
 
 test('an Artist decision stays bound while its entry keeps its key and name; reordering, roles and phrases keep it', () => {
@@ -324,13 +337,21 @@ test('a legacy project converts to its Draft v2 view without touching its approv
 test('the import detail shows Draft v2 values, entry- and label-bound decisions and every published identity, and offers work for format 1 and 2 projects only', () => {
     for (const name of v1Fixtures) {
         const doc = load(name), detail = adminImportDetail(doc, actor, true), legacy = adminImportDto(doc, actor, true), view = importProjectV2View(doc)!;
-        const { draft: _a, suggestions: _b, decisions: _c, published, approvalDigest: _g, ...shared } = detail, { draft: _d, suggestions: _e, decisions: _f, published: legacyPublished, ...v1 } = legacy;
+        const { draft: _a, suggestions: _b, decisions: _c, published, approvalDigest: _g, assets, valueRevision, automaticPaths, possibleLabelEntryKeys, ...shared } = detail;
+        const { draft: _d, suggestions: _e, decisions: _f, published: legacyPublished, assets: legacyAssets, ...v1 } = legacy;
         assert.deepEqual(shared, v1, name);
+        // Every value of a project saved before value origins is the administrator's own, and its evidence reads as version 1 with
+        // exactly its five v1 values and empty extended fields.
+        assert.deepEqual([valueRevision, automaticPaths, possibleLabelEntryKeys], [0, [], []], name);
+        assert.deepEqual(assets.map(({ tags: _t, ...asset }) => asset), legacyAssets.map(({ tags: _t, ...asset }) => asset), name);
+        assert.deepEqual(assets.map(asset => asset.tags), legacyAssets.map(asset => asset.tags && { version: 1, ...asset.tags, albumArtists: [], label: null, discNumber: null, durationMs: null,
+            identifiers: { barcode: null, catalogNumber: null, isrc: null, musicBrainzReleaseId: null }, flagged: [] }), name);
         assert.deepEqual(detail.draft, view.draft, name);
         assert.deepEqual(detail.suggestions, view.suggestions.filter(suggestion => suggestion.generation === legacy.analysis.generation), name);
         // A legacy Artist decision names the legacy entry; every other decision names none.
         const unbound = !doc.draft.album.artistName.trim(), legacyKey = legacyArtistEntryKey(doc._id.toHexString());
-        assert.deepEqual(detail.decisions, legacy.decisions.filter(decision => decision.scope !== 'artist' || !unbound).map(decision => ({ ...decision, entryKey: decision.scope === 'artist' ? legacyKey : null })), name);
+        assert.deepEqual(detail.decisions, legacy.decisions.filter(decision => decision.scope !== 'artist' || !unbound).map(decision => ({ ...decision, entryKey: decision.scope === 'artist' ? legacyKey : null,
+            boundName: decision.scope === 'artist' ? doc.draft.album.artistName.trim() : null })), name);
         // A legacy approval's single Artist is listed as the only published Artist, with no label.
         assert.deepEqual(published, legacyPublished && { albumId: legacyPublished.albumId, artistIds: [legacyPublished.artistId], organizationId: null, trackIds: legacyPublished.trackIds }, name);
     }
@@ -339,12 +360,21 @@ test('the import detail shows Draft v2 values, entry- and label-bound decisions 
         tracks: [{ slotId: slot1, title: 'Synthetic Opening', discNumber: 1, trackNumber: 1 }, { slotId: slot2, title: 'Synthetic Reprise', discNumber: 2, trackNumber: 1 }] });
     // The lookup-sourced suggestion is outside the v1 source vocabulary and is left out.
     assert.deepEqual(item.suggestions.map(({ field, value }) => [field, value]), [['artists', doc.suggestions[0].value], ['title', 'Synthetic Compat Album (Deluxe)']]);
-    // Each entry and the label keep their own decision, which names its entry (or none) and never shows its bound name.
+    // Each entry and the label keep their own decision, which names its entry (or none) and the name it was made for.
     const [e1, e2] = doc.draft.album.artists.map(value => value.key);
-    assert.deepEqual(item.decisions.map(({ scope, slotId, entryKey }) => [scope, slotId, entryKey]), [['artist', null, e1], ['artist', null, e2], ['label', null, null], ['album', null, null], ['track', slot1, null], ['track', slot2, null]]);
+    assert.deepEqual(item.decisions.map(({ scope, slotId, entryKey, boundName }) => [scope, slotId, entryKey, boundName]),
+        [['artist', null, e1, 'Synthetic Primary'], ['artist', null, e2, 'Synthetic Guest'], ['label', null, null, 'Synthetic Label'], ['album', null, null, null], ['track', slot1, null, null], ['track', slot2, null, null]]);
     assert.deepEqual(item.capabilities, { analysis: true, upload: true, publish: true });
+    // The stored automatic origins are listed in path order; neither entry name looks like a company, and no automatic write is counted.
+    assert.deepEqual(item.automaticPaths, ['album.artists', 'album.label', 'album.releaseDate', `tracks.${slot1}.title`, `tracks.${slot1}.discNumber`, `tracks.${slot1}.trackNumber`, `tracks.${slot2}.discNumber`, `tracks.${slot2}.trackNumber`]);
+    assert.deepEqual([item.possibleLabelEntryKeys, item.valueRevision], [[], 0]);
+    // Its evidence has no `version: 2`, so it reads as version 1: the extended values it stores (album artist, label, disc and
+    // release ID) were never read by this release's tag reader and are not shown.
+    const tags = item.assets.find(asset => asset.slotId === slot1)!.tags!;
+    assert.deepEqual(tags, { version: 1, title: 'Synthetic Opening', album: 'Synthetic Compat Album', artists: ['Synthetic Primary', 'Synthetic Guest'], year: 2026, trackNumber: 1, albumArtists: [], label: null, discNumber: null,
+        durationMs: null, identifiers: { barcode: null, catalogNumber: null, isrc: null, musicBrainzReleaseId: null }, flagged: [] });
     const json = JSON.stringify(item);
-    for (const sentinel of ['futureAlbumField', 'draftOrigins', 'draftVersion', 'boundName', 'futureTopLevel', 'albumArtist', 'identifiers', 'lookup-', 'automatic']) assert.equal(json.includes(sentinel), false, sentinel);
+    for (const sentinel of ['futureAlbumField', 'draftOrigins', 'draftVersion', 'futureTopLevel', 'albumArtist"', '0000000000f2', 'lookup-', 'automatedAt']) assert.equal(json.includes(sentinel), false, sentinel);
     // Renaming the label clears only its decision; removing an entry clears only that entry's.
     const renamed = adminImportDetail({ ...doc, draft: { ...doc.draft, album: { ...doc.draft.album, label: { name: 'Renamed Label', musicBrainzId: null }, artists: [doc.draft.album.artists[0]] } } } as AdminImportDocument, actor, true);
     assert.deepEqual(renamed.decisions.map(({ scope, entryKey }) => [scope, entryKey]), [['artist', e1], ['album', null], ['track', null], ['track', null]]);
@@ -465,8 +495,8 @@ test('a format-2 approval may leave every Disc Number unknown, as long as each t
 });
 
 test('the approval digest binds the shown draft, decisions, cover and staged bytes in any key order, and nothing an approval does not show', () => {
-    const decision = { scope: 'album', slotId: null, entryKey: null, action: 'create-distinct', candidateId: null, candidateRevision: null };
-    const shown = { draft: draft(), decisions: [decision], selectedCoverSlotId: 'cover' as string | null, assets: [{ slotId: 'cover', state: 'ready', sha256: 'a'.repeat(64) }] }, base = importApprovalDigest(shown);
+    const decision = { scope: 'album', slotId: null, entryKey: null, boundName: null as string | null, action: 'create-distinct', candidateId: null, candidateRevision: null };
+    const shown = { draft: draft(), decisions: [decision], selectedCoverSlotId: 'cover' as string | null, assets: [{ slotId: 'cover', state: 'ready', sha256: 'a'.repeat(64) }], tagOnly: { artists: false, label: false } }, base = importApprovalDigest(shown);
     assert.match(base, /^[a-f0-9]{64}$/);
     const reverse = <T extends object>(value: T) => Object.fromEntries(Object.entries(value).reverse()) as T;
     assert.equal(importApprovalDigest(reverse({ ...shown, draft: reverse({ ...shown.draft, album: reverse(shown.draft.album) }), decisions: shown.decisions.map(reverse), assets: shown.assets.map(reverse) })), base);
@@ -475,17 +505,24 @@ test('the approval digest binds the shown draft, decisions, cover and staged byt
     for (const [label, change] of [
         ['a draft value', (value: typeof shown) => { value.draft.tracks[1].discNumber = 2; }], ['an Artist entry', (value: typeof shown) => { value.draft.album.artists[0].joinPhrase = ' & '; }],
         ['a decision', (value: typeof shown) => { value.decisions[0].action = 'skip'; }], ['the cover', (value: typeof shown) => { value.selectedCoverSlotId = null; }],
-        ['an asset state', (value: typeof shown) => { value.assets[0].state = 'deleting'; }], ['asset bytes', (value: typeof shown) => { value.assets[0].sha256 = 'b'.repeat(64); }]
+        ['an asset state', (value: typeof shown) => { value.assets[0].state = 'deleting'; }], ['asset bytes', (value: typeof shown) => { value.assets[0].sha256 = 'b'.repeat(64); }],
+        ['a bound name', (value: typeof shown) => { value.decisions[0].boundName = 'Lorem Ensemble'; }],
+        ['the Artist entries resting only on file tags', (value: typeof shown) => { value.tagOnly.artists = true; }], ['the label resting only on file tags', (value: typeof shown) => { value.tagOnly.label = true; }]
     ] as const) { const copy = structuredClone(shown); change(copy); assert.notEqual(importApprovalDigest(copy), base, label); }
     // The detail digests exactly what it shows; actor, receipts, revision, analysis and suggestions leave it unchanged.
     const detail = adminImportDetail(loadV2(), actor, true), unshown = loadV2();
-    assert.equal(detail.approvalDigest, importApprovalDigest({ draft: detail.draft, decisions: detail.decisions, selectedCoverSlotId: detail.selectedCoverSlotId, assets: detail.assets }));
+    // The fixture's Artist entries and label are automatic, so the confirmation marks both as resting only on file tags.
+    assert.equal(detail.approvalDigest, importApprovalDigest({ draft: detail.draft, decisions: detail.decisions, selectedCoverSlotId: detail.selectedCoverSlotId, assets: detail.assets, tagOnly: { artists: true, label: true } }));
     Object.assign(unshown, { revision: unshown.revision + 5, receipts: [], analysis: { ...unshown.analysis, generation: unshown.analysis.generation + 1 }, suggestions: [] });
     assert.equal(adminImportDetail(unshown, '0000000000000000000000b2', false).approvalDigest, detail.approvalDigest);
     const retitled = loadV2(); (retitled.draft as ImportDraftV2).album.title = 'Retitled'; assert.notEqual(adminImportDetail(retitled, actor, true).approvalDigest, detail.approvalDigest);
+    // Reviewing the label (it becomes the administrator's own) changes what the confirmation marks, and so the digest; automatic
+    // writes elsewhere counted by valueRevision alone do not.
+    const reviewed = loadV2(); reviewed.draftOrigins!['album:label'] = 'administrator'; assert.notEqual(adminImportDetail(reviewed, actor, true).approvalDigest, detail.approvalDigest);
+    assert.equal(adminImportDetail({ ...loadV2(), valueRevision: 9 }, actor, true).approvalDigest, detail.approvalDigest);
     // The Web contract fixture (web/src/features/admin/adminApi.test.ts) echoes this value. Changing what the digest covers makes
     // every open confirmation ADMIN_IMPORT_APPROVAL_STALE across that deploy, so both must be updated deliberately.
-    assert.equal(detail.approvalDigest, 'b220c79b50569d175e0ffd58aa59c16fde9713616937fab9fdd5c1c7b49b5467');
+    assert.equal(detail.approvalDigest, 'e3fe4303d00be9a0834356a317c65c1e8c7417618fc51471f9fe55284f6d9df9');
 });
 
 test('converting a project saved before Draft v2 keeps its approval digest, so an approval built on its view stays current', () => {

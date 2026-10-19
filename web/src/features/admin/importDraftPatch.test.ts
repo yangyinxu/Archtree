@@ -65,3 +65,15 @@ test('entry edits rebase over another administrator\'s label save but not over a
   expect(rebaseDraft(base, draft, applyChanges(base, [{ path: 'album.artists', base: base.album.artists, value: [artistEntry('Lorem')] }]))).toBeNull();
   expect(draftChanges(draft, rebaseDraft(base, draft, applyChanges(base, [{ path: 'album.artists', base: base.album.artists, value: draft.album.artists }]))!)).toEqual([]);
 });
+
+test('an edit over a value automation changed is carried onto the newer saved draft, because an administrator save wins over automation', () => {
+  const base = detail().draft, draft = structuredClone(base); draft.tracks[0].title = 'Typed'; draft.album.title = 'Mine';
+  // Automation wrote both edited paths meanwhile: the automatic one is carried over with the new automatic value as its base.
+  const saved = applyChanges(base, [{ path: `tracks.${slotId}.title`, base: '', value: 'Tagged' }, { path: 'album.title', base: '', value: 'Tagged Album' }]);
+  const rebased = rebaseDraft(base, draft, saved, new Set([`tracks.${slotId}.title`]));
+  expect(rebased).toBeNull();
+  const both = rebaseDraft(base, draft, saved, new Set([`tracks.${slotId}.title`, 'album.title']))!;
+  expect(draftChanges(saved, both)).toEqual([{ path: 'album.title', base: 'Tagged Album', value: 'Mine' }, { path: `tracks.${slotId}.title`, base: 'Tagged', value: 'Typed' }]);
+  // Without the marker, another value on an edited path is still another administrator's save.
+  expect(rebaseDraft(base, draft, saved)).toBeNull();
+});

@@ -6,6 +6,7 @@ import type { MessageKey } from '../../localization/contract';
 import { useAdminAccess, useAdminText } from './AdminAccess';
 import { adminRequest, candidatesSchema, duplicateEditsKey, importPath, type DecisionEdits, type ImportCandidate, type ImportDecision, type ImportDetail } from './adminApi';
 import { adminWorkspace } from './adminWorkspace';
+import { staleDecisionEdits } from './importApproval';
 import styles from './adminStyles';
 
 /** One decision row: each Artist entry (by key), the label, the Album and each track. */
@@ -15,16 +16,18 @@ const sameRow = (decision: Pick<ImportDecision, 'scope' | 'slotId' | 'entryKey'>
 /**
  * Candidate names are evidence, never a unique identity or an automatic reuse decision. Each Artist entry and the label need their
  * own decision, and two entries cannot reuse one Artist; an append needs none for them, so their rows say they are not applied.
+ * Unsaved decisions survive field saves, Luna and automatic writes; they conflict once a decided entry or label was renamed or
+ * another save stored decisions after the first edit. Candidates are read again after automatic writes rename what they match.
  */
-export function ImportDuplicates({ item, disabled, onSave }: { item: ImportDetail; disabled: boolean; onSave: (decisions: ImportDecision[]) => void }) {
+export function ImportDuplicates({ item, disabled, onSave }: { item: ImportDetail; disabled: boolean; onSave: (body: { expectedRevision: number; decisions: ImportDecision[] }) => void }) {
   const t = useAdminText(), { t: sharedText } = useLocalization();
   const access = useAdminAccess();
   const [requested, setRequested] = useState(false);
   const key = duplicateEditsKey(item.id);
   const [edits, setEdits] = useState<DecisionEdits | null>(() => adminWorkspace.buffer(key) ?? null);
-  const conflict = Boolean(edits && edits.revision !== item.revision);
+  const conflict = Boolean(edits && staleDecisionEdits(item, edits));
   const query = useQuery({
-    queryKey: ['admin-imports', access.viewerId, access.epoch, access.generation, item.id, 'duplicates', item.revision],
+    queryKey: ['admin-imports', access.viewerId, access.epoch, access.generation, item.id, 'duplicates', item.revision, item.valueRevision],
     queryFn: ({ signal }) => adminRequest(`${importPath(item.id)}/duplicate-candidates`, candidatesSchema, { signal }),
     enabled: requested, retry: false, gcTime: 0
   });
@@ -41,8 +44,9 @@ export function ImportDuplicates({ item, disabled, onSave }: { item: ImportDetai
   const decide = (row: DecisionRow, value: string, candidates: ImportCandidate[]) => {
     const others = decisions.filter(decision => !sameRow(decision, row));
     const candidate = candidates.find(item => item.id === value);
-    const next: ImportDecision[] = value ? [...others, { scope: row.scope, slotId: row.slotId, entryKey: row.entryKey, action: candidate ? 'reuse' : value as 'skip' | 'create-distinct', candidateId: candidate?.id ?? null, candidateRevision: candidate?.revision ?? null }] : others;
-    const buffer = { revision: edits?.revision ?? item.revision, decisions: next };
+    const next: ImportDecision[] = value ? [...others, { scope: row.scope, slotId: row.slotId, entryKey: row.entryKey, boundName: row.scope === 'artist' || row.scope === 'label' ? row.name : null,
+      action: candidate ? 'reuse' : value as 'skip' | 'create-distinct', candidateId: candidate?.id ?? null, candidateRevision: candidate?.revision ?? null }] : others;
+    const buffer: DecisionEdits = { revision: edits?.revision ?? item.revision, decisions: next };
     setEdits(buffer); adminWorkspace.retain(key, buffer, access);
   };
   return <section className={styles.panel}>
@@ -70,7 +74,7 @@ export function ImportDuplicates({ item, disabled, onSave }: { item: ImportDetai
         </label>{candidates.map(candidate => <p key={candidate.id}><Link className={styles.itemLink} to={`/admin/catalog/${candidate.kind === 'track' ? 'audioTrack' : candidate.kind}/${candidate.id}`}>{candidate.label}</Link> · {t(`duplicates.${candidate.match}`)} · {t(`field.${candidate.visibility}`)}</p>)}</>}</div>;
       })}
       {conflict && <div role="alert"><p>{t('common.conflict')}</p><button className={styles.button} onClick={() => { setEdits(null); adminWorkspace.forget(key); }}>{t('review.load_saved')}</button></div>}
-      <button className={styles.button} disabled={disabled || edits === null || conflict} onClick={() => onSave(decisions)}>{t('action.save_decisions')}</button>
+      <button className={styles.button} disabled={disabled || edits === null || conflict} onClick={() => onSave({ expectedRevision: edits?.revision ?? item.revision, decisions })}>{t('action.save_decisions')}</button>
     </>}
   </section>;
 }

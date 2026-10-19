@@ -11,7 +11,7 @@
 import { ApiError } from '../../api/client';
 import { ADMIN_RELOAD_REQUIRED, adminWorkspace } from './adminWorkspace';
 import { adminRequest, importPath, type AdminGuard } from './adminTransport';
-import { ADMIN_IMPORT_RELOAD_REQUIRED, responseSchema, type ImportDetail, type ImportResponse } from './adminApi';
+import { ADMIN_IMPORT_RELOAD_REQUIRED, newerImport, responseSchema, type ImportDetail, type ImportResponse } from './adminApi';
 import { liveAsset, uploadPublicationLocked } from './importUploadRules';
 
 /** One administrator approval uploads every selected file sequentially; each file keeps its own intent and outcome. */
@@ -79,10 +79,10 @@ export class ImportUploadQueue {
     this.observe(item); this.pending.push({ slotId, file }); this.mark(slotId, status('queued'));
     if (!this.state.running) { this.set({ stopped: null }); void this.drain(guard); }
   }
-  /** Keeps the newest project state, whichever request or reader produced it. */
+  /** Keeps the newest project state (by revision, then automatic writes), whichever request or reader produced it. */
   observe(item: ImportDetail) {
     const latest = this.state.latest;
-    if (item.id !== this.importId || latest === item || latest && item.revision < latest.revision) return;
+    if (item.id !== this.importId || latest === item || latest && newerImport(latest, item)) return;
     this.set({ latest: item });
   }
   /** Reopening reconciles admitted uploads of unknown outcome against storage, one at a time and without bytes. */

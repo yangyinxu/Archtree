@@ -32,10 +32,12 @@
  *   - a whole-draft save from an editor that predates Draft v2 is refused without a write, and its lost response still replays
  *   - a field save writes and marks only its changed paths, replays its intent and refuses a changed body under the same operation
  *   - a field save is admitted after a Luna tick bumped the revision, and editing a join phrase keeps the role
+ *   - decisions, adoption and stopping analysis are admitted after a Luna tick bumped the revision, while analysis from before an administrator receipt is refused
+ *   - accepting a suggestion over an automatic value written after its baseline wins, while another administrator's value or changed Artist entries still conflict
  *   - a legacy project converts at its first admitted change without starting analysis, and its pending Artist suggestion can be accepted, rejected or conflict
  *   - a create with a v1 draft replays its receipt, stores its Draft v2 conversion, and a pre-deploy v1 project replays unconverted
  *   - Luna on a Draft v2 project receives the v1 baseline view and stores an Artist suggestion; its work is claimed and holds capacity
- *   - Artist and label decisions bind by key and name, make those values the administrator's own, and refuse unknown entries, a missing label or an outdated body
+ *   - Artist and label decisions bind by key and name, make those values the administrator's own, and refuse unknown entries, a missing label, a renamed value or an outdated body
  *   - candidates are queried per Artist entry name and for the label among ready Organizations, so one common name never hides another
  *   - an Artist decision may name its entry key in any case: it binds that entry under its stored key, and a second spelling is no second decision
  *   - workbench search matches every Artist entry name and a legacy Artist name
@@ -238,9 +240,9 @@ test('duplicate candidates include hidden ready identities without raw storage a
     await getDb()!.collection('audioTracks').insertOne({ _id: trackId, title: 'Recording', albumId: albumId.toHexString(), s3Key: trackId.toHexString(), uploadStatus: 'ready', publicationStatus: 'ready' });
     const { items } = await adminImportDuplicateCandidates(actor.toHexString(), first.item.id); assert.equal(items.length, 3); assert.equal(items[0].visibility, 'hidden'); assert.equal(JSON.stringify(items).includes('s3Key'), false);
     const track = items.find(i => i.kind === 'track')!, album = items.find(i => i.kind === 'album')!;
-    const decision = { scope: 'track', slotId: draft.tracks[0].slotId, entryKey: null, action: 'reuse', candidateId: track.id, candidateRevision: track.revision };
+    const decision = { scope: 'track', slotId: draft.tracks[0].slotId, entryKey: null, boundName: null, action: 'reuse', candidateId: track.id, candidateRevision: track.revision };
     await assert.rejects(decideAdminImportDuplicates(actor.toHexString(), first.item.id, { ...mutation(2), decisions: [decision] }), errorCode('ADMIN_IMPORT_TRACK_BELONGS_TO_ALBUM'));
-    const result = await decideAdminImportDuplicates(actor.toHexString(), first.item.id, { ...mutation(2), decisions: [decision, { scope: 'album', slotId: null, entryKey: null, action: 'reuse', candidateId: album.id, candidateRevision: album.revision }] }); assert.equal(result.item.decisions.length, 2);
+    const result = await decideAdminImportDuplicates(actor.toHexString(), first.item.id, { ...mutation(2), decisions: [decision, { scope: 'album', slotId: null, entryKey: null, boundName: null, action: 'reuse', candidateId: album.id, candidateRevision: album.revision }] }); assert.equal(result.item.decisions.length, 2);
     await getDb()!.collection('audioTracks').updateOne({ _id: trackId }, { $set: { title: 'Changed' } });
     await assert.rejects(decideAdminImportDuplicates(actor.toHexString(), first.item.id, { ...mutation(result.item.revision), decisions: result.item.decisions }), errorCode('ADMIN_IMPORT_DUPLICATE_STALE'));
 });
@@ -325,12 +327,17 @@ test('a project saved in a newer draft format is read-only: edits, analysis, ado
 test('reads of a newer-format project expose only the Draft v2 allowlist in detail and the v1 allowlist in inventory and duplicate candidates', async () => {
     const { id } = await newerProject(), artistId = new ObjectId();
     const detail = await getAdminImport(a2.toHexString(), id), page = await listAdminImports(a2.toHexString(), {});
-    // The editor DTO names each decision's entry (none for a newer format); the inventory keeps the v1 allowlist.
-    const v1Only = ['musicBrainzId', 'discNumber', 'Synthetic Label', 'joinPhrase', 'entryKey'];
-    for (const sentinel of ['futureAlbumField', 'draftOrigins', 'draftVersion', 'albumArtist', 'identifiers', 'lookup-', 'futureTopLevel', 'boundName', ...v1Only]) {
+    // The editor DTO names each decision's entry and bound name (none for a newer format); the inventory keeps the v1 allowlist.
+    const v1Only = ['musicBrainzId', 'discNumber', 'Synthetic Label', 'joinPhrase', 'entryKey', 'boundName', 'identifiers', 'albumArtists', 'automaticPaths', 'valueRevision'];
+    for (const sentinel of ['futureAlbumField', 'draftOrigins', 'draftVersion', 'albumArtist"', '0000000000f2', 'lookup-', 'futureTopLevel', 'automatedAt', ...v1Only]) {
         assert.equal(JSON.stringify(page).includes(sentinel), false, sentinel);
         if (!v1Only.includes(sentinel)) assert.equal(JSON.stringify(detail).includes(sentinel), false, sentinel);
     }
+    // A newer format binds no name and marks nothing automatic, and its version-less evidence reads as version 1 (the album
+    // artist and release ID it stores are never shown).
+    assert.ok(detail.item.decisions.every(decision => decision.entryKey === null && decision.boundName === null));
+    assert.deepEqual([detail.item.automaticPaths, detail.item.possibleLabelEntryKeys, detail.item.valueRevision], [[], [], 0]);
+    assert.ok(detail.item.assets.some(asset => asset.tags !== null) && detail.item.assets.every(asset => asset.tags === null || (asset.tags.version === 1 && asset.tags.albumArtists.length === 0 && asset.tags.identifiers.musicBrainzReleaseId === null)));
     assert.equal(detail.item.startedByMe, false); assert.deepEqual(detail.item.draft.album.artists.map(entry => entry.name), ['Synthetic Primary', 'Synthetic Guest']);
     assert.deepEqual(detail.item.capabilities, { analysis: false, upload: false, publish: false });
     assert.equal(page.items.length, 1);
@@ -441,6 +448,48 @@ test('a field save is admitted after a Luna tick bumped the revision, and editin
     assert.deepEqual(phrased.item.draft.album.artists.map(value => [value.name, value.role, value.joinPhrase]), [['Lorem', 'primary', ' with '], ['Ipsum', 'featured', null]]);
 });
 
+test('decisions, adoption and stopping analysis are admitted after a Luna tick bumped the revision, while analysis from before an administrator receipt is refused', async () => {
+    const by = actor.toHexString(), first = await create(), id = first.item.id;
+    const named = await editImportDraft(by, id, first.item, draft => { draft.album.artists = [entry('Lorem')]; });
+    await analyzeAdminImport(by, id, mutation(named.item.revision), lunaArtist);
+    const opened = await getAdminImport(by, id); await runAdminImportWorkerOnce(lunaArtist);
+    const ticked = await getAdminImport(by, id), title = ticked.item.suggestions.find(suggestion => suggestion.field === 'title')!;
+    assert.ok(ticked.item.revision > opened.item.revision); assert.equal(ticked.item.analysis.state, 'queued');
+    const key = opened.item.draft.album.artists[0].key, artist = { scope: 'artist', slotId: null, entryKey: key, boundName: 'Lorem', action: 'create-distinct', candidateId: null, candidateRevision: null };
+    const decided = await decideAdminImportDuplicates(by, id, { ...mutation(opened.item.revision), decisions: [artist] });
+    assert.deepEqual(decided.item.decisions, [artist]);
+    const adopted = await adoptAdminImportSuggestions(by, id, { ...mutation(opened.item.revision), generation: 1, selectedIds: [title.id], rejectIds: [] });
+    assert.equal(adopted.item.draft.album.title, 'Suggested Album');
+    const stopped = await cancelAdminImportAnalysis(by, id, mutation(opened.item.revision));
+    assert.equal(stopped.item.analysis.state, 'cancelled');
+    assert.deepEqual(stopped.item.receipts.slice(-3).map(receipt => receipt.kind), ['decisions', 'adopt', 'cancel-analysis']);
+    const before = await stored(id);
+    await assert.rejects(analyzeAdminImport(by, id, mutation(opened.item.revision), lunaArtist), errorCode('ADMIN_IMPORT_REVISION_CONFLICT'));
+    assert.deepEqual(await stored(id), before);
+});
+
+test('accepting a suggestion over an automatic value written after its baseline wins, while another administrator\'s value or changed Artist entries still conflict', async () => {
+    const by = actor.toHexString(), first = await create(), id = first.item.id;
+    await analyzeAdminImport(by, id, mutation(1), lunaArtist); await settle(lunaArtist);
+    // File tags confirmed after Luna's baseline: automation wrote the Album title, and another administrator typed the entries.
+    await rewrite(id, doc => {
+        const draft = doc.draft as ImportDraftV2; draft.album.title = 'Tagged Album'; draft.album.artists = [entry('Typed Ensemble')];
+        doc.draftOrigins!['album:title'] = 'automatic'; doc.draftOrigins!['album:artists'] = 'administrator'; doc.valueRevision = 1;
+    });
+    const done = await getAdminImport(by, id), [title, artists] = ['title', 'artists'].map(field => done.item.suggestions.find(suggestion => suggestion.field === field)!);
+    let before = await stored(id);
+    await assert.rejects(adoptAdminImportSuggestions(by, id, { ...mutation(done.item.revision), generation: 1, selectedIds: [artists.id], rejectIds: [] }), errorCode('ADMIN_IMPORT_FIELD_CONFLICT'));
+    assert.deepEqual(await stored(id), before);
+    // Artist entries are never replaced by an Artist suggestion once they changed, even automatic ones (the legacy-project rule).
+    await rewrite(id, doc => { doc.draftOrigins!['album:artists'] = 'automatic'; });
+    before = await stored(id);
+    await assert.rejects(adoptAdminImportSuggestions(by, id, { ...mutation(done.item.revision), generation: 1, selectedIds: [artists.id], rejectIds: [] }), errorCode('ADMIN_IMPORT_FIELD_CONFLICT'));
+    assert.deepEqual(await stored(id), before);
+    const adopted = await adoptAdminImportSuggestions(by, id, { ...mutation(done.item.revision), generation: 1, selectedIds: [title.id], rejectIds: [] });
+    const doc = await stored(id);
+    assert.deepEqual([adopted.item.draft.album.title, doc!.draftOrigins!['album:title'], adopted.item.automaticPaths.includes('album.title')], ['Suggested Album', 'administrator', false]);
+});
+
 test('a legacy project converts at its first admitted change without starting analysis, and its pending Artist suggestion can be accepted, rejected or conflict', async () => {
     const { id: editedId, doc } = await legacyProject('v1-analysis-pending-artist-name.json'), by = a1.toHexString();
     const opened = await getAdminImport(by, editedId), suggestion = opened.item.suggestions.find(value => value.field === 'artists')!;
@@ -501,19 +550,19 @@ test('Luna on a Draft v2 project receives the v1 baseline view and stores an Art
     assert.deepEqual(adopted.item.draft.album.artists.map(value => [value.key, value.name]), [[key, 'Ipsum Quartet']]);
 });
 
-test('Artist and label decisions bind by key and name, make those values the administrator\'s own, and refuse unknown entries, a missing label or an outdated body', async () => {
+test('Artist and label decisions bind by key and name, make those values the administrator\'s own, and refuse unknown entries, a missing label, a renamed value or an outdated body', async () => {
     const first = await create(), id = first.item.id, by = actor.toHexString();
-    const decision = (scope: string, extra: Record<string, unknown> = {}) => ({ scope, slotId: null, entryKey: null, action: 'create-distinct', candidateId: null, candidateRevision: null, ...extra });
+    const decision = (scope: string, extra: Record<string, unknown> = {}) => ({ scope, slotId: null, entryKey: null, boundName: null, action: 'create-distinct', candidateId: null, candidateRevision: null, ...extra });
     // Without entries, no Artist decision names a current entry.
-    await assert.rejects(decideAdminImportDuplicates(by, id, { ...mutation(1), decisions: [decision('artist', { entryKey: randomUUID() })] }), errorCode('ADMIN_IMPORT_INVALID_INPUT'));
+    await assert.rejects(decideAdminImportDuplicates(by, id, { ...mutation(1), decisions: [decision('artist', { entryKey: randomUUID(), boundName: 'Lorem' })] }), errorCode('ADMIN_IMPORT_INVALID_INPUT'));
     const named = await editImportDraft(by, id, first.item, draft => { draft.album.artists = [entry('Lorem'), entry('Ipsum'), entry('Dolor', 'featured')]; draft.album.label = { name: 'Sit Records', musicBrainzId: null }; });
     const [e1, e2, e3] = named.item.draft.album.artists.map(value => value.key);
     // Automation owns the entries and the label until an explicit decision (S8 writes them; the origins are set here).
     await rewrite(id, doc => { doc.draftOrigins!['album:artists'] = 'automatic'; doc.draftOrigins!['album:label'] = 'automatic'; });
     // A skip is no explicit identity: it leaves both values automatic.
-    const skipped = await decideAdminImportDuplicates(by, id, { ...mutation(named.item.revision), decisions: [decision('artist', { entryKey: e2, action: 'skip' }), decision('label', { action: 'skip' })] });
+    const skipped = await decideAdminImportDuplicates(by, id, { ...mutation(named.item.revision), decisions: [decision('artist', { entryKey: e2, boundName: 'Ipsum', action: 'skip' }), decision('label', { boundName: 'Sit Records', action: 'skip' })] });
     let doc = await stored(id); assert.deepEqual([doc!.draftOrigins!['album:artists'], doc!.draftOrigins!['album:label']], ['automatic', 'automatic']);
-    const body = [decision('artist', { entryKey: e1 }), decision('artist', { entryKey: e2, action: 'skip' }), decision('artist', { entryKey: e3 }), decision('label'), decision('album')];
+    const body = [decision('artist', { entryKey: e1, boundName: 'Lorem' }), decision('artist', { entryKey: e2, boundName: 'Ipsum', action: 'skip' }), decision('artist', { entryKey: e3, boundName: 'Dolor' }), decision('label', { boundName: 'Sit Records' }), decision('album')];
     const decided = await decideAdminImportDuplicates(by, id, { ...mutation(skipped.item.revision), decisions: body });
     assert.deepEqual(decided.item.decisions, body);
     doc = await stored(id);
@@ -525,22 +574,31 @@ test('Artist and label decisions bind by key and name, make those values the adm
     const renamed = await editImportDraft(by, id, reordered.item, draft => { draft.album.artists[0].name = 'Ipsum Renamed'; draft.album.label = { name: 'Sit Records Ltd', musicBrainzId: null }; });
     assert.deepEqual(renamed.item.decisions.map(value => [value.scope, value.entryKey]), [['artist', e1], ['artist', e3], ['album', null]]);
     // Refused bodies write nothing.
-    const before = await stored(id), reused = { action: 'reuse', candidateId: new ObjectId().toHexString(), candidateRevision: 'a'.repeat(64) };
+    const before = await stored(id), reused = { action: 'reuse', candidateId: new ObjectId().toHexString(), candidateRevision: 'a'.repeat(64) }, lorem = { entryKey: e1, boundName: 'Lorem' };
     for (const [label, decisions] of [
-        ['an unknown entry', [decision('artist', { entryKey: randomUUID() })]], ['an Artist decision naming no entry', [decision('artist')]], ['a label decision naming an entry', [decision('label', { entryKey: e1 })]],
-        ['an Album decision naming an entry', [decision('album', { entryKey: e1 })]], ['two decisions for one entry', [decision('artist', { entryKey: e1 }), decision('artist', { entryKey: e1, action: 'skip' })]],
-        ['two entries reusing one Artist', [decision('artist', { entryKey: e1, ...reused }), decision('artist', { entryKey: e3, ...reused })]], ['an unknown scope', [decision('organization')]],
-        ['123 decisions', Array.from({ length: 123 }, () => decision('album'))]
+        ['an unknown entry', [decision('artist', { entryKey: randomUUID(), boundName: 'Lorem' })]], ['an Artist decision naming no entry', [decision('artist')]], ['a label decision naming an entry', [decision('label', { entryKey: e1, boundName: 'Sit Records Ltd' })]],
+        ['an Album decision naming an entry', [decision('album', { entryKey: e1 })]], ['two decisions for one entry', [decision('artist', lorem), decision('artist', { ...lorem, action: 'skip' })]],
+        ['two entries reusing one Artist', [decision('artist', { ...lorem, ...reused }), decision('artist', { entryKey: e3, boundName: 'Dolor', ...reused })]], ['an unknown scope', [decision('organization')]],
+        ['123 decisions', Array.from({ length: 123 }, () => decision('album'))],
+        ['an Album decision binding a name', [decision('album', { boundName: 'Synthetic Album' })]], ['a track-less bound name that is not text', [decision('artist', { ...lorem, boundName: 7 })]],
+        ['a bound name over 200 characters', [decision('artist', { ...lorem, boundName: 'n'.repeat(201) })]]
     ] as const) await assert.rejects(async () => decideAdminImportDuplicates(by, id, { ...mutation(renamed.item.revision), decisions }), errorCode('ADMIN_IMPORT_INVALID_INPUT'), label);
+    // A decision made for a name since renamed (an open Review tab) is stale, for an entry and for the label alike.
+    for (const [label, decisions] of [['a renamed entry', [decision('artist', { entryKey: e2, boundName: 'Ipsum' })]], ['a renamed label', [decision('label', { boundName: 'Sit Records' })]],
+        ['a name in another case', [decision('artist', { entryKey: e1, boundName: 'LOREM' })]], ['no name for an entry', [decision('artist', { entryKey: e1 })]]] as const)
+        await assert.rejects(async () => decideAdminImportDuplicates(by, id, { ...mutation(renamed.item.revision), decisions }), errorCode('ADMIN_IMPORT_DECISION_STALE'), label);
     assert.deepEqual(await stored(id), before);
     // A label decision needs a label.
     const unlabelled = await editImportDraft(by, id, renamed.item, draft => { draft.album.label = null; });
-    await assert.rejects(decideAdminImportDuplicates(by, id, { ...mutation(unlabelled.item.revision), decisions: [decision('label')] }), errorCode('ADMIN_IMPORT_INVALID_INPUT'));
-    // A body from an editor that predates entry keys asks for a reload and writes nothing, while a stored receipt of one still replays.
-    const { entryKey: _entryKey, ...outdatedItem } = decision('album'), outdated = { ...mutation(unlabelled.item.revision), decisions: [outdatedItem] }, unchanged = await stored(id);
+    await assert.rejects(decideAdminImportDuplicates(by, id, { ...mutation(unlabelled.item.revision), decisions: [decision('label', { boundName: 'Sit Records Ltd' })] }), errorCode('ADMIN_IMPORT_INVALID_INPUT'));
+    // A body from an editor that predates entry keys or bound names asks for a reload and writes nothing, while a stored receipt
+    // of one (admitted before bound names, without them) still replays.
+    const { entryKey: _entryKey, boundName: _name, ...outdatedItem } = decision('album'), outdated = { ...mutation(unlabelled.item.revision), decisions: [outdatedItem] }, unchanged = await stored(id);
     await assert.rejects(decideAdminImportDuplicates(by, id, outdated), errorCode('ADMIN_IMPORT_RELOAD_REQUIRED'));
+    const { boundName: _unbound, ...unnamedItem } = decision('album');
+    await assert.rejects(decideAdminImportDuplicates(by, id, { ...mutation(unlabelled.item.revision), decisions: [unnamedItem] }), errorCode('ADMIN_IMPORT_RELOAD_REQUIRED'));
     assert.deepEqual(await stored(id), unchanged);
-    const replayed = { ...mutation(unlabelled.item.revision - 1), decisions: [outdatedItem] };
+    const replayed = { ...mutation(unlabelled.item.revision - 1), decisions: [unnamedItem] };
     await rewrite(id, doc => { doc.receipts.push({ operationId: replayed.operationId, kind: 'decisions', revision: doc.revision, actorId: by, hash: importDigest({ kind: 'decisions', body: replayed }), at: new Date() }); });
     assert.deepEqual((await decideAdminImportDuplicates(by, id, replayed)).receipt, { operationId: replayed.operationId, kind: 'decisions', revision: unchanged!.revision });
     // A label reused at a stale revision, or a label Organization that is not ready, is stale.
@@ -550,8 +608,8 @@ test('Artist and label decisions bind by key and name, make those values the adm
     const candidate = (await adminImportDuplicateCandidates(by, id)).items.find(item => item.kind === 'organization')!;
     assert.equal(candidate.id, readyLabel.toHexString());
     for (const [candidateId, candidateRevision] of [[readyLabel.toHexString(), 'b'.repeat(64)], [deleting.toHexString(), candidate.revision]])
-        await assert.rejects(decideAdminImportDuplicates(by, id, { ...mutation(labelled.item.revision), decisions: [decision('label', { action: 'reuse', candidateId, candidateRevision })] }), errorCode('ADMIN_IMPORT_DUPLICATE_STALE'));
-    const reusedLabel = await decideAdminImportDuplicates(by, id, { ...mutation(labelled.item.revision), decisions: [decision('label', { action: 'reuse', candidateId: candidate.id, candidateRevision: candidate.revision })] });
+        await assert.rejects(decideAdminImportDuplicates(by, id, { ...mutation(labelled.item.revision), decisions: [decision('label', { boundName: 'Sit Records', action: 'reuse', candidateId, candidateRevision })] }), errorCode('ADMIN_IMPORT_DUPLICATE_STALE'));
+    const reusedLabel = await decideAdminImportDuplicates(by, id, { ...mutation(labelled.item.revision), decisions: [decision('label', { boundName: 'Sit Records', action: 'reuse', candidateId: candidate.id, candidateRevision: candidate.revision })] });
     assert.deepEqual(reusedLabel.item.decisions.map(value => [value.scope, value.candidateId]), [['label', candidate.id]]);
 });
 
@@ -573,7 +631,7 @@ test('candidates are queried per Artist entry name and for the label among ready
 test('an Artist decision may name its entry key in any case: it binds that entry under its stored key, and a second spelling is no second decision', async () => {
     const first = await create(), id = first.item.id, by = actor.toHexString();
     const named = await editImportDraft(by, id, first.item, draft => { draft.album.artists = [entry('Lorem')]; }), key = named.item.draft.album.artists[0].key;
-    const decision = (entryKey: string, action = 'create-distinct') => ({ scope: 'artist', slotId: null, entryKey, action, candidateId: null, candidateRevision: null });
+    const decision = (entryKey: string, action = 'create-distinct') => ({ scope: 'artist', slotId: null, entryKey, boundName: 'Lorem', action, candidateId: null, candidateRevision: null });
     await assert.rejects(decideAdminImportDuplicates(by, id, { ...mutation(named.item.revision), decisions: [decision(key), decision(key.toUpperCase(), 'skip')] }), errorCode('ADMIN_IMPORT_INVALID_INPUT'));
     const decided = await decideAdminImportDuplicates(by, id, { ...mutation(named.item.revision), decisions: [decision(key.toUpperCase())] });
     assert.deepEqual(decided.item.decisions, [decision(key)]);
@@ -682,7 +740,7 @@ const settle = async (luna: ImportAnalysisProvider) => { for (let tick = 0; tick
 
 test('accepting suggestions makes their values the administrator\'s own and clears an Artist decision whose entry they rename', async () => {
     const first = await create(), id = first.item.id, named = await editImportDraft(actor.toHexString(), id, first.item, draft => { draft.album.artists = artistEntries('Lorem Ensemble'); }), key = named.item.draft.album.artists[0].key;
-    const artist = { scope: 'artist', slotId: null, entryKey: key, action: 'create-distinct', candidateId: null, candidateRevision: null }, album = { ...artist, scope: 'album', entryKey: null };
+    const artist = { scope: 'artist', slotId: null, entryKey: key, boundName: 'Lorem Ensemble', action: 'create-distinct', candidateId: null, candidateRevision: null }, album = { ...artist, scope: 'album', entryKey: null, boundName: null };
     const decided = await decideAdminImportDuplicates(actor.toHexString(), id, { ...mutation(named.item.revision), decisions: [artist, album] });
     await analyzeAdminImport(actor.toHexString(), id, mutation(decided.item.revision), lunaArtist); await settle(lunaArtist);
     // Automation (S8) owns the Album title by the time the administrator accepts the suggestions.

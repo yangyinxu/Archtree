@@ -10,14 +10,15 @@
  *   - an outdated strict schema asks for a reload, while a receipt mismatch stays an unconfirmed retryable intent
  *   - AdminMutation and AdminCommand show a reload state with no retryable intent for an outdated response
  *   - a server refusal of a newer-format project asks for a reload of that action only, with no retryable intent
- *   - the server Draft v2 projection parses strictly with its approval digest, while v1 drafts, unknown entry keys, track Artist suggestions, Disc Number 1000 and a missing digest are refused
+ *   - the server Draft v2 projection parses strictly with its approval digest, bound names, tag view and automatic markers, while v1 drafts, unknown entry keys, track Artist suggestions, Disc Number 1000 and a missing digest are refused
+ *   - a newer saved state is a later revision, or the same revision with later automatic writes
  *   - duplicate candidates parse label Organizations and up to 460 items, and refuse unknown kinds
  * @end-catalog */
 
 import { z } from 'zod';
 import { advanceAccountEpoch, captureAccountOperation } from '../../api/accountEpoch';
 import { adminWorkspace } from './adminWorkspace';
-import { ADMIN_IMPORT_RELOAD_REQUIRED, adminRequest, candidatesSchema, detailSchema, responseSchema } from './adminApi';
+import { ADMIN_IMPORT_RELOAD_REQUIRED, adminRequest, candidatesSchema, detailSchema, newerImport, responseSchema } from './adminApi';
 import { ADMIN_RELOAD_REQUIRED } from './adminTransport';
 import { AdminCommand } from './useAdminCommand';
 import { AdminMutation } from './useAdminMutation';
@@ -152,7 +153,7 @@ test('a server refusal of a newer-format project asks for a reload of that actio
   expect(command.getSnapshot().intent).toBeNull(); expect(adminWorkspace.getSnapshot().reloadRequired).toBe(false);
 });
 
-test('the server Draft v2 projection parses strictly with its approval digest, while v1 drafts, unknown entry keys, track Artist suggestions, Disc Number 1000 and a missing digest are refused', () => {
+test('the server Draft v2 projection parses strictly with its approval digest, bound names, tag view and automatic markers, while v1 drafts, unknown entry keys, track Artist suggestions, Disc Number 1000 and a missing digest are refused', () => {
   // The server's Draft v2 projection of the synthetic fixture (test/fixtures/adminImportCompat/v2-draft-project.json).
   const projected = {
     id: "b8fe89a0a6b4501d5db35e13",
@@ -162,23 +163,32 @@ test('the server Draft v2 projection parses strictly with its approval digest, w
     startedByMe: true,
     manifest: {"rootLabel": "Synthetic Primary - Synthetic Compat Album", "files": [{"slotId": "00000009-0000-4000-a000-000000000001", "filename": "01 - Synthetic Opening.mp3", "relativePath": "Disc 1/01 - Synthetic Opening.mp3", "byteLength": 4096}, {"slotId": "00000009-0000-4000-a000-000000000002", "filename": "01 - Synthetic Reprise.mp3", "relativePath": "Disc 2/01 - Synthetic Reprise.mp3", "byteLength": null}]},
     analysis: {"state": "queued", "generation": 1, "operationId": "00000009-0000-4000-8000-000000000004", "completedChunks": 1, "totalChunks": 2, "attemptsUsed": 1, "maxAttempts": 22, "issue": null},
-    decisions: [{"scope": "artist", "slotId": null, "entryKey": "00000009-0000-4000-8000-0000000000e1", "action": "create-distinct", "candidateId": null, "candidateRevision": null}, {"scope": "artist", "slotId": null, "entryKey": "00000009-0000-4000-8000-0000000000e2", "action": "create-distinct", "candidateId": null, "candidateRevision": null}, {"scope": "label", "slotId": null, "entryKey": null, "action": "create-distinct", "candidateId": null, "candidateRevision": null}, {"scope": "album", "slotId": null, "entryKey": null, "action": "create-distinct", "candidateId": null, "candidateRevision": null}, {"scope": "track", "slotId": "00000009-0000-4000-a000-000000000001", "entryKey": null, "action": "create-distinct", "candidateId": null, "candidateRevision": null}, {"scope": "track", "slotId": "00000009-0000-4000-a000-000000000002", "entryKey": null, "action": "create-distinct", "candidateId": null, "candidateRevision": null}],
+    decisions: [{"scope": "artist", "slotId": null, "entryKey": "00000009-0000-4000-8000-0000000000e1", "boundName": "Synthetic Primary", "action": "create-distinct", "candidateId": null, "candidateRevision": null}, {"scope": "artist", "slotId": null, "entryKey": "00000009-0000-4000-8000-0000000000e2", "boundName": "Synthetic Guest", "action": "create-distinct", "candidateId": null, "candidateRevision": null}, {"scope": "label", "slotId": null, "entryKey": null, "boundName": "Synthetic Label", "action": "create-distinct", "candidateId": null, "candidateRevision": null}, {"scope": "album", "slotId": null, "entryKey": null, "boundName": null, "action": "create-distinct", "candidateId": null, "candidateRevision": null}, {"scope": "track", "slotId": "00000009-0000-4000-a000-000000000001", "entryKey": null, "boundName": null, "action": "create-distinct", "candidateId": null, "candidateRevision": null}, {"scope": "track", "slotId": "00000009-0000-4000-a000-000000000002", "entryKey": null, "boundName": null, "action": "create-distinct", "candidateId": null, "candidateRevision": null}],
     upload: {"ready": 1, "total": 2, "available": true},
     publication: "notStarted",
     publicationRecovery: null,
     published: null,
-    assets: [{"slotId": "00000009-0000-4000-a000-000000000001", "state": "ready", "byteLength": 4096, "sha256": "719b383821e6441a28fd740b613e025e2e8cae1240f47297cef590f888c1cb31", "contentType": "audio/mpeg", "tags": {"title": "Synthetic Opening", "album": "Synthetic Compat Album", "artists": ["Synthetic Primary", "Synthetic Guest"], "year": 2026, "trackNumber": 1}, "recovery": {"operationId": "00000009-0000-4000-8000-000000000003", "expectedRevision": 2, "kind": "upload", "startedByMe": true}}, {"slotId": "embedded-00000009-0000-4000-a000-000000000001", "state": "ready", "byteLength": 3073, "sha256": "59353ff2c987657686b1510ce52d67a888c1704ffc9c4185ddf33dd1caeae2b4", "contentType": "image/jpeg", "tags": null, "recovery": {"operationId": "00000009-0000-4000-8000-000000000030", "expectedRevision": 4, "kind": "upload", "startedByMe": true}}],
+    assets: [{"slotId": "00000009-0000-4000-a000-000000000001", "state": "ready", "byteLength": 4096, "sha256": "719b383821e6441a28fd740b613e025e2e8cae1240f47297cef590f888c1cb31", "contentType": "audio/mpeg", "tags": {"version": 1, "title": "Synthetic Opening", "album": "Synthetic Compat Album", "year": 2026, "trackNumber": 1, "artists": ["Synthetic Primary", "Synthetic Guest"], "albumArtists": [], "label": null, "discNumber": null, "durationMs": null, "identifiers": {"barcode": null, "catalogNumber": null, "isrc": null, "musicBrainzReleaseId": null}, "flagged": []}, "recovery": {"operationId": "00000009-0000-4000-8000-000000000003", "expectedRevision": 2, "kind": "upload", "startedByMe": true}}, {"slotId": "embedded-00000009-0000-4000-a000-000000000001", "state": "ready", "byteLength": 3073, "sha256": "59353ff2c987657686b1510ce52d67a888c1704ffc9c4185ddf33dd1caeae2b4", "contentType": "image/jpeg", "tags": null, "recovery": {"operationId": "00000009-0000-4000-8000-000000000030", "expectedRevision": 4, "kind": "upload", "startedByMe": true}}],
     selectedCoverSlotId: null,
     capabilities: {"analysis": true, "upload": true, "publish": true},
     // The server's approvalDigest of this projection (adminImportDetail of the fixture); the Web echoes it and never hashes.
-    approvalDigest: "b220c79b50569d175e0ffd58aa59c16fde9713616937fab9fdd5c1c7b49b5467",
+    approvalDigest: "e3fe4303d00be9a0834356a317c65c1e8c7417618fc51471f9fe55284f6d9df9",
+    valueRevision: 0,
+    automaticPaths: ["album.artists", "album.label", "album.releaseDate", "tracks.00000009-0000-4000-a000-000000000001.title", "tracks.00000009-0000-4000-a000-000000000001.discNumber", "tracks.00000009-0000-4000-a000-000000000001.trackNumber", "tracks.00000009-0000-4000-a000-000000000002.discNumber", "tracks.00000009-0000-4000-a000-000000000002.trackNumber"],
+    possibleLabelEntryKeys: [],
     receipts: [{"operationId": "00000009-0000-4000-8000-000000000001", "kind": "create", "revision": 1}, {"operationId": "00000009-0000-4000-8000-000000000002", "kind": "edit", "revision": 2}, {"operationId": "00000009-0000-4000-8000-000000000003", "kind": "upload", "revision": 3}, {"operationId": "00000009-0000-4000-8000-000000000004", "kind": "analyze", "revision": 4}],
     draft: {"album": {"title": "Synthetic Compat Album", "artists": [{"key": "00000009-0000-4000-8000-0000000000e1", "name": "Synthetic Primary", "role": "primary", "joinPhrase": " feat. ", "musicBrainzId": "00000009-0000-4000-8000-0000000000f1"}, {"key": "00000009-0000-4000-8000-0000000000e2", "name": "Synthetic Guest", "role": "featured", "joinPhrase": null, "musicBrainzId": null}], "label": {"name": "Synthetic Label", "musicBrainzId": null}, "releaseDate": {"year": 2026, "month": 3, "day": null}, "visibility": "public"}, "tracks": [{"slotId": "00000009-0000-4000-a000-000000000001", "title": "Synthetic Opening", "discNumber": 1, "trackNumber": 1}, {"slotId": "00000009-0000-4000-a000-000000000002", "title": "Synthetic Reprise", "discNumber": 2, "trackNumber": 1}]},
     suggestions: [{"scope": "album", "slotId": null, "field": "artists", "baseline": [{"key": "00000009-0000-4000-8000-0000000000e1", "name": "Synthetic Primary", "role": "primary", "joinPhrase": " feat. ", "musicBrainzId": "00000009-0000-4000-8000-0000000000f1"}], "value": [{"key": "00000009-0000-4000-8000-0000000000e1", "name": "Synthetic Primary", "role": "primary", "joinPhrase": " feat. ", "musicBrainzId": "00000009-0000-4000-8000-0000000000f1"}, {"key": "00000009-0000-4000-8000-0000000000e2", "name": "Synthetic Guest", "role": "featured", "joinPhrase": null, "musicBrainzId": null}], "source": "context", "evidence": "Selected root: Synthetic Primary - Synthetic Compat Album", "id": "1841aae643a83f45acba69f4", "generation": 1, "decision": "pending"}, {"scope": "album", "slotId": null, "field": "title", "baseline": "Synthetic Compat Album", "value": "Synthetic Compat Album (Deluxe)", "source": "folder", "evidence": "Selected root: Synthetic Primary - Synthetic Compat Album", "id": "6d91973d95b005647626d360", "generation": 1, "decision": "pending"}]
   };
   expect(detailSchema.safeParse(projected).success).toBe(true);
   expect(responseSchema.safeParse({ item: projected, receipt: null }).success).toBe(true);
-  const { album, tracks } = projected.draft, [artists] = projected.suggestions, [decision] = projected.decisions;
+  const { album, tracks } = projected.draft, [artists] = projected.suggestions, [decision] = projected.decisions, [audio] = projected.assets, tags = audio.tags!;
+  // Version-2 evidence parses, and a projection from before the markers defaults to none.
+  const v2Tags = { ...tags, version: 2, albumArtists: ['Synthetic Primary'], label: 'Synthetic Label', discNumber: 1, durationMs: 251_400,
+    identifiers: { barcode: '4006381333931', catalogNumber: 'SYN-001', isrc: 'USABC2600001', musicBrainzReleaseId: '00000009-0000-4000-8000-0000000000f2' }, flagged: [{ field: 'title', reason: 'characters' }] };
+  expect(detailSchema.safeParse({ ...projected, assets: [{ ...audio, tags: v2Tags }, projected.assets[1]] }).success).toBe(true);
+  const { valueRevision: _value, automaticPaths: _paths, possibleLabelEntryKeys: _labels, ...unmarked } = projected;
+  expect(detailSchema.parse(unmarked)).toMatchObject({ valueRevision: 0, automaticPaths: [], possibleLabelEntryKeys: [] });
   // A completed publication lists every credited Artist and the label; a legacy single artistId is refused.
   const published = { albumId: 'a'.repeat(24), artistIds: ['b'.repeat(24), 'c'.repeat(24)], organizationId: 'd'.repeat(24), trackIds: ['e'.repeat(24)] };
   for (const value of [published, { ...published, organizationId: null }, { ...published, artistIds: [published.artistIds[0]] }]) expect(detailSchema.safeParse({ ...projected, published: value }).success).toBe(true);
@@ -193,6 +203,15 @@ test('the server Draft v2 projection parses strictly with its approval digest, w
     { ...projected, decisions: [{ scope: decision.scope, slotId: decision.slotId, action: decision.action, candidateId: decision.candidateId, candidateRevision: decision.candidateRevision }] },
     { ...projected, decisions: [{ ...decision, scope: 'organization' }] }, { ...projected, decisions: [{ ...decision, entryKey: 'not-a-key' }] },
     { ...projected, decisions: Array(123).fill(decision) },
+    // A decision without its bound name is an outdated shape too.
+    { ...projected, decisions: [{ scope: decision.scope, slotId: decision.slotId, entryKey: decision.entryKey, action: decision.action, candidateId: decision.candidateId, candidateRevision: decision.candidateRevision }] },
+    { ...projected, decisions: [{ ...decision, boundName: 'n'.repeat(201) }] },
+    // The tag view is allowlisted: an unknown key, flag reason or version, and too many marker entries are refused.
+    { ...projected, assets: [{ ...audio, tags: { ...tags, albumArtist: 'Synthetic Primary' } }, projected.assets[1]] },
+    { ...projected, assets: [{ ...audio, tags: { ...tags, flagged: [{ field: 'title', reason: 'stripped' }] } }, projected.assets[1]] },
+    { ...projected, assets: [{ ...audio, tags: { ...tags, version: 3 } }, projected.assets[1]] },
+    { ...projected, assets: [{ ...audio, tags: { ...tags, identifiers: { ...tags.identifiers, extra: null } } }, projected.assets[1]] },
+    { ...projected, automaticPaths: Array(306).fill('album.title') }, { ...projected, possibleLabelEntryKeys: ['not-a-key'] }, { ...projected, valueRevision: -1 },
     { ...projected, draft: { album: { title: album.title, artistName: 'Synthetic Primary', releaseDate: album.releaseDate, visibility: album.visibility }, tracks: tracks.map(({ discNumber: _disc, ...track }) => track) } },
     { ...projected, draft: { ...projected.draft, album: { ...album, artists: [{ ...album.artists[0], extra: true }, album.artists[1]] } } },
     { ...projected, draft: { ...projected.draft, album: { ...album, label: { name: 'Synthetic Label', musicBrainzId: 'not-an-id' } } } },
@@ -202,6 +221,13 @@ test('the server Draft v2 projection parses strictly with its approval digest, w
   ]) expect(detailSchema.safeParse(changed).success).toBe(false);
   expect(ADMIN_IMPORT_RELOAD_REQUIRED).toBe('ADMIN_IMPORT_RELOAD_REQUIRED');
   expect(ADMIN_IMPORT_RELOAD_REQUIRED).not.toBe(ADMIN_RELOAD_REQUIRED);
+});
+
+test('a newer saved state is a later revision, or the same revision with later automatic writes', () => {
+  expect(newerImport({ revision: 3, valueRevision: 0 }, { revision: 2, valueRevision: 9 })).toBe(true);
+  expect(newerImport({ revision: 2, valueRevision: 4 }, { revision: 2, valueRevision: 3 })).toBe(true);
+  for (const [next, previous] of [[{ revision: 2, valueRevision: 3 }, { revision: 2, valueRevision: 3 }], [{ revision: 2, valueRevision: 9 }, { revision: 3, valueRevision: 0 }], [{ revision: 2, valueRevision: 2 }, { revision: 2, valueRevision: 3 }]])
+    expect(newerImport(next, previous)).toBe(false);
 });
 
 test('duplicate candidates parse label Organizations and up to 460 items, and refuse unknown kinds', () => {

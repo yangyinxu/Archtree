@@ -38,11 +38,13 @@ export function applyChanges(draft: ImportDraftV2, changes: readonly ImportDraft
 /**
  * Moves unsaved edits onto a newer saved draft, path by path: while every edited path still holds there the value the edit
  * started from or the edited value itself, saves of other paths (another administrator's, an upload confirmation) never block
- * this editor. Returns null when another save changed an edited path, so the editor offers the saved version instead.
+ * this editor. An edited path whose saved value is `automatic` (written from file tags) is carried over too, because an
+ * administrator save always wins over automation. Returns null when another administrator's save changed an edited path, so the
+ * editor offers the saved version instead.
  */
-export function rebaseDraft(base: ImportDraftV2, draft: ImportDraftV2, saved: ImportDraftV2): ImportDraftV2 | null {
+export function rebaseDraft(base: ImportDraftV2, draft: ImportDraftV2, saved: ImportDraftV2, automatic: ReadonlySet<string> = new Set()): ImportDraftV2 | null {
   const local = draftChanges(base, draft);
-  if (!local.every(change => { const current = valueAt(saved, change.path); return same(current, change.base) || same(current, change.value); })) return null;
+  if (!local.every(change => { const current = valueAt(saved, change.path); return automatic.has(change.path) || same(current, change.base) || same(current, change.value); })) return null;
   return applyChanges(saved, local);
 }
 

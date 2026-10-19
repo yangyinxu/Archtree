@@ -99,8 +99,10 @@ export function ImportMedia({ item, operation, uploads, disabled, publishDisable
   const publishOperation = item.publicationRecovery?.operationId ?? [...item.receipts].reverse().find(receipt => receipt.kind === 'publish')?.operationId;
   const canCancelPublication = Boolean(publishOperation && ['preparing', 'needsAttention'].includes(item.publication));
   const closeConfirmation = () => { setConfirmation(null); setApproved(null); };
-  // An approval binds the saved project it was built on: a newer revision or a changed approvalDigest makes it stale.
-  const confirmationStale = Boolean(confirmation && (confirmation.importId !== item.id || confirmation.revision !== item.revision
+  // An approval binds only the approvalDigest of what it shows, so other saves, Luna and automatic writes elsewhere leave it
+  // current. A removal or cancellation binds its asset or approval and, as the server does, any administrator change after the
+  // revision it was confirmed at (a receipt above it); upload transfers, Luna and publication progress leave it current.
+  const confirmationStale = Boolean(confirmation && (confirmation.importId !== item.id || (confirmation.kind !== 'publish' && item.receipts.some(receipt => receipt.revision > confirmation.revision))
     || ('assetStamp' in confirmation && confirmation.assetStamp !== assetStamp(item.assets.find(asset => asset.slotId === confirmation.slotId && asset.state !== 'deleted')))
     || (confirmation.kind === 'cancelPublication' && confirmation.publicationOperationId !== publishOperation)
     || (confirmation.kind === 'publish' && confirmation.item.approvalDigest !== item.approvalDigest)));
@@ -130,6 +132,7 @@ export function ImportMedia({ item, operation, uploads, disabled, publishDisable
       const code = queued?.code && refusal[queued.code];
       return <li key={row.slotId} className={styles.card}><div className={styles.row}><strong className={styles.filename}>{row.label}</strong><span className={styles.badge}>{badge(queued, asset)}</span></div>
         {asset?.tags && <details><summary>{t('layout.evidence')}</summary><pre className={styles.rawDraft}>{JSON.stringify(asset.tags, null, 2)}</pre></details>}
+        {asset?.tags?.flagged.length ? <p className={styles.muted}>{t('media.tags_left_out', { count: new Set(asset.tags.flagged.map(flag => flag.field)).size })}</p> : null}
         {code && <p role="status">{t(code)}</p>}
         {uploadRecovery && !uploadRecovery.startedByMe && unresolved && <p>{t('media.other_owner')}</p>}
         {row.kind === 'audio' && !source && (!asset || asset.state === 'failed') && <p className={styles.muted}>{t('upload.needs_file')}</p>}

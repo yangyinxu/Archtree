@@ -235,18 +235,21 @@ export function legacyDecisionsView(raw: unknown, slots: ReadonlySet<string>): I
 
 /**
  * The editor's Draft v2 decisions: an Artist decision names a UUID entry key, a label or Album decision names none, and a track
- * decision names a manifest slot. One per scope, slot and entry (the first stored one), within the request bound.
+ * decision names a manifest slot. An Artist or label decision carries the name it was made for (null when unreadable), so the
+ * editor can resend it unchanged; Album and track decisions bind none. One per scope, slot and entry (the first stored one),
+ * within the request bound.
  */
 export function importDecisionsV2View(raw: unknown, slots: ReadonlySet<string>): ImportDecisionDtoV2[] {
     const seen = new Set<string>(), decisions: ImportDecisionDtoV2[] = [];
     for (const value of list(raw)) {
         if (!isRecord(value)) continue;
         const { scope, slotId, entryKey, action, candidateId, candidateRevision } = value;
+        const boundName = (scope === 'artist' || scope === 'label') && typeof value.boundName === 'string' && value.boundName.length <= DRAFT_V2_LIMITS.name ? value.boundName : null;
         if (!oneOf(scope, ['artist', 'label', 'album', 'track'] as const) || !oneOf(action, ['reuse', 'skip', 'create-distinct'] as const)) continue;
         if (scope === 'artist' ? !uuid(entryKey) || slotId !== null : scope === 'track' ? typeof slotId !== 'string' || !slots.has(slotId) || entryKey !== null : slotId !== null || entryKey !== null) continue;
         if ((candidateId !== null && !objectId(candidateId)) || (candidateRevision !== null && typeof candidateRevision !== 'string')) continue;
         const key = `${scope}:${slotId}:${entryKey}`; if (seen.has(key)) continue; seen.add(key);
-        decisions.push({ scope, slotId: slotId as string | null, entryKey: entryKey as string | null, action, candidateId: candidateId as string | null, candidateRevision: candidateRevision as string | null });
+        decisions.push({ scope, slotId: slotId as string | null, entryKey: entryKey as string | null, boundName, action, candidateId: candidateId as string | null, candidateRevision: candidateRevision as string | null });
     }
     return decisions.slice(0, DRAFT_V2_LIMITS.decisions);
 }
@@ -266,19 +269,22 @@ export function legacyTagsView(raw: unknown): ImportEmbeddedTags | null {
     const nullable = (value: unknown) => typeof value === 'string' ? value : null;
     return { title: nullable(raw.title), album: nullable(raw.album), artists: list(raw.artists).filter((value): value is string => typeof value === 'string').slice(0, 50), year: count(raw.year), trackNumber: count(raw.trackNumber) };
 }
-/** The v1 asset projection, one per slot; storage identities, tags beyond v1 and actors stay private. */
-export function legacyAssetsView(raw: unknown, slots: ReadonlySet<string>, actorId: string): AdminImportDetail['assets'] {
-    const seen = new Set<string>(), assets: AdminImportDetail['assets'] = [];
+/**
+ * The asset projection, one per slot; storage identities, automation markers and actors stay private. Tags use `tagsView`: the five
+ * v1 fields for the v1 contract (the default), or the editor's version-2 view (importTagsV2View).
+ */
+export function legacyAssetsView<T = ImportEmbeddedTags>(raw: unknown, slots: ReadonlySet<string>, actorId: string, tagsView: (raw: unknown) => T | null = legacyTagsView as (raw: unknown) => T | null): (Omit<AdminImportDetail['assets'][number], 'tags'> & { tags: T | null })[] {
+    const seen = new Set<string>(), assets: (Omit<AdminImportDetail['assets'][number], 'tags'> & { tags: T | null })[] = [];
     for (const asset of list(raw) as ImportAsset[]) {
         if (!legacyAssetVisible(asset, slots) || seen.has(asset.slotId)) continue;
         const { slotId, state, byteLength, sha256, contentType, tags, recovery, operationId, actorId: owner } = asset; seen.add(slotId);
-        assets.push({ slotId, state, byteLength, sha256, contentType, tags: legacyTagsView(tags),
+        assets.push({ slotId, state, byteLength, sha256, contentType, tags: tagsView(tags),
             recovery: { operationId: recovery?.operationId ?? operationId, expectedRevision: recovery?.expectedRevision ?? 1, kind: recovery?.kind ?? 'upload', startedByMe: (recovery?.actorId ?? owner) === actorId } });
     }
     return assets;
 }
 /** The selected cover only while it names a ready image among the projected assets; anything else is no selection. */
-export const legacySelectedCover = (raw: unknown, assets: AdminImportDetail['assets']): string | null =>
+export const legacySelectedCover = (raw: unknown, assets: readonly Pick<AdminImportDetail['assets'][number], 'slotId' | 'state' | 'contentType'>[]): string | null =>
     typeof raw === 'string' && assets.some(asset => asset.slotId === raw && asset.state === 'ready' && asset.contentType.startsWith('image/')) ? raw : null;
 
 /** A v1 analysis state; a state this release does not know is shown as needing attention. */

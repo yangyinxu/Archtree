@@ -79,7 +79,12 @@ join phrase, the label and the tracks in disc order, that the single publish
 request carries those decisions, and the links to the Album, each Artist and
 the label Organization, with axe scans of the page and the confirmation.
 Another publishes an unsaved title edit without Save and checks that the one
-publish request carries it and the editor then shows it saved.
+publish request carries it and the editor then shows it saved. Another loads a
+draft whose values came from file tags and checks that the editor marks them
+From file tags, notes that a company-like Artist entry looks like a label and
+drops a value's marker once it is edited, and that the confirmation marks the
+entry and the label From file tags only, with axe scans of the page and the
+confirmation.
 
 The catalog reviews spec checks that an existing-Album review shows the Album's
 Artist Credits and label read-only and applies a Disc Number change.
@@ -400,6 +405,19 @@ player control still works.
   identity, with a hidden reused record marked Hidden. Approve, refresh the
   page and confirm the saved draft holds the edited title and the decisions.
   Repeat with a screen reader at 320 CSS px.
+- As an administrator, create an import from a folder of tagged audio files
+  that share their album, album artist, year and label tags, with the tracks
+  in `Disc 1` and `Disc 2` folders and no disc tags. Confirm each track's
+  title, Disc Number and Track Number appear, marked From file tags, as its
+  upload is confirmed, and that once every file is confirmed the Album title,
+  year, label and one primary Artist entry appear, marked From file tags in
+  Draft, with the entry and the label marked From file tags only in the
+  publication confirmation. Save an edited automatic track title while other
+  files still upload and confirm the save keeps it, no conflict appears, and
+  Review decisions and the cover choice stay available. Repeat with files
+  whose album tags disagree and with a Various Artists album artist, and
+  confirm those values stay empty and no Artist entry is written. Repeat with
+  a screen reader at 320 CSS px.
 
 ## Media Session observations
 

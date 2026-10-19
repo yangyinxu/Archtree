@@ -32,12 +32,16 @@
  *   - an unsaved buffer of the earlier v1 editor is never read as the Draft v2 draft
  *   - clearing the Artist name and retyping the saved name leaves nothing to save, an empty name sends nothing, and a new name keeps the saved entry
  *   - another administrator saving a different value rebases unsaved edits: Save stays available and sends only this editor's value
+ *   - automatic values written at the same revision rebase unsaved edits without a conflict, and an edit over an automatic value is kept
+ *   - an editor without unsaved edits takes automatic values written at the same revision and marks them From file tags
  *   - a Disc Number typed in the import editor is saved as the only change
  *   - reordering Artist entries by keyboard saves the reordered list as the only change, keeping each key and role and each phrase in its position
  *   - a role change and a label edit save only album.artists and album.label, and clearing the label saves no label
  *   - an edited entry list with duplicate names sends no save until the names differ
  *   - a draft of two primaries, a featured entry and a label is decided entry by entry in Review and published in one step, linking every confirmed identity
  *   - an unsaved title edit is published in one request without Save, the editor then shows it saved, and Publish alone stays available while the draft is unsaved
+ *   - unsaved decisions save with the revision of their first edit through Luna progress, and go stale once another administrator saves decisions
+ *   - a decision save refused because its entry was renamed meanwhile reloads the project and marks the unsaved decisions stale, with no retry
  *   - a refused approval keeps the unsaved edits and the Review decisions for another look
  *   - after a stale approval the page reloads the saved project, and approving again sends its new digest with the same unsaved edit
  *   - another administrator saving different Artist entries refuses this editor's entry edits and offers the saved version
@@ -55,7 +59,7 @@ import { adminWorkspace } from './adminWorkspace';
 import { AdminWorkbenchPage } from './AdminWorkbenchPage';
 import { AdminImportPage } from './AdminImportPage';
 import { AdminCreateImportPage } from './AdminCreateImportPage';
-import { capabilities, deferred, detail, json, projectId, session, slotTwo, viewer, applyDraftChanges, artistEntry, entryKey, fieldSaveEndpoint, labelEntry } from './adminFixtures.testSupport';
+import { capabilities, deferred, detail, json, projectId, session, slotId, slotTwo, viewer, applyDraftChanges, artistEntry, entryKey, fieldSaveEndpoint, labelEntry } from './adminFixtures.testSupport';
 
 function mount(route: string) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -265,8 +269,8 @@ test('a project saved by a newer release refuses a save with a reload request fo
 });
 test('an append to an Album without a primary Artist explains the refusal instead of a generic conflict, with no retry', async () => {
   const item = detail(); item.capabilities.publish = true; item.publication = 'notStarted'; const publishes: string[] = [], reads: string[] = [];
-  item.decisions = [{ scope: 'album', slotId: null, entryKey: null, action: 'reuse', candidateId: '1'.repeat(24), candidateRevision: 'r' },
-    ...item.draft.tracks.map(track => ({ scope: 'track' as const, slotId: track.slotId, entryKey: null, action: 'create-distinct' as const, candidateId: null, candidateRevision: null }))];
+  item.decisions = [{ scope: 'album', slotId: null, entryKey: null, boundName: null, action: 'reuse', candidateId: '1'.repeat(24), candidateRevision: 'r' },
+    ...item.draft.tracks.map(track => ({ scope: 'track' as const, slotId: track.slotId, entryKey: null, boundName: null, action: 'create-distinct' as const, candidateId: null, candidateRevision: null }))];
   const album = { kind: 'album', id: '1'.repeat(24), label: 'Existing Album', revision: 'r', albumId: null, visibility: 'public', match: 'name', matchedSlotIds: [], automaticReuse: false };
   vi.stubGlobal('fetch', vi.fn(async (path: string, init: RequestInit) => {
     if (path.endsWith('/duplicate-candidates')) return json({ items: [album] });
@@ -584,6 +588,38 @@ test('another administrator saving a different value rebases unsaved edits: Save
   expect([server.current().draft.album.title, server.current().draft.tracks[1].title]).toEqual(['My edit', 'Their track title']);
 });
 
+test('automatic values written at the same revision rebase unsaved edits without a conflict, and an edit over an automatic value is kept', async () => {
+  const server = fieldSaveEndpoint(detail()); vi.stubGlobal('fetch', vi.fn(server.fetch));
+  mount(`/admin/imports/${projectId}`);
+  fireEvent.change(await screen.findByRole('textbox', { name: 'Title' }), { target: { value: 'My edit' } });
+  fireEvent.change(screen.getByRole('textbox', { name: '1 · Title' }), { target: { value: 'Typed One' } });
+  // File tags confirmed meanwhile: automation wrote both track titles without a new revision, one of them over this editor's edit.
+  const tagged = applyDraftChanges(server.current().draft, [{ path: `tracks.${slotId}.title`, value: 'Tagged One' }, { path: `tracks.${slotTwo}.title`, value: 'Tagged Two' }]);
+  server.set({ ...server.current(), valueRevision: 1, automaticPaths: [`tracks.${slotId}.title`, `tracks.${slotTwo}.title`], draft: tagged });
+  fireEvent.click(screen.getByRole('button', { name: 'Refresh status' }));
+  await waitFor(() => expect(screen.getByRole('textbox', { name: '2 · Title · From file tags' })).toHaveValue('Tagged Two'));
+  expect(screen.queryByRole('button', { name: 'Discard local edits and load saved version' })).not.toBeInTheDocument();
+  expect([screen.getByRole('textbox', { name: 'Title' }), screen.getByRole('textbox', { name: '1 · Title' })].map(input => (input as HTMLInputElement).value)).toEqual(['My edit', 'Typed One']);
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+  await waitFor(() => expect(server.writes).toHaveLength(1));
+  // The save replaces the automatic value it changed from its current value, and leaves the other automatic value alone.
+  expect(server.writes[0]).toMatchObject({ expectedRevision: 1, changes: [{ path: 'album.title', base: '', value: 'My edit' }, { path: `tracks.${slotId}.title`, base: 'Tagged One', value: 'Typed One' }] });
+});
+
+test('an editor without unsaved edits takes automatic values written at the same revision and marks them From file tags', async () => {
+  const server = fieldSaveEndpoint(detail()); vi.stubGlobal('fetch', vi.fn(server.fetch));
+  mount(`/admin/imports/${projectId}`);
+  expect(await screen.findByRole('textbox', { name: 'Title' })).toBeVisible();
+  const tagged = applyDraftChanges(server.current().draft, [{ path: 'album.title', value: 'Tagged Album' }, { path: `tracks.${slotId}.title`, value: 'Tagged One' }]);
+  server.set({ ...server.current(), valueRevision: 1, automaticPaths: ['album.title', `tracks.${slotId}.title`], draft: tagged });
+  fireEvent.click(screen.getByRole('button', { name: 'Refresh status' }));
+  expect(await screen.findByRole('textbox', { name: 'Title · From file tags' })).toHaveValue('Tagged Album');
+  expect(screen.getByRole('textbox', { name: '1 · Title · From file tags' })).toHaveValue('Tagged One');
+  expect(screen.getByRole('textbox', { name: '2 · Title' })).toBeVisible();
+  expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled(); expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  expect(server.writes).toEqual([]);
+});
+
 test('a Disc Number typed in the import editor is saved as the only change', async () => {
   const server = fieldSaveEndpoint(detail()); vi.stubGlobal('fetch', vi.fn(server.fetch));
   mount(`/admin/imports/${projectId}`);
@@ -689,8 +725,8 @@ test('a draft of two primaries, a featured entry and a label is decided entry by
   expect(screen.getByRole('link', { name: 'Edit label' })).toHaveAttribute('href', `/admin/catalog/organization/${published.organizationId}`);
   const fresh = { action: 'create-distinct', candidateId: null, candidateRevision: null };
   expect(saved).toEqual([]);
-  expect(publishes).toEqual([{ operationId: expect.any(String), expectedRevision: 1, changes: [], selectedCoverSlotId: null, approvalDigest: 'e'.repeat(64), decisions: [...artists.map(entry => ({ scope: 'artist', slotId: null, entryKey: entry.key, ...fresh })),
-    { scope: 'label', slotId: null, entryKey: null, ...fresh }, { scope: 'album', slotId: null, entryKey: null, ...fresh }, ...initial.draft.tracks.map(track => ({ scope: 'track', slotId: track.slotId, entryKey: null, ...fresh }))] }]);
+  expect(publishes).toEqual([{ operationId: expect.any(String), expectedRevision: 1, changes: [], selectedCoverSlotId: null, approvalDigest: 'e'.repeat(64), decisions: [...artists.map(entry => ({ scope: 'artist', slotId: null, entryKey: entry.key, boundName: entry.name, ...fresh })),
+    { scope: 'label', slotId: null, entryKey: null, boundName: 'Lorem Records', ...fresh }, { scope: 'album', slotId: null, entryKey: null, boundName: null, ...fresh }, ...initial.draft.tracks.map(track => ({ scope: 'track', slotId: track.slotId, entryKey: null, boundName: null, ...fresh }))] }]);
   // The approval saved the shown decisions, so no unsaved Review decision remains.
   expect(adminWorkspace.buffer(`duplicate-edits:${projectId}`)).toBeUndefined();
   expect(screen.queryByText(changedElsewhere)).not.toBeInTheDocument(); expect(screen.queryByRole('button', { name: 'Retry original operation' })).not.toBeInTheDocument();
@@ -701,7 +737,7 @@ function decidedProject() {
   const item = detail(); item.capabilities.publish = true; item.capabilities.upload = true; item.publication = 'notStarted'; item.revision = 3;
   item.draft.album.title = 'Synthetic Album'; item.draft.album.artists = [artistEntry('Lorem')]; item.draft.tracks = item.draft.tracks.map((track, index) => ({ ...track, title: ['First', 'Second'][index] }));
   const fresh = { action: 'create-distinct', candidateId: null, candidateRevision: null } as const;
-  item.decisions = [{ scope: 'artist', slotId: null, entryKey: entryKey(1), ...fresh }, { scope: 'album', slotId: null, entryKey: null, ...fresh }, ...item.draft.tracks.map(track => ({ scope: 'track' as const, slotId: track.slotId, entryKey: null, ...fresh }))];
+  item.decisions = [{ scope: 'artist', slotId: null, entryKey: entryKey(1), boundName: 'Lorem', ...fresh }, { scope: 'album', slotId: null, entryKey: null, boundName: null, ...fresh }, ...item.draft.tracks.map(track => ({ scope: 'track' as const, slotId: track.slotId, entryKey: null, boundName: null, ...fresh }))];
   item.assets = [{ slotId: item.manifest.files[0].slotId, state: 'ready', byteLength: 100, sha256: 'a'.repeat(64), contentType: 'audio/mpeg', tags: null, recovery: null },
     { slotId: 'cover', state: 'ready', byteLength: 100, sha256: 'b'.repeat(64), contentType: 'image/png', tags: null, recovery: null }];
   return item;
@@ -715,7 +751,7 @@ test('an unsaved title edit is published in one request without Save, the editor
     return json({ item: server.current(), receipt: { operationId: body.operationId, kind: 'publish', revision: server.current().revision } }, 202);
   }));
   mount(`/admin/imports/${projectId}`);
-  adminWorkspace.retain(`duplicate-edits:${projectId}`, { revision: 3, decisions: server.current().decisions }, captureAccountOperation(viewer));
+  adminWorkspace.retain(`duplicate-edits:${projectId}`, { decisions: server.current().decisions }, captureAccountOperation(viewer));
   fireEvent.change(await screen.findByRole('textbox', { name: 'Title' }), { target: { value: 'Approved Title' } });
   expect(screen.getByText('Unsaved changes')).toBeVisible();
   // Saved-draft actions wait for a save; Publish includes the unsaved edit.
@@ -733,6 +769,70 @@ test('an unsaved title edit is published in one request without Save, the editor
   expect(screen.getByRole('textbox', { name: 'Title' })).toHaveValue('Approved Title'); expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
   expect(adminWorkspace.buffer(`duplicate-edits:${projectId}`)).toBeUndefined();
 });
+test('unsaved decisions save with the revision of their first edit through Luna progress, and go stale once another administrator saves decisions', async () => {
+  const initial = detail(); initial.draft.album.title = 'Synthetic Album'; initial.draft.album.artists = [artistEntry('Lorem')];
+  const server = fieldSaveEndpoint(initial), saved: Record<string, any>[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (path: string, init?: RequestInit) => {
+    if (init?.method !== 'POST' || !path.endsWith('/decisions')) return server.fetch(path, init);
+    saved.push(JSON.parse(String(init.body))); return json({ code: 'ADMIN_IMPORT_REVISION_CONFLICT' }, 409);
+  }));
+  const decide = async () => {
+    fireEvent.click(await screen.findByRole('button', { name: 'Find matches' }));
+    fireEvent.change(await screen.findByRole('combobox', { name: '1 · Decision' }), { target: { value: 'create-distinct' } });
+  };
+  const refresh = async (next: ReturnType<typeof detail>) => {
+    // Review remounts for the newer revision, so its matches are hidden until they are requested again.
+    server.set(next); fireEvent.click(screen.getByRole('button', { name: 'Refresh status' }));
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Save decisions' })).not.toBeInTheDocument());
+    fireEvent.click(await screen.findByRole('button', { name: 'Find matches' })); await screen.findByRole('button', { name: 'Save decisions' });
+  };
+  mount(`/admin/imports/${projectId}`);
+  fireEvent.click(await screen.findByRole('tab', { name: 'Review' }));
+  await decide();
+  // A Luna tick raises the revision without a receipt: the buffer stays current and still names the revision of its first edit.
+  await refresh({ ...server.current(), revision: 2 });
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Save decisions' })).toBeEnabled());
+  fireEvent.click(screen.getByRole('button', { name: 'Save decisions' }));
+  await waitFor(() => expect(saved).toHaveLength(1));
+  expect(saved[0]).toEqual({ operationId: expect.any(String), expectedRevision: 1, decisions: [{ scope: 'artist', slotId: null, entryKey: entryKey(1), boundName: 'Lorem', action: 'create-distinct', candidateId: null, candidateRevision: null }] });
+  // Another administrator saves decisions after this buffer began: it says so and cannot be saved until the saved ones are loaded.
+  const other = { scope: 'album' as const, slotId: null, entryKey: null, boundName: null, action: 'create-distinct' as const, candidateId: null, candidateRevision: null };
+  await refresh({ ...server.current(), revision: 3, decisions: [other], receipts: [{ operationId: '20000000-0000-4000-8000-00000000000b', kind: 'decisions', revision: 3 }] });
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Save decisions' })).toBeDisabled());
+  expect(screen.getByRole('button', { name: 'Discard local edits and load saved version' })).toBeVisible();
+  fireEvent.click(screen.getByRole('button', { name: 'Discard local edits and load saved version' }));
+  expect(adminWorkspace.buffer(`duplicate-edits:${projectId}`)).toBeUndefined(); expect(saved).toHaveLength(1);
+});
+test('a decision save refused because its entry was renamed meanwhile reloads the project and marks the unsaved decisions stale, with no retry', async () => {
+  const initial = detail(); initial.draft.album.title = 'Synthetic Album'; initial.draft.album.artists = [artistEntry('Lorem')];
+  const server = fieldSaveEndpoint(initial), saved: Record<string, any>[] = []; let reads = 0;
+  vi.stubGlobal('fetch', vi.fn(async (path: string, init?: RequestInit) => {
+    if (path.endsWith('/duplicate-candidates')) return json({ items: [] });
+    if (path === `/api/admin/v1/imports/${projectId}` && !init?.method) reads++;
+    if (init?.method !== 'POST' || !path.endsWith('/decisions')) return server.fetch(path, init);
+    saved.push(JSON.parse(String(init.body))); const current = server.current();
+    // Another administrator renamed the entry after this Review tab decided it, so the server refuses the decision.
+    server.set({ ...current, revision: current.revision + 1, draft: { ...current.draft, album: { ...current.draft.album, artists: [artistEntry('Lorem Renamed')] } } });
+    return json({ code: 'ADMIN_IMPORT_DECISION_STALE' }, 409);
+  }));
+  mount(`/admin/imports/${projectId}`);
+  fireEvent.click(await screen.findByRole('tab', { name: 'Review' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Find matches' }));
+  fireEvent.change(await screen.findByRole('combobox', { name: '1 · Decision' }), { target: { value: 'create-distinct' } });
+  const readsBeforeSave = reads; fireEvent.click(screen.getByRole('button', { name: 'Save decisions' }));
+  await waitFor(() => expect(saved).toHaveLength(1));
+  expect(saved[0].decisions).toEqual([{ scope: 'artist', slotId: null, entryKey: entryKey(1), boundName: 'Lorem', action: 'create-distinct', candidateId: null, candidateRevision: null }]);
+  // The refusal is a conflict: the saved project is read again, and nothing offers to resend the refused intent.
+  expect((await screen.findAllByText(changedElsewhere))[0]).toBeVisible(); await waitFor(() => expect(reads).toBeGreaterThan(readsBeforeSave));
+  expect(screen.queryByRole('button', { name: 'Retry original operation' })).not.toBeInTheDocument();
+  // Review shows the renamed entry, and its unsaved decision (made for the earlier name) is stale and cannot be saved.
+  fireEvent.click(await screen.findByRole('button', { name: 'Find matches' }));
+  expect((await screen.findByRole('combobox', { name: '1 · Decision' })).closest('label')!.firstChild!.textContent).toBe('Artist · Lorem Renamed · Primary');
+  expect(screen.getByRole('button', { name: 'Save decisions' })).toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: 'Discard local edits and load saved version' }));
+  expect(adminWorkspace.buffer(`duplicate-edits:${projectId}`)).toBeUndefined(); expect(screen.getByRole('button', { name: 'Save decisions' })).toBeDisabled();
+  expect(saved).toHaveLength(1);
+});
 test('a refused approval keeps the unsaved edits and the Review decisions for another look', async () => {
   const server = fieldSaveEndpoint(decidedProject()), publishes: Record<string, any>[] = [];
   vi.stubGlobal('fetch', vi.fn(async (path: string, init?: RequestInit) => {
@@ -740,7 +840,7 @@ test('a refused approval keeps the unsaved edits and the Review decisions for an
     publishes.push(JSON.parse(String(init.body))); return json({ code: 'ADMIN_IMPORT_APPROVAL_STALE' }, 409);
   }));
   mount(`/admin/imports/${projectId}`);
-  const buffer = { revision: 3, decisions: server.current().decisions }; adminWorkspace.retain(`duplicate-edits:${projectId}`, buffer, captureAccountOperation(viewer));
+  const buffer = { decisions: server.current().decisions }; adminWorkspace.retain(`duplicate-edits:${projectId}`, buffer, captureAccountOperation(viewer));
   fireEvent.change(await screen.findByRole('textbox', { name: 'Title' }), { target: { value: 'Approved Title' } });
   fireEvent.click(screen.getByRole('tab', { name: 'Publish' })); fireEvent.click(screen.getByRole('button', { name: 'Publish Album' }));
   const approve = within(screen.getByRole('dialog')).getByRole('button', { name: 'Publish Album' }); await waitFor(() => expect(approve).toBeEnabled()); fireEvent.click(approve);

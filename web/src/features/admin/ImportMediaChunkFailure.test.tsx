@@ -19,8 +19,8 @@ afterEach(() => { cleanup(); adminWorkspace.reset(); vi.unstubAllGlobals(); });
 
 test('a checklist chunk that cannot load asks for a reload inside the dialog, keeps Approve disabled and sends nothing', async () => {
   const item = detail(); item.publication = 'notStarted'; item.capabilities.publish = true; item.draft.album.title = 'Synthetic Album';
-  item.decisions = [{ scope: 'album', slotId: null, entryKey: null, action: 'create-distinct', candidateId: null, candidateRevision: null },
-    ...[slotId, slotTwo].map(slot => ({ scope: 'track' as const, slotId: slot, entryKey: null, action: 'create-distinct' as const, candidateId: null, candidateRevision: null }))];
+  item.decisions = [{ scope: 'album', slotId: null, entryKey: null, boundName: null, action: 'create-distinct', candidateId: null, candidateRevision: null },
+    ...[slotId, slotTwo].map(slot => ({ scope: 'track' as const, slotId: slot, entryKey: null, boundName: null, action: 'create-distinct' as const, candidateId: null, candidateRevision: null }))];
   const fetchMock = vi.fn(); vi.stubGlobal('fetch', fetchMock);
   const operation = new AdminMutation(), run = vi.spyOn(operation, 'run').mockImplementation(() => {});
   const client = new QueryClient(); client.setQueryData(['browser-session'], session);

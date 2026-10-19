@@ -68,8 +68,11 @@ test('cookie-owned import reads require exact viewer and create/replay uses top-
     const replay = await request('/api/admin/v1/imports', 'POST', value); assert.equal(replay.status, 201); assert.equal((await replay.json()).item.id, result.item.id);
     // A whole-draft save from an editor that predates Draft v2 asks for a reload, at any revision.
     const outdated = await request(`/api/admin/v1/imports/${result.item.id}`, 'PATCH', { operationId: randomUUID(), expectedRevision: 9, draft: result.item.draft }); assert.equal(outdated.status, 409); assert.deepEqual(await outdated.json(), { code: 'ADMIN_IMPORT_RELOAD_REQUIRED' });
-    // A field save binds each path's base value: another administrator's newer value is a bounded field conflict.
-    const path = `/api/admin/v1/imports/${result.item.id}`, saved = await request(path, 'PATCH', { operationId: randomUUID(), expectedRevision: 9, changes: [{ path: 'album.title', base: '', value: 'Saved first' }] });
+    // A field save binds each path's base value: another administrator's newer value is a bounded field conflict, and a revision
+    // the project never had is refused.
+    const path = `/api/admin/v1/imports/${result.item.id}`, future = await request(path, 'PATCH', { operationId: randomUUID(), expectedRevision: 9, changes: [{ path: 'album.title', base: '', value: 'Saved first' }] });
+    assert.equal(future.status, 409); assert.deepEqual(await future.json(), { code: 'ADMIN_IMPORT_REVISION_CONFLICT' });
+    const saved = await request(path, 'PATCH', { operationId: randomUUID(), expectedRevision: 1, changes: [{ path: 'album.title', base: '', value: 'Saved first' }] });
     assert.equal(saved.status, 200); assert.equal((await saved.json()).item.draft.album.title, 'Saved first');
     const stale = await request(path, 'PATCH', { operationId: randomUUID(), expectedRevision: 1, changes: [{ path: 'album.title', base: '', value: 'Saved later' }] });
     assert.equal(stale.status, 409); assert.deepEqual(await stale.json(), { code: 'ADMIN_IMPORT_FIELD_CONFLICT' });
@@ -174,10 +177,13 @@ test('an approval body up to 192 KB is parsed, its fields are bounded before the
     const created = await (await request('/api/admin/v1/imports', 'POST', body())).json(), path = `/api/admin/v1/imports/${created.item.id}`, publish = `${path}/publish`;
     const imports = getDb()!.collection('adminAlbumImports'), before = await imports.findOne({ _id: new ObjectId(created.item.id) });
     const approval = () => ({ operationId: randomUUID(), expectedRevision: 1, changes: [] as unknown[], decisions: [] as unknown[], selectedCoverSlotId: null, approvalDigest: created.item.approvalDigest as string });
-    // Stale bases together pass the field-save limit: the body is still parsed and reaches the revision check.
-    const stale = 'b'.repeat(42_000), large = { ...approval(), expectedRevision: 9, changes: ['title', 'visibility', 'releaseDate', 'label'].map(field => ({ path: `album.${field}`, base: stale, value: null })) };
+    // Stale bases together pass the field-save limit: the body is still parsed, admitted with the current digest, and reaches the
+    // field check, where the Album title's stale base is another administrator's value. A revision the project never had is refused.
+    const stale = 'b'.repeat(42_000), values: Record<string, unknown> = { title: 'Stale title', visibility: 'public', releaseDate: null, label: null };
+    const large = { ...approval(), changes: Object.entries(values).map(([field, value]) => ({ path: `album.${field}`, base: stale, value })) };
     assert.ok(JSON.stringify(large).length > 160 * 1024 && JSON.stringify(large).length < 192 * 1024);
-    const parsed = await request(publish, 'POST', large); assert.equal(parsed.status, 409); assert.deepEqual(await parsed.json(), { code: 'ADMIN_IMPORT_REVISION_CONFLICT' });
+    const parsed = await request(publish, 'POST', large); assert.equal(parsed.status, 409); assert.deepEqual(await parsed.json(), { code: 'ADMIN_IMPORT_FIELD_CONFLICT' });
+    const future = await request(publish, 'POST', { ...large, operationId: randomUUID(), expectedRevision: 9 }); assert.equal(future.status, 409); assert.deepEqual(await future.json(), { code: 'ADMIN_IMPORT_REVISION_CONFLICT' });
     assert.equal((await request(publish, 'POST', { ...large, changes: [...large.changes, { path: 'album.artists', base: stale, value: null }] })).status, 413);
     assert.equal((await request(`${path}/decisions`, 'POST', { ...approval(), padding: 'p'.repeat(100_000) })).status, 413);
     // Nested deeper than a draft value or a flat decision: refused before the fingerprint.

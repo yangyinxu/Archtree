@@ -28,8 +28,9 @@ export function boundImportApproval(body: Record<string, unknown>): void {
 /**
  * Inside the publish transaction, after receipt lookup: requires every approval field, refuses a changed saved basis (409
  * ADMIN_IMPORT_APPROVAL_STALE), then saves decisions, changes and the cover exactly as /decisions, PATCH and /select-cover would,
- * in that order. Decisions bind the saved names they were made for, so renaming an entry or the label in the same approval drops
- * its decision. Returns the saved Draft v2; any refusal aborts the transaction with nothing written.
+ * in that order. Decisions carry the bound names shown, which must still be the saved names (409 ADMIN_IMPORT_DECISION_STALE), and
+ * renaming an entry or the label in the same approval drops its decision. Returns the saved Draft v2; any refusal aborts the
+ * transaction with nothing written.
  */
 export async function saveImportApproval(doc: AdminImportDocument, body: Record<string, unknown>, actor: string, session: ClientSession): Promise<ImportDraftV2> {
     if (!IMPORT_APPROVAL_FIELDS.every(key => hasOwn(body, key)) || !Array.isArray(body.changes) || !Array.isArray(body.decisions)

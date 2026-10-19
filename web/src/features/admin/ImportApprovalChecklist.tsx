@@ -33,11 +33,12 @@ export function ImportApprovalChecklist({ item, draft, changes, onChange }: {
   // A reuse is shown by name and visibility from the same candidate read Review uses (and shares while Review keeps it).
   const reuses = Boolean(body?.decisions.some(decision => decision.action === 'reuse'));
   const candidates = useQuery({
-    queryKey: ['admin-imports', access.viewerId, access.epoch, access.generation, item.id, 'duplicates', item.revision],
+    queryKey: ['admin-imports', access.viewerId, access.epoch, access.generation, item.id, 'duplicates', item.revision, item.valueRevision],
     queryFn: ({ signal }) => adminRequest(`${importPath(item.id)}/duplicate-candidates`, candidatesSchema, { signal }),
     enabled: reuses, retry: false, gcTime: 0
   });
-  const checklist = body && (!reuses || candidates.isSuccess) ? approvalChecklist(draft, body.decisions, candidates.data?.items ?? []) : null;
+  const checklist = body && (!reuses || candidates.isSuccess) ? approvalChecklist(draft, body.decisions, candidates.data?.items ?? [],
+    { automaticPaths: item.automaticPaths, possibleLabelEntryKeys: item.possibleLabelEntryKeys, changedPaths: changes.map(change => change.path) }) : null;
   const ready = Boolean(checklist && checklist.blocked === 0);
   useEffect(() => { onChange(body && { body, ready }); }, [body, ready]);
   const identity = (value: ApprovalIdentity) => value.kind === 'reused'
@@ -56,10 +57,10 @@ export function ImportApprovalChecklist({ item, draft, changes, onChange }: {
       {checklist.append && <p role="note">{t('publication.append_not_applied')}</p>}
       <dl>
         <div><dt>{t('field.title')}</dt><dd>{applied(draft.album.title || t('common.untitled'))}</dd></div>
-        <div><dt>{t('field.artists')}</dt><dd>{entriesByline(draft.album.artists) || '—'}
+        <div><dt>{t('field.artists')}</dt><dd>{[entriesByline(draft.album.artists) || '—', checklist.artistsFromTags && t('publication.tags_only')].filter(Boolean).join(' · ')}
           <ol>{checklist.artists.map(entry => <li key={entry.key}>{[entry.name, sharedText(`catalog.credit.${entry.role}` as MessageKey),
-            entry.joinPhrase && t('publication.join_phrase', { phrase: entry.joinPhrase }), identity(entry.identity)].filter(Boolean).join(' · ')}</li>)}</ol></dd></div>
-        <div><dt>{t('field.label')}</dt><dd>{checklist.label ? `${checklist.label.name} · ${identity(checklist.label.identity)}` : t('publication.no_label')}</dd></div>
+            entry.joinPhrase && t('publication.join_phrase', { phrase: entry.joinPhrase }), identity(entry.identity), entry.possibleLabel && t('entries.possible_label')].filter(Boolean).join(' · ')}</li>)}</ol></dd></div>
+        <div><dt>{t('field.label')}</dt><dd>{checklist.label ? [checklist.label.name, identity(checklist.label.identity), checklist.labelFromTags && t('publication.tags_only')].filter(Boolean).join(' · ') : t('publication.no_label')}</dd></div>
         <div><dt>{t('field.releaseDate')}</dt><dd>{applied(reviewValueText(draft.album.releaseDate))}</dd></div>
         <div><dt>{t('field.visibility')}</dt><dd>{applied(t(`field.${draft.album.visibility}`))}</dd></div>
         <div><dt>{t('layout.selectedCover')}</dt><dd>{applied(coverText)}</dd></div>

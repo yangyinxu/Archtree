@@ -31,7 +31,7 @@ vi.mock('./conversionStore', async importOriginal => {
     conversionStore: { get: mocks.get, list: mocks.list, getOutputFile: mocks.output, updateBatch: mocks.update, cleanupConfirmed: mocks.cleanup } };
 });
 vi.mock('./conversionApi', () => ({ conversionApi: { importProof: mocks.proof } }));
-vi.mock('./adminApi', () => ({ adminRequest: mocks.request, responseSchema: {} }));
+vi.mock('./adminApi', async importOriginal => ({ adminRequest: mocks.request, responseSchema: {}, newerImport: (await importOriginal<typeof import('./adminApi')>()).newerImport }));
 vi.mock('./adminTransport', () => ({ adminRequest: mocks.request, importPath: (value: string) => `/${value}` }));
 // Most tests only observe the single queue start; one delegates to the real queue to see the MP3 bytes leave.
 vi.mock('./importUploadQueue', () => ({ importUploadQueue: mocks.queue }));
