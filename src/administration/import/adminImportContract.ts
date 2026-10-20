@@ -38,17 +38,19 @@ export type ImportEmbeddedTagsV2 = ImportEmbeddedTags & { version: 2; albumArtis
 export type ImportTagsView = Omit<ImportEmbeddedTagsV2, 'version'> & { version: 1 | 2 };
 /**
  * One identity candidate. `match` says why it is listed: an exact case-insensitive name, verified identical bytes, the entry's or
- * label's MusicBrainz ID (`musicBrainzId`) or a name metadata lookup found for that ID (`alias`, with `aliasOf` the ID). An Artist
- * or Organization candidate names the MusicBrainz ID it holds (`musicBrainzId`) only when it holds a keepable one.
+ * label's MusicBrainz ID (`musicBrainzId`), a name metadata lookup found for that ID (`alias`, with `aliasOf` the ID) or an iTunes
+ * localized name lookup found for an Artist name (`localizedName`, with `localizedOf` that draft or proposed Artist name). An
+ * Artist or Organization candidate names the MusicBrainz ID it holds (`musicBrainzId`) only when it holds a keepable one.
  */
 export type ImportDuplicateCandidate = { kind: 'artist' | 'organization' | 'album' | 'track'; id: string; label: string; revision: string; albumId: string | null; visibility: 'public' | 'hidden';
-    match: 'name' | 'sha256' | 'musicBrainzId' | 'alias'; matchedSlotIds: string[]; automaticReuse: false; musicBrainzId?: string; aliasOf?: string };
+    match: 'name' | 'sha256' | 'musicBrainzId' | 'alias' | 'localizedName'; matchedSlotIds: string[]; automaticReuse: false; musicBrainzId?: string; aliasOf?: string; localizedOf?: string };
 /**
  * The duplicate candidates of one import: at most 920 name candidates (the saved draft's names and those pending Luna proposals
  * would write), one verified byte match per staged hash (at most 100), 300 Album-member matches, one exact MusicBrainz ID match per
- * entry and the label (21) and 20 alias matches each (420): at most 1761 items. `unavailable` names each Artist name, label or
- * Album title (at most 44) whose same-name, same-ID or alias record is malformed: it is no selectable candidate, yet it keeps that
- * row from being preselected.
+ * entry and the label (21), 20 alias matches each (420) and 20 localized-name matches for each of at most 40 Artist names (800): at
+ * most 2561 items. `unavailable` names each Artist name, label or Album title (at most 44) whose same-name, same-ID, alias or
+ * localized-name record is malformed, or whose localized-name record is listed (once) for another row: it is no selectable
+ * candidate of that row, yet it keeps that row from being preselected.
  */
 export type ImportCandidatesResponse = { items: ImportDuplicateCandidate[]; memberMatchesComplete: boolean; unavailable: { kind: 'artist' | 'organization' | 'album'; label: string }[] };
 export type ImportDuplicateDecision = { scope: 'artist' | 'album' | 'track'; slotId: string | null; action: 'reuse' | 'skip' | 'create-distinct'; candidateId: string | null; candidateRevision: string | null };
@@ -99,9 +101,12 @@ export const invalidImport = (): never => { throw new AdminImportError(400, 'ADM
 export const importEnabled = () => process.env.FINITUDE_ADMIN_IMPORTS_ENABLED === 'true';
 export const uuid = (value: unknown): value is string => typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 export const objectId = (value: unknown): value is string => typeof value === 'string' && /^[0-9a-f]{24}$/.test(value);
-/** The staged front artwork of one metadata lookup candidate (`lookup-musicbrainz:<release MBID>`, adminImportLookupCover.ts). */
+/**
+ * The staged front artwork of one metadata lookup candidate (`lookup-musicbrainz:<release MBID>`, or `lookup-itunes:<collection ID>`
+ * for an iTunes-only candidate; adminImportLookupCover.ts).
+ */
 export const isLookupCoverSlot = (slotId: unknown): slotId is string => typeof slotId === 'string'
-    && /^lookup-musicbrainz:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(slotId);
+    && /^lookup-(?:musicbrainz:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|itunes:[1-9]\d{0,11})$/.test(slotId);
 export const lookupCoverSlotId = (candidateKey: string) => `lookup-${candidateKey}`;
 export const record = (value: unknown): Record<string, unknown> => { if (!value || typeof value !== 'object' || Array.isArray(value)) return invalidImport(); return value as Record<string, unknown>; };
 export const exact = (value: Record<string, unknown>, keys: string[]) => { if (Object.keys(value).some(key => !keys.includes(key))) invalidImport(); };

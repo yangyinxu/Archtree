@@ -20,15 +20,17 @@ import { asyncHandler } from '../middleware/requestProtectionMiddleware';
 import { limitMediaConcurrencyFor, observeMediaDeliveryFor } from '../middleware/mediaDeliveryMiddleware';
 import { publishAdminImport, resumeAdminImportPublication, cancelAdminImportPublication } from '../administration/import/adminImportPublisher';
 import { chooseAdminImportLookup, getAdminImportLookup, resolveAdminImportLookup, retryAdminImportLookup, submitAdminImportLookup } from '../administration/lookup/metadataLookupRequests';
-import { defaultLookupArtworkClient, previewAdminImportLookupArtwork } from '../administration/import/adminImportLookupCover';
+import { defaultItunesArtworkClient, defaultLookupArtworkClient, previewAdminImportLookupArtwork } from '../administration/import/adminImportLookupCover';
 import type { CoverArtClient } from '../administration/lookup/coverArtClient';
+import type { ItunesArtworkClient } from '../administration/lookup/itunesArtworkClient';
 import { createMediaAbortContext } from '../services/media/mediaDeliveryService';
 
 /**
- * Mount behind app-level pre-body auth/origin/size guards; defense-in-depth guards remain here. `artwork` supplies the Cover Art
- * Archive client of lookup candidate previews (tests inject one).
+ * Mount behind app-level pre-body auth/origin/size guards; defense-in-depth guards remain here. `artwork` and `itunesArtwork` supply
+ * the Cover Art Archive and iTunes artwork clients of lookup candidate previews (tests inject them).
  */
-export function createAdminImportRouter(storage: ImportObjectStorage = defaultImportObjectStorage, artwork: () => CoverArtClient = defaultLookupArtworkClient) {
+export function createAdminImportRouter(storage: ImportObjectStorage = defaultImportObjectStorage, artwork: () => CoverArtClient = defaultLookupArtworkClient,
+    itunesArtwork: () => ItunesArtworkClient = defaultItunesArtworkClient) {
     const router = express.Router();
     router.use('/imports', (_req, res, next) => { res.setHeader('Cache-Control', 'no-store'); next(); });
     router.use('/imports', requireAuth, requireAdmin, (req, res, next) => {
@@ -92,15 +94,16 @@ export function createAdminImportRouter(storage: ImportObjectStorage = defaultIm
         catch (error) { const known = error instanceof AdminImportError; res.status(known ? error.status : 503).end(); }
     }));
     // A transient WebP preview of a lookup candidate's front artwork for the current administrator; no bytes are stored. It is
-    // observed but stays out of the per-IP media pool, which refuses at once instead of queueing: the Cover Art Archive gate
-    // (concurrency 2, waiting), the preview deadline and the shared cover scheduler already bound its work, and a chooser listing many
-    // releases must not starve the same administrator's staged-cover previews and listener artwork.
+    // observed but stays out of the per-IP media pool, which refuses at once instead of queueing: the source's gate (Cover Art
+    // Archive: concurrency 2; iTunes: one request at a time, 3 s apart; both waiting), the preview deadline and the shared cover
+    // scheduler already bound its work, and a chooser listing many releases must not starve the same administrator's staged-cover
+    // previews and listener artwork.
     router.get('/imports/:id/lookup/candidates/:key/artwork', observeMediaDeliveryFor('artwork'), asyncHandler(async (req, res) => {
         const context = createMediaAbortContext(req, res);
         res.setHeader('Cache-Control', 'private, no-store');
         try {
             const { userId, sessionId } = (req as AuthenticatedRequest).auth!;
-            const body = await runRequestWork(req, () => previewAdminImportLookupArtwork(userId, sessionId, req.params.id, req.params.key, context.signal, artwork()));
+            const body = await runRequestWork(req, () => previewAdminImportLookupArtwork(userId, sessionId, req.params.id, req.params.key, context.signal, artwork(), itunesArtwork()));
             if (res.destroyed) return;
             res.setHeader('X-Content-Type-Options', 'nosniff'); res.type('image/webp').send(body);
         } catch (error) {

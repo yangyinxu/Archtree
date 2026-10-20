@@ -10,6 +10,8 @@
  *   - a partial comparison is disclosed, and its single matching group is offered without a preselection but needs no answer
  *   - the view never carries what the strict Web schema refuses: an impossible calendar date shows as unknown and a repeated difference once
  *   - a candidate shows a front-artwork preview only when its fetched release reports one, and never an address
+ *   - an iTunes-only candidate shows as such with its collection ID, whether it was checked against MusicBrainz and an artwork flag, never its address, storefront or localized names
+ *   - the iTunes status: not queried without a stage or once a run ended before it answered, running or retrying while an iTunes request waits, else as the stage ended
  * @end-catalog */
 
 /**
@@ -29,6 +31,7 @@ import type { AdminImportDocument } from '../../src/administration/import/adminI
 import type { MusicBrainzRelease } from '../../src/administration/lookup/lookupContract';
 import { applyPreselectedLookup } from '../../src/administration/lookup/lookupValueApplication';
 import { importLookupView } from '../../src/administration/lookup/lookupView';
+import { itunesRelease } from '../../src/administration/lookup/lookupItunesStage';
 import { rankLookupWithinBudget, type MetadataLookupRecord, type StoredLookupCandidate } from '../../src/administration/lookup/metadataLookupRecord';
 
 const importId = '0000000000000000000000d2', actor = '0000000000000000000000e1';
@@ -73,22 +76,22 @@ test('the view allowlists evidence: no link, ISRC, recording ID, account, grant,
     const view = importLookupView(applied, doc)!, text = JSON.stringify(view);
     for (const secret of ['://', 'isrc', 'JPXX', 'recordingId', 'actorId', actor, 'grantExpiresAt', 'fence', 'leaseOwner', 'worker-secret', 'fileSetDigest', 'queries',
         'musicBrainzReleaseSearch', 'operationId', 'grantSource', 'automaticRuns', 'removed-slot', 'Url', 'secret']) assert.equal(text.includes(secret), false, secret);
-    assert.deepEqual(Object.keys(view).sort(), ['applied', 'blocking', 'candidates', 'disclosure', 'groups', 'input', 'issue', 'needsAnswer', 'outcome', 'preselection', 'run',
+    assert.deepEqual(Object.keys(view).sort(), ['applied', 'blocking', 'candidates', 'disclosure', 'groups', 'input', 'issue', 'itunes', 'needsAnswer', 'outcome', 'preselection', 'run',
         'staleFiles', 'state'].sort());
-    assert.deepEqual(view.candidates[0], { key: `musicbrainz:${mbid(1)}`, releaseId: mbid(1), status: 'matching', title: 'Synthetic Album', artist: 'Synthetic Lead & Synthetic Second',
+    assert.deepEqual(view.candidates[0], { key: `musicbrainz:${mbid(1)}`, releaseId: mbid(1), source: 'musicbrainz', notChecked: false, status: 'matching', title: 'Synthetic Album', artist: 'Synthetic Lead & Synthetic Second',
         label: 'Label 1', catalogNumber: 'SYN-001', barcode: '4006381333931', country: 'JP', date: { year: 2021, month: 5, day: 1 }, formats: ['CD'], trackCount: 2,
         comparison: { trackCount: { local: 2, candidate: 2 }, discCount: { local: null, candidate: 1 }, differences: [], unknownLocalDurations: 0, unknownCandidateDurations: 0 },
         groupKey: view.groups[0].groupKey, artistMismatch: false, artwork: true });
     assert.deepEqual([view.run, view.state, view.issue, view.outcome, view.input, view.preselection, view.disclosure, view.staleFiles],
         [2, 'complete', null, 'candidates', { trigger: 'submitted', submitted: { kind: 'album', text: 'Synthetic Album' } },
-            { candidateKey: `musicbrainz:${mbid(1)}`, basis: 'onlyMatchingGroup', artistMismatch: false }, { unknownLocalDurations: 0, unknownLocalDiscNumbers: 2, partialComparison: false }, [slot(1)]]);
+            { candidateKey: `musicbrainz:${mbid(1)}`, basis: 'onlyMatchingGroup', artistMismatch: false, notChecked: false }, { unknownLocalDurations: 0, unknownLocalDiscNumbers: 2, partialComparison: false }, [slot(1)]]);
     // A proposal names each credited MusicBrainz artist and the label's.
     assert.deepEqual(view.groups[0].proposal.artists, [{ name: 'Synthetic Lead', role: 'primary', joinPhrase: ' & ', musicBrainzId: mbid(1) },
         { name: 'Synthetic Second', role: 'primary', joinPhrase: null, musicBrainzId: mbid(2) }]);
     assert.equal(view.groups[0].proposal.labelMusicBrainzId, mbid(10));
-    assert.deepEqual([view.applied!.choice, view.applied!.basis, view.applied!.candidateKey, view.applied!.values.map(value => value.path).slice(0, 2), view.applied!.conflicts, view.applied!.flagged],
-        ['preselected', 'onlyMatchingGroup', `musicbrainz:${mbid(1)}`, ['album.title', 'album.artists'], [], []]);
-    assert.deepEqual([view.needsAnswer, view.blocking], [{ tie: false, conflicts: [] }, false]);
+    assert.deepEqual([view.applied!.choice, view.applied!.basis, view.applied!.candidateKey, view.applied!.values.map(value => value.path).slice(0, 2), view.applied!.conflicts, view.applied!.flagged,
+        view.applied!.source, view.applied!.notChecked], ['preselected', 'onlyMatchingGroup', `musicbrainz:${mbid(1)}`, ['album.title', 'album.artists'], [], [], 'musicbrainz', false]);
+    assert.deepEqual([view.needsAnswer, view.blocking, view.itunes], [{ tie: false, conflicts: [] }, false, 'notQueried']);
 });
 
 test('candidates follow the ranking when ranked and the stored order as incomplete otherwise; an unreadable record is no view', () => {
@@ -183,4 +186,47 @@ test('a candidate shows a front-artwork preview only when its fetched release re
         { [mbid(1)]: true, [mbid(2)]: false, [mbid(3)]: false, [mbid(4)]: false, [mbid(5)]: false });
     const text = JSON.stringify(view);
     for (const address of ['coverartarchive', 'archive.org', 'front-', '://']) assert.equal(text.includes(address), false, address);
+});
+
+test('an iTunes-only candidate shows as such with its collection ID, whether it was checked against MusicBrainz and an artwork flag, never its address, storefront or localized names', () => {
+    const doc = project();
+    const value = itunesRelease({ collectionId: '1613862586', collectionName: 'Synthetic Album', artistName: 'Synthetic Ensemble', trackCount: 2, releaseDate: { year: 2022, month: 3, day: 24 },
+        country: 'JPN', artworkUrl: 'https://is1-ssl.mzstatic.com/image/thumb/Music/v4/a/b/c/x.jpg/100x100bb.jpg' }, [1, 2].map(n => ({ trackId: `9${n}`, collectionId: '1613862586',
+        collectionName: null, trackName: n === 1 ? 'First Song' : 'Second Song', artistName: 'Synthetic Ensemble', discNumber: 1, discCount: 1, trackNumber: n, trackTimeMillis: 200_000 + n * 10_000 })), '4580760834214');
+    const itunes = (check: 'noRelease' | 'unavailable' | 'notRun'): StoredLookupCandidate => ({ key: 'itunes:1613862586', source: 'itunes', releaseId: '1613862586', basis: 'itunes', summary: null,
+        release: value, details: 'fetched', itunes: { storefront: 'jp', artworkUrl: 'https://is1-ssl.mzstatic.com/image/thumb/Music/v4/a/b/c/x.jpg/100x100bb.jpg', check } });
+    const stage = { reason: 'searchUnavailable' as const, text: null, requests: [], requestIndex: 0, bridge: [], bridgeIndex: 0, bridgeOutcomes: [], state: 'answered' as const, complete: true, finalized: true,
+        items: [{ key: 'collection:1613862586', kind: 'collection' as const, collectionId: '1613862586', names: [{ storefront: 'us' as const, title: 'A', artist: 'Romanized Secret' },
+            { storefront: 'jp' as const, title: 'B', artist: '日本語の秘密' }], barcode: null, bridge: 'unavailable' as const, collection: 'fetched' as const }] };
+    const run = applyPreselectedLookup(doc, record(doc, [itunes('unavailable')], { issue: 'sourceUnavailable', itunesStage: stage }), now).record;
+    const view = importLookupView(run, doc)!, text = JSON.stringify(view);
+    assert.deepEqual(view.candidates[0], { key: 'itunes:1613862586', releaseId: '1613862586', source: 'itunes', notChecked: true, status: 'matching', title: 'Synthetic Album',
+        artist: 'Synthetic Ensemble', label: null, catalogNumber: null, barcode: '4580760834214', country: null, date: { year: 2022, month: 3, day: 24 }, formats: [], trackCount: 2,
+        comparison: { trackCount: { local: 2, candidate: 2 }, discCount: { local: null, candidate: 1 }, differences: [], unknownLocalDurations: 0, unknownCandidateDurations: 0 },
+        groupKey: view.groups[0].groupKey, artistMismatch: false, artwork: true });
+    assert.deepEqual([view.preselection, view.applied!.source, view.applied!.notChecked, view.applied!.releaseId, view.itunes],
+        [{ candidateKey: 'itunes:1613862586', basis: 'onlyMatchingGroup', artistMismatch: false, notChecked: true }, 'itunes', true, '1613862586', 'answered']);
+    for (const secret of ['mzstatic', '://', 'storefront', '"jp"', 'Romanized Secret', '日本語の秘密', 'artworkUrl', 'JPN']) assert.equal(text.includes(secret), false, secret);
+    // A candidate MusicBrainz ruled out is not flagged; one whose bridge did not run is.
+    assert.deepEqual(['noRelease', 'notRun'].map(check => importLookupView(record(doc, [itunes(check as 'noRelease')]), doc)!.candidates[0].notChecked), [false, true]);
+    // A key and release ID that disagree, or a source that contradicts the key, is no candidate.
+    for (const broken of [{ releaseId: '1613862587' }, { releaseId: '01613862586', key: 'itunes:01613862586' }, { source: 'musicbrainz' }, { key: `musicbrainz:${mbid(1)}` }]) {
+        assert.deepEqual(importLookupView({ ...record(doc, []), ranking: null, candidates: [{ ...itunes('noRelease'), ...broken } as StoredLookupCandidate] }, doc)!.candidates, [], JSON.stringify(broken));
+    }
+});
+
+test('the iTunes status: not queried without a stage or once a run ended before it answered, running or retrying while an iTunes request waits, else as the stage ended', () => {
+    const doc = project(), base = record(doc, []);
+    const stage = (state: 'running' | 'answered' | 'unavailable') => ({ reason: 'noMatch' as const, text: null, requests: [], requestIndex: 0, items: [], bridge: null, bridgeIndex: 0,
+        bridgeOutcomes: [], state, complete: true, finalized: false });
+    const status = (extra: Partial<MetadataLookupRecord>) => importLookupView({ ...base, ...extra }, doc)!.itunes;
+    assert.deepEqual([status({}), status({ itunesStage: null }), status({ itunesStage: 'x' as never })], ['notQueried', 'notQueried', 'notQueried']);
+    assert.deepEqual([status({ state: 'running', phase: 'itunes', itunesStage: stage('running') }), status({ state: 'retrying', phase: 'itunes', itunesStage: stage('running') }),
+        status({ state: 'retrying', phase: 'bridge', itunesStage: stage('answered') }), status({ state: 'retrying', phase: 'itunes', itunesStage: stage('answered') }),
+        status({ state: 'running', phase: 'itunes', itunesStage: stage('answered') }), status({ state: 'stopped', phase: 'itunes', itunesStage: stage('running') }),
+        status({ state: 'complete', itunesStage: stage('answered') }), status({ state: 'complete', itunesStage: stage('unavailable') })],
+    ['running', 'retrying', 'answered', 'retrying', 'running', 'notQueried', 'answered', 'unavailable']);
+    // An applied candidate of an earlier release's record shows as MusicBrainz's, and a source without its key is ignored.
+    const applied = { run: 1, candidateKey: `musicbrainz:${mbid(1)}`, releaseId: mbid(1), choice: 'chosen', basis: 'chosen', values: [], conflicts: [], flagged: [], source: 'itunes', notChecked: true };
+    assert.deepEqual(((view) => [view.source, view.notChecked])(importLookupView({ ...base, applied: applied as never }, doc)!.applied!), ['musicbrainz', false]);
 });

@@ -44,6 +44,7 @@
  *   - a ticked label named like an existing record needs a decision, and only then the confirmation offers to apply the ticked suggestions first
  *   - a ticked Artist-entries value keeps the decision of an entry under its exact name and preselects its new entry
  *   - the confirmation lists each MusicBrainz ID the publication records or replaces, and sends exactly those
+ *   - an iTunes-only result's staged artwork is named by its source and collection ID in the files, the cover choice and the checklist, and its automatic choice says it comes from iTunes
  * @end-catalog */
 
 import type { ComponentProps } from 'react';
@@ -781,4 +782,21 @@ test('the confirmation lists each MusicBrainz ID the publication records or repl
   expect(value('Label')).toHaveTextContent(`Sit Records · Reuses Sit Records · replaces MusicBrainz ID ${id(5)} with ${id(9)}`);
   expect(run).toHaveBeenCalledWith(`/${item.id}/publish`, 'POST', expect.objectContaining({ musicBrainzIds: [{ scope: 'artist', entryKey: entryKey(1), musicBrainzId: id(1), replaces: null },
     { scope: 'artist', entryKey: entryKey(2), musicBrainzId: id(2), replaces: null }, { scope: 'label', entryKey: null, musicBrainzId: id(9), replaces: id(5) }] }));
+});
+
+test('an iTunes-only result\'s staged artwork is named by its source and collection ID in the files, the cover choice and the checklist, and its automatic choice says it comes from iTunes', async () => {
+  const lookupSlot = 'lookup-itunes:1689358563', asset = { slotId: lookupSlot, state: 'ready' as const, byteLength: 100, sha256: 'a'.repeat(64), contentType: 'image/jpeg', tags: null, recovery: null };
+  const item = detail();
+  item.publication = 'notStarted'; item.coverChoice = 'automatic'; item.selectedCoverSlotId = lookupSlot; item.assets = [asset];
+  mount(item, new AdminMutation());
+  expect(screen.getByText('iTunes artwork · 16893585', { selector: 'strong' })).toBeVisible();
+  expect(screen.getByRole('radio', { name: /iTunes artwork · 16893585$/ })).toBeChecked();
+  expect(screen.getByText('Chosen automatically: the applied iTunes-only result’s artwork from iTunes. Choosing an option here replaces the automatic choice.')).toBeVisible();
+  expect(screen.queryByText(/Cover Art Archive/)).toBeNull();
+  cleanup();
+  const { item: approved, ipsum } = reviewed(); stubFetch(candidatesEndpoint([ipsum]));
+  mount({ ...approved, coverChoice: 'automatic', selectedCoverSlotId: lookupSlot, assets: [asset] }, new AdminMutation(), 'publication');
+  fireEvent.click(screen.getByRole('button', { name: 'Publish Album' })); await approve();
+  const value = within(screen.getByRole('region', { name: 'What becomes catalog content' })).getByText('Album cover', { selector: 'dt' }).nextElementSibling!;
+  expect(value).toHaveTextContent(/^iTunes artwork · 16893585 · Chosen automatically$/);
 });

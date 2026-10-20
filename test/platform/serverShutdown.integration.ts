@@ -21,7 +21,7 @@ import { MetadataLookupSourceError } from '../../src/administration/lookup/looku
 import type { MetadataLookupRecord } from '../../src/administration/lookup/metadataLookupRecord';
 import { adminImportLookupCollection, requestAutomaticMetadataLookup, startMetadataLookupWorker } from '../../src/administration/lookup/metadataLookupService';
 import { createMusicBrainzClient, type MusicBrainzClient } from '../../src/administration/lookup/musicBrainzClient';
-import { fixtureTransport, immediateGate } from '../support/metadataLookupFixtures';
+import { emptyItunesClient, fixtureTransport, immediateGate } from '../support/metadataLookupFixtures';
 import { startMongoReplicaSet, type MongoReplicaSetHarness } from '../support/mongoReplicaSet';
 
 let harness: MongoReplicaSetHarness;
@@ -108,7 +108,7 @@ test('draining waits for a tracked metadata lookup pass, which aborts its reques
       return new Promise((_resolve, reject) => options.signal.addEventListener('abort', () => { aborted = true; reject(new MetadataLookupSourceError('musicbrainz', 'cancelled')); }, { once: true }));
     } };
     const lifecycle = new ServerLifecycle();
-    const stopWorker = startMetadataLookupWorker({ musicBrainz: holding }, 10, operation => lifecycle.track(operation));
+    const stopWorker = startMetadataLookupWorker({ musicBrainz: holding, itunes: emptyItunesClient() }, 10, operation => lifecycle.track(operation));
     lifecycle.onDrain(() => { void stopWorker(); });
     server.listen(0, '127.0.0.1');
     await new Promise<void>(resolve => server.once('listening', resolve));

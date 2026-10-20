@@ -3,8 +3,9 @@
  *   Classes: Storage
  *   Functions: code, projects, stored, lookupRecord, later, sha, mbid, keyOf, slotOf, lookupAsset, v2, seeded,
  *              json, searchAnswer, releaseAnswer, looked, item, choose, chosen, complete, approve, front,
- *              chain, artwork, pass, lookupCoverRecord, taggedWav, fresh, coverChoice
- *   Constants: guard, actor, other, by, byOther, PRIVATE, lengths, shared
+ *              chain, artwork, pass, lookupCoverRecord, taggedWav, fresh, coverChoice, itunesArtwork,
+ *              withItunesCandidate
+ *   Constants: guard, actor, other, by, byOther, PRIVATE, lengths, shared, mzstatic, itunesSlot
  *   Variables: harness, jpeg, sample
  * Tests
  *   - choosing a release with front artwork queues its staging under the chooser's grant in that transaction, and Publish waits for it
@@ -28,6 +29,8 @@
  *   - a cleanup whose applying administrator lost the role needs attention, and another current administrator completes it with the original intent
  *   - applying the same release again queues a staging that failed or whose grant expired, under the new grant, and stages it with one fetch
  *   - a confirmed failure in the applied release's slot is replaced by its next application's staging, which is staged and selected
+ *   - an applied iTunes-only candidate stages its iTunes artwork at 1200 px as lookup-itunes:<collection ID>; replacing it with a MusicBrainz release cleans it, and that release's cover never comes from iTunes
+ *   - an iTunes artwork fetch that fails keeps the current cover choice and never holds Publish; an iTunes-only candidate without an artwork address queues nothing
  * @end-catalog */
 
 /**
@@ -59,11 +62,13 @@ import { automaticCoverCleanupOperationId, automaticEmbeddedStagings } from '../
 import type { ImportAsset } from '../../src/administration/import/adminImportMediaTypes';
 import type { ImportDraftV2 } from '../../src/administration/import/adminImportDraft';
 import { createCoverArtClient, type CoverArtClient } from '../../src/administration/lookup/coverArtClient';
+import { createItunesArtworkClient } from '../../src/administration/lookup/itunesArtworkClient';
+import { itunesRelease } from '../../src/administration/lookup/lookupItunesStage';
 import { createMusicBrainzClient, musicBrainzUrls, type MusicBrainzReleaseQuery } from '../../src/administration/lookup/musicBrainzClient';
 import { chooseAdminImportLookup, getAdminImportLookup } from '../../src/administration/lookup/metadataLookupRequests';
 import { adminImportLookupCollection, requestAutomaticMetadataLookup, runMetadataLookupOnce } from '../../src/administration/lookup/metadataLookupService';
 import { approvalBody } from '../support/adminImportApproval';
-import { fixtureTransport, immediateGate, type LookupExchange } from '../support/metadataLookupFixtures';
+import { emptyItunesClient, fixtureTransport, immediateGate, type LookupExchange } from '../support/metadataLookupFixtures';
 import { installNetworkGuard } from '../support/networkGuard';
 
 const guard = installNetworkGuard();
@@ -143,7 +148,7 @@ async function looked(id: string) {
     const exchanges = [searchAnswer({ release: 'Synthetic Album', artist: 'Synthetic Ensemble' }, [mbid(1), mbid(2), mbid(3)]), searchAnswer({ release: 'Synthetic Album' }, []),
         releaseAnswer(1, true), releaseAnswer(2, true), releaseAnswer(3, false)];
     const musicBrainz = createMusicBrainzClient({ gate: immediateGate(), transport: fixtureTransport(exchanges).transport, sleep: async () => undefined });
-    for (let tick = 0; tick < 10 && await runMetadataLookupOnce({ musicBrainz }); tick++);
+    for (let tick = 0; tick < 10 && await runMetadataLookupOnce({ musicBrainz, itunes: emptyItunesClient() }); tick++);
     const record = await lookupRecord(id);
     assert.deepEqual([record.state, record.ranking?.groups.length, record.applied], ['complete', 3, null]);
 }
@@ -690,4 +695,61 @@ test('a confirmed failure in the applied release\'s slot is replaced by its next
     // The confirmed failure keeps its record in the history.
     assert.deepEqual((doc.media!.assetHistory ?? []).filter(asset => asset.slotId === slotOf(1)).map(asset => [asset.operationId, asset.state]), [[lost.operationId, 'failed']]);
     assert.equal((await item(id)).selectedCoverSlotId, slotOf(1));
+});
+
+const mzstatic = 'https://is1-ssl.mzstatic.com/image/thumb/Music126/v4/aa/bb/cc/synthetic/cover.jpg/100x100bb.jpg';
+const itunesSlot = 'lookup-itunes:9001';
+/** An iTunes artwork client over a fake transport; every URL it asks for is recorded with its headers. */
+const itunesArtwork = (exchanges: LookupExchange[]) => {
+    const fixture = fixtureTransport(exchanges);
+    return { client: createItunesArtworkClient({ gate: immediateGate(), transport: fixture.transport, sleep: async () => undefined, schedule: (_key, _signal, work) => work() }), requests: fixture.requests };
+};
+/** Adds an iTunes-only candidate (collection 9001, matching the files, with an artwork address) to a seeded import's completed run. */
+async function withItunesCandidate(id: string, artworkUrl: string | null = mzstatic) {
+    const release = itunesRelease({ collectionId: '9001', collectionName: 'Synthetic Album', artistName: 'Synthetic Lead', trackCount: 2, releaseDate: { year: 2022, month: 1, day: 2 }, country: 'JPN', artworkUrl },
+        lengths.map((length, index) => ({ trackId: `9001${index}`, collectionId: '9001', collectionName: null, trackName: `Synthetic Track ${index + 1}`, artistName: 'Synthetic Lead', discNumber: 1,
+            discCount: 1, trackNumber: index + 1, trackTimeMillis: length })), null);
+    await adminImportLookupCollection().updateOne({ _id: new ObjectId(id) }, { $push: { candidates: { key: 'itunes:9001', source: 'itunes', releaseId: '9001', basis: 'itunes', summary: null,
+        release, details: 'fetched', itunes: { storefront: 'us', artworkUrl, check: 'noRelease' } } } } as never);
+}
+
+test('an applied iTunes-only candidate stages its iTunes artwork at 1200 px as lookup-itunes:<collection ID>; replacing it with a MusicBrainz release cleans it, and that release\'s cover never comes from iTunes', async () => {
+    const id = await seeded(); await looked(id); await withItunesCandidate(id);
+    await choose(id, 'itunes:9001');
+    assert.deepEqual([(await stored(id)).media!.lookupCover!.candidateKey, (await stored(id)).media!.lookupCover!.artworkUrl, (await getAdminImportLookup(by, id)).summary.waiting.cover],
+        ['itunes:9001', mzstatic, true]);
+    const storage = new Storage(), rewritten = mzstatic.replace('100x100bb.jpg', '1200x1200bb.jpg');
+    const itunes = itunesArtwork([{ url: rewritten, status: 200, headers: { 'content-type': 'image/jpeg' }, bodyBase64: jpeg.toString('base64') }]), coverArt = artwork([]);
+    assert.equal(await runLookupCoverPassOnce(storage, id, undefined, { artwork: coverArt.client, itunesArtwork: itunes.client }), true);
+    let doc = await stored(id);
+    const cover = doc.media!.assets.find(asset => asset.slotId === itunesSlot && asset.state !== 'deleted')!, job = doc.media!.lookupCover!;
+    assert.deepEqual([cover.state, cover.filename, cover.sha256, cover.actorId, job.state, storage.puts], ['ready', 'itunes-front.jpg', sha(jpeg), byOther, 'staged', 1]);
+    assert.deepEqual((doc.automaticReceipts ?? []).map(receipt => [receipt.kind, receipt.operationId]), [['upload', job.operationId]]);
+    assert.deepEqual([itunes.requests.map(request => [request.url, request.headers['User-Agent']]), coverArt.requests], [[[rewritten, 'Finitude/1.0']], []]);
+    assert.equal((await item(id)).selectedCoverSlotId, itunesSlot);
+    // A MusicBrainz release with Cover Art Archive artwork replaces it: the iTunes cover is cleaned, and iTunes is never asked again.
+    await choose(id, keyOf(1));
+    const replacing = itunesArtwork([]);
+    await runLookupCoverPassOnce(storage, id, undefined, { artwork: artwork(chain(1)).client, itunesArtwork: replacing.client });
+    doc = await stored(id);
+    const removed = [...doc.media!.assets, ...(doc.media!.assetHistory ?? [])].find(asset => asset.slotId === itunesSlot)!;
+    assert.deepEqual([removed.state, removed.recovery.kind, storage.has(removed), lookupAsset(doc, 1)?.state, (await item(id)).selectedCoverSlotId, replacing.requests],
+        ['deleted', 'cleanup', false, 'ready', slotOf(1), []]);
+});
+
+test('an iTunes artwork fetch that fails keeps the current cover choice and never holds Publish; an iTunes-only candidate without an artwork address queues nothing', async () => {
+    for (const [exchanges, issue] of [[[{ url: mzstatic.replace('100x100bb.jpg', '1200x1200bb.jpg'), status: 404, headers: { 'content-type': 'text/html' } }], 'noArtwork'],
+        [Array.from({ length: 3 }, () => ({ url: mzstatic.replace('100x100bb.jpg', '1200x1200bb.jpg'), status: 503, headers: { 'content-type': 'text/html' } })), 'unavailable']] as [LookupExchange[], string][]) {
+        const id = await seeded(); await looked(id); await withItunesCandidate(id);
+        await choose(id, 'itunes:9001');
+        const storage = new Storage();
+        await runLookupCoverPassOnce(storage, id, undefined, { artwork: artwork([]).client, itunesArtwork: itunesArtwork(exchanges).client });
+        const doc = await stored(id);
+        assert.deepEqual([doc.media!.lookupCover!.state, doc.media!.lookupCover!.issue, storage.puts, (await item(id)).selectedCoverSlotId], ['failed', issue, 0, `embedded-${doc.manifest.files[0].slotId}`], issue);
+        assert.equal((await getAdminImportLookup(by, id)).summary.waiting.cover, false);
+        assert.equal((await approve(id)).item.publication, 'preparing', issue);
+    }
+    const bare = await seeded(); await looked(bare); await withItunesCandidate(bare, null);
+    await choose(bare, 'itunes:9001');
+    assert.deepEqual([(await stored(bare)).media!.lookupCover, (await getAdminImportLookup(by, bare)).summary.waiting.cover], [undefined, false]);
 });

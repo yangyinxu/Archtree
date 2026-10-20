@@ -264,9 +264,12 @@ test('assets outside the v1 slots, states, lifecycles or identities are hidden f
     const lookup = { ...audio, slotId: 'lookup-musicbrainz:0000000b-0000-4000-8000-000000000001', contentType: 'image/jpeg' };
     for (const state of ['pending', 'ready', 'failed', 'unknown', 'deleting', 'cleanupFailed'] as const) assert.equal(legacyAssetVisible({ ...lookup, state }, slots), true, state);
     assert.equal(legacyAssetVisible({ ...lookup, state: 'deleted' }, slots), false);
-    for (const slotId of ['lookup-musicbrainz:0000000B-0000-4000-8000-000000000001', 'lookup-musicbrainz:x', 'lookup-itunes:1', 'lookup-', `lookup-musicbrainz:0000000b-0000-4000-8000-000000000001/x`]) {
+    for (const slotId of ['lookup-musicbrainz:0000000B-0000-4000-8000-000000000001', 'lookup-musicbrainz:x', 'lookup-itunes:0', 'lookup-itunes:01', 'lookup-itunes:1234567890123', 'lookup-',
+        `lookup-musicbrainz:0000000b-0000-4000-8000-000000000001/x`, 'lookup-itunes:1/x']) {
         assert.equal(legacyAssetVisible({ ...lookup, slotId }, slots), false, slotId);
     }
+    // An iTunes-only candidate's cover is a lookup cover too.
+    assert.equal(legacyAssetVisible({ ...lookup, slotId: 'lookup-itunes:1', state: 'ready' }, slots), true);
     // In the projections, a ready lookup cover can be the selected cover; its removed record never shows.
     const projected = { ...doc, media: { ...doc.media!, assets: [...doc.media!.assets, { ...lookup, state: 'ready' as const }, { ...lookup, slotId: 'lookup-musicbrainz:0000000b-0000-4000-8000-000000000002', state: 'deleted' as const }],
         selectedCoverSlotId: lookup.slotId } } as AdminImportDocument;

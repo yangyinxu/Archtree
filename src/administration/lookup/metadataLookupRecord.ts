@@ -5,13 +5,15 @@
  *          LookupValueFlag, LookupAppliedValue, LookupConflict, LookupApplication, MetadataLookupRecord,
  *          ImportLookupGate
  *   Functions: isBlockingLookupState, importLookupFileSet, lookupStaleSlots, planImportLookup,
- *              lookupFileEvidence, lookupReportedTrackCount, mergeLookupCandidates, lookupHitsAdmitted,
- *              recordLookupDetails, rankLookupRecord, rankLookupWithinBudget, lookupRetryAt, lookupGateFor,
- *              automaticLookupOperationId, startLookupRun, lookupFetchedAliases, refreshLookupGrant
+ *              lookupFileEvidence, withCandidateRelease, admitItunesCandidate, lookupReportedTrackCount,
+ *              mergeLookupCandidates, lookupHitsAdmitted, recordLookupDetails, rankLookupRecord,
+ *              rankLookupWithinBudget, lookupRetryAt, lookupGateFor, automaticLookupOperationId,
+ *              startLookupRun, lookupFetchedAliases, refreshLookupGrant
  * Internal
  *   Types: LookupSource, FoundLookupRelease
  *   Functions: sha256, manifestFiles, readyAsset, evidence, shared, names, tagEvidence, compactRelease,
- *              candidateBytes, withRelease, reportedCount
+ *              candidateBytes, reportedCount
+ *   Constants: withRelease
  * @end-catalog */
 
 /**
@@ -27,8 +29,9 @@ import type { ImportAsset } from '../import/adminImportMediaTypes';
 import type { AdminImportDocument } from '../import/adminImportService';
 import { importAssetDurationEvidence, importTagsV2View } from '../import/adminImportTags';
 import type { ImportDraftPath } from '../import/adminImportValueState';
-import { METADATA_LOOKUP_JOB_LIMITS, type LookupEntityAliases, type MusicBrainzRelease, type MusicBrainzReleaseSummary } from './lookupContract';
+import { METADATA_LOOKUP_JOB_LIMITS, type ItunesStorefront, type LookupEntityAliases, type MusicBrainzRelease, type MusicBrainzReleaseSummary } from './lookupContract';
 import { normalizeMusicBrainzId } from './lookupIdentifiers';
+import type { LookupItunesStage } from './lookupItunesStage';
 import { planMetadataLookup, type LookupPlan, type LookupPlanInput, type PlannedLookupQuery } from './lookupQueryPlanner';
 import { lookupTrackCountPlausible, rankLookupCandidates, type LocalFileEvidence, type LookupPreselection, type RankedLookup } from './lookupRanking';
 
@@ -41,13 +44,18 @@ export type MetadataLookupInput = { trigger: 'tags' | 'folder' | 'submitted'; su
 /** One manifest slot as a run saw it: the ready upload's intent and bytes, or nulls while the slot has no confirmed file. */
 export type LookupFileIdentity = { slotId: string; operationId: string | null; sha256: string | null };
 export type StoredLookupCandidate = {
-    /** `musicbrainz:<releaseId>`. */
-    key: string; source: 'musicbrainz'; releaseId: string;
-    basis: PlannedLookupQuery['basis']; summary: MusicBrainzReleaseSummary | null; release: MusicBrainzRelease | null;
+    /** `musicbrainz:<releaseId>`, or `itunes:<collection ID>` for an iTunes-only candidate, whose `releaseId` is the collection ID. */
+    key: string; source: 'musicbrainz' | 'itunes'; releaseId: string;
+    basis: PlannedLookupQuery['basis'] | 'itunes'; summary: MusicBrainzReleaseSummary | null; release: MusicBrainzRelease | null;
     /** Only `fetched` candidates carry a release; every other one is incomplete and unranked. */
     details: 'pending' | 'fetched' | 'missing' | 'failed' | 'omitted';
     /** The release total a recording hit reported for a release without a summary; absent when unknown or stored by an earlier release. */
     reportedTrackCount?: number;
+    /**
+     * An iTunes-only candidate's storefront, its validated 100-pixel artwork address and why it was not checked against MusicBrainz
+     * (lookupItunesStage.ts). Internal: never projected.
+     */
+    itunes?: { storefront: ItunesStorefront; artworkUrl: string | null; check: 'noRelease' | 'unavailable' | 'notRun' };
 };
 export type StoredLookupRanking = RankedLookup & { rankedAt: Date; files: LocalFileEvidence[] };
 /** A candidate value left out: control or invisible characters, over a length bound, a failed format, the draft cap, or only placeholder credits. */
@@ -63,7 +71,9 @@ export type LookupConflict = { path: ImportDraftPath; lookup: unknown; slotId: s
  * The candidate (or none) applied to the import's draft and its evidence: who applied it and how (a preselection, an explicit choice
  * or none), the paths this application wrote, the values that rest on it, its unanswered or answered conflicts and the flagged values.
  * `musicBrainzIds` are the IDs this application supplied that the draft carries after it (an entry by key, the label with entryKey
- * null), which choosing another candidate or none removes again; absent on an application stored before MusicBrainz IDs.
+ * null), which choosing another candidate or none removes again; absent on an application stored before MusicBrainz IDs. For an
+ * iTunes-only candidate `source` is `itunes`, `releaseId` holds its iTunes collection ID (the source evidence) and `notChecked` marks
+ * one that was not checked against MusicBrainz; both are absent for a MusicBrainz candidate.
  */
 export type LookupApplication = {
     run: number; candidateKey: string | null; releaseId: string | null;
@@ -71,15 +81,30 @@ export type LookupApplication = {
     actorId: string; operationId: string | null; at: Date;
     paths: ImportDraftPath[]; values: LookupAppliedValue[]; conflicts: LookupConflict[]; flagged: LookupValueFlag[];
     musicBrainzIds?: { entryKey: string | null; musicBrainzId: string }[];
+    source?: 'itunes'; notChecked?: true;
 };
 export type MetadataLookupRecord = {
     _id: ObjectId; run: number; state: MetadataLookupState; issue: MetadataLookupIssue | null;
     outcome: 'candidates' | 'noRelease' | 'noQuery' | null;
     operationId: string; actorId: string; grantSource: MetadataLookupGrantSource; grantExpiresAt: Date;
-    automatic: boolean; input: MetadataLookupInput; queries: PlannedLookupQuery[]; queryIndex: number; phase: 'search' | 'details' | 'aliases' | 'done';
+    automatic: boolean; input: MetadataLookupInput; queries: PlannedLookupQuery[]; queryIndex: number;
+    phase: 'search' | 'details' | 'itunes' | 'bridge' | 'aliases' | 'done';
     fileSetDigest: string; files: LookupFileIdentity[];
-    /** Failed MusicBrainz attempts of this run; each one schedules an automatic retry until METADATA_LOOKUP_JOB_LIMITS.retryDelaysMs runs out. */
-    attempts: { musicbrainz: number }; retryAt: Date | null;
+    /**
+     * Failed attempts of this run per source; each one schedules an automatic retry until METADATA_LOOKUP_JOB_LIMITS.retryDelaysMs
+     * runs out. `itunes` is absent on a record from an earlier release.
+     */
+    attempts: { musicbrainz: number; itunes?: number }; retryAt: Date | null;
+    /**
+     * The iTunes fallback stage (lookupItunesStage.ts): null until MusicBrainz answered without a matching candidate, or stayed
+     * unavailable during its searches; absent on a record from an earlier release.
+     */
+    itunesStage?: LookupItunesStage | null;
+    /**
+     * Sources whose automatic retries ran out during this run, with the issue they ended with: nothing more is sent to them, and the
+     * run completes with what it has (a MusicBrainz issue is the completed run's issue). Absent on a record from an earlier release.
+     */
+    exhausted?: { musicbrainz?: 'sourceBusy' | 'sourceUnavailable'; itunes?: 'sourceBusy' | 'sourceUnavailable' };
     candidates: StoredLookupCandidate[]; ranking: StoredLookupRanking | null;
     /**
      * The credited artists and labels whose aliases this run looks up after its details (at most 16, lookupRunStep.ts); absent on a
@@ -210,12 +235,24 @@ const compactRelease = (release: MusicBrainzRelease): MusicBrainzRelease => ({
 });
 const candidateBytes = (candidates: readonly StoredLookupCandidate[]) => Buffer.byteLength(JSON.stringify(candidates));
 /** A fetched release is stored while every candidate together fits the byte budget; otherwise it is omitted and incomplete. */
-function withRelease(candidates: StoredLookupCandidate[], index: number, release: MusicBrainzRelease): StoredLookupCandidate[] {
+export function withCandidateRelease(candidates: readonly StoredLookupCandidate[], index: number, release: MusicBrainzRelease): StoredLookupCandidate[] {
     const next = [...candidates];
     next[index] = { ...candidates[index], release: compactRelease(release), details: 'fetched' };
     if (candidateBytes(next) <= METADATA_LOOKUP_JOB_LIMITS.candidateBytes) return next;
     next[index] = { ...candidates[index], release: null, details: 'omitted' };
     return next;
+}
+const withRelease = withCandidateRelease;
+/**
+ * Admits an iTunes-only candidate with its release (within the byte budget, else omitted), or one whose collection lookup gave no
+ * complete release as omitted: null when the candidate bound is reached, unchanged when a candidate with its key is already stored
+ * (another result of the same collection).
+ */
+export function admitItunesCandidate(candidates: readonly StoredLookupCandidate[], candidate: StoredLookupCandidate): StoredLookupCandidate[] | null {
+    if (candidates.some(existing => existing.key === candidate.key)) return [...candidates];
+    if (candidates.length >= METADATA_LOOKUP_JOB_LIMITS.candidates) return null;
+    if (!candidate.release) return [...candidates, { ...candidate, release: null, details: 'omitted' }];
+    return withCandidateRelease([...candidates, { ...candidate, release: null, details: 'pending' }], candidates.length, candidate.release);
 }
 
 type FoundLookupRelease = { releaseId: string; summary?: MusicBrainzReleaseSummary | null; release?: MusicBrainzRelease | null; trackCount?: number | null };
@@ -275,15 +312,17 @@ export function recordLookupDetails(candidates: readonly StoredLookupCandidate[]
 /**
  * Ranks the stored candidates against the import's current files; an incomplete candidate is never ranked or preselected, and
  * a comparison whose searches were not complete, or with an incomplete candidate that could match, never preselects its only
- * matching group (a release that no longer exists cannot match). `aliases` (fetched artist aliases by ID) let a credited artist
- * agree with an artist tag through an alias.
+ * matching group (a release that no longer exists cannot match). `aliases` (fetched artist aliases by ID) and `localized` (the
+ * iTunes localized name groups) let a credited artist agree with an artist tag through an alias or a localized name. An iTunes-only
+ * candidate ranks with the reason it was not checked against MusicBrainz, which decides whether it may be preselected.
  */
 export function rankLookupRecord(candidates: readonly StoredLookupCandidate[], doc: Pick<AdminImportDocument, '_id' | 'manifest' | 'media' | 'draft'>, now: Date,
-    options: { searchComplete: boolean; aliases?: ReadonlyMap<string, readonly string[]> }): StoredLookupRanking {
+    options: { searchComplete: boolean; aliases?: ReadonlyMap<string, readonly string[]>; localized?: readonly (readonly string[])[] }): StoredLookupRanking {
     const files = lookupFileEvidence(doc);
-    const ranked = rankLookupCandidates(candidates.map(candidate => ({ key: candidate.key, source: candidate.source, releaseId: candidate.releaseId,
-        summary: candidate.summary, release: candidate.release, reportedTrackCount: reportedCount(candidate.reportedTrackCount), missing: candidate.details === 'missing' })), files,
-        { searchComplete: options.searchComplete, aliases: options.aliases });
+    const ranked = rankLookupCandidates(candidates.map(candidate => ({ key: candidate.key, source: candidate.source === 'itunes' ? 'itunes' as const : 'musicbrainz' as const,
+        releaseId: candidate.releaseId, summary: candidate.summary, release: candidate.release, reportedTrackCount: reportedCount(candidate.reportedTrackCount),
+        missing: candidate.details === 'missing', ...(candidate.source === 'itunes' ? { itunesCheck: candidate.itunes?.check } : {}) })), files,
+        { searchComplete: options.searchComplete, aliases: options.aliases, localized: options.localized });
     return { ...ranked, rankedAt: now, files };
 }
 
@@ -294,15 +333,16 @@ export function rankLookupRecord(candidates: readonly StoredLookupCandidate[], d
  * Every ranking gets the run's `searchComplete`; an omitted release makes the comparison partial too.
  */
 export function rankLookupWithinBudget(candidates: readonly StoredLookupCandidate[], doc: Pick<AdminImportDocument, '_id' | 'manifest' | 'media' | 'draft'>, now: Date,
-    options: { searchComplete: boolean; budget?: number; aliases?: ReadonlyMap<string, readonly string[]> }): { candidates: StoredLookupCandidate[]; ranking: StoredLookupRanking } {
-    const budget = options.budget ?? METADATA_LOOKUP_JOB_LIMITS.recordBytes, searchComplete = options.searchComplete, aliases = options.aliases;
-    let kept = [...candidates], ranking = rankLookupRecord(kept, doc, now, { searchComplete, aliases });
+    options: { searchComplete: boolean; budget?: number; aliases?: ReadonlyMap<string, readonly string[]>; localized?: readonly (readonly string[])[] }):
+    { candidates: StoredLookupCandidate[]; ranking: StoredLookupRanking } {
+    const budget = options.budget ?? METADATA_LOOKUP_JOB_LIMITS.recordBytes, { searchComplete, aliases, localized } = options;
+    let kept = [...candidates], ranking = rankLookupRecord(kept, doc, now, { searchComplete, aliases, localized });
     const largest = kept.map((candidate, index) => ({ index, bytes: candidate.release ? candidateBytes([candidate]) : 0 }))
         .filter(entry => entry.bytes > 0).sort((left, right) => right.bytes - left.bytes || left.index - right.index);
     for (const { index } of largest) {
         if (Buffer.byteLength(JSON.stringify({ candidates: kept, ranking })) <= budget) break;
         kept = kept.map((candidate, at): StoredLookupCandidate => at === index ? { ...candidate, release: null, details: 'omitted' } : candidate);
-        ranking = rankLookupRecord(kept, doc, now, { searchComplete, aliases });
+        ranking = rankLookupRecord(kept, doc, now, { searchComplete, aliases, localized });
     }
     return { candidates: kept, ranking };
 }
@@ -341,9 +381,9 @@ export function automaticLookupOperationId(importId: string, run: number, digest
 }
 
 /**
- * The next run of an import, replacing the previous run's results. Only the automatic-run count, whether a folder-name query
- * was handed to the worker and the applied values carry over; its searches start complete. A run with no query is complete at
- * once (`noQuery`) and sends nothing.
+ * The next run of an import, replacing the previous run's results (its iTunes stage, retry counts and exhausted sources included).
+ * Only the automatic-run count, whether a folder-name query was handed to the worker and the applied values carry over; its
+ * searches start complete. A run with no query is complete at once (`noQuery`) and sends nothing.
  */
 export function startLookupRun(previous: MetadataLookupRecord | null, init: {
     importId: ObjectId; actorId: string; grantSource: MetadataLookupGrantSource; operationId: string; automatic: boolean;
@@ -357,7 +397,8 @@ export function startLookupRun(previous: MetadataLookupRecord | null, init: {
         operationId: init.operationId, actorId: init.actorId, grantSource: init.grantSource, grantExpiresAt: new Date(now.getTime() + METADATA_LOOKUP_JOB_LIMITS.grantMs),
         automatic: init.automatic, input: { trigger: init.input.trigger, submitted: init.input.submitted ? { ...init.input.submitted } : null },
         queries: init.queries.map(query => structuredClone(query)), queryIndex: 0, phase: searching ? 'search' : 'done',
-        fileSetDigest: init.fileSet.digest, files: init.fileSet.files.map(file => ({ ...file })), attempts: { musicbrainz: 0 }, retryAt: null,
+        fileSetDigest: init.fileSet.digest, files: init.fileSet.files.map(file => ({ ...file })), attempts: { musicbrainz: 0, itunes: 0 }, retryAt: null,
+        itunesStage: null, exhausted: {},
         candidates: [], ranking: null, aliases: [], searchComplete: true, applied: previous?.applied ?? null, staleSlotIds: [],
         automaticRuns: (Number.isSafeInteger(previous?.automaticRuns) ? previous!.automaticRuns : 0) + (init.automatic ? 1 : 0),
         folderUsed: previous?.folderUsed === true,

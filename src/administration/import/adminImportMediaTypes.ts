@@ -14,6 +14,7 @@
 import type { MediaRepresentation } from '../../models/mediaRepresentation';
 import { ADMIN_IMPORT_LIMITS, type ImportDraft, type ImportDuplicateDecision, type ImportEmbeddedTags, type ImportEmbeddedTagsV2 } from './adminImportContract';
 import type { ImportDecisionV2, ImportDraftV2 } from './adminImportDraft';
+import type { ImportLocalizedNames } from './adminImportLocalizedNames';
 import type { ImportMusicBrainzNames } from './adminImportMusicBrainzIds';
 
 /** Stage objects are never AudioTrack rows, so ordinary publication recovery cannot expose a draft. */
@@ -62,6 +63,8 @@ export interface ImportPublication {
     artists?: ImportPublicationArtist[]; label?: ImportPublicationLabel | null;
     /** Format 3, optional: the names lookup found for each MusicBrainz ID the snapshot carries, which the alias recheck reads. */
     musicBrainzNames?: ImportMusicBrainzNames;
+    /** Format 3, optional (only when there are some): the iTunes localized name groups of the snapshot's entries, which the recheck reads. */
+    localizedNames?: ImportLocalizedNames;
     tracks: { slotId: string; id: string; key: string; reused: boolean; candidateRevision: string | null; state: 'pending' | 'ready' | 'unknown'; versionId: string | null; etag: string | null; cleanupComplete?: boolean }[];
     cover: { slotId: string; key: string; state: 'pending' | 'ready' | 'unknown'; versionId: string | null; etag: string | null; cleanupComplete?: boolean } | null;
     bucket: string; leaseOwner: string | null; leaseUntil: Date | null;
@@ -71,8 +74,12 @@ export interface ImportPublication {
  * `lookup-<candidateKey>`, under the grant of the application that applied it. Never projected, never bumps `revision`.
  */
 export interface ImportLookupCover {
-    /** The applied candidate whose fetched release reports front artwork; null when none is applied or it reports none. */
-    candidateKey: string | null; releaseId: string | null;
+    /**
+     * The applied candidate whose fetched release reports front artwork; null when none is applied or it reports none. For an
+     * iTunes-only candidate `releaseId` is its collection ID and `artworkUrl` its validated artwork address (null or absent for a
+     * Cover Art Archive release).
+     */
+    candidateKey: string | null; releaseId: string | null; artworkUrl?: string | null;
     /** The staging intent: its asset admission and its automatic `upload` receipt. */
     operationId: string | null;
     /** `queued` and `running` hold Publish (within the grant); every other state is settled. */

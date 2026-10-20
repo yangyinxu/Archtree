@@ -1528,38 +1528,39 @@ The wire protocol and operational bounds are documented in
 - Name matches, identical bytes, external identifiers and matching durations are
   candidates, not proof of Artist or Organization identity, Album edition, or
   recording identity. Candidates load automatically, matching names
-  case-insensitively and through MusicBrainz aliases that metadata lookup found.
-  Unless the import appends to an existing Album, each draft Artist entry and
-  any label need their own decision, and two entries cannot reuse one Artist. A
-  decision binds its entry and that entry's name and MusicBrainz ID: reordering
-  the entry or changing its role or join phrase keeps it, while renaming or
-  removing the entry or the label, or changing its ID, clears it, except as
-  described in Administrator Metadata Lookup. Applying a replacement Artist list
-  keeps decisions only for unchanged entries. A decision that this section
-  preselects needs no explicit answer, even when other candidates are shown;
-  otherwise administrators explicitly choose reuse, skip, append missing
-  members, or create a distinct entry. Luna never chooses or preselects an
-  identity. No automatic merge, deletion of catalog content, catalog media or
-  uploaded source audio, media replacement, or reassignment of a Track to a
-  different Album is permitted. Unhashed historical assets remain unverified.
+  case-insensitively and through MusicBrainz aliases and iTunes localized names
+  that metadata lookup found. Unless the import appends to an existing Album,
+  each draft Artist entry and any label need their own decision, and two entries
+  cannot reuse one Artist. A decision binds its entry and that entry's name and
+  MusicBrainz ID: reordering the entry or changing its role or join phrase keeps
+  it, while renaming or removing the entry or the label, or changing its ID,
+  clears it, except as described in Administrator Metadata Lookup. Applying a
+  replacement Artist list keeps decisions only for unchanged entries. A decision
+  that this section preselects needs no explicit answer, even when other
+  candidates are shown; otherwise administrators explicitly choose reuse, skip,
+  append missing members, or create a distinct entry. Luna never chooses or
+  preselects an identity. No automatic merge, deletion of catalog content,
+  catalog media or uploaded source audio, media replacement, or reassignment of
+  a Track to a different Album is permitted. Unhashed historical assets remain
+  unverified.
 - For each Artist entry and the label, an existing record with the same
   MusicBrainz ID is preselected as reuse, and create is preselected when no
   candidate exists. An entry carries a MusicBrainz ID only from a MusicBrainz
-  response, never from file tags, and applying a candidate that credits one
-  MusicBrainz artist, or one name compared case-insensitively, twice keeps only
-  its first entry. A new Artist or label Organization keeps the ID its entry
-  carries, and reusing a record without an ID records it while the record still
-  has none and is unchanged since review. A record that holds a different ID is
-  never changed automatically: the administrator reuses it and keeps its ID,
-  reuses it and explicitly replaces the ID, or creates a distinct record.
-  Creating a distinct record, or reusing a different record, despite an exact-ID
-  match records no ID, and an ID is replaced only when no other record of that
-  kind holds the new one. Other name candidates for an entry with an exact-ID
-  match are shown but need no answer. Each preselected create is rechecked when
-  approved and when published. At approval, a new exact-ID or name candidate
-  requires a fresh review. A publication that finds such a candidate, or that
-  would give two records one ID, becomes needs attention without minting
-  identities, and cancelling it permits a fresh review.
+  response, never from file tags or iTunes, and applying a candidate that
+  credits one MusicBrainz artist, or one name compared case-insensitively, twice
+  keeps only its first entry. A new Artist or label Organization keeps the ID
+  its entry carries, and reusing a record without an ID records it while the
+  record still has none and is unchanged since review. A record that holds a
+  different ID is never changed automatically: the administrator reuses it and
+  keeps its ID, reuses it and explicitly replaces the ID, or creates a distinct
+  record. Creating a distinct record, or reusing a different record, despite an
+  exact-ID match records no ID, and an ID is replaced only when no other record
+  of that kind holds the new one. Other name candidates for an entry with an
+  exact-ID match are shown but need no answer. Each preselected create is
+  rechecked when approved and when published. At approval, a new exact-ID or
+  name candidate requires a fresh review. A publication that finds such a
+  candidate, or that would give two records one ID, becomes needs attention
+  without minting identities, and cancelling it permits a fresh review.
 - The Album is preselected as create when no Album name candidate exists, and
   that create is rechecked like a preselected Artist create. An Album name
   candidate is shown as a possible duplicate Album that needs an explicit
@@ -1612,15 +1613,15 @@ The wire protocol and operational bounds are documented in
   join phrases, the label, the disc and track order, identity decisions, the
   cover, upload progress and visibility, which defaults to public and can be
   changed in place. Rows that need no answer are collapsed; values resting on
-  file tags or Luna are flagged and never collapsed. Only a choice among tied
-  matching groups, a conflict with the administrator's own value, a MusicBrainz
-  ID conflict or an identity candidate that is not preselected needs an answer.
-  Publish stays unavailable until each is answered and while any upload, lookup,
-  value application, cover staging or analysis is queued or running. When the
-  files or the applied release credit only a placeholder such as Various Artists
-  and a new Album has no primary Artist entry, the summary says at once that the
-  import cannot be published yet. The Draft, Review, Files and Publish sections
-  remain available for manual work.
+  file tags, an iTunes-only candidate or Luna are flagged and never collapsed.
+  Only a choice among tied matching groups, a conflict with the administrator's
+  own value, a MusicBrainz ID conflict or an identity candidate that is not
+  preselected needs an answer. Publish stays unavailable until each is answered
+  and while any upload, lookup, value application, cover staging or analysis is
+  queued or running. When the files or the applied release credit only a
+  placeholder such as Various Artists and a new Album has no primary Artist
+  entry, the summary says at once that the import cannot be published yet. The
+  Draft, Review, Files and Publish sections remain available for manual work.
 - The publication confirmation lists everything that becomes catalog content:
   the title, the ordered Artist entries with their roles and join phrases, the
   label, the date, the full disc and track list with titles, the cover, the
@@ -1705,6 +1706,14 @@ The wire protocol and operational bounds are documented in
   administration layout.
 - Metadata lookup uses these sources in order:
   - MusicBrainz is the primary source, with Cover Art Archive for artwork.
+  - Unless MusicBrainz returns a matching candidate, the Apple iTunes Search API
+    is queried in several fixed storefronts. Titles and names found there, such
+    as the Japanese title for a romanized query or the romanized title for a
+    Japanese one, are looked up again in MusicBrainz, and an embedded barcode
+    may be looked up in iTunes to find them. An iTunes result becomes a
+    candidate itself only when that second lookup finds no MusicBrainz release
+    or cannot run; in the latter case it is marked as not checked against
+    MusicBrainz.
   - Deezer, Spotify and other services are not used.
 - Metadata lookup responses are untrusted data. Each source is bounded in time
   and size, and its request-rate and concurrency bounds apply across the whole
@@ -1735,15 +1744,18 @@ The wire protocol and operational bounds are documented in
   the others stay in evidence. Metadata lookup preselects the matching candidate
   that an embedded identifier shared by every file matches alone, and otherwise
   the only matching group. A preselection whose credited artist agrees with no
-  non-empty artist tag of the files, directly or through a MusicBrainz alias
-  that the lookup found, is flagged and never collapsed. A preselection is a
-  proposal that the publication approval confirms. An incomplete or unranked
-  candidate is never preselected. When several matching groups remain, the
-  administrator chooses one from a view of the values that differ and each
-  candidate's barcode, catalogue number, country and medium. Without a matching
-  candidate nothing is preselected and no choice is needed. Every candidate
-  stays selectable, one that does not match shows its differences, and the
-  administrator may choose none.
+  non-empty artist tag of the files, directly or through a MusicBrainz alias or
+  iTunes localized name that the lookup found, is flagged and never collapsed. A
+  preselection is a proposal that the publication approval confirms. An
+  incomplete or unranked candidate is never preselected. An iTunes-only
+  candidate is preselected only after MusicBrainz answered without a release or
+  stayed unavailable through its automatic retries; in the latter case it is
+  flagged as not checked against MusicBrainz. When several matching groups
+  remain, the administrator chooses one from a view of the values that differ
+  and each candidate's barcode, catalogue number, country and medium. Without a
+  matching candidate nothing is preselected and no choice is needed. Every
+  candidate stays selectable, one that does not match shows its differences, and
+  the administrator may choose none.
 - Applying a candidate, automatically when it is preselected or when the
   administrator chooses it, writes all its supported values in one step: the
   Album title, Artist entries, label and date, and each matched file's track
@@ -1757,14 +1769,14 @@ The wire protocol and operational bounds are documented in
   other explicit decision on that entry is cleared and shown again. Where the
   administrator's own value differs, the summary shows both with nothing
   preselected, and publication waits until the administrator keeps one. Each
-  applied value keeps its source evidence, such as the MusicBrainz release ID
-  and the match basis, and each track value names its local file. Applying
-  another candidate replaces the values the earlier one wrote that are still
-  automatic, and choosing none returns them to their values from file tags or
-  leaves them empty. Either action first removes each MusicBrainz ID the earlier
-  candidate supplied that an entry or the label still carries, unless an
-  explicit identity decision has bound it since. Applying stores its complete
-  set of values or nothing, and retrying the same intent is idempotent.
+  applied value keeps its source evidence, such as the MusicBrainz release ID or
+  iTunes collection ID and the match basis, and each track value names its local
+  file. Applying another candidate replaces the values the earlier one wrote
+  that are still automatic, and choosing none returns them to their values from
+  file tags or leaves them empty. Either action first removes each MusicBrainz
+  ID the earlier candidate supplied that an entry or the label still carries,
+  unless an explicit identity decision has bound it since. Applying stores its
+  complete set of values or nothing, and retrying the same intent is idempotent.
   Placeholder credits such as Various Artists or [unknown], and a [no label]
   label, are never written.
 - Metadata lookup runs on the server and finishes after the browser closes or
@@ -1786,11 +1798,13 @@ The wire protocol and operational bounds are documented in
   entry, is featured and the others are primary; the summary and the publication
   confirmation show each role, and the administrator can still change it. Only
   this proposal reads a featuring phrase; a stored or edited join phrase never
-  sets a role. The label is the release's first listed label, and any others
+  sets a role. A single iTunes artist name is one entry and is never split
+  automatically. The label is the release's first listed label, and any others
   stay evidence. The Album date is the release group's first-release date at its
   known precision; the release's own date stays evidence and is used only when
-  the group has none. Romanized or alternate titles enter the catalog only as
-  draft values and never become Search aliases. Release and recording
+  the group has none, and an iTunes date is used only for an iTunes-only
+  candidate. Romanized or alternate titles enter the catalog only as draft
+  values and never become Search aliases. Release, recording and iTunes
   identifiers remain private import evidence; only Artists and Organizations
   keep a MusicBrainz ID, as described in Administrator Album Imports.
 - When metadata lookup finds no release or no matching release, or cannot run
@@ -1814,18 +1828,18 @@ The wire protocol and operational bounds are documented in
   it. Other candidates and all iTunes evidence and identifiers are never sent to
   Luna. Luna never chooses an identity, supplies a MusicBrainz ID, selects a
   release or presents its values as lookup evidence.
-- Metadata lookup artwork is Cover Art Archive artwork from a fixed allowlist of
-  artwork hosts. The server fetches artwork only from those hosts, including
-  after every redirect, and within size and pixel bounds. Candidate previews are
-  transient: the server shows them through protected administrator image
-  delivery that stores no bytes and sends no credentials to the artwork host,
-  and the browser never loads a lookup address directly. To use an applied
-  release's front artwork as a new Album's cover, the server validates and
-  completely decodes it, then stages it as a cover candidate under the existing
-  staged-upload lifecycle and selects it as described in Administrator Album
-  Imports; a failed fetch or staging, or one whose outcome is unknown, keeps the
-  current cover choice. Metadata lookup never creates an external artwork
-  reference.
+- Metadata lookup artwork is Cover Art Archive artwork, or iTunes artwork for an
+  iTunes-only candidate, from a fixed allowlist of artwork hosts. The server
+  fetches artwork only from those hosts, including after every redirect, and
+  within size and pixel bounds. Candidate previews are transient: the server
+  shows them through protected administrator image delivery that stores no bytes
+  and sends no credentials to the artwork host, and the browser never loads a
+  lookup address directly. To use an applied release's front artwork as a new
+  Album's cover, the server validates and completely decodes it, then stages it
+  as a cover candidate under the existing staged-upload lifecycle and selects it
+  as described in Administrator Album Imports; a failed fetch or staging, or one
+  whose outcome is unknown, keeps the current cover choice. Metadata lookup
+  never creates an external artwork reference.
 - Metadata lookup results and evidence are bounded private project data that
   only current administrators can read.
 

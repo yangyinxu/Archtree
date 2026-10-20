@@ -28,6 +28,7 @@ import { hasOwn } from './adminImportDraft';
 import { legacyManifestView } from './adminImportDraftCompat';
 import { importUploadSettled, type ImportAsset, type ImportMedia } from './adminImportMediaTypes';
 import type { AdminImportDocument } from './adminImportService';
+import { itunesArtworkUrl } from '../lookup/itunesArtworkClient';
 import type { StoredLookupCandidate } from '../lookup/metadataLookupRecord';
 
 /** An explicit choice is an administrator's (a slot or No cover); an automatic one is the lookup cover, the shared embedded image or null. */
@@ -173,18 +174,23 @@ export const lookupCoverOperationId = (importId: string, candidateKey: string, a
  * Records, in memory, which candidate's front artwork the lookup cover pass stages, as part of the application that applies
  * `candidate` (or none): a fetched release reporting front artwork queues a staging under `grant` (the grant of the run or choice
  * applying it), and any other change of the applied candidate leaves the job idle while the pass cleans the covers no longer
- * applied. Applying the same candidate again writes nothing while its staging is staged, or queued or running within its grant;
- * one that failed, was skipped or ran past its grant is queued again under this application's grant with its own intent. None
- * without an earlier artwork candidate writes nothing. It never bumps `lookupGate`: the application writes the import document in
- * its own transaction, which already fences Publish. Returns whether the job changed.
+ * applied. An iTunes-only candidate offers its artwork only with a valid stored artwork address, which the job records (a Cover Art
+ * Archive release's job has none; a MusicBrainz candidate found through the iTunes bridge never offers iTunes artwork). Applying the
+ * same candidate again writes nothing while its staging is staged, or queued or running within its grant; one that failed, was
+ * skipped or ran past its grant is queued again under this application's grant with its own intent. None without an earlier
+ * artwork candidate writes nothing. It never bumps `lookupGate`: the application writes the import document in its own
+ * transaction, which already fences Publish. Returns whether the job changed.
  */
-export function noteLookupCoverApplication(doc: Pick<AdminImportDocument, '_id' | 'media'>, candidate: Pick<StoredLookupCandidate, 'key' | 'releaseId' | 'release'> | null,
+export function noteLookupCoverApplication(doc: Pick<AdminImportDocument, '_id' | 'media'>,
+    candidate: Pick<StoredLookupCandidate, 'key' | 'releaseId' | 'release'> & Partial<Pick<StoredLookupCandidate, 'source' | 'itunes'>> | null,
     grant: { actorId: string; grantExpiresAt: Date }, now: Date): boolean {
-    const offered = candidate?.release?.frontArtwork === true && typeof candidate.key === 'string' && isLookupCoverSlot(lookupCoverSlotId(candidate.key)) ? candidate.key : null;
+    const itunes = candidate?.source === 'itunes', artworkUrl = itunes ? candidate!.itunes?.artworkUrl ?? null : null;
+    const offered = candidate?.release?.frontArtwork === true && typeof candidate.key === 'string' && isLookupCoverSlot(lookupCoverSlotId(candidate.key))
+        && (itunes ? candidate.key.startsWith('itunes:') && itunesArtworkUrl(artworkUrl, 1200) !== null : candidate.key.startsWith('musicbrainz:')) ? candidate.key : null;
     const current = lookupJob(doc.media);
     if (current ? current.candidateKey === offered && (offered === null || current.state === 'staged' || lookupCoverStagingActive(current, now)) : offered === null) return false;
     doc.media ??= { assets: [] };
-    doc.media.lookupCover = { candidateKey: offered, releaseId: offered ? candidate!.releaseId : null,
+    doc.media.lookupCover = { candidateKey: offered, releaseId: offered ? candidate!.releaseId : null, ...(offered && itunes ? { artworkUrl } : {}),
         operationId: offered ? lookupCoverOperationId(doc._id.toHexString(), offered, now) : null, state: offered ? 'queued' : 'idle', issue: null,
         actorId: grant.actorId, grantExpiresAt: grant.grantExpiresAt, due: true, leaseOwner: null, leaseUntil: null, updatedAt: now };
     return true;

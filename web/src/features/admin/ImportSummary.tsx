@@ -48,7 +48,8 @@ const idText = (value: unknown) => (Array.isArray(value) ? value : value ? [valu
  * notice, a primary Artist entry the unsaved changes add, since Publish includes them. It shows the metadata lookup status with
  * its next step (a free retry or Luna, per the owner's next-step rules; no lookup step where this server cannot run lookup), the
  * name box, a tie or conflict that needs an answer, the lone matching release of a partial comparison as an optional choice, the
- * values flagged as resting on file tags, an artist mismatch and the Luna suggestions with their ticks (the administrator's toggles
+ * values flagged as resting on file tags or an iTunes-only candidate (and as not checked against MusicBrainz), an artist mismatch
+ * and the Luna suggestions with their ticks (the administrator's toggles
  * are kept in the workspace for the confirmation; an append marks its Album ones as not applied), and folds every row that needs
  * no answer. Its Publish opens the media panel's one-step confirmation. Owner rules: docs/business-rules.md (Administrator Album
  * Imports, Review and publish summary; Administrator Metadata Lookup).
@@ -77,16 +78,24 @@ export function ImportSummary({ item, operation, uploads, disabled, publishDisab
   // The status, the next step and the step beside it (owner rules: Administrator Metadata Lookup, next-step bullet). Without a
   // run, lookup is not configured here, waits for uploads, or did not start (its trigger failed); a retry or a name needs it configured.
   const applied = lookup?.applied, tie = Boolean(lookup?.needsAnswer.tie), available = summary?.lookupAvailable !== false;
+  // Nothing the run found matched or was applied; a completed run keeps MusicBrainz's issue when its retries ran out.
+  const unmatched = !lookup?.groups.length && (applied?.run !== lookup?.run || applied?.choice === 'none');
+  const musicBrainzDown = lookup?.issue === 'sourceUnavailable' || lookup?.issue === 'sourceBusy';
   const [status, next, beside]: [string, Step | null, Step | null] = !lookup ? [!available ? 'lookup.not_configured' : summary?.waiting.uploads ? 'lookup.not_run' : 'lookup.not_started', summary?.waiting.uploads && available ? null : 'luna', null]
-    : lookup.state === 'queued' || lookup.state === 'running' ? ['lookup.active', null, null]
-    : lookup.state === 'retrying' ? ['lookup.retrying', 'retry', 'luna']
+    : lookup.state === 'queued' || lookup.state === 'running' ? [lookup.itunes === 'running' ? 'lookup.active_itunes' : 'lookup.active', null, null]
+    : lookup.state === 'retrying' ? [lookup.itunes === 'retrying' ? 'lookup.retrying_itunes' : 'lookup.retrying', 'retry', 'luna']
     : lookup.state === 'unavailable' ? [lookup.issue === 'notConfigured' ? 'lookup.not_configured' : 'lookup.unavailable', 'luna', 'retry']
     : lookup.state !== 'complete' ? [`lookup.${lookup.state}`, 'retry', 'luna']
+    // MusicBrainz answered without a match and iTunes stayed unavailable: a free retry may still find it.
+    : unmatched && lookup.itunes === 'unavailable' && !musicBrainzDown ? ['lookup.itunes_unavailable', 'luna', 'retry']
+    // MusicBrainz stayed unavailable, so nothing is "no match": details it could not fetch are incomplete, anything else unavailable.
+    : unmatched && musicBrainzDown ? (lookup.candidates.some(candidate => candidate.status === 'incomplete') ? ['lookup.incomplete', 'retry', 'luna'] : ['lookup.unavailable', 'luna', 'retry'])
     : lookup.outcome === 'noRelease' || lookup.outcome === 'noQuery' ? [lookup.outcome === 'noQuery' ? 'lookup.no_query' : 'lookup.no_release', 'luna', null]
     : tie ? ['lookup.tie', null, null]
     // The only matching release of a partial comparison is offered, never applied unasked; it needs no answer.
     : lookup.groups.length === 1 && !lookup.preselection && lookup.disclosure?.partialComparison && applied?.run !== lookup.run ? ['lookup.single_choice', null, null]
-    : applied?.run === lookup.run && applied.choice !== 'none' ? ['lookup.applied', null, null]
+    : applied?.run === lookup.run && applied.choice !== 'none' ? (applied.source !== 'itunes' ? ['lookup.applied', null, null]
+      : applied.notChecked ? ['lookup.applied_itunes_unchecked', 'luna', 'retry'] : ['lookup.applied_itunes', null, null])
     : lookup.groups.length ? ['lookup.applied_none', null, null]
     // Candidates whose details could not be fetched are no proof that nothing matches.
     : lookup.candidates.some(candidate => candidate.status === 'incomplete') ? ['lookup.incomplete', 'retry', 'luna']
@@ -98,8 +107,11 @@ export function ImportSummary({ item, operation, uploads, disabled, publishDisab
     onClick={() => kind === 'retry' ? run('lookup/retry') : setAnalyzing(true)}>{t(kind === 'retry' ? 'lookup.retry' : 'lookup.luna')}</button>;
   const needed = new Set(lookup?.needsAnswer.conflicts ?? []), conflicts = applied?.conflicts ?? [], open = conflicts.filter(conflict => needed.has(conflict.path));
   const resolve = (target: string, answer: 'mine' | 'lookup') => run('lookup/resolve', { run: applied!.run, candidateKey: applied!.candidateKey, answers: [{ path: target, answer, base: valueAt(item.draft, target) }] });
-  // Values resting only on file tags (not on the applied candidate, not changed here) are flagged and never folded.
-  const fromTags = item.automaticPaths.filter(target => !item.lookupPaths.includes(target) && !changed.has(target) && !(append && target.startsWith('album.')));
+  // Values resting only on file tags (not on the applied candidate, not changed here), or on an iTunes-only candidate, are flagged and never folded.
+  const shown = (target: string) => !changed.has(target) && !(append && target.startsWith('album.'));
+  const fromTags = item.automaticPaths.filter(target => !item.lookupPaths.includes(target) && shown(target));
+  const fromItunes = applied?.source === 'itunes' && applied.choice !== 'none' ? item.lookupPaths.filter(shown) : [];
+  const itunesMark = [t('lookup.itunes_only'), applied?.notChecked && t('lookup.not_checked')].filter(Boolean).join(' · '), flaggedPaths = [...fromTags, ...fromItunes];
   const ticks = new Map(summary?.luna.map(entry => [entry.id, entry.tick]));
   const suggestions = item.suggestions.filter(suggestion => suggestion.decision === 'pending' && ticks.has(suggestion.id) && ticks.get(suggestion.id) !== 'resolved');
   const on = suggestions.filter(suggestion => ticked(suggestion, ticks.get(suggestion.id), toggles, changed)).map(suggestion => suggestion.id);
@@ -127,9 +139,9 @@ export function ImportSummary({ item, operation, uploads, disabled, publishDisab
           <dl className={styles.diff}><div><dt>{t('summary.yours')}</dt><dd>{(conflict.musicBrainzId ? idText : valueText)(valueAt(item.draft, conflict.path))}</dd></div><div><dt>{t('summary.lookup_value')}</dt><dd>{(conflict.musicBrainzId ? idText : valueText)(conflict.lookup)}</dd></div></dl>
           <div className={styles.actions}>{(['mine', 'lookup'] as const).map(answer => <button key={answer} type="button" className={styles.button} disabled={disabled} aria-describedby={`${id}-${conflict.path}`}
             onClick={() => resolve(conflict.path, answer)}>{t(answer === 'mine' ? 'summary.keep_mine' : 'summary.use_lookup')}</button>)}</div></li>)}</ul></section>}
-      {(fromTags.length > 0 || (lookup?.preselection?.artistMismatch && applied?.choice === 'preselected' && applied.run === lookup.run)) && <ul aria-label={t('summary.flagged')}>
+      {(flaggedPaths.length > 0 || (lookup?.preselection?.artistMismatch && applied?.choice === 'preselected' && applied.run === lookup.run)) && <ul aria-label={t('summary.flagged')}>
         {lookup?.preselection?.artistMismatch && applied?.choice === 'preselected' && applied.run === lookup.run && <li>{t('summary.artist_mismatch')}</li>}
-        {fromTags.map(target => <li key={target}>{`${label(target)}: ${valueText(valueAt(draft, target))} · ${t('publication.tags_only')}`}</li>)}</ul>}
+        {flaggedPaths.map(target => <li key={target}>{`${label(target)}: ${valueText(valueAt(draft, target))} · ${fromTags.includes(target) ? t('publication.tags_only') : itunesMark}`}</li>)}</ul>}
       {suggestions.length > 0 && <fieldset className={styles.editor}><legend>{t('summary.luna')}</legend><p className={styles.muted}>{t('summary.luna_help')}</p>
         {suggestions.map(suggestion => {
           const target = suggestionPath(suggestion), blocked = ticks.get(suggestion.id) === 'conflict' || changed.has(target);
@@ -140,15 +152,15 @@ export function ImportSummary({ item, operation, uploads, disabled, publishDisab
         <div className={styles.actions}><button type="button" className={styles.button} disabled={disabled} onClick={() => run('adopt', { generation: item.analysis.generation, selectedIds: on, rejectIds: suggestions.map(suggestion => suggestion.id).filter(value => !on.includes(value)) })}>{t('summary.luna_apply')}</button></div>
       </fieldset>}
       <details className={styles.details}><summary>{t('summary.values')}</summary><dl>
-        {!fromTags.includes('album.title') && row('album.title', notApplied(draft.album.title || t('common.untitled')))}
-        {!fromTags.includes('album.artists') && <div><dt>{t('field.artists')}</dt><dd>{notApplied(entriesByline(draft.album.artists) || '—')}<ol>{draft.album.artists.map(entry => <li key={entry.key}>{[entry.name, role(entry.role),
+        {!flaggedPaths.includes('album.title') && row('album.title', notApplied(draft.album.title || t('common.untitled')))}
+        {!flaggedPaths.includes('album.artists') && <div><dt>{t('field.artists')}</dt><dd>{notApplied(entriesByline(draft.album.artists) || '—')}<ol>{draft.album.artists.map(entry => <li key={entry.key}>{[entry.name, role(entry.role),
           entry.joinPhrase && t('publication.join_phrase', { phrase: entry.joinPhrase })].filter(Boolean).join(' · ')}</li>)}</ol></dd></div>}
-        {!fromTags.includes('album.label') && row('album.label', notApplied(draft.album.label?.name ?? t('publication.no_label')))}
-        {!fromTags.includes('album.releaseDate') && row('album.releaseDate', notApplied(reviewValueText(draft.album.releaseDate)))}
+        {!flaggedPaths.includes('album.label') && row('album.label', notApplied(draft.album.label?.name ?? t('publication.no_label')))}
+        {!flaggedPaths.includes('album.releaseDate') && row('album.releaseDate', notApplied(reviewValueText(draft.album.releaseDate)))}
         <div><dt><label htmlFor={`${id}-visibility`}>{t('field.visibility')}</label></dt><dd><select id={`${id}-visibility`} value={draft.album.visibility} disabled={disabled || append || locked}
           onChange={event => operation.run(path, 'PATCH', { expectedRevision: item.revision, changes: [{ path: 'album.visibility', base: item.draft.album.visibility, value: event.target.value }] })}>
           {(['public', 'hidden'] as const).map(value => <option key={value} value={value}>{t(`field.${value}`)}</option>)}</select>{append && ` · ${t('publication.not_applied')}`}</dd></div>
-        <div><dt>{t('layout.selected_cover')}</dt><dd>{notApplied([cover === null ? t('media.no_cover') : cover === 'cover' ? t('media.manual_cover') : cover.startsWith('lookup-') ? lookupCoverName(t('media.lookup_cover'), cover) : t('media.cover_candidate'),
+        <div><dt>{t('layout.selected_cover')}</dt><dd>{notApplied([cover === null ? t('media.no_cover') : cover === 'cover' ? t('media.manual_cover') : cover.startsWith('lookup-') ? lookupCoverName(t, cover) : t('media.cover_candidate'),
           item.coverChoice === 'automatic' && cover !== null && t('summary.cover_automatic')].filter(Boolean).join(' · '))}</dd></div>
         <div><dt>{t('summary.tracks')}</dt><dd><ol>{approvalTrackOrder(draft.tracks).map(track => <li key={track.slotId}>{[t('publication.track_position', { disc: String(track.discNumber ?? 1), track: track.trackNumber === null ? '—' : String(track.trackNumber) }), track.title || t('common.untitled')].join(' · ')}</li>)}</ol></dd></div>
         <div><dt>{t('summary.identities')}</dt><dd>{t('summary.identities_saved', { count: item.decisions.length })}</dd></div>

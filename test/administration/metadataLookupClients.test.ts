@@ -21,6 +21,7 @@
  *   - identifier formats are checked before use
  *   - iTunes accepts text/javascript, drops preview and store links, keeps allowlisted artwork and sends no contact
  *   - iTunes storefronts are fixed and ordered by script
+ *   - UPC lookups choose storefronts by the GS1 prefix of a valid barcode, and the artwork address survives only on the fixed artwork hosts
  *   - iTunes 403 and 429 are rateLimited, and an empty lookup is null
  *   - the Cover Art Archive listing follows its three allowlisted hops and returns no URL
  *   - each Cover Art Archive hop is bound to its host and to the requested MBID
@@ -45,7 +46,7 @@ import type { LookupGateLease, MetadataLookupRateGate } from '../../src/administ
 import { createLookupResponseCache, type LookupResponseCache } from '../../src/administration/lookup/lookupResponseCache';
 import { parseRetryAfter, type LookupClientDependencies } from '../../src/administration/lookup/lookupSourceRequest';
 import { createMusicBrainzClient, escapeLucene, musicBrainzLuceneQuery, musicBrainzUrls, parseMusicBrainzEntityAliases, parseMusicBrainzReleaseSearch } from '../../src/administration/lookup/musicBrainzClient';
-import { createItunesSearchClient, itunesStorefrontsForText, itunesUrls } from '../../src/administration/lookup/iTunesSearchClient';
+import { createItunesSearchClient, itunesArtworkAddress, itunesStorefrontsForBarcode, itunesStorefrontsForText, itunesUrls } from '../../src/administration/lookup/iTunesSearchClient';
 import { coverArtDestination, createCoverArtClient } from '../../src/administration/lookup/coverArtClient';
 import {
     allLookupFixtureFiles, availableLookupConfiguration, fixtureRoot, fixtureTransport, immediateGate, loadLookupFixture, loadLookupFixtures, type LookupExchange
@@ -410,6 +411,16 @@ test('iTunes storefronts are fixed and ordered by script', () => {
     assert.deepEqual(itunesStorefrontsForText('Hotel California'), ['us', 'jp']);
     assert.throws(() => itunesUrls.search('Hotel California', 'gb', 'album'), inputFailure('identifier'));
     assert.throws(() => itunesUrls.lookupId('1689358563', 'JP'), inputFailure('identifier'));
+});
+
+test('UPC lookups choose storefronts by the GS1 prefix of a valid barcode, and the artwork address survives only on the fixed artwork hosts', () => {
+    const order = (barcode: string) => itunesStorefrontsForBarcode(normalizeGtin(barcode)!);
+    // Japanese JAN prefixes (450–459, 490–499), Korea (880), Taiwan (471), anything else in the us storefront first.
+    assert.deepEqual([order('4582579942951'), order('4902102072915'), order('4500000000001'), order('4999999999999')], [['jp', 'us'], ['jp', 'us'], ['jp', 'us'], ['jp', 'us']]);
+    assert.deepEqual([order('8801234567893'), order('4710000000004'), order('075596050920'), order('4006381333931'), order('4600000000008')],
+        [['kr', 'us'], ['tw', 'us'], ['us', 'jp'], ['us', 'jp'], ['us', 'jp']]);
+    assert.deepEqual([itunesArtworkAddress('https://is5-ssl.mzstatic.com/image/thumb/x/100x100bb.jpg'), itunesArtworkAddress('https://is6-ssl.mzstatic.com/x.jpg'),
+        itunesArtworkAddress('http://is1-ssl.mzstatic.com/x.jpg'), itunesArtworkAddress(7)], ['https://is5-ssl.mzstatic.com/image/thumb/x/100x100bb.jpg', null, null, null]);
 });
 
 test('iTunes 403 and 429 are rateLimited, and an empty lookup is null', async () => {

@@ -28,7 +28,8 @@ const proposalText = (field: typeof fields[number], proposal: Proposal, withId?:
  * answer. The only matching group of a partial comparison, never applied unasked, is offered the same way with every value but
  * needs no answer. Every candidate also stays selectable in a folded list, a non-matching one showing how it differs from the
  * files. Files whose duration or Disc Number is unknown are disclosed, since ranking never counts them as agreement, and so is a
- * comparison that did not include every release MusicBrainz found. Choosing applies at once (POST /lookup/choose); a release
+ * comparison that did not include every release MusicBrainz found. An iTunes-only candidate is marked as such, and as not checked
+ * against MusicBrainz when MusicBrainz could not rule it out. Choosing applies at once (POST /lookup/choose); a release
  * applied as a preselection stays choosable while a tie needs an answer. A candidate whose release reports front artwork shows it
  * through the protected administrator preview, never from a lookup address: once per release (in the tie or offered view when it
  * represents a group there, else in the folded list, and there only once the list is opened), at most two loading at a time in the
@@ -77,6 +78,7 @@ export function CandidateChooser({ importId, viewerId, lookup, disabled, onChoos
     return <li key={candidate.key} className={styles.card}>
       {artwork(candidate, prefix === 'a')}
       <strong id={`${id}-${prefix}${index}`}>{[candidate.title ?? '—', candidate.artist].filter(Boolean).join(' · ')}</strong>
+      {candidate.source === 'itunes' && <p className={styles.muted}>{[t('lookup.itunes_only'), candidate.notChecked && t('lookup.not_checked')].filter(Boolean).join(' · ')}</p>}
       {!proposal && <p className={styles.muted}>{[t(`lookup.status_${candidate.status}`), candidate.label, reviewValueText(candidate.date), candidate.trackCount === null ? null : t('lookup.track_count', { count: candidate.trackCount })].filter(Boolean).join(' · ')}</p>}
       <dl>
         {proposal && differing.map(field => fact(fieldKeys[field], proposalText(field, proposal, byId(field) ? withId : undefined)))}

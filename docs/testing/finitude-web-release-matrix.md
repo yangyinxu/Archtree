@@ -115,7 +115,12 @@ protected administrator preview (a mocked WebP; no request reaches a lookup
 host), checks that the summary says Publish waits while the applied release's
 cover is staged and keeps Publish disabled, and that once the staged lookup
 cover arrives it is chosen automatically, named in the summary and the
-confirmation, and carried by the one publish request.
+confirmation, and carried by the one publish request. Another applies an
+iTunes-only result after MusicBrainz stayed unavailable: the summary says it
+was not checked against MusicBrainz with Luna first beside a free retry, its
+values are flagged as iTunes only and not checked, the chooser marks the
+candidate the same way with an axe scan, the summary reflows at 320, 768 and
+1440 px, and one confirmation publishes it.
 
 The catalog reviews spec checks that an existing-Album review shows the Album's
 Artist Credits and label read-only and applies a Disc Number change, and that a
@@ -511,6 +516,21 @@ player control still works.
   Archive unreachable, and confirm Publish stops waiting with the current cover
   choice kept. Publish and confirm the Album shows the chosen cover and Files
   keeps no other lookup cover. Repeat with a screen reader at 320 CSS px.
+- As an administrator, with metadata lookup configured in a development
+  environment, import a one-file song whose title tag is romanized and which
+  MusicBrainz lists only under its Japanese title (for example "Pandora Call"
+  by ヰ世界情緒). Confirm the summary says lookup searches the iTunes Search
+  API, that the MusicBrainz release found through the Japanese title is applied
+  with no iTunes-only mark, and that Review lists an Artist named with the
+  artist's other localized name as an iTunes localized name. Then import files
+  that MusicBrainz does not know but iTunes does, and confirm the chooser
+  marks the result iTunes only, the summary flags its values as iTunes only,
+  its iTunes artwork is staged and chosen automatically while the browser
+  requests no mzstatic address, and Publish needs one confirmation. With
+  MusicBrainz unreachable, confirm the result is also marked Not checked
+  against MusicBrainz with Luna first beside a free retry; with iTunes
+  unreachable, confirm the summary says iTunes was unavailable and Publish
+  stops waiting once its retries end. Repeat with a screen reader at 320 CSS px.
 
 ## Media Session observations
 

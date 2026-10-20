@@ -2,7 +2,8 @@
  * Internal
  *   Types: Client
  *   Functions: slot, mbid, tags, project, runOf, json, searchUrl, searchAnswer, releaseAnswer, clientOf, drive,
- *              sent, aliasLookups, one, fixture, creditedAnswer, aliasAnswer
+ *              sent, aliasLookups, one, fixture, creditedAnswer, aliasAnswer, recordedReleases,
+ *              recordingAnswer, songSearch, albumSearch, collectionAnswer, itunesPaths
  *   Constants: guard, importId, actor, start, recorded, blueArchiveTag
  * Tests
  *   - fallback queries are sent together only when the searches before them found nothing; a skipped folder fallback spends no folder allowance
@@ -19,6 +20,16 @@
  *   - after the details, a run looks up the aliases of its credited artists and first label once each, never a placeholder, and ranks with them
  *   - alias lookups are bounded to 16 per run, a source failure fails every remaining target and ranks at once without an attempt, and a record without aliases completes
  *   - alias targets follow the ranking with the preselection first, each release's credits then its first label, each ID once, never a placeholder or an unfetched release, at most 16
+ *   - Pandora Call romanized: MusicBrainz finds nothing, iTunes gives the Japanese title, and the bridge finds the singles in MusicBrainz
+ *   - a barcode is looked up in iTunes when MusicBrainz finds nothing for it, and the collection it names is searched again in MusicBrainz
+ *   - a MusicBrainz matching group never starts the iTunes stage, and a run planned from identifiers iTunes cannot search has none
+ *   - MusicBrainz exhausted while searching: iTunes is still asked, nothing is bridged, and its result becomes an iTunes-only candidate preselected as not checked
+ *   - MusicBrainz exhausted during the bridge leaves the results not yet bridged unavailable, and they become not-checked candidates
+ *   - iTunes throttled through its automatic retries: 2–10 s, then 2 and 5 minutes, then the stage is unavailable and the run completes on MusicBrainz's answer
+ *   - refused iTunes, bridge and collection requests are skipped: the next request is sent, a refused bridge offers its result unchecked and a refused collection offers none
+ *   - per attempt the iTunes stage sends at most five iTunes searches or UPC lookups, four bridge searches and four collection lookups, sharing the 25-candidate bound
+ *   - busy mode lasts only until the first failed attempt of either source, and a record from an earlier release without the iTunes fields completes
+ *   - the aliases after the iTunes stage are those of the bridged releases' credits, within the bound of 16 the whole run shares, and an iTunes-only candidate adds none
  * @end-catalog */
 
 /**
@@ -50,8 +61,11 @@ import {
 } from '../../src/administration/lookup/musicBrainzClient';
 import { importLookupFileSet, planImportLookup, startLookupRun, type MetadataLookupRecord, type StoredLookupCandidate } from '../../src/administration/lookup/metadataLookupRecord';
 import {
-    availableLookupConfiguration, fixtureTransport, hotelCaliforniaExchanges, immediateGate, loadLookupFixture, loadLookupFixtures, type LookupExchange
+    availableLookupConfiguration, emptyItunesClient, fixtureTransport, hotelCaliforniaExchanges, immediateGate, itunesAnswer, itunesCollectionResult, itunesFixtureClient, itunesSongResult,
+    loadLookupFixture, loadLookupFixtures, type LookupExchange
 } from '../support/metadataLookupFixtures';
+import { itunesUrls } from '../../src/administration/lookup/iTunesSearchClient';
+import { lookupLocalizedGroups } from '../../src/administration/lookup/lookupItunesStage';
 import { installNetworkGuard } from '../support/networkGuard';
 
 const guard = installNetworkGuard();
@@ -83,10 +97,15 @@ const searchAnswer = (query: MusicBrainzReleaseQuery, releases: [string, number?
     releases: releases.map(([id, trackCount], index) => ({ id, title: `Synthetic Release ${index}`, score: 100 - index, ...(trackCount === undefined ? {} : { 'track-count': trackCount }) })) });
 const releaseAnswer = (id: string, lengths: number[]) => json(musicBrainzUrls.release(id).href, { id, title: 'Synthetic Album', media: [{ position: 1, format: 'CD',
     tracks: lengths.map((length, index) => ({ position: index + 1, number: String(index + 1), title: `Synthetic Track ${index + 1}`, length, recording: { id: mbid(900 + index), length } })) }] });
-const clientOf = (exchanges: LookupExchange[]) => {
-    const fixture = fixtureTransport(exchanges);
+/**
+ * MusicBrainz over fixture exchanges, and iTunes over its own (`itunes`) or, by default, an iTunes client that answers nothing (so a
+ * run without a MusicBrainz match passes through an empty iTunes stage); `itunesCalls` records what that default client was asked.
+ */
+const clientOf = (exchanges: LookupExchange[], itunes?: LookupExchange[]) => {
+    const fixture = fixtureTransport(exchanges), itunesCalls: string[] = [];
+    const replayed = itunes ? itunesFixtureClient(itunes) : null;
     return { musicBrainz: createMusicBrainzClient({ gate: immediateGate(), transport: fixture.transport, sleep: async () => undefined, configuration: availableLookupConfiguration }),
-        requests: fixture.requests };
+        itunes: replayed?.itunes ?? emptyItunesClient(itunesCalls), requests: fixture.requests, itunesRequests: replayed?.requests ?? [], itunesCalls };
 };
 type Client = ReturnType<typeof clientOf>;
 /** Drives a run as the worker would, waiting out each automatic retry on a virtual clock, until it ends. */
@@ -100,7 +119,7 @@ async function drive(record: MetadataLookupRecord, doc: AdminImportDocument, cli
             now = next.retryAt!; result = null; continue;
         }
         modes.push(proceeded.step.mode);
-        result = await performLookupStep(client.musicBrainz, proceeded.step.action, proceeded.step.mode);
+        result = await performLookupStep(client, proceeded.step.action, proceeded.step.mode);
     }
     throw new Error('the run did not end');
 }
@@ -228,10 +247,10 @@ test('a 503/429 is busy and retried after its Retry-After within 2–10 s, later
     const throttled = clientOf([...loadLookupFixture('musicbrainz/synthetic-503-retry-after-0-then-200.json').exchanges, releaseAnswer(mbid(1), [200_000, 200_000])]);
     const first = proceedLookupRun(submitted, doc, null, start);
     assert.equal(first.step.mode, 'busy');
-    const failure = await performLookupStep(throttled.musicBrainz, first.step.action!, first.step.mode);
-    assert.deepEqual(failure, { kind: 'failed', failure: 'rateLimited', retryAfterMs: 1000 });
+    const failure = await performLookupStep(throttled, first.step.action!, first.step.mode);
+    assert.deepEqual(failure, { kind: 'failed', source: 'musicbrainz', failure: 'rateLimited', retryAfterMs: 1000 });
     const waiting = proceedLookupRun(first.next, doc, failure, start).next;
-    assert.deepEqual([waiting.state, waiting.issue, waiting.retryAt!.getTime() - start.getTime(), waiting.attempts], ['retrying', 'sourceBusy', 2_000, { musicbrainz: 1 }]);
+    assert.deepEqual([waiting.state, waiting.issue, waiting.retryAt!.getTime() - start.getTime(), waiting.attempts], ['retrying', 'sourceBusy', 2_000, { musicbrainz: 1, itunes: 0 }]);
     const modes: string[] = [];
     const done = await drive(waiting, doc, throttled, modes);
     assert.deepEqual([done.state, done.issue, done.outcome, modes, throttled.requests.length], ['complete', null, 'candidates', ['wait', 'wait'], 3]);
@@ -239,28 +258,38 @@ test('a 503/429 is busy and retried after its Retry-After within 2–10 s, later
     // Failures in a row: the first throttled one follows its Retry-After (clamped), later ones 2 and 5 minutes, then the run ends busy.
     const automatic = runOf(project(2, one)), action = proceedLookupRun(automatic, doc, null, start).next;
     const fail = (record: MetadataLookupRecord, result: LookupStepResult, now = start) => proceedLookupRun(record, doc, result, now).next;
-    const limited = (retryAfterMs: number | null): LookupStepResult => ({ kind: 'failed', failure: 'rateLimited', retryAfterMs });
+    const limited = (retryAfterMs: number | null): LookupStepResult => ({ kind: 'failed', source: 'musicbrainz', failure: 'rateLimited', retryAfterMs });
     let record = fail(action, limited(7000));
     const delays: [string, string | null, number | null][] = [[record.state, record.issue, record.retryAt!.getTime() - start.getTime()]];
-    for (let attempt = 0; attempt < 3; attempt++) {
+    for (let attempt = 0; attempt < 2; attempt++) {
         record = fail(record, limited(45_000));
         delays.push([record.state, record.issue, record.retryAt ? record.retryAt.getTime() - start.getTime() : null]);
     }
-    assert.deepEqual(delays, [['retrying', 'sourceBusy', 7_000], ['retrying', 'sourceBusy', 120_000], ['retrying', 'sourceBusy', 300_000], ['unavailable', 'sourceBusy', null]]);
-    assert.deepEqual([record.ranking, record.outcome, record.attempts], [null, null, { musicbrainz: 4 }]);
+    assert.deepEqual(delays, [['retrying', 'sourceBusy', 7_000], ['retrying', 'sourceBusy', 120_000], ['retrying', 'sourceBusy', 300_000]]);
+    // Exhausted while searching: MusicBrainz is asked nothing more and the iTunes stage starts (`searchUnavailable`); finding no
+    // iTunes-only candidate, the run ends unavailable with MusicBrainz's issue, never "no release", and is never ranked.
+    const exhaustedStep = proceedLookupRun(record, doc, limited(45_000), start);
+    assert.deepEqual([exhaustedStep.next.state, exhaustedStep.next.exhausted, exhaustedStep.next.itunesStage?.reason, exhaustedStep.next.queryIndex, exhaustedStep.step.action?.kind],
+        ['running', { musicbrainz: 'sourceBusy' }, 'searchUnavailable', automatic.queries.length, 'itunes']);
+    const itunesOnly = clientOf([]);
+    record = await drive(exhaustedStep.next, doc, itunesOnly);
+    assert.deepEqual([record.state, record.issue, record.retryAt, record.ranking, record.outcome, record.attempts, itunesOnly.requests.length, itunesOnly.itunesCalls],
+        ['unavailable', 'sourceBusy', null, null, null, { musicbrainz: 4, itunes: 0 }, 0, ['album us Synthetic Album Synthetic Ensemble', 'album jp Synthetic Album Synthetic Ensemble']]);
     assert.equal(fail(action, limited(45_000)).retryAt!.getTime() - start.getTime(), METADATA_LOOKUP_JOB_LIMITS.rateLimitedRetryMs.maximum);
     // A gate refusal is busy and an outage unavailable: both keep 30 seconds (or a longer Retry-After of at most a minute).
-    for (const [result, issue, delay] of [[{ kind: 'failed', failure: 'busy', retryAfterMs: 1000 }, 'sourceBusy', 30_000], [{ kind: 'failed', failure: 'busy', retryAfterMs: 45_000 }, 'sourceBusy', 45_000],
-        [{ kind: 'failed', failure: 'unavailable', retryAfterMs: null }, 'sourceUnavailable', 30_000]] as const) {
+    for (const [result, issue, delay] of [[{ kind: 'failed', source: 'musicbrainz', failure: 'busy', retryAfterMs: 1000 }, 'sourceBusy', 30_000],
+        [{ kind: 'failed', source: 'musicbrainz', failure: 'busy', retryAfterMs: 45_000 }, 'sourceBusy', 45_000],
+        [{ kind: 'failed', source: 'musicbrainz', failure: 'unavailable', retryAfterMs: null }, 'sourceUnavailable', 30_000]] as const) {
         const next = fail(action, result);
         assert.deepEqual([next.state, next.issue, next.retryAt!.getTime() - start.getTime()], ['retrying', issue, delay], JSON.stringify(result));
     }
-    // A retry past the grant counts as exhausted, the throttled one and the 30-second one alike, so a run never blocks past its grant.
+    // A retry past the grant counts as exhausted, the throttled one and the 30-second one alike, so a run never blocks past its grant
+    // (the worker stops it once the grant expires); MusicBrainz is exhausted with the issue it failed with.
     const late = fail(action, limited(9000), new Date(action.grantExpiresAt.getTime() - 5000));
-    assert.deepEqual([late.state, late.issue, late.retryAt], ['unavailable', 'sourceBusy', null]);
+    assert.deepEqual([late.exhausted, late.retryAt, late.itunesStage?.reason], [{ musicbrainz: 'sourceBusy' }, null, 'searchUnavailable']);
     for (const [failure, issue] of [['unavailable', 'sourceUnavailable'], ['busy', 'sourceBusy']] as const) {
-        const ended = fail(action, { kind: 'failed', failure, retryAfterMs: null }, new Date(action.grantExpiresAt.getTime() - 10_000));
-        assert.deepEqual([ended.state, ended.issue, ended.retryAt, ended.attempts], ['unavailable', issue, null, { musicbrainz: 1 }], failure);
+        const ended = fail(action, { kind: 'failed', source: 'musicbrainz', failure, retryAfterMs: null }, new Date(action.grantExpiresAt.getTime() - 10_000));
+        assert.deepEqual([ended.exhausted, ended.retryAt, ended.attempts], [{ musicbrainz: issue }, null, { musicbrainz: 1, itunes: 0 }], failure);
     }
 });
 
@@ -367,26 +396,27 @@ test('the bound reached with only fallbacks left keeps the comparison complete; 
     // An identifier lookup returns everything it knows.
     const pandoraSingle = '5302459e-1ed2-4469-b360-50b135e88466';
     const lookups = clientOf([...loadLookupFixture(`musicbrainz/release-${pandoraSingle}.json`).exchanges, ...loadLookupFixture('musicbrainz/isrc-JPY392200483.json').exchanges]);
-    const byId = await performLookupStep(lookups.musicBrainz, { kind: 'search', index: 0, query: { kind: 'musicBrainzRelease', releaseId: pandoraSingle, basis: 'releaseId' } }, 'wait');
-    const byIsrc = await performLookupStep(lookups.musicBrainz, { kind: 'search', index: 1, query: { kind: 'musicBrainzIsrc', isrc: 'JPY392200483', basis: 'isrc' } }, 'wait');
+    const byId = await performLookupStep(lookups, { kind: 'search', index: 0, query: { kind: 'musicBrainzRelease', releaseId: pandoraSingle, basis: 'releaseId' } }, 'wait');
+    const byIsrc = await performLookupStep(lookups, { kind: 'search', index: 1, query: { kind: 'musicBrainzIsrc', isrc: 'JPY392200483', basis: 'isrc' } }, 'wait');
     assert.ok(byId.kind === 'found' && byIsrc.kind === 'found');
     // The recorded ISRC answer lists its two recordings without releases, so it offers none.
     assert.deepEqual([byId.complete, byId.found.map(item => item.releaseId), byIsrc.complete, byIsrc.found], [true, [pandoraSingle], true, []]);
 });
 
 test('a request maps every failure for the stored step: a refused gate is busy, a 503/429 rate-limited, other source failures and errors unavailable, refused input skipped and a stop a shutdown', async () => {
-    const failing = (error: unknown): MusicBrainzClient => {
+    const failing = (error: unknown) => {
         const fail = async () => { throw error; };
-        return { searchReleases: fail, searchRecordings: fail, lookupRelease: fail, browseReleaseGroupReleases: fail, lookupIsrc: fail, lookupAliases: fail };
+        return { musicBrainz: { searchReleases: fail, searchRecordings: fail, lookupRelease: fail, browseReleaseGroupReleases: fail, lookupIsrc: fail, lookupAliases: fail } as MusicBrainzClient,
+            itunes: { searchCollections: fail, searchSongs: fail, lookupCollection: fail, lookupUpc: fail } };
     };
     const search: LookupAction = { kind: 'search', index: 0, query: { kind: 'musicBrainzReleaseSearch', query: { release: 'Synthetic Album' }, basis: 'albumText' } };
     const details: LookupAction = { kind: 'details', releaseId: mbid(1) };
     const source = (failure: ConstructorParameters<typeof MetadataLookupSourceError>[1], retryAfterMs: number | null = null) => new MetadataLookupSourceError('musicbrainz', failure, retryAfterMs);
     for (const [error, expected] of [
-        [source('busy', 1000), { kind: 'failed', failure: 'busy', retryAfterMs: 1000 }], [source('rateLimited', 5000), { kind: 'failed', failure: 'rateLimited', retryAfterMs: 5000 }],
-        [source('unavailable'), { kind: 'failed', failure: 'unavailable', retryAfterMs: null }], [source('invalidResponse'), { kind: 'failed', failure: 'unavailable', retryAfterMs: null }],
+        [source('busy', 1000), { kind: 'failed', source: 'musicbrainz', failure: 'busy', retryAfterMs: 1000 }], [source('rateLimited', 5000), { kind: 'failed', source: 'musicbrainz', failure: 'rateLimited', retryAfterMs: 5000 }],
+        [source('unavailable'), { kind: 'failed', source: 'musicbrainz', failure: 'unavailable', retryAfterMs: null }], [source('invalidResponse'), { kind: 'failed', source: 'musicbrainz', failure: 'unavailable', retryAfterMs: null }],
         // Without a stop, `cancelled` is the step deadline: the source did not answer in time.
-        [source('cancelled'), { kind: 'failed', failure: 'unavailable', retryAfterMs: null }], [new Error('synthetic failure'), { kind: 'failed', failure: 'unavailable', retryAfterMs: null }],
+        [source('cancelled'), { kind: 'failed', source: 'musicbrainz', failure: 'unavailable', retryAfterMs: null }], [new Error('synthetic failure'), { kind: 'failed', source: 'musicbrainz', failure: 'unavailable', retryAfterMs: null }],
         [source('notConfigured'), { kind: 'notConfigured' }], [new MetadataLookupInputError('invalidText'), { kind: 'refused', action: search }]
     ] as const) {
         assert.deepEqual(await performLookupStep(failing(error), search, 'wait'), expected, String(error));
@@ -394,7 +424,7 @@ test('a request maps every failure for the stored step: a refused gate is busy, 
     assert.deepEqual(await performLookupStep(failing(new MetadataLookupInputError('identifier')), details, 'wait'), { kind: 'refused', action: details });
     // An alias lookup maps its failures the same way (the run then records that target as failed, never retrying it).
     const aliases: LookupAction = { kind: 'aliases', entity: 'label', id: mbid(2) };
-    assert.deepEqual(await performLookupStep(failing(source('busy', 1000)), aliases, 'busy'), { kind: 'failed', failure: 'busy', retryAfterMs: 1000 });
+    assert.deepEqual(await performLookupStep(failing(source('busy', 1000)), aliases, 'busy'), { kind: 'failed', source: 'musicbrainz', failure: 'busy', retryAfterMs: 1000 });
     assert.deepEqual(await performLookupStep(failing(new MetadataLookupInputError('identifier')), aliases, 'wait'), { kind: 'refused', action: aliases });
     // A query kind a later release stored is skipped rather than sent.
     const unknown = { kind: 'search', index: 0, query: { kind: 'itunesCollectionSearch', basis: 'albumText' } } as unknown as LookupAction;
@@ -408,20 +438,24 @@ test('a throttled release lookup is retried within seconds as busy, and details 
     const doc = project(2, one), client = clientOf([searchAnswer({ release: 'Synthetic Album', artist: 'Synthetic Ensemble' }, [[mbid(1), 2], [mbid(2), 2]]),
         searchAnswer({ release: 'Synthetic Album' }, [])]);
     let step = proceedLookupRun(runOf(doc), doc, null, start);
-    for (let search = 0; search < 2; search++) step = proceedLookupRun(step.next, doc, await performLookupStep(client.musicBrainz, step.step.action!, step.step.mode), start);
+    for (let search = 0; search < 2; search++) step = proceedLookupRun(step.next, doc, await performLookupStep(client, step.step.action!, step.step.mode), start);
     assert.deepEqual(step.step.action, { kind: 'details', releaseId: mbid(1) });
-    const limited: LookupStepResult = { kind: 'failed', failure: 'rateLimited', retryAfterMs: 1000 };
+    const limited: LookupStepResult = { kind: 'failed', source: 'musicbrainz', failure: 'rateLimited', retryAfterMs: 1000 };
     // Claimed again once due: the same release lookup is handed out, and fails again.
     const again = (record: MetadataLookupRecord) => proceedLookupRun(proceedLookupRun(record, doc, null, start).next, doc, limited, start).next;
     let record = proceedLookupRun(step.next, doc, limited, start).next;
     const waits = [[record.state, record.issue, record.phase, record.retryAt!.getTime() - start.getTime()]];
     for (let retry = 0; retry < 2; retry++) { record = again(record); waits.push([record.state, record.issue, record.phase, record.retryAt!.getTime() - start.getTime()]); }
     assert.deepEqual(waits, [['retrying', 'sourceBusy', 'details', 2_000], ['retrying', 'sourceBusy', 'details', 120_000], ['retrying', 'sourceBusy', 'details', 300_000]]);
-    // Retries exhausted while fetching details: the run completes with every pending release failed, and the comparison is partial.
-    const ended = again(record);
+    // Retries exhausted while fetching details: every pending release is failed and, without a matching group, the iTunes stage
+    // runs (no bridge: MusicBrainz is exhausted); the run then completes with the comparison partial.
+    const exhaustedRecord = again(record);
+    assert.deepEqual([exhaustedRecord.state, exhaustedRecord.phase, exhaustedRecord.exhausted, exhaustedRecord.itunesStage?.reason, exhaustedRecord.candidates.map(candidate => candidate.details)],
+        ['running', 'itunes', { musicbrainz: 'sourceUnavailable' }, 'noMatch', ['failed', 'failed']]);
+    const ended = await drive(exhaustedRecord, doc, client);
     assert.deepEqual([ended.state, ended.issue, ended.outcome, ended.candidates.map(candidate => candidate.details), ended.ranking!.disclosure.partialComparison, ended.ranking!.preselection],
         ['complete', 'sourceUnavailable', 'candidates', ['failed', 'failed'], true, null]);
-    assert.deepEqual(sent(client), { searches: 2, details: 0 });
+    assert.deepEqual([sent(client), client.itunesCalls.length], [{ searches: 2, details: 0 }, 2]);
 });
 
 /** A release lookup answer crediting `credits` ([name, artist ID]) and the given labels ([name, label ID]). */
@@ -444,7 +478,7 @@ test('after the details, a run looks up the aliases of its credited artists and 
     assert.deepEqual(aliasLookups(client), [musicBrainzUrls.artistAliases(mbid(11)).href, musicBrainzUrls.artistAliases(mbid(12)).href, musicBrainzUrls.labelAliases(mbid(21)).href]);
     assert.deepEqual(done.aliases, [{ kind: 'artist', id: mbid(11), state: 'fetched', names: ['Synthetic Lead', 'シンセ'] }, { kind: 'artist', id: mbid(12), state: 'missing', names: [] },
         { kind: 'label', id: mbid(21), state: 'failed', names: [] }]);
-    assert.deepEqual([done.state, done.issue, done.phase, done.attempts, done.retryAt], ['complete', null, 'done', { musicbrainz: 0 }, null]);
+    assert.deepEqual([done.state, done.issue, done.phase, done.attempts, done.retryAt], ['complete', null, 'done', { musicbrainz: 0, itunes: 0 }, null]);
     assert.deepEqual(modes.slice(-3), ['wait', 'wait', 'wait']);
     // The album-artist tag names the lead through an alias the run found, so the preselection is not flagged.
     assert.deepEqual([done.ranking!.preselection?.basis, done.ranking!.preselection?.artistMismatch], ['onlyMatchingGroup', false]);
@@ -465,7 +499,7 @@ test('alias lookups are bounded to 16 per run, a source failure fails every rema
     const pending: MetadataLookupRecord = { ...done, state: 'running', phase: 'aliases', aliases: [{ kind: 'artist', id: mbid(99), state: 'fetched', names: ['Synthetic Alias'] },
         { kind: 'artist', id: mbid(100), state: 'pending', names: [] }, { kind: 'artist', id: mbid(101), state: 'pending', names: [] }, { kind: 'label', id: mbid(200), state: 'pending', names: [] }] };
     for (const failure of ['busy', 'rateLimited', 'unavailable'] as const) {
-        const failed = proceedLookupRun(pending, doc, { kind: 'failed', failure, retryAfterMs: 30_000 }, start);
+        const failed = proceedLookupRun(pending, doc, { kind: 'failed', source: 'musicbrainz', failure, retryAfterMs: 30_000 }, start);
         assert.deepEqual([failed.next.state, failed.next.issue, failed.next.retryAt, failed.next.aliases!.map(entry => [entry.state, entry.names]), failed.next.attempts, failed.step.action],
             ['complete', null, null, [['fetched', ['Synthetic Alias']], ['failed', []], ['failed', []], ['failed', []]], done.attempts, null], failure);
     }
@@ -477,11 +511,11 @@ test('alias lookups are bounded to 16 per run, a source failure fails every rema
     const { aliases: _aliases, ...legacy } = pending;
     assert.equal(proceedLookupRun(legacy as MetadataLookupRecord, doc, null, start).next.state, 'complete');
     // A request maps an alias lookup the same way, always waiting for its gate.
-    assert.deepEqual(await performLookupStep({ lookupAliases: async () => null } as unknown as MusicBrainzClient, { kind: 'aliases', entity: 'artist', id: mbid(1) }, 'busy'),
+    assert.deepEqual(await performLookupStep({ musicBrainz: { lookupAliases: async () => null } as unknown as MusicBrainzClient, itunes: emptyItunesClient() }, { kind: 'aliases', entity: 'artist', id: mbid(1) }, 'busy'),
         { kind: 'aliases', action: { kind: 'aliases', entity: 'artist', id: mbid(1) }, names: null });
     let seen: string | undefined;
-    await performLookupStep({ lookupAliases: async (_kind: string, _id: string, options: { mode: string }) => { seen = options.mode; return { id: mbid(1), names: ['A'] }; } } as unknown as MusicBrainzClient,
-        { kind: 'aliases', entity: 'label', id: mbid(1) }, 'busy');
+    await performLookupStep({ musicBrainz: { lookupAliases: async (_kind: string, _id: string, options: { mode: string }) => { seen = options.mode; return { id: mbid(1), names: ['A'] }; } } as unknown as MusicBrainzClient,
+        itunes: emptyItunesClient() }, { kind: 'aliases', entity: 'label', id: mbid(1) }, 'busy');
     assert.equal(seen, 'wait');
 });
 
@@ -506,4 +540,257 @@ test('alias targets follow the ranking with the preselection first, each release
     const crowded = stored(6, Array.from({ length: 20 }, (_unused, index) => [`Synthetic ${index}`, mbid(100 + index)] as [string, string]), [['Synthetic Label', mbid(200)]]);
     assert.deepEqual(lookupAliasTargets([crowded], null).map(target => target.id), Array.from({ length: METADATA_LOOKUP_JOB_LIMITS.aliasLookups }, (_unused, index) => mbid(100 + index)));
     assert.deepEqual(lookupAliasTargets([unfetched], null), []);
+});
+
+/** The recorded release lookups of every fixture release, for runs that fetch the Pandora Call and Hotel California editions. */
+const recordedReleases = () => [...loadLookupFixtures('musicbrainz').entries()].filter(([name]) => /^release-[0-9a-f-]{36}\.json$/.test(name)).flatMap(([, file]) => file.exchanges);
+const recordingAnswer = (query: MusicBrainzRecordingQuery, releases: [string, number][] = []) => json(musicBrainzUrls.recordingSearch(query).href, { count: releases.length ? 1 : 0, offset: 0,
+    recordings: releases.length ? [{ id: mbid(950), title: query.recording, length: 200_000, 'artist-credit': [], releases: releases.map(([id, count]) => ({ id, title: 'Synthetic Release', 'track-count': count, media: [] })) }] : [] });
+const songSearch = (term: string, storefront: 'us' | 'jp' | 'kr' | 'tw', results: Record<string, unknown>[]) => itunesAnswer(itunesUrls.search(term, storefront, 'song'), results);
+const albumSearch = (term: string, storefront: 'us' | 'jp' | 'kr' | 'tw', results: Record<string, unknown>[]) => itunesAnswer(itunesUrls.search(term, storefront, 'album'), results);
+/** A collection lookup answering the collection and its songs, each [title, milliseconds]. */
+const collectionAnswer = (collectionId: number, name: string, artist: string, songs: [string, number][], storefront: 'us' | 'jp' = 'us', extra: Record<string, unknown> = {}) =>
+    itunesAnswer(itunesUrls.lookupId(collectionId, storefront), [itunesCollectionResult(collectionId, name, artist, songs.length, extra),
+        ...songs.map(([title, length], index) => itunesSongResult(collectionId * 100 + index, collectionId, title, artist, { trackNumber: index + 1, trackTimeMillis: length }))]);
+const itunesPaths = (client: Client) => client.itunesRequests.map(request => decodeURIComponent(new URL(request.url).search.replace(/\+/g, ' ')));
+
+test('Pandora Call romanized: MusicBrainz finds nothing, iTunes gives the Japanese title, and the bridge finds the singles in MusicBrainz', async () => {
+    // A one-file import titled in romaji; its file is a 3:40 rip, so only the single, the album track and an unrelated song of the
+    // recorded jp search are plausible results.
+    const doc = project(1, () => tags({ title: 'Pandora Call', durationMs: 220_000 }));
+    const record = runOf(doc);
+    assert.deepEqual(record.queries.map(query => (query as { query: MusicBrainzRecordingQuery }).query), [{ recording: 'Pandora Call' }]);
+    const recorded = loadLookupFixture('musicbrainz/recording-search-pandora-call.json').exchanges.at(-1)!;
+    const client = clientOf([recordingAnswer({ recording: 'Pandora Call' }),
+        recorded, recordingAnswer({ recording: 'Flower', artist: 'sumika' }, [[mbid(70), 12]]), recordingAnswer({ recording: 'PANDORA CALL', artist: 'Isekaijoucho' }),
+        releaseAnswer(mbid(70), Array.from({ length: 12 }, () => 200_000)), ...recordedReleases()], [
+        // The us storefront shows the single under its romanized names.
+        songSearch('Pandora Call', 'us', [itunesSongResult(1689358564, 1689358563, 'PANDORA CALL', 'Isekaijoucho', { collectionName: 'PANDORA CALL - Single' })]),
+        ...loadLookupFixture('itunes/search-jp-song-pandora-call-romanized.json').exchanges]);
+    const steps: string[] = [];
+    let now = start, result: LookupStepResult | null = null, next = record;
+    for (let count = 0; count < 100; count++) {
+        const proceeded = proceedLookupRun(next, doc, result, now);
+        next = proceeded.next;
+        if (!proceeded.step.action) { if (next.state !== 'retrying') break; now = next.retryAt!; result = null; continue; }
+        steps.push(proceeded.step.action.kind);
+        if (proceeded.step.action.kind === 'bridge' && proceeded.step.action.index === 0) {
+            // The first bridge search is the recorded Japanese recording search: the title and artist the jp storefront showed.
+            assert.equal(musicBrainzUrls.recordingSearch((proceeded.step.action.query as { query: MusicBrainzRecordingQuery }).query).href, recorded.url);
+        }
+        result = await performLookupStep(client, proceeded.step.action, proceeded.step.mode);
+    }
+    assert.deepEqual(itunesPaths(client), ['?term=Pandora Call&country=us&media=music&entity=song&limit=25', '?term=Pandora Call&country=jp&media=music&entity=song&limit=25']);
+    const stage = next.itunesStage!;
+    assert.deepEqual([stage.reason, stage.state, stage.complete, stage.items.map(item => [item.key, item.bridge, item.collection, item.names.map(name => name.storefront)])], ['noMatch', 'answered', true, [
+        ['song:1689358564', 'found', 'notNeeded', ['us', 'jp']], ['song:1735882391', 'found', 'notNeeded', ['jp']], ['song:1538283577', 'found', 'notNeeded', ['jp']]]]);
+    // Japanese names first, the romanized pair last; the two Japanese results share one search.
+    assert.deepEqual(stage.bridge!.map(query => [(query as { query: MusicBrainzRecordingQuery }).query, query.itemKeys]), [
+        [{ recording: 'パンドラコール', artist: 'ヰ世界情緒' }, ['song:1689358564', 'song:1735882391']], [{ recording: 'Flower', artist: 'sumika' }, ['song:1538283577']],
+        [{ recording: 'PANDORA CALL', artist: 'Isekaijoucho' }, ['song:1689358564']]]);
+    // Every bridged release is fetched; no iTunes-only candidate, and the singles' group is preselected.
+    assert.deepEqual([next.state, next.outcome, next.issue, next.candidates.some(candidate => candidate.source === 'itunes'), next.candidates.length, sent(client).details],
+        ['complete', 'candidates', null, false, 9, 9]);
+    assert.deepEqual([next.ranking!.preselection?.candidateKey.slice(12, 20), next.ranking!.preselection?.basis, next.ranking!.disclosure.partialComparison], ['5302459e', 'onlyMatchingGroup', false]);
+    assert.deepEqual(steps.slice(0, 6), ['search', 'itunes', 'itunes', 'bridge', 'bridge', 'bridge']);
+    // The single's names in both storefronts are one localized name group, which identity matching and artist agreement read.
+    assert.deepEqual(lookupLocalizedGroups(next), [['Isekaijoucho', 'ヰ世界情緒']]);
+});
+
+test('a barcode is looked up in iTunes when MusicBrainz finds nothing for it, and the collection it names is searched again in MusicBrainz', async () => {
+    const digital = fixture('fa7d3357'), lengths = digital.media[0].tracks.map(track => track.lengthMs!);
+    const doc = project(9, index => tags({ identifiers: { barcode: '075596050920', catalogNumber: null, isrc: null, musicBrainzReleaseId: null }, durationMs: lengths[index] }));
+    const record = runOf(doc);
+    assert.deepEqual(record.queries, [{ kind: 'musicBrainzReleaseSearch', query: { barcode: '075596050920' }, basis: 'barcode' }]);
+    const client = clientOf([searchAnswer({ barcode: '075596050920' }, []), ...hotelCaliforniaExchanges()], loadLookupFixture('itunes/lookup-us-upc-075596050920.json').exchanges);
+    const done = await drive(record, doc, client);
+    // The us storefront answers first (a 007 GS1 prefix), so the jp UPC lookup is never sent; only the nine-track edition is plausible.
+    assert.deepEqual(itunesPaths(client), ['?upc=075596050920&entity=song&country=us&limit=200']);
+    assert.deepEqual(done.itunesStage!.items.map(item => [item.key, item.barcode, item.bridge, item.names]), [
+        ['collection:635770200', '075596050920', 'found', [{ storefront: 'us', title: 'Hotel California', artist: 'Eagles' }]]]);
+    // The bridge's release search is the derived Hotel California search; its editions are fetched, and the tie remains a choice.
+    assert.equal(client.requests[1].url, hotelCaliforniaExchanges()[0].url);
+    assert.deepEqual([done.state, done.candidates.length, done.candidates.some(candidate => candidate.source === 'itunes'), done.ranking!.groups.length, done.ranking!.preselection],
+        ['complete', 25, false, 2, null]);
+    assert.deepEqual(lookupAnswersNeeded(done, doc, { append: false }), { tie: true, conflicts: [] });
+});
+
+test('a MusicBrainz matching group never starts the iTunes stage, and a run planned from identifiers iTunes cannot search has none', async () => {
+    const doc = project(2, one), record = runOf(doc);
+    const client = clientOf([searchAnswer({ release: 'Synthetic Album', artist: 'Synthetic Ensemble' }, [[mbid(1), 2]]), searchAnswer({ release: 'Synthetic Album' }, []), releaseAnswer(mbid(1), [200_000, 210_000])]);
+    const done = await drive(record, doc, client);
+    assert.deepEqual([done.ranking!.groups.length, done.itunesStage, client.itunesCalls], [1, null, []]);
+    // A release ID found no release: nothing to search in iTunes.
+    const byId = runOf(doc, { queries: [{ kind: 'musicBrainzRelease', releaseId: mbid(2), basis: 'releaseId' }] });
+    const missing = clientOf([{ url: musicBrainzUrls.release(mbid(2)).href, status: 404, headers: { 'content-type': 'application/json' }, bodyText: '{"error":"Not Found"}' }]);
+    const none = await drive(byId, doc, missing);
+    assert.deepEqual([none.outcome, none.itunesStage, missing.itunesCalls], ['noRelease', null, []]);
+});
+
+test('MusicBrainz exhausted while searching: iTunes is still asked, nothing is bridged, and its result becomes an iTunes-only candidate preselected as not checked', async () => {
+    const doc = project(2, one), record = runOf(doc);
+    // Four throttled answers to the first search exhaust MusicBrainz's automatic retries.
+    let next = proceedLookupRun(record, doc, null, start).next;
+    for (let attempt = 0; attempt < 4; attempt++) next = proceedLookupRun(next, doc, { kind: 'failed', source: 'musicbrainz', failure: 'rateLimited', retryAfterMs: null }, start).next;
+    const term = 'Synthetic Album Synthetic Ensemble';
+    const client = clientOf([], [albumSearch(term, 'us', [itunesCollectionResult(9001, 'Synthetic Album', 'Synthetic Ensemble', 2)]), albumSearch(term, 'jp', []),
+        collectionAnswer(9001, 'Synthetic Album', 'Synthetic Ensemble', [['Synthetic Track 1', 200_000], ['Synthetic Track 2', 210_000]])]);
+    const done = await drive(next, doc, client);
+    assert.deepEqual([client.requests.length, done.itunesStage!.reason, done.itunesStage!.bridge, done.itunesStage!.items.map(item => [item.bridge, item.collection])],
+        [0, 'searchUnavailable', [], [['unavailable', 'fetched']]]);
+    const candidate = done.candidates.find(item => item.source === 'itunes')!;
+    assert.deepEqual([candidate.key, candidate.releaseId, candidate.basis, candidate.itunes], ['itunes:9001', '9001', 'itunes', { storefront: 'us', artworkUrl: null, check: 'unavailable' }]);
+    assert.deepEqual([done.state, done.issue, done.outcome, done.exhausted, done.ranking!.preselection], ['complete', 'sourceBusy', 'candidates', { musicbrainz: 'sourceBusy' },
+        { candidateKey: 'itunes:9001', groupKey: done.ranking!.groups[0].groupKey, basis: 'onlyMatchingGroup', artistMismatch: false, notChecked: true }]);
+});
+
+test('MusicBrainz exhausted during the bridge leaves the results not yet bridged unavailable, and they become not-checked candidates', async () => {
+    const doc = project(1, () => tags({ title: 'Synthetic Song', durationMs: 200_000 }));
+    const record = runOf(doc);
+    // The second bridge search never gets an answer: it fails through every automatic retry.
+    const client = clientOf([recordingAnswer({ recording: 'Synthetic Song' }), recordingAnswer({ recording: 'シンセ曲', artist: 'シンセ歌手' }, [[mbid(1), 1]])], [
+        songSearch('Synthetic Song', 'us', [itunesSongResult(101, 201, 'シンセ曲', 'シンセ歌手', { trackTimeMillis: 200_000 }), itunesSongResult(102, 202, 'Other Song', 'Other Singer', { trackTimeMillis: 200_500 })]),
+        songSearch('Synthetic Song', 'jp', []), collectionAnswer(202, 'Other Song - Single', 'Other Singer', [['Other Song', 200_500]])]);
+    const done = await drive(record, doc, client);
+    assert.deepEqual(done.itunesStage!.bridgeOutcomes, ['found', 'unsent']);
+    assert.deepEqual(done.itunesStage!.items.map(item => [item.key, item.bridge, item.collection]), [['song:101', 'found', 'notNeeded'], ['song:102', 'unavailable', 'fetched']]);
+    // The bridged release's details were never fetched (MusicBrainz exhausted): it is incomplete and could match, so the comparison
+    // is partial and the not-checked candidate is offered, not preselected.
+    assert.deepEqual([done.state, done.issue, done.exhausted, done.candidates.map(candidate => [candidate.key, candidate.details, candidate.itunes?.check ?? null])],
+        ['complete', 'sourceUnavailable', { musicbrainz: 'sourceUnavailable' }, [[`musicbrainz:${mbid(1)}`, 'failed', null], ['itunes:202', 'fetched', 'unavailable']]]);
+    assert.deepEqual([done.ranking!.disclosure.partialComparison, done.ranking!.preselection, done.attempts], [true, null, { musicbrainz: 4, itunes: 0 }]);
+});
+
+test('iTunes throttled through its automatic retries: 2–10 s, then 2 and 5 minutes, then the stage is unavailable and the run completes on MusicBrainz\'s answer', async () => {
+    const doc = project(2, one), record = runOf(doc);
+    const client = clientOf([searchAnswer({ release: 'Synthetic Album', artist: 'Synthetic Ensemble' }, [[mbid(1), 3]]), searchAnswer({ release: 'Synthetic Album' }, []),
+        releaseAnswer(mbid(1), [1000, 1000, 1000])]);
+    let step = proceedLookupRun(record, doc, null, start);
+    while (step.step.action && step.step.action.kind !== 'itunes') step = proceedLookupRun(step.next, doc, await performLookupStep(client, step.step.action, step.step.mode), start);
+    assert.deepEqual([step.next.phase, step.next.itunesStage?.reason, step.step.action], ['itunes', 'noMatch',
+        { kind: 'itunes', index: 0, request: { kind: 'itunesSearch', term: 'Synthetic Album Synthetic Ensemble', entity: 'album', storefront: 'us' } }]);
+    const limited: LookupStepResult = { kind: 'failed', source: 'itunes', failure: 'rateLimited', retryAfterMs: 4000 };
+    const waits: [string, string | null, string, number][] = [];
+    let next = step.next;
+    for (let attempt = 0; attempt < 3; attempt++) {
+        next = proceedLookupRun(next, doc, limited, start).next;
+        waits.push([next.state, next.issue, next.phase, next.retryAt!.getTime() - start.getTime()]);
+        next = proceedLookupRun(next, doc, null, next.retryAt!).next;
+    }
+    assert.deepEqual(waits, [['retrying', 'sourceBusy', 'itunes', 4_000], ['retrying', 'sourceBusy', 'itunes', 120_000], ['retrying', 'sourceBusy', 'itunes', 300_000]]);
+    const ended = proceedLookupRun(next, doc, limited, start);
+    // MusicBrainz's attempts are untouched; iTunes is asked nothing more and the run completes with the release MusicBrainz found.
+    assert.deepEqual([ended.step.action, ended.next.state, ended.next.issue, ended.next.outcome, ended.next.attempts, ended.next.exhausted, ended.next.itunesStage!.state],
+        [null, 'complete', null, 'candidates', { musicbrainz: 0, itunes: 4 }, { itunes: 'sourceBusy' }, 'unavailable']);
+    assert.equal(ended.next.itunesStage!.requestIndex, ended.next.itunesStage!.requests.length);
+});
+
+test('refused iTunes, bridge and collection requests are skipped: the next request is sent, a refused bridge offers its result unchecked and a refused collection offers none', () => {
+    const doc = project(1, () => tags({ title: 'Synthetic Song', durationMs: 200_000 }));
+    let step = proceedLookupRun(runOf(doc), doc, null, start);
+    step = proceedLookupRun(step.next, doc, { kind: 'found', action: step.step.action as LookupAction & { kind: 'search' }, found: [], complete: true }, start);
+    const first = step.step.action as LookupAction & { kind: 'itunes' };
+    assert.equal(first.request.storefront, 'us');
+    // The us search is refused: the jp search is next.
+    step = proceedLookupRun(step.next, doc, { kind: 'refused', action: first }, start);
+    const second = step.step.action as LookupAction & { kind: 'itunes' };
+    assert.deepEqual([second.index, second.request.storefront], [1, 'jp']);
+    const songs = { collections: [], tracks: [1, 2].map(n => ({ trackId: String(300 + n), collectionId: String(400 + n), collectionName: null, trackName: `Song ${n}`, artistName: `Singer ${n}`,
+        discNumber: 1, discCount: 1, trackNumber: 1, trackTimeMillis: 200_000 })) };
+    step = proceedLookupRun(step.next, doc, { kind: 'itunes', action: second, result: songs }, start);
+    // Both bridge searches are refused: their results were not checked, and each needs its collection lookup.
+    for (let index = 0; index < 2; index++) {
+        const bridge = step.step.action as LookupAction & { kind: 'bridge' };
+        assert.deepEqual([bridge.kind, bridge.index], ['bridge', index]);
+        step = proceedLookupRun(step.next, doc, { kind: 'refused', action: bridge }, start);
+    }
+    const lookup = step.step.action as LookupAction & { kind: 'itunesCollection' };
+    assert.deepEqual(lookup, { kind: 'itunesCollection', itemKey: 'song:301', collectionId: '401', storefront: 'jp' });
+    step = proceedLookupRun(step.next, doc, { kind: 'refused', action: lookup }, start);
+    const other = step.step.action as LookupAction & { kind: 'itunesCollection' };
+    step = proceedLookupRun(step.next, doc, { kind: 'itunesCollection', action: other, result: {
+        collections: [{ collectionId: '402', collectionName: 'Song 2 - Single', artistName: 'Singer 2', trackCount: 1, releaseDate: { year: 2020, month: 1, day: 2 }, country: 'JPN', artworkUrl: null }],
+        tracks: [{ ...songs.tracks[1] }] } }, start);
+    assert.deepEqual(step.next.itunesStage!.items.map(item => [item.bridge, item.collection]), [['notRun', 'missing'], ['notRun', 'fetched']]);
+    // Offered but never preselected: MusicBrainz never ruled it out.
+    assert.deepEqual([step.next.state, step.next.candidates.map(candidate => [candidate.key, candidate.itunes?.check]), step.next.ranking!.groups.length, step.next.ranking!.preselection],
+        ['complete', [['itunes:402', 'notRun']], 1, null]);
+});
+
+test('per attempt the iTunes stage sends at most five iTunes searches or UPC lookups, four bridge searches and four collection lookups, sharing the 25-candidate bound', async () => {
+    // An album title in Han script with a barcode no storefront knows: two UPC lookups, then jp, tw and us searches.
+    const doc = project(2, index => tags({ album: '合成音楽集', identifiers: { barcode: '4006381333931', catalogNumber: null, isrc: null, musicBrainzReleaseId: null },
+        durationMs: [200_000, 210_000][index] }));
+    const record = runOf(doc), queries = record.queries as { query: MusicBrainzReleaseQuery }[];
+    // Each storefront shows the same six two-track collections, the tw storefront under other artist names.
+    const results = Array.from({ length: 6 }, (_unused, index) => itunesCollectionResult(500 + index, `合成 ${index}`, `歌手 ${index}`, 2));
+    const musicBrainz: LookupExchange[] = queries.map(query => searchAnswer(query.query, [])), itunes: LookupExchange[] = [
+        itunesAnswer(itunesUrls.lookupUpc('4006381333931', 'us'), []), itunesAnswer(itunesUrls.lookupUpc('4006381333931', 'jp'), []), albumSearch('合成音楽集', 'jp', results),
+        albumSearch('合成音楽集', 'tw', results.map(item => ({ ...item, artistName: `${item.artistName} tw` }))), albumSearch('合成音楽集', 'us', results)];
+    // Every bridge search finds nothing, and every collection lookup answers its collection.
+    for (let index = 0; index < 4; index++) {
+        for (const artist of [`歌手 ${index}`, `歌手 ${index} tw`]) musicBrainz.push(searchAnswer({ release: `合成 ${index}`, artist }, []));
+        itunes.push(collectionAnswer(500 + index, `合成 ${index}`, `歌手 ${index}`, [['A', 200_000], ['B', 300_000]], 'jp'));
+    }
+    const client = clientOf(musicBrainz, itunes);
+    const done = await drive(record, doc, client);
+    const upc = client.itunesRequests.filter(request => request.url.includes('upc=')).length, searches = client.itunesRequests.filter(request => request.url.includes('/search?')).length;
+    const collections = client.itunesRequests.filter(request => request.url.includes('lookup?id=')).length;
+    assert.deepEqual([upc, searches, collections, client.requests.length - queries.length], [2, 3, 4, 4]);
+    // Six plausible results, four kept: the stage is incomplete, so nothing is preselected. The four bridge searches cover both
+    // name pairs of the first two results only; the last two were not checked.
+    assert.deepEqual([done.itunesStage!.complete, done.itunesStage!.items.map(item => [item.key, item.bridge, item.unbridged === true, item.collection])],
+        [false, [[500, 'noRelease', false], [501, 'noRelease', false], [502, 'notRun', true], [503, 'notRun', true]].map(([id, bridge, unbridged]) => [`collection:${id}`, bridge, unbridged, 'fetched'])]);
+    assert.deepEqual([done.candidates.length, done.ranking!.disclosure.partialComparison, done.ranking!.preselection, done.aliases], [4, true, null, []]);
+    // With 25 candidates already known, a result is skipped without its collection lookup.
+    const full = Array.from({ length: 25 }, (_unused, index): StoredLookupCandidate => ({ key: `musicbrainz:${mbid(700 + index)}`, source: 'musicbrainz', releaseId: mbid(700 + index),
+        basis: 'albumText', summary: null, release: null, details: 'missing' }));
+    const stage = { ...done.itunesStage!, finalized: false, complete: true, items: done.itunesStage!.items.map(item => ({ ...item, bridge: 'pending' as const, collection: 'notNeeded' as const })) };
+    const bounded = proceedLookupRun({ ...done, state: 'running', phase: 'bridge', candidates: full, itunesStage: stage }, doc, null, start);
+    assert.deepEqual([bounded.step.action, bounded.next.itunesStage!.items.map(item => item.collection), bounded.next.itunesStage!.complete, bounded.next.candidates.length],
+        [null, ['skipped', 'skipped', 'skipped', 'skipped'], false, 25]);
+});
+
+test('busy mode lasts only until the first failed attempt of either source, and a record from an earlier release without the iTunes fields completes', async () => {
+    const doc = project(2, one), submitted = runOf(doc, { submitted: { kind: 'album', text: 'Synthetic Album' } });
+    let step = proceedLookupRun(submitted, doc, null, start);
+    while (step.step.action?.kind === 'search') step = proceedLookupRun(step.next, doc, { kind: 'found', action: step.step.action, found: [], complete: true }, start);
+    // MusicBrainz found nothing: the first iTunes request still uses busy mode, and one failed iTunes attempt ends it.
+    assert.deepEqual([step.step.action?.kind, step.step.mode], ['itunes', 'busy']);
+    const waiting = proceedLookupRun(step.next, doc, { kind: 'failed', source: 'itunes', failure: 'busy', retryAfterMs: null }, start).next;
+    assert.deepEqual([waiting.state, waiting.attempts, waiting.retryAt!.getTime() - start.getTime()], ['retrying', { musicbrainz: 0, itunes: 1 }, 30_000]);
+    assert.equal(proceedLookupRun(waiting, doc, null, waiting.retryAt!).step.mode, 'wait');
+    // A record stored mid-search by a release before the iTunes stage (no stage, exhausted sources or iTunes attempts) completes.
+    const legacy = { ...runOf(doc), attempts: { musicbrainz: 0 } } as Partial<MetadataLookupRecord>;
+    delete legacy.itunesStage; delete legacy.exhausted;
+    const client = clientOf((runOf(doc).queries as { query: MusicBrainzReleaseQuery }[]).map(query => searchAnswer(query.query, [])));
+    const done = await drive(legacy as MetadataLookupRecord, doc, client);
+    assert.deepEqual([done.state, done.outcome, done.itunesStage?.state, client.itunesCalls.length], ['complete', 'noRelease', 'answered', 2]);
+});
+
+test('the aliases after the iTunes stage are those of the bridged releases\' credits, within the bound of 16 the whole run shares, and an iTunes-only candidate adds none', async () => {
+    const doc = project(1, () => tags({ title: 'Synthetic Song', durationMs: 200_000 }));
+    const credits = Array.from({ length: 20 }, (_unused, index) => [`Synthetic ${index}`, mbid(100 + index)] as [string, string]);
+    // The first result's names find a release crediting 20 artists; the second's find none, so its collection becomes a candidate.
+    const client = clientOf([recordingAnswer({ recording: 'Synthetic Song' }), recordingAnswer({ recording: 'シンセ曲', artist: 'シンセ歌手' }, [[mbid(1), 1]]),
+        recordingAnswer({ recording: 'Other Song', artist: 'Other Singer' }), creditedAnswer(mbid(1), credits, [['Synthetic Label', mbid(200)]]),
+        ...credits.map(([name, id]) => aliasAnswer('artist', id, [name, `${name} Alias`]))], [
+        songSearch('Synthetic Song', 'us', [itunesSongResult(101, 201, 'シンセ曲', 'シンセ歌手', { trackTimeMillis: 200_000 }), itunesSongResult(102, 202, 'Other Song', 'Other Singer', { trackTimeMillis: 200_500 })]),
+        songSearch('Synthetic Song', 'jp', []), collectionAnswer(202, 'Other Song - Single', 'Other Singer', [['Other Song', 200_500]])]);
+    const steps: string[] = [];
+    let now = start, result: LookupStepResult | null = null, next = runOf(doc);
+    for (let count = 0; count < 100; count++) {
+        const proceeded = proceedLookupRun(next, doc, result, now);
+        next = proceeded.next;
+        if (!proceeded.step.action) { if (next.state !== 'retrying') break; now = next.retryAt!; result = null; continue; }
+        steps.push(proceeded.step.action.kind);
+        result = await performLookupStep(client, proceeded.step.action, proceeded.step.mode);
+    }
+    assert.deepEqual(steps, ['search', 'itunes', 'itunes', 'bridge', 'bridge', 'details', 'itunesCollection', ...Array<string>(16).fill('aliases')]);
+    assert.deepEqual(next.candidates.map(candidate => [candidate.key, candidate.details]), [[`musicbrainz:${mbid(1)}`, 'fetched'], ['itunes:202', 'fetched']]);
+    // The preselected iTunes-only candidate comes first in the order but credits no MusicBrainz ID; the bridged release's first 16
+    // artists fill the bound, so its label is never looked up.
+    assert.deepEqual(aliasLookups(client), credits.slice(0, METADATA_LOOKUP_JOB_LIMITS.aliasLookups).map(([, id]) => musicBrainzUrls.artistAliases(id).href));
+    assert.deepEqual([next.aliases!.length, next.aliases!.every(entry => entry.kind === 'artist' && entry.state === 'fetched')], [16, true]);
+    assert.deepEqual([next.state, next.ranking!.preselection?.candidateKey, next.ranking!.preselection?.basis, next.ranking!.preselection?.notChecked], ['complete', 'itunes:202', 'onlyMatchingGroup', undefined]);
 });

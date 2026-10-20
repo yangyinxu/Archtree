@@ -245,7 +245,8 @@ Metadata lookup jobs live in `adminImportLookups`, one record per import project
 holds its run number, state (`queued`, `running`, `retrying`, `complete`,
 `unavailable`, `stopped` or `superseded`), the granting administrator and a
 one-hour grant, the bound file set, the planned queries and progress, at most 25
-candidates (4 MiB of JSON together) and whether its searches were complete, the
+candidates (MusicBrainz releases or iTunes collections, 4 MiB of JSON
+together) and whether its searches were complete, the
 ranking (candidates plus ranking stay
 within 12 MiB, well under MongoDB's 16 MiB document limit), the applied
 candidate (or none) with its values, conflicts and flagged values (at most one
@@ -272,7 +273,8 @@ bump only `valueRevision`; a choice or an answer also takes its receipt's
 `revision`. File-tag automation reads the record's applied values in its own
 transaction, so it never replaces them; no index is added.
 
-An application whose release reports front artwork also records the import's
+An application whose release reports front artwork, or whose iTunes-only
+candidate has an allowlisted iTunes artwork address, also records the import's
 lookup cover job, `media.lookupCover`, in the same transaction; it is never
 projected and never changes `revision`. The publication worker runs the lookup
 cover pass (`runLookupCoverPassOnce` in
@@ -286,6 +288,24 @@ its claim; it is no constraint, so its failure is only a startup diagnostic and
 read-only apart from the shared gate's bookkeeping in
 `adminMetadataLookupGates`: they write no import, lookup or catalog document
 and no storage object.
+
+The iTunes fallback adds no collection, index or `requiredIndexRevision`
+change. A lookup record may hold `itunesStage` (the stage's requests, at most
+four results with their storefront names, and its bridge searches),
+`exhausted` (sources whose retries ran out) and `attempts.itunes`, and an
+iTunes-only candidate (`itunes:<collection ID>`) keeps its storefront, check
+and validated mzstatic artwork address under `itunes`, never projected; the
+lookup cover job keeps that address as `artworkUrl`. Import documents gain
+`localizedNames` (at most 21 groups of 4 iTunes localized artist names),
+written only by lookup value application in the same transaction as the
+applied values, and a format-3 approval freezes the groups that hold a current
+Artist entry's name as `media.publication.localizedNames` (only when there are
+some), which the worker's preselection recheck reads. The lookup worker's
+MusicBrainz and iTunes clients share one gate client and one response cache;
+iTunes requests and an iTunes-only candidate's artwork go through the `itunes`
+gate document (one request at a time, 3 seconds apart). The release before the
+fallback ignores these fields (see
+[Rollback floors](../features/admin-workbench.md#rollback-floors)).
 
 MusicBrainz IDs add two required unique partial indexes,
 `artist_musicbrainz_id` on `artists` and `organization_musicbrainz_id` on

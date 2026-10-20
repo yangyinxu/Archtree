@@ -13,7 +13,7 @@
 
 import { createHash } from 'node:crypto';
 import { METADATA_LOOKUP_LIMITS, type LookupDate, type MusicBrainzRelease, type MusicBrainzReleaseSummary } from './lookupContract';
-import { isPlaceholderCredit, normalizeGtin, normalizeMusicBrainzId } from './lookupIdentifiers';
+import { isPlaceholderCredit, normalizeGtin, normalizeItunesId, normalizeMusicBrainzId } from './lookupIdentifiers';
 import { keepableMusicBrainzId } from '../../utils/musicBrainzId';
 
 /**
@@ -24,6 +24,8 @@ import { keepableMusicBrainzId } from '../../utils/musicBrainzId';
  * the comparison is complete: a search that offered more releases than were compared
  * (`searchComplete: false`) or an incomplete candidate that could match may hide another matching
  * group, so the comparison is disclosed as partial and only an embedded identifier still preselects.
+ * An iTunes-only candidate never shares a group with a MusicBrainz one, and is preselected only when
+ * MusicBrainz answered without a release for it or stayed unavailable (then flagged `notChecked`).
  */
 export type LocalFileEvidence = {
     slotId: string; order: number;
@@ -35,7 +37,8 @@ export type LocalFileEvidence = {
     identifiers: { releaseId: string | null; barcode: string | null; catalogNumber: string | null };
 };
 export type LookupCandidate = {
-    key: string; source: 'musicbrainz'; releaseId: string;
+    /** For an iTunes-only candidate `releaseId` is its collection ID and `itunesCheck` why it was not checked against MusicBrainz. */
+    key: string; source: 'musicbrainz' | 'itunes'; releaseId: string; itunesCheck?: 'noRelease' | 'unavailable' | 'notRun';
     summary: MusicBrainzReleaseSummary | null;
     /** Null when the release details could not be fetched: the candidate is incomplete. */
     release: MusicBrainzRelease | null;
@@ -70,7 +73,8 @@ export type RankedLookupCandidate = {
     groupKey: string | null; artistMismatch: boolean | null;
 };
 export type RankedLookupGroup = { groupKey: string; representativeKey: string; memberKeys: string[]; proposal: LookupProposal };
-export type LookupPreselection = { candidateKey: string; groupKey: string; basis: 'releaseId' | 'barcode' | 'catalogNumber' | 'onlyMatchingGroup'; artistMismatch: boolean };
+/** `notChecked` (present only when true): an iTunes-only candidate preselected while MusicBrainz stayed unavailable. */
+export type LookupPreselection = { candidateKey: string; groupKey: string; basis: 'releaseId' | 'barcode' | 'catalogNumber' | 'onlyMatchingGroup'; artistMismatch: boolean; notChecked?: boolean };
 export type RankedLookup = {
     candidates: RankedLookupCandidate[];
     groups: RankedLookupGroup[];
@@ -134,7 +138,9 @@ const canonical = (value: unknown): string => {
     if (value && typeof value === 'object') return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonical((value as Record<string, unknown>)[key])}`).join(',')}}`;
     return JSON.stringify(value);
 };
-const groupKeyFor = (proposal: LookupProposal) => createHash('sha256').update(canonical(proposal)).digest('hex');
+/** MusicBrainz group keys hash the proposal alone (unchanged since S10); iTunes ones also name the source, so groups never mix sources. */
+const groupKeyFor = (proposal: LookupProposal, source: LookupCandidate['source']) =>
+    createHash('sha256').update(canonical(source === 'itunes' ? { source: 'itunes', proposal } : proposal)).digest('hex');
 const byText = (left: string, right: string) => left < right ? -1 : left > right ? 1 : 0;
 
 /**
@@ -197,10 +203,12 @@ const compareRelease = (release: MusicBrainzRelease, files: readonly LocalFileEv
 };
 
 /**
- * True when artist tags exist and none equals the joined credit, a credited name, a canonical artist name or an alias the lookup
- * found for a credited artist (`aliases`, by MusicBrainz ID).
+ * True when artist tags exist and none equals the joined credit, a credited name, a canonical artist name, an alias the lookup
+ * found for a credited artist (`aliases`, by MusicBrainz ID) or another name of an iTunes localized name group (`localized`) that
+ * holds one of those names.
  */
-const artistMismatchFor = (release: MusicBrainzRelease, files: readonly LocalFileEvidence[], aliases?: ReadonlyMap<string, readonly string[]>) => {
+const artistMismatchFor = (release: MusicBrainzRelease, files: readonly LocalFileEvidence[], aliases?: ReadonlyMap<string, readonly string[]>,
+    localized?: readonly (readonly string[])[]) => {
     const tags = new Set(files.flatMap(file => file.artistTags).filter(tag => typeof tag === 'string').map(folded).filter(Boolean));
     if (!tags.size) return false;
     const names = new Set([
@@ -208,6 +216,8 @@ const artistMismatchFor = (release: MusicBrainzRelease, files: readonly LocalFil
         ...release.artistCredit.flatMap(credit => [folded(credit.name), folded(credit.artistName),
             ...(aliases?.get(normalizeMusicBrainzId(credit.artistId) ?? '') ?? []).filter(name => typeof name === 'string').map(folded)])
     ]);
+    const groups = (Array.isArray(localized) ? localized : []).map(group => (Array.isArray(group) ? group : []).filter((name): name is string => typeof name === 'string').map(folded));
+    for (const group of groups.filter(group => group.some(name => names.has(name)))) for (const name of group) names.add(name);
     return ![...tags].some(tag => names.has(tag));
 };
 
@@ -218,9 +228,13 @@ const sharedIdentifier = (files: readonly LocalFileEvidence[], read: (file: Loca
     return files.length && values.size === 1 && value ? value : null;
 };
 
-/** A fetched release counts only when it is the candidate's own release; otherwise the candidate is incomplete. */
-const usableRelease = (candidate: LookupCandidate) => candidate.release
-    && normalizeMusicBrainzId(candidate.release.releaseId) === normalizeMusicBrainzId(candidate.releaseId) ? candidate.release : null;
+/**
+ * A fetched release counts only when it is the candidate's own release (by MusicBrainz ID, or for an iTunes-only candidate by its
+ * collection ID); otherwise the candidate is incomplete.
+ */
+const usableRelease = (candidate: LookupCandidate) => !candidate.release ? null
+    : candidate.source === 'itunes' ? normalizeItunesId(candidate.releaseId) !== null && candidate.release.releaseId === candidate.releaseId ? candidate.release : null
+        : normalizeMusicBrainzId(candidate.releaseId) !== null && normalizeMusicBrainzId(candidate.release.releaseId) === normalizeMusicBrainzId(candidate.releaseId) ? candidate.release : null;
 
 /** Duplicate keys keep the most complete entry, chosen without regard to input order. */
 const distinctCandidates = (candidates: readonly LookupCandidate[]) => {
@@ -237,22 +251,27 @@ const distinctCandidates = (candidates: readonly LookupCandidate[]) => {
 /**
  * `searchComplete` false marks a comparison partial; left out, the searches count as complete (pure callers and tests). An
  * incomplete candidate makes it partial too, unless it cannot match: it no longer exists or reported another track count.
- * `aliases` are the artist aliases the run found, by MusicBrainz ID (artistMismatchFor).
+ * `aliases` are the artist aliases the run found, by MusicBrainz ID, and `localized` its iTunes localized name groups
+ * (artistMismatchFor). An iTunes-only candidate is preselectable only when its check is `noRelease` or `unavailable`: an
+ * identifier that names one that is not preselects nothing, and neither does an only matching group it represents.
  */
 export const rankLookupCandidates = (candidates: readonly LookupCandidate[], files: readonly LocalFileEvidence[],
-    options: { toleranceMs?: number; searchComplete?: boolean; aliases?: ReadonlyMap<string, readonly string[]> } = {}): RankedLookup => {
+    options: { toleranceMs?: number; searchComplete?: boolean; aliases?: ReadonlyMap<string, readonly string[]>; localized?: readonly (readonly string[])[] } = {}): RankedLookup => {
     const toleranceMs = options.toleranceMs ?? METADATA_LOOKUP_LIMITS.durationToleranceMs;
     const sorted = orderedFiles(files), distinct = distinctCandidates(candidates);
-    type Scored = RankedLookupCandidate & { order: number[]; frontArtwork: boolean; release: MusicBrainzRelease | null };
+    type Scored = RankedLookupCandidate & { order: number[]; frontArtwork: boolean; release: MusicBrainzRelease | null; source: LookupCandidate['source'];
+        preselectable: boolean; notChecked: boolean };
     const scored: Scored[] = distinct.map(candidate => {
-        const release = usableRelease(candidate);
+        const release = usableRelease(candidate), source = candidate.source === 'itunes' ? 'itunes' as const : 'musicbrainz' as const;
+        const preselectable = source !== 'itunes' || candidate.itunesCheck === 'noRelease' || candidate.itunesCheck === 'unavailable';
+        const notChecked = source === 'itunes' && candidate.itunesCheck === 'unavailable';
         if (!release) return { key: candidate.key, releaseId: candidate.releaseId, status: 'incomplete', comparison: null, proposal: null,
-            groupKey: null, artistMismatch: null, order: [], frontArtwork: false, release: null };
+            groupKey: null, artistMismatch: null, order: [], frontArtwork: false, release: null, source, preselectable, notChecked };
         const { comparison, status, order } = compareRelease(release, sorted, toleranceMs);
         const proposal = proposalForRelease(release);
         return { key: candidate.key, releaseId: candidate.releaseId, status, comparison, proposal,
-            groupKey: status === 'matching' ? groupKeyFor(proposal) : null, artistMismatch: artistMismatchFor(release, files, options.aliases),
-            order, frontArtwork: release.frontArtwork === true, release };
+            groupKey: status === 'matching' ? groupKeyFor(proposal, source) : null, artistMismatch: artistMismatchFor(release, files, options.aliases, options.localized),
+            order, frontArtwork: release.frontArtwork === true, release, source, preselectable, notChecked };
     });
 
     const byRepresentative = (left: Scored, right: Scored) => Number(right.frontArtwork) - Number(left.frontArtwork) || byText(left.releaseId, right.releaseId) || byText(left.key, right.key);
@@ -267,12 +286,12 @@ export const rankLookupCandidates = (candidates: readonly LookupCandidate[], fil
         left.order[0] - right.order[0] || left.order[1] - right.order[1] || left.order[2] - right.order[2]
         || byText(left.releaseId, right.releaseId) || byText(left.key, right.key));
     const incomplete = scored.filter(candidate => candidate.status === 'incomplete').sort((left, right) => byText(left.key, right.key));
-    const strip = ({ order: _order, frontArtwork: _frontArtwork, release: _release, ...candidate }: Scored): RankedLookupCandidate => candidate;
+    const strip = ({ order: _order, frontArtwork: _frontArtwork, release: _release, source: _source, preselectable: _preselectable, notChecked: _notChecked, ...candidate }: Scored): RankedLookupCandidate => candidate;
     const ranked = [...groups.flatMap(group => group.members), ...others, ...incomplete].map(strip);
 
     const matching = scored.filter(candidate => candidate.status === 'matching');
-    const select = (candidate: Scored, basis: LookupPreselection['basis']): LookupPreselection =>
-        ({ candidateKey: candidate.key, groupKey: candidate.groupKey!, basis, artistMismatch: candidate.artistMismatch === true });
+    const select = (candidate: Scored, basis: LookupPreselection['basis']): LookupPreselection => ({ candidateKey: candidate.key, groupKey: candidate.groupKey!, basis,
+        artistMismatch: candidate.artistMismatch === true, ...(candidate.notChecked ? { notChecked: true } : {}) });
     let preselection: LookupPreselection | null = null;
     const identifierRules: [LookupPreselection['basis'], string | null, (candidate: Scored, value: string) => boolean][] = [
         ['releaseId', sharedIdentifier(files, file => normalizeMusicBrainzId(file.identifiers.releaseId)),
@@ -285,11 +304,12 @@ export const rankLookupCandidates = (candidates: readonly LookupCandidate[], fil
     for (const [basis, value, matches] of identifierRules) {
         if (!value) continue;
         const hits = matching.filter(candidate => matches(candidate, value));
-        if (hits.length === 1) { preselection = select(hits[0], basis); break; }
+        // A lone hit that may not be preselected (an iTunes-only candidate not yet ruled out in MusicBrainz) preselects nothing.
+        if (hits.length === 1) { if (hits[0].preselectable) preselection = select(hits[0], basis); break; }
     }
     const partialComparison = options.searchComplete === false || distinct.some(candidate => !usableRelease(candidate) && candidate.missing !== true
         && lookupTrackCountPlausible(candidate.summary?.trackCount ?? candidate.reportedTrackCount, files.length));
-    if (!preselection && groups.length === 1 && !partialComparison) preselection = select(groups[0].representative, 'onlyMatchingGroup');
+    if (!preselection && groups.length === 1 && !partialComparison && groups[0].representative.preselectable) preselection = select(groups[0].representative, 'onlyMatchingGroup');
 
     return {
         candidates: ranked,

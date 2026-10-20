@@ -99,7 +99,7 @@ export function ImportMedia({ item, operation, uploads, disabled, publishDisable
   const covers = item.assets.filter(asset => asset.contentType.startsWith('image/') && asset.state === 'ready'), automatic = item.coverChoice === 'automatic';
   // Extracted images and lookup covers have their own automatic lifecycle and remain removable even after preview readiness is lost.
   // A lookup cover is named by its source and release, so two kept at once read apart.
-  const lookupCover = (slotId: string | null) => Boolean(slotId?.startsWith('lookup-')), lookupName = (slotId: string) => lookupCoverName(t('media.lookup_cover'), slotId);
+  const lookupCover = (slotId: string | null) => Boolean(slotId?.startsWith('lookup-')), lookupName = (slotId: string) => lookupCoverName(t, slotId);
   const mediaRows = [
     ...item.manifest.files.map(file => ({ slotId: file.slotId, label: file.relativePath, kind: 'audio' as const })),
     { slotId: 'cover', label: t('media.manual_cover'), kind: 'cover' as const },
@@ -173,7 +173,7 @@ export function ImportMedia({ item, operation, uploads, disabled, publishDisable
       </li>;
     })}</ul>
     {covers.length > 0 && <fieldset disabled={disabled || publicationLocked} className={styles.editor}><legend>{t('layout.selected_cover')}</legend>
-      {automatic && <p className={styles.muted}>{t(item.selectedCoverSlotId === null ? 'media.cover_automatic_none' : lookupCover(item.selectedCoverSlotId) ? 'media.cover_automatic_lookup' : 'media.cover_automatic')}</p>}
+      {automatic && <p className={styles.muted}>{t(item.selectedCoverSlotId === null ? 'media.cover_automatic_none' : lookupCover(item.selectedCoverSlotId) ? item.selectedCoverSlotId.startsWith('lookup-itunes:') ? 'media.cover_automatic_lookup_itunes' : 'media.cover_automatic_lookup' : 'media.cover_automatic')}</p>}
       <label><input type="radio" name="selected-cover" checked={!automatic && item.selectedCoverSlotId === null} onChange={() => operation.run(`${path}/select-cover`, 'POST', { expectedRevision: item.revision, slotId: null })} />{t('media.no_cover')}</label>
       {/* A checked radio fires no change, so choosing the image already chosen automatically is a click that makes it explicit. */}
       {covers.map(asset => <label key={asset.slotId} className={styles.artworkChoice}><input type="radio" name="selected-cover" checked={item.selectedCoverSlotId === asset.slotId} onChange={() => operation.run(`${path}/select-cover`, 'POST', { expectedRevision: item.revision, slotId: asset.slotId })}

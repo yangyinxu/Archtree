@@ -5,7 +5,7 @@
  *          MusicBrainzRecordingHit, MusicBrainzIsrcResult, ItunesCollection, ItunesTrack, ItunesSearchResult,
  *          CoverArtListing, LookupSourceFailure, LookupInputProblem, LookupEntityAliases
  *   Classes: MetadataLookupSourceError, MetadataLookupInputError
- *   Functions: isLookupCandidateKey
+ *   Functions: isLookupCandidateKey, lookupCandidateSource
  *   Constants: metadataLookupSources, METADATA_LOOKUP_RATES, METADATA_LOOKUP_LIMITS, METADATA_LOOKUP_RETRY,
  *              METADATA_LOOKUP_HOSTS, ITUNES_STOREFRONTS, ADMIN_IMPORT_LOOKUP_COLLECTION,
  *              METADATA_LOOKUP_JOB_LIMITS, metadataLookupIndexes
@@ -17,10 +17,12 @@ import type { ImportDate } from '../import/adminImportContract';
 
 /**
  * Fixed sources, hosts, bounds and evidence types of administrator metadata lookup. The lookup
- * worker (metadataLookupService.ts) calls the MusicBrainz client; the Cover Art Archive client
- * fetches only a release's front artwork, for candidate previews and the lookup cover pass
- * (adminImportLookupCover.ts); the iTunes client waits for a later stage. Every value here is
- * server-chosen; no administrator input can change a host, a rate or a size bound.
+ * worker (metadataLookupService.ts) calls the MusicBrainz client, and the iTunes client for the
+ * fallback stage when MusicBrainz finds no matching release (lookupItunesStage.ts); the Cover Art
+ * Archive client fetches only a release's front artwork, and the iTunes artwork client only an
+ * iTunes-only candidate's, for candidate previews and the lookup cover pass
+ * (adminImportLookupCover.ts). Every value here is server-chosen; no administrator input can
+ * change a host, a rate or a size bound.
  */
 export const metadataLookupSources = ['musicbrainz', 'itunes', 'coverartarchive'] as const;
 export type MetadataLookupSource = typeof metadataLookupSources[number];
@@ -124,9 +126,12 @@ export type ItunesTrack = { trackId: string; collectionId: string; collectionNam
 export type ItunesSearchResult = { collections: ItunesCollection[]; tracks: ItunesTrack[] };
 export type CoverArtListing = { releaseId: string; images: { imageId: string; front: boolean; back: boolean; approved: boolean; types: string[]; sizes: (250 | 500 | 1200)[] }[] };
 
-/** A stored candidate's key: `musicbrainz:<release MBID>` in lower case. */
-export const isLookupCandidateKey = (value: unknown): value is string => typeof value === 'string'
-    && /^musicbrainz:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value);
+/** A stored candidate's key: `musicbrainz:<release MBID>` in lower case, or `itunes:<collection ID>` (1 to 12 digits, no leading zero). */
+export const isLookupCandidateKey = (value: unknown): value is string => lookupCandidateSource(value) !== null;
+/** The source a candidate key names, or null for anything that is no candidate key. */
+export const lookupCandidateSource = (value: unknown): 'musicbrainz' | 'itunes' | null => typeof value !== 'string' ? null
+    : /^musicbrainz:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value) ? 'musicbrainz'
+        : /^itunes:[1-9]\d{0,11}$/.test(value) ? 'itunes' : null;
 
 export type LookupSourceFailure = 'notConfigured' | 'busy' | 'rateLimited' | 'unavailable' | 'invalidResponse' | 'cancelled';
 const failureCodes: Record<LookupSourceFailure, string> = {
@@ -158,14 +163,19 @@ export const ADMIN_IMPORT_LOOKUP_COLLECTION = 'adminImportLookups';
  * a wait-mode request with its gate waits and in-call retries, which the deadline then aborts as unavailable), the candidate
  * bounds, the JSON budget of candidates plus ranking (well under MongoDB's 16 MiB document limit), the automatic runs per
  * project, and the automatic retries per run with the longest Retry-After they honour. The first automatic retry after a
- * 503/429 follows its Retry-After within `rateLimitedRetryMs`; a run sends at most `plannedQueries` searches, `candidates`
- * release lookups and `aliasLookups` artist or label alias lookups, keeping at most `aliasNames` names per entity.
+ * 503/429 follows its Retry-After within `rateLimitedRetryMs`; retries are counted per source. Per attempt, a run sends at most
+ * `plannedQueries` MusicBrainz searches, `candidates` release lookups (MusicBrainz and iTunes-only candidates share the bound) and
+ * `aliasLookups` artist or label alias lookups, keeping at most `aliasNames` names per entity. Its iTunes stage, alongside those,
+ * sends at most `itunesUpcLookups` UPC lookups, `itunesSearches` iTunes searches and `itunesCollectionLookups` collection lookups,
+ * keeps at most `itunesItems` iTunes results, and bridges them with at most `bridgeSearches` more MusicBrainz searches: at most 60
+ * requests. It keeps at most `localizedGroups` groups of `localizedNames` localized artist names.
  */
 export const METADATA_LOOKUP_JOB_LIMITS = Object.freeze({
     grantMs: 60 * 60 * 1000, leaseMs: 180_000, stepDeadlineMs: 120_000, workerIntervalMs: 2_000,
     candidates: 25, aliasLookups: 16, aliasNames: 32, candidateBytes: 4 * 1024 * 1024, recordBytes: 12 * 1024 * 1024, automaticRuns: 3,
     retryDelaysMs: Object.freeze([30_000, 120_000, 300_000]), retryAfterMaximumMs: 60_000,
-    rateLimitedRetryMs: Object.freeze({ minimum: 2_000, maximum: 10_000 })
+    rateLimitedRetryMs: Object.freeze({ minimum: 2_000, maximum: 10_000 }),
+    itunesUpcLookups: 2, itunesSearches: 3, itunesItems: 4, itunesCollectionLookups: 4, bridgeSearches: 4, localizedGroups: 4, localizedNames: 4
 });
 /**
  * One credited artist or label whose MusicBrainz aliases a run looks up after its release details: `pending` until fetched,

@@ -27,12 +27,14 @@ import { defaultImportObjectStorage, importAssetTarget, type ImportObjectStorage
 import { assertImportPreselectionsCurrent, importIdentityCandidates, importIdentityPreselections, sameImportPreselections } from './adminImportIdentity';
 import { assertImportReusedRecordsReady, commitImportCatalogGraph, freezeImportIdentities, importAlbumCredits, importPublicationConflict as conflict, requireCurrentApproval as currentApproval, requireImportPublicationReady as ready } from './adminImportCatalogCommit';
 import { lookupAnswersNeeded } from '../lookup/lookupValueApplication';
+import { importLocalizedNameMap, mergeImportLocalizedNames } from './adminImportLocalizedNames';
 import { importMusicBrainzIdWrites, importMusicBrainzNameMap, mergeImportMusicBrainzNames, sameMusicBrainzIdWrites } from './adminImportMusicBrainzIds';
 import { isBlockingLookupState, lookupGateFor } from '../lookup/metadataLookupRecord';
 import { runAutomaticImportCoverCleanupOnce } from './adminImportCoverCleanup';
 import { lookupCoverStagingActive } from './adminImportCoverAutomation';
 import { runLookupCoverPassOnce } from './adminImportLookupCover';
 import type { CoverArtClient } from '../lookup/coverArtClient';
+import type { ItunesArtworkClient } from '../lookup/itunesArtworkClient';
 
 const candidateProjection = importCandidateProjection;
 /** What the publish gate reads of the lookup record: the run and its state, whether it ranked a tie, and the applied values. */
@@ -96,7 +98,9 @@ export async function publishAdminImport(actor: string, id: string, raw: unknown
         // review) needs a fresh review below. Saved decisions stay explicit; the preselections are frozen with them, and must be
         // the ones the confirmation showed, so an append file shown as a new member is never frozen as a reuse, or the reverse.
         const explicit = doc.decisions as ImportDecisionV2[];
-        const candidates = await importIdentityCandidates({ manifest: doc.manifest, draft, assets: doc.media?.assets ?? [], decisions: explicit, names: importMusicBrainzNameMap(doc.musicBrainzNames, draft) }, session);
+        const localized = mergeImportLocalizedNames(doc.localizedNames, [], draft);
+        const candidates = await importIdentityCandidates({ manifest: doc.manifest, draft, assets: doc.media?.assets ?? [], decisions: explicit, names: importMusicBrainzNameMap(doc.musicBrainzNames, draft),
+            localized: importLocalizedNameMap(localized, draft.album.artists.map(entry => entry.name)) }, session);
         const preselections = importIdentityPreselections(draft, explicit, candidates);
         if (hasOwn(body, 'preselections') && !sameImportPreselections(body.preselections as unknown[], preselections)) throw new AdminImportError(409, 'ADMIN_IMPORT_REVIEW_REQUIRED');
         const decisions = [...explicit, ...preselections];
@@ -146,7 +150,7 @@ export async function publishAdminImport(actor: string, id: string, raw: unknown
         markAdministratorValues(doc.draftOrigins ??= {}, draftV2Paths(draft));
         if (lookup || doc.lookupGate) doc.lookupGate = lookupGateFor(lookup ?? doc.lookupGate!, doc.lookupGate);
         doc.media.publication = { schemaVersion: 3, operationId: body.operationId as string, actorId: actor, approvedRevision: doc.revision, snapshot: structuredClone(draft), decisions: structuredClone(decisions), state: 'preparing', issue: null, grantExpiresAt: new Date(Date.now() + 24 * 3600000), ...identities, albumId: existingAlbum?._id.toHexString() ?? new ObjectId().toHexString(), newAlbum: !existingAlbum, albumRevision: existingAlbum ? albumDecision.candidateRevision : null, coverId, tracks, cover: coverId ? { slotId: coverAsset!.slotId, key: `images/${coverId}`, state: 'pending', versionId: null, etag: null } : null, bucket: process.env.S3_BUCKET_NAME!.trim(), leaseOwner: null, leaseUntil: null,
-            musicBrainzNames: mergeImportMusicBrainzNames(doc.musicBrainzNames, new Map(), draft) };
+            musicBrainzNames: mergeImportMusicBrainzNames(doc.musicBrainzNames, new Map(), draft), ...(localized.length ? { localizedNames: localized } : {}) };
     });
     return result;
 }
@@ -329,11 +333,11 @@ export async function resumeAdminImportPublication(actor: string, id: string, op
 /**
  * The publication worker: a tick that publishes nothing sweeps one completed import whose automatic cover cleanup is not done
  * (crash recovery, imports completed before automatic covers, and candidates that were waiting or pinned), and otherwise runs one
- * lookup cover pass (adminImportLookupCover.ts), which needs this worker's private storage. `artwork` replaces the production
- * Cover Art Archive client (tests).
+ * lookup cover pass (adminImportLookupCover.ts), which needs this worker's private storage. `artwork` and `itunesArtwork` replace
+ * the production Cover Art Archive and iTunes artwork clients (tests).
  */
 export function startAdminImportPublisher(storage: ImportObjectStorage = defaultImportObjectStorage, intervalMs = 2_000, track?: AdminWorkTracker,
-    artwork?: () => CoverArtClient): () => Promise<void> {
+    artwork?: () => CoverArtClient, itunesArtwork?: () => ItunesArtworkClient): () => Promise<void> {
     return startAdminWorker(async signal => await runAdminImportPublicationOnce(storage, undefined, signal) || await runAutomaticImportCoverCleanupOnce(storage, undefined, signal)
-        || await runLookupCoverPassOnce(storage, undefined, signal, { artwork: artwork?.() }), intervalMs, track);
+        || await runLookupCoverPassOnce(storage, undefined, signal, { artwork: artwork?.(), itunesArtwork: itunesArtwork?.() }), intervalMs, track);
 }

@@ -3,10 +3,11 @@
  *   Classes: Storage
  *   Functions: mutation, code, projects, stored, lookup, later, tagged, project, slotOf, upload, v2, seeded,
  *              json, unavailable, mbid, searchUrl, releaseUrl, searchAnswer, releaseAnswer, fixtureClient,
- *              recordingGate, drain, onNextProjectRead, queue, submit, preparingPublication, syntheticAlbum,
- *              png, image, holdFirstSearch
+ *              recordingGate, runMetadataLookupOnce, startMetadataLookupWorker, drain, onNextProjectRead,
+ *              queue, submit, preparingPublication, syntheticAlbum, png, image, holdFirstSearch,
+ *              albumSearchUrl, collectionUrl, syntheticCollection
  *   Constants: guard, actor, other, by, byOther, contact, sharedFrames, albumQuery, albumDecision, hotelBase,
- *              hotelLengths
+ *              hotelLengths, albumTerm, mzstatic
  *   Variables: harness
  * Tests
  *   - confirming every selected file queues one automatic run under the uploader, fencing the import without touching its revision
@@ -46,6 +47,13 @@
  *   - a manual retry replaces a run waiting for an automatic retry and waits for the gate, and a retry past the grant ends the run unavailable
  *   - a release-ID query answered by a merged release keeps the fetched release under its current ID and ranks it
  *   - a submitted run's first 503 with Retry-After 0 is retried as busy within seconds and then waits, never 30 seconds
+ *   - a matching MusicBrainz release sends nothing to iTunes
+ *   - iTunes unavailable while MusicBrainz answered: the run retries iTunes automatically, blocking Publish, then completes with MusicBrainz's answer and iTunes unavailable
+ *   - MusicBrainz unavailable through its retries: the iTunes result becomes an iTunes-only candidate, preselected and applied as not checked against MusicBrainz
+ *   - a bridge search MusicBrainz refuses leaves its result not checked: an iTunes-only candidate that is offered but never preselected
+ *   - a run that preselects nothing still keeps its localized names: review lists the Artist named with the other name, and create is not preselected
+ *   - the MusicBrainz and iTunes gates both hold for two workers with their own database handles on two imports
+ *   - a free manual retry after iTunes stayed unavailable repeats the iTunes requests of the stored queries, and the result MusicBrainz then rules out is applied unflagged
  * @end-catalog */
 
 /**
@@ -73,19 +81,24 @@ import {
     type ImportObjectTarget
 } from '../../src/administration/import/adminImportStorage';
 import type { ImportAnalysisProvider } from '../../src/administration/import/adminImportProvider';
+import type { ImportDraftV2 } from '../../src/administration/import/adminImportDraft';
+import { importIdentityPreselections } from '../../src/administration/import/adminImportIdentity';
 import { MetadataLookupInputError, MetadataLookupSourceError, type MusicBrainzReleaseSummary } from '../../src/administration/lookup/lookupContract';
 import { createMongoLookupRateGate, type MetadataLookupRateGate } from '../../src/administration/lookup/lookupRateGate';
 import {
     createMusicBrainzClient, musicBrainzUrls, type MusicBrainzClient, type MusicBrainzRecordingQuery, type MusicBrainzReleaseQuery
 } from '../../src/administration/lookup/musicBrainzClient';
 import type { MetadataLookupRecord } from '../../src/administration/lookup/metadataLookupRecord';
+import { createItunesSearchClient } from '../../src/administration/lookup/iTunesSearchClient';
 import { getAdminImportLookup } from '../../src/administration/lookup/metadataLookupRequests';
 import {
-    adminImportLookupCollection, queueMetadataLookup, requestAutomaticMetadataLookup, runMetadataLookupOnce, startMetadataLookupWorker,
+    adminImportLookupCollection, queueMetadataLookup, requestAutomaticMetadataLookup, runMetadataLookupOnce as runLookupWorkerOnce, startMetadataLookupWorker as startLookupWorker,
     type MetadataLookupRequest, type MetadataLookupWorkerDependencies
 } from '../../src/administration/lookup/metadataLookupService';
 import { loadImportFixture } from '../support/adminImportFixtures';
-import { fixtureTransport, hotelCaliforniaExchanges, immediateGate, loadLookupFixture, type LookupExchange } from '../support/metadataLookupFixtures';
+import {
+    emptyItunesClient, fixtureTransport, hotelCaliforniaExchanges, immediateGate, itunesAnswer, itunesCollectionResult, itunesFixtureClient, itunesSongResult, loadLookupFixture, type LookupExchange
+} from '../support/metadataLookupFixtures';
 import { installNetworkGuard } from '../support/networkGuard';
 import { createPcmWav, withId3TextFrames } from '../support/pcmWav';
 
@@ -163,6 +176,12 @@ const recordingGate = (modes: string[], refuseBusy = false): MetadataLookupRateG
     const gate = immediateGate();
     return { async acquire(source, mode, signal) { modes.push(mode); if (refuseBusy && mode === 'busy') throw new MetadataLookupSourceError(source, 'busy', 1000); return gate.acquire(source, mode, signal); } };
 };
+/**
+ * The worker with an iTunes client that answers nothing unless a test passes its own, so a run without a MusicBrainz match passes
+ * an empty iTunes stage and no production client (or request) is ever made.
+ */
+const runMetadataLookupOnce = (dependencies: MetadataLookupWorkerDependencies = {}, signal?: AbortSignal) => runLookupWorkerOnce({ itunes: emptyItunesClient(), ...dependencies }, signal);
+const startMetadataLookupWorker = (dependencies: MetadataLookupWorkerDependencies = {}, intervalMs?: number) => startLookupWorker({ itunes: emptyItunesClient(), ...dependencies }, intervalMs);
 /** Runs due work until nothing is claimable at the injected time. */
 async function drain(dependencies: MetadataLookupWorkerDependencies) { for (let tick = 0; tick < 10 && await runMetadataLookupOnce(dependencies); tick++); }
 /** Arms a one-shot hook on the next read of an import project, which runs inside the next transaction that reads one. */
@@ -461,7 +480,7 @@ test('a rate-limited source is retried after its Retry-After within seconds, the
     await runMetadataLookupOnce({ musicBrainz: failing.musicBrainz, now: () => now });
     const gaveUp = (await lookup(id))!;
     assert.deepEqual([gaveUp.state, gaveUp.issue, gaveUp.outcome, gaveUp.ranking, gaveUp.attempts, failing.requests.length, (await stored(id)).lookupGate!.blocking],
-        ['unavailable', 'sourceBusy', null, null, { musicbrainz: 4 }, 12, false]);
+        ['unavailable', 'sourceBusy', null, null, { musicbrainz: 4, itunes: 0 }, 12, false]);
     // Another administrator retries manually: the same queries run under that administrator's grant.
     const retried = await queue(byOther, id, () => ({ kind: 'retry', actorId: byOther, operationId: randomUUID() }));
     assert.deepEqual([retried.run, retried.grantSource, retried.actorId, retried.automatic, retried.automaticRuns, retried.queries], [2, 'retry', byOther, false, 1, gaveUp.queries]);
@@ -622,7 +641,7 @@ test('a submitted run started during uploads treats newly confirmed files as kno
         recordingGate(modes, true));
     await drain({ musicBrainz: client.musicBrainz });
     const done = (await lookup(item.id))!;
-    assert.deepEqual([done.state, done.outcome, done.attempts, modes], ['complete', 'noRelease', { musicbrainz: 0 }, ['wait', 'wait']]);
+    assert.deepEqual([done.state, done.outcome, done.attempts, modes], ['complete', 'noRelease', { musicbrainz: 0, itunes: 0 }, ['wait', 'wait']]);
 });
 
 test('lookup never blocks saves, uploads or Luna, and a lookup step committed during a save is kept when the save retries', async t => {
@@ -775,7 +794,7 @@ test('saves, decisions, candidates and analysis succeed while a run is queued, r
     release();
     assert.equal(await worker, true);
     const ended = (await lookup(item.id))!;
-    assert.deepEqual([ended.state, ended.issue, ended.attempts, ended.retryAt, (await stored(item.id)).lookupGate!.blocking], ['unavailable', 'notConfigured', { musicbrainz: 0 }, null, false]);
+    assert.deepEqual([ended.state, ended.issue, ended.attempts, ended.retryAt, (await stored(item.id)).lookupGate!.blocking], ['unavailable', 'notConfigured', { musicbrainz: 0, itunes: 0 }, null, false]);
     await work('unavailable');
 });
 
@@ -860,7 +879,7 @@ test('a refused query is skipped and a refused release lookup leaves its candida
     const record = (await lookup(id))!;
     // The refused search counts as not sent, which leaves the comparison partial.
     assert.deepEqual([record.state, record.issue, record.outcome, record.queryIndex, record.attempts, record.candidates.map(candidate => candidate.details), record.searchComplete],
-        ['complete', null, 'candidates', 2, { musicbrainz: 0 }, ['fetched', 'failed'], false]);
+        ['complete', null, 'candidates', 2, { musicbrainz: 0, itunes: 0 }, ['fetched', 'failed'], false]);
     assert.equal(record.ranking!.candidates.find(candidate => candidate.releaseId === mbid(2))!.status, 'incomplete');
     assert.deepEqual(base.requests.map(request => request.url), [searchUrl({ release: 'Synthetic Album' }), releaseUrl(mbid(1))]);
 });
@@ -886,7 +905,7 @@ test('a timed-out or unexpected failure is retried after 30 seconds, a throttled
     for (const [label, failure] of failures) {
         const { record, calls, start } = await failWith(failure, 1);
         assert.deepEqual([record.state, record.issue, record.attempts, record.retryAt!.getTime() - start.getTime(), record.leaseOwner, calls],
-            ['retrying', 'sourceUnavailable', { musicbrainz: 1 }, 30_000, null, 1], label);
+            ['retrying', 'sourceUnavailable', { musicbrainz: 1, itunes: 0 }, 30_000, null, 1], label);
     }
     // A throttled source (503/429) is busy, and its first retry follows the Retry-After within 2 to 10 seconds.
     for (const [retryAfterMs, delay] of [[45_000, 10_000], [600_000, 10_000], [3_000, 3_000], [null, 2_000]] as const) {
@@ -900,7 +919,7 @@ test('a timed-out or unexpected failure is retried after 30 seconds, a throttled
     assert.equal(clamped.record.retryAt!.getTime() - clamped.start.getTime(), 60_000);
     const busy = await failWith(() => new MetadataLookupSourceError('musicbrainz', 'busy'), 4);
     assert.deepEqual([busy.record.state, busy.record.issue, busy.record.outcome, busy.record.ranking, busy.record.attempts, busy.record.retryAt, busy.calls],
-        ['unavailable', 'sourceBusy', null, null, { musicbrainz: 4 }, null, 4]);
+        ['unavailable', 'sourceBusy', null, null, { musicbrainz: 4, itunes: 0 }, null, 4]);
 });
 
 test('a grant that expires between steps stops the run, keeping earlier candidates unranked and discarding the step that found it', async () => {
@@ -1000,7 +1019,7 @@ test('a manual retry replaces a run waiting for an automatic retry and waits for
     assert.equal((await lookup(id))!.state, 'retrying');
     const retried = await queue(byOther, id, () => ({ kind: 'retry', actorId: byOther, operationId: randomUUID() }));
     assert.deepEqual([retried.run, retried.state, retried.grantSource, retried.attempts, retried.retryAt, (await stored(id)).lookupGate],
-        [2, 'queued', 'retry', { musicbrainz: 0 }, null, { fence: 4, run: 2, state: 'queued', blocking: true }]);
+        [2, 'queued', 'retry', { musicbrainz: 0, itunes: 0 }, null, { fence: 4, run: 2, state: 'queued', blocking: true }]);
     const modes: string[] = [];
     const working = fixtureClient([searchAnswer(albumQuery, [mbid(1)]), searchAnswer({ release: 'Synthetic Album' }, []), releaseAnswer(mbid(1), [1000])], recordingGate(modes, true));
     await drain({ musicBrainz: working.musicBrainz });
@@ -1014,7 +1033,7 @@ test('a manual retry replaces a run waiting for an automatic retry and waits for
     await runMetadataLookupOnce({ musicBrainz: fixtureClient(unavailable(searchUrl(albumQuery), 3)).musicBrainz, now: () => nearEnd });
     const ended = (await lookup(late))!;
     assert.deepEqual([ended.state, ended.issue, ended.retryAt, ended.attempts, ended.outcome, (await stored(late)).lookupGate],
-        ['unavailable', 'sourceBusy', null, { musicbrainz: 1 }, null, { fence: 3, run: 1, state: 'unavailable', blocking: false }]);
+        ['unavailable', 'sourceBusy', null, { musicbrainz: 1, itunes: 0 }, null, { fence: 3, run: 1, state: 'unavailable', blocking: false }]);
     // Ten seconds before the grant ends, an outage's 30-second retry would come after it too: the run ends unavailable at once.
     const outage = await seeded(1, syntheticAlbum);
     await requestAutomaticMetadataLookup(by, outage, 'upload');
@@ -1023,7 +1042,7 @@ test('a manual retry replaces a run waiting for an automatic retry and waits for
     await runMetadataLookupOnce({ musicBrainz: down, now: () => tenBefore });
     const gone = (await lookup(outage))!;
     assert.deepEqual([gone.state, gone.issue, gone.retryAt, gone.attempts, gone.outcome, (await stored(outage)).lookupGate],
-        ['unavailable', 'sourceUnavailable', null, { musicbrainz: 1 }, null, { fence: 3, run: 1, state: 'unavailable', blocking: false }]);
+        ['unavailable', 'sourceUnavailable', null, { musicbrainz: 1, itunes: 0 }, null, { fence: 3, run: 1, state: 'unavailable', blocking: false }]);
 });
 
 test('a release-ID query answered by a merged release keeps the fetched release under its current ID and ranks it', async () => {
@@ -1051,10 +1070,198 @@ test('a submitted run\'s first 503 with Retry-After 0 is retried as busy within 
     await runMetadataLookupOnce({ musicBrainz: client.musicBrainz, now: () => start });
     const waiting = (await lookup(id))!;
     assert.deepEqual([waiting.state, waiting.issue, waiting.retryAt!.getTime() - start.getTime(), waiting.attempts, (await stored(id)).lookupGate!.blocking, client.requests.length],
-        ['retrying', 'sourceBusy', 2_000, { musicbrainz: 1 }, true, 1]);
+        ['retrying', 'sourceBusy', 2_000, { musicbrainz: 1, itunes: 0 }, true, 1]);
     assert.equal(await runMetadataLookupOnce({ musicBrainz: client.musicBrainz, now: () => later(1_999, start) }), false, 'not due yet');
     await runMetadataLookupOnce({ musicBrainz: client.musicBrainz, now: () => waiting.retryAt! });
     const done = (await lookup(id))!;
     assert.deepEqual([done.state, done.issue, done.outcome, done.searchComplete, done.ranking!.preselection?.basis, modes, client.requests.length],
         ['complete', null, 'candidates', true, 'onlyMatchingGroup', ['busy', 'wait', 'wait'], 3]);
+});
+
+/** iTunes answers for the album term of the seeded `Synthetic Album` imports: an album search and a collection lookup in `storefront`. */
+const albumTerm = 'Synthetic Album Synthetic Ensemble';
+const albumSearchUrl = (storefront: 'us' | 'jp', term = albumTerm) => `https://itunes.apple.com/search?term=${encodeURIComponent(term).replace(/%20/g, '+')}&country=${storefront}&media=music&entity=album&limit=25`;
+const collectionUrl = (collectionId: number, storefront: 'us' | 'jp' = 'us') => `https://itunes.apple.com/lookup?id=${collectionId}&entity=song&country=${storefront}&limit=200`;
+const mzstatic = 'https://is1-ssl.mzstatic.com/image/thumb/Music126/v4/aa/bb/cc/synthetic/cover.jpg/100x100bb.jpg';
+const syntheticCollection = (collectionId: number, name: string, artist = 'Synthetic Ensemble', lengths = [1000]) => [
+    itunesCollectionResult(collectionId, name, artist, lengths.length, { artworkUrl100: mzstatic }),
+    ...lengths.map((length, index) => itunesSongResult(collectionId * 10 + index, collectionId, `Synthetic Track ${index + 1}`, artist, { trackNumber: index + 1, trackTimeMillis: length }))];
+
+test('a matching MusicBrainz release sends nothing to iTunes', async () => {
+    const id = await seeded(1, syntheticAlbum);
+    await requestAutomaticMetadataLookup(by, id, 'upload');
+    const calls: string[] = [];
+    await drain({ musicBrainz: fixtureClient([searchAnswer(albumQuery, [mbid(1)]), searchAnswer({ release: 'Synthetic Album' }, []), releaseAnswer(mbid(1), [1000])]).musicBrainz, itunes: emptyItunesClient(calls) });
+    const record = (await lookup(id))!;
+    assert.deepEqual([record.state, record.ranking!.preselection?.basis, record.itunesStage, calls], ['complete', 'onlyMatchingGroup', null, []]);
+    assert.equal((await getAdminImportLookup(by, id)).lookup!.itunes, 'notQueried');
+});
+
+test('iTunes unavailable while MusicBrainz answered: the run retries iTunes automatically, blocking Publish, then completes with MusicBrainz\'s answer and iTunes unavailable', async () => {
+    const id = await seeded(1, syntheticAlbum);
+    await requestAutomaticMetadataLookup(by, id, 'upload');
+    // MusicBrainz offers one release that cannot match one file; iTunes answers 503 to every attempt of its first search.
+    const musicBrainz = fixtureClient([searchAnswer(albumQuery, [mbid(1)]), searchAnswer({ release: 'Synthetic Album' }, []), releaseAnswer(mbid(1), [1000, 1000, 1000])]).musicBrainz;
+    const itunes = itunesFixtureClient(Array.from({ length: 12 }, () => ({ url: albumSearchUrl('us'), status: 503, headers: { 'content-type': 'text/html' }, bodyText: 'busy' })));
+    let now = new Date();
+    for (const delay of [5_000, 120_000, 300_000]) {
+        await runMetadataLookupOnce({ musicBrainz, itunes: itunes.itunes, now: () => now });
+        const record = (await lookup(id))!, read = await getAdminImportLookup(by, id);
+        assert.deepEqual([record.state, record.phase, record.issue, record.retryAt!.getTime() - now.getTime(), read.lookup!.itunes, read.summary.waiting.lookup, read.lookup!.blocking],
+            ['retrying', 'itunes', 'sourceBusy', delay, 'retrying', true, true]);
+        now = record.retryAt!;
+    }
+    await runMetadataLookupOnce({ musicBrainz, itunes: itunes.itunes, now: () => now });
+    const done = (await lookup(id))!, read = await getAdminImportLookup(by, id);
+    assert.deepEqual([done.state, done.issue, done.outcome, done.attempts, done.exhausted, done.itunesStage!.state, itunes.requests.length],
+        ['complete', null, 'candidates', { musicbrainz: 0, itunes: 4 }, { itunes: 'sourceBusy' }, 'unavailable', 12]);
+    assert.deepEqual([read.lookup!.itunes, read.lookup!.issue, read.summary.waiting.lookup, read.lookup!.blocking, (await stored(id)).lookupGate!.blocking], ['unavailable', null, false, false, false]);
+});
+
+test('MusicBrainz unavailable through its retries: the iTunes result becomes an iTunes-only candidate, preselected and applied as not checked against MusicBrainz', async () => {
+    const id = await seeded(1, syntheticAlbum);
+    await requestAutomaticMetadataLookup(by, id, 'upload');
+    // No MusicBrainz answer at all: each of the four attempts of the first search is unavailable, retried after 30 s, 2 and 5 minutes.
+    const down = fixtureClient([]);
+    const itunes = itunesFixtureClient([itunesAnswer(albumSearchUrl('us'), syntheticCollection(9001, 'Synthetic Album')), itunesAnswer(albumSearchUrl('jp'), []),
+        itunesAnswer(collectionUrl(9001), syntheticCollection(9001, 'Synthetic Album'))]);
+    let now = new Date();
+    for (let attempt = 0; attempt < 4; attempt++) {
+        await runMetadataLookupOnce({ musicBrainz: down.musicBrainz, itunes: itunes.itunes, now: () => now });
+        const record = (await lookup(id))!;
+        if (record.state === 'retrying') now = record.retryAt!;
+    }
+    const done = (await lookup(id))!, read = await getAdminImportLookup(by, id), doc = await stored(id);
+    assert.deepEqual([done.state, done.issue, done.outcome, done.exhausted, done.itunesStage!.reason, done.itunesStage!.bridge, down.requests.length],
+        ['complete', 'sourceUnavailable', 'candidates', { musicbrainz: 'sourceUnavailable' }, 'searchUnavailable', [], 4]);
+    assert.deepEqual([done.ranking!.preselection?.candidateKey, done.ranking!.preselection?.notChecked, done.applied!.source, done.applied!.notChecked, done.applied!.releaseId],
+        ['itunes:9001', true, 'itunes', true, '9001']);
+    assert.deepEqual([read.lookup!.candidates[0].source, read.lookup!.candidates[0].notChecked, read.lookup!.preselection!.notChecked, read.lookup!.applied!.source, read.lookup!.applied!.notChecked, read.lookup!.itunes],
+        ['itunes', true, true, 'itunes', true, 'answered']);
+    // Its values are applied (the draft never changes its revision), and its artwork is queued for staging from the stored address.
+    const draft = doc.draft as { album: { title: string; artists: { name: string; musicBrainzId: string | null }[] } };
+    assert.deepEqual([draft.album.title, draft.album.artists.map(entry => [entry.name, entry.musicBrainzId]), doc.media!.lookupCover!.candidateKey, doc.media!.lookupCover!.artworkUrl],
+        ['Synthetic Album', [['Synthetic Ensemble', null]], 'itunes:9001', mzstatic]);
+    // Only the term, storefront and collection ID reach Apple, with the product-only User-Agent; neither the view nor the summary
+    // shows an address, and the record keeps the artwork address only on the iTunes-only candidate.
+    assert.deepEqual(itunes.requests.map(request => decodeURIComponent(new URL(request.url).search.replace(/\+/g, ' '))), [
+        `?term=${albumTerm}&country=us&media=music&entity=album&limit=25`, `?term=${albumTerm}&country=jp&media=music&entity=album&limit=25`, '?id=9001&entity=song&country=us&limit=200']);
+    for (const request of itunes.requests) {
+        assert.deepEqual([Object.keys(request.headers).sort(), request.headers['User-Agent']], [['Accept', 'Accept-Encoding', 'User-Agent'], 'Finitude/1.0']);
+        for (const secret of ['Secret', 'Disc', '.wav', 'example.test', contact]) assert.equal(decodeURIComponent(request.url).includes(secret), false, secret);
+    }
+    assert.equal(JSON.stringify(read).includes('://'), false);
+    assert.deepEqual(JSON.stringify(done).match(/https:\/\/[^"]+/g), [mzstatic]);
+});
+
+test('a bridge search MusicBrainz refuses leaves its result not checked: an iTunes-only candidate that is offered but never preselected', async () => {
+    const id = await seeded(1, syntheticAlbum);
+    await requestAutomaticMetadataLookup(by, id, 'upload');
+    const answers = fixtureClient([searchAnswer(albumQuery, []), searchAnswer({ release: 'Synthetic Album' }, [])]);
+    const refusing: MusicBrainzClient = { ...answers.musicBrainz, async searchReleases(query, options) {
+        if (query.release === 'シンセアルバム') throw new MetadataLookupInputError('invalidText');
+        return answers.musicBrainz.searchReleases(query, options);
+    } };
+    const itunes = itunesFixtureClient([itunesAnswer(albumSearchUrl('us'), syntheticCollection(9002, 'シンセアルバム', 'シンセ合奏団')), itunesAnswer(albumSearchUrl('jp'), []),
+        itunesAnswer(collectionUrl(9002), syntheticCollection(9002, 'シンセアルバム', 'シンセ合奏団'))]);
+    await drain({ musicBrainz: refusing, itunes: itunes.itunes });
+    const done = (await lookup(id))!, read = (await getAdminImportLookup(by, id)).lookup!;
+    assert.deepEqual([done.state, done.itunesStage!.bridgeOutcomes, done.itunesStage!.items.map(item => item.bridge), done.candidates.map(candidate => candidate.itunes?.check)],
+        ['complete', ['refused'], ['notRun'], ['notRun']]);
+    assert.deepEqual([read.groups.length, read.preselection, read.applied, read.candidates[0].notChecked, read.needsAnswer, read.blocking], [1, null, null, true, { tie: false, conflicts: [] }, false]);
+});
+
+test('a run that preselects nothing still keeps its localized names: review lists the Artist named with the other name, and create is not preselected', async () => {
+    const id = await seeded(1, syntheticAlbum), lead = randomUUID();
+    await projects().updateOne({ _id: new ObjectId(id) }, { $set: { 'draft.album.artists': [{ key: lead, name: 'Synthetic Ensemble', role: 'primary', joinPhrase: null, musicBrainzId: null }] } });
+    await requestAutomaticMetadataLookup(by, id, 'upload');
+    // iTunes shows the collection under a Japanese name in jp; neither name pair finds a MusicBrainz release, and the collection's
+    // only song does not match the file, so the iTunes-only candidate is offered but nothing is preselected or applied.
+    const musicBrainz = fixtureClient([searchAnswer(albumQuery, []), searchAnswer({ release: 'Synthetic Album' }, []), searchAnswer({ release: 'シンセアルバム', artist: 'シンセ合奏団' }, []),
+        searchAnswer(albumQuery, [])]);
+    const itunes = itunesFixtureClient([itunesAnswer(albumSearchUrl('us'), syntheticCollection(9004, 'Synthetic Album')), itunesAnswer(albumSearchUrl('jp'), syntheticCollection(9004, 'シンセアルバム', 'シンセ合奏団')),
+        itunesAnswer(collectionUrl(9004), syntheticCollection(9004, 'Synthetic Album', 'Synthetic Ensemble', [300_000]))]);
+    await drain({ musicBrainz: musicBrainz.musicBrainz, itunes: itunes.itunes });
+    const done = (await lookup(id))!, doc = await stored(id);
+    assert.deepEqual([done.state, done.outcome, done.candidates.map(candidate => candidate.key), done.ranking!.groups.length, done.ranking!.preselection, done.applied, musicBrainz.requests.length],
+        ['complete', 'candidates', ['itunes:9004'], 0, null, null, 4]);
+    // The run's group holds the entry's name, so it is kept on the import without any value change.
+    assert.deepEqual([doc.localizedNames, doc.valueRevision ?? 0, doc.revision], [[['Synthetic Ensemble', 'シンセ合奏団']], 0, 1]);
+    const ready = new ObjectId();
+    await getDb()!.collection('artists').insertOne({ _id: ready, name: 'シンセ合奏団', lifecycleStatus: 'ready' });
+    try {
+        const candidates = await adminImportDuplicateCandidates(by, id);
+        assert.deepEqual(candidates.items.filter(item => item.kind === 'artist').map(item => [item.id, item.match, item.localizedOf]), [[ready.toHexString(), 'localizedName', 'Synthetic Ensemble']]);
+        assert.equal(importIdentityPreselections(doc.draft as ImportDraftV2, [], candidates).some(decision => decision.entryKey === lead), false);
+    } finally { await getDb()!.collection('artists').deleteOne({ _id: ready }); }
+});
+
+test('the MusicBrainz and iTunes gates both hold for two workers with their own database handles on two imports', async () => {
+    const ids = [await seeded(1, syntheticAlbum), await seeded(1, () => v2({ album: 'Other Album', albumArtists: ['Synthetic Ensemble'] }))];
+    for (const each of ids) await requestAutomaticMetadataLookup(by, each, 'upload');
+    const spans: { source: 'musicbrainz' | 'itunes'; start: number; end: number }[] = [];
+    const rates = { musicbrainz: { intervalMs: 100, concurrency: 1, leaseMs: 30_000 }, itunes: { intervalMs: 300, concurrency: 1, leaseMs: 30_000 } };
+    const timed = (source: 'musicbrainz' | 'itunes', transport: ReturnType<typeof fixtureTransport>['transport']) => {
+        const request = transport.request!;
+        return { ...transport, request: async (...args: Parameters<typeof request>) => {
+            const span = { source, start: performance.now(), end: 0 }; spans.push(span);
+            await new Promise(resolve => setTimeout(resolve, 20));
+            try { return await request(...args); } finally { span.end = performance.now(); }
+        } };
+    };
+    const worker = (db: ReturnType<typeof getDb>) => {
+        const gate = createMongoLookupRateGate(db!, { rates });
+        const musicBrainz = fixtureTransport([searchAnswer(albumQuery, []), searchAnswer({ release: 'Synthetic Album' }, []),
+            searchAnswer({ release: 'Other Album', artist: 'Synthetic Ensemble' }, []), searchAnswer({ release: 'Other Album' }, [])]);
+        const itunes = fixtureTransport([albumSearchUrl('us'), albumSearchUrl('jp'), albumSearchUrl('us', 'Other Album Synthetic Ensemble'), albumSearchUrl('jp', 'Other Album Synthetic Ensemble')]
+            .map(url => itunesAnswer(url, [])));
+        return { musicBrainz: createMusicBrainzClient({ gate, transport: timed('musicbrainz', musicBrainz.transport), sleep: async () => undefined }),
+            itunes: createItunesSearchClient({ gate, transport: timed('itunes', itunes.transport), sleep: async () => undefined }) };
+    };
+    const secondHandle = getDatabaseClient().db(getDb()!.databaseName);
+    await Promise.all([drain(worker(getDb())), drain(worker(secondHandle))]);
+    for (const each of ids) assert.deepEqual([(await lookup(each))!.state, (await lookup(each))!.outcome, (await lookup(each))!.itunesStage!.state], ['complete', 'noRelease', 'answered']);
+    for (const [source, interval] of [['musicbrainz', 100], ['itunes', 300]] as const) {
+        const ordered = spans.filter(span => span.source === source).sort((left, right) => left.start - right.start);
+        assert.equal(ordered.length, 4, source);
+        for (let index = 1; index < ordered.length; index++) {
+            assert.ok(ordered[index].start >= ordered[index - 1].end, `${source} requests never overlap`);
+            assert.ok(ordered[index].start - ordered[index - 1].start >= interval - 5, `${source} spacing ${ordered[index].start - ordered[index - 1].start}`);
+        }
+    }
+});
+
+test('a free manual retry after iTunes stayed unavailable repeats the iTunes requests of the stored queries, and the result MusicBrainz then rules out is applied unflagged', async () => {
+    const id = await seeded(1, syntheticAlbum);
+    await requestAutomaticMetadataLookup(by, id, 'upload');
+    // iTunes is throttled through every automatic retry of the first run, then answers the retried run.
+    const itunes = itunesFixtureClient([...Array.from({ length: 12 }, () => ({ url: albumSearchUrl('us'), status: 503, headers: { 'content-type': 'text/html' }, bodyText: 'busy' })),
+        itunesAnswer(albumSearchUrl('us'), syntheticCollection(9003, 'Synthetic Album')), itunesAnswer(albumSearchUrl('jp'), []), itunesAnswer(collectionUrl(9003), syntheticCollection(9003, 'Synthetic Album'))]);
+    // MusicBrainz knows no release in either run; the retried run's bridge repeats the credited search.
+    const musicBrainz = fixtureClient([searchAnswer(albumQuery, []), searchAnswer({ release: 'Synthetic Album' }, []), searchAnswer(albumQuery, []), searchAnswer({ release: 'Synthetic Album' }, []),
+        searchAnswer(albumQuery, [])]);
+    let now = new Date();
+    for (let tick = 0; tick < 6; tick++) {
+        await runMetadataLookupOnce({ musicBrainz: musicBrainz.musicBrainz, itunes: itunes.itunes, now: () => now });
+        const record = (await lookup(id))!;
+        if (record.state !== 'retrying') break;
+        now = record.retryAt!;
+    }
+    const first = (await lookup(id))!, read = await getAdminImportLookup(by, id);
+    assert.deepEqual([first.state, first.outcome, first.issue, first.exhausted, first.itunesStage!.items, itunes.requests.length, musicBrainz.requests.length],
+        ['complete', 'noRelease', null, { itunes: 'sourceBusy' }, [], 12, 2]);
+    assert.deepEqual([read.lookup!.itunes, read.lookup!.blocking, read.summary.waiting.lookup], ['unavailable', false, false]);
+    // The retry repeats the stored queries under the retrying administrator's grant, with fresh attempts and no stage.
+    const retried = await queue(byOther, id, () => ({ kind: 'retry', actorId: byOther, operationId: randomUUID() }));
+    assert.deepEqual([retried.run, retried.queries, retried.attempts, retried.exhausted, retried.itunesStage], [2, first.queries, { musicbrainz: 0, itunes: 0 }, {}, null]);
+    await drain({ musicBrainz: musicBrainz.musicBrainz, itunes: itunes.itunes, now: () => now });
+    const done = (await lookup(id))!, view = (await getAdminImportLookup(by, id)).lookup!;
+    assert.deepEqual(itunes.requests.slice(12).map(request => request.url), [albumSearchUrl('us'), albumSearchUrl('jp'), collectionUrl(9003)]);
+    assert.equal(musicBrainz.requests.length, 5);
+    // MusicBrainz answered the bridge without a release: the iTunes-only candidate is preselected and applied, not flagged as unchecked.
+    assert.deepEqual([done.run, done.state, done.issue, done.exhausted, done.itunesStage!.items.map(item => [item.bridge, item.collection]), done.applied!.candidateKey, done.applied!.source,
+        done.applied!.notChecked, done.applied!.actorId], [2, 'complete', null, {}, [['noRelease', 'fetched']], 'itunes:9003', 'itunes', undefined, byOther]);
+    assert.deepEqual([view.itunes, view.applied!.source, view.applied!.notChecked, view.preselection!.notChecked, view.candidates[0].notChecked],
+        ['answered', 'itunes', false, false, false]);
+    assert.equal((await stored(id)).draft.album.title, 'Synthetic Album');
 });

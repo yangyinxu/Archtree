@@ -13,6 +13,7 @@
  *   - an untitled file is never matched by title when appending, so an untitled member holds only the file its bytes match
  *   - the record holding an entry's MusicBrainz ID is preselected as reuse, binding the ID, and its other candidates need no answer
  *   - a record lookup found under an alias of the entry's ID, or holding the ID, blocks create like a name candidate; another ID's does not
+ *   - a record named with an iTunes localized name of an Artist name blocks create for that entry (or the proposed name it was read for) like a name candidate, and only for it
  *   - the worker recheck reads no candidates for a format-1 or format-2 approval or one that froze no preselection, and refuses a malformed format-3 decision list
  *   - a same-name record too malformed to be a candidate keeps its row from being preselected, and only that row
  *   - names compare without the host locale, so a Turkish default locale still matches a dotted capital I
@@ -171,6 +172,21 @@ test('a record lookup found under an alias of the entry\'s ID, or holding the ID
     assert.equal(importIdentityPreselections(value, taken, listing([holder])).some(item => item.entryKey === lorem), false);
     // An entry without an ID is never matched by another entry's alias or ID rows.
     assert.equal(importIdentityPreselections(draft(), [], listing([alias, holder])).some(item => item.entryKey === lorem), true);
+});
+
+test('a record named with an iTunes localized name of an Artist name blocks create for that entry (or the proposed name it was read for) like a name candidate, and only for it', () => {
+    const value = draft();
+    const localized = candidate('artist', 'ロレム合奏団', { match: 'localizedName', localizedOf: 'LOREM ENSEMBLE' });
+    const preselected = importIdentityPreselections(value, [], listing([localized]));
+    assert.deepEqual([preselected.some(item => item.entryKey === lorem), preselected.some(item => item.entryKey === ipsum)], [false, true]);
+    // A row read for a name no entry has (a pending proposal's) blocks no entry; once a renamed entry carries that name, it does.
+    const proposed = candidate('artist', 'イプサム', { match: 'localizedName', localizedOf: 'Ipsum Proposal' });
+    assert.equal(importIdentityPreselections(value, [], listing([proposed])).some(item => item.entryKey === ipsum), true);
+    const renamed = draft(item => { item.album.artists[1].name = 'Ipsum Proposal'; });
+    assert.equal(importIdentityPreselections(renamed, [], listing([proposed])).some(item => item.entryKey === ipsum), false);
+    // A localized name never stands for a label, and never reuses: the entry needs an explicit answer.
+    assert.equal(importIdentityPreselections(value, [], listing([{ ...localized, localizedOf: 'Sit Records' }])).some(item => item.scope === 'label'), true);
+    assert.equal(preselected.some(item => item.action === 'reuse'), false);
 });
 
 test('the worker recheck reads no candidates for a format-1 or format-2 approval or one that froze no preselection, and refuses a malformed format-3 decision list', async () => {

@@ -40,6 +40,7 @@
  *   - a create with a v1 draft replays its receipt, stores its Draft v2 conversion, and a pre-deploy v1 project replays unconverted
  *   - Luna on a Draft v2 project receives the Draft v2 baseline without keys or IDs and stores Artist entries keyed by exact name; its work is claimed and holds capacity
  *   - Luna receives only the applied MusicBrainz release as labelled untrusted context, and every suggestion of a chunk that sent it records it
+ *   - an applied iTunes-only candidate sends Luna no context, and no collection ID, storefront, artwork address or localized name reaches its input
  *   - /adopt takes at most 304 suggestion IDs, and label and Disc Number suggestions are accepted or rejected through it
  *   - duplicate candidates also cover the names and titles pending Luna proposals would write, while the summary counts the saved draft
  *   - a pending proposal naming a saved Artist, label, Album or track title in another case lists each same-name record once
@@ -63,6 +64,8 @@
  *   - a legacy value over its bound after NFC reads as empty, and a save from that shown value converts the project and replaces it
  *   - the summary state is computed by the server: a public default changed in place, what Publish waits for, Luna ticks, lookup and identity answers, an append, the lookup configuration and the budget left
  *   - a renamed entry keeps its MusicBrainz ID only under a name lookup found for it, and Review lists records named so as alias candidates
+ *   - iTunes localized names list the Artists named with another name of a saved or proposed Artist name by their strongest match, a malformed one holds its name, and none keeps a MusicBrainz ID
+ *   - two Artist entries of one localized name group: the record listed for the first keeps the second from a preselected create too
  * @end-catalog */
 
 import assert from 'node:assert/strict';
@@ -605,17 +608,20 @@ test('Luna on a Draft v2 project receives the Draft v2 baseline without keys or 
     assert.deepEqual(adopted.item.draft.album.artists, entries);
 });
 
-/** A metadata lookup record with three candidates: the applied MusicBrainz release, another release and an iTunes collection. */
-const appliedLookup = (id: string, choice: 'chosen' | 'none' = 'chosen') => {
+/** A metadata lookup record with three candidates: the applied MusicBrainz release, another release and an iTunes-only candidate. */
+const appliedLookup = (id: string, choice: 'chosen' | 'none' | 'itunes' = 'chosen') => {
     const releaseId = '0383dadf-2a4e-4d10-a46a-e9e041da8eb3', other = '11111111-2222-4333-8444-555555555555';
     const release = (rid: string, title: string) => ({ releaseId: rid, releaseGroupId: '22222222-3333-4444-8555-666666666666', title, status: 'Official', barcode: '4006381333931', barcodeText: '4006381333931', country: 'JP', primaryType: 'Album', secondaryTypes: [], trackCount: 1, frontArtwork: true,
         artistCredit: [{ name: 'Lorem Ensemble', joinPhrase: '', artistId: '33333333-4444-4555-8666-777777777777', artistName: 'Lorem Ensemble' }], labels: [{ name: 'Amet Records', labelId: '55555555-6666-4777-8888-999999999999', catalogNumber: 'AMET-001' }],
         date: { year: 2020, month: null, day: null }, groupFirstReleaseDate: null, media: [{ position: 2, format: 'CD', tracks: [{ position: 1, number: '1', title: `${title} Song`, lengthMs: 1000, recordingId: '66666666-7777-4888-8999-aaaaaaaaaaaa', isrcs: ['JPAB01234567'] }] }] });
     const candidate = (rid: string, title: string) => ({ key: `musicbrainz:${rid}`, source: 'musicbrainz', releaseId: rid, basis: 'title', summary: null, release: release(rid, title), details: 'fetched' });
     return { releaseId, record: { _id: new ObjectId(id), run: 2, state: 'complete', issue: null, outcome: 'candidates', input: { trigger: 'submitted', submitted: { kind: 'album', text: 'Ipsum' } }, ranking: null, staleSlotIds: [],
-        candidates: [candidate(other, 'Other Release'), candidate(releaseId, 'Ipsum'), { key: 'itunes:12345', source: 'itunes', collectionId: '12345', details: 'fetched', release: { title: 'iTunes Title' } }],
+        candidates: [candidate(other, 'Other Release'), candidate(releaseId, 'Ipsum'), { key: 'itunes:12345', source: 'itunes', releaseId: '12345', basis: 'itunes', summary: null, details: 'fetched',
+            release: { ...release('12345', 'iTunes Title'), artistCredit: [{ name: 'Lorem Ensemble', joinPhrase: '', artistId: '', artistName: 'Lorem Ensemble' }], labels: [] },
+            itunes: { storefront: 'jp', artworkUrl: 'https://is1-ssl.mzstatic.com/image/thumb/Music/v4/a/b/c/x.jpg/100x100bb.jpg', check: 'unavailable' } }],
         applied: choice === 'none' ? { run: 2, candidateKey: null, releaseId: null, choice: 'none', basis: null, values: [], flagged: [], conflicts: [] }
-            : { run: 2, candidateKey: `musicbrainz:${releaseId}`, releaseId, choice, basis: 'chosen', values: [], flagged: [], conflicts: [] } } };
+            : choice === 'itunes' ? { run: 2, candidateKey: 'itunes:12345', releaseId: '12345', choice: 'chosen', basis: 'chosen', values: [], flagged: [], conflicts: [], source: 'itunes', notChecked: true }
+                : { run: 2, candidateKey: `musicbrainz:${releaseId}`, releaseId, choice, basis: 'chosen', values: [], flagged: [], conflicts: [] } } };
 };
 
 test('Luna receives only the applied MusicBrainz release as labelled untrusted context, and every suggestion of a chunk that sent it records it', async () => {
@@ -648,6 +654,21 @@ test('Luna receives only the applied MusicBrainz release as labelled untrusted c
     assert.deepEqual([again!.analysis.generation, 'lookupContext' in again!.analysis, inputs.slice(2).map(input => input.lookupContext)], [2, false, [null, null]]);
     assert.deepEqual(again!.suggestions.map(value => [value.generation, 'lookupContext' in value]), [[1, true], [1, true], [2, false], [2, false]]);
     assert.equal(again!.analysisHistory[0].lookupContext!.releaseId, releaseId);
+});
+
+test('an applied iTunes-only candidate sends Luna no context, and no collection ID, storefront, artwork address or localized name reaches its input', async () => {
+    const by = actor.toHexString(), first = await create(), id = first.item.id, inputs: AnalysisInput[] = [];
+    await getDb()!.collection('adminImportLookups').insertOne(appliedLookup(id, 'itunes').record as never);
+    // The import keeps the run's localized names for its entries; Luna never reads them.
+    await rewrite(id, doc => { doc.localizedNames = [['Lorem Ensemble', 'ロレム合奏団']]; });
+    const luna: ImportAnalysisProvider = { configured: () => true, analyze: async input => { inputs.push(input); return []; } };
+    await analyzeAdminImport(by, id, mutation(1), luna); await settle(luna);
+    assert.equal('lookupContext' in (await stored(id))!.analysis, false);
+    assert.ok(inputs.length >= 1);
+    for (const input of inputs) {
+        assert.equal(input.lookupContext, null);
+        for (const text of ['12345', 'itunes', 'iTunes', 'mzstatic', '"jp"', 'storefront', 'ロレム合奏団', 'localized', 'notChecked']) assert.ok(!JSON.stringify(input).includes(text), text);
+    }
 });
 
 test('/adopt takes at most 304 suggestion IDs, and label and Disc Number suggestions are accepted or rejected through it', async () => {
@@ -1182,4 +1203,68 @@ test('a renamed entry keeps its MusicBrainz ID only under a name lookup found fo
     // Dropping the ID (always allowed) clears it and its names.
     await rename('ロレム・アンサンブル', null);
     assert.deepEqual([v2(await stored(id)).album.artists[0].musicBrainzId, (await getAdminImportLookup(actor.toHexString(), id)).musicBrainzNames], [null, []]);
+});
+
+test('iTunes localized names list the Artists named with another name of a saved or proposed Artist name by their strongest match, a malformed one holds its name, and none keeps a MusicBrainz ID', async () => {
+    const by = actor.toHexString(), id = (await create()).item.id, mbid = '00000000-0000-4000-8000-0000000000b1', lead = randomUUID(), second = randomUUID();
+    // Lookup found the lead under three other names (one also an alias of its ID) and the second entry under its Japanese name;
+    // the last group holds no name read, so it is never queried.
+    await rewrite(id, doc => {
+        v2(doc).album.artists = [{ key: lead, name: 'Lorem Ensemble', role: 'primary', joinPhrase: null, musicBrainzId: mbid }, { key: second, name: 'Dolor Trio', role: 'featured', joinPhrase: null, musicBrainzId: null }];
+        doc.musicBrainzNames = [{ musicBrainzId: mbid, names: ['Lorem Ensemble', 'Lorem Ens.'] }];
+        doc.localizedNames = [['Lorem Ensemble', 'ロレム合奏団', '로렘 앙상블', 'Lorem Ens.'], ['Dolor Trio', 'ドロル三重奏団'], ['Amet Choir', 'アメット合唱団'], ['Sit Quartet', 'シット四重奏団']];
+    });
+    // A pending Luna proposal names the second entry in Japanese and adds a third Artist: their names are read as if applied.
+    const luna: ImportAnalysisProvider = { configured: () => true, analyze: async input => input.album ? [{ scope: 'album', slotId: null, field: 'artists',
+        value: [{ name: 'Lorem Ensemble', role: 'primary', joinPhrase: null }, { name: 'ドロル三重奏団', role: 'featured', joinPhrase: null }, { name: 'Amet Choir', role: 'featured', joinPhrase: null }], source: 'folder', evidence: 'folder' }] : [] };
+    await analyzeAdminImport(by, id, mutation(1), luna); await settle(luna);
+    assert.equal((await getAdminImport(by, id)).item.suggestions.filter(value => value.decision === 'pending' && value.field === 'artists').length, 1);
+    const [holder, alias, korean, named, japanese, malformed, unread] = Array.from({ length: 7 }, () => new ObjectId());
+    await getDb()!.collection('artists').insertMany([{ _id: holder, name: 'ロレム合奏団', lifecycleStatus: 'ready', musicBrainzId: mbid }, { _id: alias, name: 'lorem ens.', lifecycleStatus: 'ready' },
+        { _id: korean, name: '로렘 앙상블', lifecycleStatus: 'ready' }, { _id: named, name: 'LOREM ENSEMBLE', lifecycleStatus: 'ready' }, { _id: japanese, name: 'ドロル三重奏団', lifecycleStatus: 'ready' },
+        { _id: malformed, name: 'アメット合唱団', lifecycleStatus: 'ready', visibility: 'secret' }, { _id: unread, name: 'シット四重奏団', lifecycleStatus: 'ready' }]);
+    const candidates = await adminImportDuplicateCandidates(by, id), artists = candidates.items.filter(item => item.kind === 'artist');
+    // ID over alias over localized name over name: the record holding the ID and the alias stay so; the record named like the
+    // proposal is listed for the saved entry whose localized name it is.
+    assert.deepEqual(artists.map(item => [item.id, item.match, item.aliasOf ?? null, item.localizedOf ?? null]).sort(), [
+        [holder.toHexString(), 'musicBrainzId', null, null], [alias.toHexString(), 'alias', mbid, null], [korean.toHexString(), 'localizedName', null, 'Lorem Ensemble'],
+        [named.toHexString(), 'name', null, null], [japanese.toHexString(), 'localizedName', null, 'Dolor Trio']].sort());
+    assert.deepEqual(candidates.unavailable, [{ kind: 'artist', label: 'Amet Choir' }]);
+    // The second entry's create is not preselected over its localized name; without the groups it would be.
+    const draft = v2(await stored(id));
+    assert.equal(importIdentityPreselections(draft, [], candidates).some(item => item.entryKey === second), false);
+    await rewrite(id, doc => { delete doc.localizedNames; });
+    assert.deepEqual(importIdentityPreselections(draft, [], await adminImportDuplicateCandidates(by, id)).filter(item => item.entryKey === second).map(item => item.action), ['create-distinct']);
+    // Localized names are never projected, and never keep a MusicBrainz ID on a renamed entry: only names found for the ID do.
+    await rewrite(id, doc => { doc.localizedNames = [['Lorem Ensemble', 'ロレム合奏団', '로렘 앙상블', 'Lorem Ens.']]; });
+    const item = (await getAdminImport(by, id)).item;
+    for (const text of ['localizedNames', '로렘 앙상블']) assert.equal(JSON.stringify([item, await getAdminImportLookup(by, id)]).includes(text), false, text);
+    await assert.rejects(editAdminImport(by, id, { ...mutation(item.revision), changes: [{ path: 'album.artists', base: item.draft.album.artists,
+        value: [{ ...item.draft.album.artists[0], name: '로렘 앙상블' }, item.draft.album.artists[1]] }] }), errorCode('ADMIN_IMPORT_INVALID_INPUT'));
+});
+
+test('two Artist entries of one localized name group: the record listed for the first keeps the second from a preselected create too', async () => {
+    const by = actor.toHexString(), id = (await create()).item.id, first = randomUUID(), second = randomUUID(), mbid = '00000000-0000-4000-8000-0000000000b2';
+    await rewrite(id, doc => {
+        v2(doc).album.artists = [{ key: first, name: 'Lorem Ensemble', role: 'primary', joinPhrase: null, musicBrainzId: null }, { key: second, name: 'ロレム合奏団', role: 'featured', joinPhrase: null, musicBrainzId: null }];
+        doc.localizedNames = [['Lorem Ensemble', 'ロレム合奏団', '로렘 앙상블']];
+    });
+    const korean = new ObjectId();
+    await getDb()!.collection('artists').insertOne({ _id: korean, name: '로렘 앙상블', lifecycleStatus: 'ready' });
+    const candidates = await adminImportDuplicateCandidates(by, id), draft = v2(await stored(id));
+    // The record is listed once, for the first name read; the second entry's name is held as unavailable instead.
+    assert.deepEqual(candidates.items.filter(item => item.kind === 'artist').map(item => [item.id, item.match, item.localizedOf]), [[korean.toHexString(), 'localizedName', 'Lorem Ensemble']]);
+    assert.deepEqual(candidates.unavailable, [{ kind: 'artist', label: 'ロレム合奏団' }]);
+    assert.deepEqual(importIdentityPreselections(draft, [], candidates).filter(item => item.scope === 'artist'), []);
+    // A record held by the first entry's MusicBrainz ID is that entry's candidate; the second entry, named with its localized name, is held too.
+    await rewrite(id, doc => { v2(doc).album.artists[0].musicBrainzId = mbid; });
+    await getDb()!.collection('artists').updateOne({ _id: korean }, { $set: { musicBrainzId: mbid } });
+    const held = await adminImportDuplicateCandidates(by, id);
+    assert.deepEqual([held.items.filter(item => item.kind === 'artist').map(item => item.match), held.unavailable], [['musicBrainzId'], [{ kind: 'artist', label: 'ロレム合奏団' }]]);
+    const preselected = importIdentityPreselections(v2(await stored(id)), [], held).filter(item => item.scope === 'artist');
+    assert.deepEqual(preselected.map(item => [item.entryKey, item.action, item.candidateId]), [[first, 'reuse', korean.toHexString()]]);
+    // Without the shared group, the second entry has no candidate and its create is preselected.
+    await rewrite(id, doc => { doc.localizedNames = [['Lorem Ensemble', '로렘 앙상블']]; });
+    const alone = await adminImportDuplicateCandidates(by, id);
+    assert.deepEqual([alone.unavailable, importIdentityPreselections(v2(await stored(id)), [], alone).filter(item => item.entryKey === second).map(item => item.action)], [[], ['create-distinct']]);
 });

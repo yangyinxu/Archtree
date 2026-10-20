@@ -17,6 +17,7 @@
  *   - details record missing, failed and compact fetched releases, and a release over the byte budget is omitted
  *   - ranking a record compares stored candidates with the current files and leaves incomplete ones unranked
  *   - candidates and ranking together stay within the record budget by omitting the largest fetched releases
+ *   - ranking reads the iTunes localized names and the check of each iTunes-only candidate; an iTunes-only candidate is admitted once, within the shared bound
  *   - automatic retries run after 30 seconds, 2 minutes and 5 minutes, or a longer Retry-After of at most a minute, then stop; a first 503/429 within seconds
  *   - every fence write increments from absent, and only queued, running and retrying runs block
  *   - a new run replaces the previous results and carries only the automatic count, folder use and applied values
@@ -43,7 +44,7 @@ import type { AdminImportDocument } from '../../src/administration/import/adminI
 import { METADATA_LOOKUP_JOB_LIMITS, type MusicBrainzRelease } from '../../src/administration/lookup/lookupContract';
 import {
     automaticLookupOperationId, importLookupFileSet, isBlockingLookupState, lookupFileEvidence, lookupGateFor, lookupHitsAdmitted, lookupReportedTrackCount, lookupRetryAt,
-    lookupFetchedAliases, lookupStaleSlots, mergeLookupCandidates, planImportLookup, rankLookupRecord, rankLookupWithinBudget, recordLookupDetails, refreshLookupGrant, startLookupRun,
+    admitItunesCandidate, lookupFetchedAliases, lookupStaleSlots, mergeLookupCandidates, planImportLookup, rankLookupRecord, rankLookupWithinBudget, recordLookupDetails, refreshLookupGrant, startLookupRun,
     type MetadataLookupRecord, type MetadataLookupState, type StoredLookupCandidate
 } from '../../src/administration/lookup/metadataLookupRecord';
 import { lookupTrackCountPlausible } from '../../src/administration/lookup/lookupRanking';
@@ -337,6 +338,31 @@ test('candidates and ranking together stay within the record budget by omitting 
     assert.deepEqual([none.candidates.map(candidate => candidate.details), none.ranking.preselection], [['omitted', 'omitted'], null]);
 });
 
+test('ranking reads the iTunes localized names and the check of each iTunes-only candidate; an iTunes-only candidate is admitted once, within the shared bound', () => {
+    const base = releases.find(release => release.releaseId.startsWith('24ae881f'))!;
+    const manifest: ImportManifest = { rootLabel: '', files: base.media[0].tracks.map((_track, index) => ({ slotId: `0000000c-0000-4000-a000-${String(index).padStart(12, '0')}`, filename: `${index}.flac`, relativePath: `${index}.flac`, byteLength: null })) };
+    const doc = project(manifest.files.map((file, index) => asset(file.slotId, tags({ durationMs: base.media[0].tracks[index].lengthMs, artists: ['イーグルス'] }))), manifest);
+    const now = new Date('2026-10-19T00:00:00Z'), [candidate] = mergeLookupCandidates([], [{ releaseId: base.releaseId, release: base }], 'albumText');
+    // The artist tag shows the jp storefront's name; the run's localized group links it to the credited name.
+    assert.deepEqual([rankLookupWithinBudget([candidate], doc, now, { searchComplete: true }).ranking.preselection?.artistMismatch,
+        rankLookupWithinBudget([candidate], doc, now, { searchComplete: true, localized: [['Eagles', 'イーグルス']] }).ranking.preselection?.artistMismatch], [true, false]);
+    // The same values as an iTunes-only candidate rank by its check: one the bridge did not run for is never preselected.
+    const itunes = (check: 'noRelease' | 'notRun'): StoredLookupCandidate => ({ key: 'itunes:635770200', source: 'itunes', releaseId: '635770200', basis: 'itunes', summary: null,
+        release: { ...base, releaseId: '635770200' }, details: 'fetched', itunes: { storefront: 'us', artworkUrl: null, check } });
+    assert.deepEqual([rankLookupRecord([itunes('noRelease')], doc, now, { searchComplete: true }).preselection?.candidateKey, rankLookupRecord([itunes('notRun')], doc, now, { searchComplete: true }).preselection],
+        ['itunes:635770200', null]);
+    assert.deepEqual(admitItunesCandidate([candidate], itunes('noRelease'))!.map(item => [item.key, item.details]), [[candidate.key, 'fetched'], ['itunes:635770200', 'fetched']]);
+    assert.deepEqual(admitItunesCandidate([itunes('notRun')], itunes('noRelease')), [itunes('notRun')]);
+    const full = Array.from({ length: METADATA_LOOKUP_JOB_LIMITS.candidates }, () => candidate);
+    assert.equal(admitItunesCandidate(full, itunes('noRelease')), null);
+    // One whose collection lookup gave no complete release is admitted without one: incomplete, and partial while it could match.
+    const short: StoredLookupCandidate = { ...itunes('noRelease'), release: null, details: 'omitted', reportedTrackCount: base.media[0].tracks.length };
+    const admitted = admitItunesCandidate([], short)!, ranked = rankLookupRecord(admitted, doc, now, { searchComplete: true });
+    assert.deepEqual([admitted.map(item => [item.key, item.details, item.release]), ranked.candidates.map(item => item.status), ranked.disclosure.partialComparison, ranked.preselection],
+        [[['itunes:635770200', 'omitted', null]], ['incomplete'], true, null]);
+    assert.equal(admitItunesCandidate(full, short), null);
+});
+
 test('automatic retries run after 30 seconds, 2 minutes and 5 minutes, or a longer Retry-After of at most a minute, then stop; a first 503/429 within seconds', () => {
     const now = new Date('2026-10-19T00:00:00Z'), at = (failures: number, retryAfterMs: number | null = null) => lookupRetryAt(failures, now, retryAfterMs)?.getTime() ?? null;
     const limited = (failures: number, retryAfterMs: number | null = null) => lookupRetryAt(failures, now, retryAfterMs, { rateLimited: true })?.getTime() ?? null;
@@ -383,7 +409,11 @@ test('a new run replaces the previous results and carries only the automatic cou
         { kind: 'artist', id: 'bad', state: 'fetched', names: ['C'] }, null as never] })], [[releaseId(9), ['A']]]);
     assert.deepEqual([...lookupFetchedAliases({}), ...lookupFetchedAliases(null)], []);
     assert.deepEqual([second.run, second.state, second.phase, second.outcome, second.completedAt, second.automaticRuns, second.folderUsed, second.applied, second.candidates, second.staleSlotIds, second.attempts, second.queryIndex,
-        second.searchComplete], [2, 'complete', 'done', 'noQuery', now, 1, true, applied, [], [], { musicbrainz: 0 }, 0, true]);
+        second.searchComplete], [2, 'complete', 'done', 'noQuery', now, 1, true, applied, [], [], { musicbrainz: 0, itunes: 0 }, 0, true]);
+    // The previous run's iTunes stage, iTunes attempts and exhausted sources never carry over.
+    const third = startLookupRun({ ...previous, attempts: { musicbrainz: 2, itunes: 3 }, exhausted: { musicbrainz: 'sourceUnavailable', itunes: 'sourceBusy' },
+        itunesStage: { reason: 'noMatch', text: null, requests: [], requestIndex: 0, items: [], bridge: [], bridgeIndex: 0, bridgeOutcomes: [], state: 'answered', complete: false, finalized: true } }, init);
+    assert.deepEqual([third.attempts, third.exhausted, third.itunesStage], [{ musicbrainz: 0, itunes: 0 }, {}, null]);
     const later = new Date(now.getTime() + 1000), granted = refreshLookupGrant(first, '0000000000000000000000e2', 'choose', later);
     assert.deepEqual([granted.actorId, granted.grantSource, granted.grantExpiresAt.getTime(), granted.run, granted.state], ['0000000000000000000000e2', 'choose', later.getTime() + METADATA_LOOKUP_JOB_LIMITS.grantMs, 1, 'queued']);
 });

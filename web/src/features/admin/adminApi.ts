@@ -67,11 +67,13 @@ export type ImportDecision = z.infer<typeof decisionSchema>;
 export const duplicateEditsKey = (id: string) => `duplicate-edits:${id}`;
 export interface DecisionEdits { revision: number; decisions: ImportDecision[] }
 /**
- * A lookup cover's name: `name` (its source) and the first eight characters of its release MBID (`lookup-musicbrainz:<mbid>`), so
- * lookup covers kept at once read apart. It lives here for the same reason as duplicateEditsKey: the import page, the summary and
- * the checklist all load this module.
+ * A lookup cover's name: its source (Cover Art Archive front artwork, or iTunes artwork for an iTunes-only candidate's
+ * `lookup-itunes:<collection ID>`) and the first eight characters of its release MBID or collection ID, so lookup covers kept at
+ * once read apart. `t` is the admin text function. It lives here for the same reason as duplicateEditsKey: the import page, the
+ * summary and the checklist all load this module.
  */
-export const lookupCoverName = (name: string, slotId: string) => [name, slotId.split(':')[1]?.slice(0, 8)].filter(Boolean).join(' · ');
+export const lookupCoverName = (t: (key: string) => string, slotId: string) =>
+  [t(slotId.startsWith('lookup-itunes:') ? 'media.lookup_cover_itunes' : 'media.lookup_cover'), slotId.split(':')[1]?.slice(0, 8)].filter(Boolean).join(' · ');
 /** Whether `next` is a newer saved state than `previous`: a later revision, or the same revision with later automatic writes. */
 export const newerImport = (next: Pick<ImportDetail, 'revision' | 'valueRevision'>, previous: Pick<ImportDetail, 'revision' | 'valueRevision'>) =>
   next.revision > previous.revision || next.revision === previous.revision && next.valueRevision > previous.valueRevision;

@@ -9,13 +9,14 @@
  * Internal
  *   Types: Kind, TrackContext
  *   Functions: named, sameName, exactName, trackRow, identifiedRows, addMusicBrainzIdCandidates,
- *              preselectedCreate, identityKey
+ *              addLocalizedNameCandidates, preselectedCreate, identityKey
  *   Constants: boundByteHash, SHOWN_PRESELECTION_KEYS
  * @end-catalog */
 
 /**
  * Identity candidates and preselection for import review. Candidates (exact case-insensitive names, names metadata lookup found
- * for an entry's MusicBrainz ID, the same MusicBrainz ID and verified identical bytes) are evidence, never identity. A preselection is never a saved decision: the approval computes it again inside its transaction,
+ * for an entry's MusicBrainz ID, iTunes localized names it found for an Artist name, the same MusicBrainz ID and verified identical
+ * bytes) are evidence, never identity. A preselection is never a saved decision: the approval computes it again inside its transaction,
  * refuses a set other than the one its confirmation showed, and freezes it marked `preselected`; the publication worker
  * recomputes it before copying and inside the commit, where a preselection that no longer holds is an identity conflict that
  * mints nothing. Owner rules live in docs/business-rules.md (Administrator Album Imports).
@@ -30,6 +31,7 @@ import { readyOrganizationLifecycleFilter } from '../../services/catalog/organiz
 import { ADMIN_IMPORT_LIMITS, AdminImportError, cleanText, invalidImport, objectId, type ImportCandidatesResponse, type ImportDuplicateCandidate, type ImportManifest } from './adminImportContract';
 import { importPublicationFormat, type ImportAsset, type ImportPublication } from './adminImportMediaTypes';
 import { DRAFT_V2_LIMITS, boundArtistDecision, boundLabelDecision, foldImportName, hasOwn, type ImportDecisionV2, type ImportDraftV2 } from './adminImportDraft';
+import { importLocalizedNameMap } from './adminImportLocalizedNames';
 import { importMusicBrainzNameMap } from './adminImportMusicBrainzIds';
 import { keepableMusicBrainzId } from '../../utils/musicBrainzId';
 
@@ -102,14 +104,17 @@ export const IMPORT_CANDIDATE_READ_BUDGET_MS = 10_000;
  * the saved draft too, and the approval then asks for explicit append answers. Then, for the entries and the label that carry a
  * MusicBrainz ID, one query per kind for the ready
  * records holding those IDs (at most 21 rows, `match: 'musicBrainzId'`, upgrading a row already listed by name), and one query
- * per such entry or label for the names lookup found for its ID (`names`, at most 32 names, 20 rows each, `match: 'alias'`):
- * at most 1761 items. A row is listed once, by its strongest match (ID over alias over name). `memberMatchesComplete` is false
- * when more member matches exist or a member is malformed, so no append file is preselected from a partial list; `unavailable`
- * names the rows whose same-name, same-ID or alias record is malformed. All reads share IMPORT_CANDIDATE_READ_BUDGET_MS. Names are
- * never unique identity keys.
+ * per such entry or label for the names lookup found for its ID (`names`, at most 32 names, 20 rows each, `match: 'alias'`),
+ * then one query per Artist name read (saved or proposed, at most 40) that has iTunes localized names (`localized`, by folded name)
+ * for the Artists named with them (20 rows each, `match: 'localizedName'`, `localizedOf` that name): at most 2561 items. A row is
+ * listed once, by its strongest match (ID over alias over localized name over name). `memberMatchesComplete` is false when more
+ * member matches exist or a member is malformed, so no append file is preselected from a partial list; `unavailable` names the
+ * rows whose same-name, same-ID, alias or localized-name record is malformed, and the Artist names whose localized-name record is
+ * listed for another row. All reads share IMPORT_CANDIDATE_READ_BUDGET_MS.
+ * Names are never unique identity keys.
  */
 export async function importIdentityCandidates(input: { manifest: ImportManifest; draft: ImportDraftV2; assets: readonly ImportAsset[]; decisions: readonly Pick<ImportDecisionV2, 'scope' | 'action' | 'candidateId'>[];
-    names?: ReadonlyMap<string, readonly string[]>; proposals?: ImportIdentityProposals }, session: ClientSession): Promise<ImportCandidatesResponse> {
+    names?: ReadonlyMap<string, readonly string[]>; localized?: ReadonlyMap<string, readonly string[]>; proposals?: ImportIdentityProposals }, session: ClientSession): Promise<ImportCandidatesResponse> {
     const { manifest, draft, assets } = input, db = getDb()!, items: ImportDuplicateCandidate[] = [], unavailable: ImportCandidatesResponse['unavailable'] = [];
     const deadline = Date.now() + IMPORT_CANDIDATE_READ_BUDGET_MS, maxTimeMS = () => Math.max(1, Math.min(3_000, deadline - Date.now()));
     const target = input.decisions.find(decision => decision.scope === 'album' && decision.action === 'reuse' && objectId(decision.candidateId))?.candidateId ?? null;
@@ -139,6 +144,7 @@ export async function importIdentityCandidates(input: { manifest: ImportManifest
         }
     }
     await addMusicBrainzIdCandidates(draft, input.names ?? new Map(), { items, unavailable, maxTimeMS }, session);
+    await addLocalizedNameCandidates(groups.filter(group => group.kind === 'artist').map(group => group.value), input.localized ?? new Map(), draft, { items, unavailable, maxTimeMS }, session);
     const listed = new Set<string>();
     /** Adds one Track row once; false when its metadata is malformed. */
     const addTrack = (row: Record<string, any>) => {
@@ -202,6 +208,36 @@ async function addMusicBrainzIdCandidates(draft: ImportDraftV2, names: ReadonlyM
     }
 }
 
+/**
+ * Adds the localized-name candidates (importIdentityCandidates): for each Artist name read that has iTunes localized names (by
+ * folded name), the ready Artists named with one of them, at most 20 rows, listed for that name (`localizedOf`). A row already
+ * listed by ID or alias keeps that match; one listed by name only becomes a localized-name row. A row is listed once, so a name
+ * whose localized-name record is already listed for another row (a second entry of the same group, or another entry's ID or
+ * alias) is made unavailable, which keeps its create from being preselected as well. A malformed row makes the name unavailable.
+ */
+async function addLocalizedNameCandidates(names: readonly string[], localized: ReadonlyMap<string, readonly string[]>, draft: ImportDraftV2,
+    out: { items: ImportDuplicateCandidate[]; unavailable: ImportCandidatesResponse['unavailable']; maxTimeMS: () => number }, session: ClientSession) {
+    const db = getDb()!;
+    const unavailable = (name: string) => { if (!out.unavailable.some(entry => entry.kind === 'artist' && sameName(entry.label, name))) out.unavailable.push({ kind: 'artist', label: name }); };
+    // Whether a listed row is already a candidate of the entries or proposals named `name`, as importIdentityPreselections reads it.
+    const listedFor = (item: ImportDuplicateCandidate, name: string) => sameName(item.label, name) || (typeof item.localizedOf === 'string' && sameName(item.localizedOf, name))
+        || draft.album.artists.some(entry => sameName(entry.name, name) && entry.musicBrainzId && (item.musicBrainzId === entry.musicBrainzId || item.aliasOf === entry.musicBrainzId));
+    for (const name of names) {
+        const others = [...new Set((localized.get(foldImportName(name)) ?? []).slice(0, 8).filter(other => typeof other === 'string' && other && !sameName(other, name)))];
+        if (!others.length) continue;
+        const found = await db.collection(IMPORT_CANDIDATE_COLLECTIONS.artist).find({ $and: [readyImportCandidate('artist'), { name: { $in: others.map(exactName) } }] }, { session, projection: importCandidateProjection }).sort({ _id: 1 }).limit(20).maxTimeMS(out.maxTimeMS()).toArray();
+        for (const doc of found) {
+            const index = out.items.findIndex(existing => existing.kind === 'artist' && existing.id === doc._id.toHexString());
+            if (!others.some(other => sameName(other, String(doc.name)))) continue;
+            if (index >= 0 && out.items[index].match !== 'name') { if (!listedFor(out.items[index], name)) unavailable(name); continue; }
+            let item: ImportDuplicateCandidate;
+            try { item = { ...importCandidateRow('artist', doc), match: 'localizedName', localizedOf: name }; }
+            catch { unavailable(name); continue; }
+            if (index >= 0) out.items[index] = item; else out.items.push(item);
+        }
+    }
+}
+
 const preselectedCreate = (scope: ImportDecisionV2['scope'], slotId: string | null, entryKey: string | null, boundName: string | null, boundMusicBrainzId: string | null = null): ImportDecisionV2 =>
     ({ scope, slotId, entryKey, boundName, ...(scope === 'artist' || scope === 'label' ? { boundMusicBrainzId } : {}), action: 'create-distinct', candidateId: null, candidateRevision: null, preselected: true });
 /**
@@ -222,9 +258,11 @@ export function importIdentityPreselections(draft: ImportDraftV2, decisions: rea
     const { items, unavailable } = candidates, preselected: ImportDecisionV2[] = [];
     // A same-name record too malformed to be a candidate still counts as one here: create is never preselected over it.
     const listed = (kind: Kind, name: string) => items.some(item => item.kind === kind && sameName(item.label, name)) || unavailable.some(entry => entry.kind === kind && sameName(entry.label, name));
-    // An entry's candidates also include the records holding its ID and those named as lookup found for its ID.
+    // An entry's candidates also include the records holding its ID, those named as lookup found for its ID, and those named with
+    // an iTunes localized name lookup found for its name.
     const listedFor = (kind: Kind, name: string, id: string | null) => listed(kind, name)
-        || (id !== null && items.some(item => item.kind === kind && (item.musicBrainzId === id || item.aliasOf === id)));
+        || (id !== null && items.some(item => item.kind === kind && (item.musicBrainzId === id || item.aliasOf === id)))
+        || items.some(item => item.kind === kind && typeof item.localizedOf === 'string' && sameName(item.localizedOf, name));
     const exactFor = (kind: Kind, id: string | null) => id === null ? undefined : items.find(item => item.kind === kind && item.match === 'musicBrainzId' && item.musicBrainzId === id);
     // A record another row explicitly reuses (or reuses and replaces the ID of), or an earlier preselection names, is not preselected again.
     const taken = (kind: Kind, id: string) => decisions.some(decision => (kind === 'artist' ? decision.scope === 'artist' : decision.scope === 'label')
@@ -274,8 +312,12 @@ export async function assertImportPreselectionsCurrent(publication: ImportPublic
     if (!preselected.length) return;
     const explicit = frozen.filter(decision => decision.preselected !== true), draft = publication.snapshot as ImportDraftV2;
     let candidates: ImportCandidatesResponse;
-    // The alias candidates are read from the names frozen with the approval, so the recheck compares what the review compared.
-    try { candidates = await importIdentityCandidates({ ...source, draft, decisions: explicit, names: importMusicBrainzNameMap(publication.musicBrainzNames, draft) }, session); }
+    // The alias and localized-name candidates are read from the names frozen with the approval, so the recheck compares what the
+    // review compared.
+    try {
+        candidates = await importIdentityCandidates({ ...source, draft, decisions: explicit, names: importMusicBrainzNameMap(publication.musicBrainzNames, draft),
+            localized: importLocalizedNameMap(publication.localizedNames, draft.album.artists.map(entry => entry.name)) }, session);
+    }
     catch (error) { if (error instanceof MongoServerError && error.code === 50) throw new AdminImportError(409, 'ADMIN_IMPORT_PUBLICATION_CONFLICT'); throw error; }
     const current = new Set(importIdentityPreselections(draft, explicit, candidates).map(identityKey));
     if (preselected.some(decision => !current.has(identityKey(decision)))) throw new AdminImportError(409, 'ADMIN_IMPORT_IDENTITY_CONFLICT');

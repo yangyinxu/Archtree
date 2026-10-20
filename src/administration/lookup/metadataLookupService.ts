@@ -6,15 +6,15 @@
  *              runMetadataLookupOnce, startMetadataLookupWorker
  * Internal
  *   Functions: lookupConfiguration, writeLookupGate, reconcileLookupFiles, rerankLookup, refuse,
- *              retryableInput, advanceLookup, releaseLookupLease, defaultMusicBrainzClient
+ *              retryableInput, advanceLookup, releaseLookupLease, defaultLookupClients
  *   Constants: lookups, transactionOptions, maximumStepsPerTick
  * @end-catalog */
 
 /**
  * Metadata lookup jobs for import projects: the automatic trigger after the confirmation that completes the file set (or a re-rank
  * of the stored candidates when it completes nothing new), stale marking when a bound file is removed, admission of submitted and
- * retried runs, and the persisted worker that advances one run one MusicBrainz request per stored step (the request and the pure
- * step decision live in lookupRunStep.ts) and applies a completed run's preselection (lookupValueApplication.ts) in the step that
+ * retried runs, and the persisted worker that advances one run one request per stored step (MusicBrainz, or iTunes for the fallback
+ * stage; the request and the pure step decision live in lookupRunStep.ts) and applies a completed run's preselection (lookupValueApplication.ts) in the step that
  * completes it. Starting a run, every state change and a re-rank write the import document's `lookupGate` in the same
  * transaction, and an application writes the document itself (its values, and the lookup cover staging it queues under the run's
  * grant); neither ever changes its `revision`. A trigger that starts
@@ -36,6 +36,8 @@ import {
 import { storedDraftV2 } from '../import/adminImportValueState';
 import { ADMIN_IMPORT_LOOKUP_COLLECTION, METADATA_LOOKUP_JOB_LIMITS as JOB } from './lookupContract';
 import { lookupTermProblem } from './lookupIdentifiers';
+import { createItunesSearchClient, type ItunesSearchClient } from './iTunesSearchClient';
+import { lookupLocalizedGroups } from './lookupItunesStage';
 import { createMongoLookupRateGate } from './lookupRateGate';
 import { createLookupResponseCache } from './lookupResponseCache';
 import { endLookupRun, idleLookupStep, performLookupStep, proceedLookupRun, type LookupStep, type LookupStepResult } from './lookupRunStep';
@@ -63,10 +65,12 @@ export function metadataLookupAccepted(doc: AdminImportDocument): boolean {
 
 /**
  * What value application reads in the caller's transaction: the ready holders of every ID a fetched candidate credits (at most 25
- * candidates of 50 credits and a label), the IDs of the records explicit decisions reuse, and the run's fetched aliases.
+ * candidates of 50 credits and a label), the IDs of the records explicit decisions reuse, the run's fetched aliases and its iTunes
+ * localized name groups.
  */
 export async function readLookupApplicationContext(doc: AdminImportDocument, record: MetadataLookupRecord | null, session: ClientSession): Promise<LookupApplicationContext> {
-    return { identity: await readMusicBrainzIdState(session, lookupCandidateIds(record), lookupDecisionRecords(doc)), aliases: lookupFetchedAliases(record) };
+    return { identity: await readMusicBrainzIdState(session, lookupCandidateIds(record), lookupDecisionRecords(doc)), aliases: lookupFetchedAliases(record),
+        localized: lookupLocalizedGroups(record) };
 }
 
 /** Fence write: in memory for a caller that later replaces `doc`, and persisted for one that does not; never touches `revision`. */
@@ -253,23 +257,29 @@ async function advanceLookup(id: ObjectId, run: number, worker: string, now: Dat
 const releaseLookupLease = (id: ObjectId, run: number, worker: string) =>
     lookups().updateOne({ _id: id, run, leaseOwner: worker }, { $set: { leaseOwner: null, leaseUntil: null } });
 
-export type MetadataLookupWorkerDependencies = { musicBrainz?: MusicBrainzClient; configuration?: () => MetadataLookupConfiguration; now?: () => Date };
-/** Production client: the deployment-wide MongoDB gate, the pinned fetcher and one process-local response cache. */
-const defaultMusicBrainzClient = (configuration?: () => MetadataLookupConfiguration) => createMusicBrainzClient({
-    gate: createMongoLookupRateGate(getDb()!), transport: pinnedHttpsTransport, cache: createLookupResponseCache(), ...(configuration ? { configuration } : {})
-});
+export type MetadataLookupWorkerDependencies = { musicBrainz?: MusicBrainzClient; itunes?: ItunesSearchClient; configuration?: () => MetadataLookupConfiguration; now?: () => Date };
 /**
- * More steps than any run needs (at most six searches, 25 release lookups and 16 alias lookups: 47; retries end the tick); a
- * safety bound against a step that stores nothing.
+ * Production clients: the MusicBrainz and iTunes clients share the deployment-wide MongoDB gate (each source keeps its own spacing
+ * and concurrency), the pinned fetcher and one process-local response cache.
  */
-const maximumStepsPerTick = 64;
+const defaultLookupClients = (configuration?: () => MetadataLookupConfiguration) => {
+    const dependencies = { gate: createMongoLookupRateGate(getDb()!), transport: pinnedHttpsTransport, cache: createLookupResponseCache(), ...(configuration ? { configuration } : {}) };
+    return { musicBrainz: createMusicBrainzClient(dependencies), itunes: createItunesSearchClient(dependencies) };
+};
+/**
+ * More steps than any run needs (at most six searches, 25 release lookups and 16 alias lookups to MusicBrainz, four bridge
+ * searches, and two UPC lookups, three searches and four collection lookups to iTunes: 60; retries end the tick); a safety bound
+ * against a step that stores nothing.
+ */
+const maximumStepsPerTick = 80;
 
-/** Claims one due run and advances it, one MusicBrainz request per stored step, until it ends, waits for a retry, or loses its lease. */
+/** Claims one due run and advances it, one request per stored step, until it ends, waits for a retry, or loses its lease. */
 export async function runMetadataLookupOnce(dependencies: MetadataLookupWorkerDependencies = {}, signal?: AbortSignal): Promise<boolean> {
     if (signal?.aborted || !importEnabled()) return false;
     const clock = dependencies.now ?? (() => new Date());
     const configuration = dependencies.configuration ?? (() => metadataLookupConfiguration());
-    const musicBrainz = dependencies.musicBrainz ?? defaultMusicBrainzClient(dependencies.configuration);
+    const defaults = !dependencies.musicBrainz || !dependencies.itunes ? defaultLookupClients(dependencies.configuration) : null;
+    const clients = { musicBrainz: dependencies.musicBrainz ?? defaults!.musicBrainz, itunes: dependencies.itunes ?? defaults!.itunes };
     const worker = randomUUID(), claimedAt = clock();
     const claim = await lookups().findOneAndUpdate({
         state: { $in: ['queued', 'running', 'retrying'] },
@@ -282,7 +292,7 @@ export async function runMetadataLookupOnce(dependencies: MetadataLookupWorkerDe
         const step = await advanceLookup(claimed._id, claimed.run, worker, clock(), result, configuration);
         if (!step.action) return true;
         if (signal?.aborted) break;
-        result = await performLookupStep(musicBrainz, step.action, step.mode, signal);
+        result = await performLookupStep(clients, step.action, step.mode, signal);
         if (result.kind === 'shutdown') break;
     }
     // Shutdown (or the safety bound): the request in flight is discarded and the stored progress resumes on the next claim.
@@ -296,8 +306,11 @@ export function startMetadataLookupWorker(dependencies: MetadataLookupWorkerDepe
     let resolved: MetadataLookupWorkerDependencies | undefined;
     return startAdminWorker(async signal => {
         // The production gate binds the connected database, so nothing is resolved before there is one.
-        if (signal.aborted || !importEnabled() || (!dependencies.musicBrainz && !getDb())) return false;
-        resolved ??={ ...dependencies, musicBrainz: dependencies.musicBrainz ?? defaultMusicBrainzClient(dependencies.configuration) };
+        if (signal.aborted || !importEnabled() || ((!dependencies.musicBrainz || !dependencies.itunes) && !getDb())) return false;
+        if (!resolved) {
+            const defaults = !dependencies.musicBrainz || !dependencies.itunes ? defaultLookupClients(dependencies.configuration) : null;
+            resolved = { ...dependencies, musicBrainz: dependencies.musicBrainz ?? defaults!.musicBrainz, itunes: dependencies.itunes ?? defaults!.itunes };
+        }
         return runMetadataLookupOnce(resolved, signal);
     }, intervalMs, track);
 }

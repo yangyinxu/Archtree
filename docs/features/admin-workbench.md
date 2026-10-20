@@ -128,9 +128,11 @@ how many beside its tag evidence. Once a staged image is ready, the cover
 choice offers No cover and each ready image: manual, embedded or Cover Art
 Archive front artwork from metadata lookup, which Files and the cover choice
 name with the first eight characters of its release MBID so lookup covers
-kept at once read apart. While the choice is automatic, a note says so,
-naming Cover Art Archive when the lookup cover is chosen, and only the image
-chosen automatically is checked (nothing is checked when no image is);
+kept at once read apart, or the iTunes artwork of an applied iTunes-only
+candidate, named with the first eight digits of its collection ID. While the
+choice is automatic, a note says so, naming Cover Art Archive or iTunes when
+the lookup cover is chosen, and only the image chosen automatically is checked
+(nothing is checked when no image is);
 choosing any option, No cover and the image already chosen automatically
 included, makes the choice explicit for good.
 Review shows an Artist suggestion as its byline
@@ -140,15 +142,18 @@ Artist row per entry, in draft order and named with its role, and a Label row
 when the draft has a label; each row lists only the candidates found for its
 own name and, for an entry or the label carrying a MusicBrainz ID, the record
 of its kind holding that ID (Same MusicBrainz ID) and the records named as
-metadata lookup found for that ID (MusicBrainz alias). Review loads the
+metadata lookup found for that ID (MusicBrainz alias), and for an Artist entry
+the Artists named with another iTunes localized name that metadata lookup
+found for its name (iTunes localized name). Review loads the
 candidates when it opens, and Find matches reads them again. A row without an
 explicit decision that the review preselects is collapsed, reads "Preselected
 as new", "Preselected to reuse" a named member or "Reuses" a named record
 "(same MusicBrainz ID)", and needs no answer: an entry or the label is
 preselected to reuse the record holding its ID unless another row's reuse,
 replace or an earlier preselection names that record, and an Artist entry,
-the label or the Album without a name, alias or same-ID candidate of its kind
-is preselected as new, and so is every track once the Album is new
+the label or the Album without a name, alias, localized-name or same-ID
+candidate of its kind is preselected as new, and so is every track once the
+Album is new
 (explicitly or preselected). Creating a distinct record, or reusing another
 one, instead of the record holding the entry's ID records no ID. Reusing a
 record that holds a different ID keeps that ID, and reusing it while
@@ -205,7 +210,14 @@ Publish; the summary only presents it:
   be fetched (retry first, Luna beside it), a tie (no next step), one
   matching release from a partial comparison that was not applied (no next
   step; choosing it, another release or none is optional), or the applied
-  release.
+  release. With the iTunes fallback it also says when lookup searches the
+  iTunes Search API (no next step) or retries it (retry first, Luna beside it),
+  when MusicBrainz answered without a match and iTunes stayed unavailable (Luna
+  first, the retry beside it), and when an iTunes-only result was applied (no
+  next step) or applied without a check against MusicBrainz (Luna first, the
+  retry beside it). A completed run whose MusicBrainz retries ran out and that
+  matched nothing reports lookup unavailable, or release details that could
+  not be fetched, never no match.
   Where the server cannot run lookup (`lookupAvailable` false) the summary says
   it is not configured, before any run too, and offers neither a retry nor the
   name box. Stale files are counted. While the applied release's front artwork
@@ -229,7 +241,9 @@ Publish; the summary only presents it:
   counts the rows the server says still need one. The candidate chooser
   discloses how many files have an unknown duration or Disc Number, which
   ranking never counts as agreement, and says when not every release
-  MusicBrainz found was compared with the files.
+  MusicBrainz found was compared with the files. It marks each iTunes-only
+  candidate "iTunes only", and "Not checked against MusicBrainz" when it is
+  `notChecked`.
 - **Offered, not needed.** The only matching group of a partial comparison
   (see Planning and ranking under [Metadata lookup](#metadata-lookup)) is not
   applied, since more matching releases may exist among those not compared.
@@ -246,16 +260,20 @@ Publish; the summary only presents it:
   when it represents a group there, else in the folded list once that is
   opened. At most two previews load at a time, in the order shown, as Cover Art
   Archive serves two; a preview that fails is tried once more two seconds
-  later and then hidden. The browser never loads a Cover Art Archive address.
+  later and then hidden. The browser never loads a Cover Art Archive or iTunes
+  artwork address.
 - **Flagged, never folded.** Values resting only on file tags (automatic and
-  not on the applied candidate), a preselection whose artist matches no artist
-  tag, directly or through an alias the lookup found, and pending Luna
-  suggestions with their ticks.
+  not on the applied candidate), values resting on an applied iTunes-only
+  candidate (marked "iTunes only", and "Not checked against MusicBrainz" when
+  MusicBrainz did not rule it out), a preselection whose artist matches no
+  artist tag, directly or through an alias or iTunes localized name the lookup
+  found, and pending Luna suggestions with their ticks.
 - **Folded.** Every other row: title, Artist entries with roles and join
   phrases, label, date, visibility (changed in place by a field save, public by
   default), cover (one chosen automatically says so, and a lookup cover is
   named Cover Art Archive front artwork with the first eight characters of its
-  release MBID), the disc and track order, saved
+  release MBID, or iTunes artwork with the first eight digits of its collection
+  ID), the disc and track order, saved
   identity decisions, upload progress, answered conflicts, and all candidates
   when there is no tie. An append marks the Album values, their conflicts and
   Album Luna suggestions not applied.
@@ -359,6 +377,7 @@ previews, import/catalog/Page editors or upload controls.
 - [Import format compatibility](#import-format-compatibility)
   - [Rollback floors](#rollback-floors)
 - [Metadata lookup](#metadata-lookup)
+  - [iTunes fallback and MusicBrainz bridge](#itunes-fallback-and-musicbrainz-bridge)
   - [Lookup runs](#lookup-runs)
   - [Triggers and grants](#triggers-and-grants)
   - [Value application](#value-application)
@@ -616,8 +635,9 @@ Import routes (relative to `/api/admin/v1`):
   reads the Draft v2 baseline without entry keys, MusicBrainz IDs or visibility
   (the label as its name) and the file tags as their five v1 fields; never an
   identifier. An import's analysis captures at admission the MusicBrainz
-  release applied to it, if any (a preselected or chosen candidate whose
-  details were fetched), only while the lookup record still stores that
+  release applied to it, if any (a preselected or chosen MusicBrainz candidate
+  whose details were fetched; an applied iTunes-only candidate gives none),
+  only while the lookup record still stores that
   candidate: a later lookup run replaces the candidates, so after one that
   applies no release the values stay applied but Luna gets no context. It sends
   the release's title, credited names and join phrases, label
@@ -740,10 +760,21 @@ Import routes (relative to `/api/admin/v1`):
   record holding each ID (`match: 'musicBrainzId'`, at most 21, upgrading a
   row already listed by name), and one query per such entry or label adds up to
   20 ready records named as metadata lookup found for its ID (`match: 'alias'`,
-  `aliasOf` the ID, from at most 32 stored names): at most 1761 items. An Artist
+  `aliasOf` the ID, from at most 32 stored names). Then, for each Artist name
+  read (the saved entries' and those pending Luna proposals would write, at
+  most 40) that has iTunes localized names on the import (`localizedNames`, see
+  [iTunes fallback and MusicBrainz bridge](#itunes-fallback-and-musicbrainz-bridge)),
+  one query adds up to 20 ready Artists named with another name of its group
+  (`match: 'localizedName'`, `localizedOf` the name it was read for, upgrading
+  a row listed by name only, never one listed by ID or alias): at most 2561
+  items. Such a row blocks a preselected create of the entry or proposal with
+  that name; since a row is listed once, another name read whose localized
+  name it also is (a second entry of the same group, or a name beside the
+  entry whose ID or alias lists it) is made `unavailable`, so its create is
+  not preselected either. A label has no localized names. An Artist
   or Organization item names the ID it holds in `musicBrainzId` only when it
-  holds a keepable one; a malformed same-ID or alias record makes its entry's or
-  label's name `unavailable`. All reads of one
+  holds a keepable one; a malformed same-ID, alias or localized-name record
+  makes its entry's or label's name `unavailable`. All reads of one
   request share a 10-second budget, each query at most 3 seconds. The editor
   loads this on opening Review and with every publication confirmation. Review
   preselects as reuse the record holding an entry's or the label's ID (unless
@@ -1100,10 +1131,13 @@ runs in `adminImportCoverCleanup.ts` beside it.
   same reserved intents once its five-minute lease expires.
 
 **Lookup cover staging.** When the applied metadata lookup candidate's fetched
-release reports Cover Art Archive front artwork, the server stages that artwork
-as the cover candidate `lookup-<candidateKey>`
-(`lookup-musicbrainz:<release MBID>`). The code lives in
-`src/administration/import/adminImportLookupCover.ts`.
+release reports Cover Art Archive front artwork, or an applied iTunes-only
+candidate has an artwork address on the fixed iTunes artwork hosts, the server
+stages that artwork as the cover candidate `lookup-<candidateKey>`
+(`lookup-musicbrainz:<release MBID>` or `lookup-itunes:<collection ID>`). A
+MusicBrainz candidate never stages iTunes artwork, the bridge's included. The
+job keeps an iTunes-only candidate's artwork address (`artworkUrl`). The code
+lives in `src/administration/import/adminImportLookupCover.ts`.
 
 - **Queueing.** The application that applies the candidate records the cover
   job (`media.lookupCover`, never projected, never changing `revision` or
@@ -1135,8 +1169,10 @@ as the cover candidate `lookup-<candidateKey>`
   the cleanups this pass deletes first) skip it before anything is fetched,
   and its own admitted record resumes the same intent.
 - **Fetch.** Under the applying administrator's fresh check, the pass fetches
-  the release's `front-1200` thumbnail from a URL the server builds (see
-  Cover Art Archive artwork under [Metadata lookup](#metadata-lookup)). 404 is
+  the release's `front-1200` thumbnail from a URL the server builds, or an
+  iTunes-only candidate's artwork rewritten to 1200 pixels (see Cover Art
+  Archive artwork and iTunes artwork under [Metadata lookup](#metadata-lookup));
+  a job whose key, release ID and address disagree fails as invalid. 404 is
   no artwork; an unconfigured lookup, an unavailable source or an invalid
   image, one larger than 1200 pixels included, fails the staging; a shutdown
   leaves it running for the next pass.
@@ -1699,25 +1735,63 @@ Later stages raise the oldest release that is safe to roll back to:
   explicitly. A Web tab opened before them cannot parse a detail with a
   `lookup-*` asset, a candidate's `artwork` or the summary's `waiting.cover`,
   so reload open workbench tabs after deploying or rolling back across them.
+- The iTunes fallback needs no floor of its own; no collection or index
+  changes. The release before it ignores a record's `itunesStage`,
+  `exhausted` and `attempts.itunes` and resumes a run stored mid-stage through
+  its details-done branch. It never shows, chooses (`itunes:` keys are invalid
+  input there) or applies an iTunes-only candidate, and values an application
+  wrote stay as automatic values: its summary shows such an application as an
+  applied release without a title and folds its values without the iTunes-only
+  or not-checked flag, so check those values, or choose Use none of these,
+  before publishing there; a re-rank there may still count such a
+  candidate as a matching group the view does not show, leaving a tie that only
+  Use none of these answers, so choose none there or retry the lookup. It
+  ignores `localizedNames` on the import and on a frozen approval, so its
+  recheck lists no localized-name candidate; roll back only while no
+  publication that froze `localizedNames` is preparing or in needs attention.
+  Before rolling back, confirm in `mongosh` that this returns 0, or cancel
+  those publications first:
+
+  ```js
+  db.adminAlbumImports.countDocuments({
+    "media.publication.state": { $in: ["preparing", "needsAttention"] },
+    "media.publication.localizedNames.0": { $exists: true }
+  })
+  ```
+
+  It fails a queued `lookup-itunes:*` staging as invalid,
+  hides such covers, refuses to reconcile them and its completion sweep keeps
+  them, so after rolling forward choose the candidate again or remove a
+  leftover cover with `DELETE …/assets/:slotId`. Its preview route answers an
+  `itunes:` key as not found. A Web tab opened before the fallback cannot parse
+  a lookup view with an iTunes-only candidate, `itunes`, `source` or
+  `notChecked`, or a candidates response with `localizedName` items, so reload
+  open workbench tabs after deploying or rolling back across it.
 - Credit join phrases and Disc Numbers have their own floor in the
   [catalog Credit rollout runbook](../deployment/catalog-credit-rollout-runbook.md#join-phrase-and-disc-number-rollback-floor).
 
 ## Metadata lookup
 
-A server worker runs MusicBrainz lookups for import projects automatically (see
+A server worker runs metadata lookups for import projects automatically (see
 [Lookup runs](#lookup-runs)) and applies a preselected candidate's values (see
 [Value application](#value-application)). [Routes](#lookup-routes) and the
 `metadataLookup` capability expose them, and the import's Review and publish
-summary (see the import page above) is their Web control. Cover Art Archive is
-queried only for a release's front artwork (see Cover Art Archive artwork
-below); iTunes is not queried yet. The source layer, the jobs and their routes
+summary (see the import page above) is their Web control. MusicBrainz is the
+primary source; only when it returns no matching candidate is the iTunes
+Search API queried and the names it shows searched again in MusicBrainz (see
+[iTunes fallback and MusicBrainz bridge](#itunes-fallback-and-musicbrainz-bridge)).
+Cover Art Archive is queried only for a release's front artwork, and the iTunes
+artwork hosts only for an iTunes-only candidate's (see Cover Art Archive
+artwork and iTunes artwork below). The source layer, the jobs and their routes
 live in `src/administration/lookup/`.
 
 - **Sources and hosts.** MusicBrainz (`https://musicbrainz.org/ws/2/` only), the
   iTunes Search API (`https://itunes.apple.com/search` and `/lookup`, in the
   fixed storefronts `jp`, `us`, `kr` and `tw`, ordered by the query's script)
-  and Cover Art Archive listings and front artwork (see Cover Art Archive
-  artwork below). A listing starts at
+  Cover Art Archive listings and front artwork (see Cover Art Archive
+  artwork below) and an iTunes-only candidate's artwork on
+  `is1-ssl.mzstatic.com` through `is5-ssl.mzstatic.com` (see iTunes artwork
+  below). A listing starts at
   `coverartarchive.org/release/<mbid>` and may redirect only to
   `archive.org/download/mbid-<mbid>/index.json` and then to the same item on an
   `ia….us.archive.org` or `dn….ca.archive.org` storage node, all bound to the
@@ -1741,9 +1815,9 @@ live in `src/administration/lookup/`.
 - **Bounds.** One deadline covers DNS, every hop and the body: 10 seconds for
   MusicBrainz and Cover Art Archive, 8 seconds for iTunes. Bodies are capped at
   2 MiB (MusicBrainz), 1 MiB (iTunes), 256 KiB (listings) and 4 MiB (front
-  artwork, or the cover upload limit `MAX_IMAGE_UPLOAD_MB` if lower). A
-  candidate preview, including its gate wait and WebP conversion, must finish
-  within 20 seconds.
+  or iTunes artwork, or the cover upload limit `MAX_IMAGE_UPLOAD_MB` if
+  lower). A candidate preview, including its gate wait and WebP conversion,
+  must finish within 20 seconds.
 - **Deployment-wide gates.** `adminMetadataLookupGates` holds one `_id`-keyed
   document per source with its next allowed start and expiring leases, decided
   on the MongoDB clock and written outside transactions. MusicBrainz requests
@@ -1795,11 +1869,27 @@ live in `src/administration/lookup/`.
   `invalidResponse`, and 404 is no artwork. A preview is converted to WebP
   within 500 pixels; a staged cover keeps the validated bytes unchanged, so it
   is never larger than 1200 pixels.
+- **iTunes artwork.** Only an iTunes-only candidate's artwork is fetched, never
+  for a MusicBrainz candidate (one the bridge found included). The server takes
+  the candidate's stored 100-pixel address, which must be strict HTTPS on
+  `is1-ssl.mzstatic.com` through `is5-ssl.mzstatic.com` with an
+  `/image/thumb/…/<w>x<h>bb.jpg|png|webp` path and no query, and rewrites only
+  its last segment: `1200x1200bb.jpg` for a staged cover, `500x500bb.jpg` for a
+  preview. Hop 0 is exactly that address; a redirect may only reach another of
+  those hosts at the same path, without a query. Requests go through the
+  `itunes` gate (one at a time, 3 seconds apart; 403, 429 and 503 are
+  rate-limited) within its 8-second deadline and send `Finitude/1.0` alone, with
+  no contact. Byte, signature, pixel, size and decoding bounds are those of
+  Cover Art Archive artwork; a 404 is no artwork, and the bytes are never
+  cached. A staged cover is `lookup-itunes:<collection ID>`, named
+  `itunes-front.<ext>`.
 - **Discarded links.** iTunes preview, track, collection and artist links never
   enter the response shape, so they never reach evidence or fixtures. A
   100-pixel iTunes artwork URL survives only on `is1-ssl.mzstatic.com` through
-  `is5-ssl.mzstatic.com`, as internal evidence. Cover Art Archive listings yield
-  image IDs, flags, types and sizes, never URLs.
+  `is5-ssl.mzstatic.com`, as internal evidence: it is stored only on an
+  iTunes-only candidate (`candidates.itunes.artworkUrl`) and its lookup cover
+  job (`media.lookupCover.artworkUrl`), and is never projected. Cover Art
+  Archive listings yield image IDs, flags, types and sizes, never URLs.
 - **Planning and ranking.** Both are pure. The planner turns embedded
   identifiers shared by every file (release MBID, barcode, catalogue number and,
   for one file, an ISRC), then album or song text, then a cleaned folder name
@@ -1837,7 +1927,8 @@ live in `src/administration/lookup/`.
     tracks, so a DVD without a tracklist is not a disc. A candidate matches
     when the track count, any known disc count and every duration agree within
     3 seconds, plus 1 second for legacy `m:ss` durations. A candidate with any
-    unknown local or MusicBrainz duration is unverified and never preselected.
+    unknown local, MusicBrainz or iTunes duration is unverified and never
+    preselected.
   - The only matching group is preselected only when the comparison is
     complete. It is partial (`partialComparison` in the disclosure) when a
     search reported more hits than it returned, the candidate bound left out a
@@ -1856,6 +1947,143 @@ live in `src/administration/lookup/`.
   `test/support/networkGuard.ts`, which fails any non-loopback DNS query,
   socket or `fetch`.
 
+### iTunes fallback and MusicBrainz bridge
+
+`src/administration/lookup/lookupItunesStage.ts` holds the stage's pure model;
+`lookupRunStep.ts` sends its requests as steps of the same run.
+
+- **When.** Only after MusicBrainz returned no matching candidate: the run's
+  planned searches and the release lookups they led to left no matching group
+  (unverified, non-matching and incomplete candidates do not count). It also
+  starts when MusicBrainz stayed unavailable through its automatic retries
+  during the planned searches (reason `searchUnavailable`). A run whose only
+  queries are a release MBID or an ISRC has no iTunes stage. The stage is
+  derived from the run's stored planned queries, so a manual retry repeats it.
+- **Requests.** First, for a valid barcode every file shares (a placeholder,
+  meaning an all-zero, malformed or bad-check-digit GTIN, is never sent),
+  `lookup?upc=<digits>&entity=song` in at most two storefronts chosen by the
+  GS1 prefix of its GTIN-14 (digits 2 to 4): `jp` then `us` for 450–459 and
+  490–499, `kr` then `us` for 880, `tw` then `us` for 471, otherwise `us` then
+  `jp`; a storefront that answers a collection ends the UPC lookups. Then the
+  run's first non-fallback text search (album, folder or song text) in at most
+  three storefronts chosen by the term's script: `jp` then `us` for kana, `kr`
+  then `us` for Hangul, `jp`, `tw` then `us` for other Han text, otherwise `us`
+  then `jp`. The term is the text and its credited artist (never a label
+  term), or the text alone when that is over 200 characters; a recording
+  search becomes `entity=song`, anything else `entity=album`.
+- **Results.** A collection (album search or UPC lookup) is kept when its track
+  count can equal the number of files (or is unknown); a song when, for a
+  one-file import with a known duration, its milliseconds are within the
+  3-second tolerance (plus a legacy file's 1-second precision). At most four
+  results are kept, in request then answer order, each once by its track or
+  collection ID with the title and artist every storefront showed (one entry
+  per storefront). A full page (25 results) never makes the comparison
+  partial, since iTunes reports no total; a plausible result left out by the
+  four-result bound does.
+- **Bridge.** Each kept result's distinct title and artist pairs are searched
+  again in MusicBrainz, at most four searches: a recording search for a song,
+  a release search for a collection with only a trailing ` - Single` or ` - EP`
+  dropped from its title; a placeholder artist is left out; searches equal
+  except for letter case are merged; pairs whose title differs from the
+  searched text (the Japanese title of a romanized search, or the reverse) go
+  first. Bridge text is never respelled (the normalized spelling stays for tag
+  and folder text only). Found releases join the candidates like any search's
+  (plausible track counts first, within the shared 25 bound) and their release
+  lookups follow; a bridge search that returned fewer hits than it reported, or
+  whose plausible hits the bound left out, makes the comparison partial. Each
+  result's bridge ends `found` (a search for it found a MusicBrainz release),
+  `noRelease` (every search for it answered none), `notRun` (a search was
+  refused, could not be built or was over the bound) or `unavailable`
+  (MusicBrainz's retries ran out before its search was sent).
+- **iTunes-only candidates.** A `found` result is evidence only. Any other
+  result is resolved through
+  `lookup?id=<collectionId>&entity=song&country=<its first storefront>`, so a
+  song result's own collection name, which may name a box set's sub-album, is
+  never taken as the album; the answer becomes candidate
+  `itunes:<collection ID>` (`source: 'itunes'`, `releaseId` the collection ID)
+  while fewer than 25 candidates are known and the candidates fit their byte
+  budget. At most four collection lookups are sent per attempt (every result
+  whose lookup has an outcome counts). A result either bound leaves out is
+  skipped without a request, making the comparison partial. An answer with
+  fewer songs than the collection's `trackCount` (songs that storefront does
+  not offer), or one that fills the 200-result limit without a `trackCount`,
+  is no complete release: the candidate is stored `omitted`, incomplete and
+  unranked, with that track count, so a comparison it could match stays
+  partial and it is never preselected or chosen. Its values: the collection name as given (draft text
+  is never stripped), its single artist string as one primary entry without a
+  MusicBrainz ID (never split, even at `、` or `feat.`), no label, the iTunes
+  release date at day precision as the release's own date (no first-release
+  date; an iTunes date is used only for an iTunes-only candidate), no country,
+  the UPC as barcode only when a UPC lookup found it, media by disc number with
+  tracks in track-number order and durations in milliseconds, and front
+  artwork only for an allowlisted artwork address.
+- **Preselection.** Groups never mix sources: an iTunes group's key also names
+  the source, and MusicBrainz group keys are unchanged. An iTunes-only
+  candidate may be preselected (by a shared barcode its UPC lookup found, or as
+  the only matching group of a complete comparison) only when its check is
+  `noRelease` or `unavailable`; a lone identifier hit that is `notRun`
+  preselects nothing. One preselected while MusicBrainz was `unavailable` is
+  flagged `notChecked`; `notRun` and `unavailable` candidates show as "Not
+  checked against MusicBrainz".
+- **Bounds.** Beside MusicBrainz's 6 planned searches, 25 release lookups
+  (shared by both sources' candidates) and 16 alias lookups, a run attempt
+  sends at most 4 bridge searches, and to iTunes at most 2 UPC lookups, 3
+  searches and 4 collection lookups: at most 60 requests, each through its
+  source's deployment-wide gate (MusicBrainz 1.1 seconds apart, iTunes 3
+  seconds apart, one at a time each), so the iTunes stage spends at most about
+  27 seconds of gate time. The worker's safety bound is 80 steps per tick.
+- **Failures.** Each source counts its own failed attempts (`attempts.itunes`
+  beside `attempts.musicbrainz`) with the same schedule: a first 503, 429 or
+  403 is retried within 2 to 10 seconds, then after 2 and 5 minutes, bounded by
+  the run's grant; the run waits as `retrying` (phase `itunes`, holding
+  Publish). When iTunes's retries run out (`exhausted.itunes`), its remaining
+  requests are skipped and its pending collection lookups fail (a result left
+  without its collection lookup makes the comparison partial; skipped searches
+  do not), and the run completes with what it has, reporting iTunes as
+  unavailable; iTunes never makes a run unavailable on its own. When
+  MusicBrainz's run out (`exhausted.musicbrainz`), nothing more is sent to it:
+  no planned or bridge search, release or alias lookup; its
+  unsent bridge searches leave their results `unavailable`, and a run whose
+  searches it ended still runs the iTunes stage, ending `unavailable` (never
+  "no release") only when no iTunes-only candidate results. A refused iTunes
+  request is skipped, a refused bridge search leaves its results `notRun`, and
+  a refused collection lookup offers no candidate. A submitted run uses busy
+  mode until the first failed attempt of either source.
+- **Status.** The lookup view's `itunes` is `notQueried`, `running`,
+  `retrying` (an iTunes request waits for its automatic retry), `answered` or
+  `unavailable`. The summary says when lookup searches iTunes (without saying
+  why: the stage also runs after MusicBrainz stayed unavailable) or retries
+  it, when MusicBrainz answered without a match and iTunes stayed unavailable
+  (Luna first, a free retry beside it), and when an iTunes-only result was
+  applied, checked (no next step) or not checked against MusicBrainz (Luna
+  first, a free retry beside it; the copy names no cause, since a `notRun`
+  candidate chosen explicitly is not checked either). A completed run that
+  keeps MusicBrainz's issue (`sourceUnavailable` or `sourceBusy`: its retries
+  ran out) and has no matching group or applied candidate is never "no
+  match": it reports release details that could not be fetched (retry first,
+  Luna beside it) when a candidate is incomplete, else lookup unavailable
+  (Luna first, the retry beside it). Values resting on an applied iTunes-only candidate are flagged
+  "iTunes only" (and "Not checked against MusicBrainz") outside the fold, and
+  the chooser marks such candidates the same way.
+- **Localized names.** The distinct artist names one kept result showed across
+  storefronts (case-folded, without placeholders, at most 200 characters) form
+  a localized name group when there are at least two: at most four groups of
+  four names per run. Ranking counts an artist tag equal to another name of a
+  group that holds a credited, canonical, joined or alias name as agreement.
+  Applying any candidate (or none, or answering conflicts), and completing or
+  re-ranking a run that applies nothing, keeps on the import
+  (`localizedNames`, at most 21 groups) the groups that hold a current Artist
+  entry's name, without a value change; a publication freezes them, only when
+  there are some. Review
+  lists Artists named with another name of an entry's or a pending proposal's
+  group as `localizedName` candidates (see the duplicate candidates above).
+  Localized names never keep a MusicBrainz ID on a renamed entry (that reads
+  `musicBrainzNames` only).
+- **Luna.** Neither an iTunes-only candidate nor any iTunes data (collection
+  ID, storefront, artwork address or localized names) reaches Luna: its
+  lookup context is only an applied MusicBrainz release's, and an applied
+  iTunes-only candidate sends none.
+
 ### Lookup runs
 
 `src/administration/lookup/metadataLookupService.ts` runs the jobs,
@@ -1867,21 +2095,31 @@ database, what the step stores and which request comes next.
   `_id` is the project's): the run number, state, issue and outcome, the grant,
   the bound file set (`fileSetDigest` and each manifest slot's confirmed upload
   intent and SHA-256), the input (`tags`, `folder` or `submitted`), at most six
-  planned queries with their progress, the MusicBrainz attempts, at most 25
-  candidates, whether every release its searches offered was compared
+  planned queries with their progress and `phase` (`search`, `details`,
+  `itunes`, `bridge`, `aliases` or `done`), the failed attempts per source
+  (`attempts.musicbrainz` and `attempts.itunes`), the sources whose retries ran
+  out (`exhausted`), the iTunes stage (`itunesStage`: its requests and
+  progress, at most four results with their storefront names, bridge searches
+  and outcomes; see
+  [iTunes fallback and MusicBrainz bridge](#itunes-fallback-and-musicbrainz-bridge)),
+  at most 25 candidates (each with its `source`; an iTunes-only one also keeps
+  its storefront, artwork address and check under `itunes`, never projected),
+  whether every release its searches offered was compared
   (`searchComplete`; a record from an earlier release counts as partial when
   it is re-ranked or resumed), the ranking with its groups, the applied
   candidate (or none) with its values, conflicts and flags (see
   [Value application](#value-application)),
   stale slots, the automatic-run count and whether a folder-name query was
   handed to the worker. A new run (an automatic rerun, a submitted name or a
-  manual retry) replaces the previous run's results; only the
+  manual retry) replaces the previous run's results, its iTunes stage, attempts
+  and exhausted sources included; only the
   automatic-run count, the folder use and the applied values carry over. No
   history is kept, and records are never deleted. `aliases` lists the credited
   artists and labels whose MusicBrainz aliases the run looked up,
   `{kind, id, state, names}` with `state` `pending`, `fetched`, `missing`
   (404 or an answer for another ID) or `failed`; a record from an earlier
-  release has none and completes without them.
+  release has none and completes without them, as one without `itunesStage`,
+  `exhausted` or `attempts.itunes` does without those.
 - **States.** `queued`, `running` and `retrying` are active; `complete`,
   `unavailable`, `stopped` and `superseded` end a run. A stopped run's issue is
   `permissionLost` or `grantExpired`, an unavailable one's `sourceUnavailable`,
@@ -1889,13 +2127,17 @@ database, what the step stores and which request comes next.
   `notConfigured`, and a superseded one's `fileSetChanged` or
   `projectClosed`. A completed run's outcome is `candidates`, `noRelease` or
   `noQuery` (nothing to look up, so nothing was sent); an unavailable run has
-  no outcome and is never reported as no release.
+  no outcome and is never reported as no release, nor is a completed run
+  without a matching group whose iTunes fallback stayed unavailable.
 - **Steps.** The worker polls every 2 seconds, claims a due run with a
-  180-second lease and advances it one MusicBrainz request per stored step: the
-  planned queries in order until 25 distinct releases are known, skipping the
-  fallbacks when a candidate is known as they start, then each candidate's
-  release lookup, then the alias lookups, then ranking. Releases whose reported
-  track count can match the files (or is unknown) are admitted first and their
+  180-second lease and advances it one request per stored step: the planned
+  MusicBrainz queries in order until 25 distinct releases are known, skipping
+  the fallbacks when a candidate is known as they start, then each candidate's
+  release lookup; then, without a matching group, the iTunes stage (its UPC
+  lookups and searches, its bridge searches, the bridged releases' lookups and
+  its collection lookups); then the alias lookups, then ranking. Releases
+  whose reported track count can match the files (or is unknown) are admitted
+  first and their
   details fetched first, so the bound is spent on plausible editions; a
   recording hit's reported track count is stored with its candidate, since its
   release has no summary. After the details (unless they ended unavailable) the
@@ -1913,11 +2155,12 @@ database, what the step stores and which request comes next.
   folded name, at most 32; aliases of type "Search hint" (misspellings) are
   excluded. Ranking then counts an artist tag that equals an alias of a credited
   artist as agreement. A run attempt sends at most 6 searches, 25 release
-  lookups and 16 alias lookups (47 requests); in wait mode each request is
-  sent at most 3
-  times within one call for a 503 or 429, and a failed step is retried
-  automatically at most 3 times. Each step's transaction first
-  rechecks the lease, the grant, the granting administrator's current role,
+  lookups and 16 alias lookups to MusicBrainz, plus at most 4 bridge searches
+  and 9 iTunes requests (60 requests); in wait mode each request is sent at
+  most 3 times within one call for a 503 or 429 (iTunes also 403), and a failed
+  step is retried automatically at most 3 times per source. Each step's
+  transaction first rechecks the lease, the grant, the granting administrator's
+  current role,
   that the project still accepts lookup and that no bound file changed. Requests
   run outside any transaction, each bounded by a 120-second step deadline. A
   worker whose lease was taken over writes nothing, and search progress
@@ -1937,19 +2180,27 @@ database, what the step stores and which request comes next.
   timeout (`sourceUnavailable`) keep 30 seconds, 2 and 5 minutes. Automatic
   runs, automatic reruns (also of submitted text) and manual retries wait for
   the source gate; a submitted run uses busy mode until its first failed
-  attempt, then waits. When the third retry fails too, or the next retry would
-  come after the run's grant expires, a search ends `unavailable` with no
-  ranking, while during release lookups the remaining candidates become
-  incomplete and the run completes with `sourceUnavailable`. A manual retry
-  starts a new run with the same queries.
+  attempt of either source, then waits. Each source counts its own attempts.
+  When MusicBrainz's third retry fails too, or the next retry would come after
+  the run's grant expires, nothing more is sent to it: during the planned
+  searches the iTunes stage still runs when MusicBrainz has no matching group,
+  and the run ends `unavailable` with no ranking unless it finds an iTunes-only
+  candidate (it then completes with the MusicBrainz issue); during release
+  lookups the remaining candidates become incomplete and the run completes
+  with `sourceUnavailable`. When iTunes's retries run out, the run completes
+  with what it has and no issue of its own (the view's `itunes` is
+  `unavailable`). A manual retry starts a new run with the same queries.
 - **Candidates.** Releases are stored without ISRCs, within 4 MiB of JSON for
   all candidates together, and candidates plus ranking stay within 12 MiB: while
   over it, the largest fetched releases are omitted and the rest ranked again. A
   release-ID query is stored under the ID MusicBrainz returns, so a release
   merged into another is ranked under its current ID. A 404 is `missing`, an
   exhausted lookup `failed` and a release over a budget `omitted`; all three
-  are incomplete and unranked. The
-  front-artwork flag comes from the release lookup. Ranking compares each
+  are incomplete and unranked. An iTunes-only candidate is stored in the same
+  release shape, built from its collection lookup within the same budgets (see
+  iTunes fallback and MusicBrainz bridge above). The front-artwork flag comes
+  from the release lookup, or for an iTunes-only candidate from its
+  allowlisted artwork address. Ranking compares each
   file's known duration (version-2 milliseconds, else a stored `mm:ss` with
   1-second precision), the draft's Disc and Track Numbers, the version-2 artist
   and album-artist tags and the identifiers every file shares.
@@ -2052,8 +2303,9 @@ fills only empty or automatic values that are still as it saw them.
   (`/lookup/choose`) applies at once. A completed run's preselection replaces
   an earlier application, an explicit one included, but never this run's own
   explicit choice; a run without a preselection leaves the earlier application
-  as it is. Only a fetched candidate whose release has the candidate's own ID
-  is applied; one answered under another ID (such as a merged release) ranks
+  as it is. Only a fetched candidate whose release (or, for an iTunes-only
+  candidate, collection) has the candidate's own ID is applied; one answered
+  under another ID (such as a merged release) ranks
   as incomplete and is never preselected or chosen. A role loss, an expired
   grant or a publication lock at that step applies nothing.
 - **Values.** The Album title; the Artist entries in credit order with their
@@ -2069,7 +2321,12 @@ fills only empty or automatic values that are still as it saw them.
   decisions on unchanged entries survive. Each entry and the label carry the
   MusicBrainz ID the release credits (never a placeholder's; proposals carry
   them as `musicBrainzId` and `labelMusicBrainzId`, so candidates crediting
-  different artists or labels under one name are different groups).
+  different artists or labels under one name are different groups). An
+  iTunes-only candidate supplies its collection name as given, its single
+  artist string as one primary entry without an ID, no label, its iTunes date
+  and each file's title, Disc and Track Number matched by milliseconds; a
+  MusicBrainz candidate the bridge found keeps its release group's date and
+  Cover Art Archive artwork.
 - **MusicBrainz IDs.** IDs come only from a MusicBrainz response: the parser
   admits an ID on an entry or the label only when the applying server step
   introduces it. Where the administrator's own entries or label equal the
@@ -2124,7 +2381,13 @@ fills only empty or automatic values that are still as it saw them.
   administrator and intent, the paths written, each value resting on the
   candidate (a track value names its manifest slot), the conflicts with their
   answers, the flagged values and the MusicBrainz IDs it supplied that the
-  draft still carries (`musicBrainzIds`). Automatic values equal to an applied
+  draft still carries (`musicBrainzIds`). For an iTunes-only candidate,
+  `releaseId` is the iTunes collection ID, `source` is `itunes` and
+  `notChecked` marks one MusicBrainz did not rule out (`unavailable` or
+  `notRun`); its values stay flagged in the summary. Each application, and a
+  completed or re-ranked run that applies nothing, also keeps on the import
+  (`localizedNames`) the run's localized name groups that hold a current
+  Artist entry's name. Automatic values equal to an applied
   value
   are listed in the detail's `lookupPaths` and are not marked as resting only
   on file tags.
@@ -2180,9 +2443,9 @@ lookup runs never make them stale.
 | `GET /lookup` | — | `200 {lookup, revision, valueRevision, summary, musicBrainzNames}`; `lookup` is `null` before any run; `musicBrainzNames` lists `{musicBrainzId, names}` for each ID the saved draft carries | `404 ADMIN_IMPORT_NOT_FOUND` for a review or a bad id |
 | `POST /lookup` | `{operationId, expectedRevision, kind, text}`, `kind` `album` or `song`, text at most 1000 characters | `202` import response, receipt `lookup` | `503 ADMIN_IMPORT_LOOKUP_UNAVAILABLE`, `400 ADMIN_IMPORT_LOOKUP_INVALID_NAME`, `409 ADMIN_IMPORT_LOOKUP_REFUSED` |
 | `POST /lookup/retry` | `{operationId, expectedRevision}` | `202`, receipt `lookup-retry` | `503 …UNAVAILABLE`, `409 …LOOKUP_ACTIVE`, `409 …NOTHING_TO_RETRY`, `409 …REFUSED` |
-| `POST /lookup/choose` | `{operationId, expectedRevision, run, candidateKey}`, key `musicbrainz:<mbid>` or `null` for none | `200`, receipt `lookup-choose` | `409 ADMIN_IMPORT_LOOKUP_STALE` (another run, an active run, an unknown candidate, a candidate before completion), `409 ADMIN_IMPORT_LOOKUP_CANDIDATE_INCOMPLETE` (no fetched details, or a release fetched under another ID), `409 …REFUSED` |
+| `POST /lookup/choose` | `{operationId, expectedRevision, run, candidateKey}`, key `musicbrainz:<mbid>`, `itunes:<collection ID>` (1 to 12 digits, no leading zero) or `null` for none | `200`, receipt `lookup-choose` | `409 ADMIN_IMPORT_LOOKUP_STALE` (another run, an active run, an unknown candidate, a candidate before completion), `409 ADMIN_IMPORT_LOOKUP_CANDIDATE_INCOMPLETE` (no fetched details, or a release or collection fetched under another ID), `409 …REFUSED` |
 | `POST /lookup/resolve` | `{operationId, expectedRevision, run, candidateKey, answers}`, 1 to 305 distinct `{path, answer, base}`, `answer` `mine` or `lookup` | `200`, receipt `lookup-resolve` | `409 …LOOKUP_STALE` (another application or a path that is no conflict), `409 ADMIN_IMPORT_FIELD_CONFLICT` (the current value is not `base`), `409 …REFUSED` (the project no longer accepts lookup or its draft cannot be read), `400 ADMIN_IMPORT_INVALID_INPUT` (an answer that grows the draft past 48 KB) |
-| `GET /lookup/candidates/:key/artwork` | — (an image element names the viewer with `?viewer=<account id>`, as staged previews do) | `200 image/webp`, the candidate's `front-500` thumbnail within 500 pixels, `Cache-Control: private, no-store`, `nosniff` | `403` (not a current administrator, rechecked after the fetch), `404` (a bad id or key, an unknown candidate, one whose fetched release reports no front artwork, or a Cover Art Archive 404), `503` (lookup unavailable or the fetch failed); no body |
+| `GET /lookup/candidates/:key/artwork` | — (an image element names the viewer with `?viewer=<account id>`, as staged previews do) | `200 image/webp`, the candidate's 500-pixel thumbnail (Cover Art Archive's `front-500`, or an iTunes-only candidate's iTunes artwork at 500 px) within 500 pixels, `Cache-Control: private, no-store`, `nosniff` | `403` (not a current administrator, rechecked after the fetch), `404` (a bad id or key, an unknown candidate, one whose key, source and collection ID disagree, one whose fetched release reports no front artwork, or an artwork host's 404), `503` (lookup unavailable or the fetch failed); no body |
 
 The artwork preview is read-only: it checks the role (and a live session),
 the import and the candidate without a fence write, stores no bytes, writes
@@ -2190,29 +2453,37 @@ nothing to storage or to the import, lookup or catalog collections (only the
 deployment-wide gate's bookkeeping in `adminMetadataLookupGates`), and sends no
 credential to the artwork host; the browser never loads a lookup address. It
 is counted in the media delivery metrics but stays out of the per-IP media
-admission pool, which refuses at once instead of queueing: the Cover Art
-Archive gate (two at a time, waiting), the preview deadline and the shared
-cover scheduler already bound it, so a chooser listing many releases never
-starves the same administrator's staged-cover previews or listener artwork.
+admission pool, which refuses at once instead of queueing: the source's gate
+(Cover Art Archive two at a time; iTunes one at a time, 3 seconds apart; both
+waiting), the preview deadline and the shared cover scheduler already bound
+it, so a chooser listing many releases never starves the same administrator's
+staged-cover previews or listener artwork.
 
 A malformed body is `400 ADMIN_IMPORT_INVALID_INPUT` before its intent is
 fingerprinted. Answering `lookup` writes the lookup value as the
 administrator's own; `mine` keeps the current value. The lookup view is an
 allowlist: the run, state, issue, outcome and input; at most 25 candidates
-(ranked order, else stored order as incomplete) with title, joined credit,
+(ranked order, else stored order as incomplete) with key, release ID,
+`source` (`musicbrainz` or `itunes`, agreeing with the key), `notChecked`
+(an iTunes-only candidate MusicBrainz did not rule out), title, joined credit,
 label, catalogue number, barcode, country, date, at most 20 formats, track
-count, the comparison counts and differences, group and artist mismatch, and
-`artwork` (whether the fetched release reports front artwork, so a protected
-preview exists; never an address); at
+count (an iTunes-only candidate shows no label, catalogue number, country or
+medium, and only a barcode its UPC lookup found), the comparison counts and
+differences, group and artist mismatch, and
+`artwork` (whether the fetched release reports front artwork, or an iTunes-only
+candidate has an allowlisted artwork address, so a protected preview exists;
+never an address); at
 most 25 groups with their proposals (each entry's and the label's MusicBrainz
 ID, `null` for a proposal stored before them); the preselection; the
 disclosure (unknown local durations and Disc Numbers, and `partialComparison`);
-the applied candidate's choice, value paths, conflicts (lookup value re-read
-through the draft rules, its MusicBrainz IDs read as introduced, and
+the preselection's `notChecked`; the iTunes stage's status (`itunes`); the
+applied candidate's `source` and `notChecked`, choice, value paths, conflicts
+(lookup value re-read through the draft rules, its MusicBrainz IDs read as
+introduced, and
 `musicBrainzId` marking a conflict only in IDs) and flags; stale files; and
 `needsAnswer` and
-`blocking`. It carries no URL, ISRC, recording ID, account, grant, lease,
-fence, file-set digest or query.
+`blocking`. It carries no URL, ISRC, recording ID, storefront, localized name,
+account, grant, lease, fence, file-set digest or query.
 
 The `summary` is the import's Review and publish state, computed by
 `src/administration/import/adminImportSummary.ts` from the same snapshot:
@@ -2247,17 +2518,27 @@ published track needs without a confirmed upload, is
   folder-chosen imports and automatically only once per project (a manual
   retry of that run repeats it); release MBIDs from earlier results of the
   same run; artist and label MBIDs credited by releases the same run fetched
-  (alias lookups, at most 16); and normalized spellings of tag or folder text
-  as fallbacks. The
+  (alias lookups, at most 16); normalized spellings of tag or folder text
+  as fallbacks; and the bridge terms, the titles and artist names the iTunes
+  Search API showed for the same run (at most 4 searches). The
   number of selected files is never sent; the run uses it only locally.
+- To Apple's iTunes Search API, only when MusicBrainz returned no matching
+  candidate, and only `https://itunes.apple.com/search` and `/lookup` (at most
+  9 requests per run attempt): the run's search term (its text and credited
+  artist, never a respelling), the fixed storefront code, the digits of a
+  valid barcode every file shares (never a placeholder such as all zeros), and
+  collection IDs from earlier results of the same run. To the iTunes artwork
+  hosts, only the rewritten path of an iTunes-only candidate's stored artwork
+  address.
 - Cover Art Archive front-artwork URLs the server builds from release MBIDs of
   the same import's lookup candidates (a staged cover or a preview), and the
   archive.org redirects they lead to.
 - Never file names, relative path segments, account data (including any
   account's email address) or audio. The only contact sent is the operator
   contact configured in `FINITUDE_ADMIN_METADATA_LOOKUP_CONTACT`, in the
-  User-Agent.
+  User-Agent of MusicBrainz and Cover Art Archive requests only.
 - Requests carry only `Accept`, `Accept-Encoding: identity` and
-  `User-Agent: Finitude/1.0 ( <contact> )`: no cookie, authorization or
-  referrer.
-- Stored records contain no URL.
+  `User-Agent: Finitude/1.0 ( <contact> )` (`Finitude/1.0` alone to Apple's
+  hosts): no cookie, authorization or referrer.
+- Stored records contain no URL except an iTunes-only candidate's validated
+  artwork address (and its lookup cover job's), which is never projected.

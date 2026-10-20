@@ -23,6 +23,7 @@ import { importDraftV2FromV1 } from './adminImportDraftCompat';
 import { analysisContext, type AnalysisInput, type AnalysisSuggestion, type LunaArtistValue, type LunaBaseline, type LunaLookupContext, type LunaRelease } from './adminImportProvider';
 import type { ImportIdentityProposals } from './adminImportIdentity';
 import type { AdminImportDocument } from './adminImportService';
+import { lookupCandidateSource } from '../lookup/lookupContract';
 import { isPlaceholderCredit } from '../lookup/lookupIdentifiers';
 import type { LookupApplication, StoredLookupCandidate } from '../lookup/metadataLookupRecord';
 
@@ -102,11 +103,13 @@ function lunaRelease(raw: Record<string, unknown>): LunaRelease | null {
 export function lunaLookupContextFor(found: { applied: Pick<LookupApplication, 'run' | 'candidateKey' | 'releaseId' | 'choice'>; candidate: StoredLookupCandidate } | null): StoredLunaLookupContext | null {
     if (!found || !isRecord(found.applied) || !isRecord(found.candidate)) return null;
     const applied = found.applied as Record<string, unknown>, candidate = found.candidate as Record<string, unknown>;
-    if ((applied.choice !== 'preselected' && applied.choice !== 'chosen') || typeof applied.candidateKey !== 'string' || typeof applied.releaseId !== 'string' || !Number.isSafeInteger(applied.run)) return null;
+    // An iTunes-only candidate (by its key, whatever its stored source says) is never Luna context.
+    if ((applied.choice !== 'preselected' && applied.choice !== 'chosen') || lookupCandidateSource(applied.candidateKey) !== 'musicbrainz' || typeof applied.releaseId !== 'string'
+        || !Number.isSafeInteger(applied.run)) return null;
     if (candidate.key !== applied.candidateKey || candidate.source !== 'musicbrainz' || candidate.releaseId !== applied.releaseId || candidate.details !== 'fetched' || !isRecord(candidate.release)) return null;
     const release = lunaRelease(candidate.release); if (!release) return null;
     const context = fitLunaLookupContext({ source: 'musicbrainz', kind: 'appliedRelease', trust: 'untrusted', truncated: false, release }, ADMIN_IMPORT_LIMITS.inputBytes);
-    return context && { releaseId: applied.releaseId, candidateKey: applied.candidateKey, run: applied.run as number, context };
+    return context && { releaseId: applied.releaseId, candidateKey: applied.candidateKey as string, run: applied.run as number, context };
 }
 
 /**

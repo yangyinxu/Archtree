@@ -21,7 +21,7 @@
 import { z } from 'zod';
 import { advanceAccountEpoch, captureAccountOperation } from '../../api/accountEpoch';
 import { adminWorkspace } from './adminWorkspace';
-import { ADMIN_IMPORT_RELOAD_REQUIRED, adminRequest, detailSchema, newerImport, responseSchema } from './adminApi';
+import { ADMIN_IMPORT_RELOAD_REQUIRED, adminRequest, detailSchema, lookupCoverName, newerImport, responseSchema } from './adminApi';
 import { ADMIN_RELOAD_REQUIRED } from './adminTransport';
 import { AdminCommand } from './useAdminCommand';
 import { AdminMutation } from './useAdminMutation';
@@ -52,6 +52,10 @@ test('a lookup cover asset parses, selected too, while an unknown slot prefix is
   const many = (count: number) => Array.from({ length: count }, (_, index) => image(`lookup-musicbrainz:${index}`));
   expect(detailSchema.safeParse({ ...item, assets: many(205) }).success).toBe(true);
   expect(detailSchema.safeParse({ ...item, assets: many(206) }).success).toBe(false);
+  // An iTunes-only candidate's cover is a lookup cover too, named by the first eight digits of its collection ID.
+  expect(detailSchema.safeParse({ ...item, assets: [image('lookup-itunes:1689358563')], selectedCoverSlotId: 'lookup-itunes:1689358563', coverChoice: 'automatic' }).success).toBe(true);
+  const names = (key: string) => ({ 'media.lookup_cover': 'Cover Art Archive front artwork', 'media.lookup_cover_itunes': 'iTunes artwork' })[key] ?? key;
+  expect([lookupCoverName(names, 'lookup-itunes:1689358563'), lookupCoverName(names, lookup)]).toEqual(['iTunes artwork · 16893585', 'Cover Art Archive front artwork · 0000000b']);
 });
 
 test('the Draft v2 detail and a mutation response list every metadata lookup receipt kind, and an unknown kind is refused', () => {

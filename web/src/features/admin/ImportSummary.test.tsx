@@ -24,6 +24,9 @@
  *   - the fold marks a cover chosen automatically, never an explicit one, and an append marks it not applied
  *   - Publish waits while the applied release's cover is being staged, the summary polls meanwhile, and a staged lookup cover is named in the fold
  *   - the Analyze confirmation focuses Cancel, closes on Escape without starting anything, and cannot be confirmed while its budget is loading, failed or too small for one more run
+ *   - the iTunes stage has its own status and next step: searching iTunes, retrying it, unavailable after no match, MusicBrainz unavailable never as no match, and an applied iTunes-only result, checked or not
+ *   - values resting on an applied iTunes-only result are flagged as iTunes only, and as not checked against MusicBrainz, and never folded
+ *   - an append flags only the track values an applied iTunes-only result wrote, an unsaved change is not flagged, and a choice of none flags nothing
  * @end-catalog */
 
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
@@ -526,4 +529,78 @@ test('the Analyze confirmation focuses Cancel, closes on Escape without starting
     expect(opened.start().hasAttribute('disabled'), JSON.stringify(analysis)).toBe(!enabled);
   }
   fireEvent.click(opened.start()); expect(opened.onConfirm).toHaveBeenCalledOnce();
+});
+
+test('the iTunes stage has its own status and next step: searching iTunes, retrying it, unavailable after no match, MusicBrainz unavailable never as no match, and an applied iTunes-only result, checked or not', async () => {
+  const itunesKey = 'itunes:1689358563', itunes = candidate(1, { key: itunesKey, releaseId: '1689358563', source: 'itunes', label: null, catalogNumber: null, country: null, formats: [] });
+  const appliedItunes = (notChecked: boolean) => applied({ candidateKey: itunesKey, releaseId: '1689358563', source: 'itunes', notChecked });
+  const cases: [Record<string, unknown>, string, string[]][] = [
+    // The stage also runs after MusicBrainz stayed unavailable, so its status claims no MusicBrainz answer.
+    [{ state: 'running', outcome: null, itunes: 'running' }, 'Looking up metadata in the iTunes Search API…', []],
+    [{ state: 'retrying', outcome: null, issue: 'sourceBusy', itunes: 'retrying' }, 'The iTunes Search API is busy or unavailable, so lookup retries automatically. You can retry now at no cost.', ['Retry lookup', 'Analyze with Luna']],
+    // MusicBrainz is still retried as before while the stage has not started.
+    [{ state: 'retrying', outcome: null, issue: 'sourceBusy', itunes: 'notQueried' }, 'MusicBrainz is busy or unavailable, so lookup retries automatically. You can retry now at no cost.', ['Retry lookup', 'Analyze with Luna']],
+    [{ outcome: 'noRelease', itunes: 'unavailable' }, 'MusicBrainz found no matching release, and the iTunes Search API was unavailable. Retry the lookup at no cost, or analyze with Luna.', ['Analyze with Luna', 'Retry lookup']],
+    [{ candidates: [candidate(2, { status: 'notMatching', groupKey: null })], itunes: 'unavailable' },
+      'MusicBrainz found no matching release, and the iTunes Search API was unavailable. Retry the lookup at no cost, or analyze with Luna.', ['Analyze with Luna', 'Retry lookup']],
+    // MusicBrainz stayed unavailable (the completed run keeps its issue): never no match, whatever iTunes answered.
+    [{ candidates: [candidate(2, { status: 'incomplete', groupKey: null, comparison: null })], issue: 'sourceUnavailable', itunes: 'unavailable' },
+      'Release details could not be fetched, so no match was confirmed. Retry the lookup at no cost, or analyze with Luna.', ['Retry lookup', 'Analyze with Luna']],
+    [{ candidates: [{ ...itunes, status: 'notMatching', groupKey: null, notChecked: true }], issue: 'sourceUnavailable', itunes: 'answered' },
+      'Metadata lookup is unavailable. Analyze with Luna, or retry the lookup at no cost.', ['Analyze with Luna', 'Retry lookup']],
+    [{ outcome: 'noRelease', issue: 'sourceBusy', itunes: 'answered' }, 'Metadata lookup is unavailable. Analyze with Luna, or retry the lookup at no cost.', ['Analyze with Luna', 'Retry lookup']],
+    [{ candidates: [itunes], groups: [group(1, 'Synthetic Album')], applied: appliedItunes(false), itunes: 'answered' },
+      'Applied an iTunes-only result: Synthetic Album 1. MusicBrainz found no release for it, so its values are flagged.', []],
+    [{ candidates: [itunes], groups: [group(1, 'Synthetic Album')], applied: appliedItunes(true), issue: 'sourceUnavailable', itunes: 'answered' },
+      'Applied an iTunes-only result: Synthetic Album 1. It was not checked against MusicBrainz, so its values are flagged.', ['Analyze with Luna', 'Retry lookup']]
+  ];
+  for (const [lookup, status, steps] of cases) {
+    const { section } = mount(detail(), lookupResponse({ lookup: view(lookup), summary: summary() }));
+    expect(await within(section()).findByText(status, { selector: 'p' })).toHaveAttribute('role', 'status');
+    expect(within(section()).queryAllByRole('button', { name: /^(Retry lookup|Analyze with Luna)$/ }).map(button => button.textContent)).toEqual(steps);
+    cleanup();
+  }
+});
+
+test('values resting on an applied iTunes-only result are flagged as iTunes only, and as not checked against MusicBrainz, and never folded', async () => {
+  const itunesKey = 'itunes:1689358563', item = detail();
+  item.draft.album.title = 'iTunes Title'; item.draft.album.artists = [artistEntry('Synthetic Ensemble')]; item.draft.tracks[0].title = 'iTunes Song';
+  item.automaticPaths = ['album.title', 'album.artists', `tracks.${slotId}.title`]; item.lookupPaths = ['album.title', 'album.artists', `tracks.${slotId}.title`];
+  const lookup = view({ candidates: [candidate(1, { key: itunesKey, releaseId: '1689358563', source: 'itunes', notChecked: true })], groups: [group(1, 'iTunes Title')],
+    applied: applied({ candidateKey: itunesKey, releaseId: '1689358563', source: 'itunes', notChecked: true }), itunes: 'answered' });
+  const { section } = mount(item, lookupResponse({ lookup, summary: summary() }));
+  await ready();
+  const flagged = within(section()).getByRole('list', { name: 'Values to check' });
+  expect(within(flagged).getAllByRole('listitem').map(row => row.textContent)).toEqual([
+    'Title: iTunes Title · iTunes only · Not checked against MusicBrainz', 'Artists: Synthetic Ensemble · iTunes only · Not checked against MusicBrainz',
+    'Track 1 · Title: iTunes Song · iTunes only · Not checked against MusicBrainz']);
+  const fold = within(section()).getByText('Values that need no answer').closest('details')!;
+  expect([within(fold).queryByText('iTunes Title'), within(fold).queryByText('Synthetic Ensemble · Primary')]).toEqual([null, null]);
+  cleanup();
+  // A checked iTunes-only result is flagged as iTunes only; a MusicBrainz release's values are folded as before.
+  mount(item, lookupResponse({ lookup: { ...lookup, applied: applied({ candidateKey: itunesKey, releaseId: '1689358563', source: 'itunes', notChecked: false }) }, summary: summary() }));
+  await ready();
+  expect(within(screen.getByRole('list', { name: 'Values to check' })).getAllByRole('listitem')[0].textContent).toBe('Title: iTunes Title · iTunes only');
+});
+
+test('an append flags only the track values an applied iTunes-only result wrote, an unsaved change is not flagged, and a choice of none flags nothing', async () => {
+  const itunesKey = 'itunes:1689358563', item = detail();
+  item.draft.album.title = 'iTunes Title'; item.draft.tracks[0].title = 'iTunes Song';
+  item.automaticPaths = ['album.title', `tracks.${slotId}.title`]; item.lookupPaths = ['album.title', `tracks.${slotId}.title`];
+  const lookup = (choice: 'chosen' | 'none') => view({ candidates: [candidate(1, { key: itunesKey, releaseId: '1689358563', source: 'itunes', notChecked: false })], groups: [group(1, 'iTunes Title')],
+    applied: applied({ candidateKey: choice === 'none' ? null : itunesKey, releaseId: choice === 'none' ? null : '1689358563', choice, basis: choice === 'none' ? null : 'chosen', source: 'itunes' }), itunes: 'answered' });
+  // An append applies no Album value, so only the track title is flagged as resting on the iTunes-only result.
+  mount(item, lookupResponse({ lookup: lookup('chosen'), summary: summary({ append: true }) }));
+  await ready();
+  expect(within(screen.getByRole('list', { name: 'Values to check' })).getAllByRole('listitem').map(row => row.textContent)).toEqual(['Track 1 · Title: iTunes Song · iTunes only']);
+  cleanup();
+  // A value the administrator is changing now is theirs, not the result's.
+  mount(item, lookupResponse({ lookup: lookup('chosen'), summary: summary() }), { approval: { draft: item.draft, changes: [{ path: `tracks.${slotId}.title`, base: 'iTunes Song', value: 'Mine' }] } });
+  await ready();
+  expect(within(screen.getByRole('list', { name: 'Values to check' })).getAllByRole('listitem').map(row => row.textContent)).toEqual(['Title: iTunes Title · iTunes only']);
+  cleanup();
+  // None applied: nothing rests on the result any more.
+  mount(item, lookupResponse({ lookup: lookup('none'), summary: summary() }));
+  await ready();
+  expect(screen.queryByRole('list', { name: 'Values to check' })).toBeNull();
 });

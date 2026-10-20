@@ -94,7 +94,7 @@ export function ImportApprovalChecklist({ item, draft, changes, onChange, onAdop
   // An append applies none of the draft's Album values or cover; each such row says so.
   const applied = (text: string) => checklist?.append ? `${text} · ${t('publication.not_applied')}` : text;
   const cover = body?.selectedCoverSlotId ?? null;
-  const coverText = [cover === null ? t('media.no_cover') : cover === 'cover' ? t('media.manual_cover') : cover.startsWith('lookup-') ? lookupCoverName(t('media.lookup_cover'), cover) : item.manifest.files.find(file => `embedded-${file.slotId}` === cover)?.filename ?? cover,
+  const coverText = [cover === null ? t('media.no_cover') : cover === 'cover' ? t('media.manual_cover') : cover.startsWith('lookup-') ? lookupCoverName(t, cover) : item.manifest.files.find(file => `embedded-${file.slotId}` === cover)?.filename ?? cover,
     // The automatic cover the project shows stays automatic when approved as shown.
     item.coverChoice === 'automatic' && cover !== null && cover === item.selectedCoverSlotId && t('summary.cover_automatic')].filter(Boolean).join(' · ');
   return <section aria-labelledby={heading} className={styles.checklist}>

@@ -56,6 +56,7 @@
  *   - two entries carrying one MusicBrainz ID cannot both record it: the approval asks for review again and writes nothing
  *   - a holder that is not ready is no candidate, so its ID surfaces at commit as identityConflict minting nothing; once it is gone a resume records the ID
  *   - the worker rechecks alias candidates from the names the approval froze; cancelling permits a fresh review that reuses the alias record and records the ID
+ *   - the worker rechecks localized-name candidates from the groups the approval froze: an Artist named with an entry's other localized name after approval needs attention with identityConflict
  *   - a malformed record holding an entry's ID, or named as an alias of the label's, is unavailable and holds its row; a create despite that holder needs attention at commit
  * @end-catalog */
 
@@ -1156,6 +1157,28 @@ test('the worker rechecks alias candidates from the names the approval froze; ca
     assert.equal((await stored(item.id)).media!.publication!.state, 'complete');
     assert.equal((await db().collection('artists').findOne({ _id: alias }))!.musicBrainzId, mbid(1));
     assert.equal((await db().collection('albums').findOne({ title: 'Amet Collection' }))!.credits[0].subjectId, alias.toHexString());
+});
+
+test('the worker rechecks localized-name candidates from the groups the approval froze: an Artist named with an entry\'s other localized name after approval needs attention with identityConflict', async () => {
+    const storage = new Storage(), groups = [['Lorem Ensemble', 'ロレム合奏団'], ['Unrelated Name', 'Other Name']];
+    const reviewedItem = await reviewed(storage);
+    await imports().updateOne({ _id: new ObjectId(reviewedItem.id) }, { $set: { localizedNames: groups } });
+    const item = (await getAdminImport(by, reviewedItem.id)).item;
+    await publishAdminImport(by, item.id, approvalBody(item));
+    // Only the groups holding a current entry name are frozen.
+    assert.deepEqual((await stored(item.id)).media!.publication!.localizedNames, [groups[0]]);
+    // The project's own groups no longer list the name, but the recheck compares what the approval compared.
+    await imports().updateOne({ _id: new ObjectId(item.id) }, { $unset: { localizedNames: '' } });
+    await candidateRecord('artist', 'ロレム合奏団');
+    const before = await counts();
+    await runAdminImportPublicationOnce(storage, item.id);
+    const held = (await stored(item.id)).media!.publication!;
+    assert.deepEqual([held.state, held.issue, storage.copies], ['needsAttention', 'identityConflict', 0]);
+    assert.deepEqual(await counts(), before);
+    // An approval without localized names freezes none (format-3 publications keep their shape).
+    const plain = await reviewed(storage);
+    await publishAdminImport(by, plain.id, approvalBody((await getAdminImport(by, plain.id)).item));
+    assert.equal('localizedNames' in (await stored(plain.id)).media!.publication!, false);
 });
 
 test('a malformed record holding an entry\'s ID, or named as an alias of the label\'s, is unavailable and holds its row; a create despite that holder needs attention at commit', async () => {

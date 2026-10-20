@@ -14,6 +14,7 @@
  *   - groups that differ only by the MusicBrainz artist or label they credit show each ID beside the names
  *   - a release reporting front artwork shows it once through the protected preview of this import: in the tie view, else in the folded list once opened
  *   - previews load two at a time in the order shown, and one that fails is tried once more after two seconds and then hidden
+ *   - an iTunes-only candidate is marked as such, and as not checked against MusicBrainz when it was not, and previews through its own encoded key
  * @end-catalog */
 
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
@@ -30,13 +31,14 @@ type Candidate = ImportLookupView['candidates'][number];
 const release = (n: number) => `0000000b-0000-4000-8000-00000000000${n}`;
 const key = (n: number) => `musicbrainz:${release(n)}`;
 const comparison = (differences: ('trackCount' | 'discCount' | 'duration')[] = []) => ({ trackCount: { local: 2, candidate: 2 }, discCount: { local: null, candidate: 2 }, differences, unknownLocalDurations: 0, unknownCandidateDurations: 0 });
-const candidate = (n: number, extra: Partial<Candidate> = {}): Candidate => ({ key: key(n), releaseId: release(n), status: 'matching', title: `Synthetic Album ${n}`, artist: 'Synthetic Lead', label: `Label ${n}`,
+const candidate = (n: number, extra: Partial<Candidate> = {}): Candidate => ({ key: key(n), releaseId: release(n), source: 'musicbrainz', notChecked: false, status: 'matching', title: `Synthetic Album ${n}`, artist: 'Synthetic Lead', label: `Label ${n}`,
   catalogNumber: null, barcode: null, country: null, date: { year: 2021, month: 5, day: null }, formats: [], trackCount: 2, comparison: comparison(), groupKey: String(n).repeat(64), artistMismatch: false, artwork: false, ...extra });
 const group = (n: number, tracks: [number, number, string][]) => ({ groupKey: String(n).repeat(64), representativeKey: key(n), memberKeys: [key(n)], proposal: { albumTitle: 'Synthetic Album',
   artists: [{ name: 'Synthetic Lead', role: 'primary' as const, joinPhrase: null, musicBrainzId: null as string | null }], label: 'Label', labelMusicBrainzId: null as string | null, releaseDate: null, tracks: tracks.map(([discNumber, trackNumber, title]) => ({ discNumber, trackNumber, title })) } });
 const view = (extra: Partial<ImportLookupView> = {}): ImportLookupView => ({ run: 2, state: 'complete', issue: null, outcome: 'candidates', input: { trigger: 'tags', submitted: null }, candidates: [], groups: [],
-  preselection: null, disclosure: null, applied: null, staleFiles: [], needsAnswer: { tie: false, conflicts: [] }, blocking: false, ...extra });
-const applied = (run: number, candidateKey: string | null): ImportLookupView['applied'] => ({ run, candidateKey, releaseId: null, choice: candidateKey ? 'chosen' : 'none', basis: candidateKey ? 'chosen' : null, values: [], conflicts: [], flagged: [] });
+  preselection: null, disclosure: null, applied: null, staleFiles: [], needsAnswer: { tie: false, conflicts: [] }, blocking: false, itunes: 'notQueried', ...extra });
+const applied = (run: number, candidateKey: string | null): ImportLookupView['applied'] => ({ run, candidateKey, releaseId: null, choice: candidateKey ? 'chosen' : 'none', basis: candidateKey ? 'chosen' : null,
+  source: 'musicbrainz', notChecked: false, values: [], conflicts: [], flagged: [] });
 const importId = 'aaaaaaaaaaaaaaaaaaaaaaaa', viewerId = 'bbbbbbbbbbbbbbbbbbbbbbbb';
 function mount(lookup: ImportLookupView, disabled = false) { const onChoose = vi.fn(); render(<CandidateChooser importId={importId} viewerId={viewerId} lookup={lookup} disabled={disabled} onChoose={onChoose} />); return onChoose; }
 afterEach(cleanup);
@@ -148,7 +150,7 @@ test('a tie from a partial comparison keeps the several-releases heading and say
   expect(screen.queryByRole('region', { name: /^One release matches/ })).not.toBeInTheDocument();
   cleanup();
   // A release applied by its shared identifier needs no choice, and the partial comparison is still said.
-  mount(view({ candidates: [candidate(1)], groups: [group(1, [[1, 1, 'First']])], preselection: { candidateKey: key(1), basis: 'releaseId', artistMismatch: false },
+  mount(view({ candidates: [candidate(1)], groups: [group(1, [[1, 1, 'First']])], preselection: { candidateKey: key(1), basis: 'releaseId', artistMismatch: false, notChecked: false },
     applied: { ...applied(2, key(1))!, choice: 'preselected', basis: 'releaseId' }, disclosure: partial }));
   expect(screen.queryByRole('region')).not.toBeInTheDocument();
   expect(screen.getByText(line)).toBeInTheDocument();
@@ -211,4 +213,15 @@ test('previews load two at a time in the order shown, and one that fails is trie
     for (const n of [4, 5, 6, 7, 8]) { expect(inFlight().length).toBeLessThanOrEqual(2); load(n); }
     expect([inFlight(), previews().length]).toEqual([[], 7]);
   } finally { vi.useRealTimers(); }
+});
+
+test('an iTunes-only candidate is marked as such, and as not checked against MusicBrainz when it was not, and previews through its own encoded key', () => {
+  const itunes = (n: number, notChecked: boolean) => candidate(n, { key: `itunes:16893585${n}`, releaseId: `16893585${n}`, source: 'itunes', notChecked, label: null, artwork: true });
+  mount(view({ candidates: [itunes(1, true), itunes(2, false), candidate(3)] }));
+  unfold(screen.getByText('Releases found: 3'));
+  const [unchecked, checked, musicBrainz] = screen.getAllByRole('listitem').filter(item => item.querySelector('strong'));
+  expect(within(unchecked).getByText('iTunes only · Not checked against MusicBrainz')).toBeInTheDocument();
+  expect(within(checked).getByText('iTunes only')).toBeInTheDocument();
+  expect(within(musicBrainz).queryByText(/iTunes only/)).toBeNull();
+  expect(within(unchecked).getByRole('img').getAttribute('src')).toBe(`/api/admin/v1/imports/${importId}/lookup/candidates/itunes%3A168935851/artwork?viewer=${viewerId}`);
 });

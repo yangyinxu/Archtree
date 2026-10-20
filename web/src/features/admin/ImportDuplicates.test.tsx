@@ -17,6 +17,7 @@
  *   - a file with identical bytes on another Album is flagged and never collapsed, but needs no answer
  *   - a failed candidate read on opening shows an error and no rows, and Find matches reads them again
  *   - an entry carrying a MusicBrainz ID lists the record holding it and alias records, collapses an exact-ID reuse, and offers replace only while no record holds the ID
+ *   - an Artist named with an iTunes localized name of an entry's name is listed for that entry as an iTunes localized name and holds it from a preselected create
  *   - only an entry carrying a MusicBrainz ID is offered replace, never while a record holding its ID is listed, and a saved replace takes its record from other entries
  * @end-catalog */
 
@@ -279,6 +280,14 @@ test('an entry carrying a MusicBrainz ID lists the record holding it and alias r
   vi.stubGlobal('fetch', vi.fn(async () => listing([holding, { ...candidate('organization', 'd'.repeat(24), 'Sit'), match: 'musicBrainzId' as const, musicBrainzId: mbid(9) }])));
   mount(item); await open();
   expect([...select(4).options].some(option => option.value.startsWith('replace:'))).toBe(false);
+});
+
+test('an Artist named with an iTunes localized name of an entry\'s name is listed for that entry as an iTunes localized name and holds it from a preselected create', async () => {
+  const item = several(), localized = { ...candidate('artist', 'e'.repeat(24), 'ロレム合奏団'), match: 'localizedName' as const, localizedOf: 'Lorem Ensemble' };
+  vi.stubGlobal('fetch', vi.fn(async () => listing([localized])));
+  mount(item); await open();
+  expect([...select(1).options].find(option => option.value === localized.id)?.textContent).toContain('iTunes localized name');
+  expect([...select(2).options].some(option => option.value === localized.id)).toBe(false);
 });
 
 test('only an entry carrying a MusicBrainz ID is offered replace, never while a record holding its ID is listed, and a saved replace takes its record from other entries', async () => {

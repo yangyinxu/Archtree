@@ -40,6 +40,7 @@ import { ADMIN_IMPORT_LOOKUP_COLLECTION } from '../lookup/lookupContract';
 import type { ImportLookupGate, LookupApplication, MetadataLookupRecord, StoredLookupCandidate } from '../lookup/metadataLookupRecord';
 import { IMPORT_CANDIDATE_COLLECTIONS, IMPORT_IDENTITY_FENCE_ID, importCandidateProjection, importCandidateRevision, importCandidateRow, importIdentityCandidates, readyImportCandidate } from './adminImportIdentity';
 import { importMusicBrainzNameMap, type ImportMusicBrainzNames } from './adminImportMusicBrainzIds';
+import { importLocalizedNameMap, type ImportLocalizedNames } from './adminImportLocalizedNames';
 import { keepableMusicBrainzId } from '../../utils/musicBrainzId';
 
 export type ProjectReceipt = Omit<ImportReceipt, 'kind'> & { kind: ImportReceipt['kind'] | 'apply' } & { actorId: string; hash: string; at: Date; selection?: { generation: number; acceptedIds: string[]; rejectedIds: string[] } };
@@ -67,6 +68,11 @@ export type AdminImportDocument = {
      * value application, never projected in v1; GET /lookup shows them.
      */
     musicBrainzNames?: ImportMusicBrainzNames;
+    /**
+     * iTunes localized name groups of the draft's Artist entries (adminImportLocalizedNames.ts): written only by lookup value
+     * application, never projected; identity candidates read them.
+     */
+    localizedNames?: ImportLocalizedNames;
     _id: ObjectId; actorId: string; revision: number; createdAt: Date; updatedAt: Date; manifest: ImportManifest; draft: ImportDraft | ImportDraftV2; analysis: Analysis; analysisHistory: Analysis[]; attemptsUsed: number;
     suggestions: StoredSuggestion[]; decisions: (ImportDuplicateDecision | ImportDecisionV2)[]; receipts: Receipt[]; recoveryReceipts?: Receipt[]; automaticReceipts?: Receipt[]; media?: ImportMedia };
 /** A Draft v2 document: an import project or catalog review written by this release, or converted at its first admitted change. */
@@ -450,8 +456,9 @@ export { importCandidateProjection, importCandidateRevision };
  * case-insensitive name candidates for each Artist entry, the label, the Album and the tracks, also for the names and titles each
  * pending Luna proposal shown would write (Artist entries, label, Album and track titles), so the confirmation preselects a ticked
  * suggestion as if it were applied; one verified byte candidate per staged hash; every byte or title match among the members of
- * each Album candidate and of the saved append target; and the exact-ID and alias candidates of the saved draft
- * (importIdentityCandidates): at most 1761 items, with `memberMatchesComplete` false when more member matches exist, and the
+ * each Album candidate and of the saved append target; the exact-ID and alias candidates of the saved draft; and the Artists named
+ * with an iTunes localized name of a saved or proposed Artist name (importIdentityCandidates): at most 2561 items, with
+ * `memberMatchesComplete` false when more member matches exist, and the
  * `unavailable` names whose same-name record is malformed. Only the saved Album reuse target is read from the decisions.
  */
 export async function adminImportDuplicateCandidates(actor: string, id: string) {
@@ -464,15 +471,18 @@ export async function adminImportDuplicateCandidates(actor: string, id: string) 
  * The saved draft as the editor shows it (its Draft v2 view, whatever format stored it), its saved decisions as the editor shows
  * them with the MusicBrainz ID each binds (adminImportDetail; decisions saved before Draft v2 name no entry key) and their identity
  * candidates read in `session`, alias candidates from the names lookup found, for the duplicate-candidates read and the summary's
- * count of identity rows left to answer. With `lunaProposals` (the duplicate-candidates read only) the candidates also cover the
- * values the shown pending Luna proposals would write; the summary's count reads the saved draft alone.
+ * count of identity rows left to answer, and localized-name candidates from the iTunes localized names lookup found. With
+ * `lunaProposals` (the duplicate-candidates read only) the candidates also cover the values the shown pending Luna proposals would
+ * write (their Artist names' localized names included); the summary's count reads the saved draft alone.
  */
 export async function importSavedIdentity(doc: AdminImportDocument, session: ClientSession, options: { lunaProposals?: boolean } = {}) {
     const manifest = legacyManifestView(doc.manifest), id = doc._id.toHexString(), draft = importDraftV2View(doc.draft, manifest, id);
     const view = importProjectV2View(doc), slots = new Set(manifest.files.map(file => file.slotId));
     const decisions = (view ? importDecisionsV2View(view.decisions, slots, { binding: true }) : legacyDecisionsView(doc.decisions, slots)) as ImportDecisionV2[];
     const proposals = options.lunaProposals ? lunaIdentityProposals(importSuggestionsV2View(doc.suggestions, legacyAnalysisView(doc).generation, slots, id).filter(suggestion => suggestion.decision === 'pending')) : undefined;
-    return { draft, decisions, candidates: await importIdentityCandidates({ manifest, draft, assets: doc.media?.assets ?? [], decisions, names: importMusicBrainzNameMap(doc.musicBrainzNames, draft), ...(proposals ? { proposals } : {}) }, session) };
+    const localized = importLocalizedNameMap(doc.localizedNames, [...draft.album.artists.map(entry => entry.name), ...(proposals?.artistNames ?? [])]);
+    return { draft, decisions, candidates: await importIdentityCandidates({ manifest, draft, assets: doc.media?.assets ?? [], decisions, names: importMusicBrainzNameMap(doc.musicBrainzNames, draft),
+        localized, ...(proposals ? { proposals } : {}) }, session) };
 }
 /** Two Artist entries of one decision set cannot reuse one Artist (a reuse that replaces its ID is a reuse too). */
 export const reusesOneArtistTwice = (raw: readonly unknown[]) => {

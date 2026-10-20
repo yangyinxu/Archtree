@@ -4,7 +4,7 @@
  *   Constants: target, otherAlbum
  *   Variables: next
  * Tests
- *   - the candidates schema accepts 1761 items and 44 unavailable names, defaulting an absent member flag to incomplete and absent names to none, and refuses more, unknown keys and automatic reuse
+ *   - the candidates schema accepts 2561 items and 44 unavailable names, defaulting an absent member flag to incomplete and absent names to none, and refuses more, unknown keys and automatic reuse
  *   - a same-name record too malformed to be a candidate holds its row, and names compare as the server does whatever the browser locale
  *   - with no candidates every saved row is preselected as new, an explicit decision wins, and a name candidate holds only its own row
  *   - a row shown under another name than the saved one is never preselected: a renamed entry or label, a changed title or a new unsaved entry
@@ -13,6 +13,7 @@
  *   - identical bytes outside the append target flag their files, and a byte match on the target flags nothing
  *   - an untitled file is never matched by title when appending, so an untitled member holds only the file its bytes match
  *   - the record holding an entry's MusicBrainz ID is preselected as reuse, and an alias or ID candidate holds a row from a preselected create
+ *   - an Artist named with an iTunes localized name of an entry's name holds that entry, and only it, from a preselected create, as on the server
  *   - the MusicBrainz ID writes mirror the server: new records keep their ID unless held, reused ones record it only without one, replace replaces
  * @end-catalog */
 
@@ -38,11 +39,13 @@ const appendTo = (...tracks: ImportDecision[]) => [decision('album', { action: '
 /** Each preselection as `scope:slot-or-entry:action[:candidate]`. */
 const rows = (decisions: readonly ImportDecision[]) => decisions.map(value => [value.scope, value.slotId ?? value.entryKey ?? '-', value.action, ...(value.candidateId ? [value.candidateId] : [])].join(':'));
 
-test('the candidates schema accepts 1761 items and 44 unavailable names, defaulting an absent member flag to incomplete and absent names to none, and refuses more, unknown keys and automatic reuse', () => {
+test('the candidates schema accepts 2561 items and 44 unavailable names, defaulting an absent member flag to incomplete and absent names to none, and refuses more, unknown keys and automatic reuse', () => {
   const item = candidate('organization', 'Sit Records', { visibility: 'hidden' }), name = { kind: 'artist', label: 'Lorem' };
   expect(candidatesSchema.parse({ items: [item] })).toEqual({ items: [item], memberMatchesComplete: false, unavailable: [] });
-  expect(candidatesSchema.safeParse({ items: Array(1761).fill(item), memberMatchesComplete: true, unavailable: Array(44).fill(name) }).success).toBe(true);
-  for (const body of [{ items: Array(1762).fill(item) }, { items: [{ ...item, match: 'other' }] }, { items: [{ ...item, musicBrainzId: 'not-an-id' }] }, { items: [{ ...item, aliasOf: 'X0000000-0000-4000-8000-000000000001' }] }, { items: [{ ...item, kind: 'label' }] }, { items: [{ ...item, automaticReuse: true }] }, { items: [], memberMatchesComplete: true, extra: 1 }, { items: [{ ...item, extra: 1 }] },
+  expect(candidatesSchema.safeParse({ items: Array(2561).fill(item), memberMatchesComplete: true, unavailable: Array(44).fill(name) }).success).toBe(true);
+  // An iTunes localized name names the Artist name it was found for.
+  expect(candidatesSchema.safeParse({ items: [{ ...item, kind: 'artist', match: 'localizedName', localizedOf: 'Lorem Ensemble' }] }).success).toBe(true);
+  for (const body of [{ items: Array(2562).fill(item) }, { items: [{ ...item, localizedOf: 'x'.repeat(201) }] }, { items: [{ ...item, localizedOf: 7 }] }, { items: [{ ...item, match: 'other' }] }, { items: [{ ...item, musicBrainzId: 'not-an-id' }] }, { items: [{ ...item, aliasOf: 'X0000000-0000-4000-8000-000000000001' }] }, { items: [{ ...item, kind: 'label' }] }, { items: [{ ...item, automaticReuse: true }] }, { items: [], memberMatchesComplete: true, extra: 1 }, { items: [{ ...item, extra: 1 }] },
     { items: [], unavailable: Array(45).fill(name) }, { items: [], unavailable: [{ ...name, kind: 'track' }] }, { items: [], unavailable: [{ ...name, id: item.id }] }])
     expect(candidatesSchema.safeParse(body).success).toBe(false);
 });
@@ -152,6 +155,13 @@ test('the record holding an entry\'s MusicBrainz ID is preselected as reuse, and
   // Candidates of a row: its name, the record holding its ID and the records named as lookup found for it.
   expect(rowCandidates('organization', 'Sit Records', mbid(9), [alias, candidate('organization', 'Other')]).map(item => item.label)).toEqual(['シット']);
   expect(rowCandidates('organization', 'Sit Records', null, [alias])).toEqual([]);
+});
+
+test('an Artist named with an iTunes localized name of an entry\'s name holds that entry, and only it, from a preselected create, as on the server', () => {
+  const draft = saved(), localized = candidate('artist', 'ロレム', { match: 'localizedName', localizedOf: 'LOREM' });
+  expect(rows(identityPreselections(draft, [draft], [], listing([localized])).filter(value => value.scope === 'artist'))).toEqual([`artist:${entryKey(2)}:create-distinct`]);
+  expect(rowCandidates('artist', 'Lorem', null, [localized]).map(item => item.label)).toEqual(['ロレム']);
+  expect([rowCandidates('artist', 'Ipsum', null, [localized]), rowCandidates('organization', 'Lorem', null, [localized])]).toEqual([[], []]);
 });
 
 test('the MusicBrainz ID writes mirror the server: new records keep their ID unless held, reused ones record it only without one, replace replaces', () => {

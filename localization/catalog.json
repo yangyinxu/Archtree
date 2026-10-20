@@ -2747,6 +2747,13 @@
       ],
       "variables": {}
     },
+    "admin.duplicates.localized_name": {
+      "description": "Administrator import Review: a candidate named with an iTunes localized name that metadata lookup found for the entry's artist name.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.duplicates.music_brainz_id": {
       "description": "Administrator import Review: a candidate that holds the MusicBrainz ID the entry or label carries.",
       "delivery": [
@@ -3334,8 +3341,33 @@
       ],
       "variables": {}
     },
+    "admin.lookup.active_itunes": {
+      "description": "Administrator workbench: import summary, lookup is searching the iTunes Search API (after MusicBrainz found no matching release or stayed unavailable).",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.lookup.applied": {
       "description": "Administrator workbench: import summary, the release whose values were applied.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "title": "string"
+      }
+    },
+    "admin.lookup.applied_itunes": {
+      "description": "Administrator workbench: import summary, the applied result came from iTunes only after MusicBrainz found no release for it; its values stay flagged.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "title": "string"
+      }
+    },
+    "admin.lookup.applied_itunes_unchecked": {
+      "description": "Administrator workbench: import summary, the applied iTunes-only result was not checked against MusicBrainz (it stayed unavailable, or the check could not run); its values stay flagged.",
       "delivery": [
         "runtime"
       ],
@@ -3449,6 +3481,20 @@
       ],
       "variables": {}
     },
+    "admin.lookup.itunes_only": {
+      "description": "Administrator workbench: a lookup candidate or an applied value that comes from the iTunes Search API only, not from MusicBrainz.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.lookup.itunes_unavailable": {
+      "description": "Administrator workbench: import summary, MusicBrainz answered without a matching release and the iTunes Search API stayed unavailable through its automatic retries.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.lookup.kind_album": {
       "description": "Administrator workbench: import summary name box, the name is an Album name.",
       "delivery": [
@@ -3521,6 +3567,13 @@
       ],
       "variables": {}
     },
+    "admin.lookup.not_checked": {
+      "description": "Administrator workbench: an iTunes-only lookup candidate or value that could not be checked against MusicBrainz.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.lookup.not_configured": {
       "description": "Administrator workbench: import summary, metadata lookup is not configured on this server.",
       "delivery": [
@@ -3558,6 +3611,13 @@
     },
     "admin.lookup.retrying": {
       "description": "Administrator workbench: import summary, the lookup source was busy or unavailable and is retried automatically.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.lookup.retrying_itunes": {
+      "description": "Administrator workbench: import summary, the iTunes Search API was busy or unavailable and lookup retries it automatically.",
       "delivery": [
         "runtime"
       ],
@@ -3732,6 +3792,13 @@
       ],
       "variables": {}
     },
+    "admin.media.cover_automatic_lookup_itunes": {
+      "description": "Administrator workbench: import files, note under the cover choice while the cover is chosen automatically as the applied iTunes-only lookup candidate's iTunes artwork.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.media.cover_automatic_none": {
       "description": "Administrator workbench: import files, note under the cover choice while the choice is automatic and selects no image.",
       "delivery": [
@@ -3755,6 +3822,13 @@
     },
     "admin.media.lookup_cover": {
       "description": "Administrator workbench: import files and summary, label of the cover staged from the applied metadata lookup release's Cover Art Archive front artwork.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.media.lookup_cover_itunes": {
+      "description": "Administrator workbench: import files and summary, label of the cover staged from an applied iTunes-only lookup candidate's iTunes artwork.",
       "delivery": [
         "runtime"
       ],

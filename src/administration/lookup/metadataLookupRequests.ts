@@ -5,7 +5,7 @@
  *              resolveAdminImportLookup
  * Internal
  *   Functions: notFound, boundRunAndCandidate, storeLookupRecord
- *   Constants: candidateKeyPattern, maximumAnswers
+ *   Constants: maximumAnswers
  * @end-catalog */
 
 /**
@@ -25,21 +25,20 @@ import { importIdentityPreselections } from '../import/adminImportIdentity';
 import { importIdentityAnswers, importSummaryView, type ImportSummaryView } from '../import/adminImportSummary';
 import { metadataLookupConfiguration, type MetadataLookupConfiguration } from '../../config/metadataLookup';
 import { boundedJson, parseDraftPath } from '../import/adminImportValueState';
-import { METADATA_LOOKUP_LIMITS } from './lookupContract';
+import { isLookupCandidateKey, METADATA_LOOKUP_LIMITS } from './lookupContract';
 import { importLookupView, type ImportLookupView } from './lookupView';
 import { chooseLookupCandidate, isLookupValuePath, resolveLookupConflicts } from './lookupValueApplication';
 import { adminImportLookupCollection, metadataLookupAccepted, queueMetadataLookup, readLookupApplicationContext } from './metadataLookupService';
 import { importMusicBrainzNameMap } from '../import/adminImportMusicBrainzIds';
 import type { MetadataLookupRecord } from './metadataLookupRecord';
 
-const candidateKeyPattern = /^musicbrainz:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 /** One answer per draft value: the five album paths and three per file. */
 const maximumAnswers = 5 + 3 * 100;
 const notFound = () => new AdminImportError(404, 'ADMIN_IMPORT_NOT_FOUND');
-/** A run number and a candidate key (or null for none), both present as own properties. */
+/** A run number and a candidate key (a MusicBrainz or iTunes-only candidate's, or null for none), both present as own properties. */
 function boundRunAndCandidate(body: Record<string, unknown>) {
     if (!hasOwn(body, 'run') || !hasOwn(body, 'candidateKey') || !Number.isSafeInteger(body.run) || (body.run as number) < 1
-        || (body.candidateKey !== null && (typeof body.candidateKey !== 'string' || !candidateKeyPattern.test(body.candidateKey)))) invalidImport();
+        || (body.candidateKey !== null && !isLookupCandidateKey(body.candidateKey))) invalidImport();
     return { run: body.run as number, candidateKey: body.candidateKey as string | null };
 }
 /** Stores a record replaced by a choice or an answer for the run it was read with; any other match is a conflict. */

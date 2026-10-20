@@ -9,7 +9,7 @@
  *   Types: TextResult, AddedId
  *   Functions: stale, emptyValue, emptyFor, slotOf, isRecord, valueAt, applicable, lookupText,
  *              lookupArtistEntries, isEntryLike, idOf, itemsOf, foundNames, storedValues, storedConflicts,
- *              withLookupIds, freshGrant, rerankEvidence
+ *              withLookupIds, freshGrant, keepLocalizedNames, rerankEvidence
  *   Constants: lookupPath, invisible, idsIn, noContext, LABEL
  * @end-catalog */
 
@@ -20,7 +20,11 @@
  * preselected. Applying another candidate, or none, replaces the values the earlier application wrote that are still automatic
  * and still as written, falling back to file-tag values or empty. MusicBrainz IDs come only from the applied release: they are
  * added to the administrator's own entries and label whose names, roles and phrases agree, a differing ID is a conflict, and the
- * IDs an earlier candidate supplied are removed again unless an explicit identity decision has bound them since. Owner rules:
+ * IDs an earlier candidate supplied are removed again unless an explicit identity decision has bound them since. An iTunes-only
+ * candidate applies the same way: its values (its collection name, its single artist string as one entry, no label, its iTunes date
+ * and its track titles and numbers matched by milliseconds) carry no MusicBrainz ID, and its application records the collection ID
+ * as source evidence. The iTunes localized names the run found join the import's `localizedNames` when a candidate (or none) is
+ * applied, and when a completed run applies nothing. Owner rules:
  * docs/business-rules.md (Administrator Metadata Lookup).
  */
 import { normalizeJoinPhrase } from '../../models/catalogCredit';
@@ -30,6 +34,7 @@ import { noteLookupCoverApplication } from '../import/adminImportCoverAutomation
 import {
     DRAFT_V2_LIMITS, derivedEntryKey, foldImportName, originKey, retainBoundDecisions, sameDraftValue, type ImportArtistEntry, type ImportDecisionV2, type ImportDraftV2, type ImportLabelEntry
 } from '../import/adminImportDraft';
+import { mergeImportLocalizedNames } from '../import/adminImportLocalizedNames';
 import { mergeImportMusicBrainzNames, type MusicBrainzIdState } from '../import/adminImportMusicBrainzIds';
 import { keepableMusicBrainzId } from '../../utils/musicBrainzId';
 import type { AdminImportDocument } from '../import/adminImportService';
@@ -38,7 +43,8 @@ import {
     type ImportAutomaticValue, type ImportDraftPath
 } from '../import/adminImportValueState';
 import { METADATA_LOOKUP_JOB_LIMITS, type MusicBrainzRelease } from './lookupContract';
-import { normalizeMusicBrainzId } from './lookupIdentifiers';
+import { normalizeItunesId, normalizeMusicBrainzId } from './lookupIdentifiers';
+import { lookupLocalizedGroups, storedItunesStage } from './lookupItunesStage';
 import { lookupTrackAssignment, proposalForRelease, type LocalFileEvidence } from './lookupRanking';
 import {
     importLookupFileSet, isBlockingLookupState, lookupFetchedAliases, lookupFileEvidence, rankLookupWithinBudget, refreshLookupGrant, type LookupApplication, type LookupAppliedValue,
@@ -59,10 +65,14 @@ const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(v
 const valueAt = (draft: ImportDraftV2, path: ImportDraftPath): { value: unknown } | null => { try { return { value: draftValueAt(draft, path) }; } catch { return null; } };
 /**
  * Whether a candidate's details are complete enough to apply: fetched, and for the release the candidate names (a release that
- * MusicBrainz answered under another ID, such as a merged one, ranks as incomplete and is never applied).
+ * MusicBrainz answered under another ID, such as a merged one, ranks as incomplete and is never applied); an iTunes-only candidate
+ * by its collection ID, which its key names too.
  */
-const applicable = (candidate: StoredLookupCandidate): boolean => candidate.details === 'fetched' && Boolean(candidate.release)
-    && normalizeMusicBrainzId(candidate.release!.releaseId) !== null && normalizeMusicBrainzId(candidate.release!.releaseId) === normalizeMusicBrainzId(candidate.releaseId);
+const applicable = (candidate: StoredLookupCandidate): boolean => {
+    if (candidate.details !== 'fetched' || !candidate.release) return false;
+    if (candidate.source === 'itunes') return normalizeItunesId(candidate.releaseId) !== null && candidate.release.releaseId === candidate.releaseId && candidate.key === `itunes:${candidate.releaseId}`;
+    return normalizeMusicBrainzId(candidate.release.releaseId) !== null && normalizeMusicBrainzId(candidate.release.releaseId) === normalizeMusicBrainzId(candidate.releaseId);
+};
 
 type TextResult = { text: string } | { reason: 'characters' | 'length' } | null;
 /** Automatic text: NFC and trimmed; empty is no value; control, invisible formatting or lone surrogate characters, or over `max`, is left out and flagged. */
@@ -188,9 +198,12 @@ export function sameLookupValue(path: string, current: unknown, value: unknown):
 export const lookupValueIds = (value: unknown): Set<string> => new Set([...(Array.isArray(value) ? value : [value])].map(idOf).filter((id): id is string => id !== null));
 const idsIn = lookupValueIds;
 
-/** What value application reads beside the record: who holds each candidate ID and the IDs of reused records, and the run's aliases. */
-export type LookupApplicationContext = { identity: MusicBrainzIdState; aliases: ReadonlyMap<string, readonly string[]> };
-const noContext: LookupApplicationContext = { identity: { holders: new Map(), storedIds: new Map() }, aliases: new Map() };
+/**
+ * What value application reads beside the record: who holds each candidate ID and the IDs of reused records, the run's aliases and
+ * its iTunes localized name groups (lookupLocalizedGroups).
+ */
+export type LookupApplicationContext = { identity: MusicBrainzIdState; aliases: ReadonlyMap<string, readonly string[]>; localized: readonly (readonly string[])[] };
+const noContext: LookupApplicationContext = { identity: { holders: new Map(), storedIds: new Map() }, aliases: new Map(), localized: [] };
 /** The credited artist IDs and first label ID of every fetched candidate: the IDs whose holders an application may need. */
 export function lookupCandidateIds(record: Pick<MetadataLookupRecord, 'candidates'> | null | undefined): { kind: 'artist' | 'organization'; id: string }[] {
     const ids: { kind: 'artist' | 'organization'; id: string }[] = [];
@@ -273,8 +286,10 @@ const freshGrant = (now: Date) => new Date(now.getTime() + METADATA_LOOKUP_JOB_L
  * holds it, or creating or reusing a record without an ID while no record holds it; any other is removed), and an ID that
  * differs from one already carried is a conflict marked `musicBrainzId`. Additions and removals keep their path's origin.
  * Writes bump `valueRevision` and keep only decisions still bound to their entry or label; `revision` and receipts never change.
- * The names found for each carried ID are merged into `musicBrainzNames`. Last, the lookup cover job records the candidate (its
- * front artwork is staged under the intent's grant) or none (noteLookupCoverApplication), without bumping `valueRevision`.
+ * The names found for each carried ID are merged into `musicBrainzNames`, and the run's localized name groups that hold a current
+ * Artist entry's name into `localizedNames`. Last, the lookup cover job records the candidate (its front artwork, Cover Art
+ * Archive's or an iTunes-only candidate's, is staged under the intent's grant) or none (noteLookupCoverApplication), without
+ * bumping `valueRevision`. An iTunes-only application records `source` and, when MusicBrainz could not rule it out, `notChecked`.
  * Applying the same candidate again writes nothing, except that a cover staging of it that failed, was skipped or ran past its
  * grant is queued again under the intent's grant.
  */
@@ -391,41 +406,61 @@ export function applyLookupCandidate(doc: AdminImportDocument, previous: LookupA
         doc.updatedAt = intent.now;
     }
     const names = mergeImportMusicBrainzNames(doc.musicBrainzNames, foundNames(candidate?.release, context.aliases), draft);
-    const namesChanged = !sameDraftValue(names, doc.musicBrainzNames ?? []);
+    let namesChanged = !sameDraftValue(names, doc.musicBrainzNames ?? []);
     if (namesChanged) doc.musicBrainzNames = names;
+    const localized = mergeImportLocalizedNames(doc.localizedNames, Array.isArray(context.localized) ? context.localized : [], draft);
+    if (!sameDraftValue(localized, doc.localizedNames ?? [])) { doc.localizedNames = localized; namesChanged = true; }
     // Last, after every step that can refuse, so a refused application queues no staging.
     const coverChanged = noteLookupCoverApplication(doc, candidate,
         { actorId: intent.actorId, grantExpiresAt: intent.grantExpiresAt instanceof Date ? intent.grantExpiresAt : freshGrant(intent.now) }, intent.now);
+    const itunes = candidate?.source === 'itunes';
     return {
         application: { run: intent.run, candidateKey: candidate?.key ?? null, releaseId: candidate?.releaseId ?? null, choice: intent.choice, basis: intent.basis,
-            actorId: intent.actorId, operationId: intent.operationId, at: intent.now, paths, values, conflicts, flagged, ...(musicBrainzIds.length ? { musicBrainzIds } : {}) },
+            actorId: intent.actorId, operationId: intent.operationId, at: intent.now, paths, values, conflicts, flagged, ...(musicBrainzIds.length ? { musicBrainzIds } : {}),
+            ...(itunes ? { source: 'itunes' as const } : {}), ...(itunes && (candidate!.itunes?.check === 'unavailable' || candidate!.itunes?.check === 'notRun') ? { notChecked: true as const } : {}) },
         changed: valuesChanged || namesChanged || coverChanged
     };
+}
+
+/**
+ * Keeps on `doc` the run's localized name groups that hold a current Artist entry's name (mergeImportLocalizedNames), so identity
+ * candidates read them whether or not a candidate is applied; whether `doc` changed. A malformed draft keeps none.
+ */
+function keepLocalizedNames(doc: AdminImportDocument, context: LookupApplicationContext): boolean {
+    let draft: ImportDraftV2;
+    try { draft = storedDraftV2(doc); } catch (error) { if (error instanceof AdminImportError) return false; throw error; }
+    const localized = mergeImportLocalizedNames(doc.localizedNames, Array.isArray(context.localized) ? context.localized : [], draft);
+    if (sameDraftValue(localized, doc.localizedNames ?? [])) return false;
+    doc.localizedNames = localized;
+    return true;
 }
 
 /**
  * Applies a completed run's preselection, as the run's granting administrator in the worker's completion step or as `actorId`
  * (the administrator whose confirmation re-ranked it), unless this run already has an explicit choice or this very preselection,
  * or the candidate is not applicable (not fetched, or fetched under another release ID). A malformed draft applies nothing.
- * `context` is what the caller read in its transaction (who holds each ID, the reused records' IDs and the run's aliases). The
- * cover staging it queues uses `grantExpiresAt`: by default the run's own grant (the worker's completion), else a fresh one.
+ * `context` is what the caller read in its transaction (who holds each ID, the reused records' IDs, the run's aliases and its
+ * localized name groups). A completed run that applies nothing still keeps its localized name groups on `doc` (`changed` then
+ * says so, and the caller writes `doc`), since identity candidates read them from the import alone. The cover staging it queues
+ * uses `grantExpiresAt`: by default the run's own grant (the worker's completion), else a fresh one.
  */
 export function applyPreselectedLookup(doc: AdminImportDocument, record: MetadataLookupRecord, now: Date, actorId: string = record.actorId,
     context: LookupApplicationContext = noContext, grantExpiresAt?: Date): { record: MetadataLookupRecord; changed: boolean } {
-    const unchanged = { record, changed: false };
+    const unchanged = () => ({ record, changed: record.state === 'complete' && keepLocalizedNames(doc, context) });
     const preselection = record.state === 'complete' ? record.ranking?.preselection : null;
-    if (!preselection || typeof preselection.candidateKey !== 'string') return unchanged;
+    if (!preselection || typeof preselection.candidateKey !== 'string') return unchanged();
     const applied = isRecord(record.applied) ? record.applied : null;
-    if (applied && applied.run === record.run && (applied.choice !== 'preselected' || applied.candidateKey === preselection.candidateKey)) return unchanged;
+    if (applied && applied.run === record.run && (applied.choice !== 'preselected' || applied.candidateKey === preselection.candidateKey)) return unchanged();
     const candidate = Array.isArray(record.candidates) ? record.candidates.find(item => item?.key === preselection.candidateKey) : undefined;
-    if (!candidate || !applicable(candidate)) return unchanged;
+    if (!candidate || !applicable(candidate)) return unchanged();
     try {
         const grant = grantExpiresAt ?? (record.grantExpiresAt instanceof Date && Number.isFinite(record.grantExpiresAt.getTime()) ? record.grantExpiresAt : freshGrant(now));
         const { application, changed } = applyLookupCandidate(doc, applied, candidate,
             { run: record.run, choice: 'preselected', basis: preselection.basis, actorId, operationId: null, now, grantExpiresAt: grant }, context);
         return { record: { ...record, applied: application }, changed };
     } catch (error) {
-        if (error instanceof AdminImportError) return unchanged;
+        // A refused application may have changed `doc` in memory, so nothing of it is written.
+        if (error instanceof AdminImportError) return { record, changed: false };
         throw error;
     }
 }
@@ -455,7 +490,10 @@ export function lookupRerankNeeded(doc: AdminImportDocument, record: MetadataLoo
 export function rerankStoredLookup(doc: AdminImportDocument, record: MetadataLookupRecord, now: Date, actorId: string = record.actorId,
     context: LookupApplicationContext = noContext): { record: MetadataLookupRecord; changed: boolean } | null {
     if (!lookupRerankNeeded(doc, record)) return null;
-    const ranked = rankLookupWithinBudget(record.candidates, doc, now, { searchComplete: record.searchComplete === true, aliases: lookupFetchedAliases(record) }), files = importLookupFileSet(doc).files;
+    // A run whose iTunes stage left a plausible result out stays partial, as when it completed.
+    const searchComplete = record.searchComplete === true && storedItunesStage(record.itunesStage)?.complete !== false;
+    const ranked = rankLookupWithinBudget(record.candidates, doc, now, { searchComplete, aliases: lookupFetchedAliases(record), localized: lookupLocalizedGroups(record) });
+    const files = importLookupFileSet(doc).files;
     const confirmed = new Set(files.filter(file => file.operationId !== null && file.sha256 !== null).map(file => file.slotId));
     const staleSlotIds = (Array.isArray(record.staleSlotIds) ? record.staleSlotIds : []).filter(slot => !confirmed.has(slot));
     return applyPreselectedLookup(doc, { ...record, files, staleSlotIds, candidates: ranked.candidates, ranking: ranked.ranking, updatedAt: now }, now, actorId, context, freshGrant(now));
@@ -539,5 +577,7 @@ export function resolveLookupConflicts(doc: AdminImportDocument, record: Metadat
     const release = Array.isArray(record.candidates) ? record.candidates.find(item => item?.key === applied.candidateKey)?.release : null;
     const names = mergeImportMusicBrainzNames(doc.musicBrainzNames, foundNames(release, lookupFetchedAliases(record)), draft);
     if (!sameDraftValue(names, doc.musicBrainzNames ?? [])) doc.musicBrainzNames = names;
+    const localized = mergeImportLocalizedNames(doc.localizedNames, lookupLocalizedGroups(record), draft);
+    if (!sameDraftValue(localized, doc.localizedNames ?? [])) doc.localizedNames = localized;
     return { ...record, applied: { ...applied, conflicts, values, ...(musicBrainzIds.length ? { musicBrainzIds } : {}) }, updatedAt: now };
 }

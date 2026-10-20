@@ -8,6 +8,7 @@
  *   - the summary state is strict: no missing or extra field, unknown tick or forged suggestion ID
  *   - proposals, ID conflicts and the found names carry MusicBrainz IDs, defaulting to none for a server that sends none
  *   - a candidate's artwork flag and the cover-staging wait default to false for a server that sends neither, and are never addresses
+ *   - an iTunes-only candidate parses with its collection ID, source and not-checked mark agreeing with its key, and the iTunes status defaults to not queried
  * @end-catalog */
 
 import { lookupResponseSchema, lookupViewSchema } from './importLookupApi';
@@ -109,4 +110,28 @@ test('a candidate\'s artwork flag and the cover-staging wait default to false fo
   for (const artwork of ['https://coverartarchive.org/release/x/front-500', 1, null]) {
     expect(lookupViewSchema.safeParse({ ...base, candidates: [{ ...base.candidates[0], artwork }] }).success).toBe(false);
   }
+});
+
+test('an iTunes-only candidate parses with its collection ID, source and not-checked mark agreeing with its key, and the iTunes status defaults to not queried', () => {
+  const item = view(), itunes = { ...item.candidates[0], key: 'itunes:1689358563', releaseId: '1689358563', source: 'itunes', notChecked: true, label: null, catalogNumber: null, country: null, formats: [] };
+  const parsed = lookupViewSchema.parse({ ...item, candidates: [itunes], groups: [], preselection: { candidateKey: itunes.key, basis: 'onlyMatchingGroup', artistMismatch: false, notChecked: true },
+    applied: { ...item.applied, candidateKey: itunes.key, releaseId: itunes.releaseId, source: 'itunes', notChecked: true }, itunes: 'answered' });
+  expect([parsed.candidates[0].source, parsed.candidates[0].notChecked, parsed.preselection!.notChecked, parsed.applied!.source, parsed.applied!.notChecked, parsed.itunes])
+    .toEqual(['itunes', true, true, 'itunes', true, 'answered']);
+  // A server that sends none of these: MusicBrainz candidates, checked, iTunes not queried.
+  const plain = lookupViewSchema.parse(item);
+  expect([plain.candidates[0].source, plain.candidates[0].notChecked, plain.preselection!.notChecked, plain.applied!.source, plain.applied!.notChecked, plain.itunes])
+    .toEqual(['musicbrainz', false, false, 'musicbrainz', false, 'notQueried']);
+  const refused = (candidate: Record<string, unknown>) => expect(lookupViewSchema.safeParse({ ...item, candidates: [candidate], groups: [], preselection: null }).success).toBe(false);
+  // Key, source and release ID must agree; a collection ID has 1 to 12 digits without a leading zero; no address is ever accepted.
+  refused({ ...itunes, releaseId: '1689358564' });
+  refused({ ...itunes, source: 'musicbrainz' });
+  refused({ ...itunes, key: 'itunes:0', releaseId: '0' });
+  refused({ ...itunes, key: 'itunes:01689358563', releaseId: '01689358563' });
+  refused({ ...itunes, key: 'itunes:1234567890123', releaseId: '1234567890123' });
+  refused({ ...itunes, artworkUrl: 'https://is1-ssl.mzstatic.com/image/thumb/x/100x100bb.jpg' });
+  refused({ ...itunes, storefront: 'jp' });
+  expect(lookupViewSchema.safeParse({ ...item, itunes: 'searching' }).success).toBe(false);
+  // A MusicBrainz ID is still required where one is named: never a collection ID.
+  expect(lookupResponseSchema.safeParse({ lookup: null, revision: 1, valueRevision: 0, summary: summary(), musicBrainzNames: [{ musicBrainzId: '1689358563', names: [] }] }).success).toBe(false);
 });

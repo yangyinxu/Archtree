@@ -31,6 +31,7 @@
  *   - after a lookup finds no release Luna is offered, and its ticked entries, label and Disc Number are preselected and approved in one confirmation
  *   - an image every file shares is chosen automatically until the administrator chooses, and the summary and confirmation show the choice
  *   - a release with front artwork shows a protected preview, Publish waits while its cover is staged, and the staged lookup cover is then chosen automatically and published
+ *   - an iTunes-only result applied after MusicBrainz stayed unavailable is marked iTunes only and not checked against MusicBrainz, its values stay flagged, and it publishes after one confirmation
  * @end-catalog */
 
 import { expect, test, type Page, type Request } from '@playwright/test';
@@ -1105,4 +1106,41 @@ test('a release with front artwork shows a protected preview, Publish waits whil
   await expect.poll(() => server.writes.map(write => write.action)).toEqual(['publish']);
   expect(server.writes[0].body.selectedCoverSlotId).toBe(lookupSlot);
   expect(outside).toEqual([]);
+});
+
+test('an iTunes-only result applied after MusicBrainz stayed unavailable is marked iTunes only and not checked against MusicBrainz, its values stay flagged, and it publishes after one confirmation', async ({ page }) => {
+  await setup(page);
+  const itunesKey = 'itunes:1689358563', item = uploadedProject();
+  item.automaticPaths = ['album.title', 'album.artists']; item.lookupPaths = ['album.title', 'album.artists'];
+  const server = await summaryProject(page, item, (_state, action) => { expect(action).toBe('publish'); return 'publish'; });
+  // MusicBrainz stayed unavailable through its retries; iTunes answered, and its only result was preselected as not checked.
+  server.lookup = lookupView({ issue: 'sourceUnavailable', itunes: 'answered',
+    candidates: [{ ...lookupCandidate(1), key: itunesKey, releaseId: '1689358563', source: 'itunes', notChecked: true, label: null, catalogNumber: null, country: null, formats: [] }],
+    groups: [{ ...lookupGroup(1), representativeKey: itunesKey, memberKeys: [itunesKey] }],
+    preselection: { candidateKey: itunesKey, basis: 'onlyMatchingGroup', artistMismatch: false, notChecked: true },
+    applied: { ...appliedRelease(1, 'preselected'), candidateKey: itunesKey, releaseId: '1689358563', source: 'itunes', notChecked: true,
+      values: [{ path: 'album.title', slotId: null }, { path: 'album.artists', slotId: null }] } });
+  await page.goto(`/finitude/admin/imports/${projectId}`); await page.getByRole('button', { name: 'Switch to Admin view' }).click();
+  await expect(summaryRegion(page).getByText('Applied an iTunes-only result: Synthetic Album. It was not checked against MusicBrainz, so its values are flagged.',
+    { exact: true })).toBeVisible();
+  // Luna is the next step, a free retry beside it.
+  await expect(summaryRegion(page).getByRole('button', { name: /^(Retry lookup|Analyze with Luna)$/ })).toHaveText(['Analyze with Luna', 'Retry lookup']);
+  // Its values are flagged outside the fold, never collapsed.
+  const flagged = summaryRegion(page).getByRole('list', { name: 'Values to check', exact: true });
+  await expect(flagged.getByRole('listitem')).toHaveText(['Title: Synthetic Album · iTunes only · Not checked against MusicBrainz',
+    'Artists: Synthetic Lead · iTunes only · Not checked against MusicBrainz']);
+  // The chooser marks the candidate the same way.
+  await summaryRegion(page).getByText('Releases found: 1', { exact: true }).click();
+  await expect(summaryRegion(page).getByText('iTunes only · Not checked against MusicBrainz', { exact: true })).toBeVisible();
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+  for (const width of [320, 768, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    expect(await noOverflow(page)).toBe(true);
+  }
+  // Nothing needs an answer: one confirmation publishes it.
+  await expect(publishFromSummary(page)).toBeEnabled();
+  await publishFromSummary(page).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Publish Album', exact: true }).click();
+  await expect.poll(() => server.writes.map(write => write.action)).toEqual(['publish']);
+  expect(server.writes[0].body).toEqual(expect.objectContaining({ approvalDigest: expect.any(String), decisions: item.decisions }));
 });

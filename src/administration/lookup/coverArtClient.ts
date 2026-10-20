@@ -2,8 +2,8 @@
  * Exports
  *   Types: CoverArtFrontSize, LookupArtwork, CoverArtFrontOptions, CoverArtClient
  *   Functions: coverArtListingUrl, coverArtDestination, parseCoverArtListing, coverArtFrontUrl,
- *              coverArtFrontDestination, createCoverArtClient, lookupArtworkWebp
- *   Constants: coverArtShape
+ *              coverArtFrontDestination, validatedLookupArtwork, createCoverArtClient, lookupArtworkWebp
+ *   Constants: coverArtShape, lookupArtworkTypes
  * Internal
  *   Types: RawImage
  *   Functions: requireMbid, scheduled
@@ -15,7 +15,7 @@ import sharp from 'sharp';
 import { strictHttpsUrl } from '../adminPinnedHttps';
 import { maxCoverArtInputBytes, maxCoverArtInputPixels, validateCoverArtFile } from '../../services/image/imageStorageService';
 import { scheduleCoverArtVariant, type CoverArtVariantScheduler } from '../../services/image/coverArtVariantScheduler';
-import { METADATA_LOOKUP_HOSTS, METADATA_LOOKUP_LIMITS, MetadataLookupInputError, MetadataLookupSourceError, type CoverArtListing } from './lookupContract';
+import { METADATA_LOOKUP_HOSTS, METADATA_LOOKUP_LIMITS, MetadataLookupInputError, MetadataLookupSourceError, type CoverArtListing, type MetadataLookupSource } from './lookupContract';
 import { normalizeCoverArtImageId, normalizeMusicBrainzId } from './lookupIdentifiers';
 import { LookupShapeError, array, boolean, integer, object, oneOf, string, validateLookupShape } from './lookupResponseShape';
 import { requestLookupBytes, requestLookupJson, type LookupCallOptions, type LookupClientDependencies } from './lookupSourceRequest';
@@ -109,18 +109,39 @@ export const coverArtFrontDestination = (releaseId: string, size: CoverArtFrontS
     };
 };
 
-const artworkTypes = ['image/jpeg', 'image/png', 'image/webp'] as const;
+/** The artwork types every lookup artwork source may answer with. */
+export const lookupArtworkTypes = ['image/jpeg', 'image/png', 'image/webp'] as const;
+const artworkTypes = lookupArtworkTypes;
 /** Validated, completely decoded front artwork: its unchanged bytes, allowlisted type and SHA-256. */
 export type LookupArtwork = { bytes: Buffer; contentType: typeof artworkTypes[number]; sha256: string };
 export type CoverArtFrontOptions = LookupCallOptions & { clientKey?: string };
 /** Native image work shares the cover scheduler; its own failures (a full queue) are unavailable, an abort cancelled. */
-const scheduled = async <T>(schedule: CoverArtVariantScheduler, clientKey: string | undefined, signal: AbortSignal, work: () => Promise<T>): Promise<T> => {
+const scheduled = async <T>(schedule: CoverArtVariantScheduler, clientKey: string | undefined, signal: AbortSignal, work: () => Promise<T>,
+    source: MetadataLookupSource = 'coverartarchive'): Promise<T> => {
     try { return await schedule(clientKey ?? 'metadata-lookup', signal, async () => { signal.throwIfAborted(); return work(); }); }
     catch (error) {
         if (error instanceof MetadataLookupSourceError) throw error;
-        throw new MetadataLookupSourceError('coverartarchive', signal.aborted ? 'cancelled' : 'unavailable');
+        throw new MetadataLookupSourceError(source, signal.aborted ? 'cancelled' : 'unavailable');
     }
 };
+/**
+ * Front artwork bytes of `size` as every lookup artwork source returns them, validated in the shared cover scheduler: the cover
+ * upload's checks (byte bound, a signature matching its type), at most 16 MP, neither side above `size` pixels and complete
+ * decoding; anything else is `invalidResponse` from `source`. The bytes stay unchanged.
+ */
+export async function validatedLookupArtwork(bytes: Buffer, contentType: string, size: CoverArtFrontSize, schedule: CoverArtVariantScheduler,
+    clientKey: string | undefined, signal: AbortSignal, source: MetadataLookupSource): Promise<LookupArtwork> {
+    if (!(artworkTypes as readonly string[]).includes(contentType)) throw new MetadataLookupSourceError(source, 'invalidResponse');
+    await scheduled(schedule, clientKey, signal, async () => {
+        try {
+            await validateCoverArtFile({ buffer: bytes, size: bytes.length, mimetype: contentType, originalname: `front-${size}` } as Express.Multer.File);
+            // A thumbnail of `size` is never larger than that; the staged cover keeps these bytes unchanged.
+            const { width = 0, height = 0 } = await sharp(bytes, { failOn: 'error', limitInputPixels: maxCoverArtInputPixels }).metadata();
+            if (!width || !height || Math.max(width, height) > size) throw new Error('Larger than its thumbnail size');
+        } catch { throw new MetadataLookupSourceError(source, 'invalidResponse'); }
+    }, source);
+    return { bytes, contentType: contentType as LookupArtwork['contentType'], sha256: createHash('sha256').update(bytes).digest('hex') };
+}
 
 export interface CoverArtClient {
     /** Null when the release has no Cover Art Archive listing (404). */
@@ -153,24 +174,16 @@ export const createCoverArtClient = (dependencies: LookupClientDependencies & { 
             deadlineMs: METADATA_LOOKUP_LIMITS.requestDeadlineMs.coverartarchive, rateLimitStatuses: [429, 503], emptyStatuses: [404]
         }, options, dependencies);
         if (!answer) return null;
-        const contentType = answer.contentType as LookupArtwork['contentType'], bytes = answer.body;
-        await scheduled(dependencies.schedule ?? scheduleCoverArtVariant, options.clientKey, options.signal, async () => {
-            try {
-                await validateCoverArtFile({ buffer: bytes, size: bytes.length, mimetype: contentType, originalname: `front-${size}` } as Express.Multer.File);
-                // A thumbnail of `size` is never larger than that; the staged cover keeps these bytes unchanged.
-                const { width = 0, height = 0 } = await sharp(bytes, { failOn: 'error', limitInputPixels: maxCoverArtInputPixels }).metadata();
-                if (!width || !height || Math.max(width, height) > size) throw new Error('Larger than its thumbnail size');
-            } catch { throw new MetadataLookupSourceError('coverartarchive', 'invalidResponse'); }
-        });
-        return { bytes, contentType, sha256: createHash('sha256').update(bytes).digest('hex') };
+        return validatedLookupArtwork(answer.body, answer.contentType, size, dependencies.schedule ?? scheduleCoverArtVariant, options.clientKey, options.signal, 'coverartarchive');
     }
 });
 
 /**
  * A transient candidate preview: the validated artwork converted to WebP within 500 px, in the shared cover scheduler. Nothing is
- * stored; a decoding failure is `invalidResponse`.
+ * stored; a decoding failure is `invalidResponse` from `source`.
  */
-export const lookupArtworkWebp = (artwork: LookupArtwork, signal: AbortSignal, clientKey: string, schedule: CoverArtVariantScheduler = scheduleCoverArtVariant): Promise<Buffer> =>
+export const lookupArtworkWebp = (artwork: LookupArtwork, signal: AbortSignal, clientKey: string, schedule: CoverArtVariantScheduler = scheduleCoverArtVariant,
+    source: MetadataLookupSource = 'coverartarchive'): Promise<Buffer> =>
     scheduled(schedule, clientKey, signal, async () => {
         const image = sharp(artwork.bytes, { failOn: 'error', limitInputPixels: maxCoverArtInputPixels }).timeout({ seconds: 10 });
         const abort = () => image.destroy();
@@ -181,6 +194,6 @@ export const lookupArtworkWebp = (artwork: LookupArtwork, signal: AbortSignal, c
             return output;
         } catch (error) {
             if (signal.aborted) throw error;
-            throw new MetadataLookupSourceError('coverartarchive', 'invalidResponse');
+            throw new MetadataLookupSourceError(source, 'invalidResponse');
         } finally { signal.removeEventListener('abort', abort); image.destroy(); }
-    });
+    }, source);

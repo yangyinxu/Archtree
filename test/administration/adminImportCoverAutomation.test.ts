@@ -20,6 +20,7 @@
  *   - the applied lookup candidate's ready cover is the automatic choice over the shared image, and explicit choices and the Album decision still win
  *   - a lookup cover that is not ready, not an image or of a candidate no longer applied falls back to the shared image
  *   - an application records the candidate whose release reports front artwork under its grant, and none without touching values or the fence
+ *   - an iTunes-only candidate records its stored artwork address only when it can be fetched from the fixed artwork hosts; a MusicBrainz candidate never records one
  *   - applying the same candidate again queues a staging that failed, was skipped or ran past its grant again, under the new grant with its own intent
  *   - a lookup cover staging holds Publish only while queued or running within its grant
  *   - before completion the lookup covers no longer applied are cleaned, except an explicit choice, pinned, cleaning or unsettled ones
@@ -350,6 +351,30 @@ test('an application records the candidate whose release reports front artwork u
     assert.deepEqual([doc.revision, doc.valueRevision, doc.updatedAt, doc.lookupGate], [4, 2, new Date(0), { fence: 3, run: 1, state: 'complete', blocking: false }]);
 });
 
+test('an iTunes-only candidate records its stored artwork address only when it can be fetched from the fixed artwork hosts; a MusicBrainz candidate never records one', () => {
+    const grant = { actorId: '0000000000000000000000a2', grantExpiresAt: new Date(now.getTime() + 3_600_000) }, _id = new ObjectId('0000000000000000000000d7');
+    const artwork = 'https://is1-ssl.mzstatic.com/image/thumb/Music126/v4/53/0f/80/530f802b/ANTCD-46555.jpg/100x100bb.jpg';
+    const itunes = (artworkUrl: string | null, extra: Record<string, unknown> = {}) => ({ key: 'itunes:1689358563', releaseId: '1689358563', source: 'itunes' as const,
+        release: { releaseId: '1689358563', frontArtwork: true } as MusicBrainzRelease, itunes: { storefront: 'jp' as const, artworkUrl, check: 'noRelease' as const }, ...extra });
+    const doc = () => ({ _id } as unknown as AdminImportDocument);
+    const queued = doc();
+    assert.equal(noteLookupCoverApplication(queued, itunes(artwork), grant, now), true);
+    assert.deepEqual(queued.media!.lookupCover, { candidateKey: 'itunes:1689358563', releaseId: '1689358563', artworkUrl: artwork,
+        operationId: lookupCoverOperationId(_id.toHexString(), 'itunes:1689358563', now), state: 'queued', issue: null, actorId: grant.actorId, grantExpiresAt: grant.grantExpiresAt,
+        due: true, leaseOwner: null, leaseUntil: null, updatedAt: now });
+    // No address, one off the artwork hosts or one that is not a thumbnail address, or a key of another source: nothing to stage.
+    for (const candidate of [itunes(null), itunes('https://example.test/image/thumb/x/100x100bb.jpg'), itunes('https://is1-ssl.mzstatic.com/x.jpg'),
+        itunes(artwork, { key: key(1) }), itunes(artwork, { source: 'musicbrainz' })]) {
+        const empty = doc();
+        assert.equal(noteLookupCoverApplication(empty, candidate, grant, now), false, JSON.stringify(candidate.key));
+        assert.equal(empty.media, undefined);
+    }
+    // A MusicBrainz candidate (one the iTunes bridge found included) keeps Cover Art Archive artwork without an address.
+    const bridged = doc();
+    noteLookupCoverApplication(bridged, { key: key(1), releaseId: mbid(1), source: 'musicbrainz', release: { releaseId: mbid(1), frontArtwork: true } as MusicBrainzRelease }, grant, now);
+    assert.deepEqual([bridged.media!.lookupCover!.candidateKey, 'artworkUrl' in bridged.media!.lookupCover!], [key(1), false]);
+});
+
 test('applying the same candidate again queues a staging that failed, was skipped or ran past its grant again, under the new grant with its own intent', () => {
     const _id = new ObjectId('0000000000000000000000d8'), fresh = { actorId: '0000000000000000000000a3', grantExpiresAt: new Date(now.getTime() + 7_200_000) };
     const offered = { key: key(1), releaseId: mbid(1), release: { releaseId: mbid(1), frontArtwork: true } as MusicBrainzRelease };
@@ -420,7 +445,9 @@ test('the embedded staging bound never counts lookup cover stagings, current or 
 
 test('lookup covers are automatic covers, so completion cleans every one the publication did not use', () => {
     assert.equal(isAutomaticCoverSlot(lookupSlot(1)), true); assert.equal(isLookupCoverSlot(lookupCoverSlotId(key(1))), true);
-    for (const value of ['lookup-', 'lookup-x', `lookup-musicbrainz:${mbid(1).toUpperCase()}`, `lookup-itunes:1`, `${lookupSlot(1)}/x`, 42]) {
+    // An iTunes-only candidate's cover is `lookup-itunes:<collection ID>`: 1 to 12 digits without a leading zero.
+    for (const value of ['lookup-itunes:1', 'lookup-itunes:123456789012']) { assert.equal(isAutomaticCoverSlot(value), true, value); assert.equal(isLookupCoverSlot(value), true, value); }
+    for (const value of ['lookup-', 'lookup-x', `lookup-musicbrainz:${mbid(1).toUpperCase()}`, 'lookup-itunes:0', 'lookup-itunes:01', 'lookup-itunes:1234567890123', 'lookup-itunes:1/x', `${lookupSlot(1)}/x`, 42]) {
         assert.equal(isAutomaticCoverSlot(value), false, String(value)); assert.equal(isLookupCoverSlot(value), false, String(value));
     }
     const assets = [lookupCover(1), lookupCover(2), lookupCover(3, { state: 'deleted' }), audio(1, X), candidate(1, X)];

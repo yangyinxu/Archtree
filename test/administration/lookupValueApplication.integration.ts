@@ -3,9 +3,9 @@
  *   Types: ReleaseOptions
  *   Classes: Storage
  *   Functions: code, projects, stored, lookup, draftOf, valueRevision, later, mbid, keyOf, v2, timed, seeded,
- *              asset, json, searchUrl, releaseUrl, searchAnswer, releaseAnswer, answers, fixtureClient, drain,
- *              looked, onNextProjectRead, submit, item, complete, approve, choose, preparingPublication,
- *              seededDigitalHotel, smokeHotelExchanges, ownEntries
+ *              asset, json, searchUrl, releaseUrl, searchAnswer, releaseAnswer, answers, fixtureClient,
+ *              runMetadataLookupOnce, drain, looked, onNextProjectRead, submit, item, complete, approve,
+ *              choose, preparingPublication, seededDigitalHotel, smokeHotelExchanges, ownEntries
  *   Constants: guard, actor, other, by, byOther, contact, lengths, albumQuery, hotelBase, hotelRelease,
  *              hotelLengths, digitalHotel, europeanCd
  *   Variables: harness
@@ -22,6 +22,7 @@
  *   - an unanswered conflict holds publication until answered or made equal by the approval's own changes; an append ignores Album conflicts, and its Luna suggestion is answered by the approval's ticks
  *   - a trigger committed inside an approval makes the approval retry and refuse an active lookup; an approval committed inside a trigger closes it
  *   - lookup writes nothing outside the import project, and a published lookup import keeps no release, recording or iTunes identifier in the catalog
+ *   - an iTunes-only candidate applied after MusicBrainz found no release publishes without its collection ID, storefront or artwork address, and its localized names list an Artist as localizedName
  *   - an administrator value saved while the completing step runs wins: the step retries against it and records an unanswered conflict instead
  *   - a publication lock taken before the completing step supersedes the run, applies nothing, and later confirmations re-rank nothing
  *   - a lookup actor account deleted before the completing step stops the run and applies nothing
@@ -77,11 +78,13 @@ import {
     chooseAdminImportLookup, getAdminImportLookup, resolveAdminImportLookup, retryAdminImportLookup, submitAdminImportLookup
 } from '../../src/administration/lookup/metadataLookupRequests';
 import {
-    adminImportLookupCollection, queueMetadataLookup, requestAutomaticMetadataLookup, runMetadataLookupOnce, type MetadataLookupWorkerDependencies
+    adminImportLookupCollection, queueMetadataLookup, requestAutomaticMetadataLookup, runMetadataLookupOnce as runLookupWorkerOnce, type MetadataLookupWorkerDependencies
 } from '../../src/administration/lookup/metadataLookupService';
 import { catalogSearchProjection } from '../../src/utils/catalogSearch';
 import { approvalBody } from '../support/adminImportApproval';
-import { fixtureTransport, hotelCaliforniaExchanges, immediateGate, loadLookupFixture, type LookupExchange } from '../support/metadataLookupFixtures';
+import {
+    emptyItunesClient, fixtureTransport, hotelCaliforniaExchanges, immediateGate, itunesAnswer, itunesCollectionResult, itunesFixtureClient, itunesSongResult, loadLookupFixture, type LookupExchange
+} from '../support/metadataLookupFixtures';
 import { runLookupCoverPassOnce } from '../../src/administration/import/adminImportLookupCover';
 import { createCoverArtClient } from '../../src/administration/lookup/coverArtClient';
 import { installNetworkGuard } from '../support/networkGuard';
@@ -151,6 +154,8 @@ const fixtureClient = (exchanges: LookupExchange[]) => {
     const fixture = fixtureTransport(exchanges);
     return { musicBrainz: createMusicBrainzClient({ gate: immediateGate(), transport: fixture.transport, sleep: async () => undefined }), requests: fixture.requests };
 };
+/** The worker with an iTunes client that answers nothing unless a test passes its own. */
+const runMetadataLookupOnce = (dependencies: MetadataLookupWorkerDependencies = {}, signal?: AbortSignal) => runLookupWorkerOnce({ itunes: emptyItunesClient(), ...dependencies }, signal);
 async function drain(dependencies: MetadataLookupWorkerDependencies) { for (let tick = 0; tick < 10 && await runMetadataLookupOnce(dependencies); tick++); }
 /** Runs the automatic lookup of a seeded import to completion with the given release answers. */
 async function looked(id: string, ids: string[], releases: LookupExchange[]) {
@@ -524,6 +529,48 @@ test('lookup writes nothing outside the import project, and a published lookup i
     for (const row of catalog.flat()) assert.deepEqual(row.catalogSearchGrams, catalogSearchProjection(row.name ?? row.title).catalogSearchGrams, String(row.name ?? row.title));
     const published = await item(id) as AdminImportDetailV2;
     assert.deepEqual(published.draft.album.artists.map(entry => entry.name), ['Synthetic Lead', 'Synthetic Second']);
+});
+
+test('an iTunes-only candidate applied after MusicBrainz found no release publishes without its collection ID, storefront or artwork address, and its localized names list an Artist as localizedName', async () => {
+    const id = await seeded(2, timed), slots = (await item(id)).manifest.files.map(file => file.slotId);
+    // The catalog already holds the Artist under the jp storefront's name.
+    const localized = new ObjectId();
+    await getDb()!.collection('artists').insertOne({ _id: localized, name: 'シンセ合奏団', lifecycleStatus: 'ready', visibility: 'public', ...catalogSearchProjection('シンセ合奏団') });
+    assert.equal((await requestAutomaticMetadataLookup(by, id, 'upload')).reason, 'queued');
+    const term = 'Synthetic+Album+Synthetic+Ensemble', artwork = 'https://is1-ssl.mzstatic.com/image/thumb/Music126/v4/aa/bb/cc/synthetic/cover.jpg/100x100bb.jpg';
+    const collection = (name: string, artist: string) => [itunesCollectionResult(9001, name, artist, 2, { artworkUrl100: artwork }),
+        ...lengths.map((length, index) => itunesSongResult(90010 + index, 9001, `Synthetic Track ${index + 1}`, artist, { trackNumber: index + 1, trackTimeMillis: length }))];
+    const itunes = itunesFixtureClient([itunesAnswer(`https://itunes.apple.com/search?term=${term}&country=us&media=music&entity=album&limit=25`, collection('Synthetic Album', 'Synthetic Ensemble')),
+        itunesAnswer(`https://itunes.apple.com/search?term=${term}&country=jp&media=music&entity=album&limit=25`, collection('シンセアルバム', 'シンセ合奏団')),
+        itunesAnswer('https://itunes.apple.com/lookup?id=9001&entity=song&country=us&limit=200', collection('Synthetic Album', 'Synthetic Ensemble'))]);
+    // MusicBrainz finds nothing, by the planned searches or by the bridge (the jp names first, then the us names again).
+    const client = fixtureClient([...answers([], []), searchAnswer({ release: 'シンセアルバム', artist: 'シンセ合奏団' }, []), searchAnswer(albumQuery, [])]);
+    await drain({ musicBrainz: client.musicBrainz, itunes: itunes.itunes });
+    const record = await lookup(id), doc = await stored(id);
+    assert.deepEqual([record.state, record.applied!.candidateKey, record.applied!.releaseId, record.applied!.source, record.applied!.notChecked, record.ranking!.preselection!.basis],
+        ['complete', 'itunes:9001', '9001', 'itunes', undefined, 'onlyMatchingGroup']);
+    assert.deepEqual([draftOf(doc).album.title, draftOf(doc).album.artists.map(entry => entry.name), draftOf(doc).album.label, doc.localizedNames, doc.media!.lookupCover!.artworkUrl],
+        ['Synthetic Album', ['Synthetic Ensemble'], null, [['Synthetic Ensemble', 'シンセ合奏団']], artwork]);
+    // Review lists the Artist named with the other localized name for the entry, so its create is not preselected.
+    const candidates = await adminImportDuplicateCandidates(by, id);
+    const listed = candidates.items.find(value => value.id === localized.toHexString())!;
+    assert.deepEqual([listed.match, listed.localizedOf, listed.kind], ['localizedName', 'Synthetic Ensemble', 'artist']);
+    const entry = draftOf(doc).album.artists[0];
+    await decideAdminImportDuplicates(by, id, { operationId: randomUUID(), expectedRevision: (await item(id)).revision,
+        decisions: [{ scope: 'artist', slotId: null, entryKey: entry.key, boundName: entry.name, action: 'create-distinct', candidateId: null, candidateRevision: null }] });
+    // The artwork host has none (404): the staging settles without a cover and never holds Publish.
+    const storage = new Storage();
+    await runLookupCoverPassOnce(storage, id, undefined, { itunesArtwork: { front: async () => null } });
+    assert.deepEqual([(await stored(id)).media!.lookupCover!.state, (await stored(id)).media!.lookupCover!.issue], ['failed', 'noArtwork']);
+    await approve(id);
+    assert.deepEqual((await stored(id)).media!.publication!.localizedNames, [['Synthetic Ensemble', 'シンセ合奏団']]);
+    await runAdminImportPublicationOnce(storage, id);
+    assert.equal((await item(id)).publication, 'complete', JSON.stringify((await stored(id)).media!.publication!.issue));
+    const catalog = await Promise.all(['albums', 'audioTracks', 'artists', 'organizations'].map(name => getDb()!.collection(name).find({ _id: { $ne: localized } }).toArray()));
+    assert.deepEqual([catalog.map(rows => rows.length), catalog[0][0].title, catalog[2].map(row => [row.name, row.musicBrainzId])], [[1, 2, 1, 0], 'Synthetic Album', [['Synthetic Ensemble', undefined]]]);
+    const text = JSON.stringify(catalog).toLowerCase();
+    for (const value of ['9001', 'itunes', 'mzstatic', 'storefront', 'シンセ合奏団', 'localized']) assert.equal(text.includes(value), false, value);
+    assert.deepEqual(slots.length, 2);
 });
 
 test('an administrator value saved while the completing step runs wins: the step retries against it and records an unanswered conflict instead', async t => {
