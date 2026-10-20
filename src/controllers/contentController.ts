@@ -13,6 +13,7 @@ export {
     addCatalogCreditWeb,
     removeCatalogCreditWeb,
     updateCatalogCreditRoleWeb,
+    updateCatalogCreditJoinPhraseWeb,
     reorderCatalogCreditWeb,
     markCatalogAttributionUnknownWeb
 } from './contentManager/creditController';

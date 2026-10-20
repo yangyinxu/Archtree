@@ -1,0 +1,141 @@
+{
+  "source": "musicbrainz",
+  "recordedAt": "2026-10-18T10:50:22.432Z",
+  "description": "Release search by title only (request URL updated from limit=25 to limit=100 after recording; the body is unchanged because its 2 hits are within both limits)",
+  "exchanges": [
+    {
+      "url": "https://musicbrainz.org/ws/2/release?query=release%3A%22Blue+Archive+Original+Soundtrack+Vol.1%22&fmt=json&limit=100",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json"
+      },
+      "body": {
+        "count": 2,
+        "offset": 0,
+        "releases": [
+          {
+            "id": "8baecda4-f155-40f6-a173-8f6b98cede5b",
+            "title": "Blue Archive Original Soundtrack Vol.1 ~Longing for the memorable days~",
+            "status": "Official",
+            "artist-credit": [
+              {
+                "name": "Mitsukiyo",
+                "joinphrase": "、",
+                "artist": {
+                  "id": "2f39bcb3-6fbe-4579-9842-990d385b4689",
+                  "name": "ミツキヨ"
+                }
+              },
+              {
+                "name": "KARUT",
+                "joinphrase": "、",
+                "artist": {
+                  "id": "d3d376e5-d445-41d3-8485-246790b99d70",
+                  "name": "KARUT"
+                }
+              },
+              {
+                "name": "Nor",
+                "artist": {
+                  "id": "80ff6fdf-ccea-4f83-85f2-d4d726622cb7",
+                  "name": "Nor"
+                }
+              }
+            ],
+            "release-group": {
+              "id": "a3957fb3-f41b-4a2a-b2d6-30431264d673",
+              "primary-type": "Album",
+              "secondary-types": [
+                "Soundtrack"
+              ]
+            },
+            "date": "2022-03-24",
+            "country": "JP",
+            "barcode": "4582579942951",
+            "label-info": [
+              {
+                "catalog-number": "BACD-0001",
+                "label": {
+                  "id": "4a3f94a0-5550-48f6-9b1a-22dee141d708",
+                  "name": "株式会社Yostar"
+                }
+              }
+            ],
+            "score": 100,
+            "track-count": 39,
+            "media": [
+              {
+                "format": "CD",
+                "track-count": 20
+              },
+              {
+                "format": "CD",
+                "track-count": 19
+              }
+            ]
+          },
+          {
+            "id": "8f032fff-c63f-4512-973a-758d6d0da2bd",
+            "title": "Blue Archive Original Soundtrack Vol.1 ～Longing for the memorable days～",
+            "status": "Official",
+            "artist-credit": [
+              {
+                "name": "ミツキヨ",
+                "joinphrase": "、",
+                "artist": {
+                  "id": "2f39bcb3-6fbe-4579-9842-990d385b4689",
+                  "name": "ミツキヨ"
+                }
+              },
+              {
+                "name": "KARUT",
+                "joinphrase": "、",
+                "artist": {
+                  "id": "d3d376e5-d445-41d3-8485-246790b99d70",
+                  "name": "KARUT"
+                }
+              },
+              {
+                "name": "Nor",
+                "artist": {
+                  "id": "80ff6fdf-ccea-4f83-85f2-d4d726622cb7",
+                  "name": "Nor"
+                }
+              }
+            ],
+            "release-group": {
+              "id": "a3957fb3-f41b-4a2a-b2d6-30431264d673",
+              "primary-type": "Album",
+              "secondary-types": [
+                "Soundtrack"
+              ]
+            },
+            "date": "2022-03-24",
+            "country": "JP",
+            "barcode": "4580760834214",
+            "label-info": [
+              {
+                "label": {
+                  "id": "4a3f94a0-5550-48f6-9b1a-22dee141d708",
+                  "name": "株式会社Yostar"
+                }
+              }
+            ],
+            "score": 100,
+            "track-count": 39,
+            "media": [
+              {
+                "format": "Digital Media",
+                "track-count": 20
+              },
+              {
+                "format": "Digital Media",
+                "track-count": 19
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

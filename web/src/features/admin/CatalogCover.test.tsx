@@ -11,6 +11,7 @@
  *   - a confirmed cancellation cannot reopen an obsolete approval from a delayed operations read
  *   - editing disabled retains an explicit current-revision cancellation and its cleanup receipt
  *   - a capability change invalidates an already open new cover approval before any write
+ *   - a source import saved by a newer release refuses the cover change with a reload request and no retry
  * @end-catalog */
 
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
@@ -21,7 +22,7 @@ import { adminWorkspace } from './adminWorkspace';
 import { CatalogCover } from './CatalogCover';
 import { detail, json, projectId, session, slotId, viewer } from './adminFixtures.testSupport';
 import type { CatalogItem } from './catalogApi';
-const item:CatalogItem={kind:'artist',id:'111111111111111111111111',revision:`cr_${'a'.repeat(43)}`,visibility:'public',effectiveVisibility:'public',coverUrl:'/api/admin/v1/catalog/artist/111111111111111111111111/artwork',mediaUrl:null,capabilities:{editing:true,visibility:true},fields:{name:'Synthetic artist',bio:'',birthDate:null}};
+const item:CatalogItem={kind:'artist',id:'111111111111111111111111',revision:`cr_${'a'.repeat(43)}`,visibility:'public',effectiveVisibility:'public',coverUrl:'/api/admin/v1/catalog/artist/111111111111111111111111/artwork',mediaUrl:null,capabilities:{editing:true,visibility:true},fields:{name:'Synthetic artist',bio:'',birthDate:null,musicBrainzId:null}};
 const operationId='30000000-0000-4000-8000-000000000003';
 function mount(removed=vi.fn(),snapshot:CatalogItem|null=item,options:{disabled?:boolean;approvalDisabled?:boolean}={}){const client=new QueryClient();client.setQueryData(['browser-session'],session);const confirmed=vi.fn();render(<QueryClientProvider client={client}><MemoryRouter><CatalogCover item={snapshot} kind={item.kind} id={item.id} disabled={options.disabled??false} approvalDisabled={options.approvalDisabled} onConfirmed={confirmed} onRemoved={removed}/></MemoryRouter></QueryClientProvider>);return confirmed;}
 beforeEach(()=>{adminWorkspace.reset();adminWorkspace.authorize(captureAccountOperation(viewer),true,true,undefined,{editing:true,visibility:true});adminWorkspace.select('admin');});
@@ -31,7 +32,7 @@ test('ready source cover selection captures both revisions and requires separate
   vi.stubGlobal('fetch',vi.fn(async(path:string,init:RequestInit)=>{
     if(init.method==='POST'){const body=JSON.parse(String(init.body));writes.push(body);return json({item,receipt:{operationId:body.operationId},coverOperation:{state:'complete',cleanupPending:true}});}
     if(path.endsWith('/cover-operations'))return json({items:[]});
-    if(path.includes('/imports?')){const {manifest,draft,suggestions,decisions:_decisions,capabilities:_capabilities,receipts:_receipts,assets:_assets,published:_published,publicationRecovery:_recovery,selectedCoverSlotId:_selected,...common}=source;return json({items:[{...common,title:'Synthetic source',rootLabel:manifest.rootLabel,artistName:'',visibility:'hidden',pendingSuggestions:suggestions.length}],counts:{all:1,analyzing:0,awaitingReview:1,needsAttention:0,completed:0},nextCursor:null});}
+    if(path.includes('/imports?')){const {manifest,draft,suggestions,decisions:_decisions,capabilities:_capabilities,receipts:_receipts,assets:_assets,published:_published,publicationRecovery:_recovery,selectedCoverSlotId:_selected,coverChoice:_coverChoice,approvalDigest:_digest,valueRevision:_value,automaticPaths:_automatic,lookupPaths:_lookup,possibleLabelEntryKeys:_labels,...common}=source;return json({items:[{...common,title:'Synthetic source',rootLabel:manifest.rootLabel,artistName:'',visibility:'hidden',pendingSuggestions:suggestions.length}],counts:{all:1,analyzing:0,awaitingReview:1,needsAttention:0,completed:0},nextCursor:null});}
     return json({item:source,receipt:null});
   }));
   const confirmed=mount();expect(screen.getByText('Choose a ready image from an import project. Replacing or removing the cover requires its own confirmation.')).toBeVisible();await waitFor(()=>expect(screen.getByRole('button',{name:'Choose from import projects'})).toBeEnabled());fireEvent.click(screen.getByRole('button',{name:'Choose from import projects'}));fireEvent.click(await screen.findByRole('button',{name:'Synthetic source'}));fireEvent.click(await screen.findByRole('button',{name:/Use this image/}));expect(writes).toHaveLength(0);fireEvent.click(within(screen.getByRole('dialog')).getByRole('button',{name:'Replace catalog cover'}));
@@ -127,4 +128,20 @@ test.each(['offline','running'] as const)('historical recovery still obeys the %
   vi.stubGlobal('fetch',vi.fn(async()=>json({items:[{operationId,startedByMe:true,state:'needsAttention',cleanupPending:false}]})));
   mount(vi.fn(),item,{disabled:fence==='running',approvalDisabled:true});
   expect(await screen.findByRole('button',{name:'Resume operation'})).toBeDisabled();expect(screen.getByRole('button',{name:'Cancel approval'})).toBeDisabled();
+});
+
+test('a source import saved by a newer release refuses the cover change with a reload request and no retry', async () => {
+  const source=detail();source.assets=[{slotId:'cover',state:'ready',byteLength:3,sha256:'a'.repeat(64),contentType:'image/jpeg',tags:null,recovery:{operationId,expectedRevision:1,kind:'upload',startedByMe:true}}];const writes:string[]=[];
+  vi.stubGlobal('fetch',vi.fn(async(path:string,init:RequestInit)=>{
+    if(init.method==='POST'){writes.push(path);return json({code:'ADMIN_IMPORT_RELOAD_REQUIRED'},409);}
+    if(path.endsWith('/cover-operations'))return json({items:[]});
+    if(path.includes('/imports?')){const {manifest,draft:_draft,suggestions,decisions:_decisions,capabilities:_capabilities,receipts:_receipts,assets:_assets,published:_published,publicationRecovery:_recovery,selectedCoverSlotId:_selected,coverChoice:_coverChoice,approvalDigest:_digest,valueRevision:_value,automaticPaths:_automatic,lookupPaths:_lookup,possibleLabelEntryKeys:_labels,...common}=source;return json({items:[{...common,title:'Synthetic source',rootLabel:manifest.rootLabel,artistName:'',visibility:'public',pendingSuggestions:suggestions.length}],counts:{all:1,analyzing:0,awaitingReview:1,needsAttention:0,completed:0},nextCursor:null});}
+    return json({item:source,receipt:null});
+  }));
+  const confirmed=mount();await waitFor(()=>expect(screen.getByRole('button',{name:'Choose from import projects'})).toBeEnabled());fireEvent.click(screen.getByRole('button',{name:'Choose from import projects'}));
+  fireEvent.click(await screen.findByRole('button',{name:'Synthetic source'}));fireEvent.click(await screen.findByRole('button',{name:/Use this image/}));fireEvent.click(within(screen.getByRole('dialog')).getByRole('button',{name:'Replace catalog cover'}));
+  // The refusal precedes admission: only this action offers a reload, and nothing is left to retry.
+  expect(await screen.findByText('The administrator workbench was updated. Reload the page to continue; unsaved edits on this page are not kept.')).toBeVisible();
+  expect(screen.getByRole('button',{name:'Reload page'})).toBeVisible();expect(screen.queryByRole('button',{name:'Retry original operation'})).not.toBeInTheDocument();
+  expect(adminWorkspace.getSnapshot().reloadRequired).toBe(false);expect(confirmed).not.toHaveBeenCalled();expect(writes).toEqual([`/api/admin/v1/catalog/artist/${item.id}/cover`]);
 });

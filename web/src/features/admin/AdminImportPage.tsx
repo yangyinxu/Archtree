@@ -3,59 +3,91 @@
  *   Functions: AdminImportPage
  * Internal
  *   Types: EditorBuffer
- *   Functions: ImportProject
- *   Constants: ImportMedia, ImportReview, ImportDuplicates
+ *   Functions: loadDraftEditor, saved, ImportProject
+ *   Constants: ImportDraftV2Editor, ImportAnalysisControls, ImportMedia, ImportReview, ImportDuplicates, stages
+ *   Variables: rebase
  * @end-catalog */
 
-import { lazy, Suspense, useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router';
 import { AdminGate, useAdminAccess, useAdminText } from './AdminAccess';
-import { adminRequest, importPath, responseSchema, type ImportDetail, type ImportDraft } from './adminApi';
+import { adminRequest, duplicateEditsKey, importPath, newerImport, responseSchema, type ImportDetail, type ImportDraftV2 } from './adminApi';
+import { artistByline, draftChanges } from './importDraftPatch';
 import { adminWorkspace } from './adminWorkspace';
 import { useAdminMutation } from './useAdminMutation';
+import { useImportUploadQueue } from './useImportUploadQueue';
 import { ImportStages, MutationStatus, useOnline } from './AdminShared';
-import { ImportDraftEditor } from './ImportDraftEditor';
 import { AdminNav } from './AdminNav';
 import styles from './adminStyles';
+// The editor, the analysis controls and the rebase of unsaved edits load beside the project read (see ImportProject), keeping this
+// route inside the initial JavaScript budget. Only a loaded editor holds unsaved edits, so a rebase is never needed earlier.
+let rebase: typeof import('./importDraftRebase') | undefined;
+const loadDraftEditor = () => import('./ImportDraftV2Editor');
+const ImportDraftV2Editor = lazy(() => loadDraftEditor().then(module => ({ default: module.ImportDraftV2Editor })));
+const ImportAnalysisControls = lazy(() => loadDraftEditor().then(module => ({ default: module.ImportAnalysisControls })));
 const ImportMedia = lazy(() => import('./ImportMedia').then(module => ({ default: module.ImportMedia })));
 const ImportReview = lazy(() => import('./ImportReview').then(module => ({ default: module.ImportReview })));
 const ImportDuplicates = lazy(() => import('./ImportDuplicates').then(module => ({ default: module.ImportDuplicates })));
 
-interface EditorBuffer { draft: ImportDraft; revision: number; dirty: boolean; selected: string[] }
+/** The import sections in tab order. */
+const stages = ['draft', 'review', 'files', 'publication'] as const;
+/** `base` is the saved draft the unsaved edits started from; a newer saved state (revision, then automatic writes) rebases them path by path (rebaseDraft). A save sends only the paths that differ from `base`. */
+interface EditorBuffer { draft: ImportDraftV2; base: ImportDraftV2; revision: number; valueRevision: number; dirty: boolean; selected: string[] }
+const saved = (item: ImportDetail, selected: string[] = []): EditorBuffer => ({ draft: item.draft, base: item.draft, revision: item.revision, valueRevision: item.valueRevision, dirty: false, selected });
 function ImportProject({ id }: { id: string }) {
   const t = useAdminText();
   const access = useAdminAccess();
   const online = useOnline();
   const path = importPath(id);
-  const bufferKey = `editor:${id}`;
+  // Draft v2 buffers use their own key, so an in-memory buffer of the v1 editor is never read as Draft v2.
+  const bufferKey = `editor-v2:${id}`;
   const [editor, setEditor] = useState<EditorBuffer | null>(() => adminWorkspace.buffer(bufferKey) ?? null);
   const [confirmed, setConfirmed] = useState<ImportDetail | null>(null);
   const [stage, setStage] = useState<'draft' | 'review' | 'files' | 'publication'>(() => adminWorkspace.buffer(`stage:${id}`) ?? 'draft');
   const [reviewVisited, setReviewVisited] = useState(stage === 'review');
   const [, refreshLocalFiles] = useState(0);
   const mutation = useAdminMutation(id);
+  const uploads = useImportUploadQueue(id);
+  const opened = useRef(false);
+  useEffect(() => { void loadDraftEditor(); void import('./importDraftRebase').then(module => { rebase = module; }); }, []);
   const query = useQuery({
     queryKey: ['admin-imports', access.viewerId, access.epoch, access.generation, id],
     queryFn: ({ signal }) => adminRequest(path, responseSchema, { signal }), retry: false, gcTime: 0,
     refetchOnWindowFocus: 'always', refetchInterval: query => online && (['running', 'queued'].includes(query.state.data?.item.analysis.state ?? '') || query.state.data?.item.publication === 'preparing') ? 3000 : false
   });
+  // A newer saved draft raises an editing conflict only when another administrator changed a path this editor edited: upload
+  // confirmations, automatic values from file tags or metadata lookup (which an administrator save always overrides; every one is
+  // in automaticPaths) and other administrators' saves of other paths rebase the unsaved edits, as the server would admit them.
+  const accept = (item: ImportDetail) => {
+    setConfirmed(previous => !previous || !newerImport(previous, item) ? item : previous);
+    setEditor(previous => {
+      const rebased = previous?.dirty && newerImport(item, previous) ? rebase?.rebaseDraft(previous.base, previous.draft, item.draft, new Set(item.automaticPaths)) : null;
+      if (previous && rebased) return { ...previous, base: item.draft, draft: rebased, revision: item.revision, valueRevision: item.valueRevision, dirty: draftChanges(item.draft, rebased).length > 0 };
+      return previous && (previous.dirty || newerImport(previous, item)) ? previous : saved(item, previous?.selected);
+    });
+    mutation.operation.reconcile(item);
+  };
   useEffect(() => {
     const item = query.data?.item;
     if (!item) return;
-    setConfirmed(previous => !previous || item.revision >= previous.revision ? item : previous);
-    setEditor(previous => previous && (previous.dirty || previous.revision > item.revision) ? previous : { draft: item.draft, revision: item.revision, dirty: false, selected: previous?.selected ?? [] });
-    mutation.operation.reconcile(item);
+    accept(item); uploads.queue.observe(item);
+    // Reopening reconciles uploads of unknown outcome once, without bytes.
+    if (!opened.current) { opened.current = true; uploads.queue.reconcileOnOpen(item, adminWorkspace.capture()); }
   }, [query.data]);
+  useEffect(() => { if (uploads.latest) accept(uploads.latest); }, [uploads.latest]);
   useEffect(() => {
     if (!mutation.result) return;
     const item = mutation.result.item;
-    setConfirmed(previous => !previous || item.revision >= previous.revision ? item : previous);
-    setEditor({ draft: item.draft, revision: item.revision, dirty: false, selected: [] });
-    if (mutation.result.receipt?.kind === 'decisions') adminWorkspace.forget(`duplicate-edits:${id}`);
+    setConfirmed(previous => !previous || !newerImport(previous, item) ? item : previous);
+    setEditor(saved(item));
+    // Saved decisions, or an approval that saved the shown ones, leave no unsaved Review decisions behind.
+    if (mutation.result.receipt?.kind === 'decisions' || mutation.result.receipt?.kind === 'publish') adminWorkspace.forget(duplicateEditsKey(id));
     mutation.operation.acknowledge();
     void query.refetch();
   }, [mutation.result]);
+  // A refused save (another administrator changed a saved path) loads the newer saved draft, so the conflict panel offers it.
+  useEffect(() => { if (mutation.error === 'conflict') void query.refetch(); }, [mutation.error]);
   useEffect(() => { if (editor) adminWorkspace.retain(bufferKey, editor, access); }, [editor]);
   useEffect(() => { adminWorkspace.retain(`stage:${id}`, stage, access); }, [stage]);
   // Keep candidate search state mounted after its first visit while deferring the initial review bundle.
@@ -73,14 +105,18 @@ function ImportProject({ id }: { id: string }) {
   }, [id, stage, item?.publication]);
   const locked = mutation.running || Boolean(mutation.intent) || !online;
   const publicationLocked = Boolean(confirmed && ['preparing', 'needsAttention', 'complete'].includes(confirmed.publication));
-  const conflict = Boolean(editor && item && editor.dirty && editor.revision !== item.revision);
+  const conflict = Boolean(editor && item && editor.dirty && (editor.revision !== item.revision || editor.valueRevision !== item.valueRevision));
+  const changes = editor ? draftChanges(editor.base, editor.draft) : [];
   const savedOnly = locked || publicationLocked || Boolean(editor?.dirty) || conflict;
   const active = item && ['queued', 'running'].includes(item.analysis.state);
   const publicationCleanup = item?.publication === 'cancelled' && Boolean(item.publicationRecovery?.cleanupPending);
   const mutate = (action: string, payload: object) => { if (item) mutation.operation.run(`${path}/${action}`, 'POST', { expectedRevision: item.revision, ...payload }); };
+  // The Review and publish summary (above the sections) and the Files and Publish sections share one media panel and its confirmation.
+  const media = (view: 'summary' | 'files' | 'publication') => <Suspense fallback={<p role="status">{t('common.loading')}</p>}><ImportMedia view={view} active={stage === view} item={item!} operation={mutation.operation} uploads={uploads} disabled={locked || editor!.dirty || conflict || Boolean(active)}
+    publishDisabled={locked || conflict || Boolean(active)} approval={{ draft: editor!.draft, changes }} /></Suspense>;
   return <section className={styles.page}><AdminNav />
     <Link className={styles.back} to="/admin/imports">{t('common.back')}</Link>
-    <header className={styles.header}><div><h1 className={styles.title}>{item?.draft.album.title || item?.manifest.rootLabel || t('common.untitled')}</h1>{item?.draft.album.artistName && <p className={styles.meta}>{item.draft.album.artistName}</p>}</div>
+    <header className={styles.header}><div><h1 className={styles.title}>{item?.draft.album.title || item?.manifest.rootLabel || t('common.untitled')}</h1>{item && item.draft.album.artists.length > 0 && <p className={styles.meta}>{artistByline(item.draft)}</p>}</div>
       <button className={styles.button} type="button" disabled={query.isFetching || !online} onClick={() => void query.refetch()}>{t('common.refresh')}</button></header>
     {!online && <p className={styles.error} role="status">{t('common.offline')}</p>}
     {query.isPending && <p role="status">{t('common.loading')}</p>}
@@ -89,36 +125,31 @@ function ImportProject({ id }: { id: string }) {
     {item && editor && <>
       <ImportStages item={item} />
       <p className={styles.meta}>{t('common.last_updated', { date: new Date(item.updatedAt).toLocaleString() })}</p>
-      <div role="tablist" aria-label={t('workbench.title')} className={styles.filters}>{(['draft', 'review', 'files', 'publication'] as const).map(value => <button key={value} id={`import-tab-${value}`} role="tab" type="button" className={styles.filter} aria-selected={stage === value} tabIndex={stage === value ? 0 : -1} onKeyDown={event => { const stages = ['draft', 'review', 'files', 'publication'] as const; const index = stages.indexOf(value); const next = event.key === 'ArrowRight' ? stages[(index + 1) % stages.length] : event.key === 'ArrowLeft' ? stages[(index + stages.length - 1) % stages.length] : event.key === 'Home' ? stages[0] : event.key === 'End' ? stages[3] : null; if (next) { event.preventDefault(); setStage(next); document.getElementById(`import-tab-${next}`)?.focus(); } }} aria-controls={`import-panel-${value}`} onClick={() => setStage(value)}>{t(`section.${value}`)}</button>)}</div>
+      {media('summary')}
+      <div role="tablist" aria-label={t('workbench.title')} className={styles.filters}>{stages.map(value => <button key={value} id={`import-tab-${value}`} role="tab" type="button" className={styles.filter} aria-selected={stage === value} tabIndex={stage === value ? 0 : -1} onKeyDown={event => { const index = stages.indexOf(value); const next = event.key === 'ArrowRight' ? stages[(index + 1) % stages.length] : event.key === 'ArrowLeft' ? stages[(index + stages.length - 1) % stages.length] : event.key === 'Home' ? stages[0] : event.key === 'End' ? stages[3] : null; if (next) { event.preventDefault(); setStage(next); document.getElementById(`import-tab-${next}`)?.focus(); } }} aria-controls={`import-panel-${value}`} onClick={() => setStage(value)}>{t(`section.${value}`)}</button>)}</div>
       {conflict && <section role="alert" className={styles.error}><p>{t('common.conflict')}</p>
         <details><summary>{t('review.saved_version')}</summary><pre className={styles.rawDraft}>{JSON.stringify(item.draft, null, 2)}</pre></details>
-        <button className={styles.button} onClick={() => setEditor({ draft: item.draft, revision: item.revision, dirty: false, selected: [] })}>{t('review.load_saved')}</button>
+        <button className={styles.button} onClick={() => setEditor(saved(item))}>{t('review.load_saved')}</button>
       </section>}
       <div hidden={stage !== 'draft'} role="tabpanel" id="import-panel-draft" aria-labelledby="import-tab-draft">
-      <form className={styles.panel} onSubmit={event => { event.preventDefault(); if (!locked && !conflict) mutation.operation.run(path, 'PATCH', { expectedRevision: editor.revision, draft: editor.draft }); }}>
+      <form className={styles.panel} onSubmit={event => { event.preventDefault(); if (!locked && !conflict && changes.length) mutation.operation.run(path, 'PATCH', { expectedRevision: editor.revision, changes }); }}>
         <header className={styles.sectionHeader}><h2>{t('layout.metadata')}</h2></header>
-        <ImportDraftEditor draft={editor.draft} filenames={item.manifest.files} disabled={locked || publicationLocked} onChange={draft => setEditor({ ...editor, draft, dirty: true })} />
-        <div className={styles.actions}><button className={`${styles.button} ${styles.primary}`} type="submit" disabled={locked || publicationLocked || !editor.dirty || conflict}>{t('action.save')}</button><span role="status">{t(editor.dirty ? 'common.unsaved' : 'common.saved')}</span></div>
+        <Suspense fallback={<p role="status">{t('common.loading')}</p>}><ImportDraftV2Editor draft={editor.draft} saved={editor.base} item={item} disabled={locked || publicationLocked}
+          onChange={draft => setEditor({ ...editor, draft, dirty: true })} /></Suspense>
+        <div className={styles.actions}><button className={`${styles.button} ${styles.primary}`} type="submit" disabled={locked || publicationLocked || !editor.dirty || conflict || !changes.length}>{t('action.save')}</button><span role="status">{t(editor.dirty ? 'common.unsaved' : 'common.saved')}</span></div>
       </form>
-      <section className={styles.panel}>
-        <header className={styles.sectionHeader}><h2>{t('stage.analysis')}</h2></header>
-        <div className={styles.actions}>
-          {!active && <button className={styles.button} disabled={savedOnly || publicationCleanup || !access.analysis || !item.capabilities.analysis || item.analysis.generation >= 2 || item.analysis.issue === 'providerOutcomeUnknown'} onClick={() => mutate('analyze', {})}>{t(item.analysis.generation ? 'action.reanalyze' : 'action.analyze')}</button>}
-          {active && <button className={styles.button} disabled={locked} onClick={() => mutate('cancel-analysis', {})}>{t('analysis.stop')}</button>}
-        </div>
-        {(!access.analysis || !item.capabilities.analysis) && <p>{t('analysis.unavailable')}</p>}
-        {item.analysis.issue && <p role="status">{t(`issue.${item.analysis.issue}`)}</p>}
-      </section>
+      <Suspense fallback={null}><ImportAnalysisControls item={item} available={access.analysis && item.capabilities.analysis} active={Boolean(active)} startDisabled={savedOnly || publicationCleanup} stopDisabled={locked} onAction={action => mutate(action, {})} /></Suspense>
       </div>
       <div hidden={stage !== 'review'} role="tabpanel" id="import-panel-review" aria-labelledby="import-tab-review">
       {stage === 'review' && <Suspense fallback={<p role="status">{t('common.loading')}</p>}><ImportReview draft={editor.draft} filenames={item.manifest.files} suggestions={item.suggestions} selected={editor.selected}
         onSelect={selected => setEditor({ ...editor, selected })} disabled={savedOnly || Boolean(active)}
         onAdopt={selectedIds => mutate('adopt', { generation: item.analysis.generation, selectedIds, rejectIds: [] })}
         onReject={rejectIds => mutate('adopt', { generation: item.analysis.generation, selectedIds: [], rejectIds })} /></Suspense>}
-      {reviewVisited && <Suspense fallback={<p role="status">{t('common.loading')}</p>}><ImportDuplicates key={item.revision} item={item} disabled={savedOnly || Boolean(active)} onSave={decisions => mutate('decisions', { decisions })} /></Suspense>}
+      {reviewVisited && <Suspense fallback={<p role="status">{t('common.loading')}</p>}><ImportDuplicates key={item.revision} item={item} disabled={savedOnly || Boolean(active)} onSave={body => mutate('decisions', body)} /></Suspense>}
       </div>
       {(['files', 'publication'] as const).map(value => <div key={value} hidden={stage !== value} role="tabpanel" id={`import-panel-${value}`} aria-labelledby={`import-tab-${value}`}>
-      <Suspense fallback={<p role="status">{t('common.loading')}</p>}><ImportMedia view={value} active={stage === value} item={item} operation={mutation.operation} disabled={locked || editor.dirty || conflict || Boolean(active)} /></Suspense>
+      {/* Publishing includes unsaved edits (one-step approval); cover, cleanup and cancellation still act on the saved draft. */}
+      {media(value)}
       </div>)}
     </>}
   </section>;

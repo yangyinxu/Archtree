@@ -10,6 +10,7 @@ import { PageSection } from '../../components/PageSection';
 import { launchStandalonePlayback } from '../playback/launchPlayback';
 import styles from '../../styles/Pages.module.css';
 import { useLocalization } from '../../localization/LocalizationProvider';
+import { useCardHoverTone } from './useCardHoverTone';
 
 const MoodFallback = lazy(() => import('./HomeMoodFallback'));
 const PaginatedPageSection = lazy(() => import('../../components/PaginatedPageSection')
@@ -29,9 +30,10 @@ export const HomePage = () => {
   // Anonymous requests never render a cached private explanation.
   const sections = home.data?.sections.filter((section) => viewerId || !section.items.some((item) => item.reason)) ?? [];
   const hasConfiguredSections = sections.length > 0;
+  const cardTone = useCardHoverTone();
 
   return (
-    <div className={styles.page}>
+    <div className={styles.page} {...cardTone}>
       <header className={`${styles.homeHeader} ${hasConfiguredSections ? styles.homeHeaderReady : ''}`}>
         <p className={styles.eyebrow}>Finitude</p>
         <h1 className={styles.pageTitle} id="home-title">{homeTitle}</h1>

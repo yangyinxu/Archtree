@@ -3,6 +3,7 @@ import { useParams } from 'react-router';
 
 import { listenerArtistQuery } from '../../api/listener';
 import { browserSessionQuery } from '../../api/session';
+import { neutralArtworkTone, useArtworkTone, useMainPaneTone } from '../../artwork/useArtworkTone';
 import { Artwork } from '../../components/Artwork';
 import { PageSection } from '../../components/PageSection';
 import { LazyArtistFollowButton } from '../../components/LazyArtistFollowButton';
@@ -16,6 +17,8 @@ export const ArtistPage = () => {
   const { artistId = '' } = useParams();
   const session = useQuery(browserSessionQuery());
   const artistQuery = useQuery(listenerArtistQuery(artistId));
+  const tone = useArtworkTone(artistQuery.data?.artist.artworkUrl) ?? neutralArtworkTone;
+  useMainPaneTone(tone.pane);
 
   if (artistQuery.isPending) {
     return <div className={styles.page}><div className={styles.state} aria-busy="true">{t('catalog.artist.loading')}</div></div>;

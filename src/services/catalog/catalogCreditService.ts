@@ -20,10 +20,12 @@ import {
     AttributionStatus,
     CatalogCredit,
     CatalogCreditValidationError,
+    keepJoinPhrasesWithSuccessors,
     legacyAlbumArtistIdsFromCredits,
     legacyTrackArtistIdsFromCredits,
     migratedCatalogCreditId,
     normalizeCatalogCredits,
+    normalizeStoredCatalogCredits,
     validateAttribution
 } from '../../models/catalogCredit';
 import {
@@ -87,13 +89,19 @@ const albumReferenceValues = (albumId: string) => [
     ObjectId.createFromHexString(albumId)
 ];
 
+/**
+ * Reads an owner's current Credits for a rebuild. Stored lists are read tolerantly, so an
+ * invalid stored join phrase is dropped (and repaired by the strict write) instead of blocking
+ * the edit; valid phrases stay on their Credits until a rebuild changes the Credit after them
+ * (see keepJoinPhrasesWithSuccessors).
+ */
 const legacyCreditsForUnmigratedOwner = async (
     session: ClientSession,
     ownerType: CatalogCreditOwnerType,
     ownerId: string,
     owner: any
 ) => {
-    if (Array.isArray(owner.credits)) return normalizeCatalogCredits(owner.credits);
+    if (Array.isArray(owner.credits)) return normalizeStoredCatalogCredits(owner.credits);
     if (ownerType === 'audioTrack') {
         const artistIds = [...new Set<string>((Array.isArray(owner.artistIds) ? owner.artistIds : [])
             .map((value: unknown) => String(value ?? '').trim().toLowerCase())
@@ -168,9 +176,13 @@ const confirmCatalogCreditMutation = async (result: CatalogCreditMutationResult)
     );
     if (!owner || owner.creditRevision !== result.creditRevision
         || owner.attributionStatus !== result.attributionStatus) return false;
+    // Read like every other stored list, so an invalid stored phrase counts as absent: a no-op
+    // result (a duplicate add) built from the same tolerant read then confirms. A real write
+    // stores strictly normalized Credits and moves creditRevision, and the fixed key order makes
+    // any missing, extra or changed valid phrase fail the comparison.
     let storedCredits: CatalogCredit[];
     try {
-        storedCredits = normalizeCatalogCredits(owner.credits);
+        storedCredits = normalizeStoredCatalogCredits(owner.credits);
     } catch {
         return false;
     }
@@ -313,12 +325,13 @@ export const addCatalogCredit = async (
                 { session, projection: { credits: 1, attributionStatus: 1, creditRevision: 1, artistIds: 1 } }
             );
             if (!owner) throw new CatalogCreditConflictError('The Credit owner is unavailable.');
-            let existing = await legacyCreditsForUnmigratedOwner(
+            const stored = await legacyCreditsForUnmigratedOwner(
                 session,
                 ownerType,
                 ownerId,
                 owner
             );
+            let existing = stored;
             if (candidate.role !== 'legacyUnspecified') {
                 existing = existing.filter((item) => !(item.subjectType === candidate.subjectType
                     && item.subjectId === candidate.subjectId
@@ -343,7 +356,7 @@ export const addCatalogCredit = async (
                 session,
                 ownerType,
                 ownerId,
-                [...existing, candidate],
+                keepJoinPhrasesWithSuccessors(stored, [...existing, candidate]),
                 'documented',
                 expectedCreditRevision
             );
@@ -379,12 +392,13 @@ export const addSoundtrackCredit = async (
             }
         );
         if (!owner) throw new CatalogCreditConflictError('The MediaTrack is unavailable.');
-        let existing = await legacyCreditsForUnmigratedOwner(
+        const stored = await legacyCreditsForUnmigratedOwner(
             session,
             'audioTrack',
             audioTrackId,
             owner
         );
+        let existing = stored;
         if (candidate.role !== 'legacyUnspecified') {
             existing = existing.filter((item) => !(item.subjectType === candidate.subjectType
                 && item.subjectId === candidate.subjectId && item.role === 'legacyUnspecified'));
@@ -404,7 +418,10 @@ export const addSoundtrackCredit = async (
                 creditRevision: observedRevision
             };
         }
-        const nextTrackCredits = duplicate ? existing : [...existing, candidate];
+        const nextTrackCredits = keepJoinPhrasesWithSuccessors(
+            stored,
+            duplicate ? existing : [...existing, candidate]
+        );
         const trackResult = await replaceCatalogCreditsWithinTransaction(
             session,
             'audioTrack',
@@ -434,7 +451,7 @@ export const addSoundtrackCredit = async (
                 session,
                 'album',
                 albumId,
-                [...albumCredits, {
+                keepJoinPhrasesWithSuccessors(albumCredits, [...albumCredits, {
                     creditId: migratedCatalogCreditId(
                         'album', albumId, 'artist', candidate.subjectId, 'primary'
                     ),
@@ -442,7 +459,7 @@ export const addSoundtrackCredit = async (
                     subjectId: candidate.subjectId,
                     role: 'primary',
                     order: albumCredits.length
-                }],
+                }]),
                 'documented',
                 Number.isInteger(album.creditRevision) ? album.creditRevision : 0
             );
@@ -506,7 +523,7 @@ export const removeAlbumPrimaryArtistCredit = async (
                 session,
                 'album',
                 albumId,
-                retained,
+                keepJoinPhrasesWithSuccessors(existing, retained),
                 retained.length > 0 ? 'documented' : 'unknown',
                 expectedCreditRevision
             );
@@ -573,7 +590,7 @@ export const replaceArtistPrimaryAlbumCredits = async (
                     && credit.subjectId === artistId && credit.role === 'primary');
                 const retained = existing.filter((credit) => !(credit.subjectType === 'artist'
                     && credit.subjectId === artistId && credit.role === 'primary'));
-                const desired = albumIds.includes(albumId)
+                const desired = keepJoinPhrasesWithSuccessors(existing, albumIds.includes(albumId)
                     ? existingPrimary
                         ? existing
                         : normalizeCatalogCredits([...retained, {
@@ -585,7 +602,7 @@ export const replaceArtistPrimaryAlbumCredits = async (
                             role: 'primary',
                             order: retained.length
                         }])
-                    : retained;
+                    : retained);
                 if (JSON.stringify(desired) === JSON.stringify(existing)
                     && Array.isArray(owner.credits)) continue;
                 await replaceCatalogCreditsWithinTransaction(
@@ -627,13 +644,15 @@ export const removeCatalogCredit = async (
                 { session, projection: { credits: 1 } }
             );
             if (!owner) throw new CatalogCreditConflictError('The Credit owner is unavailable.');
-            const existing = Array.isArray(owner.credits) ? normalizeCatalogCredits(owner.credits) : [];
+            // Remaining Credits keep their valid phrases while the same Credit still follows them;
+            // an invalid stored phrase is dropped.
+            const existing = Array.isArray(owner.credits) ? normalizeStoredCatalogCredits(owner.credits) : [];
             const retained = existing.filter((credit) => credit.creditId !== creditId);
             return replaceCatalogCreditsWithinTransaction(
                 session,
                 ownerType,
                 ownerId,
-                retained,
+                keepJoinPhrasesWithSuccessors(existing, retained),
                 retained.length > 0 ? 'documented' : emptyAttributionStatus,
                 expectedCreditRevision
             );
@@ -654,7 +673,9 @@ export const reorderCatalogCredits = async (
                 { session, projection: { credits: 1 } }
             );
             if (!owner) throw new CatalogCreditConflictError('The Credit owner is unavailable.');
-            const existing = Array.isArray(owner.credits) ? normalizeCatalogCredits(owner.credits) : [];
+            // A phrase stays with its Credit only while the same Credit still follows it; an invalid
+            // stored phrase is dropped.
+            const existing = Array.isArray(owner.credits) ? normalizeStoredCatalogCredits(owner.credits) : [];
             const byId = new Map(existing.map((credit) => [credit.creditId, credit]));
             if (orderedCreditIds.length !== existing.length
                 || new Set(orderedCreditIds).size !== existing.length
@@ -665,7 +686,7 @@ export const reorderCatalogCredits = async (
                 session,
                 ownerType,
                 ownerId,
-                orderedCreditIds.map((id) => byId.get(id)!),
+                keepJoinPhrasesWithSuccessors(existing, orderedCreditIds.map((id) => byId.get(id)!)),
                 existing.length > 0 ? 'documented' : 'unknown',
                 expectedCreditRevision
             );

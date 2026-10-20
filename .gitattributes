@@ -6,8 +6,15 @@
 *.yml text eol=lf
 *.yaml text eol=lf
 
+# Elastic Beanstalk reads these as YAML on Linux, and the artifact stager copies
+# the working tree, so Windows checkouts must hold the same LF bytes that ship.
+/.ebextensions/*.config text eol=lf
+
 # Canonical localization sources and generated bundles are validated byte-for-byte.
 /localization/**/*.json text eol=lf
+
+# Metadata lookup fixtures are checked as LF JSON by metadataLookupClients.test.ts.
+/test/fixtures/metadataLookup/** text eol=lf
 
 # Preserve the original formatting of this bundled third-party license.
 web/public/licenses/mp3/LGPL-2.0.txt -whitespace

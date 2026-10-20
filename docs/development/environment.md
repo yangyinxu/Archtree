@@ -31,6 +31,17 @@ Canonical localization JSON uses LF even in Windows checkouts with
 two-space JSON and duplicate-key checks enabled; do not regenerate locale content
 just to repair checkout line endings.
 
+`.gitattributes` also pins `.ebextensions/*.config` to LF, because Elastic
+Beanstalk reads them as YAML on Linux and the artifact stager copies the working
+tree. Git does not rewrite files checked out before a rule changed, so a checkout
+that still holds CRLF copies fails the deployment tests until those files are
+checked out again:
+
+```sh
+rm .ebextensions/*.config
+git checkout -- .ebextensions
+```
+
 ```sh
 node --version
 npm ci
@@ -246,15 +257,20 @@ that tests spawn load nothing, and replaces `DB_CONN_STRING`, `DB_NAME`,
 `S3_BUCKET_NAME`, `AWS_ENDPOINT_URL`, and `AWS_EC2_METADATA_DISABLED` with
 synthetic loopback values, including values exported in the terminal;
 `AWS_SESSION_TOKEN` is removed. An unmocked database or AWS call therefore fails
-against `127.0.0.1:9`. The runner also preloads
-`test/support/syntheticMxResolver.ts`, so the authentication-email domain check
-answers from a synthetic MX resolver and no test queries real DNS. Suites that
-need real services start their own disposable MongoDB and S3-compatible
-fixtures. Running one file directly with `node --import tsx --test` bypasses
-this environment and the resolver preload, so tests that spawn the app or
-script entries can then read a root `.env`, and authentication email requests
-and emails would look up real MX records; add `--import ./test/support/syntheticMxResolver.ts`
-from the repository root to keep DNS synthetic.
+against `127.0.0.1:9`. `FINITUDE_ADMIN_METADATA_LOOKUP_CONTACT` is blanked, so
+metadata lookup stays unavailable even when the terminal sets a contact. The
+metadata lookup tests also install `test/support/networkGuard.ts`, which
+refuses `fetch`, DNS queries and socket connections to any non-loopback host;
+they read recorded responses only from `test/fixtures/metadataLookup/`. The
+runner also preloads `test/support/syntheticMxResolver.ts`, so the
+authentication-email domain check answers from a synthetic MX resolver and no
+test queries real DNS. Suites that need real services start their own disposable
+MongoDB and S3-compatible fixtures. Running one file directly with
+`node --import tsx --test` bypasses this environment and the resolver preload,
+so tests that spawn the app or script entries can then read a root `.env`, and
+authentication email requests and emails would look up real MX records; add
+`--import ./test/support/syntheticMxResolver.ts` from the repository root to
+keep DNS synthetic.
 
 `npm run test:server:linux` runs the Linux suites explicitly and rejects other
 hosts. `npm run doctor:release` checks Linux, Bash, Node, MongoDB and FFmpeg. Deployment

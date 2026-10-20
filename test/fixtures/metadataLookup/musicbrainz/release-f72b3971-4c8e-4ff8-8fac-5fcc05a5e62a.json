@@ -1,0 +1,192 @@
+{
+  "source": "musicbrainz",
+  "recordedAt": "2026-10-18T10:50:22.432Z",
+  "description": "MusicBrainz release lookup (Hotel California search result)",
+  "exchanges": [
+    {
+      "url": "https://musicbrainz.org/ws/2/release/f72b3971-4c8e-4ff8-8fac-5fcc05a5e62a?inc=artist-credits+labels+recordings+release-groups+isrcs&fmt=json",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "body": {
+        "id": "f72b3971-4c8e-4ff8-8fac-5fcc05a5e62a",
+        "title": "Hotel California",
+        "status": "Bootleg",
+        "artist-credit": [
+          {
+            "name": "Eagles",
+            "joinphrase": "",
+            "artist": {
+              "id": "f46bd570-5768-462e-b84c-c7c993bbf47e",
+              "name": "Eagles"
+            }
+          }
+        ],
+        "release-group": {
+          "id": "91bf707c-6c33-4efd-83ca-e4c88f14bcaa",
+          "primary-type": "Album",
+          "secondary-types": [
+            "Live"
+          ],
+          "first-release-date": "1992"
+        },
+        "date": "1992",
+        "country": "DE",
+        "barcode": "8004883020195",
+        "label-info": [
+          {
+            "catalog-number": "CD 12019",
+            "label": {
+              "id": "0c22125d-7ed0-4c15-9d75-fffba7b8f8e4",
+              "name": "On Stage"
+            }
+          }
+        ],
+        "cover-art-archive": {
+          "front": true
+        },
+        "media": [
+          {
+            "position": 1,
+            "format": "CD",
+            "tracks": [
+              {
+                "position": 1,
+                "number": "1",
+                "title": "Hotel California",
+                "length": 405000,
+                "recording": {
+                  "id": "ac738eaf-9faa-4866-9dd7-ab3c53dc36df",
+                  "length": 405000,
+                  "isrcs": []
+                }
+              },
+              {
+                "position": 2,
+                "number": "2",
+                "title": "The Long Run",
+                "length": 309000,
+                "recording": {
+                  "id": "1537e3ec-e734-4b5e-a625-3757bfe31ea2",
+                  "length": 309000,
+                  "isrcs": []
+                }
+              },
+              {
+                "position": 3,
+                "number": "3",
+                "title": "I Can’t Tell You Why",
+                "length": 305000,
+                "recording": {
+                  "id": "8f132c63-6867-4031-8178-c36ecab5059c",
+                  "length": 305000,
+                  "isrcs": []
+                }
+              },
+              {
+                "position": 4,
+                "number": "4",
+                "title": "Life in the Fast Lane",
+                "length": 307000,
+                "recording": {
+                  "id": "ceaaf5d1-43e0-48b8-874b-ac060b9a1583",
+                  "length": 307000,
+                  "isrcs": []
+                }
+              },
+              {
+                "position": 5,
+                "number": "5",
+                "title": "Desperado",
+                "length": 232000,
+                "recording": {
+                  "id": "70a9392f-063c-4a26-b766-bd5ae4d2f760",
+                  "length": 232000,
+                  "isrcs": []
+                }
+              },
+              {
+                "position": 6,
+                "number": "6",
+                "title": "All Night Long",
+                "length": 328000,
+                "recording": {
+                  "id": "88356de6-08d8-49ec-b9be-b115342a1a32",
+                  "length": 328000,
+                  "isrcs": []
+                }
+              },
+              {
+                "position": 7,
+                "number": "7",
+                "title": "Take It to the Limit",
+                "length": 304000,
+                "recording": {
+                  "id": "9b9955c7-207b-4916-a46f-06d4e203bb7b",
+                  "length": 304000,
+                  "isrcs": []
+                }
+              },
+              {
+                "position": 8,
+                "number": "8",
+                "title": "Seven Bridges Road",
+                "length": 204000,
+                "recording": {
+                  "id": "e616bd89-3a70-4529-aa6e-3989a0f4853d",
+                  "length": 204000,
+                  "isrcs": []
+                }
+              },
+              {
+                "position": 9,
+                "number": "9",
+                "title": "Heartache Tonight",
+                "length": 277000,
+                "recording": {
+                  "id": "4173d7e5-bea7-4d5f-9131-e09851b3c7b2",
+                  "length": 277000,
+                  "isrcs": []
+                }
+              },
+              {
+                "position": 10,
+                "number": "10",
+                "title": "Wasted Time",
+                "length": 320000,
+                "recording": {
+                  "id": "813e4e36-355f-485e-8622-558d1c419a0f",
+                  "length": 320000,
+                  "isrcs": []
+                }
+              },
+              {
+                "position": 11,
+                "number": "11",
+                "title": "Saturday Night",
+                "length": 240000,
+                "recording": {
+                  "id": "df8c09e3-15c0-4c89-ba80-15b9e0fce8ca",
+                  "length": 240000,
+                  "isrcs": []
+                }
+              },
+              {
+                "position": 12,
+                "number": "12",
+                "title": "Take It Easy",
+                "length": 333000,
+                "recording": {
+                  "id": "cceb28b9-6de4-449f-9fd6-19cb1f3506f4",
+                  "length": 333000,
+                  "isrcs": []
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

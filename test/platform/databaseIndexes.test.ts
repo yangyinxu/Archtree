@@ -5,14 +5,17 @@
  *   - index migration is additive, repeatable, and records its verified revision
  *   - receipt collection creation accepts only NamespaceExists code and fails safely before index writes
  *   - mandatory index failure prevents migration success without disclosing database errors
+ *   - the metadata lookup worker index is required
  *   - essential social cleanup indexes must exist before startup can complete
  *   - the email-link cleanup index must exist before startup can complete
  *   - social cleanup indexes reject unique, sparse, partial, hidden and expiring substitutes
  *   - report deduplication and deletion cleanup indexes are mandatory, while the triage sort index is optional
  *   - nonunique, sparse, partial, and incompatible collation constraints fail verification
  *   - the cover cancellation receipt index requires both declared string predicates
+ *   - the MusicBrainz ID indexes are required, unique and partial on stored strings only
  *   - a dropped required index makes a previously initialized database unready
  *   - optional performance-index failure preserves required constraints and emits bounded diagnostics
+ *   - the lookup cover worker index is optional: its failure is a bounded diagnostic and needs no required-index revision
  *   - a failed metadata read does not finish verification while another read occupies the pool
  * @end-catalog */
 
@@ -93,6 +96,17 @@ test('mandatory index failure prevents migration success without disclosing data
     assert.ok(error instanceof DatabaseIndexInitializationError);
     assert.equal(error.indexId, 'users:email');
     assert.equal(String(error).includes('private-email'), false);
+    return true;
+  });
+  assert.deepEqual(fake.receipts, []);
+});
+
+test('the metadata lookup worker index is required', async () => {
+  const fake = databaseDouble();
+  fake.fail('adminImportLookups');
+  await assert.rejects(initializeDatabaseIndexes(fake.db), (error: unknown) => {
+    assert.ok(error instanceof DatabaseIndexInitializationError);
+    assert.equal(error.indexId, 'adminImportLookups:state,leaseUntil,retryAt');
     return true;
   });
   assert.deepEqual(fake.receipts, []);
@@ -182,6 +196,31 @@ test('the cover cancellation receipt index requires both declared string predica
   await assert.rejects(verifyRequiredDatabaseIndexes(fake.db), /cancellation.actor,cancellation.operationId/);
 });
 
+test('the MusicBrainz ID indexes are required, unique and partial on stored strings only', async () => {
+  for (const collection of ['artists', 'organizations']) {
+    const fake = databaseDouble(); await initializeDatabaseIndexes(fake.db);
+    const index = () => fake.metadata.get(collection)!.find(entry => 'musicBrainzId' in entry.key)!;
+    assert.deepEqual(index().partialFilterExpression, { musicBrainzId: { $type: 'string' } });
+    assert.equal(index().unique, true);
+    assert.equal(index().name, collection === 'artists' ? 'artist_musicbrainz_id' : 'organization_musicbrainz_id');
+    await verifyRequiredDatabaseIndexes(fake.db);
+    // A sparse, non-partial or non-unique substitute cannot stand in for the declared constraint.
+    for (const altered of [{ sparse: true }, { partialFilterExpression: undefined }, { unique: false }, { partialFilterExpression: { musicBrainzId: { $exists: true } } }]) {
+      const entry = index(), original = structuredClone(entry);
+      Object.assign(entry, altered);
+      await assert.rejects(verifyRequiredDatabaseIndexes(fake.db), new RegExp(`${collection}:musicBrainzId`));
+      for (const key of Object.keys(entry)) delete entry[key];
+      Object.assign(entry, original);
+      await verifyRequiredDatabaseIndexes(fake.db);
+    }
+    // Startup fails closed (existing duplicates refuse the unique index) and records no revision.
+    const failing = databaseDouble(); failing.fail(collection);
+    await assert.rejects(initializeDatabaseIndexes(failing.db), DatabaseIndexInitializationError);
+    assert.deepEqual(failing.receipts, []);
+  }
+  assert.equal(requiredIndexRevision, 'required-indexes-v11-musicbrainz-ids');
+});
+
 test('a dropped required index makes a previously initialized database unready', async () => {
   const fake = databaseDouble();
   await initializeDatabaseIndexes(fake.db);
@@ -200,6 +239,30 @@ test('optional performance-index failure preserves required constraints and emit
     { category: 'optional_index_unavailable', indexId: 'posts:createdAt' }
   ]);
   assert.equal(fake.receipts.length, 1);
+});
+
+test('the lookup cover worker index is optional: its failure is a bounded diagnostic and needs no required-index revision', async () => {
+  const declared = databaseIndexes.filter(index => index.options?.name === 'admin_import_lookup_cover_worker');
+  assert.deepEqual(declared.map(index => [index.collection, index.keys, Boolean(index.required || index.options?.unique)]),
+    [['adminAlbumImports', { 'media.lookupCover.due': 1, 'media.lookupCover.leaseUntil': 1 }, false]]);
+  assert.equal(requiredIndexRevision, 'required-indexes-v11-musicbrainz-ids');
+  const fake = databaseDouble(), collection = fake.db.collection.bind(fake.db);
+  (fake.db as unknown as { collection: unknown }).collection = (name: string) => {
+    const target = collection(name);
+    return { ...target, createIndex: async (key: Document, options: Document) => {
+      if (options?.name === 'admin_import_lookup_cover_worker') throw new Error('private-email@example.test');
+      return target.createIndex(key, options);
+    } };
+  };
+  const entries: string[] = [];
+  const warn = console.warn;
+  console.warn = (entry: string) => { entries.push(entry); };
+  try { await initializeDatabaseIndexes(fake.db); } finally { console.warn = warn; }
+  assert.deepEqual(entries.map(entry => JSON.parse(entry)), [
+    { category: 'optional_index_unavailable', indexId: 'adminAlbumImports:media.lookupCover.due,media.lookupCover.leaseUntil' }
+  ]);
+  assert.equal(fake.receipts.length, 1);
+  await verifyRequiredDatabaseIndexes(fake.db);
 });
 
 test('a failed metadata read does not finish verification while another read occupies the pool', async () => {

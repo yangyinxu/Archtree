@@ -4,6 +4,7 @@
  *   Constants: mocks, peer, profile
  * Tests
  *   - signed-out and resolving sessions read no private profiles or shares
+ *   - a share card shows plain Artist names joined by commas, without a join phrase
  *   - opening and switching private lists has no playback, save, mutation or room side effects
  *   - inactive identity and failed profile or share refresh hide cached private cards
  *   - logical expiry removes a displayed card without waiting for polling or server cleanup
@@ -86,6 +87,14 @@ test('signed-out and resolving sessions read no private profiles or shares', asy
   expect(await screen.findByText('From Alice')).toBeVisible();
   await act(async () => { client.setQueryData(browserSessionResolvingQueryKey, true); });
   await waitFor(() => expect(screen.queryByText('From Alice')).not.toBeInTheDocument());
+});
+
+test('a share card shows plain Artist names joined by commas, without a join phrase', async () => {
+  mocks.shares.mockResolvedValue({ items: [share({ content: {
+    contentType: 'audioTrack', id: 'a'.repeat(24), title: 'Shared track', artworkUrl: '', artistNames: ['Lorem', 'Ipsum']
+  } })], nextCursor: null });
+  show(); expect(await screen.findByText('From Alice')).toBeVisible();
+  expect(screen.getByText('Lorem, Ipsum')).toBeVisible();
 });
 
 test('opening and switching private lists has no playback, save, mutation or room side effects', async () => {

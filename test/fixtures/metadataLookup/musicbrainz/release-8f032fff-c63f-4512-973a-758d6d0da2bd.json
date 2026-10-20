@@ -1,0 +1,589 @@
+{
+  "source": "musicbrainz",
+  "recordedAt": "2026-10-18T10:50:22.432Z",
+  "description": "MusicBrainz release lookup (Blue Archive search result)",
+  "exchanges": [
+    {
+      "url": "https://musicbrainz.org/ws/2/release/8f032fff-c63f-4512-973a-758d6d0da2bd?inc=artist-credits+labels+recordings+release-groups+isrcs&fmt=json",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "body": {
+        "id": "8f032fff-c63f-4512-973a-758d6d0da2bd",
+        "title": "Blue Archive Original Soundtrack Vol.1 ～Longing for the memorable days～",
+        "status": "Official",
+        "artist-credit": [
+          {
+            "name": "ミツキヨ",
+            "joinphrase": "、",
+            "artist": {
+              "id": "2f39bcb3-6fbe-4579-9842-990d385b4689",
+              "name": "ミツキヨ"
+            }
+          },
+          {
+            "name": "KARUT",
+            "joinphrase": "、",
+            "artist": {
+              "id": "d3d376e5-d445-41d3-8485-246790b99d70",
+              "name": "KARUT"
+            }
+          },
+          {
+            "name": "Nor",
+            "joinphrase": "",
+            "artist": {
+              "id": "80ff6fdf-ccea-4f83-85f2-d4d726622cb7",
+              "name": "Nor"
+            }
+          }
+        ],
+        "release-group": {
+          "id": "a3957fb3-f41b-4a2a-b2d6-30431264d673",
+          "primary-type": "Album",
+          "secondary-types": [
+            "Soundtrack"
+          ],
+          "first-release-date": "2022-03-24"
+        },
+        "date": "2022-03-24",
+        "country": "JP",
+        "barcode": "4580760834214",
+        "label-info": [
+          {
+            "catalog-number": null,
+            "label": {
+              "id": "4a3f94a0-5550-48f6-9b1a-22dee141d708",
+              "name": "株式会社Yostar"
+            }
+          }
+        ],
+        "cover-art-archive": {
+          "front": true
+        },
+        "media": [
+          {
+            "position": 1,
+            "format": "Digital Media",
+            "tracks": [
+              {
+                "position": 1,
+                "number": "1",
+                "title": "Constant Moderato",
+                "length": 137000,
+                "recording": {
+                  "id": "31a58abe-372d-48e2-a6f9-5383e3926b21",
+                  "length": 137000,
+                  "isrcs": [
+                    "JPR502200276"
+                  ]
+                }
+              },
+              {
+                "position": 2,
+                "number": "2",
+                "title": "Midsummer cat",
+                "length": 140000,
+                "recording": {
+                  "id": "fa15cae5-3ee7-430c-8b42-f8d0883dc0b5",
+                  "length": 140000,
+                  "isrcs": [
+                    "JPR502200277"
+                  ]
+                }
+              },
+              {
+                "position": 3,
+                "number": "3",
+                "title": "Connected Sky",
+                "length": 121000,
+                "recording": {
+                  "id": "552c39d8-a454-4803-95bf-abbc3fa81212",
+                  "length": 121000,
+                  "isrcs": [
+                    "JPR502200278"
+                  ]
+                }
+              },
+              {
+                "position": 4,
+                "number": "4",
+                "title": "Shooting Stars",
+                "length": 117000,
+                "recording": {
+                  "id": "ac0e9a87-9d1f-468f-9330-30e9a307cc49",
+                  "length": 117000,
+                  "isrcs": [
+                    "JPR502200279"
+                  ]
+                }
+              },
+              {
+                "position": 5,
+                "number": "5",
+                "title": "Step by Step",
+                "length": 130000,
+                "recording": {
+                  "id": "54909467-cdb5-4a6a-8e24-83a4e775268e",
+                  "length": 130000,
+                  "isrcs": [
+                    "JPR502200280"
+                  ]
+                }
+              },
+              {
+                "position": 6,
+                "number": "6",
+                "title": "MX Adventure",
+                "length": 114000,
+                "recording": {
+                  "id": "cf8a38e7-64e2-4fb6-84e5-443eaece73b9",
+                  "length": 114000,
+                  "isrcs": [
+                    "JPR502200281"
+                  ]
+                }
+              },
+              {
+                "position": 7,
+                "number": "7",
+                "title": "Irasshaimase",
+                "length": 130000,
+                "recording": {
+                  "id": "b71500c7-4c7e-4343-b890-27edec85e59f",
+                  "length": 130000,
+                  "isrcs": [
+                    "JPR502200282"
+                  ]
+                }
+              },
+              {
+                "position": 8,
+                "number": "8",
+                "title": "Daily Routine 247",
+                "length": 116000,
+                "recording": {
+                  "id": "8be96c98-8101-43b2-9dcf-7b705d63acfc",
+                  "length": 116000,
+                  "isrcs": [
+                    "JPR502200283"
+                  ]
+                }
+              },
+              {
+                "position": 9,
+                "number": "9",
+                "title": "Future Bossa",
+                "length": 131000,
+                "recording": {
+                  "id": "63c6922c-a8f7-4dd9-94c8-b39c5777e9b6",
+                  "length": 131000,
+                  "isrcs": [
+                    "JPR502200284"
+                  ]
+                }
+              },
+              {
+                "position": 10,
+                "number": "10",
+                "title": "Lemonade Diary",
+                "length": 154000,
+                "recording": {
+                  "id": "2aa5f8c2-0248-42b2-8742-363da4545e37",
+                  "length": 154000,
+                  "isrcs": [
+                    "JPR502200285"
+                  ]
+                }
+              },
+              {
+                "position": 11,
+                "number": "11",
+                "title": "Plug and Play",
+                "length": 128000,
+                "recording": {
+                  "id": "f2660bf9-40e5-4dc8-9309-1024331adbc3",
+                  "length": 128000,
+                  "isrcs": [
+                    "JPR502200286"
+                  ]
+                }
+              },
+              {
+                "position": 12,
+                "number": "12",
+                "title": "Water Drop",
+                "length": 128000,
+                "recording": {
+                  "id": "2afa6cea-62ff-4f9f-9187-d09d39cb4dec",
+                  "length": 128000,
+                  "isrcs": [
+                    "JPR502200287"
+                  ]
+                }
+              },
+              {
+                "position": 13,
+                "number": "13",
+                "title": "Signal of Abydos",
+                "length": 117000,
+                "recording": {
+                  "id": "a5aa5e85-077c-4022-86f6-bd2374cfef80",
+                  "length": 117000,
+                  "isrcs": [
+                    "JPR502200288"
+                  ]
+                }
+              },
+              {
+                "position": 14,
+                "number": "14",
+                "title": "Sugar story",
+                "length": 120000,
+                "recording": {
+                  "id": "db342df8-76e2-4d56-80fc-439f8ff7183e",
+                  "length": 120000,
+                  "isrcs": [
+                    "JPR502200289"
+                  ]
+                }
+              },
+              {
+                "position": 15,
+                "number": "15",
+                "title": "ARES",
+                "length": 114000,
+                "recording": {
+                  "id": "8007c0df-21c4-427f-91a2-595f01f1f690",
+                  "length": 114000,
+                  "isrcs": [
+                    "JPR502200290"
+                  ]
+                }
+              },
+              {
+                "position": 16,
+                "number": "16",
+                "title": "Vibes",
+                "length": 137000,
+                "recording": {
+                  "id": "0dbd457c-f7d9-4501-bcbf-37fafb30bef2",
+                  "length": 137000,
+                  "isrcs": [
+                    "JPR502200291"
+                  ]
+                }
+              },
+              {
+                "position": 17,
+                "number": "17",
+                "title": "Future Lab",
+                "length": 121000,
+                "recording": {
+                  "id": "89bd8b3a-f8d8-474e-9e71-0d653730821f",
+                  "length": 121000,
+                  "isrcs": [
+                    "JPR502200292"
+                  ]
+                }
+              },
+              {
+                "position": 18,
+                "number": "18",
+                "title": "After the Beep",
+                "length": 121000,
+                "recording": {
+                  "id": "7f27861f-7a89-4b14-9856-d16cd4334423",
+                  "length": 121000,
+                  "isrcs": [
+                    "JPR502200293"
+                  ]
+                }
+              },
+              {
+                "position": 19,
+                "number": "19",
+                "title": "Rolling beat",
+                "length": 150000,
+                "recording": {
+                  "id": "809324f0-2c7f-4fd6-8e95-2147deaf5a9e",
+                  "length": 150000,
+                  "isrcs": [
+                    "JPR502200294"
+                  ]
+                }
+              },
+              {
+                "position": 20,
+                "number": "20",
+                "title": "Accelerator",
+                "length": 111000,
+                "recording": {
+                  "id": "c01a45f4-a05b-4fc1-8263-511e1a72af83",
+                  "length": 111000,
+                  "isrcs": [
+                    "JPR502200295"
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "position": 2,
+            "format": "Digital Media",
+            "tracks": [
+              {
+                "position": 1,
+                "number": "1",
+                "title": "Mischievous Step",
+                "length": 151000,
+                "recording": {
+                  "id": "6750d518-5e94-4cd3-b9e7-661884a25af6",
+                  "length": 151000,
+                  "isrcs": [
+                    "JPR502200296"
+                  ]
+                }
+              },
+              {
+                "position": 2,
+                "number": "2",
+                "title": "Mechanical JUNGLE",
+                "length": 123000,
+                "recording": {
+                  "id": "c1fef32f-7a82-4d35-9d78-e3260d616b50",
+                  "length": 123000,
+                  "isrcs": [
+                    "JPR502200297"
+                  ]
+                }
+              },
+              {
+                "position": 3,
+                "number": "3",
+                "title": "Virtual Storm",
+                "length": 124000,
+                "recording": {
+                  "id": "c742e90a-724b-4964-a821-ca18c02284b9",
+                  "length": 124000,
+                  "isrcs": [
+                    "JPR502200298"
+                  ]
+                }
+              },
+              {
+                "position": 4,
+                "number": "4",
+                "title": "Tech N Tech",
+                "length": 125000,
+                "recording": {
+                  "id": "1227eb01-f9e4-42b7-92dd-6a2454b018dd",
+                  "length": 125000,
+                  "isrcs": [
+                    "JPR502200299"
+                  ]
+                }
+              },
+              {
+                "position": 5,
+                "number": "5",
+                "title": "Party time",
+                "length": 77000,
+                "recording": {
+                  "id": "9f9e5374-d8a0-45a0-8b0b-376c9f70dd3b",
+                  "length": 77000,
+                  "isrcs": [
+                    "JPR502200300"
+                  ]
+                }
+              },
+              {
+                "position": 6,
+                "number": "6",
+                "title": "Endless Carnival",
+                "length": 163000,
+                "recording": {
+                  "id": "9fe7c30c-0942-4371-89dc-53d81a5c18ee",
+                  "length": 163000,
+                  "isrcs": [
+                    "JPR502200301"
+                  ]
+                }
+              },
+              {
+                "position": 7,
+                "number": "7",
+                "title": "Fade Out",
+                "length": 91000,
+                "recording": {
+                  "id": "1ca23353-64a0-4dbe-a9b7-9f8afd2b854d",
+                  "length": 91000,
+                  "isrcs": [
+                    "JPR502200302"
+                  ]
+                }
+              },
+              {
+                "position": 8,
+                "number": "8",
+                "title": "Alert",
+                "length": 118000,
+                "recording": {
+                  "id": "3ead0b02-d127-41e4-af3d-625f0e0dd5d7",
+                  "length": 118000,
+                  "isrcs": [
+                    "JPR502200303"
+                  ]
+                }
+              },
+              {
+                "position": 9,
+                "number": "9",
+                "title": "CrossFire",
+                "length": 111000,
+                "recording": {
+                  "id": "835f1d5e-9022-41d5-a520-f67864972a1b",
+                  "length": 111000,
+                  "isrcs": [
+                    "JPR502200304"
+                  ]
+                }
+              },
+              {
+                "position": 10,
+                "number": "10",
+                "title": "Interface",
+                "length": 117000,
+                "recording": {
+                  "id": "cc0b6717-c28b-413f-988a-f2200bb6c69c",
+                  "length": 117000,
+                  "isrcs": [
+                    "JPR502200305"
+                  ]
+                }
+              },
+              {
+                "position": 11,
+                "number": "11",
+                "title": "Out of Control",
+                "length": 141000,
+                "recording": {
+                  "id": "5d0f925f-97fc-4d4a-8ddb-9c8d0dd57d24",
+                  "length": 141000,
+                  "isrcs": [
+                    "JPR502200306"
+                  ]
+                }
+              },
+              {
+                "position": 12,
+                "number": "12",
+                "title": "Mechanical JUNGLE Hard Arrange",
+                "length": 129000,
+                "recording": {
+                  "id": "7d80dc84-d50f-439f-9683-2ad556e7ef70",
+                  "length": 129000,
+                  "isrcs": [
+                    "JPR502200307"
+                  ]
+                }
+              },
+              {
+                "position": 13,
+                "number": "13",
+                "title": "Fearful Utopia",
+                "length": 123000,
+                "recording": {
+                  "id": "c1babc3c-a3b3-4a97-b185-06b16a73ae4a",
+                  "length": 123000,
+                  "isrcs": [
+                    "JPR502200308"
+                  ]
+                }
+              },
+              {
+                "position": 14,
+                "number": "14",
+                "title": "SAKURA PUNCH",
+                "length": 123000,
+                "recording": {
+                  "id": "73263dd8-e2c9-4158-842c-64336e1135f1",
+                  "length": 123000,
+                  "isrcs": [
+                    "JPR502200309"
+                  ]
+                }
+              },
+              {
+                "position": 15,
+                "number": "15",
+                "title": "Denshi Toujou!",
+                "length": 115000,
+                "recording": {
+                  "id": "a08e15c0-2a4f-4884-9d9a-aec8b7cc9e8e",
+                  "length": 115000,
+                  "isrcs": [
+                    "JPR502200310"
+                  ]
+                }
+              },
+              {
+                "position": 16,
+                "number": "16",
+                "title": "Kaiten Screw!!!",
+                "length": 131000,
+                "recording": {
+                  "id": "ea0ccd17-9051-4903-9355-fba267c75870",
+                  "length": 131000,
+                  "isrcs": [
+                    "JPR502200311"
+                  ]
+                }
+              },
+              {
+                "position": 17,
+                "number": "17",
+                "title": "CrossFire Hard Arrange",
+                "length": 139000,
+                "recording": {
+                  "id": "ba48057e-520f-4de2-9f6c-60cf76b44afb",
+                  "length": 139000,
+                  "isrcs": [
+                    "JPR502200312"
+                  ]
+                }
+              },
+              {
+                "position": 18,
+                "number": "18",
+                "title": "Fevertime",
+                "length": 117000,
+                "recording": {
+                  "id": "0865c19e-5f50-4293-a690-0c91cecc2c25",
+                  "length": 117000,
+                  "isrcs": [
+                    "JPR502200313"
+                  ]
+                }
+              },
+              {
+                "position": 19,
+                "number": "19",
+                "title": "Library of Omen",
+                "length": 131000,
+                "recording": {
+                  "id": "d6116805-3668-4d84-bee9-7dc281c4cf31",
+                  "length": 131000,
+                  "isrcs": [
+                    "JPR502200314"
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -23,6 +23,9 @@ behavior contract.
 
 The Playwright suite runs the production `web/dist` bundle through Archtree's
 Express application and uses deterministic browser-only API and audio fixtures.
+Its parallel workers share that one process, so each forwards its own synthetic
+client address through the one trusted proxy hop and keeps its own per-IP rate
+windows, as separate listeners would; no production limit is reset or relaxed.
 It runs in bundled Chromium only, and covers critical/serious axe
 findings, keyboard skip navigation, reduced motion, direct route refreshes, and
 320 px, 768 px, and 1440 px reflow checks. It also verifies that wheel input
@@ -31,7 +34,8 @@ remains independently scrollable. Player coverage includes persisted
 Shuffle/Repeat state, hover-only seek preview, release-time pointer seeking,
 keyboard seeking, 24 px seek hit targets, and axe scans of the expanded mobile
 player and shortcut-help layers. Video coverage must additionally verify one
-shared media element, automatic Audio browse and Video theater presentations,
+shared media element (decorative card hover previews are separate muted
+elements that never touch the player, and are excluded from that count), automatic Audio browse and Video theater presentations,
 Audio-to-Video and Video-to-Audio queue transitions, a full right-side Video
 queue, recoverable failure without a fabricated fallback, no media-mode switch,
 and no duplicate activity write. Responsive-shell coverage verifies the exact
@@ -40,7 +44,10 @@ Library rail, delayed Now Playing dismissal, the narrow Album hero, and player
 identity while the real Now Playing control closes and restores the pane.
 Search coverage verifies cancellable debounced result previews without history
 writes, explicit history commits, and committed query restoration through
-browser Back and Forward.
+browser Back and Forward on the narrow page field. At 1440 px it verifies the
+shell typeahead: inline suggestions on the current route, arrow-key highlight
+kept in view, Enter on a highlight, Enter and Escape without one, recent
+searches, result-type filters, and axe scans with the suggestion list open.
 
 The Engineering Guide browser spec verifies its hosted login return destination,
 then reads the same generated bundle through the loopback documentation preview.
@@ -50,6 +57,73 @@ verify real session and administrator middleware for every guide page and asset.
 Run `npm run build` before the browser gate; the guide build validates its curated
 source references and internal links. The preview verifies document presentation,
 not production account access or deployment.
+
+The administrator workbench spec covers the one-approval import upload queue:
+creating an import uploads every selected file one request at a time with no
+per-file dialog, and Resume after reselection reports each file's own result.
+An unknown outcome is reconciled without bytes and then retried with its
+original operation, and switching to User view during an upload stops the queue
+after that file without restarting it on return. Files chosen without a folder
+show no folder field. The local MP3 conversion spec verifies that an import
+created from converted MP3s uploads through the same queue. The administrator
+workbench spec also checks that a new import's draft opens with Public
+visibility and that saving the draft sends only the changed fields. It also
+moves an Artist entry with the keyboard, checking that the move is announced
+and keeps focus on the moved entry and that the reordered entries and a new
+label save as just `album.artists` and `album.label`, with axe scans and
+reflow at 320, 768 and 1440 px. Another test publishes an import with two
+primary Artists, a featured Artist and a new label in one step, expanding each
+row Review collapsed as preselected and deciding each entry, the label, the
+Album and each track on its own row without a separate save, checks that the
+confirmation lists the entries with their roles and join phrase, the label and
+the tracks in disc order, that the single publish request carries those
+decisions, and the links to the Album, each Artist and the label Organization,
+with axe scans of the page and the confirmation. Another publishes an unsaved
+title edit without Save and checks that the one publish request carries it and
+the editor then shows it saved. Another loads a draft whose values came from
+file tags and checks that the editor marks them From file tags, notes that a
+company-like Artist entry looks like a label and drops a value's marker once it
+is edited, and that the confirmation marks the entry and the label From file
+tags only, with axe scans of the page and the confirmation. Another opens Review
+on an import with no candidates and checks that its matches load without a find
+step, that the entry, the label, the Album and each track are collapsed as
+preselected new records with no decision asked, that the confirmation lists each
+as New, and that the single publish request carries no decisions, only the
+preselections the confirmation showed, with axe scans of the page and the
+confirmation. Another loads an import whose files share one embedded image and
+checks that Files and the summary show it chosen automatically, that choosing No
+cover makes the choice explicit, and that the one publish request carries the
+cover the confirmation shows. The Review and publish summary tests create an
+import from a folder, upload it, and check that values prefilled from file tags
+are flagged while a fixture lookup runs and Publish waits, that the one matching
+release is preselected and applied, and that one confirmation publishes it with
+no decision and no Luna tick; that a tie lists only the values that differ with
+each release's barcode, catalogue number, country and medium and is chosen from
+the keyboard; that a conflict with the administrator's label is kept from the
+keyboard while the summary reflows at 320, 768 and 1440 px; that an unavailable
+lookup offers Luna first beside a free retry, that a retry that stays
+unavailable keeps both, and that Luna starts only after its confirmation shows
+the budget, its suggestion for an empty title then arriving ticked; that an
+import without a folder or usable tags offers Luna beside an empty name box that
+looks up a typed name from the keyboard and stores nothing; and that after a
+lookup finds no release Luna is offered, and its ticked Artist entries, label
+and Disc Number are preselected in one confirmation, which offers no Apply
+ticked suggestions now and approves with their preselections and ticks, with axe
+scans throughout. Another shows a candidate whose release reports front artwork
+through the protected administrator preview (a mocked WebP; no request reaches a
+lookup host), checks that the summary says Publish waits while the applied
+release's cover is staged and keeps Publish disabled, and that once the staged
+lookup cover arrives it is chosen automatically, named in the summary and the
+confirmation, and carried by the one publish request. Another applies an
+iTunes-only result after MusicBrainz stayed unavailable: the summary says it
+was not checked against MusicBrainz with Luna first beside a free retry, its
+values are flagged as iTunes only and not checked, the chooser marks the
+candidate the same way with an axe scan, the summary reflows at 320, 768 and
+1440 px, and one confirmation publishes it.
+
+The catalog reviews spec checks that an existing-Album review shows the Album's
+Artist Credits and label read-only and applies a Disc Number change, and that a
+Luna label suggestion shows only as an identity hint that Keep current rejects.
 
 The historical 2026-08-19 MediaTrack amendment passed
 304/304 server tests, 214/214 Web unit/component tests, 148/148 integration
@@ -272,11 +346,18 @@ player control still works.
 
 - Navigate Home, Search, Library authentication state, Album, Artist, Account,
   and browser back/forward using only the keyboard.
-- In both Search fields, type and delete without submitting, confirm results
-  update after the debounce while Recent searches remains unchanged, then use
-  Enter or the mobile-keyboard Search action and confirm only that final query
-  is recorded. Repeat with a Chinese or Japanese IME and verify composition
-  text is not searched or submitted before the candidate is committed.
+- On a phone width, in the Search page field, type and delete without
+  submitting, confirm results update after the debounce while Recent searches
+  remains unchanged, then use Enter or the mobile-keyboard Search action and
+  confirm only that final query is recorded. Repeat with a Chinese or Japanese
+  IME and verify composition text is not searched or submitted before the
+  candidate is committed.
+- At 768 px and wider, type in the shell field on Home: confirm suggestions
+  appear without leaving Home, arrow keys highlight and scroll them, Enter
+  opens a highlight or otherwise full results, Escape closes and then clears,
+  typing after a highlight clears it, and a screen reader announces the
+  active option and the suggestion count. Repeat with an IME and confirm arrow
+  and Escape keys stay with the composition.
 - Confirm focus is visible, follows route changes sensibly, remains trapped in
   modal dialogs, and returns to the invoking control when a dialog closes.
 - Start Album playback, select an individual MediaTrack, use Previous/Next,
@@ -326,6 +407,129 @@ player control still works.
   and retry states with a screen reader.
 - On mobile, open and close the expanded player, use every visible transport
   control, and confirm queue swipes have equivalent buttons.
+- As an administrator, create an import from a folder of several audio files
+  and confirm they upload one at a time, each with its own progress and result,
+  without a per-file confirmation. Switch to User view during an upload and
+  confirm that file finishes and no other file starts. Reload during an upload
+  and confirm reopening shows each interrupted file as ready, of unknown
+  outcome (reconciled without bytes) or not uploaded, and never resends bytes
+  on its own. Reselect the folder and resume: only incomplete files upload, an
+  unconfirmed file is resent only under its original operation, and a file
+  whose content changed is refused. Repeat at 320 CSS px with a screen reader
+  and confirm progress and per-file results are announced.
+- As an administrator, use only the keyboard and a screen reader to add three
+  Artist entries to an import draft, move one up and down, make one Featured,
+  and set a join phrase, a label and a Disc Number, then save. Confirm each
+  move is announced with the entry's new position, focus stays on the moved
+  entry and no primary entry follows a featured one. Repeat at 320 CSS px.
+- As an administrator, publish an import with two primary Artists, a featured
+  Artist and a new label, where only one primary name matches an existing
+  Artist, in different letter case. Confirm Review loads its matches without a
+  find step, shows the other entries, the label, the Album and each track
+  collapsed as preselected new records, asks for a decision only for the
+  matching entry, refuses reusing one Artist for two entries, and that the
+  completed import links to the Album, each Artist and the label Organization.
+  In User view, confirm the Album byline keeps the join phrases, the tracks
+  credit only the primary Artists, the Album appears in each primary Artist's
+  Discography, the featured Artist's Collaborations and the label's Releases.
+  Then append one new file and one file already on that Album and confirm the
+  identical file is preselected to reuse its track and the new one as a new
+  member, the draft's Album values, entries, label and cover are shown as not
+  applied, the confirmation lists the new track with its Disc and Track Number,
+  and the new track takes the Album's primary Artists, order and visibility.
+- As an administrator, make each Review decision without Save decisions, then
+  edit the import's title without saving and choose Publish. Confirm the
+  confirmation says the unsaved changes are included and lists the title, the
+  entries in order with their roles and join phrases, the label, the date,
+  the visibility, the cover, the tracks by Disc and Track Number, and each
+  identity, with a hidden reused record marked Hidden. Approve, refresh the
+  page and confirm the saved draft holds the edited title and the decisions.
+  Repeat with a screen reader at 320 CSS px.
+- As an administrator, open the publication confirmation of an import whose rows
+  are all preselected, create an Artist named like one of its entries in another
+  letter case from a second tab, then approve. Confirm the approval is refused
+  and nothing is published, and that Review, once it reads its matches again,
+  asks for a decision on that entry.
+- As an administrator, create an import from a folder of tagged audio files
+  that share their album, album artist, year and label tags, with the tracks
+  in `Disc 1` and `Disc 2` folders and no disc tags. Confirm each track's
+  title, Disc Number and Track Number appear, marked From file tags, as its
+  upload is confirmed, and that once every file is confirmed the Album title,
+  year, label and one primary Artist entry appear, marked From file tags in
+  Draft, with the entry and the label marked From file tags only in the
+  publication confirmation. Save an edited automatic track title while other
+  files still upload and confirm the save keeps it, no conflict appears, and
+  Review decisions and the cover choice stay available. Repeat with files
+  whose album tags disagree and with a Various Artists album artist, and
+  confirm those values stay empty and no Artist entry is written. Repeat with
+  a screen reader at 320 CSS px.
+- As an administrator, create an import from audio files that all embed the
+  same cover image. Once every file is confirmed, confirm Files and the
+  summary show that image chosen automatically, that saving an append to an
+  existing Album in Review deselects it and that saving a new Album again
+  restores it. Repeat with files whose images differ: confirm no cover is
+  chosen, choose one, publish, and confirm Files then lists only the chosen
+  image and the Album shows it.
+- As an administrator, with metadata lookup configured against MusicBrainz in a
+  development environment, create imports from a folder of a tagged Album with
+  one matching release, of an Album with several matching editions, and of
+  files without usable tags chosen without a folder. Confirm each opens on the
+  Review and publish summary; that the first shows Looking up, then the applied
+  release with nothing to answer, and publishes after one confirmation; that the
+  second lists only the values that differ with each edition's barcode,
+  catalogue number, country and medium, and that Publish waits until one or
+  none is chosen; and that the third offers Luna beside an empty name box.
+  Type a name of your own for one Artist entry or the label before the lookup
+  applies and confirm Keep mine and Use lookup value appear and Publish waits
+  for the answer. Make lookup unavailable and confirm Retry lookup comes first,
+  then Analyze with Luna once the automatic retries end, and that Analyze shows
+  the project and daily budget and starts nothing until confirmed; confirm
+  Luna's suggestions for empty or tag values arrive ticked, others unticked, and
+  that unticking keeps the current value at approval. With no tags and no
+  match, let Luna suggest the Album title, the Artist entries and the label, and
+  confirm the same publication confirmation preselects them as new; then name an
+  existing Organization like the suggested label and confirm its row needs a
+  decision and Apply ticked suggestions now appears only then. Confirm the name
+  box refuses a link, keeps no history and that no global search appears.
+  Without an operator contact, confirm the summary says lookup is not
+  configured, offers Luna and shows neither a retry nor the name box. Repeat
+  with a screen reader at 320 CSS px.
+- As an administrator, with metadata lookup configured against MusicBrainz in a
+  development environment, import a popular Album with many editions (for
+  example Hotel California by Eagles) whose files match exactly one edition
+  among those compared. Confirm the summary says one release matches but was
+  not applied because not every release found was compared, that the chooser
+  shows the release with every value, says not every release was compared and
+  offers Use none of these, that Publish is available without a choice, and
+  that choosing the release applies it.
+- As an administrator, with metadata lookup configured against MusicBrainz and
+  Cover Art Archive in a development environment, import an Album whose
+  matching release has front artwork. Confirm the chooser shows the release's
+  front artwork through the protected preview and the browser requests no
+  Cover Art Archive or archive.org address; that the summary says Publish waits
+  while the cover is staged; and that once staging ends Files lists the Cover
+  Art Archive front artwork, chosen automatically over an image every file
+  shares. Choose another release and confirm the earlier cover is cleaned up
+  and the new one chosen; choose none and confirm the shared embedded image is
+  chosen again. Repeat for a release without front artwork, and with Cover Art
+  Archive unreachable, and confirm Publish stops waiting with the current cover
+  choice kept. Publish and confirm the Album shows the chosen cover and Files
+  keeps no other lookup cover. Repeat with a screen reader at 320 CSS px.
+- As an administrator, with metadata lookup configured in a development
+  environment, import a one-file song whose title tag is romanized and which
+  MusicBrainz lists only under its Japanese title (for example "Pandora Call"
+  by ヰ世界情緒). Confirm the summary says lookup searches the iTunes Search
+  API, that the MusicBrainz release found through the Japanese title is applied
+  with no iTunes-only mark, and that Review lists an Artist named with the
+  artist's other localized name as an iTunes localized name. Then import files
+  that MusicBrainz does not know but iTunes does, and confirm the chooser
+  marks the result iTunes only, the summary flags its values as iTunes only,
+  its iTunes artwork is staged and chosen automatically while the browser
+  requests no mzstatic address, and Publish needs one confirmation. With
+  MusicBrainz unreachable, confirm the result is also marked Not checked
+  against MusicBrainz with Luna first beside a free retry; with iTunes
+  unreachable, confirm the summary says iTunes was unavailable and Publish
+  stops waiting once its retries end. Repeat with a screen reader at 320 CSS px.
 
 ## Media Session observations
 

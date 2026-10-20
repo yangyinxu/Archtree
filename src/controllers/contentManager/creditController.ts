@@ -2,9 +2,10 @@
  * Exports
  *   Functions: createOrganizationWeb, createOrganizationReleaseWeb, updateOrganizationWeb,
  *              deleteOrganizationWeb, addCatalogCreditWeb, removeCatalogCreditWeb, updateCatalogCreditRoleWeb,
- *              reorderCatalogCreditWeb, markCatalogAttributionUnknownWeb
+ *              updateCatalogCreditJoinPhraseWeb, reorderCatalogCreditWeb, markCatalogAttributionUnknownWeb
  * Internal
  *   Functions: creditOwnerRedirect, loadCreditOwner
+ *   Constants: canonicalObjectIdPattern, staleCreditListMessage
  * @end-catalog */
 
 /** Adapts Organization and role-bearing Credit forms while preserving explicit attribution choices. */
@@ -17,7 +18,10 @@ import { normalizeUtf8Text } from '../../utils/textEncoding';
 import {
     catalogCreditRoles,
     catalogCreditSubjectTypes,
-    createCatalogCreditId
+    createCatalogCreditId,
+    normalizeJoinPhrase,
+    normalizeStoredCatalogCredits,
+    withoutJoinPhrase
 } from '../../models/catalogCredit';
 import { Organization, organizationTypes } from '../../models/organization';
 import { deleteUnreferencedOrganization } from '../../services/catalog/organizationLifecycleService';
@@ -216,11 +220,15 @@ export const removeCatalogCreditWeb = async (req: Request, res: Response, next: 
     }
 };
 
+/** A form owner ID must be a canonical ObjectId before it reaches a model lookup that would throw. */
+const canonicalObjectIdPattern = /^[0-9a-f]{24}$/i;
+const staleCreditListMessage = 'Credits changed concurrently. Reload and try again.';
+
 const loadCreditOwner = (ownerType: 'album' | 'audioTrack', ownerId: string) => ownerType === 'album'
     ? Album.findById(ownerId)
     : AudioTrack.findById(ownerId);
 
-/** Changes one Credit role while preserving its stable ID and order. */
+/** Changes one Credit role while preserving its stable ID, order and join phrase. */
 export const updateCatalogCreditRoleWeb = async (req: Request, res: Response, next: NextFunction) => {
     try {
         const authReq = req as AuthenticatedRequest;
@@ -234,14 +242,16 @@ export const updateCatalogCreditRoleWeb = async (req: Request, res: Response, ne
             return creditOwnerRedirect(res, ownerType, ownerId, 'Choose a valid Credit role.');
         }
         const owner: any = await loadCreditOwner(ownerType, ownerId);
-        const credits = Array.isArray(owner?.credits) ? owner.credits : [];
-        if (!credits.some((credit: any) => credit.creditId === creditId)) {
+        // Rebuild from the tolerant stored read: valid phrases stay by creditId, an invalid one
+        // is dropped (and so repaired), and a structurally broken list fails as a 400.
+        const credits = Array.isArray(owner?.credits) ? normalizeStoredCatalogCredits(owner.credits) : [];
+        if (!credits.some((credit) => credit.creditId === creditId)) {
             return creditOwnerRedirect(res, ownerType, ownerId, 'Credit not found. Reload and try again.');
         }
         await replaceCatalogCredits(
             ownerType,
             ownerId,
-            credits.map((credit: any) => credit.creditId === creditId ? { ...credit, role } : credit),
+            credits.map((credit) => credit.creditId === creditId ? { ...credit, role } : credit),
             'documented',
             Number.isInteger(owner.creditRevision) ? owner.creditRevision : 0
         );
@@ -255,7 +265,81 @@ export const updateCatalogCreditRoleWeb = async (req: Request, res: Response, ne
     }
 };
 
-/** Moves one Credit by one position using optimistic revision control. */
+/**
+ * Sets or clears one Credit's join phrase (empty clears) through the canonical Credit lifecycle;
+ * other phrases are kept. The write is fenced by the Credit revision the form was rendered with,
+ * so a phrase is never saved over a list whose next name changed after the page was drawn.
+ */
+export const updateCatalogCreditJoinPhraseWeb = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const authReq = req as AuthenticatedRequest;
+        if (!authReq.auth) return res.redirect('/auth/login-web?returnTo=%2Fcontent%2Fmanage');
+        if (rejectNonAdminManagerRequest(authReq, res)) return;
+        const ownerType = req.body.ownerType === 'audioTrack' ? 'audioTrack' : 'album';
+        const ownerId = String(req.body.ownerId ?? '').trim();
+        const creditId = String(req.body.creditId ?? '').trim();
+        if (!canonicalObjectIdPattern.test(ownerId)) {
+            return creditOwnerRedirect(res, ownerType, ownerId, 'Credit not found. Reload and try again.');
+        }
+        // A missing or malformed revision (for example a page rendered before this field existed)
+        // cannot prove the list is unchanged, so it asks for a reload instead of guessing.
+        const rawRevision = req.body.creditRevision;
+        const expectedRevision = typeof rawRevision === 'string' && /^\d{1,15}$/.test(rawRevision)
+            ? Number(rawRevision)
+            : undefined;
+        if (expectedRevision === undefined) {
+            return creditOwnerRedirect(res, ownerType, ownerId, staleCreditListMessage);
+        }
+        const raw = req.body.joinPhrase;
+        // A repeated form field decodes as an array; only one string value is a phrase. Surrounding
+        // spaces are part of the phrase, so the value is never trimmed.
+        let joinPhrase: string | undefined;
+        try {
+            if (typeof raw !== 'string') throw new Error('Join phrase must be one text value.');
+            joinPhrase = raw === '' ? undefined : normalizeJoinPhrase(raw);
+        } catch {
+            return creditOwnerRedirect(res, ownerType, ownerId, 'A join phrase is at most 16 characters of visible text without control or invisible formatting characters, or empty for a comma.');
+        }
+        const owner: any = await loadCreditOwner(ownerType, ownerId);
+        if (owner && (Number.isInteger(owner.creditRevision) ? owner.creditRevision : 0) !== expectedRevision) {
+            return creditOwnerRedirect(res, ownerType, ownerId, staleCreditListMessage);
+        }
+        // Rebuild from the tolerant stored read: other valid phrases stay on their Credits and an
+        // invalid one is dropped (and so repaired); a structurally broken list fails as a 400.
+        const credits = Array.isArray(owner?.credits) ? normalizeStoredCatalogCredits(owner.credits) : [];
+        if (!credits.some((credit) => credit.creditId === creditId)) {
+            return creditOwnerRedirect(res, ownerType, ownerId, 'Credit not found. Reload and try again.');
+        }
+        // The transaction re-checks the same revision, so a change committed after this read also
+        // conflicts instead of being built on.
+        await replaceCatalogCredits(
+            ownerType,
+            ownerId,
+            credits.map((credit) => credit.creditId !== creditId
+                ? credit
+                : joinPhrase === undefined ? withoutJoinPhrase(credit) : { ...credit, joinPhrase }),
+            'documented',
+            expectedRevision
+        );
+        return creditOwnerRedirect(
+            res,
+            ownerType,
+            ownerId,
+            joinPhrase === undefined ? 'Credit join phrase cleared.' : 'Credit join phrase updated successfully.'
+        );
+    } catch (error) {
+        const ownerType = req.body.ownerType === 'audioTrack' ? 'audioTrack' : 'album';
+        if (Number((error as any)?.statusCode) >= 400 && Number((error as any)?.statusCode) < 500) {
+            return creditOwnerRedirect(res, ownerType, String(req.body.ownerId ?? ''), String((error as Error).message));
+        }
+        return next(error);
+    }
+};
+
+/**
+ * Moves one Credit by one position using optimistic revision control. A moved Credit's join
+ * phrase, and the phrase before it, are kept only while the same Credit still follows them.
+ */
 export const reorderCatalogCreditWeb = async (req: Request, res: Response, next: NextFunction) => {
     try {
         const authReq = req as AuthenticatedRequest;

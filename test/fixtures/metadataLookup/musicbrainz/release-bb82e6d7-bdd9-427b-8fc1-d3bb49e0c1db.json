@@ -1,0 +1,312 @@
+{
+  "source": "musicbrainz",
+  "recordedAt": "2026-10-18T10:50:22.432Z",
+  "description": "MusicBrainz release lookup (Hotel California search result)",
+  "exchanges": [
+    {
+      "url": "https://musicbrainz.org/ws/2/release/bb82e6d7-bdd9-427b-8fc1-d3bb49e0c1db?inc=artist-credits+labels+recordings+release-groups+isrcs&fmt=json",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "body": {
+        "id": "bb82e6d7-bdd9-427b-8fc1-d3bb49e0c1db",
+        "title": "Hotel California",
+        "status": "Official",
+        "artist-credit": [
+          {
+            "name": "Eagles",
+            "joinphrase": "",
+            "artist": {
+              "id": "f46bd570-5768-462e-b84c-c7c993bbf47e",
+              "name": "Eagles"
+            }
+          }
+        ],
+        "release-group": {
+          "id": "836f349a-0434-3e8b-a0bc-261f77a9f99c",
+          "primary-type": "Album",
+          "secondary-types": [],
+          "first-release-date": "1976-12-08"
+        },
+        "date": "2017-11-24",
+        "country": "XE",
+        "barcode": "081227933234",
+        "label-info": [
+          {
+            "catalog-number": "081227933234",
+            "label": {
+              "id": "a8bea33e-67af-424a-a734-898e2dc437ed",
+              "name": "Asylum Records"
+            }
+          }
+        ],
+        "cover-art-archive": {
+          "front": true
+        },
+        "media": [
+          {
+            "position": 1,
+            "format": "CD",
+            "tracks": [
+              {
+                "position": 1,
+                "number": "1",
+                "title": "Hotel California",
+                "length": 391000,
+                "recording": {
+                  "id": "40bd0203-bc3f-4b15-9ab3-ceeb2ef35d7a",
+                  "length": 390266,
+                  "isrcs": [
+                    "USEE11300195",
+                    "USEE11300353",
+                    "USEE19900323"
+                  ]
+                }
+              },
+              {
+                "position": 2,
+                "number": "2",
+                "title": "New Kid in Town",
+                "length": 304000,
+                "recording": {
+                  "id": "eb5641b3-196d-45ba-9edf-1d37671bd3b8",
+                  "length": 304000,
+                  "isrcs": [
+                    "USEE11300196",
+                    "USEE11300354",
+                    "USEE19900324"
+                  ]
+                }
+              },
+              {
+                "position": 3,
+                "number": "3",
+                "title": "Life in the Fast Lane",
+                "length": 286000,
+                "recording": {
+                  "id": "eb5550c8-9d31-4270-9dac-1f11566a3805",
+                  "length": 286093,
+                  "isrcs": [
+                    "USEE11300197",
+                    "USEE11300355",
+                    "USEE19900325"
+                  ]
+                }
+              },
+              {
+                "position": 4,
+                "number": "4",
+                "title": "Wasted Time",
+                "length": 296000,
+                "recording": {
+                  "id": "826c84b4-b625-4ba9-847d-8fb1a31a2d21",
+                  "length": 296172,
+                  "isrcs": [
+                    "USEE11300198",
+                    "USEE11300356",
+                    "USEE19900326"
+                  ]
+                }
+              },
+              {
+                "position": 5,
+                "number": "5",
+                "title": "Wasted Time (reprise)",
+                "length": 83000,
+                "recording": {
+                  "id": "1f2ce3df-edbf-4da9-84a6-688ca7adbb37",
+                  "length": 83266,
+                  "isrcs": [
+                    "USEE11300203",
+                    "USEE11300357",
+                    "USEE19900327"
+                  ]
+                }
+              },
+              {
+                "position": 6,
+                "number": "6",
+                "title": "Victim of Love",
+                "length": 250000,
+                "recording": {
+                  "id": "898fe0ff-71a7-40b1-913c-9157a34ba16e",
+                  "length": 249293,
+                  "isrcs": [
+                    "USEE11300199",
+                    "USEE11300358",
+                    "USEE19900328"
+                  ]
+                }
+              },
+              {
+                "position": 7,
+                "number": "7",
+                "title": "Pretty Maids All in a Row",
+                "length": 239000,
+                "recording": {
+                  "id": "e1de5771-92f0-4a7d-a796-b0c6b66c7cf4",
+                  "length": 238533,
+                  "isrcs": [
+                    "USEE11300200",
+                    "USEE11300359",
+                    "USEE19900329"
+                  ]
+                }
+              },
+              {
+                "position": 8,
+                "number": "8",
+                "title": "Try and Love Again",
+                "length": 311000,
+                "recording": {
+                  "id": "dacd1802-bd44-4843-957d-7b51b8b0e764",
+                  "length": 310693,
+                  "isrcs": [
+                    "USEE11300201",
+                    "USEE11300360",
+                    "USEE19900330"
+                  ]
+                }
+              },
+              {
+                "position": 9,
+                "number": "9",
+                "title": "The Last Resort",
+                "length": 445000,
+                "recording": {
+                  "id": "887f7e1c-5eb1-4f3b-9c12-8e54a6ebedbd",
+                  "length": 448546,
+                  "isrcs": [
+                    "USEE11300202",
+                    "USEE11300361",
+                    "USEE19900331"
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "position": 2,
+            "format": "CD",
+            "tracks": [
+              {
+                "position": 1,
+                "number": "1",
+                "title": "Take It Easy",
+                "length": 287000,
+                "recording": {
+                  "id": "b1c142ad-07fe-49b1-8b13-07cb0675c513",
+                  "length": 287000,
+                  "isrcs": []
+                }
+              },
+              {
+                "position": 2,
+                "number": "2",
+                "title": "Take It to the Limit",
+                "length": 318000,
+                "recording": {
+                  "id": "03b1f0e0-4d16-494a-8d89-13b01f921dfd",
+                  "length": 318000,
+                  "isrcs": []
+                }
+              },
+              {
+                "position": 3,
+                "number": "3",
+                "title": "New Kid in Town",
+                "length": 292000,
+                "recording": {
+                  "id": "010efb28-d00c-45ef-a52a-dd82dafba72a",
+                  "length": 292000,
+                  "isrcs": []
+                }
+              },
+              {
+                "position": 4,
+                "number": "4",
+                "title": "James Dean",
+                "length": 229000,
+                "recording": {
+                  "id": "2fa0fb77-a2ec-4332-a612-3d892bab88db",
+                  "length": 229000,
+                  "isrcs": []
+                }
+              },
+              {
+                "position": 5,
+                "number": "5",
+                "title": "Good Day in Hell",
+                "length": 328000,
+                "recording": {
+                  "id": "1c11aac6-10a7-4b26-b7b1-24bbbd53b93c",
+                  "length": 328000,
+                  "isrcs": []
+                }
+              },
+              {
+                "position": 6,
+                "number": "6",
+                "title": "Witchy Woman",
+                "length": 260000,
+                "recording": {
+                  "id": "2ed03e82-d3e7-4a9b-906c-e5bc1135cb2b",
+                  "length": 260000,
+                  "isrcs": [
+                    "USRH11703163",
+                    "USRH11703350"
+                  ]
+                }
+              },
+              {
+                "position": 7,
+                "number": "7",
+                "title": "Funk #49",
+                "length": 243000,
+                "recording": {
+                  "id": "df8976d1-e3c4-48f6-89b4-016a6cba82ea",
+                  "length": 243000,
+                  "isrcs": []
+                }
+              },
+              {
+                "position": 8,
+                "number": "8",
+                "title": "One of These Nights",
+                "length": 232000,
+                "recording": {
+                  "id": "f555871e-3175-42c1-bf50-e73f76308820",
+                  "length": 232000,
+                  "isrcs": []
+                }
+              },
+              {
+                "position": 9,
+                "number": "9",
+                "title": "Hotel California",
+                "length": 409000,
+                "recording": {
+                  "id": "a482ed37-9214-4bde-82ac-40984417106f",
+                  "length": 409000,
+                  "isrcs": []
+                }
+              },
+              {
+                "position": 10,
+                "number": "10",
+                "title": "Already Gone",
+                "length": 315000,
+                "recording": {
+                  "id": "764db295-a5f9-418f-803d-9c07a76f208c",
+                  "length": 315000,
+                  "isrcs": []
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

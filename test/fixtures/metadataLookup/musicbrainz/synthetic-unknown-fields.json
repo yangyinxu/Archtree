@@ -1,0 +1,78 @@
+{
+  "source": "musicbrainz",
+  "synthetic": true,
+  "description": "A valid release with unknown fields at every level",
+  "exchanges": [
+    {
+      "url": "https://musicbrainz.org/ws/2/release/00000000-0000-4000-8000-000000000010?inc=artist-credits+labels+recordings+release-groups+isrcs&fmt=json",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json"
+      },
+      "body": {
+        "id": "00000000-0000-4000-8000-000000000010",
+        "title": "Synthetic Release",
+        "status": "Official",
+        "artist-credit": [
+          {
+            "name": "Synthetic Artist",
+            "joinphrase": "",
+            "artist": {
+              "id": "00000000-0000-4000-8000-000000000900",
+              "name": "Synthetic Artist"
+            }
+          }
+        ],
+        "release-group": {
+          "id": "00000000-0000-4000-8000-000000000901",
+          "primary-type": "Album",
+          "secondary-types": [],
+          "first-release-date": "2020-01-02"
+        },
+        "date": "2020-01-02",
+        "country": "XW",
+        "barcode": "",
+        "label-info": [],
+        "cover-art-archive": {
+          "front": false
+        },
+        "media": [
+          {
+            "position": 1,
+            "format": "CD",
+            "unexpected-medium-field": 1,
+            "pregap": {
+              "position": 0,
+              "title": "Hidden",
+              "recording": {
+                "id": "00000000-0000-4000-8000-000000000911"
+              }
+            },
+            "tracks": [
+              {
+                "position": 1,
+                "number": "1",
+                "title": "Synthetic Track",
+                "length": 180000,
+                "unexpected-track-field": "x",
+                "recording": {
+                  "id": "00000000-0000-4000-8000-000000000902",
+                  "length": 180000,
+                  "isrcs": [
+                    "USAAA2000001"
+                  ],
+                  "video": false
+                }
+              }
+            ]
+          }
+        ],
+        "unexpected-field": {
+          "nested": true
+        },
+        "asin": "B000000000",
+        "packaging": "Jewel Case"
+      }
+    }
+  ]
+}

@@ -31,3 +31,10 @@ test('A to B to A never revives an earlier operation or editing buffer', () => {
   expect(adminWorkspace.current(first, false)).toBe(false);
   expect(adminWorkspace.buffer('draft')).toBeUndefined();
 });
+test('a reload request survives view selection, suspension and authorization, and a reset clears it', () => {
+  const guard = captureAccountOperation('a'); adminWorkspace.authorize(guard, true, true); adminWorkspace.select('admin');
+  adminWorkspace.requireReload(); expect(adminWorkspace.getSnapshot().reloadRequired).toBe(true);
+  adminWorkspace.select('user'); adminWorkspace.suspend(); adminWorkspace.authorize(guard, true, true); adminWorkspace.select('admin');
+  expect(adminWorkspace.getSnapshot().reloadRequired).toBe(true);
+  adminWorkspace.reset(); expect(adminWorkspace.getSnapshot().reloadRequired).toBe(false);
+});

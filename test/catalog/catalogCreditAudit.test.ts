@@ -43,3 +43,16 @@ test('exhausted budgets and invalid Credit state never create a target lookup', 
         assert.equal(plan.remainingReferences, budget);
     }
 });
+
+test('an invalid stored join phrase never suppresses the subject lookups of its owner', () => {
+    const owners = [{
+        credits: [
+            { ...credit('artist'), joinPhrase: 'x\u200By' },
+            { ...credit('organization', other), joinPhrase: null }
+        ]
+    }];
+    const plan = planCreditSubjectLookups(owners, incomplete, incomplete, 3);
+    assert.deepEqual([...plan.artistIds], [subject]);
+    assert.deepEqual([...plan.organizationIds], [other]);
+    assert.equal(plan.remainingReferences, 1);
+});

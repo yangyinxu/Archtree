@@ -1,0 +1,32 @@
+{
+  "source": "musicbrainz",
+  "synthetic": true,
+  "description": "Release search whose track-count is a string",
+  "exchanges": [
+    {
+      "url": "https://musicbrainz.org/ws/2/release?query=release%3A%22Synthetic+Wrong+Type%22&fmt=json&limit=100",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json"
+      },
+      "body": {
+        "count": 1,
+        "offset": 0,
+        "releases": [
+          {
+            "id": "00000000-0000-4000-8000-000000000009",
+            "title": "Synthetic",
+            "score": 100,
+            "track-count": "9",
+            "media": [
+              {
+                "format": "CD",
+                "track-count": 9
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

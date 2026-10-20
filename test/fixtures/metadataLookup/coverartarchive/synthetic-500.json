@@ -1,0 +1,15 @@
+{
+  "source": "coverartarchive",
+  "synthetic": true,
+  "description": "Cover Art Archive 500",
+  "exchanges": [
+    {
+      "url": "https://coverartarchive.org/release/00000000-0000-4000-8000-000000000020",
+      "status": 500,
+      "headers": {
+        "content-type": "text/html"
+      },
+      "bodyText": "error"
+    }
+  ]
+}

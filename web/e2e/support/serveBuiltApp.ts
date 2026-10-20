@@ -33,6 +33,8 @@ const isolateEnvironment = () => {
   process.env.DOTENV_CONFIG_PATH = isolatedEnvironmentPath;
   process.env.JWT_SECRET = 'finitude-browser-test-only';
   process.env.AUTH_CODE_PEPPER = 'finitude-browser-test-only';
+  // Trusts the per-worker X-Forwarded-For set in playwright.config.ts, so workers keep separate per-IP windows.
+  process.env.TRUST_PROXY_HOPS = '1';
 };
 
 if (!Number.isSafeInteger(port) || port < 1 || port > 65_535) {

@@ -6,6 +6,7 @@ be completed solely through application code.
 <!-- @catalog -->
 **Contents**
 
+- [Administrator Metadata Lookup Rollout](#administrator-metadata-lookup-rollout)
 - [Artist Follow and New Releases Rollout](#artist-follow-and-new-releases-rollout)
 - [Production HTTPS for Authentication](#production-https-for-authentication)
 - [Web-only Audio Social Launch](#web-only-audio-social-launch)
@@ -16,6 +17,34 @@ be completed solely through application code.
   - [Enable for testing](#enable-for-testing)
   - [After the test window](#after-the-test-window)
 <!-- @end-catalog -->
+
+## Administrator Metadata Lookup Rollout
+
+Status: Lookup jobs run on the server once an import's uploads complete and
+apply a preselected release's values to the draft, staging its Cover Art
+Archive front artwork as a cover candidate; when MusicBrainz finds no matching
+release they query the iTunes Search API in fixed storefronts, search its names
+again in MusicBrainz and offer an iTunes-only candidate only when that finds no
+release or cannot run, staging its iTunes artwork. Publish waits while a run or
+that staging is active, a tie is unresolved or a conflict with an
+administrator's own value is unanswered. The Web Review and publish summary
+shows each run's status, ties and conflicts, takes a submitted Album or song
+name and offers a manual retry. Without the contact below, nothing is sent and
+no lookup starts.
+
+- [ ] Set `FINITUDE_ADMIN_METADATA_LOOKUP_CONTACT` in production to an operator
+      email address or https URL before metadata lookup is enabled for
+      administrators. Lookup stays unavailable, and sends nothing, without it.
+- [ ] During release verification of metadata lookup, confirm the fixed iTunes
+      storefronts (`jp`, `us`, `kr`, `tw`) and the source rates (MusicBrainz at
+      least 1.1 seconds apart, iTunes 3 seconds apart, Cover Art Archive two at
+      once).
+- [ ] During release verification of the iTunes fallback, confirm that the
+      fixed iTunes artwork hosts (`is1-ssl.mzstatic.com` through
+      `is5-ssl.mzstatic.com`) still serve the rewritten `1200x1200bb.jpg` and
+      `500x500bb.jpg` thumbnails, and that one run stays within its iTunes
+      bounds (at most 2 UPC lookups, 3 searches and 4 collection lookups, and 4
+      MusicBrainz bridge searches).
 
 ## Artist Follow and New Releases Rollout
 

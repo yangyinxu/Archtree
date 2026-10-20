@@ -1,0 +1,164 @@
+{
+  "source": "coverartarchive",
+  "recordedAt": "2026-10-18T10:50:22.432Z",
+  "description": "Cover Art Archive listing: Hotel California, front artwork",
+  "exchanges": [
+    {
+      "url": "https://coverartarchive.org/release/83afdb26-9c27-4ec6-ad70-25b8cb897a31",
+      "status": 307,
+      "headers": {
+        "content-type": "text/plain; charset=utf-8",
+        "location": "https://archive.org/download/mbid-83afdb26-9c27-4ec6-ad70-25b8cb897a31/index.json"
+      }
+    },
+    {
+      "url": "https://archive.org/download/mbid-83afdb26-9c27-4ec6-ad70-25b8cb897a31/index.json",
+      "status": 302,
+      "headers": {
+        "content-type": "text/html; charset=UTF-8",
+        "location": "https://dn710302.ca.archive.org/0/items/mbid-83afdb26-9c27-4ec6-ad70-25b8cb897a31/index.json"
+      }
+    },
+    {
+      "url": "https://dn710302.ca.archive.org/0/items/mbid-83afdb26-9c27-4ec6-ad70-25b8cb897a31/index.json",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json"
+      },
+      "body": {
+        "images": [
+          {
+            "id": 9786783001,
+            "front": true,
+            "back": false,
+            "approved": true,
+            "types": [
+              "Front"
+            ],
+            "thumbnails": {
+              "250": "http://coverartarchive.org/release/83afdb26-9c27-4ec6-ad70-25b8cb897a31/9786783001-250.jpg",
+              "500": "http://coverartarchive.org/release/83afdb26-9c27-4ec6-ad70-25b8cb897a31/9786783001-500.jpg",
+              "1200": "http://coverartarchive.org/release/83afdb26-9c27-4ec6-ad70-25b8cb897a31/9786783001-1200.jpg"
+            }
+          },
+          {
+            "id": 29378029087,
+            "front": false,
+            "back": false,
+            "approved": true,
+            "types": [
+              "Front",
+              "Booklet"
+            ],
+            "thumbnails": {
+              "250": "http://coverartarchive.org/release/83afdb26-9c27-4ec6-ad70-25b8cb897a31/29378029087-250.jpg",
+              "500": "http://coverartarchive.org/release/83afdb26-9c27-4ec6-ad70-25b8cb897a31/29378029087-500.jpg",
+              "1200": "http://coverartarchive.org/release/83afdb26-9c27-4ec6-ad70-25b8cb897a31/29378029087-1200.jpg"
+            }
+          },
+          {
+            "id": 29378031995,
+            "front": false,
+            "back": false,
+            "approved": true,
+            "types": [
+              "Booklet"
+            ],
+            "thumbnails": {
+              "250": "http://coverartarchive.org/release/83afdb26-9c27-4ec6-ad70-25b8cb897a31/29378031995-250.jpg",
+              "500": "http://coverartarchive.org/release/83afdb26-9c27-4ec6-ad70-25b8cb897a31/29378031995-500.jpg",
+              "1200": "http://coverartarchive.org/release/83afdb26-9c27-4ec6-ad70-25b8cb897a31/29378031995-1200.jpg"
+            }
+          },
+          {
+            "id": 29378038315,
+            "front": false,
+            "back": false,
+            "approved": true,
+            "types": [
+              "Booklet"
+            ],
+            "thumbnails": {
+              "250": "http://coverartarchive.org/release/83afdb26-9c27-4ec6-ad70-25b8cb897a31/29378038315-250.jpg",
+              "500": "http://coverartarchive.org/release/83afdb26-9c27-4ec6-ad70-25b8cb897a31/29378038315-500.jpg",
+              "1200": "http://coverartarchive.org/release/83afdb26-9c27-4ec6-ad70-25b8cb897a31/29378038315-1200.jpg"
+            }
+          },
+          {
+            "id": 29378044538,
+            "front": false,
+            "back": false,
+            "approved": true,
+            "types": [
+              "Booklet"
+            ],
+            "thumbnails": {
+              "250": "http://coverartarchive.org/release/83afdb26-9c27-4ec6-ad70-25b8cb897a31/29378044538-250.jpg",
+              "500": "http://coverartarchive.org/release/83afdb26-9c27-4ec6-ad70-25b8cb897a31/29378044538-500.jpg",
+              "1200": "http://coverartarchive.org/release/83afdb26-9c27-4ec6-ad70-25b8cb897a31/29378044538-1200.jpg"
+            }
+          },
+          {
+            "id": 29378052118,
+            "front": false,
+            "back": true,
+            "approved": true,
+            "types": [
+              "Back",
+              "Booklet"
+            ],
+            "thumbnails": {
+              "250": "http://coverartarchive.org/release/83afdb26-9c27-4ec6-ad70-25b8cb897a31/29378052118-250.jpg",
+              "500": "http://coverartarchive.org/release/83afdb26-9c27-4ec6-ad70-25b8cb897a31/29378052118-500.jpg",
+              "1200": "http://coverartarchive.org/release/83afdb26-9c27-4ec6-ad70-25b8cb897a31/29378052118-1200.jpg"
+            }
+          },
+          {
+            "id": 29378055265,
+            "front": false,
+            "back": false,
+            "approved": true,
+            "types": [
+              "Back",
+              "Spine"
+            ],
+            "thumbnails": {
+              "250": "http://coverartarchive.org/release/83afdb26-9c27-4ec6-ad70-25b8cb897a31/29378055265-250.jpg",
+              "500": "http://coverartarchive.org/release/83afdb26-9c27-4ec6-ad70-25b8cb897a31/29378055265-500.jpg",
+              "1200": "http://coverartarchive.org/release/83afdb26-9c27-4ec6-ad70-25b8cb897a31/29378055265-1200.jpg"
+            }
+          },
+          {
+            "id": 29378058932,
+            "front": false,
+            "back": false,
+            "approved": true,
+            "types": [
+              "Medium"
+            ],
+            "thumbnails": {
+              "250": "http://coverartarchive.org/release/83afdb26-9c27-4ec6-ad70-25b8cb897a31/29378058932-250.jpg",
+              "500": "http://coverartarchive.org/release/83afdb26-9c27-4ec6-ad70-25b8cb897a31/29378058932-500.jpg",
+              "1200": "http://coverartarchive.org/release/83afdb26-9c27-4ec6-ad70-25b8cb897a31/29378058932-1200.jpg"
+            }
+          },
+          {
+            "id": 29378060429,
+            "front": false,
+            "back": false,
+            "approved": true,
+            "types": [
+              "Medium"
+            ],
+            "thumbnails": {
+              "250": "http://coverartarchive.org/release/83afdb26-9c27-4ec6-ad70-25b8cb897a31/29378060429-250.jpg",
+              "500": "http://coverartarchive.org/release/83afdb26-9c27-4ec6-ad70-25b8cb897a31/29378060429-500.jpg",
+              "1200": "http://coverartarchive.org/release/83afdb26-9c27-4ec6-ad70-25b8cb897a31/29378060429-1200.jpg"
+            }
+          }
+        ],
+        "release": "https://musicbrainz.org/release/83afdb26-9c27-4ec6-ad70-25b8cb897a31"
+      }
+    }
+  ]
+}

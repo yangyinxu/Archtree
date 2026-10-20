@@ -1,0 +1,15 @@
+{
+  "source": "itunes",
+  "synthetic": true,
+  "description": "iTunes 403",
+  "exchanges": [
+    {
+      "url": "https://itunes.apple.com/search?term=Synthetic+Forbidden&country=us&media=music&entity=album&limit=25",
+      "status": 403,
+      "headers": {
+        "content-type": "text/html"
+      },
+      "bodyText": "forbidden"
+    }
+  ]
+}

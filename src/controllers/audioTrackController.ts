@@ -220,6 +220,7 @@ export const postAudioTrack = async (req: Request, res: Response, next: NextFunc
         audioTrackObjectId
     );
     track.trackNumber = embeddedTrackNumber(audioMetadata?.common?.track?.no);
+    track.setEmbeddedDiscNumber(audioMetadata?.common?.disk?.no);
     track.credits = creditsForLegacyArtistIds(
         'audioTrack',
         audioTrackId,

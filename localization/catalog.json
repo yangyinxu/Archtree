@@ -1011,8 +1011,41 @@
       ],
       "variables": {}
     },
+    "admin.analysis.budget_daily": {
+      "description": "Administrator workbench: Luna analysis confirmation, what is left today across the deployment.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "daily": "number"
+      }
+    },
+    "admin.analysis.budget_project": {
+      "description": "Administrator workbench: Luna analysis confirmation, what is left for this project.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "attempts": "number",
+        "runs": "number"
+      }
+    },
     "admin.analysis.confirm": {
-      "description": "Send the selected filenames and folder context to Luna for analysis? This may incur a provider charge.",
+      "description": "Analyze confirmation: what Luna receives (folder and file names, current draft values, file tags and the applied MusicBrainz release, if any); it only suggests values and may incur a provider charge.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.analysis.confirm_action": {
+      "description": "Administrator workbench: Luna analysis confirmation, starts the paid analysis.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.analysis.confirm_title": {
+      "description": "Administrator workbench: Luna analysis confirmation title.",
       "delivery": [
         "runtime"
       ],
@@ -1189,7 +1222,7 @@
       "variables": {}
     },
     "admin.catalog_review.artist_hint": {
-      "description": "Artist suggestions are identity clues. Confirm attribution in the original Album; adopting draft metadata does not change it.",
+      "description": "Artist and label suggestions are identity clues. Confirm attribution and the label in the original Album; adopting draft metadata never changes Credits.",
       "delivery": [
         "runtime"
       ],
@@ -1266,7 +1299,7 @@
       "variables": {}
     },
     "admin.catalog_review.empty_artist": {
-      "description": "Artist identity suggestions are shown below. Confirm attribution in the original Album.",
+      "description": "Administrator catalog review: Review is empty except for Artist and label identity hints, which are shown below and confirmed in the original Album.",
       "delivery": [
         "runtime"
       ],
@@ -1316,6 +1349,13 @@
     },
     "admin.catalog_review.filename_missing": {
       "description": "Original filename not retained",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.hints_title": {
+      "description": "Administrator catalog review: heading of the panel listing Luna's Artist and label suggestions as identity hints.",
       "delivery": [
         "runtime"
       ],
@@ -1512,7 +1552,7 @@
       "variables": {}
     },
     "admin.catalog.automatic_order": {
-      "description": "Track numbers determine Album order automatically. Saving a number updates the linked Album order.",
+      "description": "Disc and track numbers determine Album order automatically. A track without a disc number belongs to disc 1. Saving a number updates the linked Album order.",
       "delivery": [
         "runtime"
       ],
@@ -1674,6 +1714,29 @@
       ],
       "variables": {}
     },
+    "admin.catalog.join_phrase": {
+      "description": "Label for the text shown between a Credit name and the next name in a byline.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.join_phrase_help": {
+      "description": "Help text for Credit join phrase inputs in the catalog editor.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.join_phrase_value": {
+      "description": "Confirmation value naming the join phrase stored after one Credit.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "phrase": "string"
+      }
+    },
     "admin.catalog.library": {
       "description": "Library",
       "delivery": [
@@ -1683,6 +1746,13 @@
     },
     "admin.catalog.list": {
       "description": "List",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.musicbrainz_id_help": {
+      "description": "Administrator catalog editor: help under the MusicBrainz ID field of an Artist or Organization.",
       "delivery": [
         "runtime"
       ],
@@ -1873,6 +1943,13 @@
       ],
       "variables": {}
     },
+    "admin.common.append_primary_required": {
+      "description": "Administrator workbench: publishing was refused because the existing Album an import appends to has no primary Artist Credit.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.common.back": {
       "description": "Administrator workbench: common back.",
       "delivery": [
@@ -1917,6 +1994,62 @@
       ],
       "variables": {}
     },
+    "admin.common.lookup_active": {
+      "description": "Administrator workbench: refusal: metadata lookup or the staging of its cover is still queued or running.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.common.lookup_candidate_incomplete": {
+      "description": "Administrator workbench: refusal: the chosen release has no fetched details.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.common.lookup_invalid_name": {
+      "description": "Administrator workbench: refusal: the submitted lookup name was a link, empty, too long or had invisible characters.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.common.lookup_nothing_to_retry": {
+      "description": "Administrator workbench: refusal: there is no earlier lookup to retry.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.common.lookup_refused": {
+      "description": "Administrator workbench: refusal: this project no longer accepts metadata lookup.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.common.lookup_stale": {
+      "description": "Administrator workbench: refusal: the lookup changed since it was shown.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.common.lookup_unavailable": {
+      "description": "Administrator workbench: refusal: metadata lookup is not available on this server.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.common.musicbrainz_id_in_use": {
+      "description": "Administrator catalog editor: the edit was refused because another record of the same kind already keeps this MusicBrainz ID.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.common.offline": {
       "description": "Administrator workbench: common offline.",
       "delivery": [
@@ -1933,6 +2066,20 @@
     },
     "admin.common.refresh": {
       "description": "Administrator workbench: common refresh.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.common.reload": {
+      "description": "An administrator response no longer matches this page version.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.common.reload_action": {
+      "description": "Action that reloads the page.",
       "delivery": [
         "runtime"
       ],
@@ -2521,8 +2668,22 @@
       ],
       "variables": {}
     },
+    "admin.draft.from_tags": {
+      "description": "Administrator import editor: marks a draft value written automatically from the files' embedded tags and not yet reviewed.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.duplicates.album": {
       "description": "Album",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.duplicates.alias": {
+      "description": "Administrator import Review: a candidate named as a MusicBrainz alias that metadata lookup found for the entry's or label's ID.",
       "delivery": [
         "runtime"
       ],
@@ -2563,12 +2724,99 @@
       ],
       "variables": {}
     },
+    "admin.duplicates.keep_preselected": {
+      "description": "Administrator import Review: the empty choice of a decision row the review preselected, which keeps that preselection instead of an explicit answer.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.duplicates.keeps_id": {
+      "description": "Administrator import Review: a reuse option for a record that holds a different MusicBrainz ID, which reusing keeps.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "id": "string"
+      }
+    },
+    "admin.duplicates.label": {
+      "description": "Administrator workbench: identity decision row for the draft label.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.duplicates.localized_name": {
+      "description": "Administrator import Review: a candidate named with an iTunes localized name that metadata lookup found for the entry's artist name.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.duplicates.music_brainz_id": {
+      "description": "Administrator import Review: a candidate that holds the MusicBrainz ID the entry or label carries.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.duplicates.name": {
       "description": "Name match",
       "delivery": [
         "runtime"
       ],
       "variables": {}
+    },
+    "admin.duplicates.not_applied": {
+      "description": "Administrator workbench: an Artist entry or label row of an import that appends to an existing Album, which needs no identity decision.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.duplicates.possible_duplicate": {
+      "description": "Administrator import Review: a track row whose staged file has the same verified bytes as a ready MediaTrack outside this Album (on another Album or on none); the row is never collapsed but needs no answer.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.duplicates.preselected_new": {
+      "description": "Administrator import Review: summary of a collapsed decision row preselected as a new record: an entry, the label or the Album without a name candidate, a track of a new Album, or an appended file matching no member of the target Album.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.duplicates.preselected_reuse": {
+      "description": "Administrator import Review: summary of a collapsed track row of an append preselected to reuse the named existing member of the target Album with identical verified bytes.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "name": "string"
+      }
+    },
+    "admin.duplicates.preselected_reuse_id": {
+      "description": "Administrator import Review: summary of a collapsed Artist or label row preselected to reuse the named existing record that holds the same MusicBrainz ID.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "name": "string"
+      }
+    },
+    "admin.duplicates.replace_id": {
+      "description": "Administrator import Review: the option to reuse the named record and replace the MusicBrainz ID it holds with the entry's.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "id": "string",
+        "name": "string",
+        "previous": "string"
+      }
     },
     "admin.duplicates.reuse": {
       "description": "Reuse existing",
@@ -2619,8 +2867,172 @@
       ],
       "variables": {}
     },
+    "admin.entries.add": {
+      "description": "Administrator import editor: action adding an empty primary Artist entry.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.entries.added": {
+      "description": "Administrator import editor: status announced after an Artist entry is added at a position.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "position": "number"
+      }
+    },
+    "admin.entries.byline": {
+      "description": "Administrator import editor: preview of the byline composed from the Artist entries.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "byline": "string"
+      }
+    },
+    "admin.entries.empty": {
+      "description": "Administrator import editor: the draft has no Artist entries.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.entries.help": {
+      "description": "Administrator import editor: how Artist entries are ordered and moved.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.entries.limit": {
+      "description": "Administrator import editor: the Artist entry limit was reached.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.entries.move_down": {
+      "description": "Administrator import editor: action moving an Artist entry one place later within its role group.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.entries.move_up": {
+      "description": "Administrator import editor: action moving an Artist entry one place earlier within its role group.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.entries.moved": {
+      "description": "Administrator import editor: status announced after an Artist entry moves.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number",
+        "name": "string",
+        "position": "number"
+      }
+    },
+    "admin.entries.name_duplicate": {
+      "description": "Administrator import editor: validation error for an Artist entry name another entry already has.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.entries.name_invalid": {
+      "description": "Administrator import editor: validation error for a name with control or invisible formatting characters.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.entries.name_required": {
+      "description": "Administrator import editor: validation error for an empty Artist entry name.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.entries.name_too_long": {
+      "description": "Administrator import editor: validation error for an Artist entry or label name longer than 200 characters after normalization.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.entries.no_primary": {
+      "description": "Administrator import editor: note that publishing a new Album needs at least one primary Artist entry (an append needs none), shown when every entry is featured.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.entries.phrase_invalid": {
+      "description": "Administrator import editor: validation error for a join phrase the server would refuse.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.entries.possible_label": {
+      "description": "Administrator import editor and publication confirmation: note on an Artist entry written from file tags whose name looks like a company, so it may be a label rather than an Artist.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.entries.remove": {
+      "description": "Administrator import editor: action removing an Artist entry.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.entries.removed": {
+      "description": "Administrator import editor: status announced after an Artist entry is removed.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "name": "string"
+      }
+    },
+    "admin.entries.role_changed": {
+      "description": "Administrator import editor: status announced after an Artist entry changes role and group.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number",
+        "name": "string",
+        "position": "number",
+        "role": "string"
+      }
+    },
+    "admin.entries.unnamed": {
+      "description": "Administrator import editor: name of an Artist entry without a name, by position.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "position": "number"
+      }
+    },
     "admin.field.artist_name": {
       "description": "Administrator workbench: field artistName.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.field.artists": {
+      "description": "Administrator workbench: field artists, the ordered Artist entries.",
       "delivery": [
         "runtime"
       ],
@@ -2654,6 +3066,13 @@
       ],
       "variables": {}
     },
+    "admin.field.disc_number": {
+      "description": "Administrator workbench: field discNumber.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.field.hidden": {
       "description": "Administrator workbench: field hidden.",
       "delivery": [
@@ -2661,8 +3080,29 @@
       ],
       "variables": {}
     },
+    "admin.field.label": {
+      "description": "Administrator workbench: field label, the optional record label Organization.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.field.label_help": {
+      "description": "Administrator workbench: help for the optional label field.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.field.month": {
       "description": "Administrator workbench: field month.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.field.music_brainz_id": {
+      "description": "Administrator catalog editor: the MusicBrainz ID an Artist or Organization keeps as private import provenance.",
       "delivery": [
         "runtime"
       ],
@@ -2769,7 +3209,7 @@
       "variables": {}
     },
     "admin.import.manifest_only": {
-      "description": "This step saves file and folder names. Select original files again in the saved project to upload them.",
+      "description": "Administrator workbench: import naming context and upload guidance.",
       "delivery": [
         "runtime"
       ],
@@ -2791,6 +3231,13 @@
     },
     "admin.import.root_help": {
       "description": "Administrator workbench: import root help.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.import.visibility_default": {
+      "description": "Administrator workbench: new imports are public by default and their visibility can be changed before publishing.",
       "delivery": [
         "runtime"
       ],
@@ -2887,6 +3334,401 @@
       ],
       "variables": {}
     },
+    "admin.lookup.active": {
+      "description": "Administrator workbench: import summary, metadata lookup is queued or running.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.lookup.active_itunes": {
+      "description": "Administrator workbench: import summary, lookup is searching the iTunes Search API (after MusicBrainz found no matching release or stayed unavailable).",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.lookup.applied": {
+      "description": "Administrator workbench: import summary, the release whose values were applied.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "title": "string"
+      }
+    },
+    "admin.lookup.applied_itunes": {
+      "description": "Administrator workbench: import summary, the applied result came from iTunes only after MusicBrainz found no release for it; its values stay flagged.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "title": "string"
+      }
+    },
+    "admin.lookup.applied_itunes_unchecked": {
+      "description": "Administrator workbench: import summary, the applied iTunes-only result was not checked against MusicBrainz (it stayed unavailable, or the check could not run); its values stay flagged.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "title": "string"
+      }
+    },
+    "admin.lookup.applied_none": {
+      "description": "Administrator workbench: import summary, no release is applied; values from file tags stay.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.lookup.artwork_preview": {
+      "description": "Administrator workbench: metadata lookup candidate list, alternative text of a release's front artwork preview.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.lookup.barcode": {
+      "description": "Administrator workbench: candidate chooser, barcode.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.lookup.box": {
+      "description": "Administrator workbench: import summary, the name box legend.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.lookup.candidates": {
+      "description": "Administrator workbench: candidate chooser, folded list of every release found.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.lookup.catalog_number": {
+      "description": "Administrator workbench: candidate chooser, catalogue number.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.lookup.choose": {
+      "description": "Administrator workbench: candidate chooser, applies this release.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.lookup.choose_none": {
+      "description": "Administrator workbench: candidate chooser, applies no release.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.lookup.chosen": {
+      "description": "Administrator workbench: candidate chooser, this release is applied.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.lookup.country": {
+      "description": "Administrator workbench: candidate chooser, release country.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.lookup.difference_disc_count": {
+      "description": "Administrator workbench: candidate chooser, disc counts differ.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "candidate": "string",
+        "local": "string"
+      }
+    },
+    "admin.lookup.difference_duration": {
+      "description": "Administrator workbench: candidate chooser, track durations differ.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.lookup.difference_track_count": {
+      "description": "Administrator workbench: candidate chooser, track counts differ.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "candidate": "string",
+        "local": "string"
+      }
+    },
+    "admin.lookup.incomplete": {
+      "description": "Administrator workbench: import summary, releases were found but none of their details could be fetched.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.lookup.itunes_only": {
+      "description": "Administrator workbench: a lookup candidate or an applied value that comes from the iTunes Search API only, not from MusicBrainz.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.lookup.itunes_unavailable": {
+      "description": "Administrator workbench: import summary, MusicBrainz answered without a matching release and the iTunes Search API stayed unavailable through its automatic retries.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.lookup.kind_album": {
+      "description": "Administrator workbench: import summary name box, the name is an Album name.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.lookup.kind_song": {
+      "description": "Administrator workbench: import summary name box, the name is a song name.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.lookup.link_refused": {
+      "description": "Administrator workbench: import summary name box, a link was entered instead of a name.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.lookup.luna": {
+      "description": "Administrator workbench: import summary, opens the Luna analysis confirmation.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.lookup.medium": {
+      "description": "Administrator workbench: candidate chooser, release medium.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.lookup.musicbrainz_id": {
+      "description": "Administrator workbench: candidate chooser, the MusicBrainz ID an entry or label of a group credits, shown when groups differ only by ID.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "id": "string"
+      }
+    },
+    "admin.lookup.name": {
+      "description": "Administrator workbench: import summary name box, the name field.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.lookup.no_match": {
+      "description": "Administrator workbench: import summary, releases were found but none matches the files.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.lookup.no_query": {
+      "description": "Administrator workbench: import summary, nothing could be looked up from tags or the folder name.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.lookup.no_release": {
+      "description": "Administrator workbench: import summary, metadata lookup found no release.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.lookup.not_checked": {
+      "description": "Administrator workbench: an iTunes-only lookup candidate or value that could not be checked against MusicBrainz.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.lookup.not_configured": {
+      "description": "Administrator workbench: import summary, metadata lookup is not configured on this server.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.lookup.not_run": {
+      "description": "Administrator workbench: import summary, no metadata lookup has run yet.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.lookup.not_started": {
+      "description": "Administrator workbench: import summary, every needed file is uploaded but no metadata lookup run exists.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.lookup.partial_comparison": {
+      "description": "Administrator workbench: import summary, lookup candidate chooser, not every release the search found was compared with the files.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.lookup.retry": {
+      "description": "Administrator workbench: import summary, manual free retry of metadata lookup.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.lookup.retrying": {
+      "description": "Administrator workbench: import summary, the lookup source was busy or unavailable and is retried automatically.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.lookup.retrying_itunes": {
+      "description": "Administrator workbench: import summary, the iTunes Search API was busy or unavailable and lookup retries it automatically.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.lookup.single_choice": {
+      "description": "Administrator workbench: import summary, one matching release from a partial comparison is offered but not applied automatically; choosing it is optional.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.lookup.stale_files": {
+      "description": "Administrator workbench: import summary, files replaced or removed since the lookup ranked them.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.lookup.status_incomplete": {
+      "description": "Administrator workbench: candidate chooser, the release details could not be fetched.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.lookup.status_matching": {
+      "description": "Administrator workbench: candidate chooser, the release matches the files.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.lookup.status_not_matching": {
+      "description": "Administrator workbench: candidate chooser, the release does not match the files.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.lookup.status_unverified": {
+      "description": "Administrator workbench: candidate chooser, durations are unknown so the match is unverified.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.lookup.stopped": {
+      "description": "Administrator workbench: import summary, metadata lookup stopped after a permission loss or an expired grant.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.lookup.submit": {
+      "description": "Administrator workbench: import summary name box, submits the name for metadata lookup.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.lookup.superseded": {
+      "description": "Administrator workbench: import summary, the lookup was replaced because the files changed or the import closed.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.lookup.tie": {
+      "description": "Administrator workbench: import summary, several matching releases need a choice.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.lookup.track_count": {
+      "description": "Administrator workbench: candidate chooser, number of tracks on the release.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.lookup.unavailable": {
+      "description": "Administrator workbench: import summary, metadata lookup stayed unavailable after its automatic retries.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.lookup.unknown_discs": {
+      "description": "Administrator workbench: candidate chooser, files whose Disc Number is unknown and so never count as agreement.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.lookup.unknown_durations": {
+      "description": "Administrator workbench: candidate chooser, files whose duration is unknown and so never count as agreement.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
     "admin.media.choose_cover": {
       "description": "Choose Album cover",
       "delivery": [
@@ -2909,7 +3751,7 @@
       "variables": {}
     },
     "admin.media.confirm_publish_copy": {
-      "description": "This creates the reviewed Album using your saved metadata, duplicate decisions, selected cover and visibility. A request being accepted is not confirmation of publication.",
+      "description": "Administrator workbench: publication confirmation copy. Approving saves the shown draft, identity decisions and cover and publishes exactly what the confirmation lists.",
       "delivery": [
         "runtime"
       ],
@@ -2930,7 +3772,35 @@
       "variables": {}
     },
     "admin.media.copy": {
-      "description": "Select the original file for each row. Uploads remain private until you explicitly publish the reviewed Album.",
+      "description": "Administrator workbench: import Files section guidance.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.media.cover_automatic": {
+      "description": "Administrator workbench: import files, note under the cover choice while the cover is chosen automatically as the one image embedded in every track.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.media.cover_automatic_lookup": {
+      "description": "Administrator workbench: import files, note under the cover choice while the cover is chosen automatically as the applied lookup release's front artwork.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.media.cover_automatic_lookup_itunes": {
+      "description": "Administrator workbench: import files, note under the cover choice while the cover is chosen automatically as the applied iTunes-only lookup candidate's iTunes artwork.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.media.cover_automatic_none": {
+      "description": "Administrator workbench: import files, note under the cover choice while the choice is automatic and selects no image.",
       "delivery": [
         "runtime"
       ],
@@ -2945,6 +3815,20 @@
     },
     "admin.media.invalid": {
       "description": "Choose the original file with the same filename and size.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.media.lookup_cover": {
+      "description": "Administrator workbench: import files and summary, label of the cover staged from the applied metadata lookup release's Cover Art Archive front artwork.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.media.lookup_cover_itunes": {
+      "description": "Administrator workbench: import files and summary, label of the cover staged from an applied iTunes-only lookup candidate's iTunes artwork.",
       "delivery": [
         "runtime"
       ],
@@ -2965,7 +3849,7 @@
       "variables": {}
     },
     "admin.media.other_owner": {
-      "description": "This upload belongs to another administrator’s operation. They can retry it; you can explicitly remove the staged file before starting a new upload.",
+      "description": "This upload belongs to another administrator’s operation. They can retry it. Once a check confirms it failed, any administrator can upload the file again.",
       "delivery": [
         "runtime"
       ],
@@ -3013,6 +3897,15 @@
       ],
       "variables": {}
     },
+    "admin.media.tags_left_out": {
+      "description": "Administrator import files: note under a file's tag evidence giving how many tag fields had values left out, and why.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
     "admin.media.title": {
       "description": "Files and publication",
       "delivery": [
@@ -3022,6 +3915,143 @@
     },
     "admin.media.upload": {
       "description": "Upload selected file",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.motion_preview.attention": {
+      "description": "Shown when an earlier preview upload or cleanup needs attention that Reconcile can resolve.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.motion_preview.cleanup_pending": {
+      "description": "Status when a preview operation succeeded but an old object still needs deletion.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.motion_preview.copy": {
+      "description": "Explains what a motion preview is and the accepted file profile.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.motion_preview.current": {
+      "description": "Facts about the current motion preview.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "height": "number",
+        "seconds": "string",
+        "width": "number"
+      }
+    },
+    "admin.motion_preview.error": {
+      "description": "Alert when a motion preview operation fails for a reason without a more specific message.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.motion_preview.error_busy": {
+      "description": "Alert when another motion preview operation for this Video is still running.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.motion_preview.error_changed": {
+      "description": "Alert when the preview or Video changed in another session and the panel reloaded its state.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.motion_preview.error_file": {
+      "description": "Alert when the chosen motion preview clip is rejected; repeats the accepted file profile.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.motion_preview.error_reconcile": {
+      "description": "Alert when unfinished preview work must be reconciled before this operation can run.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.motion_preview.file": {
+      "description": "Label of the motion preview file input.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.motion_preview.none": {
+      "description": "Shown when the Video has no motion preview.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.motion_preview.outdated": {
+      "description": "Shown when the stored preview was made for an earlier Video and is hidden.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.motion_preview.reconcile": {
+      "description": "Button that recovers an unfinished preview upload or cleanup.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.motion_preview.reconciled": {
+      "description": "Status after preview reconciliation completes.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.motion_preview.remove": {
+      "description": "Button that removes the current motion preview.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.motion_preview.removed": {
+      "description": "Status after a motion preview is removed.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.motion_preview.title": {
+      "description": "Heading of the administrator panel for a Video MediaTrack's motion preview.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.motion_preview.upload": {
+      "description": "Button that uploads the chosen motion preview.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.motion_preview.uploaded": {
+      "description": "Status after a motion preview upload succeeds.",
       "delivery": [
         "runtime"
       ],
@@ -3076,6 +4106,13 @@
       ],
       "variables": {}
     },
+    "admin.publication.append_not_applied": {
+      "description": "Administrator workbench: note before publishing an import that appends to an existing Album, naming the draft values that are not applied.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.publication.cancel": {
       "description": "Cancel unconfirmed publication",
       "delivery": [
@@ -3111,8 +4148,90 @@
       ],
       "variables": {}
     },
+    "admin.publication.checklist": {
+      "description": "Administrator workbench: heading of the publication confirmation list of everything that becomes catalog content.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.publication.confirm": {
       "description": "Confirm publication",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.publication.decision_changed": {
+      "description": "Administrator workbench: publication confirmation, a reused record that changed or is no longer listed since it was reviewed.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.publication.decisions_conflict": {
+      "description": "Administrator workbench: publication confirmation, unsaved identity decisions were made on an older saved version, so approval waits.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.publication.existing_member": {
+      "description": "Administrator workbench: publication confirmation, a track that is already a member of the existing Album an import appends to.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.publication.join_phrase": {
+      "description": "Administrator workbench: publication confirmation, the join phrase after one Artist entry, shown with its spacing.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "phrase": "string"
+      }
+    },
+    "admin.publication.luna_names": {
+      "description": "Administrator workbench: publication confirmation, ticked Luna suggestions add names that match existing records, so those rows need an explicit decision; offers to apply them first and answer them in Review.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.publication.luna_ticks": {
+      "description": "Administrator workbench: publication confirmation, Luna suggestions this approval applies and keeps.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "ticked": "number",
+        "unticked": "number"
+      }
+    },
+    "admin.publication.needs_decision": {
+      "description": "Administrator workbench: publication confirmation, an identity that has no decision yet; approval waits for one in Review.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.publication.new_record": {
+      "description": "Administrator workbench: publication confirmation, an Artist, Organization, Album or Track that publishing creates new.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.publication.no_label": {
+      "description": "Administrator workbench: publication confirmation, the draft names no label Organization.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.publication.not_applied": {
+      "description": "Administrator workbench: publication confirmation, a draft value an import that appends to an existing Album does not apply.",
       "delivery": [
         "runtime"
       ],
@@ -3132,6 +4251,25 @@
       ],
       "variables": {}
     },
+    "admin.publication.records_id": {
+      "description": "Administrator workbench: publication confirmation, the MusicBrainz ID the publication records on this row's record.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "id": "string"
+      }
+    },
+    "admin.publication.replaces_id": {
+      "description": "Administrator workbench: publication confirmation, the MusicBrainz ID the publication puts in place of the one the reused record holds.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "id": "string",
+        "previous": "string"
+      }
+    },
     "admin.publication.resume": {
       "description": "Resume confirmed publication",
       "delivery": [
@@ -3139,8 +4277,41 @@
       ],
       "variables": {}
     },
+    "admin.publication.reused_record": {
+      "description": "Administrator workbench: publication confirmation, the existing catalog record an identity decision reuses, by name.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "name": "string"
+      }
+    },
+    "admin.publication.tags_only": {
+      "description": "Administrator publication confirmation: marks the Artist entries or the label as resting only on the files' embedded tags (not reviewed or decided).",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.publication.track_position": {
+      "description": "Administrator workbench: publication confirmation, one track position; an unknown Disc Number shows as 1 and an unknown Track Number as a dash.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "disc": "string",
+        "track": "string"
+      }
+    },
     "admin.publication.unavailable": {
       "description": "Publication is unavailable for this import; review and cleanup remain available.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.publication.unsaved_included": {
+      "description": "Administrator workbench: publication confirmation, the editor has unsaved draft changes, which approving saves together with the approval.",
       "delivery": [
         "runtime"
       ],
@@ -3155,6 +4326,22 @@
     },
     "admin.published.edit_artist": {
       "description": "Edit Artist",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.published.edit_artist_numbered": {
+      "description": "Administrator workbench: link to edit one of several published Artists, numbered in Credit order.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "number": "number"
+      }
+    },
+    "admin.published.edit_label": {
+      "description": "Administrator workbench: link to edit the published label Organization.",
       "delivery": [
         "runtime"
       ],
@@ -3458,6 +4645,237 @@
       ],
       "variables": {}
     },
+    "admin.summary.artist_mismatch": {
+      "description": "Administrator workbench: import summary, the preselected release credits an artist that no artist tag of the files names.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.summary.conflicts": {
+      "description": "Administrator workbench: import summary, heading of metadata lookup values that differ from the administrator's own.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.summary.cover_automatic": {
+      "description": "Administrator workbench: import summary and approval confirmation, mark after a cover that was chosen automatically.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.summary.flagged": {
+      "description": "Administrator workbench: import summary, accessible name of the list of flagged values.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.summary.identities": {
+      "description": "Administrator workbench: import summary, identity decisions row.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.summary.identities_saved": {
+      "description": "Administrator workbench: import summary, number of saved identity decisions; the confirmation lists each new or reused record.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.summary.identity_answers": {
+      "description": "Administrator workbench: import summary, identity rows without a decision or preselection, answered in the Review section.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.summary.keep_mine": {
+      "description": "Administrator workbench: import summary, keep the administrator's value in a lookup conflict.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.summary.kept_mine": {
+      "description": "Administrator workbench: import summary, an answered lookup conflict kept the administrator's value.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.summary.lookup_value": {
+      "description": "Administrator workbench: import summary, the metadata lookup value in a conflict.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.summary.luna": {
+      "description": "Administrator workbench: import summary and publication confirmation, Luna suggestions.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.summary.luna_apply": {
+      "description": "Administrator workbench: import summary, apply ticked Luna suggestions to the draft now and keep current values for the others.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.summary.luna_help": {
+      "description": "Administrator workbench: import summary, how Luna suggestion ticks work.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.summary.luna_mark": {
+      "description": "Administrator workbench: import summary, marks a value suggested by Luna.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.summary.musicbrainz_id_conflict": {
+      "description": "Administrator import summary: heading of a lookup conflict whose values agree in names, roles and phrases but differ in MusicBrainz IDs.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "field": "string"
+      }
+    },
+    "admin.summary.needs_answers": {
+      "description": "Administrator workbench: import summary, number of lookup questions to answer before Publish.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.summary.placeholder_only": {
+      "description": "Administrator workbench: import summary, the files or the applied release credit only a placeholder and a new Album has no primary Artist entry.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.summary.publish": {
+      "description": "Administrator workbench: import summary, opens the one-step publication confirmation.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.summary.title": {
+      "description": "Administrator workbench: import Review and publish summary heading.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.summary.track_field": {
+      "description": "Administrator workbench: import summary, one file's value, by its position in the draft.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "field": "string",
+        "position": "number"
+      }
+    },
+    "admin.summary.tracks": {
+      "description": "Administrator workbench: import summary and candidate chooser, the disc and track order.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.summary.uploads": {
+      "description": "Administrator workbench: import summary, confirmed uploads.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "ready": "number",
+        "total": "number"
+      }
+    },
+    "admin.summary.use_lookup": {
+      "description": "Administrator workbench: import summary, use the metadata lookup value in a conflict.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.summary.used_lookup": {
+      "description": "Administrator workbench: import summary, an answered lookup conflict used the lookup value.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.summary.values": {
+      "description": "Administrator workbench: import summary, folded rows that need no answer.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.summary.waiting_analysis": {
+      "description": "Administrator workbench: import summary, Publish waits for Luna analysis.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.summary.waiting_cover": {
+      "description": "Administrator workbench: Review and publish summary, status while the applied lookup release's cover is being staged and Publish waits.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.summary.waiting_lookup": {
+      "description": "Administrator workbench: import summary, Publish waits for metadata lookup.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.summary.waiting_uploads": {
+      "description": "Administrator workbench: import summary, Publish waits for uploads.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.summary.yours": {
+      "description": "Administrator workbench: import summary, the administrator's own value in a lookup conflict.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.upload.check_again": {
+      "description": "Checks an upload of unknown outcome against storage without sending bytes.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.upload.cleanup": {
       "description": "Remove staged file",
       "delivery": [
@@ -3465,8 +4883,90 @@
       ],
       "variables": {}
     },
+    "admin.upload.current": {
+      "description": "Live status naming the file being uploaded.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "name": "string"
+      }
+    },
+    "admin.upload.needs_file": {
+      "description": "A file must be selected again before it can upload.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.upload.progress": {
+      "description": "Count of uploaded files out of the import total.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "completed": "number",
+        "total": "number"
+      }
+    },
+    "admin.upload.queued": {
+      "description": "Row badge for a file waiting in the upload queue.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.upload.refused_changed": {
+      "description": "A file differs from the bytes already admitted for its upload.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.upload.refused_cleanup": {
+      "description": "A file cannot upload while its staged copy is being removed.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.upload.refused_mismatch": {
+      "description": "Some reselected files matched no incomplete file.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.upload.reselect_files": {
+      "description": "Action to choose individual import files again.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.upload.reselect_folder": {
+      "description": "Action to choose the import folder again.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.upload.reselect_help": {
+      "description": "Explains how reselected files are matched.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.upload.resume": {
+      "description": "Primary action that uploads the incomplete files with local copies.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.upload.retry": {
-      "description": "Retry the same upload",
+      "description": "Explicit retry of one file upload.",
       "delivery": [
         "runtime"
       ],
@@ -3479,8 +4979,64 @@
       ],
       "variables": {}
     },
+    "admin.upload.stopped_interrupted": {
+      "description": "Queue stopped because a lost response or server failure left the last file’s outcome unknown.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.upload.stopped_limit": {
+      "description": "Queue stopped because the import reached its operation limit.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.upload.stopped_permission": {
+      "description": "Queue stopped because administrator permission is unavailable.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.upload.stopped_publication": {
+      "description": "Queue stopped because a publication locks the import files.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.upload.stopped_unavailable": {
+      "description": "Queue stopped because private upload storage is unavailable.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.upload.stopped_view": {
+      "description": "Queue stopped because the administrator left Admin view.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.upload.title": {
+      "description": "Upload queue title on the import Files section.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.upload.upload": {
       "description": "Upload",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.upload.uploading": {
+      "description": "Row badge for the file currently uploading.",
       "delivery": [
         "runtime"
       ],
@@ -4831,6 +6387,43 @@
         "title": "string"
       }
     },
+    "content.album.play_byline_label": {
+      "description": "Accessible label for the Play action on an Album card, including the Album's creator byline.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "byline": "string",
+        "title": "string"
+      }
+    },
+    "content.album.play_failed": {
+      "description": "Polite status announced when an Album card's Play action cannot load the Album queue.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "title": "string"
+      }
+    },
+    "content.album.play_label": {
+      "description": "Accessible label for the Play action on an Album card; names the Album so it differs from a same-titled MediaTrack's Play.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "title": "string"
+      }
+    },
+    "content.album.play_room_active": {
+      "description": "Polite status announced when an Album card's Play is refused because listening-room playback owns this device's player.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "title": "string"
+      }
+    },
     "content.artist.portrait_alt": {
       "description": "Alternative text for an Artist portrait image.",
       "delivery": [
@@ -4848,6 +6441,15 @@
       "variables": {
         "title": "string",
         "type": "string"
+      }
+    },
+    "content.pause.label": {
+      "description": "Accessible label for the Pause action on the media card whose MediaTrack is currently playing.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "title": "string"
       }
     },
     "content.play.byline_label": {
@@ -8828,6 +10430,20 @@
       ],
       "variables": {}
     },
+    "search.filter.all": {
+      "description": "Search result filter that shows every result group.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "search.filters.label": {
+      "description": "Accessible name of the Search result type filter group.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "search.form.label": {
       "description": "Accessible label for the Search results form.",
       "delivery": [
@@ -8915,6 +10531,52 @@
         "runtime"
       ],
       "variables": {}
+    },
+    "search.typeahead.hint_navigate": {
+      "description": "Keyboard hint in the typeahead header next to the up and down arrow keys.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "search.typeahead.hint_submit": {
+      "description": "Keyboard hint in the typeahead header next to the Enter key.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "search.typeahead.label": {
+      "description": "Accessible name of the shell search suggestion list shown while typing on wide layouts.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "search.typeahead.recent": {
+      "description": "Secondary text on a typeahead option that repeats a recent search.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "search.typeahead.result_count": {
+      "description": "Polite status announcing how many typeahead suggestions are available.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "search.typeahead.search_for": {
+      "description": "Typeahead option that opens the full Search results for the typed query.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "query": "string"
+      }
     },
     "seek.position_label": {
       "description": "Accessible label for the playback position slider.",

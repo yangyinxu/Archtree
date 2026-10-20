@@ -1,0 +1,193 @@
+{
+  "source": "musicbrainz",
+  "recordedAt": "2026-10-18T10:50:22.432Z",
+  "description": "MusicBrainz release lookup (Hotel California search result)",
+  "exchanges": [
+    {
+      "url": "https://musicbrainz.org/ws/2/release/e38dc685-45a2-3350-8901-64ec9941e652?inc=artist-credits+labels+recordings+release-groups+isrcs&fmt=json",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "body": {
+        "id": "e38dc685-45a2-3350-8901-64ec9941e652",
+        "title": "Hotel California",
+        "status": "Official",
+        "artist-credit": [
+          {
+            "name": "Eagles",
+            "joinphrase": "",
+            "artist": {
+              "id": "f46bd570-5768-462e-b84c-c7c993bbf47e",
+              "name": "Eagles"
+            }
+          }
+        ],
+        "release-group": {
+          "id": "836f349a-0434-3e8b-a0bc-261f77a9f99c",
+          "primary-type": "Album",
+          "secondary-types": [],
+          "first-release-date": "1976-12-08"
+        },
+        "date": "1992",
+        "country": "US",
+        "barcode": "010963204315",
+        "label-info": [
+          {
+            "catalog-number": "LPZ-2043",
+            "label": {
+              "id": "b1fe170d-0ac1-4d7a-b7e3-318c2426d5c4",
+              "name": "DCC Compact Classics"
+            }
+          }
+        ],
+        "cover-art-archive": {
+          "front": true
+        },
+        "media": [
+          {
+            "position": 1,
+            "format": "12\" Vinyl",
+            "tracks": [
+              {
+                "position": 1,
+                "number": "1",
+                "title": "Hotel California",
+                "length": 390266,
+                "recording": {
+                  "id": "40bd0203-bc3f-4b15-9ab3-ceeb2ef35d7a",
+                  "length": 390266,
+                  "isrcs": [
+                    "USEE11300195",
+                    "USEE11300353",
+                    "USEE19900323"
+                  ]
+                }
+              },
+              {
+                "position": 2,
+                "number": "2",
+                "title": "New Kid in Town",
+                "length": 303840,
+                "recording": {
+                  "id": "eb5641b3-196d-45ba-9edf-1d37671bd3b8",
+                  "length": 304000,
+                  "isrcs": [
+                    "USEE11300196",
+                    "USEE11300354",
+                    "USEE19900324"
+                  ]
+                }
+              },
+              {
+                "position": 3,
+                "number": "3",
+                "title": "Life in the Fast Lane",
+                "length": 286093,
+                "recording": {
+                  "id": "eb5550c8-9d31-4270-9dac-1f11566a3805",
+                  "length": 286093,
+                  "isrcs": [
+                    "USEE11300197",
+                    "USEE11300355",
+                    "USEE19900325"
+                  ]
+                }
+              },
+              {
+                "position": 4,
+                "number": "4",
+                "title": "Wasted Time",
+                "length": 296440,
+                "recording": {
+                  "id": "826c84b4-b625-4ba9-847d-8fb1a31a2d21",
+                  "length": 296172,
+                  "isrcs": [
+                    "USEE11300198",
+                    "USEE11300356",
+                    "USEE19900326"
+                  ]
+                }
+              },
+              {
+                "position": 5,
+                "number": "5",
+                "title": "Wasted Time (reprise)",
+                "length": 83266,
+                "recording": {
+                  "id": "1f2ce3df-edbf-4da9-84a6-688ca7adbb37",
+                  "length": 83266,
+                  "isrcs": [
+                    "USEE11300203",
+                    "USEE11300357",
+                    "USEE19900327"
+                  ]
+                }
+              },
+              {
+                "position": 6,
+                "number": "6",
+                "title": "Victim of Love",
+                "length": 249293,
+                "recording": {
+                  "id": "898fe0ff-71a7-40b1-913c-9157a34ba16e",
+                  "length": 249293,
+                  "isrcs": [
+                    "USEE11300199",
+                    "USEE11300358",
+                    "USEE19900328"
+                  ]
+                }
+              },
+              {
+                "position": 7,
+                "number": "7",
+                "title": "Pretty Maids All in a Row",
+                "length": 238506,
+                "recording": {
+                  "id": "e1de5771-92f0-4a7d-a796-b0c6b66c7cf4",
+                  "length": 238533,
+                  "isrcs": [
+                    "USEE11300200",
+                    "USEE11300359",
+                    "USEE19900329"
+                  ]
+                }
+              },
+              {
+                "position": 8,
+                "number": "8",
+                "title": "Try and Love Again",
+                "length": 310693,
+                "recording": {
+                  "id": "dacd1802-bd44-4843-957d-7b51b8b0e764",
+                  "length": 310693,
+                  "isrcs": [
+                    "USEE11300201",
+                    "USEE11300360",
+                    "USEE19900330"
+                  ]
+                }
+              },
+              {
+                "position": 9,
+                "number": "9",
+                "title": "The Last Resort",
+                "length": 448733,
+                "recording": {
+                  "id": "887f7e1c-5eb1-4f3b-9c12-8e54a6ebedbd",
+                  "length": 448546,
+                  "isrcs": [
+                    "USEE11300202",
+                    "USEE11300361",
+                    "USEE19900331"
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

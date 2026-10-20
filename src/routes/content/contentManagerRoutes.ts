@@ -47,6 +47,7 @@ router.post('/organization/delete', asyncHandler(contentController.deleteOrganiz
 router.post('/credits/add', asyncHandler(contentController.addCatalogCreditWeb));
 router.post('/credits/remove', asyncHandler(contentController.removeCatalogCreditWeb));
 router.post('/credits/update-role', asyncHandler(contentController.updateCatalogCreditRoleWeb));
+router.post('/credits/update-join-phrase', asyncHandler(contentController.updateCatalogCreditJoinPhraseWeb));
 router.post('/credits/reorder', asyncHandler(contentController.reorderCatalogCreditWeb));
 router.post('/credits/mark-unknown', asyncHandler(contentController.markCatalogAttributionUnknownWeb));
 

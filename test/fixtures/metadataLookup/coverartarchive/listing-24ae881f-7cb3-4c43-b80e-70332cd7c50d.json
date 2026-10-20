@@ -1,0 +1,14 @@
+{
+  "source": "coverartarchive",
+  "recordedAt": "2026-10-18T10:50:22.432Z",
+  "description": "Cover Art Archive listing: Hotel California without artwork (404)",
+  "exchanges": [
+    {
+      "url": "https://coverartarchive.org/release/24ae881f-7cb3-4c43-b80e-70332cd7c50d",
+      "status": 404,
+      "headers": {
+        "content-type": "text/html; charset=utf-8"
+      }
+    }
+  ]
+}

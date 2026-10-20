@@ -4,6 +4,13 @@ import { fileURLToPath } from 'node:url';
 const port = 4173;
 const origin = `http://127.0.0.1:${port}`;
 const configDirectory = fileURLToPath(new URL('.', import.meta.url));
+/**
+ * All workers share one test server; as 127.0.0.1 they would spend one per-IP rate window (public
+ * reads allow 120 a minute) and a late request, such as a locale bundle, would get 429. Each worker
+ * instead forwards its own RFC 2544 benchmark address through the one trusted proxy hop, as
+ * production clients do; no limit is reset or relaxed. Workers reload this file with their index set.
+ */
+const workerClientAddress = `198.18.0.${Number(process.env.TEST_PARALLEL_INDEX ?? 0) + 1}`;
 
 /** Runs the built listener through Express so browser tests include production routing and CSP. */
 export default defineConfig({
@@ -28,6 +35,7 @@ export default defineConfig({
       ],
   use: {
     baseURL: origin,
+    extraHTTPHeaders: { 'X-Forwarded-For': workerClientAddress },
     headless: true,
     screenshot: 'only-on-failure',
     trace: 'retain-on-failure',

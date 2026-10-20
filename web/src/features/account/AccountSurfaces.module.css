@@ -198,7 +198,7 @@
 
 .button:disabled,
 .textButton:disabled {
-  cursor: wait;
+  cursor: default;
   opacity: 0.58;
 }
 

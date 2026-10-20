@@ -1,0 +1,82 @@
+{
+  "_id": {
+    "$oid": "2d459e17311271801ee19ff5"
+  },
+  "actorId": "0000000000000000000000a1",
+  "revision": 1,
+  "createdAt": {
+    "$date": "2026-01-15T09:01:00Z"
+  },
+  "updatedAt": {
+    "$date": "2026-01-15T09:01:00Z"
+  },
+  "manifest": {
+    "rootLabel": "Synthetic Artist - Synthetic Album",
+    "files": [
+      {
+        "slotId": "00000001-0000-4000-a000-000000000001",
+        "filename": "01 - Lorem Opening.mp3",
+        "relativePath": "Disc 1/01 - Lorem Opening.mp3",
+        "byteLength": 4096
+      },
+      {
+        "slotId": "00000001-0000-4000-a000-000000000002",
+        "filename": "02 - Ipsum Interlude.mp3",
+        "relativePath": "Disc 1/02 - Ipsum Interlude.mp3",
+        "byteLength": 5120
+      }
+    ]
+  },
+  "draft": {
+    "album": {
+      "title": "Synthetic Album",
+      "artistName": "Lorem Ensemble & Ipsum Quartet",
+      "releaseDate": {
+        "year": 2025,
+        "month": 6,
+        "day": null
+      },
+      "visibility": "hidden"
+    },
+    "tracks": [
+      {
+        "slotId": "00000001-0000-4000-a000-000000000001",
+        "title": "Lorem Opening",
+        "trackNumber": 1
+      },
+      {
+        "slotId": "00000001-0000-4000-a000-000000000002",
+        "title": "Ipsum Interlude",
+        "trackNumber": 2
+      }
+    ]
+  },
+  "analysis": {
+    "state": "idle",
+    "generation": 0,
+    "operationId": null,
+    "actorId": null,
+    "grantExpiresAt": null,
+    "baseline": null,
+    "chunks": [],
+    "issue": null,
+    "leaseOwner": null,
+    "leaseUntil": null
+  },
+  "analysisHistory": [],
+  "attemptsUsed": 0,
+  "suggestions": [],
+  "decisions": [],
+  "receipts": [
+    {
+      "operationId": "00000001-0000-4000-8000-000000000001",
+      "kind": "create",
+      "revision": 1,
+      "hash": "a21990b8f5ff6362a8f4957fd71cc4e74b94d6dc9228bbb27d7ad6c05a226e3f",
+      "actorId": "0000000000000000000000a1",
+      "at": {
+        "$date": "2026-01-15T09:01:00Z"
+      }
+    }
+  ]
+}

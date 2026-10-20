@@ -1,0 +1,63 @@
+/* Mutually exclusive pill filters shared by Library and Search; each option is an aria-pressed button. */
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  margin: 1.35rem 0 0.8rem;
+}
+
+.filters button {
+  background: var(--color-surface-hover);
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  color: var(--color-text-muted);
+  font-size: 0.82rem;
+  min-height: 2.4rem;
+  padding: 0.35rem 0.8rem;
+  transition:
+    background-color var(--motion-fast) var(--ease-standard),
+    border-color var(--motion-fast) var(--ease-standard),
+    color var(--motion-fast) var(--ease-standard),
+    transform var(--motion-fast) var(--ease-standard);
+}
+
+.filters button:not([aria-pressed='true']):hover {
+  background: color-mix(in srgb, var(--color-surface-hover) 78%, var(--color-text));
+  color: var(--color-text);
+}
+
+.filters button:active {
+  transform: scale(0.97);
+}
+
+.filters button[aria-pressed='true'] {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  color: var(--color-canvas);
+  font-weight: 700;
+}
+
+.filters button:focus-visible {
+  outline: 2px solid var(--color-text);
+  outline-offset: 3px;
+}
+
+@media (max-width: 640px), (pointer: coarse) {
+  .filters button {
+    min-height: var(--control-min-size);
+  }
+}
+
+@media (forced-colors: active) {
+  .filters button {
+    border-color: CanvasText;
+  }
+
+  /* System colors flatten the accent fill, so the pressed filter uses Highlight instead. */
+  .filters button[aria-pressed='true'] {
+    background: Highlight;
+    border-color: Highlight;
+    color: HighlightText;
+    forced-color-adjust: none;
+  }
+}

@@ -24,6 +24,7 @@ import { enqueueListenerTelemetry } from '../telemetry/client';
 import { classifyListenerRoute } from '../telemetry/routeClassifier';
 import { createMediaSessionAdapter } from './mediaSessionAdapter';
 import { canonicalOrder, copyQueue, currentCycleHistory, queueLaunchOrder, shuffledOrder } from './queueOrder';
+import { RoomPlaybackActiveError } from './types';
 import type { createRoomPlaybackController, RoomPlaybackState } from './roomPlayback';
 
 const DEFAULT_SKIP_SECONDS = 10;
@@ -631,7 +632,7 @@ export const createPlayerStore = (
     launchOptions = {}
   ) => {
     if (destroyed) return;
-    if (room) throw new Error('Leave room playback before launching a local queue.');
+    if (room) throw new RoomPlaybackActiveError();
     if (queue.length === 0) {
       clearQueue();
       return;
@@ -709,7 +710,7 @@ export const createPlayerStore = (
     launchAlbumQueue: launchQueue,
     launchStandalone: async (item, launchOptions = {}) => {
       if (destroyed) return;
-      if (room) throw new Error('Leave room playback before launching a local queue.');
+      if (room) throw new RoomPlaybackActiveError();
       if (launchOptions.autoplay ?? true) store.notePlaybackIntent();
       const ownedQueue = copyQueue([item]);
       playOrder = [0];

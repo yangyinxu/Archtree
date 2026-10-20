@@ -3,18 +3,28 @@
  *   Types: ContentCardProps
  *   Functions: ContentCard
  *   Constants: defaultContentCardArtworkSizes
+ * Internal
+ *   Constants: CardVideoPreview
  * @end-catalog */
 
+import { lazy, Suspense } from 'react';
 import { Link } from 'react-router';
-import { Play } from 'lucide-react';
+import { Pause, Play } from 'lucide-react';
 
 import { contentByline, type AudioTrackSummary, type ContentSummary, type FollowedArtistReason as Reason } from '../api/contentSchemas';
+import { AlbumCardPlayButton } from './AlbumCardPlayButton';
 import { FollowedArtistReason } from './FollowedArtistReason';
 import { Artwork } from './Artwork';
 import styles from './ContentCard.module.css';
 import { useLocalization } from '../localization/LocalizationProvider';
+import { playerStore, usePlayingTrackId } from '../player';
 import { LazyShareMusicButton } from '../features/social/LazyShareMusicButton';
 import { LazyRoomTrackButton } from '../features/social/LazyRoomTrackButton';
+import { useVideoPreviewIntent } from './useVideoPreviewIntent';
+
+// The preview element loads only once a mouse rests on a Video card; a chunk that fails to load
+// (an old tab after a deploy) shows no preview instead of the route's error page.
+const CardVideoPreview = lazy(() => import('./CardVideoPreview').catch(() => ({ default: () => null })));
 
 
 export interface ContentCardProps {
@@ -24,10 +34,17 @@ export interface ContentCardProps {
   reason?: Reason;
 }
 
-// Subtract the action's inline padding and border from each outer grid-card width.
-export const defaultContentCardArtworkSizes = '(max-width: 400px) calc(100vw - 3.3rem - 2px), (max-width: 480px) calc((100vw - 2.75rem) / 2 - 1.3rem - 2px), (max-width: 1023px) calc(10.5rem - 1.3rem - 2px), calc(14rem - 1.3rem - 2px)';
+/**
+ * Describes the artwork, not the card, in a bleeding card Grid: 1rem page gutters on narrow
+ * screens, a 24 px artwork rhythm, and two columns once the content is at least 304 px wide.
+ */
+export const defaultContentCardArtworkSizes = '(max-width: 335px) calc(100vw - 2rem), (max-width: 480px) calc((100vw - 3.5rem) / 2), (max-width: 1023px) 10.5rem, 14rem';
 
-/** Presents one content summary with a single, non-overlapping primary action. */
+/**
+ * Presents one content summary with a single primary action. MediaTrack cards play (or pause the
+ * active MediaTrack) from the whole card; Album cards link to the Album and add a sibling Play
+ * button over the artwork, so no interactive element is nested inside another.
+ */
 export const ContentCard = ({
   item,
   onPlay,
@@ -35,6 +52,8 @@ export const ContentCard = ({
   artworkSizes = defaultContentCardArtworkSizes
 }: ContentCardProps) => {
   const { locale, t } = useLocalization();
+  const playingTrackId = usePlayingTrackId();
+  const isPlaying = item.contentType === 'audioTrack' && playingTrackId === item.id;
   const title = item.contentType === 'artist'
     ? item.name.trim() || t('content.title.unknown_artist')
     : item.title.trim() || (item.contentType === 'album'
@@ -55,13 +74,30 @@ export const ContentCard = ({
     item.contentType === 'audioTrack' ? item.duration : null
   ].filter(Boolean).join(' · ');
   const showPlayReveal = item.contentType === 'audioTrack' && Boolean(onPlay);
+  // Only a playable Video MediaTrack that is not already the current playback offers a preview.
+  const previewSource = item.contentType === 'audioTrack' && item.mediaType === 'video' && onPlay && !isPlaying
+    ? item.streamUrl
+    : null;
+  const preview = useVideoPreviewIntent(previewSource);
   const body = (
     <>
       <span className={styles.artworkFrame}>
         <Artwork alt="" kind={item.contentType} sizes={artworkSizes} src={item.artworkUrl} />
+        {preview.active && previewSource ? (
+          <Suspense fallback={null}>
+            <CardVideoPreview
+              className={styles.videoPreview}
+              mediaTrackId={item.id}
+              onStop={preview.stop}
+              streamUrl={previewSource}
+            />
+          </Suspense>
+        ) : null}
         {showPlayReveal ? (
           <span aria-hidden="true" className={styles.playReveal}>
-            <Play fill="currentColor" focusable="false" strokeWidth={1.8} />
+            {isPlaying
+              ? <Pause fill="currentColor" focusable="false" strokeWidth={1.8} />
+              : <Play fill="currentColor" focusable="false" strokeWidth={1.8} />}
           </span>
         ) : null}
       </span>
@@ -73,15 +109,30 @@ export const ContentCard = ({
   );
 
   return (
-    <article className={`${styles.card} ${reason ? styles.withReason : ''}`}>
+    <article
+      className={`${styles.card} ${reason ? styles.withReason : ''}`}
+      // Lets a page tint itself with the hovered card's artwork tone.
+      data-artwork-src={item.artworkUrl || undefined}
+      data-playback-state={isPlaying ? 'playing' : undefined}
+      ref={preview.cardRef}
+    >
       {item.contentType === 'audioTrack' ? (
         onPlay ? (
           <button
-            aria-label={contentByline(item)
-              ? t('content.play.byline_label', { title, byline: contentByline(item) })
-              : t('content.play.label', { title })}
+            aria-current={isPlaying ? 'true' : undefined}
+            aria-label={isPlaying
+              ? t('content.pause.label', { title })
+              : contentByline(item)
+                ? t('content.play.byline_label', { title, byline: contentByline(item) })
+                : t('content.play.label', { title })}
             className={styles.action}
-            onClick={() => onPlay(item)}
+            onClick={() => {
+              if (isPlaying) {
+                playerStore.pause();
+                return;
+              }
+              onPlay(item);
+            }}
             type="button"
           >
             {body}
@@ -98,6 +149,7 @@ export const ContentCard = ({
           {body}
         </Link>
       )}
+      {item.contentType === 'album' && <AlbumCardPlayButton album={item} title={title} />}
       <FollowedArtistReason reason={reason} />
       {item.contentType !== 'artist' && <span className={styles.shareAction}>
         {item.contentType === 'audioTrack' && item.mediaType !== 'video' && <LazyRoomTrackButton mediaTrackId={item.id} title={title} />}

@@ -22,6 +22,7 @@
  *   - public projection drops unknown fields and unsafe artwork while keeping Unicode within card bounds
  *   - revoked sessions and simultaneous account deletion cannot leave shares or resurrect outboxes
  *   - recipient deletion winning send admission leaves no orphan share, recipient budget or outbox
+ *   - a share card of a track credited to an Artist and a label with private MusicBrainz IDs names them without either ID
  * @end-catalog */
 
 import assert from 'node:assert/strict';
@@ -323,4 +324,25 @@ test('recipient deletion winning send admission leaves no orphan share, recipien
     assert.equal(await shares().countDocuments({}), 0);
     assert.equal(await db().collection('socialOutbox').findOne({ _id: b.actor.userId }), null);
     assert.equal(await db().collection('socialBudgets').findOne({ _id: b.actor.userId }), null);
+});
+
+test('a share card of a track credited to an Artist and a label with private MusicBrainz IDs names them without either ID', async () => {
+    const { a, b } = await pair(), artistId = '00000000-0000-4000-8000-0000000000d1', labelId = '00000000-0000-4000-8000-0000000000d2';
+    const artist = new ObjectId(), label = new ObjectId();
+    await db().collection('artists').insertOne({ _id: artist, name: 'Shared Provenance Artist', lifecycleStatus: 'ready', musicBrainzId: artistId });
+    await db().collection('organizations').insertOne({ _id: label, name: 'Shared Provenance Label', organizationType: 'label', lifecycleStatus: 'ready', musicBrainzId: labelId });
+    await db().collection('audioTracks').updateOne({ _id: new ObjectId(trackIds[0]) }, { $set: { artistIds: [artist.toHexString()], attributionStatus: 'documented', creditRevision: 1,
+        credits: [{ creditId: 'credit_primary_0', subjectType: 'artist', subjectId: artist.toHexString(), role: 'primary', order: 0 },
+            { creditId: 'credit_label_1', subjectType: 'organization', subjectId: label.toHexString(), role: 'label', order: 1 }] } });
+    try {
+        assert.equal((await send(a, b)).outcome, 'applied');
+        const [incoming, outgoing] = [(await list(b)).items[0], (await list(a, 'outgoing')).items[0]];
+        assert.deepEqual(incoming.content?.artistNames, ['Shared Provenance Artist']);
+        for (const card of [incoming, outgoing]) {
+            const text = JSON.stringify(card);
+            for (const forbidden of ['musicBrainzId', artistId, labelId]) assert.equal(text.includes(forbidden), false, forbidden);
+        }
+    } finally {
+        await db().collection('artists').deleteMany({ _id: artist }); await db().collection('organizations').deleteMany({ _id: label });
+    }
 });

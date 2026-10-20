@@ -30,7 +30,7 @@ function CreditValue({ credit }: { credit: CatalogCredit }) {
     : t(name.isError ? 'catalog.credit_unavailable' : 'common.loading', { id: credit.subjectId });
   const role = credit.role === 'legacyUnspecified' ? t('catalog.unspecified')
     : sharedText(`catalog.credit.${credit.role}` as MessageKey);
-  return <li>{label} · {t(`catalog.${credit.subjectType}`)} · {role}
+  return <li>{label} · {t(`catalog.${credit.subjectType}`)} · {role}{credit.joinPhrase !== undefined && <> · {t('catalog.join_phrase_value', { phrase: credit.joinPhrase })}</>}
     {/* The modal trap sees the summary, while closed records contribute no hidden focus targets. */}
     <details onToggle={event => setRecordOpen(event.currentTarget.open)}><summary tabIndex={0}>{t('catalog.credit_record')}</summary>
       {recordOpen && <Link className={`${styles.itemLink} ${styles.rawDraft}`} to={`/admin/catalog/${credit.subjectType}/${credit.subjectId}`}>{credit.subjectId}</Link>}

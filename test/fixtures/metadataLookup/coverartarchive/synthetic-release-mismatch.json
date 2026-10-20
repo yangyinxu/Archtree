@@ -1,0 +1,32 @@
+{
+  "source": "coverartarchive",
+  "synthetic": true,
+  "description": "A listing that names a different release",
+  "exchanges": [
+    {
+      "url": "https://coverartarchive.org/release/00000000-0000-4000-8000-000000000021",
+      "status": 307,
+      "headers": {
+        "location": "https://archive.org/download/mbid-00000000-0000-4000-8000-000000000021/index.json"
+      }
+    },
+    {
+      "url": "https://archive.org/download/mbid-00000000-0000-4000-8000-000000000021/index.json",
+      "status": 302,
+      "headers": {
+        "location": "https://ia800101.us.archive.org/1/items/mbid-00000000-0000-4000-8000-000000000021/index.json"
+      }
+    },
+    {
+      "url": "https://ia800101.us.archive.org/1/items/mbid-00000000-0000-4000-8000-000000000021/index.json",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json"
+      },
+      "body": {
+        "images": [],
+        "release": "https://musicbrainz.org/release/00000000-0000-4000-8000-000000000099"
+      }
+    }
+  ]
+}

@@ -1,0 +1,227 @@
+{
+  "recorder": "scripts/record-metadata-lookup-fixtures.ts",
+  "recordedAt": "2026-10-18T10:50:22.432Z",
+  "userAgentProduct": "ArchtreeMetadataFixtureRecorder/0.1",
+  "probes": [
+    {
+      "file": "coverartarchive/listing-24ae881f-7cb3-4c43-b80e-70332cd7c50d.json",
+      "description": "Cover Art Archive listing: Hotel California without artwork (404)"
+    },
+    {
+      "file": "coverartarchive/listing-83afdb26-9c27-4ec6-ad70-25b8cb897a31.json",
+      "description": "Cover Art Archive listing: Hotel California, front artwork"
+    },
+    {
+      "file": "coverartarchive/listing-8659aff4-a89a-4f46-87c2-3be7117f6780.json",
+      "description": "Cover Art Archive listing: Pandora Call single"
+    },
+    {
+      "file": "coverartarchive/listing-8baecda4-f155-40f6-a173-8f6b98cede5b.json",
+      "description": "Cover Art Archive listing: Blue Archive JP CD"
+    },
+    {
+      "file": "itunes/lookup-jp-1689358563.json",
+      "description": "iTunes collection lookup (jp) of the Pandora Call single"
+    },
+    {
+      "file": "itunes/lookup-us-upc-075596050920.json",
+      "description": "iTunes UPC lookup (us) of the Hotel California barcode"
+    },
+    {
+      "file": "itunes/search-jp-song-pandora-call-romanized.json",
+      "description": "iTunes song search (jp): Pandora Call"
+    },
+    {
+      "file": "itunes/search-jp-song-pandora-call.json",
+      "description": "iTunes song search (jp): パンドラコール"
+    },
+    {
+      "file": "itunes/search-us-album-hotel-california.json",
+      "description": "iTunes album search (us): Hotel California Eagles"
+    },
+    {
+      "file": "musicbrainz/browse-release-group-836f349a.json",
+      "description": "Release-group browse: Hotel California"
+    },
+    {
+      "file": "musicbrainz/isrc-JPY392200483.json",
+      "description": "ISRC lookup of the Pandora Call single recording"
+    },
+    {
+      "file": "musicbrainz/recording-search-pandora-call.json",
+      "description": "Recording search: recording \"パンドラコール\" AND artist \"ヰ世界情緒\""
+    },
+    {
+      "file": "musicbrainz/release-0a9833a9-9980-42d5-8b24-bfb4068ecb10.json",
+      "description": "MusicBrainz release lookup (Hotel California search result)"
+    },
+    {
+      "file": "musicbrainz/release-0ea3b00b-a9a3-46e1-b1e2-f1e7697e8878.json",
+      "description": "MusicBrainz release lookup (Hotel California search result)"
+    },
+    {
+      "file": "musicbrainz/release-14a2a203-c6d9-4ca7-ad1d-c5a7b94e3124.json",
+      "description": "MusicBrainz release lookup (Hotel California search result)"
+    },
+    {
+      "file": "musicbrainz/release-1c0f39f3-b90a-4832-9bad-4d84dbf12fef.json",
+      "description": "MusicBrainz release lookup (Hotel California search result)"
+    },
+    {
+      "file": "musicbrainz/release-1d472dd6-32cc-3f0a-96b0-4448233dd4df.json",
+      "description": "MusicBrainz release lookup (Hotel California search result)"
+    },
+    {
+      "file": "musicbrainz/release-1e166986-2adc-4c63-86d3-f22146cf7ce2.json",
+      "description": "MusicBrainz release lookup (Hotel California search result)"
+    },
+    {
+      "file": "musicbrainz/release-249c032d-00b2-4702-bae4-8efe787276f1.json",
+      "description": "MusicBrainz release lookup (Pandora Call recording search result)"
+    },
+    {
+      "file": "musicbrainz/release-24ae881f-7cb3-4c43-b80e-70332cd7c50d.json",
+      "description": "MusicBrainz release lookup (Hotel California search result)"
+    },
+    {
+      "file": "musicbrainz/release-304a548c-85a2-3926-8379-cdbfdf891a12.json",
+      "description": "MusicBrainz release lookup (Hotel California search result)"
+    },
+    {
+      "file": "musicbrainz/release-3f223a88-a852-3b83-9130-b4365cc1b036.json",
+      "description": "MusicBrainz release lookup (Hotel California search result)"
+    },
+    {
+      "file": "musicbrainz/release-4671ab19-6e97-4d1b-a1ac-d12667645b72.json",
+      "description": "MusicBrainz release lookup (Hotel California search result)"
+    },
+    {
+      "file": "musicbrainz/release-4aed7962-5ba4-4e3f-aea2-8e33335b4b0c.json",
+      "description": "MusicBrainz release lookup (Pandora Call recording search result)"
+    },
+    {
+      "file": "musicbrainz/release-4c4c8ab2-c0e3-3b89-bf49-ead5e45dff08.json",
+      "description": "MusicBrainz release lookup (Hotel California search result)"
+    },
+    {
+      "file": "musicbrainz/release-519c3c07-d951-3482-9c27-b0eb6a59d3d9.json",
+      "description": "MusicBrainz release lookup (Hotel California search result)"
+    },
+    {
+      "file": "musicbrainz/release-5302459e-1ed2-4469-b360-50b135e88466.json",
+      "description": "MusicBrainz release lookup (Pandora Call recording search result)"
+    },
+    {
+      "file": "musicbrainz/release-54614efa-5eb9-41eb-a9f1-65ad06098d9b.json",
+      "description": "MusicBrainz release lookup (Hotel California search result)"
+    },
+    {
+      "file": "musicbrainz/release-548df779-4817-46e8-84ba-f2cf31855a21.json",
+      "description": "MusicBrainz release lookup (Hotel California search result)"
+    },
+    {
+      "file": "musicbrainz/release-56259778-a08c-4815-ad4f-b3aa943b6512.json",
+      "description": "MusicBrainz release lookup (Hotel California search result)"
+    },
+    {
+      "file": "musicbrainz/release-77e74b2b-5762-4359-a14d-4161b6210f0f.json",
+      "description": "MusicBrainz release lookup (Pandora Call recording search result)"
+    },
+    {
+      "file": "musicbrainz/release-7b73e57c-35a0-4f3d-85d4-6e139d87c0c6.json",
+      "description": "MusicBrainz release lookup (Hotel California search result)"
+    },
+    {
+      "file": "musicbrainz/release-83afdb26-9c27-4ec6-ad70-25b8cb897a31.json",
+      "description": "MusicBrainz release lookup (Hotel California search result)"
+    },
+    {
+      "file": "musicbrainz/release-85bc0ffc-7c17-42f1-a526-354a6ec6fadd.json",
+      "description": "MusicBrainz release lookup (Blue Archive search result)"
+    },
+    {
+      "file": "musicbrainz/release-8659aff4-a89a-4f46-87c2-3be7117f6780.json",
+      "description": "MusicBrainz release lookup (Pandora Call recording search result)"
+    },
+    {
+      "file": "musicbrainz/release-8baecda4-f155-40f6-a173-8f6b98cede5b.json",
+      "description": "MusicBrainz release lookup (Blue Archive search result)"
+    },
+    {
+      "file": "musicbrainz/release-8f032fff-c63f-4512-973a-758d6d0da2bd.json",
+      "description": "MusicBrainz release lookup (Blue Archive search result)"
+    },
+    {
+      "file": "musicbrainz/release-957cd256-0d4e-47f1-b5da-0ccdc818465d.json",
+      "description": "MusicBrainz release lookup (Pandora Call recording search result)"
+    },
+    {
+      "file": "musicbrainz/release-999e900d-8f66-44df-89b3-889634f02488.json",
+      "description": "MusicBrainz release lookup (Pandora Call recording search result)"
+    },
+    {
+      "file": "musicbrainz/release-a235c19e-13f6-432e-93b0-c62e7188fdde.json",
+      "description": "MusicBrainz release lookup (Pandora Call recording search result)"
+    },
+    {
+      "file": "musicbrainz/release-b42f7f38-22da-4aae-9ae6-3e0f9752f4c4.json",
+      "description": "MusicBrainz release lookup (Hotel California search result)"
+    },
+    {
+      "file": "musicbrainz/release-b799c5e3-188d-40e1-9599-94ca73365aee.json",
+      "description": "MusicBrainz release lookup (Hotel California search result)"
+    },
+    {
+      "file": "musicbrainz/release-bb82e6d7-bdd9-427b-8fc1-d3bb49e0c1db.json",
+      "description": "MusicBrainz release lookup (Hotel California search result)"
+    },
+    {
+      "file": "musicbrainz/release-bef9ebe8-8210-4f54-b1e1-d99009c92f92.json",
+      "description": "MusicBrainz release lookup (Hotel California search result)"
+    },
+    {
+      "file": "musicbrainz/release-cb961c6b-b51e-45de-9633-fa9a5d33f5cf.json",
+      "description": "MusicBrainz release lookup (Hotel California search result)"
+    },
+    {
+      "file": "musicbrainz/release-e38dc685-45a2-3350-8901-64ec9941e652.json",
+      "description": "MusicBrainz release lookup (Hotel California search result)"
+    },
+    {
+      "file": "musicbrainz/release-ebd981c7-a2ab-48e4-a9b7-79533fa31769.json",
+      "description": "MusicBrainz release lookup (Hotel California search result)"
+    },
+    {
+      "file": "musicbrainz/release-f72b3971-4c8e-4ff8-8fac-5fcc05a5e62a.json",
+      "description": "MusicBrainz release lookup (Hotel California search result)"
+    },
+    {
+      "file": "musicbrainz/release-fa7d3357-f3e9-4da5-ad70-09c05ef8207f.json",
+      "description": "MusicBrainz release lookup (Hotel California 2013 digital edition, beyond the first search page)"
+    },
+    {
+      "file": "musicbrainz/release-search-blue-archive-credited.json",
+      "description": "Release search with the credited names and the ~ subtitle (request URL updated from limit=25 to limit=100 after recording; the body is unchanged because its 1 hit is within both limits)"
+    },
+    {
+      "file": "musicbrainz/release-search-blue-archive-normalized.json",
+      "description": "Release searches with the normalized spelling \"Soundtrack\": alone and with the label (both find the JP CD and JP digital editions)"
+    },
+    {
+      "file": "musicbrainz/release-search-blue-archive-sound-track.json",
+      "description": "Release searches with the tag spelling \"Sound Track\": alone, with the credited names and with the label (no release found)"
+    },
+    {
+      "file": "musicbrainz/release-search-blue-archive-subtitle.json",
+      "description": "Release searches by the subtitle alone and with the credited names"
+    },
+    {
+      "file": "musicbrainz/release-search-blue-archive-title.json",
+      "description": "Release search by title only (request URL updated from limit=25 to limit=100 after recording; the body is unchanged because its 2 hits are within both limits)"
+    },
+    {
+      "file": "musicbrainz/release-search-hotel-california.json",
+      "description": "Release search: release \"Hotel California\" AND artist \"Eagles\""
+    }
+  ]
+}

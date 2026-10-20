@@ -7,6 +7,7 @@
  *   - landing actions keep account actions for everyone and management shortcuts for admins
  *   - listener routes report a clear service error when the bundle is absent
  *   - public listener capabilities follow the social and room rollout switches without authentication
+ *   - public presentation capabilities report motion previews only for the exact opt-in
  *   - listener caches only manifested assets and reserves SPA fallbacks for routes
  *   - listener telemetry accepts strict same-origin batches without requiring credentials
  *   - listener telemetry rejects cross-origin, non-JSON, unbounded, and oversized input
@@ -271,6 +272,36 @@ test('public listener capabilities follow the social and room rollout switches w
   } finally {
     restore('FINITUDE_SOCIAL_ENABLED', previous.social);
     restore('FINITUDE_ROOMS_ENABLED', previous.rooms);
+    await close(server);
+    await rm(temporaryRoot, { recursive: true, force: true });
+  }
+});
+
+test('public presentation capabilities report motion previews only for the exact opt-in', async () => {
+  const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), 'archtree-listener-presentation-'));
+  const previous = process.env.FINITUDE_MOTION_PREVIEWS_ENABLED;
+  const restore = (value: string | undefined) => {
+    if (value === undefined) delete process.env.FINITUDE_MOTION_PREVIEWS_ENABLED;
+    else process.env.FINITUDE_MOTION_PREVIEWS_ENABLED = value;
+  };
+  const { server, baseUrl } = await listen(path.join(temporaryRoot, 'missing-dist'));
+  try {
+    for (const [value, expected] of [
+      [undefined, false],
+      ['false', false],
+      ['TRUE', false],
+      [' true ', false],
+      ['true', true]
+    ] as const) {
+      restore(value);
+      const response = await fetch(`${baseUrl}/api/listener/v1/presentation-capabilities`);
+      assert.equal(response.status, 200);
+      assert.equal(response.headers.get('cache-control'), 'no-store');
+      // The Web decoder ignores additive fields, but this contract stays exactly these two.
+      assert.deepEqual(await response.json(), { contractVersion: 1, motionPreviews: expected });
+    }
+  } finally {
+    restore(previous);
     await close(server);
     await rm(temporaryRoot, { recursive: true, force: true });
   }

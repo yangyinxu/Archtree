@@ -132,7 +132,7 @@
 .dangerButton:disabled,
 .cancelButton:disabled,
 .confirmButton:disabled {
-  cursor: wait;
+  cursor: default;
   opacity: 0.62;
 }
 

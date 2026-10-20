@@ -52,6 +52,7 @@ export interface ListenerAlbumSummary {
     artistNames: string[];
     releaseDate: ListenerDate | null;
     credits?: ListenerCatalogCredit[];
+    /** Never ''; absent when no credited subject is visible, so clients fall back to artistNames. */
     displayByline?: string;
     attributionStatus?: ListenerAttributionStatus;
 }
@@ -69,6 +70,7 @@ export interface ListenerAudioTrackSummary {
     mediaType: ListenerMediaType;
     streamUrl: string;
     credits?: ListenerCatalogCredit[];
+    /** Never ''; absent when no credited subject is visible, so clients fall back to artistNames. */
     displayByline?: string;
     attributionStatus?: ListenerAttributionStatus;
 }

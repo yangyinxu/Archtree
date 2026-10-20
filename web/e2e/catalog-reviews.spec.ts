@@ -10,6 +10,7 @@
  *   Variables: locale
  * Tests
  *   - private Album covers disappear on User view or role loss and make no later private image reads
+ *   - a Luna label suggestion is only an identity hint: it is never a Review item, and Keep current rejects it without changing the label
  *   - a long direct catalog confirmation starts at the first old/new field and keeps its actions reachable at 390px
  *   - reverting catalog edits restores review and cover actions without issuing a catalog mutation
  *   - reverting an old catalog draft retains the recovery entry for a newer saved revision
@@ -28,8 +29,8 @@ import chinese from '../../localization/locales/zh-Hans.json' with { type: 'json
 import AxeBuilder from '@axe-core/playwright';
 import sharp from 'sharp';
 import { capabilities, session, viewer } from '../src/features/admin/adminFixtures.testSupport';
-import { albumId, catalogAlbum, catalogReview, reviewId, slotTwo, titleSuggestionId } from '../src/features/admin/catalogReviewFixtures.testSupport';
-import type { CatalogReview } from '../src/features/admin/catalogReviewApi';
+import { albumId, catalogAlbum, catalogReview, reviewId, slotId, slotTwo, titleSuggestionId } from '../src/features/admin/catalogReviewFixtures.testSupport';
+import type { CatalogReview, ReviewField } from '../src/features/admin/catalogReviewApi';
 import type { CatalogItem, CatalogKind } from '../src/features/admin/catalogApi';
 
 const shots = process.env.FINITUDE_CATALOG_E2E_SCREENSHOTS_DIR ?? '/tmp/finitude-first-use-fixed-20261014';
@@ -75,9 +76,9 @@ function remainingCatalogItems(kind: RemainingCatalogKind): CatalogItem[] {
     const common = { id, revision: catalogAlbum().revision, visibility, effectiveVisibility: visibility,
       coverUrl: kind === 'organization' ? null : `/api/admin/v1/catalog/${kind}/${id}/artwork`, mediaUrl: null,
       capabilities: { editing: true, visibility: true } };
-    if (kind === 'artist') return { ...common, kind, fields: { name, bio: 'Synthetic biography. 私有目录中的艺术家介绍。', birthDate: { year: 1987, month: null, day: null } } };
-    if (kind === 'organization') return { ...common, kind, fields: { name, description: 'Synthetic organization. 保存与发行录音的机构。', organizationType: 'archive' } };
-    return { ...common, kind, fields: { title: name, releaseDate: { year: 2023 + index, month: null, day: null }, credits: null, attributionStatus: 'unknown', trackNumber: index + 1 } };
+    if (kind === 'artist') return { ...common, kind, fields: { name, bio: 'Synthetic biography. 私有目录中的艺术家介绍。', birthDate: { year: 1987, month: null, day: null }, musicBrainzId: null } };
+    if (kind === 'organization') return { ...common, kind, fields: { name, description: 'Synthetic organization. 保存与发行录音的机构。', organizationType: 'archive', musicBrainzId: null } };
+    return { ...common, kind, fields: { title: name, releaseDate: { year: 2023 + index, month: null, day: null }, credits: null, attributionStatus: 'unknown', discNumber: null, trackNumber: index + 1 } };
   });
 }
 
@@ -184,6 +185,11 @@ async function setup(page: Page, administrator = true, initialReleaseDate: { yea
         review = { ...review, revision: review.revision + 1, analysis: { ...review.analysis, state: 'queued', generation: 1, operationId: body.operationId } };
         return route.fulfill({ status: 202, json: receipt(body, 'analyze'), headers });
       }
+      if (path.endsWith('/adopt') && !(body.selectedIds as string[]).length) {
+        // Keep current rejects the listed suggestions and changes no value.
+        review = { ...review, revision: review.revision + 1, suggestions: review.suggestions.map(value => (body.rejectIds as string[]).includes(value.id) ? { ...value, decision: 'rejected' } : value) };
+        return route.fulfill({ json: receipt(body, 'adopt'), headers });
+      }
       if (path.endsWith('/adopt')) {
         expect(body.selectedIds).toEqual([titleSuggestionId]); expect(body.rejectIds).toEqual([]);
         const selected = review.suggestions.find(value => value.id === titleSuggestionId)!;
@@ -192,12 +198,17 @@ async function setup(page: Page, administrator = true, initialReleaseDate: { yea
         return route.fulfill({ json: receipt(body, 'adopt'), headers });
       }
       expect(path.endsWith('/apply')).toBe(true);
-      expect(body.fields).toEqual([{ scope: 'album', slotId: null, field: 'title' }]);
+      // Each test asserts its own selected fields through api.writes; only a selected Album title changes the mocked Album.
       expect(review.sourceStatus).toBe('current');
-      album = { ...album, revision: `cr_${'c'.repeat(43)}`, fields: { ...album.fields, title: review.draft.album.title } };
+      const fields = body.fields as ReviewField[];
+      album = { ...album, revision: `cr_${'c'.repeat(43)}`, fields: { ...album.fields, ...(fields.some(value => value.scope === 'album' && value.field === 'title') ? { title: review.draft.album.title } : {}) } };
       review = { ...review, revision: review.revision + 1, state: 'applied', capabilities: { analysis: false, apply: false },
         applied: { operationId: body.operationId, at: '2026-10-14T00:00:00.000Z', fields: body.fields } };
       return route.fulfill({ json: receipt(body, 'apply'), headers });
+    }
+    if (method === 'GET' && /^\/api\/admin\/v1\/catalog\/audioTrack\/[0-9a-f]{24}\/motion-preview$/.test(path)) {
+      // Motion previews default off, so the editor's preview panel renders nothing.
+      return route.fulfill({ status: 404, json: { code: 'ADMIN_MOTION_PREVIEW_DISABLED' }, headers });
     }
     throw new Error(`Unexpected synthetic administrator request: ${method} ${path}`);
   });
@@ -638,6 +649,7 @@ for (const variant of localizedViewports) {
     await capture(page, '09-apply-confirmation', width, false); await reflow(page);
     await application.getByRole('button', { name: label('admin.catalog_review.apply_action', { count: 1 }) }).click();
     await expect(page.getByRole('heading', { name: label('admin.catalog_review.applied') })).toBeVisible();
+    expect(api.writes.filter(value => value.path.endsWith('/apply')).map(value => value.body.fields)).toEqual([[{ scope: 'album', slotId: null, field: 'title' }]]);
     expect(api.album().id).toBe(albumId); expect(api.album().fields.title).toBe('Reviewed synthetic Album');
     expect(api.review().source.tracks.find(value => value.slotId === slotTwo)?.trackNumber).toBeNull();
     expect(api.writes.some(value => /\/imports|\/publish|\/assets\//.test(value.path))).toBe(false);
@@ -672,10 +684,10 @@ for (const width of [1280, 390]) {
     item.source.tracks = Array.from({ length: 100 }, (_, index) => ({
       slotId: `10000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`,
       id: (index + 1).toString(16).padStart(24, '0'), revision: item.source.album.revision,
-      title: `Synthetic track ${index + 1}`, trackNumber: index + 1,
+      title: `Synthetic track ${index + 1}`, discNumber: null, trackNumber: index + 1,
       originalFileName: `${String(index + 1).padStart(2, '0')} Synthetic.mp3`
     }));
-    item.draft.tracks = item.source.tracks.map(({ slotId, title, trackNumber }) => ({ slotId, title, trackNumber }));
+    item.draft.tracks = item.source.tracks.map(({ slotId, title, trackNumber }) => ({ slotId, title, discNumber: null, trackNumber }));
     item.analysis = { ...item.analysis, state: 'idle', generation: 0, operationId: null, completedChunks: 0, totalChunks: 0, attemptsUsed: 0 };
     item.suggestions = [];
     await enter(page, `/finitude/admin/catalog-reviews/${reviewId}`);
@@ -688,6 +700,53 @@ for (const width of [1280, 390]) {
     expect((await start.boundingBox())!.y).toBeLessThan((await firstTrack.boundingBox())!.y);
     await reflow(page);
     expect(api.writes).toEqual([]);
+  });
+}
+
+for (const width of [320, 768, 1440]) {
+  test(`read-only Credits and label context stay readable while a captured Disc Number is edited and applied at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: width === 1440 ? 900 : 844 });
+    const api = await setup(page); api.ready();
+    const item = api.review(), guest = 'Synthetic guest — 夜间录音与海岸回声 / a long credited name for careful administration';
+    item.draft.album.artists = [{ key: '50000000-0000-4000-8000-000000000001', name: 'Synthetic catalog Artist', role: 'primary', joinPhrase: ' feat. ', musicBrainzId: null },
+      { key: '50000000-0000-4000-8000-000000000002', name: guest, role: 'featured', joinPhrase: null, musicBrainzId: null }];
+    item.draft.album.label = { name: 'Synthetic Label', musicBrainzId: null };
+    const context = structuredClone(item.draft.album);
+    await enter(page, `/finitude/admin/catalog-reviews/${reviewId}`);
+    const artist = page.getByRole('textbox', { name: label('admin.field.artist_name'), exact: true });
+    await expect(artist).toHaveValue(`Synthetic catalog Artist feat. ${guest}`); await expect(artist).toHaveAttribute('readonly', '');
+    await expect(page.getByRole('list', { name: label('admin.catalog.credits'), exact: true }).getByRole('listitem')).toHaveText([
+      `Synthetic catalog Artist · ${label('catalog.credit.primary')} · ${label('admin.catalog.join_phrase_value', { phrase: ' feat. ' })}`, `${guest} · ${label('catalog.credit.featured')}`]);
+    const labelField = page.getByRole('textbox', { name: label('admin.organization.label'), exact: true });
+    await expect(labelField).toHaveValue('Synthetic Label'); await expect(labelField).toHaveAttribute('readonly', '');
+    await expect(page.getByRole('combobox', { name: label('admin.field.visibility'), exact: true })).toBeDisabled();
+    await page.getByRole('spinbutton', { name: `1 · ${label('admin.field.disc_number')}`, exact: true }).fill('2');
+    await page.getByRole('button', { name: label('admin.catalog_review.save_draft'), exact: true }).click();
+    await expect(page.getByText(label('admin.catalog_review.draft_saved'), { exact: true })).toBeVisible();
+    // The save is the whole Draft v2 with the read-only context unchanged.
+    const saved = api.writes.filter(value => value.method === 'PATCH').map(value => value.body.draft as CatalogReview['draft']);
+    expect(saved).toHaveLength(1);
+    expect({ artists: saved[0].album.artists, label: saved[0].album.label, visibility: saved[0].album.visibility }).toEqual({ artists: context.artists, label: context.label, visibility: context.visibility });
+    expect(saved[0].tracks.map(track => track.discNumber)).toEqual([2, null]);
+    await capture(page, '25-review-credits-context', width); await reflow(page);
+    await page.getByRole('tab', { name: label('admin.catalog_review.apply_tab') }).click();
+    const discChange = label('admin.catalog_review.select_field', { type: label('admin.catalog_review.target_track'), target: 'Synthetic first track', field: label('admin.field.disc_number') });
+    await page.getByRole('checkbox', { name: discChange, exact: true }).check();
+    await reflow(page);
+    await page.getByRole('button', { name: label('admin.catalog_review.apply_action', { count: 1 }) }).click();
+    const application = page.getByRole('dialog', { name: label('admin.catalog_review.apply_confirm') });
+    const summary = application.getByRole('heading', { name: discChange, exact: true }).locator('..');
+    await expect(summary.getByText(label('admin.catalog_review.original_value'), { exact: true })).toBeVisible();
+    await expect(summary.getByText(label('admin.catalog_review.saved_value'), { exact: true })).toBeVisible();
+    await expect(summary.getByText('—', { exact: true })).toBeVisible();
+    await expect(summary.getByText('2', { exact: true })).toBeVisible();
+    expect(api.writes.filter(value => value.path.endsWith('/apply'))).toHaveLength(0);
+    await capture(page, '26-disc-apply-confirmation', width, false); await reflow(page);
+    await application.getByRole('button', { name: label('admin.catalog_review.apply_action', { count: 1 }) }).click();
+    await expect(page.getByRole('heading', { name: label('admin.catalog_review.applied') })).toBeVisible();
+    expect(api.writes.filter(value => value.path.endsWith('/apply')).map(value => value.body.fields)).toEqual([[{ scope: 'track', slotId, field: 'discNumber' }]]);
+    expect(api.album().fields.title).toBe('Synthetic catalog Album');
+    await reflow(page);
   });
 }
 
@@ -775,6 +834,25 @@ for (const variant of localizedViewports) {
     } });
   });
 }
+
+test('a Luna label suggestion is only an identity hint: it is never a Review item, and Keep current rejects it without changing the label', async ({ page }) => {
+  const api = await setup(page); api.ready();
+  const item = api.review(), [title] = item.suggestions;
+  item.draft.album.label = { name: 'Synthetic Label', musicBrainzId: null };
+  const hint = { ...title, id: '6'.repeat(24), field: 'label' as const, baseline: { name: 'Synthetic Label', musicBrainzId: null }, value: { name: 'Synthetic label hint', musicBrainzId: null } };
+  item.suggestions = [hint];
+  await enter(page, `/finitude/admin/catalog-reviews/${reviewId}`);
+  await page.getByRole('tab', { name: label('admin.catalog_review.review_tab') }).click();
+  const panel = page.getByRole('tabpanel', { name: label('admin.catalog_review.review_tab') });
+  await expect(panel.getByRole('heading', { name: label('admin.catalog_review.hints_title'), exact: true })).toBeVisible();
+  await expect(panel.getByText('Synthetic label hint', { exact: true })).toBeVisible();
+  await expect(panel.getByRole('checkbox')).toHaveCount(0);
+  expect((await new AxeBuilder({ page }).include('[role=tabpanel]:not([hidden])').analyze()).violations).toEqual([]);
+  await panel.getByRole('button', { name: label('admin.action.keep'), exact: true }).click();
+  await expect.poll(() => api.writes.filter(write => write.path.endsWith('/adopt')).map(write => [write.body.selectedIds, write.body.rejectIds])).toEqual([[[], [hint.id]]]);
+  await expect(panel.getByRole('button', { name: label('admin.action.keep'), exact: true })).toHaveCount(0);
+  expect(api.review().draft.album.label).toEqual({ name: 'Synthetic Label', musicBrainzId: null });
+});
 
 test('a long direct catalog confirmation starts at the first old/new field and keeps its actions reachable at 390px', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });

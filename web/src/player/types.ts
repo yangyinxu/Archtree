@@ -4,10 +4,19 @@
  *          PlayerPlaybackErrorStage, PlayerPlaybackErrorEvent, PlayerSnapshot, PlayerLaunchOptions,
  *          PlayerAudio, PlayerMediaSessionAction, PlayerMediaSessionActionDetails, PlayerMediaSession,
  *          CreatePlayerStoreOptions, PlayerPlaybackEvent, PlayerStore
+ *   Classes: RoomPlaybackActiveError
  * @end-catalog */
 
 import type { MediaSessionArtworkSource } from '../artwork/artworkUrls';
 import type { createRoomPlaybackController, RoomPlaybackAttachment, RoomPlaybackOptions, RoomPlaybackState } from './roomPlayback';
+
+/** Refuses a local queue launch while an attached room owns the shared player. */
+export class RoomPlaybackActiveError extends Error {
+  constructor() {
+    super('Leave room playback before launching a local queue.');
+    this.name = 'RoomPlaybackActiveError';
+  }
+}
 
 /** Canonical metadata retained for every item in the one shared playback queue. */
 export interface PlayerQueueItem {

@@ -1,0 +1,1054 @@
+{
+  "source": "musicbrainz",
+  "synthetic": true,
+  "description": "Derived and illustrative: the release search \"Hotel California\" by \"Eagles\" at the run's 100-release page, which was never recorded (live it reports 83 hits). It holds the recorded first page of release-search-hotel-california.json (25 releases, 19 with nine tracks) followed by the 2013 digital edition fa7d3357, a nine-track edition of the same release group (browse-release-group-836f349a.json) that page leaves out; count 26 makes the page complete. Request counts derived from it are illustrative",
+  "exchanges": [
+    {
+      "url": "https://musicbrainz.org/ws/2/release?query=release%3A%22Hotel+California%22+AND+artist%3A%22Eagles%22&fmt=json&limit=100",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json"
+      },
+      "body": {
+        "count": 26,
+        "offset": 0,
+        "releases": [
+          {
+            "id": "bb82e6d7-bdd9-427b-8fc1-d3bb49e0c1db",
+            "title": "Hotel California",
+            "status": "Official",
+            "artist-credit": [
+              {
+                "name": "Eagles",
+                "artist": {
+                  "id": "f46bd570-5768-462e-b84c-c7c993bbf47e",
+                  "name": "Eagles"
+                }
+              }
+            ],
+            "release-group": {
+              "id": "836f349a-0434-3e8b-a0bc-261f77a9f99c",
+              "primary-type": "Album"
+            },
+            "date": "2017-11-24",
+            "country": "XE",
+            "barcode": "081227933234",
+            "label-info": [
+              {
+                "catalog-number": "081227933234",
+                "label": {
+                  "id": "a8bea33e-67af-424a-a734-898e2dc437ed",
+                  "name": "Asylum Records"
+                }
+              }
+            ],
+            "score": 100,
+            "track-count": 19,
+            "media": [
+              {
+                "format": "CD",
+                "track-count": 9
+              },
+              {
+                "format": "CD",
+                "track-count": 10
+              }
+            ]
+          },
+          {
+            "id": "1c0f39f3-b90a-4832-9bad-4d84dbf12fef",
+            "title": "Hotel California",
+            "status": "Official",
+            "artist-credit": [
+              {
+                "name": "Eagles",
+                "artist": {
+                  "id": "f46bd570-5768-462e-b84c-c7c993bbf47e",
+                  "name": "Eagles"
+                }
+              }
+            ],
+            "release-group": {
+              "id": "836f349a-0434-3e8b-a0bc-261f77a9f99c",
+              "primary-type": "Album"
+            },
+            "date": "2017-11-24",
+            "country": "XW",
+            "barcode": "603497862542",
+            "label-info": [
+              {
+                "label": {
+                  "id": "a8bea33e-67af-424a-a734-898e2dc437ed",
+                  "name": "Asylum Records"
+                }
+              },
+              {
+                "label": {
+                  "id": "873f9f75-af68-4872-98e2-431058e4c9a9",
+                  "name": "Elektra"
+                }
+              }
+            ],
+            "score": 100,
+            "track-count": 19,
+            "media": [
+              {
+                "format": "Digital Media",
+                "track-count": 9
+              },
+              {
+                "format": "Digital Media",
+                "track-count": 10
+              }
+            ]
+          },
+          {
+            "id": "24ae881f-7cb3-4c43-b80e-70332cd7c50d",
+            "title": "Hotel California",
+            "status": "Official",
+            "artist-credit": [
+              {
+                "name": "Eagles",
+                "artist": {
+                  "id": "f46bd570-5768-462e-b84c-c7c993bbf47e",
+                  "name": "Eagles"
+                }
+              }
+            ],
+            "release-group": {
+              "id": "836f349a-0434-3e8b-a0bc-261f77a9f99c",
+              "primary-type": "Album"
+            },
+            "date": "",
+            "country": "FR",
+            "barcode": "075596050920",
+            "label-info": [
+              {
+                "catalog-number": "7559-60509-2",
+                "label": {
+                  "id": "a8bea33e-67af-424a-a734-898e2dc437ed",
+                  "name": "Asylum Records"
+                }
+              }
+            ],
+            "score": 100,
+            "track-count": 9,
+            "media": [
+              {
+                "format": "CD",
+                "track-count": 9
+              }
+            ]
+          },
+          {
+            "id": "0a9833a9-9980-42d5-8b24-bfb4068ecb10",
+            "title": "Hotel California",
+            "status": "Official",
+            "artist-credit": [
+              {
+                "name": "Eagles",
+                "artist": {
+                  "id": "f46bd570-5768-462e-b84c-c7c993bbf47e",
+                  "name": "Eagles"
+                }
+              }
+            ],
+            "release-group": {
+              "id": "836f349a-0434-3e8b-a0bc-261f77a9f99c",
+              "primary-type": "Album"
+            },
+            "date": "1990",
+            "country": "CA",
+            "barcode": "77749541441302",
+            "label-info": [
+              {
+                "catalog-number": "E2 103",
+                "label": {
+                  "id": "873f9f75-af68-4872-98e2-431058e4c9a9",
+                  "name": "Elektra"
+                }
+              }
+            ],
+            "score": 100,
+            "track-count": 9,
+            "media": [
+              {
+                "format": "CD",
+                "track-count": 9
+              }
+            ]
+          },
+          {
+            "id": "b42f7f38-22da-4aae-9ae6-3e0f9752f4c4",
+            "title": "Hotel California",
+            "status": "Official",
+            "artist-credit": [
+              {
+                "name": "Eagles",
+                "artist": {
+                  "id": "f46bd570-5768-462e-b84c-c7c993bbf47e",
+                  "name": "Eagles"
+                }
+              }
+            ],
+            "release-group": {
+              "id": "836f349a-0434-3e8b-a0bc-261f77a9f99c",
+              "primary-type": "Album"
+            },
+            "date": "2011-08-17",
+            "country": "JP",
+            "barcode": "4943674108961",
+            "label-info": [
+              {
+                "catalog-number": "WPCR-14165",
+                "label": {
+                  "id": "873f9f75-af68-4872-98e2-431058e4c9a9",
+                  "name": "Elektra"
+                }
+              }
+            ],
+            "score": 100,
+            "track-count": 27,
+            "media": [
+              {
+                "format": "Hybrid SACD (CD layer)",
+                "track-count": 9
+              },
+              {
+                "format": "Hybrid SACD (SACD layer, 2 channels)",
+                "track-count": 9
+              },
+              {
+                "format": "Hybrid SACD (SACD layer, multichannel)",
+                "track-count": 9
+              }
+            ]
+          },
+          {
+            "id": "e38dc685-45a2-3350-8901-64ec9941e652",
+            "title": "Hotel California",
+            "status": "Official",
+            "artist-credit": [
+              {
+                "name": "Eagles",
+                "artist": {
+                  "id": "f46bd570-5768-462e-b84c-c7c993bbf47e",
+                  "name": "Eagles"
+                }
+              }
+            ],
+            "release-group": {
+              "id": "836f349a-0434-3e8b-a0bc-261f77a9f99c",
+              "primary-type": "Album"
+            },
+            "date": "1992",
+            "country": "US",
+            "barcode": "010963204315",
+            "label-info": [
+              {
+                "catalog-number": "LPZ-2043",
+                "label": {
+                  "id": "b1fe170d-0ac1-4d7a-b7e3-318c2426d5c4",
+                  "name": "DCC Compact Classics"
+                }
+              }
+            ],
+            "score": 100,
+            "track-count": 9,
+            "media": [
+              {
+                "format": "12\" Vinyl",
+                "track-count": 9
+              }
+            ]
+          },
+          {
+            "id": "bef9ebe8-8210-4f54-b1e1-d99009c92f92",
+            "title": "Hotel California",
+            "status": "Official",
+            "artist-credit": [
+              {
+                "name": "Eagles",
+                "artist": {
+                  "id": "f46bd570-5768-462e-b84c-c7c993bbf47e",
+                  "name": "Eagles"
+                }
+              }
+            ],
+            "release-group": {
+              "id": "836f349a-0434-3e8b-a0bc-261f77a9f99c",
+              "primary-type": "Album"
+            },
+            "date": "1984-01",
+            "country": "US",
+            "label-info": [
+              {
+                "catalog-number": "MFSL 1-126",
+                "label": {
+                  "id": "edd54e2f-2eef-46b1-a9b5-bedfe5ed33be",
+                  "name": "Mobile Fidelity Sound Lab"
+                }
+              }
+            ],
+            "score": 100,
+            "track-count": 9,
+            "media": [
+              {
+                "format": "12\" Vinyl",
+                "track-count": 9
+              }
+            ]
+          },
+          {
+            "id": "0ea3b00b-a9a3-46e1-b1e2-f1e7697e8878",
+            "title": "Hotel California",
+            "status": "Bootleg",
+            "artist-credit": [
+              {
+                "name": "Eagles",
+                "artist": {
+                  "id": "f46bd570-5768-462e-b84c-c7c993bbf47e",
+                  "name": "Eagles"
+                }
+              }
+            ],
+            "release-group": {
+              "id": "836f349a-0434-3e8b-a0bc-261f77a9f99c",
+              "primary-type": "Album"
+            },
+            "date": "",
+            "country": "RU",
+            "label-info": [
+              {
+                "catalog-number": "K22A - B",
+                "label": {
+                  "id": "157afde4-4bf5-4039-8ad2-5a15acc85176",
+                  "name": "[no label]"
+                }
+              }
+            ],
+            "score": 100,
+            "track-count": 9,
+            "media": [
+              {
+                "format": "12\" Vinyl",
+                "track-count": 9
+              }
+            ]
+          },
+          {
+            "id": "f72b3971-4c8e-4ff8-8fac-5fcc05a5e62a",
+            "title": "Hotel California",
+            "status": "Bootleg",
+            "artist-credit": [
+              {
+                "name": "Eagles",
+                "artist": {
+                  "id": "f46bd570-5768-462e-b84c-c7c993bbf47e",
+                  "name": "Eagles"
+                }
+              }
+            ],
+            "release-group": {
+              "id": "91bf707c-6c33-4efd-83ca-e4c88f14bcaa",
+              "primary-type": "Album",
+              "secondary-types": [
+                "Live"
+              ]
+            },
+            "date": "1992",
+            "country": "DE",
+            "barcode": "8004883020195",
+            "label-info": [
+              {
+                "catalog-number": "CD 12019",
+                "label": {
+                  "id": "0c22125d-7ed0-4c15-9d75-fffba7b8f8e4",
+                  "name": "On Stage"
+                }
+              }
+            ],
+            "score": 100,
+            "track-count": 12,
+            "media": [
+              {
+                "format": "CD",
+                "track-count": 12
+              }
+            ]
+          },
+          {
+            "id": "ebd981c7-a2ab-48e4-a9b7-79533fa31769",
+            "title": "Hotel California",
+            "status": "Official",
+            "artist-credit": [
+              {
+                "name": "Eagles",
+                "artist": {
+                  "id": "f46bd570-5768-462e-b84c-c7c993bbf47e",
+                  "name": "Eagles"
+                }
+              }
+            ],
+            "release-group": {
+              "id": "836f349a-0434-3e8b-a0bc-261f77a9f99c",
+              "primary-type": "Album"
+            },
+            "date": "1990",
+            "country": "CA",
+            "barcode": "075596050920",
+            "label-info": [
+              {
+                "catalog-number": "E2-103",
+                "label": {
+                  "id": "a8bea33e-67af-424a-a734-898e2dc437ed",
+                  "name": "Asylum Records"
+                }
+              },
+              {
+                "catalog-number": "E2-103",
+                "label": {
+                  "id": "873f9f75-af68-4872-98e2-431058e4c9a9",
+                  "name": "Elektra"
+                }
+              }
+            ],
+            "score": 100,
+            "track-count": 9,
+            "media": [
+              {
+                "format": "CD",
+                "track-count": 9
+              }
+            ]
+          },
+          {
+            "id": "7b73e57c-35a0-4f3d-85d4-6e139d87c0c6",
+            "title": "Hotel California",
+            "status": "Official",
+            "artist-credit": [
+              {
+                "name": "Eagles",
+                "artist": {
+                  "id": "f46bd570-5768-462e-b84c-c7c993bbf47e",
+                  "name": "Eagles"
+                }
+              }
+            ],
+            "release-group": {
+              "id": "836f349a-0434-3e8b-a0bc-261f77a9f99c",
+              "primary-type": "Album"
+            },
+            "date": "",
+            "country": "DE",
+            "barcode": "075596050920",
+            "label-info": [
+              {
+                "catalog-number": "7559-60509-2",
+                "label": {
+                  "id": "a8bea33e-67af-424a-a734-898e2dc437ed",
+                  "name": "Asylum Records"
+                }
+              },
+              {
+                "catalog-number": "253 051",
+                "label": {
+                  "id": "a8bea33e-67af-424a-a734-898e2dc437ed",
+                  "name": "Asylum Records"
+                }
+              }
+            ],
+            "score": 100,
+            "track-count": 9,
+            "media": [
+              {
+                "format": "CD",
+                "track-count": 9
+              }
+            ]
+          },
+          {
+            "id": "cb961c6b-b51e-45de-9633-fa9a5d33f5cf",
+            "title": "Hotel California",
+            "status": "Official",
+            "artist-credit": [
+              {
+                "name": "Eagles",
+                "artist": {
+                  "id": "f46bd570-5768-462e-b84c-c7c993bbf47e",
+                  "name": "Eagles"
+                }
+              }
+            ],
+            "release-group": {
+              "id": "836f349a-0434-3e8b-a0bc-261f77a9f99c",
+              "primary-type": "Album"
+            },
+            "date": "1984",
+            "country": "US",
+            "barcode": "",
+            "label-info": [
+              {
+                "catalog-number": "103-2",
+                "label": {
+                  "id": "a8bea33e-67af-424a-a734-898e2dc437ed",
+                  "name": "Asylum Records"
+                }
+              },
+              {
+                "catalog-number": "253 051",
+                "label": {
+                  "id": "a8bea33e-67af-424a-a734-898e2dc437ed",
+                  "name": "Asylum Records"
+                }
+              }
+            ],
+            "score": 100,
+            "track-count": 9,
+            "media": [
+              {
+                "format": "CD",
+                "track-count": 9
+              }
+            ]
+          },
+          {
+            "id": "4671ab19-6e97-4d1b-a1ac-d12667645b72",
+            "title": "Hotel California",
+            "status": "Official",
+            "artist-credit": [
+              {
+                "name": "Eagles",
+                "artist": {
+                  "id": "f46bd570-5768-462e-b84c-c7c993bbf47e",
+                  "name": "Eagles"
+                }
+              }
+            ],
+            "release-group": {
+              "id": "836f349a-0434-3e8b-a0bc-261f77a9f99c",
+              "primary-type": "Album"
+            },
+            "date": "1976-12",
+            "country": "JP",
+            "barcode": "",
+            "label-info": [
+              {
+                "catalog-number": "P-10221Y",
+                "label": {
+                  "id": "a8bea33e-67af-424a-a734-898e2dc437ed",
+                  "name": "Asylum Records"
+                }
+              }
+            ],
+            "score": 100,
+            "track-count": 9,
+            "media": [
+              {
+                "format": "12\" Vinyl",
+                "track-count": 9
+              }
+            ]
+          },
+          {
+            "id": "3f223a88-a852-3b83-9130-b4365cc1b036",
+            "title": "Hotel California",
+            "status": "Official",
+            "artist-credit": [
+              {
+                "name": "Eagles",
+                "artist": {
+                  "id": "f46bd570-5768-462e-b84c-c7c993bbf47e",
+                  "name": "Eagles"
+                }
+              }
+            ],
+            "release-group": {
+              "id": "836f349a-0434-3e8b-a0bc-261f77a9f99c",
+              "primary-type": "Album"
+            },
+            "date": "1984",
+            "country": "GB",
+            "barcode": "075596050920",
+            "label-info": [
+              {
+                "catalog-number": "7559-60509-2",
+                "label": {
+                  "id": "a8bea33e-67af-424a-a734-898e2dc437ed",
+                  "name": "Asylum Records"
+                }
+              }
+            ],
+            "score": 100,
+            "track-count": 9,
+            "media": [
+              {
+                "format": "CD",
+                "track-count": 9
+              }
+            ]
+          },
+          {
+            "id": "304a548c-85a2-3926-8379-cdbfdf891a12",
+            "title": "Hotel California",
+            "status": "Official",
+            "artist-credit": [
+              {
+                "name": "Eagles",
+                "artist": {
+                  "id": "f46bd570-5768-462e-b84c-c7c993bbf47e",
+                  "name": "Eagles"
+                }
+              }
+            ],
+            "release-group": {
+              "id": "836f349a-0434-3e8b-a0bc-261f77a9f99c",
+              "primary-type": "Album"
+            },
+            "date": "1999",
+            "country": "US",
+            "barcode": "075596050920",
+            "label-info": [
+              {
+                "catalog-number": "103-2",
+                "label": {
+                  "id": "a8bea33e-67af-424a-a734-898e2dc437ed",
+                  "name": "Asylum Records"
+                }
+              }
+            ],
+            "score": 100,
+            "track-count": 9,
+            "media": [
+              {
+                "format": "CD",
+                "track-count": 9
+              }
+            ]
+          },
+          {
+            "id": "83afdb26-9c27-4ec6-ad70-25b8cb897a31",
+            "title": "Hotel California",
+            "status": "Official",
+            "artist-credit": [
+              {
+                "name": "Eagles",
+                "artist": {
+                  "id": "f46bd570-5768-462e-b84c-c7c993bbf47e",
+                  "name": "Eagles"
+                }
+              }
+            ],
+            "release-group": {
+              "id": "836f349a-0434-3e8b-a0bc-261f77a9f99c",
+              "primary-type": "Album"
+            },
+            "date": "2007-12-04",
+            "country": "US",
+            "barcode": "081227994167",
+            "label-info": [
+              {
+                "catalog-number": "R2 401212",
+                "label": {
+                  "id": "a8bea33e-67af-424a-a734-898e2dc437ed",
+                  "name": "Asylum Records"
+                }
+              }
+            ],
+            "score": 100,
+            "track-count": 9,
+            "media": [
+              {
+                "format": "CD",
+                "track-count": 9
+              }
+            ]
+          },
+          {
+            "id": "b799c5e3-188d-40e1-9599-94ca73365aee",
+            "title": "Hotel California",
+            "status": "Official",
+            "artist-credit": [
+              {
+                "name": "Eagles",
+                "artist": {
+                  "id": "f46bd570-5768-462e-b84c-c7c993bbf47e",
+                  "name": "Eagles"
+                }
+              }
+            ],
+            "release-group": {
+              "id": "836f349a-0434-3e8b-a0bc-261f77a9f99c",
+              "primary-type": "Album"
+            },
+            "date": "2008-12-17",
+            "country": "JP",
+            "barcode": "4943674085361",
+            "label-info": [
+              {
+                "catalog-number": "WPCR-13236",
+                "label": {
+                  "id": "a8bea33e-67af-424a-a734-898e2dc437ed",
+                  "name": "Asylum Records"
+                }
+              }
+            ],
+            "score": 100,
+            "track-count": 9,
+            "media": [
+              {
+                "format": "SHM-CD",
+                "track-count": 9
+              }
+            ]
+          },
+          {
+            "id": "4c4c8ab2-c0e3-3b89-bf49-ead5e45dff08",
+            "title": "Hotel California",
+            "status": "Official",
+            "artist-credit": [
+              {
+                "name": "Eagles",
+                "artist": {
+                  "id": "f46bd570-5768-462e-b84c-c7c993bbf47e",
+                  "name": "Eagles"
+                }
+              }
+            ],
+            "release-group": {
+              "id": "836f349a-0434-3e8b-a0bc-261f77a9f99c",
+              "primary-type": "Album"
+            },
+            "date": "1999",
+            "country": "CA",
+            "barcode": "075596050951",
+            "label-info": [
+              {
+                "catalog-number": "CD 60509",
+                "label": {
+                  "id": "873f9f75-af68-4872-98e2-431058e4c9a9",
+                  "name": "Elektra"
+                }
+              }
+            ],
+            "score": 100,
+            "track-count": 9,
+            "media": [
+              {
+                "format": "CD",
+                "track-count": 9
+              }
+            ]
+          },
+          {
+            "id": "1e166986-2adc-4c63-86d3-f22146cf7ce2",
+            "title": "Hotel California",
+            "status": "Promotion",
+            "artist-credit": [
+              {
+                "name": "Eagles",
+                "artist": {
+                  "id": "f46bd570-5768-462e-b84c-c7c993bbf47e",
+                  "name": "Eagles"
+                }
+              }
+            ],
+            "release-group": {
+              "id": "77075d90-12a9-3414-9daf-32ed15a8e318",
+              "primary-type": "Single",
+              "secondary-types": [
+                "Live"
+              ]
+            },
+            "score": 100,
+            "track-count": 1,
+            "media": [
+              {
+                "track-count": 1
+              }
+            ]
+          },
+          {
+            "id": "519c3c07-d951-3482-9c27-b0eb6a59d3d9",
+            "title": "Hotel California",
+            "status": "Official",
+            "artist-credit": [
+              {
+                "name": "Eagles",
+                "artist": {
+                  "id": "f46bd570-5768-462e-b84c-c7c993bbf47e",
+                  "name": "Eagles"
+                }
+              }
+            ],
+            "release-group": {
+              "id": "836f349a-0434-3e8b-a0bc-261f77a9f99c",
+              "primary-type": "Album"
+            },
+            "date": "1989-09-21",
+            "country": "NL",
+            "barcode": "0075596050920",
+            "label-info": [
+              {
+                "label": {
+                  "id": "c595c289-47ce-4fba-b999-b87503e8cb71",
+                  "name": "Warner Bros. Records"
+                }
+              }
+            ],
+            "score": 100,
+            "track-count": 9,
+            "media": [
+              {
+                "format": "CD",
+                "track-count": 9
+              }
+            ]
+          },
+          {
+            "id": "1d472dd6-32cc-3f0a-96b0-4448233dd4df",
+            "title": "Hotel California",
+            "status": "Official",
+            "artist-credit": [
+              {
+                "name": "Eagles",
+                "artist": {
+                  "id": "f46bd570-5768-462e-b84c-c7c993bbf47e",
+                  "name": "Eagles"
+                }
+              }
+            ],
+            "release-group": {
+              "id": "836f349a-0434-3e8b-a0bc-261f77a9f99c",
+              "primary-type": "Album"
+            },
+            "date": "1976-12",
+            "country": "GB",
+            "label-info": [
+              {
+                "catalog-number": "K53051",
+                "label": {
+                  "id": "a8bea33e-67af-424a-a734-898e2dc437ed",
+                  "name": "Asylum Records"
+                }
+              }
+            ],
+            "score": 100,
+            "track-count": 9,
+            "media": [
+              {
+                "format": "12\" Vinyl",
+                "track-count": 9
+              }
+            ]
+          },
+          {
+            "id": "14a2a203-c6d9-4ca7-ad1d-c5a7b94e3124",
+            "title": "Hotel California",
+            "status": "Official",
+            "artist-credit": [
+              {
+                "name": "Eagles",
+                "artist": {
+                  "id": "f46bd570-5768-462e-b84c-c7c993bbf47e",
+                  "name": "Eagles"
+                }
+              }
+            ],
+            "release-group": {
+              "id": "836f349a-0434-3e8b-a0bc-261f77a9f99c",
+              "primary-type": "Album"
+            },
+            "date": "2001-12-11",
+            "country": "US",
+            "barcode": "075596050999",
+            "label-info": [
+              {
+                "catalog-number": "60509-9",
+                "label": {
+                  "id": "873f9f75-af68-4872-98e2-431058e4c9a9",
+                  "name": "Elektra"
+                }
+              }
+            ],
+            "score": 100,
+            "track-count": 18,
+            "media": [
+              {
+                "format": "DVD-Audio",
+                "track-count": 18
+              }
+            ]
+          },
+          {
+            "id": "56259778-a08c-4815-ad4f-b3aa943b6512",
+            "title": "Hotel California",
+            "status": "Official",
+            "artist-credit": [
+              {
+                "name": "Eagles",
+                "artist": {
+                  "id": "f46bd570-5768-462e-b84c-c7c993bbf47e",
+                  "name": "Eagles"
+                }
+              }
+            ],
+            "release-group": {
+              "id": "836f349a-0434-3e8b-a0bc-261f77a9f99c",
+              "primary-type": "Album"
+            },
+            "date": "2006-05-01",
+            "country": "GB",
+            "barcode": "081227016326",
+            "label-info": [
+              {
+                "catalog-number": "8122701632",
+                "label": {
+                  "id": "a8bea33e-67af-424a-a734-898e2dc437ed",
+                  "name": "Asylum Records"
+                }
+              }
+            ],
+            "score": 100,
+            "track-count": 9,
+            "media": [
+              {
+                "format": "CD",
+                "track-count": 9
+              }
+            ]
+          },
+          {
+            "id": "548df779-4817-46e8-84ba-f2cf31855a21",
+            "title": "Hotel California",
+            "status": "Official",
+            "artist-credit": [
+              {
+                "name": "Eagles",
+                "artist": {
+                  "id": "f46bd570-5768-462e-b84c-c7c993bbf47e",
+                  "name": "Eagles"
+                }
+              }
+            ],
+            "release-group": {
+              "id": "836f349a-0434-3e8b-a0bc-261f77a9f99c",
+              "primary-type": "Album"
+            },
+            "date": "1984",
+            "country": "US",
+            "barcode": "",
+            "label-info": [
+              {
+                "catalog-number": "103-2",
+                "label": {
+                  "id": "a8bea33e-67af-424a-a734-898e2dc437ed",
+                  "name": "Asylum Records"
+                }
+              },
+              {
+                "catalog-number": "253 051",
+                "label": {
+                  "id": "a8bea33e-67af-424a-a734-898e2dc437ed",
+                  "name": "Asylum Records"
+                }
+              }
+            ],
+            "score": 100,
+            "track-count": 9,
+            "media": [
+              {
+                "format": "CD",
+                "track-count": 9
+              }
+            ]
+          },
+          {
+            "id": "54614efa-5eb9-41eb-a9f1-65ad06098d9b",
+            "title": "Hotel California",
+            "status": "Official",
+            "artist-credit": [
+              {
+                "name": "Eagles",
+                "artist": {
+                  "id": "f46bd570-5768-462e-b84c-c7c993bbf47e",
+                  "name": "Eagles"
+                }
+              }
+            ],
+            "release-group": {
+              "id": "836f349a-0434-3e8b-a0bc-261f77a9f99c",
+              "primary-type": "Album"
+            },
+            "date": "",
+            "country": "CH",
+            "barcode": "",
+            "label-info": [
+              {
+                "catalog-number": "103-2 EUROPE: 253 051",
+                "label": {
+                  "id": "a8bea33e-67af-424a-a734-898e2dc437ed",
+                  "name": "Asylum Records"
+                }
+              }
+            ],
+            "score": 100,
+            "track-count": 9,
+            "media": [
+              {
+                "format": "CD",
+                "track-count": 9
+              }
+            ]
+          },
+          {
+            "id": "fa7d3357-f3e9-4da5-ad70-09c05ef8207f",
+            "title": "Hotel California",
+            "status": "Official",
+            "artist-credit": [
+              {
+                "name": "Eagles",
+                "joinphrase": "",
+                "artist": {
+                  "id": "f46bd570-5768-462e-b84c-c7c993bbf47e",
+                  "name": "Eagles"
+                }
+              }
+            ],
+            "release-group": {
+              "id": "836f349a-0434-3e8b-a0bc-261f77a9f99c",
+              "primary-type": "Album"
+            },
+            "date": "2013-04-26",
+            "country": "XW",
+            "barcode": "603497923175",
+            "label-info": [
+              {
+                "catalog-number": null,
+                "label": {
+                  "id": "873f9f75-af68-4872-98e2-431058e4c9a9",
+                  "name": "Elektra"
+                }
+              },
+              {
+                "catalog-number": null,
+                "label": {
+                  "id": "c4f2cf49-b57c-4cc1-8061-f54400704ac4",
+                  "name": "Rhino"
+                }
+              }
+            ],
+            "score": 100,
+            "track-count": 9,
+            "media": [
+              {
+                "format": "Digital Media",
+                "track-count": 9
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

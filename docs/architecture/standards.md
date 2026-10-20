@@ -62,9 +62,9 @@ routes ─▶ controllers ─▶ application ─▶ services / models / reposito
 | `src/repositories/<domain>/` | Document shapes and queries for domains whose persistence is separated from their use cases. | Contain lifecycle decisions. |
 | `src/contracts/` | Versioned public wire types (`listenerV1`, `roomV1`, …). Changing one is an API change; see [listener.md](listener.md#compatibility-policy). | Import server internals. |
 | `src/infrastructure/` | Database and S3 clients, indexes, topology, readiness, diagnostics. | Depend on domain services; database startup arming avatar-mutation recovery is the one exception. |
-| `src/config/` | Environment-derived rollout switches and capacity limits, read once at the edge of each feature. | Perform I/O. |
+| `src/config/` | Environment-derived rollout switches, capacity limits and outbound client identity (the metadata lookup contact), read once at the edge of each feature. | Perform I/O. |
 | `src/realtime/` | The WebSocket room gateway, tickets, seats, and wind-down. | Bypass `application/rooms` for room state changes. |
-| `src/administration/` | Administrator workbench backend, grouped as `catalog/`, `import/`, and `conversion/`, with shared admin flags at its root. | Be reachable without an administrator role guard. |
+| `src/administration/` | Administrator workbench backend, grouped as `catalog/`, `import/`, `conversion/` and `lookup/` (metadata sources, lookup jobs, value application and lookup requests), with shared admin flags and the pinned HTTPS fetcher (`adminPinnedHttps.ts`) at its root. | Be reachable without an administrator role guard. |
 | `src/views/` | Server-rendered HTML for the account, content-manager, admin, and portfolio pages. | Query the database directly. |
 | `src/public/` | Static browser assets for the server-rendered pages (CSS, small scripts, fonts). | Hold Finitude Web code, which belongs in `web/`. |
 | `src/utils/` | Pure helpers (keys, pagination, text encoding) without I/O. | Read the environment or the database. |
@@ -155,7 +155,8 @@ gate) and `web/e2e-social/` (social and rooms gate).
   Markdown. Vendored, generated, fixture, and JSON files are exempt.
 - Run `npm run catalog:generate` after editing such a file. `npm test` runs
   `npm run catalog:check` and fails on a missing or stale catalog. Never edit a
-  catalog by hand.
+  catalog by hand. Both commands accept CRLF (Windows) and LF working copies,
+  keep each file's line endings, and write nothing if any file fails to parse.
 - A catalog is a navigation aid, not permission to grow a file. Split a module
   when it passes roughly 800 lines or mixes responsibilities, along the
   boundaries its catalog already shows.

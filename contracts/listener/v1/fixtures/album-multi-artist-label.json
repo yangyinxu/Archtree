@@ -1,0 +1,85 @@
+{
+  "album": {
+    "contentType": "album",
+    "id": "64b000000000000000000011",
+    "title": "Amet Collection",
+    "artworkUrl": "",
+    "artistNames": [
+      "Lorem Ensemble",
+      "Ipsum Quartet",
+      "Dolor Soloist"
+    ],
+    "releaseDate": {
+      "year": 2026,
+      "month": 3,
+      "day": 14
+    },
+    "credits": [
+      {
+        "subjectType": "artist",
+        "subjectId": "64b000000000000000000013",
+        "name": "Lorem Ensemble",
+        "role": "primary",
+        "order": 0
+      },
+      {
+        "subjectType": "artist",
+        "subjectId": "64b000000000000000000014",
+        "name": "Ipsum Quartet",
+        "role": "primary",
+        "order": 1
+      },
+      {
+        "subjectType": "artist",
+        "subjectId": "64b000000000000000000015",
+        "name": "Dolor Soloist",
+        "role": "featured",
+        "order": 2
+      },
+      {
+        "subjectType": "organization",
+        "subjectId": "64b000000000000000000016",
+        "name": "Sit Records",
+        "role": "label",
+        "order": 3
+      }
+    ],
+    "displayByline": "Lorem Ensemble & Ipsum Quartet feat. Dolor Soloist",
+    "attributionStatus": "documented"
+  },
+  "tracks": [
+    {
+      "contentType": "audioTrack",
+      "id": "64b000000000000000000012",
+      "title": "Consectetur",
+      "artworkUrl": "",
+      "artistNames": [
+        "Lorem Ensemble",
+        "Ipsum Quartet"
+      ],
+      "albumId": "64b000000000000000000011",
+      "albumTitle": "Amet Collection",
+      "duration": "00:01",
+      "mediaType": "audio",
+      "streamUrl": "/content/mediaTrack/stream/64b000000000000000000012",
+      "credits": [
+        {
+          "subjectType": "artist",
+          "subjectId": "64b000000000000000000013",
+          "name": "Lorem Ensemble",
+          "role": "primary",
+          "order": 0
+        },
+        {
+          "subjectType": "artist",
+          "subjectId": "64b000000000000000000014",
+          "name": "Ipsum Quartet",
+          "role": "primary",
+          "order": 1
+        }
+      ],
+      "displayByline": "Lorem Ensemble & Ipsum Quartet",
+      "attributionStatus": "documented"
+    }
+  ]
+}

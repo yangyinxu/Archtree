@@ -1,0 +1,18 @@
+{
+  "source": "itunes",
+  "synthetic": true,
+  "description": "iTunes lookup without results",
+  "exchanges": [
+    {
+      "url": "https://itunes.apple.com/lookup?id=1000000001&entity=song&country=us&limit=200",
+      "status": 200,
+      "headers": {
+        "content-type": "text/javascript; charset=utf-8"
+      },
+      "body": {
+        "resultCount": 0,
+        "results": []
+      }
+    }
+  ]
+}

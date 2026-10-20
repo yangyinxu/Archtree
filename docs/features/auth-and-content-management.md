@@ -404,6 +404,18 @@ sign-in attempts.
   carousels share the Artist detail classification and rollout switches, apply
   ready lifecycle and role precedence before the result limit, and use legacy
   relationships only for records without canonical Credits.
+- A Credit may store a join phrase for server bylines. The Content Manager
+  shows each Credit's phrase except the last one's and sets or clears it with
+  `POST /content/manage/credits/update-join-phrase` (`ownerType`, `ownerId`,
+  `creditId`, `joinPhrase`, `creditRevision`); an empty value clears it, and
+  the same validation as the administrator catalog applies. The form carries
+  the Credit revision it was rendered with, so a missing revision or any
+  Credit change made after the page was drawn asks for a reload instead of
+  attaching the phrase to a different next name. Role changes keep every
+  phrase. Additions, removals, reordering and legacy artist-ID edits keep a
+  phrase only while the same Credit still follows it, and every rebuild drops
+  an invalid stored phrase. Disc Numbers are not editable in the Content
+  Manager.
 - Manual Carousel and Grid/List additions, reorder operations, and moves read
   their current contents inside the same MongoDB transaction as the reference
   fences and writes. Concurrent appends preserve both edits and the 500-item
@@ -412,10 +424,18 @@ sign-in attempts.
   positional edit. Adds rejected by the current size limit or a concurrently
   deleted definition also return that conflict rather than reporting success.
   Cross-Carousel moves commit both sides or neither.
-- Single and bulk Content Manager Audio MediaTrack creation records original filenames
-  and a pending upload state before sending files to S3. They accept Artist Credits,
-  Organization Credits, inherited Album primary Artists, or an explicitly
-  undocumented attribution state.
+- Single and bulk Content Manager Audio MediaTrack creation records original
+  filenames and a pending upload state before sending files to S3. They accept
+  Artist Credits, Organization Credits, inherited Album primary Artists, or an
+  explicitly undocumented attribution state. Inherited primary Credits keep
+  their Album order; each keeps its join phrase only when the next Album Credit
+  is inherited too, so a phrase never introduces a name it was not written for.
+- Single and bulk Content Manager Audio creation and the legacy
+  `/content/audioTrack` endpoint store the file's embedded Track Number and,
+  when the file carries a valid one (1–999), its Disc Number with
+  `discNumberSource: 'embedded'`. A missing or invalid disc tag stores neither
+  key, and Album order treats that MediaTrack as disc 1. Each bulk file is read
+  independently, so one invalid tag never affects another file.
 - The legacy `/content/audioTrack` creation endpoint continues to require an
   existing Artist during the compatibility window and can be disabled with
   the Catalog Credit legacy-write cutover switch.
@@ -521,7 +541,7 @@ sign-in attempts.
   Each contextual Home item may carry
   `{ "reason": { "code": "followedArtist", "artist": { "id": "...", "name": "..." } } }`;
   public content summaries and expanded `included` objects never gain this field.
-- Startup revision `required-indexes-v9-administrator-conversions` requires the unique
+- Startup revision `required-indexes-v11-musicbrainz-ids` requires the unique
   `artistFollows(userId, artistId)` index, owner/follow-date and Artist/owner
   cleanup indexes, and the Album/MediaTrack descending calendar-date indexes.
   The resolver uses those date indexes, bounded equality joins and a 3-second

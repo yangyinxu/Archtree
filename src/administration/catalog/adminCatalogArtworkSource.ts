@@ -1,20 +1,14 @@
-import { isIP } from 'node:net';
+import { strictHttpsUrl } from '../adminPinnedHttps';
 
 export type AdminCatalogArtworkSource =
     | { kind: 'stored'; imageId: string; reference: string }
     | { kind: 'external'; url: string; reference: string };
 
-/** Only database-owned HTTPS references can enter the private legacy-artwork proxy. */
-export const legacyCatalogArtworkUrl = (value: unknown): URL | null => {
-    if (typeof value !== 'string' || value.length > 2048 || /[\u0000-\u0020\u007f\\]/.test(value)) return null;
-    try {
-        const url = new URL(value);
-        if (url.protocol !== 'https:' || url.username || url.password || url.hash
-            || (url.port && url.port !== '443') || !url.hostname.includes('.')
-            || isIP(url.hostname.replace(/^\[|\]$/g, '')) || url.hostname.endsWith('.')) return null;
-        return url;
-    } catch { return null; }
-};
+/**
+ * Only database-owned HTTPS references can enter the private legacy-artwork proxy. The rules are the
+ * shared outbound ones, so the proxy and metadata lookup can never drift apart.
+ */
+export const legacyCatalogArtworkUrl = strictHttpsUrl;
 
 /** An explicit image identity takes precedence; malformed identities never unlock a URL fallback. */
 export const adminCatalogArtworkSource = (doc: Record<string, unknown>): AdminCatalogArtworkSource | null => {

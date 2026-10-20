@@ -1,21 +1,38 @@
 import { z } from 'zod';
 import { apiRequest, ApiError } from '../../api/client';
-import { adminWorkspace } from './adminWorkspace';
+import { ADMIN_RELOAD_REQUIRED, adminWorkspace } from './adminWorkspace';
 
 const id = z.string().regex(/^[a-f0-9]{24}$/);
 export type AdminGuard = ReturnType<typeof adminWorkspace.capture>;
+export { ADMIN_RELOAD_REQUIRED };
+/**
+ * A server refusal, unlike the client-side ADMIN_RELOAD_REQUIRED (a strict-parse failure of this bundle): the project was saved
+ * in a newer format, or the request came from an outdated editor. It lives here, beside the transport, so a command hook can
+ * read it without loading the import schemas.
+ */
+export const ADMIN_IMPORT_RELOAD_REQUIRED = 'ADMIN_IMPORT_RELOAD_REQUIRED';
 
-/** Read results belong to a view generation; admitted writes may finish while that same account uses User view. */
+/**
+ * Read results belong to a view generation; admitted writes may finish while that same account uses User view.
+ * The strict schema is applied here, after transport, so an outdated bundle becomes a reload request rather
+ * than an unconfirmed operation; a caller's own receipt check never reaches this state.
+ */
 export async function adminEndpointRequest<T>(path: string, schema: z.ZodType<T>, init: RequestInit = {}, guard = adminWorkspace.capture()): Promise<T> {
   if (!adminWorkspace.current(guard)) throw new DOMException('Admin view changed', 'AbortError');
+  let raw: unknown;
   try {
-    const result = await apiRequest(`/api/admin/v1${path}`, schema, { ...init, accountViewer: guard.viewerId, cache: 'no-store' });
-    if (!adminWorkspace.current(guard, !init.method || init.method === 'GET')) throw new DOMException('Admin view changed', 'AbortError');
-    return result;
+    raw = await apiRequest(`/api/admin/v1${path}`, z.unknown(), { ...init, accountViewer: guard.viewerId, cache: 'no-store' });
   } catch (error) {
     if (adminWorkspace.current(guard, false) && error instanceof ApiError && [401, 403].includes(error.status ?? 0)) adminWorkspace.reset();
     throw error;
   }
+  if (!adminWorkspace.current(guard, !init.method || init.method === 'GET')) throw new DOMException('Admin view changed', 'AbortError');
+  const parsed = schema.safeParse(raw);
+  if (!parsed.success) {
+    if (adminWorkspace.current(guard, false)) adminWorkspace.requireReload();
+    throw new ApiError('The administrator workbench needs a reload.', 'invalid-response', 200, ADMIN_RELOAD_REQUIRED);
+  }
+  return parsed.data;
 }
 export const importPath = (value: string) => `/${id.parse(value)}`;
 

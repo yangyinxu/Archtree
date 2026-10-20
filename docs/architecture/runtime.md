@@ -43,7 +43,8 @@ uniqueness, and rejects sparse, partial, or incompatible-collation substitutes.
 An existing correct index is reused. Indexes and duplicate records are never
 automatically dropped or rewritten.
 
-After verification, startup upserts the static `required-indexes-v1` receipt in
+After verification, startup upserts the static receipt named by
+`requiredIndexRevision` (now `required-indexes-v11-musicbrainz-ids`) in
 `schemaMigrations`. It records only the revision and application time. A new
 required constraint must receive a new reviewed revision. A partially failed
 attempt is retried using the same additive definitions; a prior receipt is never
@@ -159,6 +160,16 @@ transport completion, without logging a false server failure or writing another
 response. Actual service failures and shutdown admission failures retain their
 normal error handling; already-admitted business work remains tracked until it settles.
 
+After the listener opens, startup starts the administrator background workers:
+Luna analysis, import publication (which also cleans up automatic cover
+candidates of completed imports and stages and cleans up lookup covers),
+existing-catalog covers and metadata lookup. Each polls every two seconds and
+runs at most one pass at a time through the lifecycle tracker, so that pass
+counts as admitted business work. Draining aborts each worker's signal, which
+cancels an in-flight metadata lookup request, stops new passes, and waits for
+the admitted pass before MongoDB closes. Tests replace each worker through the
+`startServer` dependencies.
+
 - `SERVER_SHUTDOWN_GRACE_MS`: default 30000, maximum 120000.
 - `SERVER_SHUTDOWN_CLEANUP_MS`: default 5000, maximum 30000.
 - A maximum additional 100 ms allows socket-close hooks to run after a forced
@@ -217,6 +228,120 @@ introduced, explicitly design shared abuse limits and measure the aggregate medi
 and provider budget. A shared cache, queue, CDN, or worker service is not introduced
 without a measured requirement and a compatible ready/deletion/revocation contract.
 
+Administrator metadata lookup is the one deployment-wide bound that the
+confirmed rules require: each source's request spacing and concurrency apply
+across every instance. The gates live in the MongoDB collection
+`adminMetadataLookupGates`, one `_id`-keyed document per source (`musicbrainz`,
+`itunes`, `coverartarchive`) with its next allowed start and expiring leases,
+decided on the database clock and written outside transactions. The gate
+collection holds no account data and needs no secondary index; a lease that is
+never released expires after 30 seconds. Startup does not create
+`adminMetadataLookupGates`; the first acquisition upserts each source document
+by `_id`, so the application account needs insert/update on that collection. The
+lookup response cache stays process-local: each lookup worker keeps its own.
+
+Metadata lookup jobs live in `adminImportLookups`, one record per import project
+(`_id` is the project's `_id`; a new run replaces the previous one). A record
+holds its run number, state (`queued`, `running`, `retrying`, `complete`,
+`unavailable`, `stopped` or `superseded`), the granting administrator and a
+one-hour grant, the bound file set, the planned queries and progress, at most 25
+candidates (MusicBrainz releases or iTunes collections, 4 MiB of JSON
+together) and whether its searches were complete, the ranking (candidates plus
+ranking stay within 12 MiB, well under MongoDB's 16 MiB document limit), the
+applied candidate (or none) with its values, conflicts and flagged values (at
+most one of each per draft value) and a 180-second worker lease. The lookup
+worker (`startMetadataLookupWorker` in
+`src/administration/lookup/metadataLookupService.ts`) starts after listen with
+the other administrator workers, polls every 2 seconds, is tracked by the server
+lifecycle and is stopped before database teardown; a stop aborts the request in
+flight and releases the lease, so the next claim resumes at the stored step. It
+is idle while imports are disabled. The required index
+`admin_import_lookup_worker` (`{ state: 1, leaseUntil: 1, retryAt: 1 }`) also
+creates the collection at startup, so no transaction ever creates it, and
+`requiredIndexRevision` was then `required-indexes-v10-metadata-lookups`. The
+application account needs insert/update on `adminImportLookups`. Import
+documents gain `lookupGate`, a never-projected fence written in the same
+transaction as every lookup run started, every lookup state change and every
+re-rank of stored candidates, which never changes the project's `revision`. It
+conflicts only with transactions that also write the import document, so the
+publish gate, which reads it with the lookup record, also writes it. The step
+that completes a run, a re-rank of stored candidates and a choice or conflict
+answer write applied values to the import document in the same transaction as
+the record (and, for the worker and a re-rank, the gate). Automatic writes
+bump only `valueRevision`; a choice or an answer also takes its receipt's
+`revision`. File-tag automation reads the record's applied values in its own
+transaction, so it never replaces them; no index is added.
+
+An application whose release reports front artwork, or whose iTunes-only
+candidate has an allowlisted iTunes artwork address, also records the import's
+lookup cover job, `media.lookupCover`, in the same transaction; it is never
+projected and never changes `revision`. The publication worker runs the lookup
+cover pass (`runLookupCoverPassOnce` in
+`src/administration/import/adminImportLookupCover.ts`) on ticks that publish
+and sweep nothing, because it owns private storage: one import whose job is
+due, under a five-minute lease that a stopped pass leaves to expire. The
+optional index `admin_import_lookup_cover_worker`
+(`{ 'media.lookupCover.due': 1, 'media.lookupCover.leaseUntil': 1 }`) serves
+its claim; it is no constraint, so its failure is only a startup diagnostic and
+`requiredIndexRevision` does not change. Candidate artwork previews are
+read-only apart from the shared gate's bookkeeping in
+`adminMetadataLookupGates`: they write no import, lookup or catalog document
+and no storage object.
+
+The iTunes fallback adds no collection, index or `requiredIndexRevision`
+change. A lookup record may hold `itunesStage` (the stage's requests, at most
+four results with their storefront names, and its bridge searches),
+`exhausted` (sources whose retries ran out) and `attempts.itunes`, and an
+iTunes-only candidate (`itunes:<collection ID>`) keeps its storefront, check
+and validated mzstatic artwork address under `itunes`, never projected; the
+lookup cover job keeps that address as `artworkUrl`. Import documents gain
+`localizedNames` (at most 21 groups of 4 iTunes localized artist names),
+written only by lookup value application in the same transaction as the
+applied values, and a format-3 approval freezes the groups that hold a current
+Artist entry's name as `media.publication.localizedNames` (only when there are
+some), which the worker's preselection recheck reads. The lookup worker's
+MusicBrainz and iTunes clients share one gate client and one response cache;
+iTunes requests and an iTunes-only candidate's artwork go through the `itunes`
+gate document (one request at a time, 3 seconds apart). The release before the
+fallback ignores these fields (see
+[Rollback floors](../features/admin-workbench.md#rollback-floors)).
+
+MusicBrainz IDs add two required unique partial indexes, `artist_musicbrainz_id`
+on `artists` and `organization_musicbrainz_id` on `organizations`, each
+`{ musicBrainzId: 1 }` with the partial filter
+`{ musicBrainzId: { $type: 'string' } }`, so any number of records without an ID
+coexist and an Artist and an Organization may share one ID.
+`requiredIndexRevision` is now `required-indexes-v11-musicbrainz-ids`. Existing
+duplicate string IDs fail startup closed
+(`DatabaseIndexInitializationError('artists:musicBrainzId')` or the
+`organizations` equivalent); nothing is dropped. Before deploying, list
+duplicates with an aggregate such as `[{ $match: { musicBrainzId: { $type:
+'string' } } }, { $group: { _id: '$musicBrainzId', count: { $sum: 1 } } },
+{ $match: { count: { $gt: 1 } } }]` on each collection and clear the extra IDs
+through the admin catalog editor. A write that would duplicate an ID fails
+inside its transaction (see [MusicBrainz IDs](catalog.md#musicbrainz-ids)): an
+Admin catalog edit returns `409 ADMIN_CATALOG_MUSICBRAINZ_ID_IN_USE`, and an
+import commit becomes needs attention (`identityConflict`). Once IDs are
+stored, the release before them is the rollback floor (see
+[Rollback floors](../features/admin-workbench.md#rollback-floors)); it keeps
+the indexes (harmless: its writers never set the field, and listener DTOs were
+already allowlisted) and ignores the alias phase of lookup records (they complete
+through the details-done branch). It ignores `musicBrainzIdWrite` and
+`musicBrainzNames`: it publishes a format-3 approval that creates records, or
+reuses records without an ID, without writing any ID, while one that reuses an
+Artist or Organization holding an ID (an exact-ID reuse, a kept ID or a
+replace) becomes needs attention there, because its reviewed revisions include
+the ID and that release never preselects by ID; roll back only while no such
+publication is preparing or in needs attention (the Rollback floors bullet has
+the `mongosh` check), or cancel them first. It refuses the `musicBrainzIds`
+this Web sends with its approvals as invalid input, and an unanswered Artist or
+label conflict whose lookup value carries IDs is not shown there but still
+holds publication (choose the candidate again or none to clear it). Decisions
+saved while rolled back for an entry or label carrying an ID bind none after
+rolling forward and are cleared. The lookup worker sends at most 16 extra
+artist or label alias lookups per run, through the same deployment-wide
+MusicBrainz gate, and a source failure ends that alias phase at once.
+
 Playback Audio/Video GETs that briefly overlap an older stream may wait up to two
 seconds for an existing admission slot. The pending pool is bounded to 32 per
 process and eight per client; active limits and playback reserves do not increase.
@@ -226,6 +351,12 @@ timer/response hooks; expiration or queue overflow retains 429 with Retry-After.
 Source and lifecycle validation happen after waiting, before storage access.
 An admitted slot releases only after transport completion and all tracked handler
 or storage work settle, so an aborted stream cannot free capacity prematurely.
+While motion previews are disabled, a Web card hover preview of a Video
+MediaTrack reads the same public stream and is admitted as playback. Once they
+are enabled it reads `/content/mediaTrack/motion-preview/:id`, admitted as the
+`motionPreview` class: rejected at once when full, never queued, and never
+given the playback reserve. A tab runs at most one preview, and clearing its source
+when the preview stops aborts the request, so it holds at most one slot.
 
 Catalog substring searches now share a dedicated per-process limit of eight active
 requests and two per client across both public search surfaces. Rejection returns

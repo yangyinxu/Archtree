@@ -1,0 +1,61 @@
+{
+  "source": "musicbrainz",
+  "recordedAt": "2026-10-18T10:50:22.432Z",
+  "description": "MusicBrainz release lookup (Hotel California search result)",
+  "exchanges": [
+    {
+      "url": "https://musicbrainz.org/ws/2/release/1e166986-2adc-4c63-86d3-f22146cf7ce2?inc=artist-credits+labels+recordings+release-groups+isrcs&fmt=json",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "body": {
+        "id": "1e166986-2adc-4c63-86d3-f22146cf7ce2",
+        "title": "Hotel California",
+        "status": "Promotion",
+        "artist-credit": [
+          {
+            "name": "Eagles",
+            "joinphrase": "",
+            "artist": {
+              "id": "f46bd570-5768-462e-b84c-c7c993bbf47e",
+              "name": "Eagles"
+            }
+          }
+        ],
+        "release-group": {
+          "id": "77075d90-12a9-3414-9daf-32ed15a8e318",
+          "primary-type": "Single",
+          "secondary-types": [
+            "Live"
+          ],
+          "first-release-date": ""
+        },
+        "barcode": null,
+        "label-info": [],
+        "cover-art-archive": {
+          "front": false
+        },
+        "media": [
+          {
+            "position": 1,
+            "format": null,
+            "tracks": [
+              {
+                "position": 1,
+                "number": "1",
+                "title": "Hotel California",
+                "length": 443200,
+                "recording": {
+                  "id": "0e0763cb-8989-4be8-8f22-a7302c86780e",
+                  "length": 443200,
+                  "isrcs": []
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

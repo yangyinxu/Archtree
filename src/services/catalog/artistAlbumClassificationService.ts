@@ -1,11 +1,14 @@
 import { catalogCreditRollout } from '../../config/catalogCreditRollout';
-import { CatalogCredit, classifyArtistAlbumCredit, normalizeCatalogCredits, validateAttribution } from '../../models/catalogCredit';
+import { CatalogCredit, classifyArtistAlbumCredit, normalizeStoredCatalogCredits, validateAttribution } from '../../models/catalogCredit';
 
-/** Reads canonical attribution without interpreting malformed or intentionally empty Credits as legacy. */
+/**
+ * Reads canonical attribution without interpreting malformed or intentionally empty Credits as
+ * legacy. An invalid stored join phrase is dropped rather than hiding the whole Credit list.
+ */
 export const validStoredCredits = (owner: any): CatalogCredit[] | null => {
     if (!catalogCreditRollout().readsEnabled || !Array.isArray(owner?.credits)) return null;
     try {
-        const credits = normalizeCatalogCredits(owner.credits);
+        const credits = normalizeStoredCatalogCredits(owner.credits);
         validateAttribution(owner.attributionStatus, credits);
         return credits;
     } catch { return null; }

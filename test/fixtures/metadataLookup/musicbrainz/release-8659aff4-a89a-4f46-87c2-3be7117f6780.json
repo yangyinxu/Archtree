@@ -1,0 +1,71 @@
+{
+  "source": "musicbrainz",
+  "recordedAt": "2026-10-18T10:50:22.432Z",
+  "description": "MusicBrainz release lookup (Pandora Call recording search result)",
+  "exchanges": [
+    {
+      "url": "https://musicbrainz.org/ws/2/release/8659aff4-a89a-4f46-87c2-3be7117f6780?inc=artist-credits+labels+recordings+release-groups+isrcs&fmt=json",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "body": {
+        "id": "8659aff4-a89a-4f46-87c2-3be7117f6780",
+        "title": "パンドラコール",
+        "status": "Official",
+        "artist-credit": [
+          {
+            "name": "ヰ世界情緒",
+            "joinphrase": "",
+            "artist": {
+              "id": "0e51b3c5-28c3-4608-aea1-ce01eca91dd2",
+              "name": "ヰ世界情緒"
+            }
+          }
+        ],
+        "release-group": {
+          "id": "9ee16711-7d7b-4f31-a1d7-e8dbb93bfb63",
+          "primary-type": "Single",
+          "secondary-types": [],
+          "first-release-date": "2022-08-17"
+        },
+        "date": "2022-08-17",
+        "country": "XW",
+        "barcode": "4582635670323",
+        "label-info": [
+          {
+            "catalog-number": null,
+            "label": {
+              "id": "e9767400-432a-43d0-9275-0c883060b5be",
+              "name": "KAMITSUBAKI RECORD"
+            }
+          }
+        ],
+        "cover-art-archive": {
+          "front": false
+        },
+        "media": [
+          {
+            "position": 1,
+            "format": "Digital Media",
+            "tracks": [
+              {
+                "position": 1,
+                "number": "1",
+                "title": "パンドラコール",
+                "length": 217030,
+                "recording": {
+                  "id": "4cf3e4e2-9809-4a44-8ccf-8e3b41cad9fa",
+                  "length": 217030,
+                  "isrcs": [
+                    "JPY392200483"
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

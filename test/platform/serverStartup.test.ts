@@ -117,14 +117,15 @@ test('administrator workers start after listening and all stop before database t
     createApplication: () => express(), port: 0, stopped: () => undefined,
     startOperationalSummary: () => () => undefined,
     startAdminImportWorker: worker('analysis'), startAdminImportPublisher: worker('publication'),
-    startAdminCatalogCoverWorker: worker('cover')
+    startAdminCatalogCoverWorker: worker('cover'), startMetadataLookupWorker: worker('lookup')
   });
   assert.equal(server.listening, true);
   process.emit('SIGTERM');
   const deadline = Date.now() + 5_000;
   while (!databaseClosed && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 5));
   assert.equal(databaseClosed, true);
-  for (const name of ['analysis', 'publication', 'cover']) {
+  for (const name of ['analysis', 'publication', 'cover', 'lookup']) {
+    assert.ok(events.indexOf(`${name}:start`) >= 0);
     assert.ok(events.indexOf(`${name}:stop`) < events.indexOf('database:close'));
   }
   assert.equal(process.listenerCount('SIGTERM'), before);

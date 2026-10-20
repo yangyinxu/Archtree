@@ -233,10 +233,14 @@ storage. Web emits it as a hashed same-origin static asset and validates it
 before mounting React; iOS and Android package it as an app resource.
 
 Archtree's current `en-US.json` may contain newer additive keys than an older
-client release. Clients ignore unknown remote keys. A remote bundle missing or
-failing to format one key falls back to packaged US English for that key. In a
-production build, lookup must never expose a raw key, blank placeholder, or
-partially formatted message to the listener.
+client release. Clients ignore unknown remote keys. A client rejects a whole
+remote bundle that lacks any key its packaged fallback contains, or whose named
+variables differ, and keeps using its packaged or previously active bundle.
+Removing or renaming a v2 runtime key, `admin.*` included, is therefore a
+breaking change while any supported Web, iOS or Android release still packages
+it; keep retired keys, unused, until then. In a production build, lookup must
+never expose a raw key, blank placeholder, or partially formatted message to the
+listener.
 
 Until migration is complete, existing native resource systems remain valid:
 

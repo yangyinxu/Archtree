@@ -4,8 +4,8 @@
  * Internal
  *   Functions: syntaxFor, wrapList, unique, titleOf, collectTests, isFunctionLike, hasExport,
  *              topLevelStatements, codeCatalog, cssCatalog, shellCatalog, pythonCatalog, yamlCatalog,
- *              anchorFactory, markdownLines, markdownCatalog, catalogLines, stripCatalog, insertCatalog,
- *              renderBlock, candidateFiles, main
+ *              anchorFactory, markdownLines, markdownCatalog, catalogLines, isCatalogStart, stripCatalog,
+ *              insertCatalog, renderBlock, catalogContent, candidateFiles, main
  *   Constants: repositoryRoot, lineThreshold, wrapWidth, generatorCommand, excluded, markers, testCallee
  * @end-catalog */
 
@@ -259,16 +259,22 @@ const catalogLines = (file, syntax, content) => {
   return markdownCatalog(content);
 };
 
-/** Removes an existing catalog block (and the blank line that follows it). */
+const isCatalogStart = (line, start) => line === start || line.startsWith(`${start} `);
+
+/**
+ * Removes an existing catalog block (and the blank line that follows it). A second
+ * block means an earlier run missed the first, so it fails instead of compounding it.
+ */
 const stripCatalog = (content, syntax) => {
   const { start, end } = markers[syntax];
   const lines = content.split('\n');
-  const first = lines.findIndex(line => line === start || line.startsWith(`${start} `));
+  const first = lines.findIndex(line => isCatalogStart(line, start));
   if (first === -1) return content;
   const last = lines.indexOf(end, first);
   if (last === -1) throw new Error(`Unterminated catalog block.`);
   const removeTo = lines[last + 1] === '' ? last + 2 : last + 1;
   lines.splice(first, removeTo - first);
+  if (lines.some(line => isCatalogStart(line, start))) throw new Error('More than one catalog block.');
   return lines.join('\n');
 };
 
@@ -295,8 +301,8 @@ const renderBlock = (syntax, lines) => {
   return [header, ...lines.map(line), end, ...(syntax === 'markdown' ? [] : [''])];
 };
 
-/** Returns the file content with an up-to-date catalog, or without one when the file is short. */
-export const catalogFile = (file, content) => {
+/** Catalogs LF-only content: the markers and every line-based rule compare whole lines without `\r`. */
+const catalogContent = (file, content) => {
   const syntax = syntaxFor(file);
   const bare = stripCatalog(content, syntax);
   if (bare.split('\n').length <= lineThreshold) return { content: bare, empty: false };
@@ -305,31 +311,57 @@ export const catalogFile = (file, content) => {
   return { content: insertCatalog(bare, syntax, renderBlock(syntax, lines)), empty: false };
 };
 
+/**
+ * Returns the file content with an up-to-date catalog, or without one when the file is short.
+ * Windows checkouts (`core.autocrlf=true`) hold CRLF copies, so parsing runs on LF-normalized
+ * text. The result keeps the file's own line endings, because Git normalizes them on commit
+ * anyway and rewriting a working copy's style would surface as noise in local diffs and editors.
+ * `changed` ignores line endings, so only a missing or stale catalog marks a file stale.
+ */
+export const catalogFile = (file, content) => {
+  const normalized = content.replace(/\r\n/g, '\n');
+  const result = catalogContent(file, normalized);
+  const lineEnding = content.includes('\r\n') ? '\r\n' : '\n';
+  return { content: result.content.replace(/\n/g, lineEnding), empty: result.empty,
+    changed: result.content !== normalized };
+};
+
 const candidateFiles = () => execFileSync('git', ['ls-files', '--cached', '--others', '--exclude-standard'],
   { cwd: repositoryRoot, encoding: 'utf8' }).split('\n')
   .filter(file => file && syntaxFor(file) && !excluded.some(pattern => pattern.test(file)));
 
+/** Catalogs every file before writing any, so one malformed block cannot leave a half-regenerated tree. */
 const main = async () => {
   const check = process.argv.includes('--check');
-  const stale = [];
+  const updates = [];
   const empty = [];
+  const failures = [];
   for (const file of candidateFiles()) {
     const absolute = path.join(repositoryRoot, file);
     let content;
     try { content = await readFile(absolute, 'utf8'); } catch (error) { if (error.code === 'ENOENT') continue; throw error; }
-    const result = catalogFile(file, content);
+    let result;
+    try { result = catalogFile(file, content); } catch (error) { failures.push(`  ${file}: ${error.message}`); continue; }
     if (result.empty) empty.push(file);
-    if (result.content === content) continue;
-    stale.push(file);
-    if (!check) await writeFile(absolute, result.content);
+    if (!result.changed) continue;
+    updates.push({ file, absolute, content: result.content });
   }
   for (const file of empty) console.warn(`No catalog entries could be derived for ${file}.`);
-  if (check && stale.length) {
-    console.error(`Stale or missing file catalogs (run \`${generatorCommand}\`):\n${stale.map(file => `  ${file}`).join('\n')}`);
+  if (failures.length) {
+    console.error(`Could not catalog these files${check ? '' : '; nothing was written'}:\n${failures.join('\n')}`);
     process.exitCode = 1;
     return;
   }
-  console.log(check ? 'File catalogs are current.' : `Updated ${stale.length} file catalogs.`);
+  if (!check) for (const update of updates) await writeFile(update.absolute, update.content);
+  if (check && updates.length) {
+    console.error(`Stale or missing file catalogs (run \`${generatorCommand}\`):\n${updates.map(({ file }) => `  ${file}`).join('\n')}`);
+    process.exitCode = 1;
+    return;
+  }
+  console.log(check ? 'File catalogs are current.' : `Updated ${updates.length} file catalogs.`);
 };
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await main();
+// No top-level await: server tests import catalogFile through tsx, which loads this module as CommonJS.
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch(error => { console.error(error); process.exitCode = 1; });
+}

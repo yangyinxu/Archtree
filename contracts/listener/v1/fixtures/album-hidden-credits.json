@@ -1,0 +1,30 @@
+{
+  "album": {
+    "contentType": "album",
+    "id": "64b0000000000000000000e1",
+    "title": "Unlisted Credits",
+    "artworkUrl": "",
+    "artistNames": [],
+    "releaseDate": {
+      "year": 2026
+    },
+    "credits": [],
+    "attributionStatus": "documented"
+  },
+  "tracks": [
+    {
+      "contentType": "audioTrack",
+      "id": "64b0000000000000000000e2",
+      "title": "Quiet Room",
+      "artworkUrl": "",
+      "artistNames": [],
+      "albumId": "64b0000000000000000000e1",
+      "albumTitle": "Unlisted Credits",
+      "duration": "2:10",
+      "mediaType": "audio",
+      "streamUrl": "/content/mediaTrack/stream/64b0000000000000000000e2",
+      "credits": [],
+      "attributionStatus": "documented"
+    }
+  ]
+}

@@ -9,14 +9,22 @@
  *   - Luna analysis requires its own confirmation and a lost acknowledgement never retries automatically
  *   - a durable unknown provider outcome prevents another paid generation while retaining manual review
  *   - Artist-only suggestions explain separate attribution management without offering identity adoption
+ *   - a label suggestion is an identity hint beside the Artist hints that can only be kept, while a Disc Number suggestion is a Review item
+ *   - a label-only review points Review at its hint, reads a missing label as no value, and a kept hint offers nothing more
+ *   - an Artist hint for an Album without Credits context reads the empty baseline and current values as no value
  *   - an applied historical review remains read-only on every stage and never starts work when reopened
  *   - selected suggestion adoption and independent rejection preserve manual values and exclude Artist identity hints
  *   - catalog application confirms only selected saved fields and invalidates projections only after its receipt
  *   - a newer saved revision invalidates an open Apply confirmation rather than rebasing its field selection
+ *   - a review saved by a newer release refuses a save with a reload request and no retry
  *   - changing review routes cannot show or retry another project unknown intent
  *   - same-revision refresh and stage changes retain Apply selection, but a newer saved value requires selecting it again
  *   - a delayed successful Save cannot overwrite a newer observed revision or erase its conflict when refresh fails
+ *   - analysis progress never makes a local edit stale, while another administrator change does
  *   - completed review guidance is read-only and no longer invites draft editing or a paid run
+ *   - the draft shows ordered Credits, join phrases and the label as read-only context and edits Disc Numbers only where captured
+ *   - a review opened before Disc Numbers were captured shows no Disc Number input and offers no disc change
+ *   - a v1 review response the strict schema refuses asks for a reload instead of showing a partial review
  * @end-catalog */
 
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
@@ -26,9 +34,9 @@ import { captureAccountOperation } from '../../api/accountEpoch';
 import { adminWorkspace } from './adminWorkspace';
 import { CatalogReviewStart } from './CatalogReviewStart';
 import { AdminCatalogReviewPage } from './AdminCatalogReviewPage';
-import { AdminControls } from './AdminAccess';
+import { AdminControls } from './AdminControls';
 import type { CatalogReview, ReviewField } from './catalogReviewApi';
-import { catalogAlbum, catalogReview, otherReviewId, reviewId, reviewJson, session, titleSuggestionId, trackSuggestionId, viewer } from './catalogReviewFixtures.testSupport';
+import { artistEntryKey, catalogAlbum, catalogReview, legacyCatalogReview, otherReviewId, reviewId, reviewJson, session, titleSuggestionId, trackSuggestionId, viewer } from './catalogReviewFixtures.testSupport';
 
 function client() {
   const value = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -141,11 +149,15 @@ test('reopening and manual editing touch only the private review, preserving cat
   expect(screen.getByRole('combobox', { name: 'Visibility' })).toBeDisabled();
   expect(screen.getByText('Original filename not retained')).toBeVisible();
   fireEvent.change(title, { target: { value: 'Private human correction' } });
+  fireEvent.change(screen.getByRole('spinbutton', { name: '2 · Disc number' }), { target: { value: '2' } });
   expect(screen.getByRole('button', { name: 'Run Luna review again' })).toBeDisabled();
   fireEvent.click(screen.getByRole('button', { name: 'Save review draft' }));
   await waitFor(() => expect(writes).toHaveLength(1));
   await waitFor(() => expect(screen.getByRole('button', { name: 'Save review draft' })).toBeDisabled());
-  expect(writes[0]).toMatchObject({ path: `/api/admin/v1/catalog-reviews/${reviewId}`, body: { expectedRevision: 1, draft: { album: { title: 'Private human correction', visibility: 'public', artistName: 'Synthetic catalog Artist' } } } });
+  // The save is the whole Draft v2: the read-only Artist entries, label and visibility travel back unchanged.
+  const saved = catalogReview().draft;
+  expect(writes[0]).toMatchObject({ path: `/api/admin/v1/catalog-reviews/${reviewId}`, body: { expectedRevision: 1 } });
+  expect(writes[0].body.draft).toEqual({ album: { ...saved.album, title: 'Private human correction' }, tracks: [saved.tracks[0], { ...saved.tracks[1], discNumber: 2 }] });
   expect(query.getQueryData(['listener', 'album', catalogAlbum().id])).toEqual({ title: 'Cached catalog title' });
 });
 
@@ -187,16 +199,83 @@ test('a durable unknown provider outcome prevents another paid generation while 
 
 test('Artist-only suggestions explain separate attribution management without offering identity adoption', async () => {
   const item = catalogReview();
-  item.suggestions = [{ ...item.suggestions[0], field: 'artistName', baseline: item.draft.album.artistName, value: 'A synthetic identity clue' }];
+  item.suggestions = [{ ...item.suggestions[0], field: 'artists', baseline: item.draft.album.artists, value: [{ key: artistEntryKey, name: 'A synthetic identity clue', role: 'primary', joinPhrase: ' & ', musicBrainzId: null },
+    { key: '50000000-0000-4000-8000-000000000002', name: 'A second clue', role: 'featured', joinPhrase: null, musicBrainzId: null }] }];
   const fetch = vi.fn(async () => reviewJson({ item, receipt: null })); vi.stubGlobal('fetch', fetch);
   mountPage(); await screen.findByRole('textbox', { name: 'Title' });
   fireEvent.click(screen.getByRole('tab', { name: 'Review Luna suggestions' }));
   const panel = within(screen.getByRole('tabpanel', { name: 'Review Luna suggestions' }));
-  expect(await panel.findByText('Artist identity suggestions are shown below. Confirm attribution in the original Album.')).toBeVisible();
-  expect(panel.getByText('A synthetic identity clue')).toBeVisible();
+  expect(await panel.findByText('Artist and label suggestions are shown below as identity hints. Confirm attribution and the label in the original Album.')).toBeVisible();
+  // Entries read as their byline: the baseline and current context, and the suggested names joined by their phrases.
+  expect(await panel.findByText('A synthetic identity clue & A second clue')).toBeVisible();
+  expect(panel.getAllByText('Synthetic catalog Artist')).toHaveLength(2);
   expect(panel.queryByRole('checkbox')).not.toBeInTheDocument();
   expect(panel.queryByRole('button', { name: 'Apply selected' })).not.toBeInTheDocument();
   expect(fetch.mock.calls).toHaveLength(1);
+});
+
+test('a label suggestion is an identity hint beside the Artist hints that can only be kept, while a Disc Number suggestion is a Review item', async () => {
+  const item = catalogReview(), [title, track] = item.suggestions;
+  item.draft.album.label = { name: 'Synthetic Label', musicBrainzId: null };
+  const label = { ...title, id: '666666666666666666666666', field: 'label' as const, baseline: { name: 'Synthetic Label', musicBrainzId: null }, value: { name: 'A synthetic label hint', musicBrainzId: null } };
+  const disc = { ...track, id: '777777777777777777777777', field: 'discNumber' as const, baseline: null, value: 2 };
+  item.suggestions = [label, disc];
+  const writes: Record<string, unknown>[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (_path: string, init: RequestInit) => {
+    if (init.method === 'POST') { const body = JSON.parse(String(init.body)); writes.push(body); return reviewJson({ item: { ...item, revision: 2, receipts: [{ operationId: body.operationId, revision: 2, kind: 'adopt' }] }, receipt: { operationId: body.operationId, revision: 2, kind: 'adopt' } }); }
+    return reviewJson({ item, receipt: null });
+  }));
+  mountPage(); await screen.findByRole('textbox', { name: 'Title' });
+  fireEvent.click(screen.getByRole('tab', { name: 'Review Luna suggestions' }));
+  const panel = within(screen.getByRole('tabpanel', { name: 'Review Luna suggestions' }));
+  // The Disc Number is an ordinary Review item; the label is never one.
+  expect(await panel.findByRole('checkbox', { name: '1 · Disc number' })).toBeInTheDocument();
+  expect(panel.getAllByRole('checkbox')).toHaveLength(1);
+  const hints = (await panel.findByRole('heading', { name: 'Artist and label hints' })).closest('section')!;
+  expect(within(hints).getByText(/^Artist and label suggestions are identity clues/)).toBeVisible();
+  const hint = within(hints).getByText('A synthetic label hint').closest('article')!;
+  expect(within(hint as HTMLElement).getAllByText('Synthetic Label')).toHaveLength(2);
+  fireEvent.click(within(hint as HTMLElement).getByRole('button', { name: 'Keep current' }));
+  await waitFor(() => expect(writes).toHaveLength(1));
+  expect(writes[0]).toMatchObject({ generation: 1, selectedIds: [], rejectIds: [label.id] });
+});
+
+test('a label-only review points Review at its hint, reads a missing label as no value, and a kept hint offers nothing more', async () => {
+  const item = catalogReview(), [title] = item.suggestions;
+  item.suggestions = [{ ...title, id: '666666666666666666666666', field: 'label' as const, baseline: null, value: { name: 'A synthetic label hint', musicBrainzId: null } }];
+  vi.stubGlobal('fetch', vi.fn(async () => reviewJson({ item, receipt: null })));
+  mountPage(); await screen.findByRole('textbox', { name: 'Title' });
+  fireEvent.click(screen.getByRole('tab', { name: 'Review Luna suggestions' }));
+  let panel = within(screen.getByRole('tabpanel', { name: 'Review Luna suggestions' }));
+  // Nothing is left to adopt, yet the pending hint is not "handled": the empty state points at it.
+  expect(await panel.findByText('Artist and label suggestions are shown below as identity hints. Confirm attribution and the label in the original Album.')).toBeVisible();
+  expect(panel.queryByRole('checkbox')).not.toBeInTheDocument();
+  let hint = (await panel.findByText('A synthetic label hint')).closest('article') as HTMLElement;
+  expect(within(hint).getByText('Label')).toBeVisible();
+  expect(within(hint).getAllByText('—')).toHaveLength(2);
+  expect(within(hint).getByRole('button', { name: 'Keep current' })).toBeEnabled();
+  cleanup();
+  // Kept, the hint stays readable without an action, and Review reads as handled.
+  item.suggestions = [{ ...item.suggestions[0], decision: 'rejected' }];
+  mountPage(); fireEvent.click(await screen.findByRole('tab', { name: 'Review Luna suggestions' }));
+  panel = within(screen.getByRole('tabpanel', { name: 'Review Luna suggestions' }));
+  expect(await panel.findByText('Suggestions have been handled. The saved review draft has no changes to apply.')).toBeVisible();
+  hint = (await panel.findByText('A synthetic label hint')).closest('article') as HTMLElement;
+  expect(within(hint).queryByRole('button', { name: 'Keep current' })).not.toBeInTheDocument();
+});
+
+test('an Artist hint for an Album without Credits context reads the empty baseline and current values as no value', async () => {
+  const item = catalogReview(); item.draft.album.artists = [];
+  item.suggestions = [{ ...item.suggestions[0], field: 'artists', baseline: [], value: [{ key: artistEntryKey, name: 'A synthetic identity clue', role: 'primary', joinPhrase: null, musicBrainzId: null }] }];
+  vi.stubGlobal('fetch', vi.fn(async () => reviewJson({ item, receipt: null })));
+  mountPage(); await screen.findByRole('textbox', { name: 'Title' });
+  expect(screen.getByRole('textbox', { name: 'Artist name' })).toHaveValue('');
+  expect(screen.queryByRole('list', { name: 'Credits' })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('tab', { name: 'Review Luna suggestions' }));
+  const panel = within(screen.getByRole('tabpanel', { name: 'Review Luna suggestions' }));
+  const hint = (await panel.findByText('A synthetic identity clue')).closest('article')!;
+  expect(within(hint as HTMLElement).getAllByText('—')).toHaveLength(2);
+  expect(within(hint as HTMLElement).getByRole('button', { name: 'Keep current' })).toBeEnabled();
 });
 
 test.each(['changed', 'unavailable'] as const)('a %s source keeps private review readable and prevents applying catalog changes', async sourceStatus => {
@@ -234,7 +313,7 @@ test('an applied historical review remains read-only on every stage and never st
 
 test('selected suggestion adoption and independent rejection preserve manual values and exclude Artist identity hints', async () => {
   let item = catalogReview(); item.draft.album.title = 'A manual Album correction';
-  item.suggestions.push({ ...item.suggestions[0], id: '555555555555555555555555', field: 'artistName', baseline: item.draft.album.artistName, value: 'Another synthetic Artist identity hint' });
+  item.suggestions.push({ ...item.suggestions[0], id: '555555555555555555555555', field: 'artists', baseline: item.draft.album.artists, value: [{ key: artistEntryKey, name: 'Another synthetic Artist identity hint', role: 'primary', joinPhrase: null, musicBrainzId: null }] });
   const writes: Array<{ path: string; body: Record<string, unknown> }> = [];
   vi.stubGlobal('fetch', vi.fn(async (path: string, init: RequestInit) => {
     if (init.method === 'POST') {
@@ -252,7 +331,7 @@ test('selected suggestion adoption and independent rejection preserve manual val
   const conflict = await screen.findByRole('checkbox', { name: 'Title' });
   expect(conflict).toBeDisabled();
   expect(screen.queryByRole('checkbox', { name: 'Artist name' })).not.toBeInTheDocument();
-  expect(screen.getByText('Another synthetic Artist identity hint')).toBeVisible();
+  expect(await screen.findByText('Another synthetic Artist identity hint')).toBeVisible();
   fireEvent.click(screen.getByRole('checkbox', { name: '1 · Title' }));
   fireEvent.click(screen.getByRole('tab', { name: 'Edit draft' }));
   fireEvent.click(screen.getByRole('tab', { name: 'Review Luna suggestions' }));
@@ -315,6 +394,19 @@ test('a newer saved revision invalidates an open Apply confirmation rather than 
   expect(within(screen.getByRole('dialog')).queryByText('Another administrator revision')).not.toBeInTheDocument();
   fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: /^Update original Album \(/ }));
   expect(writes).toEqual([]);
+});
+
+test('a review saved by a newer release refuses a save with a reload request and no retry', async () => {
+  const writes: string[] = [], message = 'The administrator workbench was updated. Reload the page to continue; unsaved edits on this page are not kept.';
+  vi.stubGlobal('fetch', vi.fn(async (path: string, init: RequestInit) => {
+    if (init.method === 'PATCH') { writes.push(path); return reviewJson({ code: 'ADMIN_IMPORT_RELOAD_REQUIRED' }, 409); }
+    return reviewJson({ item: catalogReview(), receipt: null });
+  }));
+  mountPage(); fireEvent.change(await screen.findByRole('textbox', { name: 'Title' }), { target: { value: 'A private correction' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Save review draft' }));
+  expect(await screen.findByText(message)).toBeVisible(); expect(screen.getByRole('button', { name: 'Reload page' })).toBeVisible();
+  expect(screen.queryByRole('button', { name: 'Retry original operation' })).not.toBeInTheDocument();
+  expect(adminWorkspace.getSnapshot().reloadRequired).toBe(false); expect(writes).toEqual([`/api/admin/v1/catalog-reviews/${reviewId}`]);
 });
 
 test('changing review routes cannot show or retry another project unknown intent', async () => {
@@ -407,6 +499,39 @@ test('a delayed successful Save cannot overwrite a newer observed revision or er
   expect(writes).toHaveLength(1);
 });
 
+test('analysis progress never makes a local edit stale, while another administrator change does', async () => {
+  let item = catalogReview(); item.analysis = { ...item.analysis, state: 'running', completedChunks: 1 };
+  item.receipts = [{ operationId: '30000000-0000-4000-8000-000000000001', kind: 'analyze', revision: 1 }];
+  const writes: Array<{ expectedRevision: number; draft: CatalogReview['draft'] }> = [];
+  vi.stubGlobal('fetch', vi.fn(async (_path: string, init: RequestInit) => {
+    if (init.method === 'PATCH') {
+      const body = JSON.parse(String(init.body)), receipt = { operationId: body.operationId, kind: 'edit' as const, revision: item.revision + 1 }; writes.push(body);
+      item = { ...item, revision: receipt.revision, draft: body.draft, receipts: [...item.receipts, receipt] };
+      return reviewJson({ item, receipt });
+    }
+    return reviewJson({ item, receipt: null });
+  }));
+  mountPage();
+  fireEvent.change(await screen.findByRole('textbox', { name: 'Title' }), { target: { value: 'Edited while Luna runs' } });
+  // A worker tick: a newer revision without an administrator receipt keeps the local edit savable.
+  item = { ...item, revision: 3, analysis: { ...item.analysis, completedChunks: 2 } };
+  fireEvent.click(screen.getByRole('button', { name: 'Refresh status' }));
+  await screen.findByText('Luna is reviewing in the background. You can leave this page; results will be saved here.');
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Refresh status' })).toBeEnabled());
+  expect(screen.queryByRole('button', { name: 'Discard local edits and load saved version' })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Save review draft' }));
+  await waitFor(() => expect(writes).toHaveLength(1));
+  expect(writes[0].expectedRevision).toBe(1); expect(writes[0].draft.album.title).toBe('Edited while Luna runs');
+  await waitFor(() => expect(screen.getByText('Review draft saved')).toBeVisible());
+  // Another administrator's save adds a receipt: the next local edit is stale.
+  fireEvent.change(screen.getByRole('textbox', { name: 'Title' }), { target: { value: 'A second local edit' } });
+  item = { ...item, revision: 5, receipts: [...item.receipts, { operationId: '30000000-0000-4000-8000-000000000005', kind: 'edit', revision: 5 }] };
+  fireEvent.click(screen.getByRole('button', { name: 'Refresh status' }));
+  await screen.findByRole('button', { name: 'Discard local edits and load saved version' });
+  expect(screen.getByRole('button', { name: 'Save review draft' })).toBeDisabled();
+  expect(writes).toHaveLength(1);
+});
+
 test.each(['idle', 'running', 'empty', 'handled', 'manual', 'cancelled'] as const)('the %s review empty state explains the next step without starting paid work', async state => {
   const item = catalogReview();
   item.suggestions = [];
@@ -456,4 +581,46 @@ test('completed review guidance is read-only and no longer invites draft editing
   const panel = within(screen.getByRole('tabpanel', { name: 'Review Luna suggestions' }));
   expect(await panel.findByText(/This review is complete and read-only/)).toBeVisible();
   expect(panel.queryByRole('button')).not.toBeInTheDocument();
+});
+
+test('the draft shows ordered Credits, join phrases and the label as read-only context and edits Disc Numbers only where captured', async () => {
+  const item = catalogReview();
+  item.draft.album.artists = [{ key: artistEntryKey, name: 'Synthetic catalog Artist', role: 'primary', joinPhrase: ' feat. ', musicBrainzId: null },
+    { key: '50000000-0000-4000-8000-000000000002', name: 'Synthetic guest', role: 'featured', joinPhrase: null, musicBrainzId: null }];
+  item.draft.album.label = { name: 'Synthetic Label', musicBrainzId: null };
+  delete item.source.tracks[1].discNumber;
+  item.draft.tracks[0].discNumber = 2;
+  vi.stubGlobal('fetch', vi.fn(async () => reviewJson({ item, receipt: null })));
+  mountPage(); await screen.findByRole('textbox', { name: 'Title' });
+  expect(screen.getByRole('textbox', { name: 'Artist name' })).toHaveValue('Synthetic catalog Artist feat. Synthetic guest');
+  const credits = within(screen.getByRole('list', { name: 'Credits' })).getAllByRole('listitem');
+  expect(credits.map(value => value.textContent)).toEqual(['Synthetic catalog Artist · Primary · Join phrase “ feat. ”', 'Synthetic guest · Featured']);
+  expect(screen.getByRole('textbox', { name: 'Label' })).toHaveAttribute('readonly');
+  expect(screen.getByRole('textbox', { name: 'Label' })).toHaveValue('Synthetic Label');
+  expect(screen.getByRole('spinbutton', { name: '1 · Disc number' })).toHaveValue(2);
+  expect(screen.queryByRole('spinbutton', { name: '2 · Disc number' })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('tab', { name: 'Update original Album' }));
+  expect(await screen.findByRole('checkbox', { name: 'Update Track · Synthetic first track · Disc number' })).toBeVisible();
+});
+
+test('a review opened before Disc Numbers were captured shows no Disc Number input and offers no disc change', async () => {
+  const item = legacyCatalogReview(); item.draft.tracks[1].discNumber = 3; item.draft.tracks[1].title = 'A saved title correction';
+  vi.stubGlobal('fetch', vi.fn(async () => reviewJson({ item, receipt: null })));
+  mountPage(); await screen.findByRole('textbox', { name: 'Title' });
+  expect(screen.queryByRole('spinbutton', { name: /Disc number/ })).not.toBeInTheDocument();
+  expect(screen.getByRole('spinbutton', { name: '1 · Track number' })).toBeEnabled();
+  fireEvent.click(screen.getByRole('tab', { name: 'Update original Album' }));
+  expect(await screen.findByRole('checkbox', { name: 'Update Track · Synthetic second track · Title' })).toBeVisible();
+  expect(screen.queryByRole('checkbox', { name: /Disc number/ })).not.toBeInTheDocument();
+});
+
+test('a v1 review response the strict schema refuses asks for a reload instead of showing a partial review', async () => {
+  const { artists: _artists, label: _label, ...album } = catalogReview().draft.album;
+  const item = { ...catalogReview(), draft: { album: { ...album, artistName: 'Synthetic catalog Artist' }, tracks: catalogReview().draft.tracks.map(({ discNumber: _disc, ...track }) => track) } };
+  vi.stubGlobal('fetch', vi.fn(async () => reviewJson({ item, receipt: null })));
+  mountPage();
+  expect(await screen.findByText('The administrator workbench was updated. Reload the page to continue; unsaved edits on this page are not kept.')).toBeVisible();
+  expect(screen.getByRole('button', { name: 'Reload page' })).toBeVisible();
+  expect(adminWorkspace.getSnapshot().reloadRequired).toBe(true);
+  expect(screen.queryByRole('textbox', { name: 'Title' })).not.toBeInTheDocument();
 });

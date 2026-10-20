@@ -20,6 +20,7 @@ export function MutationStatus({ mutation }: { mutation: ReturnType<typeof useAd
   if (mutation.running) return <p role="status">{t('common.saving')}</p>;
   if (!mutation.error) return null;
   return <div role="alert" className={styles.error}><p>{t(`common.${mutation.error}`)}</p>
+    {mutation.error === 'reload' && <button type="button" className={styles.button} onClick={() => window.location.reload()}>{t('common.reload_action')}</button>}
     {mutation.intent && <button type="button" className={styles.button} onClick={mutation.operation.retry}>{t('common.retry_operation')}</button>}
   </div>;
 }

@@ -42,6 +42,8 @@ export class Organization {
     lifecycleUpdatedAt: Date;
     lifecycleError: string | null;
     referenceRevision: number;
+    /** Private import provenance (lowercase UUID); written only by the admin catalog service and import publication. */
+    musicBrainzId?: string;
 
     constructor(
         name: string,
@@ -104,6 +106,7 @@ export class Organization {
             .toArray();
     }
 
+    /** Writes only name, description and type: the allowlist never writes visibility or a MusicBrainz ID. */
     static updateById(organizationId: string, update: Record<string, unknown>) {
         preserveCatalogVisibilityUpdate(update);
         const allowed: Record<string, unknown> = {};

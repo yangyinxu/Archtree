@@ -1,0 +1,29 @@
+{
+  "source": "musicbrainz",
+  "recordedAt": "2026-10-18T10:50:22.432Z",
+  "description": "ISRC lookup of the Pandora Call single recording",
+  "exchanges": [
+    {
+      "url": "https://musicbrainz.org/ws/2/isrc/JPY392200483?inc=releases&fmt=json",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "body": {
+        "isrc": "JPY392200483",
+        "recordings": [
+          {
+            "id": "4cf3e4e2-9809-4a44-8ccf-8e3b41cad9fa",
+            "title": "パンドラコール",
+            "length": 217030
+          },
+          {
+            "id": "7cdadfd4-fb66-464c-8854-65cc1746dc5d",
+            "title": "パンドラコール",
+            "length": 217257
+          }
+        ]
+      }
+    }
+  ]
+}

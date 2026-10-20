@@ -7,6 +7,7 @@ Product behavior remains defined in [business-rules.md](../business-rules.md).
 
 - [Listener public contracts and browser boundaries](#listener-public-contracts-and-browser-boundaries)
   - [Compatibility policy](#compatibility-policy)
+  - [Native client compatibility](#native-client-compatibility)
   - [Browser module boundaries](#browser-module-boundaries)
   - [Verification](#verification)
 - [Browser session recovery](#browser-session-recovery)
@@ -28,8 +29,10 @@ therefore fails type checking even when the difference is an optional field.
 
 ### Compatibility policy
 
-- Public catalog and collection response objects discard unknown additive fields
-  recursively before returning the parsed result to a query cache or UI.
+- Finitude Web's public catalog and collection schemas discard unknown additive
+  fields recursively before returning the parsed result to a query cache or UI.
+  The native clients decode differently; see
+  [Native client compatibility](#native-client-compatibility).
 - Known fields still validate their requiredness, value type, bounds, enum, and
   reference relationships. A new discriminator or enum variant is not an additive
   field and requires a negotiated capability or a new major API contract.
@@ -44,10 +47,18 @@ therefore fails type checking even when the difference is an optional field.
   permission for the server to send private fields. Existing server projection and
   lifecycle integration tests remain required security checks.
 
-`contracts/listener/v1/fixtures/album-legacy.json` and `album-current.json` are
+`contracts/listener/v1/fixtures/album-legacy.json`, `album-current.json`,
+`album-multi-artist-label.json` and `album-hidden-credits.json` are
 credential-free, database-independent JSON examples that native consumers can
-load unchanged. The compatibility test reads both through the current parser and
-reads the current fixture through an independent frozen baseline parser.
+load unchanged. The third is an imported Album with two primary Artists, a
+featured Artist and a label, frozen from server output with synthetic IDs: the
+Album's Credits keep their roles and order, its byline carries the join
+phrases, its tracks carry only the primary Artists, every `artistNames` list is
+unique, and it adds no field. The fourth, also frozen from server output, is a
+documented Album and MediaTrack whose every credited subject is hidden or not
+ready: `credits` is empty and `displayByline` is absent. The compatibility test
+reads all four through the current parser and reads the current-shape fixtures
+through an independent frozen baseline parser.
 
 The frozen parser establishes the forward-compatible reader introduced by this
 change. It does not retroactively change already-open historical Web clients
@@ -57,10 +68,57 @@ use a versioned endpoint or capability negotiation if an immediate incompatible
 change is necessary. The fixtures must be extended with every wire addition, and
 the frozen baseline reader must not be silently updated to make a test pass.
 
-The sibling `D:\Documents\GitHub\Finitude_iOS` repository was unavailable during
-this change, so native decoding could not be verified. No native product behavior
-or server response field was changed. Native adoption should run the same fixtures
-against its decoder before shipping.
+### Native client compatibility
+
+The native clients do not share the Web stripping policy, so every listener
+wire change must satisfy each decoder. Checked against Finitude_iOS 91589f0
+and Finitude_Android 433ee43:
+
+- iOS decodes Listener Home collection pages strictly. An unknown key in any
+  object of the page, including summaries and Credits, rejects the whole page.
+  Each byline (at most 500 Swift Characters) and Credit name (at most 200)
+  must already be trimmed and contain no Cc or Cf scalar, or the page is
+  rejected.
+- Android ignores unknown keys while decoding, then validates collection pages
+  and Album details. Each byline (at most 500 code points) and Credit name (at
+  most 200) must be trimmed and contain no ISO control character; Cf is
+  accepted.
+- iOS rejects an empty byline on Home collection pages and Android on
+  collection pages and Album details; both accept an absent one and fall back
+  to `artistNames` joined with `, `. The server therefore never
+  sends `''`: when no credited Artist or Organization is visible it omits
+  `displayByline` and sends an empty `credits` list. An owner without usable
+  stored attribution omits all three attribution fields, as before. Web treats
+  each of them as optional as well.
+- Web strips unknown fields at runtime, as described above, and
+  `contentContractAlignment.ts` fails the Web build when its schemas and the
+  canonical DTOs disagree.
+
+While that iOS decoder is supported, an additive listener v1 field needs a
+negotiated capability or a new contract. Credit join phrases therefore add no
+field and reach clients only inside `displayByline`. A phrase that reaches a
+byline has passed the same validation as a write, so it adds no Cc or Cf
+character; an invalid stored phrase is shown as `, `. The shared byline
+builder, `src/services/catalog/catalogByline.ts`, keeps every byline within
+500 UTF-16 code units, which never exceeds either client's limit. It does not
+rewrite stored names: a name with a Cf character, such as an emoji ZWJ
+sequence, or a Credit name over 200 characters still fails native validation.
+
+Disc Numbers add no field either. Listener v1 carries neither Disc nor Track
+Number, so a multi-disc Album reaches clients only as the order of
+`Album.audioTrackIds`, and clients number its rows by position.
+
+The legacy public catalog (`publicCatalogService.ts`) projects each Credit as
+exactly the five fields that `PublicCatalogCredit` declares: `subjectType`,
+`subjectId`, `name`, `role` and `order`. Earlier releases spread the stored
+Credit and so also sent `creditId`. This makes the runtime match the declared
+contract and is not a DTO shape change; neither Web nor the native clients
+read `creditId` from public responses.
+
+`test/support/nativeDisplayTextValidators.ts` ports both native checks and
+their byline fallback, and `test/listener/nativeBylineValidators.test.ts`
+replays server bylines, including owners without a visible credited subject,
+through them. Re-check the sibling repositories whenever either decoder changes.
 
 ### Browser module boundaries
 

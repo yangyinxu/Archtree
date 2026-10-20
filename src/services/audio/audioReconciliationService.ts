@@ -17,6 +17,8 @@ import { getS3 } from '../../infrastructure/s3';
 import { loadAdminCanonicalReservations } from '../../administration/adminCanonicalReservationService';
 import { isAudioObjectKeyForTrack } from '../../utils/audioStorageKey';
 import { isVideoObjectKeyForTrack } from '../../utils/videoStorageKey';
+import { isMotionPreviewCandidateKey } from '../../utils/motionPreviewStorageKey';
+import { reconcileMotionPreviewStorage } from '../media/motionPreviewReconciliation';
 import {
     activeMediaTypeForTrack,
     isMediaObjectKeyForTrack,
@@ -341,7 +343,7 @@ export const reconcileAudioStorage = async () => {
         throw new Error('S3_BUCKET_NAME is not configured.');
     }
 
-    const [tracks, allS3Objects, videoS3Objects] = await Promise.all([
+    const [tracks, allS3Objects, videoS3Objects, motionPreviewS3Objects] = await Promise.all([
         db.collection('audioTracks').find({}, {
             projection: {
                 title: 1,
@@ -369,11 +371,13 @@ export const reconcileAudioStorage = async () => {
                 storageCleanupStatus: 1,
                 storageCleanupUpdatedAt: 1,
                 storageCleanupError: 1,
-                videoAsset: 1
+                videoAsset: 1,
+                motionPreview: 1
             }
         }).limit(reconciliationLimit + 1).toArray(),
         listS3Objects(bucket, isAudioStorageCandidateKey),
-        listS3Objects(bucket, isVideoStorageCandidateKey, 'video/')
+        listS3Objects(bucket, isVideoStorageCandidateKey, 'video/'),
+        listS3Objects(bucket, isMotionPreviewCandidateKey, 'motion-preview/')
     ]);
     if (tracks.length > reconciliationLimit) {
         throw new Error(`Audio reconciliation exceeds the ${reconciliationLimit} database-record safety limit.`);
@@ -498,6 +502,7 @@ export const reconcileAudioStorage = async () => {
             invalidStorageKeys: invalidVideoStorageKeys,
             duplicateStorageKeys: duplicateVideoStorageKeys,
             invalidStorageObjects: invalidVideoStorageObjects
-        }
+        },
+        motionPreviewStorage: reconcileMotionPreviewStorage(tracks, motionPreviewS3Objects)
     };
 };

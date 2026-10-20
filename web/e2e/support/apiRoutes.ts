@@ -194,6 +194,22 @@ export const installSignedOutApi = async (page: Page): Promise<BrowserApiFixture
       await jsonResponse(route, 200, { contractVersion: 1, deterministicDiscovery: false, artistFollows: false });
       return;
     }
+    if (call.method === 'GET' && call.pathname === '/api/listener/v1/presentation-capabilities') {
+      // Motion previews default off, as in production; specs that need them override this route.
+      await jsonResponse(route, 200, { contractVersion: 1, motionPreviews: false });
+      return;
+    }
+    if ((call.method === 'GET' || call.method === 'HEAD')
+      && call.pathname.startsWith('/content/mediaTrack/motion-preview/')) {
+      // Only the Video fixture has a motion preview; every other track answers a bare 404.
+      if (call.pathname === `/content/mediaTrack/motion-preview/${catalogIds.firstTrack}`) {
+        // Playwright's Chromium cannot decode H.264, so the fixture clip is the WebM test video.
+        await fulfillMedia(route, video, 'video/webm');
+      } else {
+        await route.fulfill({ status: 404, body: '' });
+      }
+      return;
+    }
     if (call.method === 'GET' && call.pathname === '/api/listener/v1/home') {
       await jsonResponse(route, 200, homeFixture);
       return;

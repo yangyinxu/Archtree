@@ -20,10 +20,8 @@ export const syntheticServerTestEnvironment = Object.freeze({
   OPENAI_ORG_ID: '',
   OPENAI_PROJECT_ID: '',
   FINITUDE_ADMIN_IMPORTS_ENABLED: 'false',
-  FINITUDE_ADMIN_CATALOG_ENABLED: 'false',
-  FINITUDE_ADMIN_VISIBILITY_ENABLED: 'false',
-  FINITUDE_HIDDEN_DELIVERY_ENFORCED: 'false',
   FINITUDE_ADMIN_IMPORT_PRIVATE_STORAGE_READY: 'false',
+  FINITUDE_ADMIN_METADATA_LOOKUP_CONTACT: '',
   ADMIN_IMPORT_S3_BUCKET_NAME: 'archtree-lorem-ipsum-private-import-test'
 });
 

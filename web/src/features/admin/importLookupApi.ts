@@ -1,0 +1,91 @@
+import { z } from 'zod';
+import { artistEntrySchema, importDateSchema, labelEntrySchema, uuidSchema } from './adminNamingSchema';
+
+/**
+ * The strict schema of an import's metadata lookup view (GET /api/admin/v1/imports/:id/lookup), mirroring the server's allowlist
+ * (src/administration/lookup/lookupView.ts): bounded candidate evidence, groups, the preselection, the applied values with their
+ * conflicts and flags, and what Publish waits for; and the import's summary state (src/administration/import/adminImportSummary.ts).
+ * The summary read (importSummaryQuery.ts) loads it with the read, so no chunk that shares that query carries it.
+ */
+const integer = z.number().int().nonnegative();
+const run = z.number().int().min(1);
+const text = z.string().max(1000);
+/** A MusicBrainz release's key, or an iTunes-only candidate's (`itunes:<collection ID>`); the release ID is the MBID or the collection ID. */
+const candidateKey = z.string().regex(/^(?:musicbrainz:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|itunes:[1-9]\d{0,11})$/);
+const releaseId = z.string().regex(/^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[1-9]\d{0,11})$/);
+const mbid = z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+const source = z.enum(['musicbrainz', 'itunes']).default('musicbrainz');
+const groupKey = z.string().regex(/^[a-f0-9]{64}$/);
+const trackPath = /^tracks\.([^.]+)\.(?:title|discNumber|trackNumber)$/;
+/** A lookup value path: four Album values, or a file's title, Disc or Track Number. */
+const valuePath = z.string().max(80).refine(path => /^album\.(?:title|artists|label|releaseDate)$/.test(path)
+  || uuidSchema.safeParse(trackPath.exec(path)?.[1]).success, 'Invalid lookup path');
+const slotId = uuidSchema.nullable();
+const basis = z.enum(['releaseId', 'barcode', 'catalogNumber', 'onlyMatchingGroup']);
+
+const comparisonSchema = z.object({
+  trackCount: z.object({ local: integer, candidate: integer }).strict(), discCount: z.object({ local: integer.nullable(), candidate: integer }).strict(),
+  differences: z.array(z.enum(['trackCount', 'discCount', 'duration'])).max(3), unknownLocalDurations: integer, unknownCandidateDurations: integer
+}).strict();
+const candidateSchema = z.object({
+  // An iTunes-only candidate, and whether it was not checked against MusicBrainz (MusicBrainz's, unchecked, from a server sending none).
+  key: candidateKey, releaseId, source, notChecked: z.boolean().default(false), status: z.enum(['matching', 'unverified', 'notMatching', 'incomplete']), title: text.nullable(), artist: text.nullable(),
+  label: text.nullable(), catalogNumber: text.nullable(), barcode: z.string().max(14).nullable(), country: z.string().max(2).nullable(), date: importDateSchema.nullable(),
+  formats: z.array(z.string().max(100)).max(20), trackCount: integer.nullable(), comparison: comparisonSchema.nullable(), groupKey: groupKey.nullable(), artistMismatch: z.boolean().nullable(),
+  // Whether a protected front-artwork preview exists (never an address); false from a server that sends none.
+  artwork: z.boolean().default(false)
+}).strict().refine(candidate => candidate.key === `${candidate.source}:${candidate.releaseId}`, 'Mismatched lookup candidate');
+/**
+ * The values a matching group would write, with the MusicBrainz ID each entry and the label credit (null from a server that sends
+ * none); text is evidence and is shown, never applied from here.
+ */
+const proposalSchema = z.object({
+  albumTitle: text, artists: z.array(z.object({ name: text, role: z.enum(['primary', 'featured']), joinPhrase: z.string().max(200).nullable(), musicBrainzId: mbid.nullable().default(null) }).strict()).max(50),
+  label: text.nullable(), labelMusicBrainzId: mbid.nullable().default(null), releaseDate: importDateSchema.nullable(), tracks: z.array(z.object({ discNumber: integer, trackNumber: integer, title: text }).strict()).max(100)
+}).strict();
+const groupSchema = z.object({ groupKey, representativeKey: candidateKey, memberKeys: z.array(candidateKey).max(25), proposal: proposalSchema }).strict();
+/** A conflict's lookup value in its draft form: a title, a Disc or Track Number, a date, a label or the Artist entries. */
+const lookupValueSchema = z.union([z.string().max(300), z.number().int().min(1).max(9999), importDateSchema, labelEntrySchema, z.array(artistEntrySchema).max(20)]);
+const appliedSchema = z.object({
+  run, candidateKey: candidateKey.nullable(), releaseId: releaseId.nullable(), choice: z.enum(['preselected', 'chosen', 'none']), basis: z.union([basis, z.literal('chosen')]).nullable(),
+  // An iTunes-only application flags its values; `notChecked` when MusicBrainz could not rule it out.
+  source, notChecked: z.boolean().default(false),
+  values: z.array(z.object({ path: valuePath, slotId }).strict()).max(305),
+  // `musicBrainzId`: the values differ only in the MusicBrainz IDs of entries or the label that agree in names, roles and phrases.
+  conflicts: z.array(z.object({ path: valuePath, slotId, lookup: lookupValueSchema, answer: z.enum(['mine', 'lookup']).nullable(), musicBrainzId: z.boolean().default(false) }).strict()).max(305),
+  flagged: z.array(z.object({ path: valuePath, reason: z.enum(['characters', 'length', 'format', 'size', 'placeholder']) }).strict()).max(305)
+}).strict();
+export const lookupViewSchema = z.object({
+  run, state: z.enum(['queued', 'running', 'retrying', 'complete', 'unavailable', 'stopped', 'superseded']),
+  issue: z.enum(['permissionLost', 'grantExpired', 'notConfigured', 'sourceUnavailable', 'sourceBusy', 'fileSetChanged', 'projectClosed']).nullable(),
+  outcome: z.enum(['candidates', 'noRelease', 'noQuery']).nullable(),
+  input: z.object({ trigger: z.enum(['tags', 'folder', 'submitted']), submitted: z.object({ kind: z.enum(['album', 'song']), text }).strict().nullable() }).strict(),
+  candidates: z.array(candidateSchema).max(25), groups: z.array(groupSchema).max(25),
+  preselection: z.object({ candidateKey, basis, artistMismatch: z.boolean(), notChecked: z.boolean().default(false) }).strict().nullable(),
+  disclosure: z.object({ unknownLocalDurations: integer, unknownLocalDiscNumbers: integer, partialComparison: z.boolean() }).strict().nullable(),
+  applied: appliedSchema.nullable(), staleFiles: z.array(uuidSchema).max(100),
+  needsAnswer: z.object({ tie: z.boolean(), conflicts: z.array(valuePath).max(305) }).strict(), blocking: z.boolean(),
+  // The iTunes fallback stage: not queried, running, waiting for an automatic retry, answered or unavailable.
+  itunes: z.enum(['notQueried', 'running', 'retrying', 'answered', 'unavailable']).default('notQueried')
+}).strict();
+/**
+ * What the server decided for the summary: an append, the work Publish waits for (uploads, lookup, the lookup cover's staging and
+ * analysis), a new Album credited only by a placeholder,
+ * each shown Luna suggestion's tick state, the analysis budget left (project runs and calls, and calls today), whether this
+ * server can run metadata lookup and how many identity rows of the saved draft no decision or preselection answers.
+ */
+const summarySchema = z.object({
+  // `cover`: the applied release's front artwork is being staged (false from a server that sends none).
+  append: z.boolean(), waiting: z.object({ uploads: z.boolean(), lookup: z.boolean(), cover: z.boolean().default(false), analysis: z.boolean() }).strict(), placeholderOnly: z.boolean(),
+  luna: z.array(z.object({ id: z.string().regex(/^[a-f0-9]{24}$/), tick: z.enum(['ticked', 'unticked', 'resolved', 'conflict']) }).strict()).max(1000),
+  analysis: z.object({ runs: integer, attempts: integer, daily: integer }).strict(), lookupAvailable: z.boolean(), identityAnswers: integer.max(1000)
+}).strict();
+/**
+ * The lookup view (null before any run) with the import's revision, automatic-write counter and summary state, and the names lookup
+ * found for each MusicBrainz ID the saved draft carries (a renamed entry keeps its ID only under one of them).
+ */
+export const lookupResponseSchema = z.object({ lookup: lookupViewSchema.nullable(), revision: integer, valueRevision: integer, summary: summarySchema,
+  musicBrainzNames: z.array(z.object({ musicBrainzId: mbid, names: z.array(z.string().max(200)).max(32) }).strict()).max(21).default([]) }).strict();
+export type ImportLookupView = z.infer<typeof lookupViewSchema>;
+export type ImportLookupResponse = z.infer<typeof lookupResponseSchema>;
+export type ImportSummaryState = z.infer<typeof summarySchema>;

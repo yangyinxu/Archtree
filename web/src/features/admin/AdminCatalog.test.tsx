@@ -19,8 +19,13 @@
  *   - historical cover cleanup preserves dirty manual values and exposes a changed saved revision for explicit review
  *   - historical cover cancellation binds the latest saved owner while retaining an older dirty manual baseline
  *   - reverting a draft after observing a newer revision retains the explicit recovery path
+ *   - a stored Disc Number appears in MediaTrack metadata before the Track Number
+ *   - join phrases are edited between names and mirror the successor rule locally
+ *   - adding a Credit clears the previous last phrase and keeps every other phrase
  *   - confirmation distinguishes unavailable Credits from explicit removal and includes coupled attribution
  *   - same-named Credit replacements remain distinguishable by their exact records
+ *   - an Artist's MusicBrainz ID is edited as trimmed lowercase text, cleared when emptied, and an ID another Artist keeps is refused with its own message
+ *   - an Organization's saved MusicBrainz ID is shown, and clearing it confirms the stored ID against none and sends only null
  * @end-catalog */
 
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
@@ -37,9 +42,9 @@ import type { CatalogItem, CatalogKind } from './catalogApi';
 const album = (): Extract<CatalogItem, { kind: 'album' }> => ({ kind: 'album', id: '111111111111111111111111', revision: `cr_${'a'.repeat(43)}`, visibility: 'public', effectiveVisibility: 'public', coverUrl: null, mediaUrl: null, capabilities: { editing: true, visibility: true }, fields: { title: 'Synthetic catalog Album', releaseDate: null, credits: null, attributionStatus: 'unknown' } });
 function catalogItem(kind: CatalogKind): CatalogItem {
   const base = album();
-  if (kind === 'artist') return { ...base, kind, fields: { name: 'Synthetic artist', bio: '', birthDate: null } };
-  if (kind === 'organization') return { ...base, kind, fields: { name: '𠮷 Synthetic organization', description: '', organizationType: 'archive' } };
-  if (kind === 'audioTrack') return { ...base, kind, fields: { ...base.fields, title: 'Synthetic track', releaseDate: { year: 2023, month: 4, day: null }, trackNumber: 2 } };
+  if (kind === 'artist') return { ...base, kind, fields: { name: 'Synthetic artist', bio: '', birthDate: null, musicBrainzId: null } };
+  if (kind === 'organization') return { ...base, kind, fields: { name: '𠮷 Synthetic organization', description: '', organizationType: 'archive', musicBrainzId: null } };
+  if (kind === 'audioTrack') return { ...base, kind, fields: { ...base.fields, title: 'Synthetic track', releaseDate: { year: 2023, month: 4, day: null }, discNumber: null, trackNumber: 2 } };
   return base;
 }
 const itemName = (item: CatalogItem) => 'name' in item.fields ? item.fields.name : item.fields.title;
@@ -199,7 +204,7 @@ test('existing catalog save is explicit, partial and preserves unsaved edits on 
   expect(screen.getByRole('textbox', { name: 'Title' })).toHaveValue('Human correction');
 });
 test('lost catalog response retries the same intent and leaving Admin destroys its private preview', async () => {
-  const item = { ...album(), kind: 'audioTrack' as const, fields: { ...album().fields, title: 'Synthetic track', releaseDate: null, credits: null, attributionStatus: 'unknown' as const, trackNumber: 1 }, mediaUrl: '/api/admin/v1/catalog/audioTrack/111111111111111111111111/media' };
+  const item = { ...album(), kind: 'audioTrack' as const, fields: { ...album().fields, title: 'Synthetic track', releaseDate: null, credits: null, attributionStatus: 'unknown' as const, discNumber: null, trackNumber: 1 }, mediaUrl: '/api/admin/v1/catalog/audioTrack/111111111111111111111111/media' };
   const bodies: string[] = []; const pause = vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {}); const load = vi.spyOn(HTMLMediaElement.prototype, 'load').mockImplementation(() => {});
   vi.stubGlobal('fetch', vi.fn(async (_path: string, init: RequestInit) => { if (_path.endsWith('/cover-operations')) return json({items:[]}); if (init.method === 'PATCH') { bodies.push(String(init.body)); throw new TypeError('offline'); } return json({ item }); }));
   mount(<AdminCatalogPage kind="audioTrack" id={item.id} />); fireEvent.change(await screen.findByRole('textbox', { name: 'Title' }), { target: { value: 'Changed' } }); fireEvent.click(screen.getByRole('button', { name: 'Save catalog changes' })); fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Save catalog changes' }));
@@ -520,6 +525,120 @@ test('reverting a draft after observing a newer revision retains the explicit re
   expect(writes).toEqual([]);
 });
 
+test('a stored Disc Number appears in MediaTrack metadata before the Track Number', async () => {
+  const base = catalogItem('audioTrack') as Extract<CatalogItem, { kind: 'audioTrack' }>;
+  const item = { ...base, fields: { ...base.fields, discNumber: 2 } };
+  vi.stubGlobal('fetch', vi.fn(async () => json({ items: [item], nextCursor: null })));
+  mount(<AdminCatalogPage />, '/admin/catalog?kind=audioTrack');
+  expect(await screen.findByRole('link', { name: itemName(item) })).toHaveAccessibleDescription('Public · 2023 · Disc number 2 · Track number 2');
+});
+
+test.each([
+  [null, '2', 2, '—', '2'],
+  [3, '', null, '3', '—']
+] as const)('the Disc number field sends only its own change (%s → %s)', async (saved, typed, sent, before, after) => {
+  const base = catalogItem('audioTrack') as Extract<CatalogItem, { kind: 'audioTrack' }>;
+  const item = { ...base, fields: { ...base.fields, discNumber: saved } }; const writes: Record<string, any>[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (path: string, init: RequestInit) => {
+    if (path.endsWith('/cover-operations')) return json({ items: [] });
+    if (init.method === 'PATCH') { const body = JSON.parse(String(init.body)); writes.push(body); return json({ item: { ...item, revision: `cr_${'b'.repeat(43)}`, fields: { ...item.fields, ...body.fields } }, receipt: { operationId: body.operationId } }); }
+    return json({ item });
+  }));
+  mount(<AdminCatalogPage kind="audioTrack" id={item.id} />);
+  const disc = await screen.findByRole('spinbutton', { name: 'Disc number' });
+  expect(disc).toHaveAttribute('max', '999');
+  fireEvent.change(disc, { target: { value: typed } });
+  fireEvent.click(screen.getByRole('button', { name: 'Save catalog changes' }));
+  const dialog = await screen.findByRole('dialog');
+  const row = within(dialog).getByRole('heading', { name: 'Disc number' }).closest('article')!;
+  expect(within(row).getByText(before, { exact: true })).toBeVisible();
+  expect(within(row).getByText(after, { exact: true })).toBeVisible();
+  expect(within(dialog).getAllByRole('article')).toHaveLength(1);
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Save catalog changes' }));
+  await waitFor(() => expect(writes).toHaveLength(1));
+  expect(writes[0].fields).toEqual({ discNumber: sent });
+});
+
+test('join phrases are edited between names and mirror the successor rule locally', async () => {
+  const ids = ['222222222222222222222222', '333333333333333333333333', '444444444444444444444444'];
+  const credits = [
+    { creditId: 'credit-first', subjectType: 'artist' as const, subjectId: ids[0], role: 'primary' as const, order: 0, joinPhrase: ' & ' },
+    { creditId: 'credit-second', subjectType: 'artist' as const, subjectId: ids[1], role: 'primary' as const, order: 1 },
+    { creditId: 'credit-third', subjectType: 'organization' as const, subjectId: ids[2], role: 'label' as const, order: 2 }
+  ];
+  const item = { ...album(), fields: { ...album().fields, credits, attributionStatus: 'documented' as const } }; const writes: Record<string, any>[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (path: string, init: RequestInit) => {
+    if (path.endsWith('/cover-operations')) return json({ items: [] });
+    if (init.method === 'PATCH') { const body = JSON.parse(String(init.body)); writes.push(body); return json({ item: { ...item, revision: `cr_${'b'.repeat(43)}`, fields: { ...item.fields, ...body.fields } }, receipt: { operationId: body.operationId } }); }
+    const subject = ids.indexOf(path.split('/').at(-1)!);
+    if (subject >= 0) return json({ item: { ...album(), id: ids[subject], kind: subject === 2 ? 'organization' : 'artist', fields: subject === 2 ? { name: 'Phrase label', description: '', organizationType: 'label' } : { name: `Phrase artist ${subject + 1}`, bio: '', birthDate: null } } });
+    return json({ item });
+  }));
+  mount(<AdminCatalogPage kind="album" id={item.id} />);
+  const phrases = await screen.findAllByRole('textbox', { name: 'Join phrase' });
+  // The last Credit has no next name, so it has no phrase input.
+  expect(phrases).toHaveLength(2);
+  expect(phrases[0]).toHaveValue(' & '); expect(phrases[1]).toHaveValue('');
+  expect(phrases[0]).toHaveAttribute('maxlength', '16');
+  expect(screen.getByText('Shown between this name and the next one. Leave empty for a comma.')).toBeVisible();
+
+  fireEvent.change(phrases[0], { target: { value: ' feat. ' } });
+  fireEvent.change(phrases[1], { target: { value: ' / ' } });
+  fireEvent.change(phrases[1], { target: { value: '' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Save catalog changes' }));
+  const dialog = await screen.findByRole('dialog');
+  expect(await within(dialog).findByText('Phrase artist 1 · Artists · Primary · Join phrase “ feat. ”')).toBeVisible();
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Save catalog changes' }));
+  await waitFor(() => expect(writes).toHaveLength(1));
+  expect(Object.keys(writes[0].fields)).toEqual(['credits', 'attributionStatus']);
+  expect(writes[0].fields.credits[0]).toEqual({ ...credits[0], joinPhrase: ' feat. ' });
+  expect(writes[0].fields.credits[1]).toEqual(credits[1]);
+  expect('joinPhrase' in writes[0].fields.credits[1]).toBe(false);
+
+  // Removing the second Credit clears the phrase that introduced it.
+  const remaining = await screen.findAllByRole('button', { name: 'Remove credit' });
+  fireEvent.click(remaining[1]);
+  const after = screen.getAllByRole('textbox', { name: 'Join phrase' });
+  expect(after).toHaveLength(1); expect(after[0]).toHaveValue('');
+});
+
+test('adding a Credit clears the previous last phrase and keeps every other phrase', async () => {
+  const ids = ['222222222222222222222222', '333333333333333333333333', '555555555555555555555555'];
+  // The stored last Credit keeps a phrase the server allows while it stays last; it has no input.
+  const credits = [
+    { creditId: 'credit-first', subjectType: 'artist' as const, subjectId: ids[0], role: 'primary' as const, order: 0, joinPhrase: ' & ' },
+    { creditId: 'credit-second', subjectType: 'artist' as const, subjectId: ids[1], role: 'primary' as const, order: 1, joinPhrase: ' / ' }
+  ];
+  const artist = (index: number) => ({ ...album(), id: ids[index], kind: 'artist' as const, fields: { name: `Phrase artist ${index + 1}`, bio: '', birthDate: null } });
+  const item = { ...album(), fields: { ...album().fields, credits, attributionStatus: 'documented' as const } }; const writes: Record<string, any>[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (path: string, init: RequestInit) => {
+    if (path.endsWith('/cover-operations')) return json({ items: [] });
+    if (init.method === 'PATCH') { const body = JSON.parse(String(init.body)); writes.push(body); return json({ item: { ...item, revision: `cr_${'b'.repeat(43)}`, fields: { ...item.fields, ...body.fields } }, receipt: { operationId: body.operationId } }); }
+    if (path.includes('/catalog/artist?query=')) return json({ items: [artist(2)], nextCursor: null });
+    const subject = ids.indexOf(path.split('/').at(-1)!);
+    if (subject >= 0) return json({ item: artist(subject) });
+    return json({ item });
+  }));
+  mount(<AdminCatalogPage kind="album" id={item.id} />);
+  const before = await screen.findAllByRole('textbox', { name: 'Join phrase' });
+  expect(before).toHaveLength(1); expect(before[0]).toHaveValue(' & ');
+
+  fireEvent.change(screen.getByRole('textbox', { name: 'Search catalog' }), { target: { value: 'Phrase' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Search catalog' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Add credit · Phrase artist 3 · Public' }));
+  // The previous last Credit now introduces the added name, so its hidden phrase is cleared.
+  const phrases = screen.getAllByRole('textbox', { name: 'Join phrase' });
+  expect(phrases).toHaveLength(2); expect(phrases[0]).toHaveValue(' & '); expect(phrases[1]).toHaveValue('');
+
+  fireEvent.click(screen.getByRole('button', { name: 'Save catalog changes' }));
+  const dialog = await screen.findByRole('dialog');
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Save catalog changes' }));
+  await waitFor(() => expect(writes).toHaveLength(1));
+  const sent = writes[0].fields.credits as Array<Record<string, unknown>>;
+  expect(sent.map(credit => [credit.subjectId, credit.order, credit.joinPhrase])).toEqual([[ids[0], 0, ' & '], [ids[1], 1, undefined], [ids[2], 2, undefined]]);
+  expect(sent.map(credit => 'joinPhrase' in credit)).toEqual([true, false, false]);
+});
+
 test('confirmation distinguishes unavailable Credits from explicit removal and includes coupled attribution', () => {
   const item = album();
   const fields = { ...item.fields, credits: [], attributionStatus: 'unknown' as const };
@@ -575,7 +694,7 @@ test('same-named Credit replacements remain distinguishable by their exact recor
 test.each([
   ['artist', { name: 'Old artist', bio: 'Old biography', birthDate: { year: 1980, month: 2, day: null } }, { name: 'New artist', bio: 'Line one\nLine two', birthDate: null }, ['Name', 'Biography', 'Birth date'], ['New artist', 'Line one\nLine two', '—']],
   ['organization', { name: 'Old organization', description: 'Old description', organizationType: 'label' }, { name: 'New organization', description: 'New description', organizationType: 'archive' }, ['Name', 'Description', 'Organization type'], ['New organization', 'New description', 'Archive']],
-  ['audioTrack', { title: 'Old track', releaseDate: null, credits: null, attributionStatus: 'unknown', trackNumber: 1 }, { title: 'New track', releaseDate: { year: 2021, month: 3, day: null }, credits: null, attributionStatus: 'unknown', trackNumber: null }, ['Title', 'Release date', 'Track number'], ['New track', '2021-03', '—']]
+  ['audioTrack', { title: 'Old track', releaseDate: null, credits: null, attributionStatus: 'unknown', discNumber: null, trackNumber: 1 }, { title: 'New track', releaseDate: { year: 2021, month: 3, day: null }, credits: null, attributionStatus: 'unknown', discNumber: null, trackNumber: null }, ['Title', 'Release date', 'Track number'], ['New track', '2021-03', '—']]
 ])('manual %s confirmation uses human labels and complete values', (_kind, previous, next, labels, values) => {
   const item = { ...album(), kind: _kind, fields: previous } as CatalogItem;
   mount(<CatalogEditConfirmation snapshot={{ item, patch: catalogPatch(item, next as CatalogItem['fields'], 'public') }} stale={false} disabled={false} onClose={vi.fn()} onConfirm={vi.fn()} />);
@@ -583,4 +702,55 @@ test.each([
     const row = screen.getByRole('heading', { name: label }).closest('article')!;
     expect(within(row).getByText(values[index], { exact: true, normalizer: text => text })).toBeVisible();
   });
+});
+
+test('an Artist\'s MusicBrainz ID is edited as trimmed lowercase text, cleared when emptied, and an ID another Artist keeps is refused with its own message', async () => {
+  const item = catalogItem('artist'), writes: Record<string, unknown>[] = [], id = '0000000a-0000-4000-8000-0000000000a1';
+  vi.stubGlobal('fetch', vi.fn(async (path: string, init: RequestInit) => {
+    if (path.endsWith('/cover-operations')) return json({ items: [] });
+    if (init.method === 'PATCH') { writes.push(JSON.parse(String(init.body))); return json({ code: 'ADMIN_CATALOG_MUSICBRAINZ_ID_IN_USE' }, 409); }
+    return json({ item });
+  }));
+  mount(<AdminCatalogPage kind="artist" id={item.id} />);
+  const field = await screen.findByRole('textbox', { name: 'MusicBrainz ID' });
+  expect(field).toHaveValue(''); expect(screen.getByText(/Private import provenance, never shown to listeners/)).toBeVisible();
+  fireEvent.change(field, { target: { value: `  ${id.toUpperCase()} ` } });
+  expect(field).toHaveValue(id);
+  fireEvent.click(screen.getByRole('button', { name: 'Save catalog changes' }));
+  fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Save catalog changes' }));
+  expect(await screen.findByText('Another record of this kind already keeps this MusicBrainz ID. Nothing was saved.')).toBeVisible();
+  expect(writes[0]).toMatchObject({ expectedRevision: item.revision, fields: { musicBrainzId: id } }); expect(Object.keys(writes[0].fields as object)).toEqual(['musicBrainzId']);
+  // The refusal leaves no retryable intent; emptying the field returns to the saved value, so nothing is left to save.
+  expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument();
+  fireEvent.change(screen.getByRole('textbox', { name: 'MusicBrainz ID' }), { target: { value: '' } });
+  expect(screen.getByRole('textbox', { name: 'MusicBrainz ID' })).toHaveValue('');
+});
+
+test('an Organization\'s saved MusicBrainz ID is shown, and clearing it confirms the stored ID against none and sends only null', async () => {
+  const id = '00000000-0000-4000-8000-0000000000b1', base = catalogItem('organization') as Extract<CatalogItem, { kind: 'organization' }>;
+  const item = { ...base, fields: { ...base.fields, musicBrainzId: id } }, writes: Record<string, unknown>[] = [];
+  let current: CatalogItem = item;
+  vi.stubGlobal('fetch', vi.fn(async (path: string, init: RequestInit) => {
+    if (path.endsWith('/cover-operations')) return json({ items: [] });
+    if (init.method === 'PATCH') {
+      const body = JSON.parse(String(init.body)); writes.push(body);
+      current = { ...item, revision: `cr_${'b'.repeat(43)}`, fields: { ...item.fields, ...body.fields } };
+      return json({ item: current, receipt: { operationId: body.operationId } });
+    }
+    return json({ item: current });
+  }));
+  mount(<AdminCatalogPage kind="organization" id={item.id} />);
+  const field = await screen.findByRole('textbox', { name: 'MusicBrainz ID' });
+  expect(field).toHaveValue(id);
+  fireEvent.change(field, { target: { value: '   ' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Save catalog changes' }));
+  const dialog = await screen.findByRole('dialog');
+  expect(within(dialog).getAllByRole('article')).toHaveLength(1);
+  const row = within(dialog).getByRole('heading', { name: 'MusicBrainz ID' }).closest('article')!;
+  expect(within(row).getByText(id, { exact: true })).toBeVisible(); expect(within(row).getByText('—', { exact: true })).toBeVisible();
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Save catalog changes' }));
+  await waitFor(() => expect(writes).toHaveLength(1));
+  expect(writes[0]).toMatchObject({ expectedRevision: item.revision, fields: { musicBrainzId: null } }); expect(Object.keys(writes[0].fields as object)).toEqual(['musicBrainzId']);
+  await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  expect(screen.getByRole('textbox', { name: 'MusicBrainz ID' })).toHaveValue('');
 });

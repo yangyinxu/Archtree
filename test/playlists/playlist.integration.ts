@@ -13,6 +13,7 @@
  *   - membership lookup is owner-only, deterministic, strict, and bounded
  *   - stable pagination, account quota, member cap, and required indexes are bounded
  *   - Playlist names are normalized, bounded, and may be duplicated
+ *   - Playlist rows keep plain Artist names when MediaTrack Credits carry join phrases
  * @end-catalog */
 
 import assert from 'node:assert/strict';
@@ -1000,4 +1001,38 @@ test('Playlist names are normalized, bounded, and may be duplicated', async () =
     assert.equal(first.body.name, 'Café');
     assert.equal(second.body.name, 'Café');
     assert.notEqual(first.body.id, second.body.id);
+});
+
+test('Playlist rows keep plain Artist names when MediaTrack Credits carry join phrases', async () => {
+    const [leadId, guestId, trackId] = [new ObjectId(), new ObjectId(), new ObjectId()];
+    await getDb()!.collection('artists').insertMany([
+        { _id: leadId, name: 'Phrase Lead', albumIds: [] },
+        { _id: guestId, name: 'Phrase Guest', albumIds: [] }
+    ]);
+    await getDb()!.collection('audioTracks').insertOne({
+        _id: trackId, title: 'Phrase Row', artistIds: [leadId.toHexString(), guestId.toHexString()],
+        uploadStatus: 'ready', s3Key: trackId.toHexString(), attributionStatus: 'documented',
+        credits: [
+            {
+                creditId: 'playlist_phrase_lead', subjectType: 'artist', subjectId: leadId.toHexString(),
+                role: 'primary', order: 0, joinPhrase: ' feat. '
+            },
+            {
+                creditId: 'playlist_phrase_guest', subjectType: 'artist', subjectId: guestId.toHexString(),
+                role: 'featured', order: 1
+            }
+        ]
+    });
+    const { body: created } = await createPlaylist(listener, 'Phrases', 'phrases-create');
+    const added = await apiRequest(listener, `/content/me/playlists/${created.id}/items`, {
+        method: 'POST',
+        body: { audioTrackId: trackId.toHexString() },
+        idempotencyKey: 'phrases-add',
+        ifMatch: '"1"'
+    });
+    assert.equal(added.status, 200);
+    const detail: any = await added.json();
+    assert.deepEqual(detail.items[0].audioTrack.artistNames, ['Phrase Lead', 'Phrase Guest']);
+    assert.equal(JSON.stringify(detail).includes('feat.'), false);
+    expectSafePlaylist(detail);
 });

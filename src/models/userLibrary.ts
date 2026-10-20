@@ -15,6 +15,7 @@ import { getDb } from '../infrastructure/database';
 import { normalizeAudioTrackText } from './audioTrack';
 import { withDerivedCoverArtUrl, withDisplayCoverArtUrl } from '../utils/coverArt';
 import { resolvePublicCatalogBylines } from '../services/catalog/publicCatalogService';
+import { composePlainNameByline } from '../services/catalog/catalogByline';
 import { withReadyCatalogItemReferences } from '../services/catalog/catalogItemReferenceFenceService';
 import { touchActiveAccount, withActiveAccount } from '../services/account/accountReferenceFenceService';
 import { escapeRegex } from '../utils/search';
@@ -345,15 +346,14 @@ export class UserLibrary {
             };
             if (save.contentType === 'album') {
                 const album = albumsById.get(String(save.contentId));
-                const legacyCreator = artists
+                // Unmigrated owners and the Credit-reads rollback share the byline cap.
+                const legacyCreator = composePlainNameByline(artists
                     .filter((artist: any) =>
                         (Array.isArray(artist.albumIds) ? artist.albumIds : [])
                             .map(String)
                             .includes(String(save.contentId))
                     )
-                    .map((artist: any) => String(artist.name ?? '').trim())
-                    .filter(Boolean)
-                    .join(', ');
+                    .map((artist: any) => String(artist.name ?? '').trim()));
                 return album ? {
                     ...common,
                     creator: creditBylines.get(String(album._id)) || legacyCreator || null,
@@ -362,10 +362,8 @@ export class UserLibrary {
             }
             const track = tracksById.get(String(save.contentId));
             if (!track) return null;
-            const legacyCreator = (Array.isArray(track.artistIds) ? track.artistIds : [])
-                .map((id: unknown) => artistNamesById.get(String(id))?.trim() ?? '')
-                .filter(Boolean)
-                .join(', ');
+            const legacyCreator = composePlainNameByline((Array.isArray(track.artistIds) ? track.artistIds : [])
+                .map((id: unknown) => artistNamesById.get(String(id))?.trim() ?? ''));
             const linkedAlbum = albumsById.get(String(track.albumId ?? ''));
             return {
                 ...common,

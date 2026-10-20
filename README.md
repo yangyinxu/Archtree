@@ -82,6 +82,8 @@ covers production-style bundles and browser gates.
   than 100 lines (`npm run catalog:check` verifies them and runs in `npm test`)
 - `npm run localization:generate`: validate locale sources and atomically
   regenerate the public manifest and runtime bundles
+- `npm run record:metadata-lookup-fixtures -- --live`: re-record the trimmed
+  public lookup fixtures from the live services (never run by tests or CI)
 - `npm run stage:eb-artifact`: validate and stage the exact allowlisted Elastic
   Beanstalk runtime tree in `elastic-beanstalk-artifact`
 

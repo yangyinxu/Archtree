@@ -1,0 +1,253 @@
+{
+  "source": "musicbrainz",
+  "recordedAt": "2026-10-18T10:50:22.432Z",
+  "description": "MusicBrainz release lookup (Pandora Call recording search result)",
+  "exchanges": [
+    {
+      "url": "https://musicbrainz.org/ws/2/release/957cd256-0d4e-47f1-b5da-0ccdc818465d?inc=artist-credits+labels+recordings+release-groups+isrcs&fmt=json",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json; charset=utf-8"
+      },
+      "body": {
+        "id": "957cd256-0d4e-47f1-b5da-0ccdc818465d",
+        "title": "色彩",
+        "status": "Official",
+        "artist-credit": [
+          {
+            "name": "ヰ世界情緒",
+            "joinphrase": "",
+            "artist": {
+              "id": "0e51b3c5-28c3-4608-aea1-ce01eca91dd2",
+              "name": "ヰ世界情緒"
+            }
+          }
+        ],
+        "release-group": {
+          "id": "32661b13-bb62-4d2b-9c62-017c92b0e88a",
+          "primary-type": "Album",
+          "secondary-types": [],
+          "first-release-date": "2024-03-27"
+        },
+        "date": "2024-03-27",
+        "country": "XW",
+        "barcode": "4582736572236",
+        "label-info": [
+          {
+            "catalog-number": "KTR-0127",
+            "label": {
+              "id": "218c8ba5-29e3-4461-b1a3-cefcfebbdf7d",
+              "name": "PHENOMENON RECORD"
+            }
+          }
+        ],
+        "cover-art-archive": {
+          "front": true
+        },
+        "media": [
+          {
+            "position": 1,
+            "format": "Digital Media",
+            "tracks": [
+              {
+                "position": 1,
+                "number": "1",
+                "title": "息吹 -instrumental-",
+                "length": 116000,
+                "recording": {
+                  "id": "fe2ac34a-f75c-4f76-81a9-344fc2b7681e",
+                  "length": 116000,
+                  "isrcs": [
+                    "JPY392301677"
+                  ]
+                }
+              },
+              {
+                "position": 2,
+                "number": "2",
+                "title": "そして白に還る",
+                "length": 313000,
+                "recording": {
+                  "id": "ca61f2bf-7995-4837-a256-4319bf636865",
+                  "length": 313000,
+                  "isrcs": [
+                    "JPY392300977"
+                  ]
+                }
+              },
+              {
+                "position": 3,
+                "number": "3",
+                "title": "ラピスのお人形",
+                "length": 189079,
+                "recording": {
+                  "id": "3cb5cbd5-f880-42ec-9e96-b87320d92e3e",
+                  "length": 189079,
+                  "isrcs": [
+                    "JPY392301191"
+                  ]
+                }
+              },
+              {
+                "position": 4,
+                "number": "4",
+                "title": "パンドラコール",
+                "length": 217257,
+                "recording": {
+                  "id": "7cdadfd4-fb66-464c-8854-65cc1746dc5d",
+                  "length": 217257,
+                  "isrcs": [
+                    "JPY392200483"
+                  ]
+                }
+              },
+              {
+                "position": 5,
+                "number": "5",
+                "title": "ディメンション",
+                "length": 183000,
+                "recording": {
+                  "id": "b6a616e7-ed22-4984-a671-b42fe0d42d2f",
+                  "length": 183000,
+                  "isrcs": [
+                    "JPZ992200187"
+                  ]
+                }
+              },
+              {
+                "position": 6,
+                "number": "6",
+                "title": "キミ消失セカイ",
+                "length": 202000,
+                "recording": {
+                  "id": "ece458df-dd62-4965-8752-2373fae526cc",
+                  "length": 202000,
+                  "isrcs": [
+                    "JPY392301187"
+                  ]
+                }
+              },
+              {
+                "position": 7,
+                "number": "7",
+                "title": "グレイスケイル",
+                "length": 189000,
+                "recording": {
+                  "id": "e88766b6-d75d-4f76-8aab-35ef4a6cc008",
+                  "length": 189000,
+                  "isrcs": [
+                    "JPY392301678"
+                  ]
+                }
+              },
+              {
+                "position": 8,
+                "number": "8",
+                "title": "此処に棘と死を",
+                "length": 224000,
+                "recording": {
+                  "id": "77b2ac33-0733-4804-a805-a8fc3962a86b",
+                  "length": 224000,
+                  "isrcs": [
+                    "JPY392301679"
+                  ]
+                }
+              },
+              {
+                "position": 9,
+                "number": "9",
+                "title": "ネリネの内緒事",
+                "length": 232000,
+                "recording": {
+                  "id": "329f7ee5-dff7-496b-82bc-e4504e78ed67",
+                  "length": 232000,
+                  "isrcs": [
+                    "JPY392301680"
+                  ]
+                }
+              },
+              {
+                "position": 10,
+                "number": "10",
+                "title": "暮れなずむ約束",
+                "length": 223000,
+                "recording": {
+                  "id": "4c52c524-77f5-48f0-9786-50c37c25f7c1",
+                  "length": 223000,
+                  "isrcs": [
+                    "JPY392200691"
+                  ]
+                }
+              },
+              {
+                "position": 11,
+                "number": "11",
+                "title": "ヴァーミリオン",
+                "length": 187000,
+                "recording": {
+                  "id": "5f746c8e-2509-40f7-8c9b-2ec467352cc8",
+                  "length": 187000,
+                  "isrcs": [
+                    "JPY392301681"
+                  ]
+                }
+              },
+              {
+                "position": 12,
+                "number": "12",
+                "title": "描き続けた君へ",
+                "length": 310482,
+                "recording": {
+                  "id": "1c1d0a16-8983-413e-bed6-3062e3003f72",
+                  "length": 310482,
+                  "isrcs": [
+                    "JPY392301192"
+                  ]
+                }
+              },
+              {
+                "position": 13,
+                "number": "13",
+                "title": "かたちなきもの",
+                "length": 246129,
+                "recording": {
+                  "id": "50dd63eb-4148-4bd1-bc9e-c27503a1ee28",
+                  "length": 246129,
+                  "isrcs": [
+                    "JPY392200661"
+                  ]
+                }
+              },
+              {
+                "position": 14,
+                "number": "14",
+                "title": "ANGELIC",
+                "length": 300273,
+                "recording": {
+                  "id": "7e85e2f0-4686-47b0-a369-4bde68438d90",
+                  "length": 300273,
+                  "isrcs": [
+                    "JPY392301413"
+                  ]
+                }
+              },
+              {
+                "position": 15,
+                "number": "15",
+                "title": "色彩 -instrumental-",
+                "length": 113398,
+                "recording": {
+                  "id": "06a797f6-1a11-492b-98d2-868e2e3819ca",
+                  "length": 113398,
+                  "isrcs": [
+                    "JPY392301682"
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

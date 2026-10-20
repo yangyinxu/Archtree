@@ -114,7 +114,9 @@ export const listenerSearchQuery = (query: string) => {
   return queryOptions({
     queryKey: listenerQueryKeys.search(normalized),
     queryFn: ({ signal }) => getListenerSearch(normalized, signal),
-    enabled: normalized.length > 0
+    enabled: normalized.length > 0,
+    // Opening full results right after a typeahead preview reuses that response.
+    staleTime: 30_000
   });
 };
 
