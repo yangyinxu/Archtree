@@ -16,7 +16,8 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { onlineManager, QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, useLocation, useNavigate } from 'react-router';
-import { AdminControls, AdminGate, AdminViewLabel } from './AdminAccess';
+import { AdminGate } from './AdminAccess';
+import { AdminControls, AdminViewLabel } from './AdminControls';
 import { adminWorkspace } from './adminWorkspace';
 import { adminRequest } from './adminApi';
 import { z } from 'zod';

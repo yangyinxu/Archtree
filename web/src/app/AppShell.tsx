@@ -54,7 +54,7 @@ const GlobalRoomInvitations = lazy(() => import('../features/social/GlobalRoomIn
   default: module.GlobalRoomInvitations
 })));
 const AccountEntry = lazy(() => import('./AccountEntry').then(module => ({ default: module.AccountEntry })));
-const AdminControls = lazy(() => import('../features/admin/AdminAccess').then(module => ({ default: module.AdminControls })));
+const AdminControls = lazy(() => import('../features/admin/AdminControls').then(module => ({ default: module.AdminControls })));
 
 /** Activates the shell skip link without changing the routed URL. */
 const skipToMainContent = (event: MouseEvent<HTMLAnchorElement>) => {

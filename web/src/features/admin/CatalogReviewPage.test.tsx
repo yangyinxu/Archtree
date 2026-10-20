@@ -34,7 +34,7 @@ import { captureAccountOperation } from '../../api/accountEpoch';
 import { adminWorkspace } from './adminWorkspace';
 import { CatalogReviewStart } from './CatalogReviewStart';
 import { AdminCatalogReviewPage } from './AdminCatalogReviewPage';
-import { AdminControls } from './AdminAccess';
+import { AdminControls } from './AdminControls';
 import type { CatalogReview, ReviewField } from './catalogReviewApi';
 import { artistEntryKey, catalogAlbum, catalogReview, legacyCatalogReview, otherReviewId, reviewId, reviewJson, session, titleSuggestionId, trackSuggestionId, viewer } from './catalogReviewFixtures.testSupport';
 
