@@ -14,7 +14,7 @@ import { adminWorkerSignal } from '../adminWorkerLifecycle';
 import { ADMIN_IMPORT_LIMITS, AdminImportError, cleanText, exact, parseImportDate, record, type ImportDate, type ImportDraft, type ImportManifest, type ImportEmbeddedTags, type ImportSuggestion } from './adminImportContract';
 import { DRAFT_V2_LIMITS, derivedEntryKey, hasOwn, parseArtistEntries, parseDiscNumber, parseDraftTitle, parseImportName, parseTrackNumber } from './adminImportDraft';
 
-/** Frozen json_schema v1 contract, kept for validateAnalysisSuggestions, the v1 reference the S0 golden replays. */
+/** Frozen json_schema v1 contract, kept for validateAnalysisSuggestions, the v1 reference the frozen v1 golden (adminImportV1Fixtures.test.ts) replays. */
 export type AnalysisInputV1 = { purpose?: 'catalogReview'; generation: number; chunk: number; manifest: ImportManifest; baseline: ImportDraft; slots: string[]; album: boolean; tags?: { slotId: string; tags: ImportEmbeddedTags }[] };
 export type AnalysisSuggestionV1 = Omit<ImportSuggestion, 'id' | 'generation' | 'decision'>;
 /** One Artist entry as Luna proposes it: no key and no MusicBrainz ID. */
@@ -124,7 +124,7 @@ export function validateLunaSuggestions(raw: unknown, input: AnalysisInput): Ana
 }
 
 /**
- * The frozen json_schema v1 validator, kept byte for byte only as the reference the S0 golden (adminImportV1Fixtures.test.ts)
+ * The frozen json_schema v1 validator, kept byte for byte only as the reference the frozen v1 golden (adminImportV1Fixtures.test.ts)
  * replays; no production path calls it, since the worker validates Luna output with validateLunaSuggestions. Provider output is
  * suggestions only; it cannot select assets, IDs, visibility, credits or publication.
  */

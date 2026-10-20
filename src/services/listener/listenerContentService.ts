@@ -47,7 +47,7 @@ import {
 } from '../catalog/albumReferenceFenceService';
 import { AttributionStatus } from '../../models/catalogCredit';
 import { artistAlbumSection, validStoredCredits } from '../catalog/artistAlbumClassificationService';
-import { catalogDisplayByline, toBylineCredit } from '../catalog/catalogByline';
+import { catalogDisplayByline, displayBylineField, toBylineCredit } from '../catalog/catalogByline';
 import { Carousel } from '../../models/carousel';
 import { catalogCreditRollout } from '../../config/catalogCreditRollout';
 import { pageItemIdentity } from '../../utils/pageItemIdentity';
@@ -478,12 +478,13 @@ const creditProjectionForOwner = (owner: any, context: CatalogContext) => {
         role: credit.role,
         order: credit.order
     }] : []);
+    const byline = catalogDisplayByline(
+        owner.attributionStatus as AttributionStatus,
+        resolved.map(({ credit, name }) => toBylineCredit(credit, name))
+    );
     return {
         credits: publicCredits,
-        displayByline: catalogDisplayByline(
-            owner.attributionStatus as AttributionStatus,
-            resolved.map(({ credit, name }) => toBylineCredit(credit, name))
-        ),
+        ...displayBylineField(byline),
         attributionStatus: owner.attributionStatus as AttributionStatus
     };
 };

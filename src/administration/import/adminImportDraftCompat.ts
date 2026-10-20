@@ -21,7 +21,7 @@
  * @end-catalog */
 
 /**
- * Forward-compatible reads of stored import projects. v1 data is presented as a Draft v2 view for later stages.
+ * Forward-compatible reads of stored import projects. v1 data is also presented as a Draft v2 view.
  * Data written in a newer format is projected back onto the v1 admin contract and stays read-only here. Views are
  * pure: they never write back and never mutate their input, and every projection is total (it never throws).
  */

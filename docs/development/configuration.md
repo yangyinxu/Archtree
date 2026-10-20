@@ -104,7 +104,8 @@ Required variables:
   documented adoption and seven-day drift gate passes.
 - Administrator workbench settings, including the imports flag, the private
   staging bucket and `FINITUDE_ADMIN_METADATA_LOOKUP_CONTACT`, are documented
-  in the [administrator workbench configuration table](../features/admin-workbench.md).
+  in the
+  [administrator workbench configuration table](../features/admin-workbench.md).
 - `AWS_ACCESS_KEY_ID`: AWS access key for S3 operations
 - `AWS_SECRET_ACCESS_KEY`: AWS secret key for S3 operations
 - `AWS_REGION`: AWS region

@@ -16,9 +16,11 @@
  *   - optional-auth Home reads return 401 for a presented Bearer token that fails verification
  *   - legacy expanded Home hydrates referenced posts outside the default Feed page safely
  *   - stored join phrases shape both Album bylines while Credits stay allowlisted
+ *   - an owner with no visible credited subject omits displayByline instead of sending an empty one
  * @end-catalog */
 
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { Server } from 'node:http';
 import path from 'node:path';
 import os from 'node:os';
@@ -886,5 +888,63 @@ test('stored join phrases shape both Album bylines while Credits stay allowliste
     const legacy: any = await legacyResponse.json();
     assert.equal(legacy.album.displayByline, 'Phrase Alpha & Phrase Beta, Phrase Gamma');
     assert.deepEqual(legacy.album.credits.map((item: any) => Object.keys(item).sort()), [creditKeys, creditKeys, creditKeys]);
+    expectSafe(legacy);
+});
+
+test('an owner with no visible credited subject omits displayByline instead of sending an empty one', async () => {
+    const db = getDb()!;
+    const fixture = JSON.parse(readFileSync(
+        new URL('../../contracts/listener/v1/fixtures/album-hidden-credits.json', import.meta.url), 'utf8'));
+    const [albumId, trackId] = [fixture.album.id, fixture.tracks[0].id];
+    const [hiddenArtistId, deletingLabelId] = [new ObjectId(), new ObjectId()];
+    await db.collection('artists').insertOne({
+        _id: hiddenArtistId, name: 'Hidden Credit Artist', albumIds: [], visibility: 'hidden'
+    });
+    await db.collection('organizations').insertOne({
+        _id: deletingLabelId, name: 'Deleting Credit Label', organizationType: 'label', lifecycleStatus: 'deleting'
+    });
+    const artistCredit = {
+        creditId: 'hidden_artist_credit', subjectType: 'artist', subjectId: hiddenArtistId.toString(), role: 'primary', order: 0
+    };
+    await db.collection('albums').insertOne({
+        _id: new ObjectId(albumId),
+        title: 'Unlisted Credits',
+        audioTrackIds: [trackId],
+        releaseDate: { year: 2026 },
+        lifecycleStatus: 'ready',
+        attributionStatus: 'documented',
+        credits: [artistCredit, {
+            creditId: 'deleting_label_credit', subjectType: 'organization', subjectId: deletingLabelId.toString(), role: 'label', order: 1
+        }]
+    });
+    await db.collection('audioTracks').insertOne({
+        _id: new ObjectId(trackId),
+        title: 'Quiet Room',
+        albumId,
+        artistIds: [hiddenArtistId.toString()],
+        duration: '2:10',
+        coverArtUrl: '',
+        uploadStatus: 'ready',
+        s3Key: trackId,
+        attributionStatus: 'documented',
+        credits: [artistCredit]
+    });
+
+    // The listener Album is exactly the frozen contract fixture: credits [] and no byline key.
+    const listenerResponse = await fetch(`${baseUrl}/api/listener/v1/albums/${albumId}`);
+    assert.equal(listenerResponse.status, 200);
+    const listener: any = await listenerResponse.json();
+    assert.deepEqual(listener, fixture);
+    const trackResponse = await fetch(`${baseUrl}/api/listener/v1/tracks/${trackId}`);
+    assert.equal(trackResponse.status, 200);
+    assert.deepEqual((await trackResponse.json() as any).audioTrack, fixture.tracks[0]);
+    expectSafe(listener);
+
+    const legacyResponse = await fetch(`${baseUrl}/content/album/${albumId}`);
+    assert.equal(legacyResponse.status, 200);
+    const legacy: any = await legacyResponse.json();
+    assert.deepEqual(legacy.album.credits, []);
+    assert.equal(legacy.album.attributionStatus, 'documented');
+    assert.equal(Object.prototype.hasOwnProperty.call(legacy.album, 'displayByline'), false);
     expectSafe(legacy);
 });

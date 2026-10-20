@@ -12,9 +12,9 @@
 
 /**
  * Golden values frozen from the code as it was before the join-phrase, Disc Number, Draft v2,
- * multi-artist Credit and MusicBrainz ID stages. Catalog review projects, conversion intents,
+ * multi-artist Credit and MusicBrainz ID changes. Catalog review projects, conversion intents,
  * import duplicate decisions, publications and create retries all store one of these values and
- * compare it with a fresh computation later. Later stages must keep every value unchanged for
+ * compare it with a fresh computation later. Later changes must keep every value unchanged for
  * existing data: a drifted value makes each stored revision stale after deploy, which forces
  * fresh reviews and rejects retries that were already admitted. Change a value only together with
  * a deliberate migration of the stored revisions.

@@ -40,7 +40,7 @@ import {
     CatalogCreditRole
 } from '../../models/catalogCredit';
 import { validStoredCredits } from './artistAlbumClassificationService';
-import { catalogDisplayByline, toBylineCredit } from './catalogByline';
+import { catalogDisplayByline, displayBylineField, toBylineCredit } from './catalogByline';
 import { catalogCreditRollout } from '../../config/catalogCreditRollout';
 
 export interface PublicSimpleDate {
@@ -277,7 +277,8 @@ const publicCreditFields = (owner: any, subjectNames?: ReadonlyMap<string, strin
             role: credit.role,
             order: credit.order
         }] : []),
-        displayByline: publicDisplayByline(owner, resolved),
+        // Omitted when empty, exactly as on the listener v1 summary of the same owner.
+        ...displayBylineField(publicDisplayByline(owner, resolved)),
         attributionStatus: owner.attributionStatus as AttributionStatus
     };
 };

@@ -45,7 +45,7 @@ export function discFromRelativePath(relativePath: string): number | null {
     return found.size === 1 ? [...found][0] : null;
 }
 
-/** Version-2 evidence of a confirmed asset, read through the allowlist; evidence stored before S8 contributes nothing. */
+/** Version-2 evidence of a confirmed asset, read through the allowlist; older version-1 evidence contributes nothing. */
 const evidence = (asset: ImportAsset | undefined): ImportTagsView | null => {
     const tags = asset?.state === 'ready' ? importTagsV2View(asset.tags) : null;
     return tags?.version === 2 ? tags : null;

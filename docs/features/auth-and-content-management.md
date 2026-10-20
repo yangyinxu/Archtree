@@ -424,12 +424,12 @@ sign-in attempts.
   positional edit. Adds rejected by the current size limit or a concurrently
   deleted definition also return that conflict rather than reporting success.
   Cross-Carousel moves commit both sides or neither.
-- Single and bulk Content Manager Audio MediaTrack creation records original filenames
-  and a pending upload state before sending files to S3. They accept Artist Credits,
-  Organization Credits, inherited Album primary Artists, or an explicitly
-  undocumented attribution state. Inherited primary Credits keep their Album
-  order; each keeps its join phrase only when the next Album Credit is
-  inherited too, so a phrase never introduces a name it was not written for.
+- Single and bulk Content Manager Audio MediaTrack creation records original
+  filenames and a pending upload state before sending files to S3. They accept
+  Artist Credits, Organization Credits, inherited Album primary Artists, or an
+  explicitly undocumented attribution state. Inherited primary Credits keep
+  their Album order; each keeps its join phrase only when the next Album Credit
+  is inherited too, so a phrase never introduces a name it was not written for.
 - Single and bulk Content Manager Audio creation and the legacy
   `/content/audioTrack` endpoint store the file's embedded Track Number and,
   when the file carries a valid one (1–999), its Disc Number with

@@ -31,10 +31,10 @@ export type ImportTagField = 'title' | 'album' | 'artists' | 'albumArtists' | 'l
 /** A tag value left out of the evidence: it held control or invisible formatting characters, was too long or failed its format. */
 export type ImportTagFlag = { field: ImportTagField; reason: 'characters' | 'length' | 'format' };
 export type ImportTagIdentifiers = { barcode: string | null; catalogNumber: string | null; isrc: string | null; musicBrainzReleaseId: string | null };
-/** Evidence written from S8 on; the five v1 fields keep their meaning so v1 projections still read them. */
+/** Evidence written by uploads admitted since imports prefill from file tags; the five v1 fields keep their meaning so v1 projections still read them. */
 export type ImportEmbeddedTagsV2 = ImportEmbeddedTags & { version: 2; albumArtists: string[]; label: string | null; discNumber: number | null;
     durationMs: number | null; identifiers: ImportTagIdentifiers; flagged: ImportTagFlag[] };
-/** The editor's view: version 1 for evidence stored before S8 (extended fields empty), else version 2. */
+/** The editor's view: version 1 for older evidence without `version: 2` (extended fields empty), else version 2. */
 export type ImportTagsView = Omit<ImportEmbeddedTagsV2, 'version'> & { version: 1 | 2 };
 /**
  * One identity candidate. `match` says why it is listed: an exact case-insensitive name, verified identical bytes, the entry's or

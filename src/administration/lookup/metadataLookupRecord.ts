@@ -139,7 +139,7 @@ type LookupSource = Pick<AdminImportDocument, 'manifest' | 'media'>;
 const sha256 = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const manifestFiles = (doc: Pick<AdminImportDocument, 'manifest'>) => Array.isArray(doc.manifest?.files) ? doc.manifest.files : [];
 const readyAsset = (doc: LookupSource, slotId: string): ImportAsset | undefined => (doc.media?.assets ?? []).find(asset => asset.slotId === slotId && asset.state === 'ready');
-/** Version-2 evidence of a confirmed file; evidence stored before S8 never reaches lookup, as it never reaches automation. */
+/** Version-2 evidence of a confirmed file; older version-1 evidence never reaches lookup, as it never reaches automation. */
 const evidence = (asset: ImportAsset | undefined): ImportTagsView | null => {
     const tags = asset ? importTagsV2View(asset.tags) : null;
     return tags?.version === 2 ? tags : null;

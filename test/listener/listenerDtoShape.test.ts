@@ -14,7 +14,7 @@
  * @end-catalog */
 
 /**
- * Golden DTO shapes frozen from the pre-change code (S0). Join phrases, Disc Numbers, Draft v2,
+ * Golden DTO shapes frozen from the pre-change code. Join phrases, Disc Numbers, Draft v2,
  * multi-artist Credits and MusicBrainz IDs all add stored fields; these baselines make any such
  * field that reaches the listener v1 Album, MediaTrack, Artist or Organization summaries, or the legacy public
  * Album, MediaTrack and Artist DTOs, fail here, so exposing one is a deliberate contract change that edits a
@@ -201,9 +201,10 @@ const listenerLegacyTrackKeyPaths = [
 
 /**
  * The legacy public Credit is an explicit allowlist of the five fields `PublicCatalogCredit`
- * declares. S1 narrowed it from `{ ...credit, name }`, which also carried `creditId`; stored
- * extras such as joinPhrase and musicBrainzId, and the internal creditId, must never appear
- * (asserted in 'legacy public Album, MediaTrack and Artist key sets ignore unknown stored fields').
+ * declares. The Credit join-phrase change narrowed it from `{ ...credit, name }`, which also
+ * carried `creditId`; stored extras such as joinPhrase and musicBrainzId, and the internal
+ * creditId, must never appear (asserted in 'legacy public Album, MediaTrack and Artist key sets
+ * ignore unknown stored fields').
  */
 const legacyPublicCreditKeys = ['name', 'order', 'role', 'subjectId', 'subjectType'];
 
@@ -250,7 +251,7 @@ const useBaselineEnvironment = (t: TestContext, overrides: Record<string, string
 /**
  * A read-only stand-in that returns each seeded collection whole. Filters and projections are
  * deliberately ignored, so the DTO builders themselves see every unknown stored field: a leak is
- * caught even if a later stage widens a MongoDB projection along with the builder.
+ * caught even if a later change widens a MongoDB projection along with the builder.
  */
 const syntheticCatalogDatabase = (collections: Record<string, Document[]>) => {
     const cursor = (documents: Document[]) => {
@@ -380,7 +381,7 @@ test('legacy public Album, MediaTrack and Artist key sets ignore unknown stored 
     ]);
 });
 
-// Freezes the CATALOG_CREDIT_READS_ENABLED=false rollback shapes that S1's shared byline helper touches.
+// Freezes the CATALOG_CREDIT_READS_ENABLED=false rollback shapes that the shared byline composer touches.
 test('Credit read rollback keeps listener v1 and legacy public key sets free of Credit fields', async (t) => {
     const detail = await withSyntheticCatalog(
         t,

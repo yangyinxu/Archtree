@@ -374,8 +374,7 @@ Startup migration `required-indexes-v4-social-participation` (now verified as
 part of `required-indexes-v11-musicbrainz-ids`, after the email-link,
 social-report, Artist Follow, administrator lifecycle, metadata lookup and
 MusicBrainz ID additions) adds mandatory unique constraints and required
-nonunique cleanup
-indexes. A sparse, partial, hidden, wrong-key or wrong-uniqueness substitute is
-rejected. TTL is opportunistic reclamation and is never an authorization or
-admission decision. See the active plan for actual verification and the
-remaining client/room rollout stages.
+nonunique cleanup indexes. A sparse, partial, hidden, wrong-key or
+wrong-uniqueness substitute is rejected. TTL is opportunistic reclamation and is
+never an authorization or admission decision. See the active plan for actual
+verification and the remaining client/room rollout stages.

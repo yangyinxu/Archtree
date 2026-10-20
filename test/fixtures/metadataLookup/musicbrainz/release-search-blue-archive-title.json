@@ -1,7 +1,7 @@
 {
   "source": "musicbrainz",
   "recordedAt": "2026-10-18T10:50:22.432Z",
-  "description": "Release search by title only",
+  "description": "Release search by title only (request URL updated from limit=25 to limit=100 after recording; the body is unchanged because its 2 hits are within both limits)",
   "exchanges": [
     {
       "url": "https://musicbrainz.org/ws/2/release?query=release%3A%22Blue+Archive+Original+Soundtrack+Vol.1%22&fmt=json&limit=100",

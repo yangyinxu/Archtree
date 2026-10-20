@@ -318,7 +318,7 @@ test('create-page and conversion-bridge retries admitted before the public defau
     const createPage = make(), bridge = { operationId: randomUUID(), manifest: { rootLabel: '', files: [{ slotId: randomUUID(), filename: 'Synthetic Song.mp3', relativePath: 'Synthetic Song.mp3', byteLength: 4096 }] } };
     for (const body of [createPage, bridge]) {
         const first = await createAdminImport(actor.toHexString(), body), manifest = parseManifest(body.manifest);
-        // A project stored before S5 holds the hidden default under the very same, unchanged create receipt.
+        // A project stored before new imports defaulted to public holds the hidden default under the very same, unchanged create receipt.
         await getDb()!.collection('adminAlbumImports').updateOne({ _id: new ObjectId(first.item.id) }, { $set: { 'draft.album.visibility': 'hidden' } });
         const before = await stored(first.item.id);
         const replay = await createAdminImport(actor.toHexString(), body);
@@ -872,7 +872,7 @@ test('Artist and label decisions bind by key and name, make those values the adm
     await assert.rejects(decideAdminImportDuplicates(by, id, { ...mutation(1), decisions: [decision('artist', { entryKey: randomUUID(), boundName: 'Lorem' })] }), errorCode('ADMIN_IMPORT_INVALID_INPUT'));
     const named = await editImportDraft(by, id, first.item, draft => { draft.album.artists = [entry('Lorem'), entry('Ipsum'), entry('Dolor', 'featured')]; draft.album.label = { name: 'Sit Records', musicBrainzId: null }; });
     const [e1, e2, e3] = named.item.draft.album.artists.map(value => value.key);
-    // Automation owns the entries and the label until an explicit decision (S8 writes them; the origins are set here).
+    // Automation owns the entries and the label until an explicit decision (file-tag automation writes them; the origins are set here).
     await rewrite(id, doc => { doc.draftOrigins!['album:artists'] = 'automatic'; doc.draftOrigins!['album:label'] = 'automatic'; });
     // A skip is no explicit identity: it leaves both values automatic.
     const skipped = await decideAdminImportDuplicates(by, id, { ...mutation(named.item.revision), decisions: [decision('artist', { entryKey: e2, boundName: 'Ipsum', action: 'skip' }), decision('label', { boundName: 'Sit Records', action: 'skip' })] });
@@ -987,7 +987,7 @@ test('an administrator save replaces an automatic value but not another administ
     const full = await editImportDraft(actor.toHexString(), id, created.item, draft => {
         draft.album.artists = [entry('Lorem', 'primary', ' & '), entry('Ipsum', 'featured')]; draft.album.label = { name: 'Synthetic Label', musicBrainzId: null }; draft.tracks[0].discNumber = 2;
     });
-    // Automation (S8) filled the Album title after this editor opened.
+    // File-tag automation filled the Album title after this editor opened.
     await rewrite(id, doc => { v2(doc).album.title = 'Tagged title'; doc.draftOrigins!['album:title'] = 'automatic'; });
     const mine = await editAdminImport(other.toHexString(), id, { ...mutation(full.item.revision), changes: [{ path: 'album.title', base: '', value: 'Mine' }] });
     assert.equal(mine.item.draft.album.title, 'Mine'); assert.equal((await stored(id))!.draftOrigins!['album:title'], 'administrator');
@@ -1058,7 +1058,7 @@ test('accepting suggestions makes their values the administrator\'s own and clea
     const artist = { scope: 'artist', slotId: null, entryKey: key, boundName: 'Lorem Ensemble', action: 'create-distinct', candidateId: null, candidateRevision: null }, album = { ...artist, scope: 'album', entryKey: null, boundName: null };
     const decided = await decideAdminImportDuplicates(actor.toHexString(), id, { ...mutation(named.item.revision), decisions: [artist, album] });
     await analyzeAdminImport(actor.toHexString(), id, mutation(decided.item.revision), lunaArtist); await settle(lunaArtist);
-    // Automation (S8) owns the Album title by the time the administrator accepts the suggestions.
+    // File-tag automation owns the Album title by the time the administrator accepts the suggestions.
     await rewrite(id, doc => { doc.draftOrigins!['album:title'] = 'automatic'; });
     const done = await getAdminImport(actor.toHexString(), id);
     assert.deepEqual([done.item.suggestions.map(suggestion => suggestion.field), done.item.decisions], [['title', 'artists'], [artist, album]]);

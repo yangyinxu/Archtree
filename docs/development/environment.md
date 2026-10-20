@@ -262,15 +262,15 @@ metadata lookup stays unavailable even when the terminal sets a contact. The
 metadata lookup tests also install `test/support/networkGuard.ts`, which
 refuses `fetch`, DNS queries and socket connections to any non-loopback host;
 they read recorded responses only from `test/fixtures/metadataLookup/`. The
-runner also preloads
-`test/support/syntheticMxResolver.ts`, so the authentication-email domain check
-answers from a synthetic MX resolver and no test queries real DNS. Suites that
-need real services start their own disposable MongoDB and S3-compatible
-fixtures. Running one file directly with `node --import tsx --test` bypasses
-this environment and the resolver preload, so tests that spawn the app or
-script entries can then read a root `.env`, and authentication email requests
-and emails would look up real MX records; add `--import ./test/support/syntheticMxResolver.ts`
-from the repository root to keep DNS synthetic.
+runner also preloads `test/support/syntheticMxResolver.ts`, so the
+authentication-email domain check answers from a synthetic MX resolver and no
+test queries real DNS. Suites that need real services start their own disposable
+MongoDB and S3-compatible fixtures. Running one file directly with
+`node --import tsx --test` bypasses this environment and the resolver preload,
+so tests that spawn the app or script entries can then read a root `.env`, and
+authentication email requests and emails would look up real MX records; add
+`--import ./test/support/syntheticMxResolver.ts` from the repository root to
+keep DNS synthetic.
 
 `npm run test:server:linux` runs the Linux suites explicitly and rejects other
 hosts. `npm run doctor:release` checks Linux, Bash, Node, MongoDB and FFmpeg. Deployment

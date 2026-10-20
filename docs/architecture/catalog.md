@@ -270,17 +270,16 @@ Credit checks do not mutate or complete deletion receipts.
 
 ### Verification
 
-`test/catalog/catalogCreditAudit.test.ts` covers shared target budgeting, deduplication,
-complete/known windows, malformed Credit state, invalid join phrases, and
-exhausted budgets.
-`test/catalog/catalogCreditAudit.integration.ts` exercises the actual Mongo queries with
-one-record windows, subjects outside the window, real missing/unavailable subjects,
-mixed-case/ObjectId membership forms, subject/target/row truncation, per-Album
-completeness, report-wide output limits, and read-only fixture preservation.
-It also preserves orphaned failed/expired deletion receipts and prevents legacy
-deletion guesses when the receipt window is incomplete.
-Existing Catalog Credit and content-reference cleanup integration suites remain
-required compatibility checks.
+`test/catalog/catalogCreditAudit.test.ts` covers shared target budgeting,
+deduplication, complete/known windows, malformed Credit state, invalid join
+phrases, and exhausted budgets. `test/catalog/catalogCreditAudit.integration.ts`
+exercises the actual Mongo queries with one-record windows, subjects outside the
+window, real missing/unavailable subjects, mixed-case/ObjectId membership forms,
+subject/target/row truncation, per-Album completeness, report-wide output
+limits, and read-only fixture preservation. It also preserves orphaned
+failed/expired deletion receipts and prevents legacy deletion guesses when the
+receipt window is incomplete. Existing Catalog Credit and content-reference
+cleanup integration suites remain required compatibility checks.
 
 ## Credit join phrases and bylines
 
@@ -337,7 +336,11 @@ presentation, including a repeated name, and apply the same length cap.
    ready or hidden is omitted but keeps its position.
 2. The byline names the primary, featured and performer Credits; without any,
    the Organization Credits; otherwise every remaining Credit. Explicit
-   `unknown` attribution yields `Attribution not documented`.
+   `unknown` attribution yields `Attribution not documented`. When no credited
+   subject is visible the byline is empty, and listener v1 and legacy
+   responses omit `displayByline` instead of sending `''`, which native
+   collection-page decoders reject; see
+   [Native client compatibility](listener.md#native-client-compatibility).
 3. A repeated name is shown once, at its first position.
 4. A name is followed by its Credit's phrase only when the next shown name
    belongs to the next Credit in the full list; otherwise `, ` joins the two
@@ -346,8 +349,7 @@ presentation, including a repeated name, and apply the same length cap.
    byline that fits is never shortened. A longer one ends after the last whole
    name that fits, followed by `…`. When even the first name followed by `…`
    does not fit, that name is cut at a grapheme boundary and followed by `…`,
-   so a first name of exactly 500 units followed by more names keeps 499
-  units.
+   so a first name of exactly 500 units followed by more names keeps 499 units.
 
 The legacy byline and the listener byline of the same owner are identical.
 Plain-name fields such as `artistNames`, Search projections, Artist page
@@ -406,7 +408,8 @@ names and the length cap, and replays its results through the native
 validator ports. `test/catalog/soundtrackCreditProposal.test.ts` covers the
 Content Manager upload proposal and its byline.
 `test/catalog/publicCatalogService.test.ts` pins the five-field legacy
-Credit. The MongoDB suites `test/catalog/catalogCredit.integration.ts`,
+Credit and the omitted empty byline. The MongoDB suites
+`test/catalog/catalogCredit.integration.ts`,
 `test/listener/listenerContent.integration.ts` and
 `test/listener/artistFollows.integration.ts` cover phrase writes and
 successors (including Artist deletion and the Content Manager phrase form),
@@ -427,13 +430,13 @@ section records how the server implements it.
 Number stores neither key, so existing records and their administrator catalog
 revisions stay unchanged.
 
-- Content Manager single and bulk uploads and the legacy
-  `/content/audioTrack` upload read `common.disk.no` through
-  `AudioTrack.setEmbeddedDiscNumber`, which keeps only a value that
-  `embeddedDiscNumber` in `services/audio/audioMetadataService.ts` accepts. A
-  missing, non-integer or out-of-range value is ignored for that file only,
-  and the upload continues without a Disc Number. The number is stored with
-  the upload record, so a publication retry keeps it.
+- Content Manager single and bulk uploads and the legacy `/content/audioTrack`
+  upload read `common.disk.no` through `AudioTrack.setEmbeddedDiscNumber`, which
+  keeps only a value that `embeddedDiscNumber` in
+  `services/audio/audioMetadataService.ts` accepts. A missing, non-integer or
+  out-of-range value is ignored for that file only, and the upload continues
+  without a Disc Number. The number is stored with the upload record, so a
+  publication retry keeps it.
 - Import publication stores each new MediaTrack's reviewed draft Disc Number
   with `discNumberSource: 'admin-import'`; an unknown one, and every track of
   a format-1 approval, stores neither key. An appended MediaTrack stores its
@@ -550,14 +553,14 @@ in any lifecycle state and the loser of two concurrent setters, allows one ID
 across kinds, refuses non-administrators and frees an ID when its record is
 deleted. `test/platform/databaseIndexes.integration.ts` shows the indexes
 refuse a same-kind duplicate and admit records without an ID.
-`test/listener/musicBrainzIdPrivacy.integration.ts` scans
-listener, legacy, Search, Page, Follow, Library and Playlist responses for
-anonymous callers, listeners and an administrator in User view;
+`test/listener/musicBrainzIdPrivacy.integration.ts` scans listener, legacy,
+Search, Page, Follow, Library and Playlist responses for anonymous callers,
+listeners and an administrator in User view;
 `test/social/musicShareLifecycle.integration.ts` and
 `test/rooms/roomMediaDiscovery.integration.ts` scan share cards, Room media
 (service and HTTP routes) and a Room's state, for a listener and an
-administrator in User view.
-Import cases are listed under [Import publication](#import-publication).
+administrator in User view. Import cases are listed under
+[Import publication](#import-publication).
 
 ## Import publication
 
@@ -584,10 +587,9 @@ the MusicBrainz IDs it froze (see [MusicBrainz IDs](#musicbrainz-ids)).
 - A new Album's Credits follow the draft: each Artist entry in order as a
   `primary` or `featured` Artist Credit with its join phrase and the
   `creditId` `import_<role>_<artistId>`, then the label as an Organization
-  Credit with role `label` and the `creditId`
-  `import_label_<organizationId>`. An empty label adds no Credit. A single
-  primary entry without a label writes the same Album Credits as a format-2
-  approval.
+  Credit with role `label` and the `creditId` `import_label_<organizationId>`.
+  An empty label adds no Credit. A single primary entry without a label writes
+  the same Album Credits as a format-2 approval.
 - Each new MediaTrack of a new Album receives the Album's primary Credits in
   order, with the same `creditId`s; featured entries and the label stay on the
   Album. As in [Content Manager inheritance](#content-manager-inheritance), a
@@ -609,11 +611,11 @@ the MusicBrainz IDs it froze (see [MusicBrainz IDs](#musicbrainz-ids)).
   visibility hides them while it is hidden.
 - The worker checks that every reused Artist, Organization and Track, and an
   append's target Album, is still ready before its first copy; a reused Track
-  must also still belong to the target Album with ready, published storage. The commit
-  reads each of them again before its first write, at its reviewed revision
-  where one was reviewed, and fences it. A record that is no longer ready or
-  has changed turns the publication into needs attention (`catalogConflict`)
-  without minting identities.
+  must also still belong to the target Album with ready, published storage. The
+  commit reads each of them again before its first write, at its reviewed
+  revision where one was reviewed, and fences it. A record that is no longer
+  ready or has changed turns the publication into needs attention
+  (`catalogConflict`) without minting identities.
 - An approval freezes, with each identity of a new Album, the MusicBrainz ID it
   records or replaces (`musicBrainzIdWrite`: `{ musicBrainzId, replaces }` or
   null; `src/administration/import/adminImportMusicBrainzIds.ts`): a new Artist
@@ -625,10 +627,9 @@ the MusicBrainz IDs it froze (see [MusicBrainz IDs](#musicbrainz-ids)).
   still holds what the review saw (none, which includes a stored value that is
   no keepable ID, such as a placeholder's, or the ID it replaces; its revision
   check already proved it unchanged). An append and formats 1 and 2 write no
-  ID. A duplicate key on a MusicBrainz ID index
-  (another publication, an existing-catalog edit, or a holder that was not
-  ready at review) aborts the transaction and becomes needs attention
-  (`identityConflict`), minting nothing.
+  ID. A duplicate key on a MusicBrainz ID index (another publication, an
+  existing-catalog edit, or a holder that was not ready at review) aborts the
+  transaction and becomes needs attention (`identityConflict`), minting nothing.
 - An approval freezes the identities the review preselected (a new record where
   no name, alias or same-ID candidate exists, the ready record holding an
   entry's MusicBrainz ID, or an append member with identical bytes) marked
@@ -656,9 +657,9 @@ kept only before another inherited Credit. They take the Album's release date,
 reduced to a simple date of valid integer parts, and are stored public, so the
 Album's own visibility hides them while it is hidden, as for a new Album's
 MediaTracks, and reveals them with its other MediaTracks once it is public.
-They store their reviewed Disc and Track Numbers, and join its order by Disc Number, Track
-Number and MediaTrack ID ([Sort key](#sort-key)). A selected cover is not
-copied, and no MusicBrainz ID is recorded.
+They store their reviewed Disc and Track Numbers, and join its order by Disc
+Number, Track Number and MediaTrack ID ([Sort key](#sort-key)). A selected cover
+is not copied, and no MusicBrainz ID is recorded.
 
 ### Verification
 

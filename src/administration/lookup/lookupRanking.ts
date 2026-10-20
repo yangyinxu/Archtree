@@ -138,7 +138,7 @@ const canonical = (value: unknown): string => {
     if (value && typeof value === 'object') return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonical((value as Record<string, unknown>)[key])}`).join(',')}}`;
     return JSON.stringify(value);
 };
-/** MusicBrainz group keys hash the proposal alone (unchanged since S10); iTunes ones also name the source, so groups never mix sources. */
+/** MusicBrainz group keys hash the proposal alone, as before iTunes candidates existed; iTunes ones also name the source, so groups never mix sources. */
 const groupKeyFor = (proposal: LookupProposal, source: LookupCandidate['source']) =>
     createHash('sha256').update(canonical(source === 'itunes' ? { source: 'itunes', proposal } : proposal)).digest('hex');
 const byText = (left: string, right: string) => left < right ? -1 : left > right ? 1 : 0;

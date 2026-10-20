@@ -47,15 +47,18 @@ therefore fails type checking even when the difference is an optional field.
   permission for the server to send private fields. Existing server projection and
   lifecycle integration tests remain required security checks.
 
-`contracts/listener/v1/fixtures/album-legacy.json`, `album-current.json` and
-`album-multi-artist-label.json` are credential-free, database-independent JSON
-examples that native consumers can load unchanged. The third is an imported
-Album with two primary Artists, a featured Artist and a label, frozen from
-server output with synthetic IDs: the Album's Credits keep their roles and
-order, its byline carries the join phrases, its tracks carry only the primary
-Artists, every `artistNames` list is unique, and it adds no field. The
-compatibility test reads all three through the current parser and reads both
-current-shape fixtures through an independent frozen baseline parser.
+`contracts/listener/v1/fixtures/album-legacy.json`, `album-current.json`,
+`album-multi-artist-label.json` and `album-hidden-credits.json` are
+credential-free, database-independent JSON examples that native consumers can
+load unchanged. The third is an imported Album with two primary Artists, a
+featured Artist and a label, frozen from server output with synthetic IDs: the
+Album's Credits keep their roles and order, its byline carries the join
+phrases, its tracks carry only the primary Artists, every `artistNames` list is
+unique, and it adds no field. The fourth, also frozen from server output, is a
+documented Album and MediaTrack whose every credited subject is hidden or not
+ready: `credits` is empty and `displayByline` is absent. The compatibility test
+reads all four through the current parser and reads the current-shape fixtures
+through an independent frozen baseline parser.
 
 The frozen parser establishes the forward-compatible reader introduced by this
 change. It does not retroactively change already-open historical Web clients
@@ -80,6 +83,13 @@ and Finitude_Android 433ee43:
   and Album details. Each byline (at most 500 code points) and Credit name (at
   most 200) must be trimmed and contain no ISO control character; Cf is
   accepted.
+- iOS rejects an empty byline on Home collection pages and Android on
+  collection pages and Album details; both accept an absent one and fall back
+  to `artistNames` joined with `, `. The server therefore never
+  sends `''`: when no credited Artist or Organization is visible it omits
+  `displayByline` and sends an empty `credits` list. An owner without usable
+  stored attribution omits all three attribution fields, as before. Web treats
+  each of them as optional as well.
 - Web strips unknown fields at runtime, as described above, and
   `contentContractAlignment.ts` fails the Web build when its schemas and the
   canonical DTOs disagree.
@@ -105,9 +115,10 @@ Credit and so also sent `creditId`. This makes the runtime match the declared
 contract and is not a DTO shape change; neither Web nor the native clients
 read `creditId` from public responses.
 
-`test/support/nativeDisplayTextValidators.ts` ports both native checks, and
-`test/listener/nativeBylineValidators.test.ts` replays server bylines through
-them. Re-check the sibling repositories whenever either decoder changes.
+`test/support/nativeDisplayTextValidators.ts` ports both native checks and
+their byline fallback, and `test/listener/nativeBylineValidators.test.ts`
+replays server bylines, including owners without a visible credited subject,
+through them. Re-check the sibling repositories whenever either decoder changes.
 
 ### Browser module boundaries
 

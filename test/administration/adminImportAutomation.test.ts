@@ -4,7 +4,7 @@
  *   Constants: importId, slotA, slotB, manifest, shared, automaticKey
  * Tests
  *   - the per-file step plans title, Disc and Track Numbers from version-2 evidence only where it has a value
- *   - evidence stored before S8, files already automated, unconfirmed files and files outside the manifest plan nothing
+ *   - version-1 evidence, files already automated, unconfirmed files and files outside the manifest plan nothing
  *   - the album step plans the shared title, year, label and one primary entry once every file is confirmed, and only once
  *   - file-tag values ignore the automation markers: per file from every confirmed version-2 file, the album values once every file is
  *   - a value the files disagree on or one file lacks stays empty, and an album artist must be the only one on every file, with none left out
@@ -62,7 +62,7 @@ test('the per-file step plans title, Disc and Track Numbers from version-2 evide
     assert.deepEqual(planImportAutomation(project([asset(slotA, tags({ discNumber: 1 }))])).values, [{ path: `tracks.${slotA}.discNumber`, seen: null, value: 1 }]);
 });
 
-test('evidence stored before S8, files already automated, unconfirmed files and files outside the manifest plan nothing', () => {
+test('version-1 evidence, files already automated, unconfirmed files and files outside the manifest plan nothing', () => {
     const legacy = { title: 'Legacy Title', album: 'Synthetic Album', artists: ['Synthetic Ensemble'], year: 2026, trackNumber: 1 };
     for (const [label, assets] of [
         ['version-1 evidence', [asset(slotA, legacy), asset(slotB, { ...legacy, version: 1 })]],

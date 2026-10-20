@@ -743,7 +743,7 @@ test('an import with no candidates publishes without answering identity question
     { scope: 'album', slotId: null, entryKey: null, boundName: null, ...created }, ...[slotId, slotTwo].map(slot => ({ scope: 'track', slotId: slot, entryKey: null, boundName: null, ...created }))] });
 });
 
-// Metadata lookup and the Review and publish summary (S11). The lookup view and summary state are shaped as the server's
+// Metadata lookup and the Review and publish summary. The lookup view and summary state are shaped as the server's
 // allowlist returns them (src/administration/lookup/lookupView.ts, src/administration/import/adminImportSummary.ts).
 type Item = ReturnType<typeof detail>;
 const releaseId = (n: number) => `0000000b-0000-4000-8000-00000000000${n}`;

@@ -11,6 +11,7 @@
  *   - public Soundtrack DTO requires a ready record with a traceable object key
  *   - public Feed Post DTO retains only the existing client contract
  *   - legacy public Credits expose only the five declared fields and phrase-aware bylines
+ *   - legacy public DTOs omit the byline when no credited subject is visible
  *   - the Library byline resolver returns the same phrase-aware byline
  *   - the Credit read rollback still omits every legacy public Credit field
  * @end-catalog */
@@ -344,6 +345,19 @@ test('legacy public Credits expose only the five declared fields and phrase-awar
             ['Delta', 'performer', 4], ['Lorem Records', 'label', 5]
         ]);
         assertNoInternalFields(dto);
+    }
+});
+
+test('legacy public DTOs omit the byline when no credited subject is visible', (t) => {
+    withEnvironment(t, { CATALOG_CREDIT_READS_ENABLED: 'true' });
+    // No subject name resolves, as when every credited Artist and Organization is hidden.
+    const album = toPublicAlbum(phraseAlbum(), [], new Map());
+    const track = toPublicAudioTrack(phraseTrack(), undefined, undefined, new Map());
+    assert.ok(track);
+    for (const dto of [album, track]) {
+        assert.equal(Object.prototype.hasOwnProperty.call(dto, 'displayByline'), false);
+        assert.deepEqual(dto.credits, []);
+        assert.equal(dto.attributionStatus, 'documented');
     }
 });
 

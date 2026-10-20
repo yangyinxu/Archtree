@@ -19,8 +19,8 @@
  * cancellation code paths with synthetic identities and a fixed clock (not captured from a live database);
  * its IDs, receipt hashes, chunk hashes and suggestions are recomputed below from the exported helpers. These
  * tests prove the current parsers, validators, DTO projection and storage reader accept every fixture
- * unchanged, so later Draft, Disc Number and multi-artist stages can rely on them as the stored v1 shapes
- * they must keep reading.
+ * unchanged, so the later Draft v2, Disc Number and multi-artist changes can rely on them as the stored v1
+ * shapes they must keep reading.
  */
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
@@ -128,7 +128,7 @@ test('a created v1 draft keeps one artistName string, track titles and numbers, 
 
 test('a completed v1 analysis keeps its baseline and leaves the artistName suggestion pending', () => {
     const doc = load('v1-analysis-pending-artist-name.json'), item = dto(doc), { analysis } = doc, baseline = analysis.baseline!;
-    // The baseline is the draftless default of its time (hidden); defaultDraft is public since S5, so compare the frozen value.
+    // The baseline is the draftless default of its time (hidden); defaultDraft is public now, so compare the frozen value.
     assert.deepEqual(baseline, legacyDefaultDraftV1(doc.manifest));
     assert.deepEqual(item.analysis, { state: 'complete', generation: 1, operationId: '00000002-0000-4000-8000-000000000002', completedChunks: 2, totalChunks: 2, attemptsUsed: 2, maxAttempts: 22, issue: null });
     const pending = item.suggestions.filter(suggestion => suggestion.decision === 'pending');

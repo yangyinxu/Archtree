@@ -2,7 +2,7 @@
  * Exports
  *   Types: BylineCredit, BylineSegment
  *   Functions: toBylineCredit, catalogBylineSegments, capCatalogByline, composeCatalogByline,
- *              catalogDisplayByline, composePlainNameByline
+ *              catalogDisplayByline, displayBylineField, composePlainNameByline
  *   Constants: undocumentedAttributionByline, maximumBylineLength, bylineTruncationMarker,
  *              defaultBylineSeparator
  * Internal
@@ -160,6 +160,14 @@ export const composeCatalogByline = (credits: readonly BylineCredit[]) =>
 /** Composes the byline shown for one owner's attribution state. */
 export const catalogDisplayByline = (status: AttributionStatus, credits: readonly BylineCredit[]): string =>
     status === 'unknown' ? undocumentedAttributionByline : composeCatalogByline(credits);
+
+/**
+ * Wire field for one owner's byline. An empty byline (no credited subject is visible) omits the
+ * key instead of sending '': empty display text fails an iOS collection page and an Android page
+ * or Album details response, while both clients fall back to `artistNames` when the key is absent.
+ */
+export const displayBylineField = (byline: string): { displayByline?: string } =>
+    byline ? { displayByline: byline } : {};
 
 /**
  * Legacy fallback for unmigrated owners and the Credit-reads rollback. It keeps the pre-Credit

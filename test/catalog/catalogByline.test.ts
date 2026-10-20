@@ -14,8 +14,8 @@
  * @end-catalog */
 
 /**
- * Pins the shared server byline composer. Phrase-free cases repeat the literals frozen by the S0
- * baseline (test/listener/nativeBylineValidators.test.ts), so the shared helper is a pure
+ * Pins the shared server byline composer. Phrase-free cases repeat the literals frozen by the
+ * golden baseline (test/listener/nativeBylineValidators.test.ts), so the shared helper is a pure
  * refactor for existing data; join phrases, adjacency and the 500-unit cap are new behavior.
  * A seeded property test replays random Credit lists through both ported native validators.
  * Invisible and combining characters are written as escapes so editors cannot alter them.

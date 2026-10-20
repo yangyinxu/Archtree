@@ -78,43 +78,42 @@ Album and each track on its own row without a separate save, checks that the
 confirmation lists the entries with their roles and join phrase, the label and
 the tracks in disc order, that the single publish request carries those
 decisions, and the links to the Album, each Artist and the label Organization,
-with axe scans of the page and the confirmation.
-Another publishes an unsaved title edit without Save and checks that the one
-publish request carries it and the editor then shows it saved. Another loads a
-draft whose values came from file tags and checks that the editor marks them
-From file tags, notes that a company-like Artist entry looks like a label and
-drops a value's marker once it is edited, and that the confirmation marks the
-entry and the label From file tags only, with axe scans of the page and the
-confirmation. Another opens Review on an import with no candidates and checks
-that its matches load without a find step, that the entry, the label, the Album
-and each track are collapsed as preselected new records with no decision asked,
-that the confirmation lists each as New, and that the single publish request
-carries no decisions, only the preselections the confirmation showed, with axe
-scans of the page and the confirmation. Another loads an import whose files
-share one embedded image and checks that Files and the summary show it chosen
-automatically, that choosing No cover makes the choice explicit, and that the
-one publish request carries the cover the confirmation shows.
-The Review and publish summary tests create an import from a folder, upload it,
-and check that values prefilled from file tags are flagged while a fixture
-lookup runs and Publish waits, that the one matching release is preselected and
-applied, and that one confirmation publishes it with no decision and no Luna
-tick; that a tie lists only the values that differ with each release's barcode,
-catalogue number, country and medium and is chosen from the keyboard; that a
-conflict with the administrator's label is kept from the keyboard while the
-summary reflows at 320, 768 and 1440 px; that an unavailable lookup offers Luna
-first beside a free retry, that a retry that stays unavailable keeps both, and
-that Luna starts only after its confirmation shows the budget, its suggestion
-for an empty title then arriving ticked; that an import without a folder or
-usable tags offers Luna beside an empty name box that looks up a typed name
-from the keyboard and stores nothing; and that after a lookup finds no release
-Luna is offered, and its ticked Artist entries, label and Disc Number are
-preselected in one confirmation, which offers no Apply ticked suggestions now
-and approves with their preselections and ticks, with axe scans throughout.
-Another shows a candidate whose release reports front artwork through the
-protected administrator preview (a mocked WebP; no request reaches a lookup
-host), checks that the summary says Publish waits while the applied release's
-cover is staged and keeps Publish disabled, and that once the staged lookup
-cover arrives it is chosen automatically, named in the summary and the
+with axe scans of the page and the confirmation. Another publishes an unsaved
+title edit without Save and checks that the one publish request carries it and
+the editor then shows it saved. Another loads a draft whose values came from
+file tags and checks that the editor marks them From file tags, notes that a
+company-like Artist entry looks like a label and drops a value's marker once it
+is edited, and that the confirmation marks the entry and the label From file
+tags only, with axe scans of the page and the confirmation. Another opens Review
+on an import with no candidates and checks that its matches load without a find
+step, that the entry, the label, the Album and each track are collapsed as
+preselected new records with no decision asked, that the confirmation lists each
+as New, and that the single publish request carries no decisions, only the
+preselections the confirmation showed, with axe scans of the page and the
+confirmation. Another loads an import whose files share one embedded image and
+checks that Files and the summary show it chosen automatically, that choosing No
+cover makes the choice explicit, and that the one publish request carries the
+cover the confirmation shows. The Review and publish summary tests create an
+import from a folder, upload it, and check that values prefilled from file tags
+are flagged while a fixture lookup runs and Publish waits, that the one matching
+release is preselected and applied, and that one confirmation publishes it with
+no decision and no Luna tick; that a tie lists only the values that differ with
+each release's barcode, catalogue number, country and medium and is chosen from
+the keyboard; that a conflict with the administrator's label is kept from the
+keyboard while the summary reflows at 320, 768 and 1440 px; that an unavailable
+lookup offers Luna first beside a free retry, that a retry that stays
+unavailable keeps both, and that Luna starts only after its confirmation shows
+the budget, its suggestion for an empty title then arriving ticked; that an
+import without a folder or usable tags offers Luna beside an empty name box that
+looks up a typed name from the keyboard and stores nothing; and that after a
+lookup finds no release Luna is offered, and its ticked Artist entries, label
+and Disc Number are preselected in one confirmation, which offers no Apply
+ticked suggestions now and approves with their preselections and ticks, with axe
+scans throughout. Another shows a candidate whose release reports front artwork
+through the protected administrator preview (a mocked WebP; no request reaches a
+lookup host), checks that the summary says Publish waits while the applied
+release's cover is staged and keeps Publish disabled, and that once the staged
+lookup cover arrives it is chosen automatically, named in the summary and the
 confirmation, and carried by the one publish request. Another applies an
 iTunes-only result after MusicBrainz stayed unavailable: the summary says it
 was not checked against MusicBrainz with Luna first beside a free retry, its

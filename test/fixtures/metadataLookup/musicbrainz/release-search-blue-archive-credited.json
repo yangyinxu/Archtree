@@ -1,7 +1,7 @@
 {
   "source": "musicbrainz",
   "recordedAt": "2026-10-18T10:50:22.432Z",
-  "description": "Release search with the credited names and the ~ subtitle",
+  "description": "Release search with the credited names and the ~ subtitle (request URL updated from limit=25 to limit=100 after recording; the body is unchanged because its 1 hit is within both limits)",
   "exchanges": [
     {
       "url": "https://musicbrainz.org/ws/2/release?query=release%3A%22Blue+Archive+Original+Soundtrack+Vol.1+%5C%7ELonging+for+the+memorable+days%5C%7E%22+AND+artist%3A%22Mitsukiyo%E3%80%81KARUT%E3%80%81Nor%22&fmt=json&limit=100",

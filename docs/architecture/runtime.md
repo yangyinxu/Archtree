@@ -163,12 +163,12 @@ normal error handling; already-admitted business work remains tracked until it s
 After the listener opens, startup starts the administrator background workers:
 Luna analysis, import publication (which also cleans up automatic cover
 candidates of completed imports and stages and cleans up lookup covers),
-existing-catalog covers and metadata lookup.
-Each polls every two seconds and runs at most one pass at a time through the
-lifecycle tracker, so that pass counts as admitted business work. Draining
-aborts each worker's signal, which cancels an in-flight metadata lookup
-request, stops new passes, and waits for the admitted pass before MongoDB
-closes. Tests replace each worker through the `startServer` dependencies.
+existing-catalog covers and metadata lookup. Each polls every two seconds and
+runs at most one pass at a time through the lifecycle tracker, so that pass
+counts as admitted business work. Draining aborts each worker's signal, which
+cancels an in-flight metadata lookup request, stops new passes, and waits for
+the admitted pass before MongoDB closes. Tests replace each worker through the
+`startServer` dependencies.
 
 - `SERVER_SHUTDOWN_GRACE_MS`: default 30000, maximum 120000.
 - `SERVER_SHUTDOWN_CLEANUP_MS`: default 5000, maximum 30000.
@@ -246,12 +246,11 @@ holds its run number, state (`queued`, `running`, `retrying`, `complete`,
 `unavailable`, `stopped` or `superseded`), the granting administrator and a
 one-hour grant, the bound file set, the planned queries and progress, at most 25
 candidates (MusicBrainz releases or iTunes collections, 4 MiB of JSON
-together) and whether its searches were complete, the
-ranking (candidates plus ranking stay
-within 12 MiB, well under MongoDB's 16 MiB document limit), the applied
-candidate (or none) with its values, conflicts and flagged values (at most one
-of each per draft value) and a 180-second worker lease. The lookup worker
-(`startMetadataLookupWorker` in
+together) and whether its searches were complete, the ranking (candidates plus
+ranking stay within 12 MiB, well under MongoDB's 16 MiB document limit), the
+applied candidate (or none) with its values, conflicts and flagged values (at
+most one of each per draft value) and a 180-second worker lease. The lookup
+worker (`startMetadataLookupWorker` in
 `src/administration/lookup/metadataLookupService.ts`) starts after listen with
 the other administrator workers, polls every 2 seconds, is tracked by the server
 lifecycle and is stopped before database teardown; a stop aborts the request in
@@ -307,9 +306,9 @@ gate document (one request at a time, 3 seconds apart). The release before the
 fallback ignores these fields (see
 [Rollback floors](../features/admin-workbench.md#rollback-floors)).
 
-MusicBrainz IDs add two required unique partial indexes,
-`artist_musicbrainz_id` on `artists` and `organization_musicbrainz_id` on
-`organizations`, each `{ musicBrainzId: 1 }` with the partial filter
+MusicBrainz IDs add two required unique partial indexes, `artist_musicbrainz_id`
+on `artists` and `organization_musicbrainz_id` on `organizations`, each
+`{ musicBrainzId: 1 }` with the partial filter
 `{ musicBrainzId: { $type: 'string' } }`, so any number of records without an ID
 coexist and an Artist and an Organization may share one ID.
 `requiredIndexRevision` is now `required-indexes-v11-musicbrainz-ids`. Existing

@@ -23,7 +23,7 @@ export interface ImportAsset {
     state: 'pending' | 'ready' | 'failed' | 'unknown' | 'deleting' | 'cleanupFailed' | 'deleted';
     versionId: string | null; etag: string | null; updatedAt: Date; leaseOwner: string | null; leaseUntil: Date | null;
     duration: string | null; format: string | null; representation: MediaRepresentation | null;
-    /** Version-2 evidence from uploads admitted from S8 on; earlier uploads keep their v1 evidence and are never re-read. */
+    /** Version-2 evidence from uploads admitted since imports prefill from file tags; earlier uploads keep their v1 evidence and are never re-read. */
     tags: ImportEmbeddedTags | ImportEmbeddedTagsV2 | null;
     /** Per-file automation ran for this confirmed upload (adminImportAutomation.ts); never projected. */
     automatedAt?: Date | null;
@@ -113,8 +113,8 @@ type PublicationShape = { schemaVersion?: unknown; snapshot?: unknown; artists?:
  * The approval format this release copies, commits and cleans, or null (it stays needs attention). Each format fails closed
  * on shape too. Format 1 needs a v1 snapshot (a string artistName, no artist entries, no Disc Numbers), so an approval a later
  * release froze without recording its format is never misread as format 1. Format 2 needs a Draft v2 snapshot with exactly one
- * primary Artist entry, no label and a `discNumber` field (a Disc Number or null) on every track. Format 3 (S7a writes it for
- * every new approval) needs a Draft v2 snapshot whose entries each have a key, a name and a primary or featured role, a label
+ * primary Artist entry, no label and a `discNumber` field (a Disc Number or null) on every track. Format 3 (every new approval
+ * writes it) needs a Draft v2 snapshot whose entries each have a key, a name and a primary or featured role, a label
  * that is null or named, a `discNumber` field on every track, 1 to 50 frozen Artists and a label that is null or a record.
  * Deeper consistency (counts, keys, IDs) is checked at commit, where a mismatch is a catalog conflict that mints nothing.
  */

@@ -109,17 +109,17 @@ export function readImportEmbeddedTags(metadata: Pick<IAudioMetadata, 'common' |
 // Stored values are re-checked on every read; a value that fails becomes empty and is never truncated.
 const storedText = (value: unknown, max: number) => typeof value === 'string' && value.length >= 1 && value.length <= max && value.trim() === value && !invisible.test(value) ? value : null;
 const storedNames = (value: unknown, max: number) => [...new Set((Array.isArray(value) ? value : []).map(name => storedText(name, IMPORT_TAG_LIMITS.name)).filter((name): name is string => name !== null))].slice(0, max);
-/** Evidence stored before S8 was only stripped of C0/C1 controls and cut to 200 characters, so it is read as the v1 DTO reads it. */
+/** Version-1 evidence was only stripped of C0/C1 controls and cut to 200 characters, so it is read as the v1 DTO reads it. */
 const legacyText = (value: unknown, max: number) => typeof value === 'string' && value.length <= max ? value : null;
 const normalizedAs = (value: unknown, normalize: (value: string) => string | null) => typeof value === 'string' && value.length <= 64 && normalize(value) === value ? value : null;
 const emptyIdentifiers = (): ImportTagIdentifiers => ({ barcode: null, catalogNumber: null, isrc: null, musicBrainzReleaseId: null });
 
-/** Version-2 evidence (written by uploads admitted from S8 on); automation reads no other evidence. */
+/** Version-2 evidence (written by uploads admitted since imports prefill from file tags); automation reads no other evidence. */
 export const isImportTagsV2 = (raw: unknown): raw is ImportEmbeddedTagsV2 => isRecord(raw) && raw.version === 2 && Array.isArray(raw.artists)
     && Array.isArray(raw.albumArtists) && isRecord(raw.identifiers) && Array.isArray(raw.flagged);
 
 /**
- * The editor's allowlisted tag view. Evidence stored before S8 (no `version: 2`) reads as version 1 with its five v1 fields and
+ * The editor's allowlisted tag view. Older evidence (no `version: 2`) reads as version 1 with its five v1 fields and
  * empty extended fields, so values it never read are not invented; version-2 evidence is checked field by field. Total; unknown
  * keys are dropped.
  */
@@ -142,7 +142,7 @@ export function importTagsV2View(raw: unknown): ImportTagsView | null {
 }
 
 /**
- * A staged file's known duration for later matching (S10): version-2 evidence is exact to the millisecond; otherwise the stored
+ * A staged file's known duration for metadata lookup matching: version-2 evidence is exact to the millisecond; otherwise the stored
  * `mm:ss` duration counts with 1-second precision (owner default). Null when neither is known.
  */
 export function importAssetDurationEvidence(asset: Pick<ImportAsset, 'tags' | 'duration'>): { durationMs: number; durationPrecisionMs: 0 | 1000 } | null {

@@ -5,6 +5,7 @@
  *   - current reader accepts the legacy JSON contract and applies only documented defaults
  *   - frozen compatibility reader accepts current server fields without propagating them
  *   - an imported Album with two primaries, a featured Artist and a label parses unchanged, and the baseline reader keeps its v1 fields
+ *   - an Album whose credited subjects are all hidden parses without a byline and falls back to artistNames
  *   - public response additions are stripped recursively before they enter a query cache
  *   - missing required response fields fail instead of becoming empty success
  *   - request and account-response validation remain strict
@@ -14,8 +15,10 @@ import { z } from 'zod';
 import legacyAlbum from '../../../contracts/listener/v1/fixtures/album-legacy.json';
 import currentAlbum from '../../../contracts/listener/v1/fixtures/album-current.json';
 import multiArtistAlbum from '../../../contracts/listener/v1/fixtures/album-multi-artist-label.json';
+import hiddenCreditsAlbum from '../../../contracts/listener/v1/fixtures/album-hidden-credits.json';
 import {
   audioTrackSummarySchema,
+  contentByline,
   libraryTargetSchema,
   listenerAlbumSchema,
   listenerHomeSchema,
@@ -61,6 +64,21 @@ test('an imported Album with two primaries, a featured Artist and a label parses
   expect(baseline.album.artistNames).toEqual(['Lorem Ensemble', 'Ipsum Quartet', 'Dolor Soloist']);
   expect(baseline.tracks.map((track) => track.artistNames)).toEqual([['Lorem Ensemble', 'Ipsum Quartet']]);
   expect(new Set(baseline.album.artistNames).size).toBe(baseline.album.artistNames.length);
+});
+
+test('an Album whose credited subjects are all hidden parses without a byline and falls back to artistNames', () => {
+  const parsed = listenerAlbumSchema.parse(hiddenCreditsAlbum);
+  expect(parsed).toEqual(hiddenCreditsAlbum);
+  for (const item of [parsed.album, ...parsed.tracks]) {
+    expect(Object.prototype.hasOwnProperty.call(item, 'displayByline')).toBe(false);
+    expect([item.credits, item.attributionStatus]).toEqual([[], 'documented']);
+    expect(contentByline(item)).toBe('');
+    expect(contentByline({ ...item, artistNames: ['Lorem Ensemble', 'Ipsum Quartet'] })).toBe('Lorem Ensemble, Ipsum Quartet');
+  }
+  expect(listenerHomeSchema.parse({
+    title: 'Home', sections: [{ id: 'section-1', title: '', presentation: 'grid', items: [hiddenCreditsAlbum.album] }]
+  }).sections[0].items).toEqual([hiddenCreditsAlbum.album]);
+  expect(baselineAlbumReader.parse(hiddenCreditsAlbum).tracks.map((track) => track.id)).toEqual([hiddenCreditsAlbum.tracks[0].id]);
 });
 
 test('public response additions are stripped recursively before they enter a query cache', () => {

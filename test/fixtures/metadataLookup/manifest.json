@@ -201,7 +201,7 @@
     },
     {
       "file": "musicbrainz/release-search-blue-archive-credited.json",
-      "description": "Release search with the credited names and the ~ subtitle"
+      "description": "Release search with the credited names and the ~ subtitle (request URL updated from limit=25 to limit=100 after recording; the body is unchanged because its 1 hit is within both limits)"
     },
     {
       "file": "musicbrainz/release-search-blue-archive-normalized.json",
@@ -217,7 +217,7 @@
     },
     {
       "file": "musicbrainz/release-search-blue-archive-title.json",
-      "description": "Release search by title only"
+      "description": "Release search by title only (request URL updated from limit=25 to limit=100 after recording; the body is unchanged because its 2 hits are within both limits)"
     },
     {
       "file": "musicbrainz/release-search-hotel-california.json",

@@ -30,7 +30,7 @@
 
 /**
  * Forward-compatible reads of stored import projects. The frozen v1 fixtures must map deterministically and
- * idempotently onto the Draft v2 view later stages adopt, and a document a newer release stored (the synthetic
+ * idempotently onto the Draft v2 view, and a document a newer release stored (the synthetic
  * fixture in test/fixtures/adminImportCompat) must project back onto exactly the v1 admin contract, read-only.
  */
 import assert from 'node:assert/strict';
@@ -462,7 +462,7 @@ test('the editor asset view allowlists version-2 tag evidence and reads evidence
         identifiers: { barcode: '4006381333932', catalogNumber: 'c'.repeat(101), isrc: 'us-abc-26-00001', musicBrainzReleaseId: 'not-an-id' }, artists: ['ok', 7, 'n'.repeat(201)] })], slots, actor, importTagsV2View);
     assert.deepEqual([bad.tags!.title, bad.tags!.album, bad.tags!.label, bad.tags!.discNumber, bad.tags!.durationMs, bad.tags!.identifiers, bad.tags!.artists],
         [null, null, null, null, null, { barcode: null, catalogNumber: null, isrc: null, musicBrainzReleaseId: null }, ['ok']]);
-    // Evidence without `version: 2` (stored before S8, or an unknown version) reads as version 1 with empty extended fields.
+    // Evidence without `version: 2` (stored by older releases, or an unknown version) reads as version 1 with empty extended fields.
     for (const version of [undefined, 1, 3, '2']) {
         const [legacy] = legacyAssetsView([asset({ ...v2, version })], slots, actor, importTagsV2View);
         assert.deepEqual(legacy.tags, { version: 1, title: 'Synthetic Title', album: 'Synthetic Album', artists: ['Synthetic Artist'], year: 2026, trackNumber: 3, albumArtists: [], label: null, discNumber: null, durationMs: null,
