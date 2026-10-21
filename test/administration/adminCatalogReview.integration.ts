@@ -3,7 +3,7 @@
  *   Types: Change
  *   Functions: db, mutation, code, deferred, createBody, create, current, edit, apply, save, admitLookup,
  *              request, downgrade, capturedAlbumFixture, completedReview, post, catalogSnapshot,
- *              memberCreditedReview
+ *              memberCreditedReview, lookupState
  *   Constants: actor, other, user, album, artist, first, second, albumTitle, provider
  *   Variables: harness, server, base, token, userToken
  * Tests
@@ -68,18 +68,29 @@
  *   - unanswered conflicts on a member's Artist entries or the expected tracklist never hold applying the selected values, and applying writes none of the review's lookup values to the catalog
  *   - Track Numbers accepted from Luna re-rank the review's run at the acceptance, applying its sole preselection, and a later title save re-ranks nothing
  *   - a renumbering save is kept without a re-rank while lookup is unavailable or no longer admits the review, and re-ranks once it is admitted again
+ *   - the creation route queues the review's one automatic catalog run in the creation transaction where lookup is available; a replay or a retry after a lost response queues nothing new
+ *   - without metadata lookup configured the route creates a format-2 review for manual editing and stores no run
+ *   - a creation whose automatic run cannot be stored writes nothing, and the same request is then admitted once
+ *   - a second creation for an Album with an open review is refused unless the administrator asks for another one
+ *   - eligibility tells the Album page why a review cannot be created, the open review whose source is current and whether lookup runs
+ *   - an Album completion created through the route runs its automatic lookup, and applying what its confirmation read shows writes the Album's values, Credits and tracklist, fills a member stored as Unknown from its own track's artist and documents it, and leaves a member with a placeholder track credit without Artists
+ *   - every Album the eligibility read refuses is one creation refuses, storing nothing, and an empty Album it admits is created through the route with its automatic run
+ *   - an Album whose retained filenames exceed what a review holds is refused by the eligibility read and by creation alike, storing nothing, and is created once they fit
+ *   - two administrators creating a review of one Album at once store one review and one run: the later creation runs again and is refused as open
+ *   - while a review is open, a stale Album revision keeps its own refusal, and replaying a creation with another `another` is an operation conflict
+ *   - a creation whose transaction meets a transient error runs again and stores one review with its one automatic run
  * @end-catalog */
 
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { after, before, beforeEach, mock, test } from 'node:test';
 import type { Server } from 'node:http';
-import { Collection, ObjectId } from 'mongodb';
+import { ClientSession, Collection, MongoError, ObjectId } from 'mongodb';
 import { createApp } from '../../src/app';
 import { getDb } from '../../src/infrastructure/database';
 import { createSession } from '../../src/services/auth/authSessionService';
 import { adminCatalogItemRevision } from '../../src/administration/catalog/adminCatalogService';
-import { createCatalogReview, getCatalogReview, listCatalogReviews, editCatalogReview, analyzeCatalogReview, adoptCatalogReview, cancelCatalogReviewAnalysis } from '../../src/administration/catalog/adminCatalogReviewService';
+import { createCatalogReview, getCatalogReview, getCatalogReviewEligibility, listCatalogReviews, editCatalogReview, analyzeCatalogReview, adoptCatalogReview, cancelCatalogReviewAnalysis } from '../../src/administration/catalog/adminCatalogReviewService';
 import { applyCatalogReview, getCatalogReviewCandidates } from '../../src/administration/catalog/adminCatalogReviewApply';
 import { adminImportIndexes, createAdminImport, getAdminImport, listAdminImports, editAdminImport, analyzeAdminImport, adoptAdminImportSuggestions, cancelAdminImportAnalysis, adminImportDuplicateCandidates, decideAdminImportDuplicates, importCandidateProjection, importCandidateRevision, importCollection, initializeAdminImportStorage, runAdminImportWorkerOnce, withImportAdmin } from '../../src/administration/import/adminImportService';
 import { catalogReviewForLookup } from '../../src/administration/catalog/adminCatalogReviewCapture';
@@ -94,12 +105,12 @@ import { ImportProviderError, type AnalysisInput, type ImportAnalysisProvider } 
 import type { CatalogReviewField, CatalogReviewResponse } from '../../src/administration/catalog/adminCatalogReviewContract';
 import { startMongoReplicaSet, type MongoReplicaSetHarness } from '../support/mongoReplicaSet';
 import {
-    chooseCatalogReviewLookup, getCatalogReviewLookup, resolveCatalogReviewLookup, retryCatalogReviewLookup, saveCatalogReview, submitCatalogReviewLookup
+    chooseCatalogReviewLookup, createCatalogReviewWithLookup, getCatalogReviewLookup, resolveCatalogReviewLookup, retryCatalogReviewLookup, saveCatalogReview, submitCatalogReviewLookup
 } from '../../src/administration/lookup/catalogReviewLookupRequests';
 import { installNetworkGuard } from '../support/networkGuard';
-import { runMetadataLookupOnce } from '../../src/administration/lookup/metadataLookupService';
+import { queueCatalogReviewLookup, runMetadataLookupOnce } from '../../src/administration/lookup/metadataLookupService';
 import type { LookupExchange } from '../support/metadataLookupFixtures';
-import { drainLookup, lookupContact, lookupMbid, pairableRelease, reviewSearches, trackCreditedRelease, withLookup } from '../support/catalogReviewRunFixtures';
+import { creditedRelease, drainLookup, lookupContact, lookupMbid, pairableRelease, reviewSearches, trackCreditedRelease, withLookup, type CreditedArtist } from '../support/catalogReviewRunFixtures';
 
 let harness: MongoReplicaSetHarness, server: Server, base = '', token = '', userToken = '';
 const actor = new ObjectId(), other = new ObjectId(), user = new ObjectId(), album = new ObjectId(), artist = new ObjectId(), first = new ObjectId(), second = new ObjectId();
@@ -108,7 +119,12 @@ const code = (expected: string) => (error: any) => error.code === expected;
 const albumTitle: CatalogReviewField = { scope: 'album', slotId: null, field: 'title' };
 const provider: ImportAnalysisProvider = { configured: () => true, analyze: async input => input.album ? [{ scope: 'album', slotId: null, field: 'title', baseline: input.baseline.album.title, value: 'Proposed Album', source: 'context', evidence: 'Existing title' }] : [] };
 const deferred = () => { let resolve!: () => void; const promise = new Promise<void>(r => { resolve = r; }); return { resolve, promise }; };
-const createBody = async () => ({ operationId: randomUUID(), albumId: String(album), expectedRevision: adminCatalogItemRevision('album', await db().collection('albums').findOne({ _id: album })) });
+/**
+ * A creation body for the Album at its current revision. `another` is true unless given (null leaves it out), so a test may create
+ * several reviews of the Album while one is open.
+ */
+const createBody = async (another: boolean | null = true) => ({ operationId: randomUUID(), albumId: String(album),
+    expectedRevision: adminCatalogItemRevision('album', await db().collection('albums').findOne({ _id: album })), ...(another === null ? {} : { another }) });
 const create = async () => createCatalogReview(String(actor), await createBody());
 const current = (id: string) => getCatalogReview(String(actor), id);
 const edit = (result: CatalogReviewResponse, change: (draft: CatalogReviewResponse['item']['draft']) => void) => { const draft = structuredClone(result.item.draft); change(draft); return editCatalogReview(String(actor), result.item.id, { ...mutation(result.item.revision), draft }); };
@@ -580,6 +596,9 @@ test('an oversized review draft is refused at creation and nothing is inserted; 
     const ids = Array.from({ length: 60 }, () => new ObjectId());
     await db().collection('audioTracks').insertMany(ids.map((id, index) => ({ _id: id, title: '题'.repeat(300), trackNumber: index + 1, uploadStatus: 'ready', publicationStatus: 'ready', s3Key: String(id), albumId: String(album), visibility: 'public', mediaType: 'audio' })));
     await db().collection('albums').updateOne({ _id: album }, { $set: { audioTrackIds: ids.map(String) } });
+    const reason = async () => (await getCatalogReviewEligibility(String(actor), { albumId: String(album) })).reason;
+    // The eligibility read runs the same check, so the Album page shows the action disabled with its reason.
+    assert.equal(await reason(), 'valuesUnsupported');
     await assert.rejects(create(), code('ADMIN_IMPORT_INVALID_INPUT'));
     assert.equal(await importCollection().countDocuments({}), 0);
     // 20 long Artist Credits push the whole draft past 48 KB while its editable values stay under it: creation and a growing edit
@@ -588,6 +607,7 @@ test('an oversized review draft is refused at creation and nothing is inserted; 
     await db().collection('artists').insertMany(artists);
     await db().collection('audioTracks').updateMany({ _id: { $in: ids.slice(44, 50) } }, { $set: { title: 'Short title' } });
     await db().collection('albums').updateOne({ _id: album }, { $set: { audioTrackIds: ids.slice(0, 50).map(String), credits: artists.map((value, order) => ({ creditId: `artist_${order}`, subjectType: 'artist', subjectId: String(value._id), role: 'primary', order, joinPhrase: ' & ' })) } });
+    assert.equal(await reason(), null);
     let review = await create(); const draft = review.item.draft, capped = { ...draft, album: { ...draft.album, artists: [], label: null } };
     assert.equal(draft.album.artists.length, 20);
     assert.ok(draftBytes(draft) > 48_000 && draftBytes(capped) < 47_000, `${draftBytes(draft)} / ${draftBytes(capped)}`);
@@ -1727,4 +1747,266 @@ test('a renumbering save is kept without a re-rank while lookup is unavailable o
     saved = await renumber([1, 2]);
     const reranked = await record();
     assert.deepEqual([reranked.applied?.choice, reranked.applied?.pairs?.length, saved.item.draft.album.expectedTracklist?.length], ['preselected', 2, 2]);
+}));
+
+/** The review's lookup record and stored document, by review ID. */
+const lookupState = async (id: string) => { const _id = new ObjectId(id); return { record: await db().collection('adminImportLookups').findOne({ _id }), doc: await importCollection().findOne({ _id }) }; };
+
+test('the creation route queues the review\'s one automatic catalog run in the creation transaction where lookup is available; a replay or a retry after a lost response queues nothing new', () => withLookup(async () => {
+    const body = await createBody(null), created = await request('/catalog-reviews', 'POST', body);
+    assert.equal(created.status, 201);
+    const value = await created.json() as CatalogReviewResponse, { record, doc } = await lookupState(value.item.id);
+    // The run plans from the Album's saved title and primary Artist under a `create` grant, as the review's one automatic run.
+    assert.deepEqual([record?.run, record?.state, record?.grantSource, record?.automatic, record?.automaticRuns, record?.input], [1, 'queued', 'create', true, 1, { trigger: 'catalog', submitted: null }]);
+    // The review was converted to format 3 before its insert: one revision without a receipt, the create receipt at revision 1, and the gate.
+    assert.deepEqual([doc?.draftVersion, doc?.revision, doc?.receipts.map(receipt => [receipt.kind, receipt.revision]), doc?.lookupGate],
+        [3, 2, [['create', 1]], { fence: 1, run: 1, state: 'queued', blocking: true }]);
+    assert.deepEqual([value.item.revision, value.receipt?.revision, value.item.draft.album.expectedTracklist, value.item.draft.tracks.map(track => track.artists)], [2, 1, null, [[], []]]);
+    // The same body again (a retry after a lost response, or a replay) answers the stored response and leaves the run as it was.
+    const replay = await request('/catalog-reviews', 'POST', body), again = await lookupState(value.item.id);
+    assert.deepEqual([replay.status, (await replay.json()).item.id, again.record?.run, again.record?.updatedAt, again.doc?.revision], [201, value.item.id, 1, record?.updatedAt, 2]);
+    assert.equal(await db().collection('adminImportLookups').countDocuments(), 1);
+    // Applying waits for the queued run.
+    await assert.rejects(apply(await current(value.item.id)), code('ADMIN_IMPORT_LOOKUP_ACTIVE'));
+}));
+
+test('without metadata lookup configured the route creates a format-2 review for manual editing and stores no run', async () => {
+    const created = await request('/catalog-reviews', 'POST', await createBody(null)), value = await created.json() as CatalogReviewResponse;
+    const { record, doc } = await lookupState(value.item.id);
+    assert.deepEqual([created.status, doc?.draftVersion, doc?.revision, doc?.lookupGate, record, value.item.draft.album.expectedTracklist], [201, 2, 1, undefined, null, undefined]);
+    assert.equal((await apply(await edit(value, draft => { draft.album.title = 'Manually corrected Album'; }))).item.state, 'applied');
+});
+
+test('a creation whose automatic run cannot be stored writes nothing, and the same request is then admitted once', () => withLookup(async () => {
+    const body = await createBody(null), original = Collection.prototype.replaceOne;
+    // The run's record is written, then the write fails: the whole creation transaction aborts.
+    const failing = mock.method(Collection.prototype, 'replaceOne', async function (this: Collection, ...args: Parameters<Collection['replaceOne']>) {
+        if (this.collectionName !== 'adminImportLookups') return original.apply(this, args);
+        failing.mock.restore(); await original.apply(this, args); throw new Error('synthetic failure after the run was stored');
+    });
+    try { await assert.rejects(createCatalogReviewWithLookup(String(actor), body), /synthetic failure/); } finally { mock.restoreAll(); }
+    assert.deepEqual([await importCollection().countDocuments({ purpose: 'catalogReview' }), await db().collection('adminImportLookups').countDocuments()], [0, 0]);
+    const created = await createCatalogReviewWithLookup(String(actor), body), { record, doc } = await lookupState(created.item.id);
+    assert.deepEqual([created.receipt?.kind, record?.run, record?.automaticRuns, doc?.lookupGate?.run], ['create', 1, 1, 1]);
+    assert.deepEqual(await createCatalogReviewWithLookup(String(actor), body), created);
+    assert.deepEqual([(await lookupState(created.item.id)).record?.updatedAt, await importCollection().countDocuments({ purpose: 'catalogReview' })], [record?.updatedAt, 1]);
+}));
+
+test('a second creation for an Album with an open review is refused unless the administrator asks for another one', async () => {
+    const reviews = () => importCollection().countDocuments({ purpose: 'catalogReview' });
+    const firstBody = await createBody(null), opened = await createCatalogReview(String(actor), firstBody);
+    const refused = await createBody(null);
+    await assert.rejects(createCatalogReview(String(actor), refused), code('ADMIN_CATALOG_REVIEW_OPEN'));
+    const routed = await request('/catalog-reviews', 'POST', await createBody(null));
+    assert.deepEqual([routed.status, await routed.json(), await reviews()], [409, { code: 'ADMIN_CATALOG_REVIEW_OPEN' }, 1]);
+    // A replay of the first creation still answers its stored response; `another` must be a boolean.
+    assert.equal((await createCatalogReview(String(actor), firstBody)).item.id, opened.item.id);
+    for (const another of ['yes', 1, null]) await assert.rejects(createCatalogReview(String(actor), { ...(await createBody(null)), another }), code('ADMIN_IMPORT_INVALID_INPUT'), String(another));
+    assert.equal((await request('/catalog-reviews', 'POST', { ...(await createBody(null)), another: 'yes' })).status, 400);
+    const explicit = await createCatalogReview(String(actor), await createBody(true));
+    assert.notEqual(explicit.item.id, opened.item.id);
+    // A review whose Album changed since it was created is not open.
+    await db().collection('albums').updateOne({ _id: album }, { $set: { title: 'Edited Album' } });
+    const afterEdit = await createCatalogReview(String(actor), await createBody(null));
+    await assert.rejects(createCatalogReview(String(actor), await createBody(null)), code('ADMIN_CATALOG_REVIEW_OPEN'));
+    // An applied review and a review saved by a newer release are not open.
+    await importCollection().updateOne({ _id: new ObjectId(afterEdit.item.id) }, { $set: { catalogApplied: { operationId: randomUUID(), at: new Date().toISOString(), fields: [albumTitle] } } });
+    const afterApplied = await createCatalogReview(String(actor), await createBody(null));
+    await importCollection().updateOne({ _id: new ObjectId(afterApplied.item.id) }, { $set: { draftVersion: 4 } });
+    const captured = await createCatalogReview(String(actor), await createBody(null));
+    // A review captured for lookup stops being open once an Artist its captured Credits name is renamed.
+    await admitLookup(captured.item.id);
+    await assert.rejects(createCatalogReview(String(actor), await createBody(null)), code('ADMIN_CATALOG_REVIEW_OPEN'));
+    await db().collection('artists').updateOne({ _id: artist }, { $set: { name: 'Renamed Artist' } });
+    assert.equal((await current(captured.item.id)).item.sourceStatus, 'changed');
+    const afterRename = await createCatalogReview(String(actor), await createBody(null));
+    assert.deepEqual([afterRename.item.sourceStatus, await reviews()], ['current', 6]);
+});
+
+test('eligibility tells the Album page why a review cannot be created, the open review whose source is current and whether lookup runs', async () => {
+    const read = (albumId = String(album)) => getCatalogReviewEligibility(String(actor), { albumId });
+    const eligible = { eligible: true, reason: null, openReviewId: null, lookupAvailable: false };
+    const refusal = (reason: string) => ({ eligible: false, reason, openReviewId: null, lookupAvailable: false });
+    assert.deepEqual(await read(), eligible);
+    assert.deepEqual(await read(String(new ObjectId())), refusal('albumNotReady'));
+    const albumBefore = (await db().collection('albums').findOne({ _id: album }))!, ids = albumBefore.audioTrackIds as string[];
+    const withAlbum = async (patch: Record<string, unknown>, expected: unknown, label: string) => {
+        await db().collection('albums').updateOne({ _id: album }, { $set: patch });
+        assert.deepEqual(await read(), expected, label);
+        await db().collection('albums').replaceOne({ _id: album }, albumBefore);
+    };
+    await withAlbum({ lifecycleStatus: 'deleting' }, refusal('albumNotReady'), 'deleted');
+    await withAlbum({ audioTrackIds: Array.from({ length: 101 }, () => String(new ObjectId())) }, refusal('tooManyTracks'), 'too many');
+    for (const malformed of [[ids[0], ids[0]], ['bad'], null, 'not a list']) await withAlbum({ audioTrackIds: malformed }, refusal('membershipInvalid'), JSON.stringify(malformed));
+    await withAlbum({ audioTrackIds: [] }, eligible, 'empty');
+    await withAlbum({ audioTrackIds: [...ids, String(new ObjectId())] }, refusal('tracksNotReady'), 'missing member');
+    const withMember = async (patch: Record<string, unknown>, reason: string) => {
+        const before = (await db().collection('audioTracks').findOne({ _id: second }))!;
+        await db().collection('audioTracks').updateOne({ _id: second }, { $set: patch });
+        assert.deepEqual(await read(), refusal(reason), reason);
+        await db().collection('audioTracks').replaceOne({ _id: second }, before);
+    };
+    await withMember({ mediaType: 'video' }, 'videoTracks');
+    await withMember({ albumId: String(new ObjectId()) }, 'membershipInconsistent');
+    await withMember({ uploadStatus: 'pending' }, 'tracksNotReady');
+    assert.deepEqual(await read(), eligible);
+    // The open review is the newest unapplied one whose source is current, whatever else the Album shows.
+    const older = await create(), newer = await create();
+    assert.deepEqual(await read(), { ...eligible, openReviewId: newer.item.id });
+    await importCollection().updateOne({ _id: new ObjectId(newer.item.id) }, { $set: { catalogApplied: { operationId: randomUUID(), at: new Date().toISOString(), fields: [albumTitle] } } });
+    assert.deepEqual(await read(), { ...eligible, openReviewId: older.item.id });
+    await db().collection('audioTracks').updateOne({ _id: second }, { $set: { mediaType: 'video' } });
+    assert.deepEqual((await read()).openReviewId, null, 'a changed member changes the source');
+    await db().collection('audioTracks').updateOne({ _id: second }, { $set: { mediaType: 'audio' } });
+    assert.deepEqual((await read()).openReviewId, older.item.id);
+    await db().collection('albums').updateOne({ _id: album }, { $set: { title: 'Edited Album' } });
+    assert.deepEqual(await read(), eligible);
+    // Lookup availability follows the server's configuration.
+    await withLookup(async () => assert.deepEqual(await read(), { ...eligible, lookupAvailable: true }));
+    // The route: private and no-store, registered before the detail route, exactly one ObjectId `albumId`.
+    const path = `/catalog-reviews/eligibility?albumId=${album}`, routed = await request(path);
+    assert.match(routed.headers.get('cache-control')!, /no-store/);
+    assert.deepEqual([routed.status, await routed.json()], [200, eligible]);
+    for (const query of ['', '?albumId=bad', `?albumId=${album}&albumId=${album}`, `?albumId=${album}&extra=1`]) {
+        const refused = await request(`/catalog-reviews/eligibility${query}`);
+        assert.deepEqual([refused.status, await refused.json()], [400, { code: 'ADMIN_IMPORT_INVALID_INPUT' }], query);
+    }
+    assert.equal((await request(path, 'GET', undefined, '')).status, 401);
+    assert.equal((await request(path, 'GET', undefined, userToken)).status, 403);
+    assert.equal((await fetch(base + '/api/admin/v1' + path, { headers: { Cookie: `session_token=${token}`, 'X-Finitude-Account-Viewer': String(other) } })).status, 409);
+});
+
+test('an Album completion created through the route runs its automatic lookup, and applying what its confirmation read shows writes the Album\'s values, Credits and tracklist, fills a member stored as Unknown from its own track\'s artist and documents it, and leaves a member with a placeholder track credit without Artists', () => withLookup(async () => {
+    await db().collection('audioTracks').updateOne({ _id: first }, { $set: { attributionStatus: 'unknown' } });
+    const singer: CreditedArtist = [lookupMbid(50), 'Track Singer'], placeholder: CreditedArtist = ['89ad4ac3-39f7-470e-963a-56509c546377', 'Various Artists'];
+    const created = await request('/catalog-reviews', 'POST', await createBody(null)), id = (await created.json() as CatalogReviewResponse).item.id;
+    await drainLookup([...reviewSearches([[lookupMbid(1), 2]]), ...creditedRelease(lookupMbid(1), { tracks: [[singer], [placeholder]] })]);
+    const { record } = await lookupState(id), slots = (await current(id)).item.source.tracks.map(track => track.slotId), candidateKey = `musicbrainz:${lookupMbid(1)}`;
+    assert.deepEqual([record?.state, record?.applied?.choice, record?.applied?.candidateKey], ['complete', 'preselected', candidateKey]);
+    // The title is answered with the lookup value; the other conflicts stay open and are not selected.
+    let review = await current(id);
+    review = await resolveCatalogReviewLookup(String(actor), id, { ...mutation(review.item.revision), run: 1, candidateKey, answers: [{ path: 'album.title', answer: 'lookup', base: 'Existing Album' }] });
+    // The confirmation's read: the Album's entries, label and the first member are selected; the placeholder member has no change.
+    const read = await getCatalogReviewCandidates(String(actor), id);
+    assert.deepEqual([read.selection, read.keptTracklist, read.members.map(member => [member.slotId, member.attribution, member.next.map(credit => credit.name)])],
+        [{ lists: ['album.artists', `tracks.${slots[0]}.artists`], label: true }, null, [[slots[0], { from: 'unknown', to: 'documented' }, ['Track Singer']]]]);
+    const lists = new Set(read.selection.lists), owned = new Set(read.identities.filter(row => row.entries.some(entry => lists.has(entry.path))).map(row => row.id));
+    const shown = (item: { scope: string; identity: string | null }) => item.scope === 'label' ? read.selection.label : owned.has(item.identity!);
+    const fields: CatalogReviewField[] = [albumTitle, { scope: 'album', slotId: null, field: 'artists' }, { scope: 'album', slotId: null, field: 'label' },
+        { scope: 'album', slotId: null, field: 'expectedTracklist' }, ...slots.map(slotId => ({ scope: 'track' as const, slotId, field: 'discNumber' as const }))];
+    const applied = await applyCatalogReview(String(actor), id, { ...mutation(review.item.revision), fields, memberCredits: read.members.map(member => member.slotId),
+        preselections: read.preselections.filter(shown), musicBrainzIds: read.musicBrainzIds.filter(shown), expectedValueRevision: read.valueRevision });
+    assert.equal(applied.item.state, 'applied');
+    const albumAfter = (await db().collection('albums').findOne({ _id: album }))!, label = (await db().collection('organizations').findOne({ name: 'Looked Up Label' }))!;
+    const created_ = (await db().collection('artists').findOne({ name: 'Track Singer' }))!;
+    assert.deepEqual([albumAfter.title, albumAfter.credits.map((credit: any) => [credit.subjectId, credit.role]), albumAfter.expectedTracklist.rows.map((row: any) => [row.discNumber, row.trackNumber])],
+        ['Looked Up Album', [[String(artist), 'primary'], [String(label._id), 'label']], [[1, 1], [1, 2]]]);
+    assert.equal((await db().collection('artists').findOne({ _id: artist }))!.musicBrainzId, lookupMbid(30));
+    const tracks = await db().collection('audioTracks').find({ _id: { $in: [first, second] } }).sort({ trackNumber: 1 }).toArray();
+    // The member stored as Unknown takes its own track's artist and is documented; the placeholder member keeps no Artist, never the Album's.
+    assert.deepEqual(tracks.map(track => [track.credits?.map((credit: any) => [credit.subjectId, credit.role]), track.attributionStatus, track.discNumber]),
+        [[[[String(created_._id), 'primary']], 'documented', 1], [undefined, undefined, 1]]);
+}));
+
+test('every Album the eligibility read refuses is one creation refuses, storing nothing, and an empty Album it admits is created through the route with its automatic run', () => withLookup(async () => {
+    const eligibility = () => getCatalogReviewEligibility(String(actor), { albumId: String(album) });
+    const stored = async () => [await importCollection().countDocuments({ purpose: 'catalogReview' }), await db().collection('adminImportLookups').countDocuments()];
+    const albumBefore = (await db().collection('albums').findOne({ _id: album }))!, memberBefore = (await db().collection('audioTracks').findOne({ _id: second }))!;
+    const states: [string, () => Promise<unknown>][] = [
+        ['albumNotReady', () => db().collection('albums').updateOne({ _id: album }, { $set: { lifecycleStatus: 'deleting' } })],
+        ['tooManyTracks', () => db().collection('albums').updateOne({ _id: album }, { $set: { audioTrackIds: Array.from({ length: 101 }, () => String(new ObjectId())) } })],
+        ['membershipInvalid', () => db().collection('albums').updateOne({ _id: album }, { $set: { audioTrackIds: [String(first), String(first)] } })],
+        ['videoTracks', () => db().collection('audioTracks').updateOne({ _id: second }, { $set: { mediaType: 'video' } })],
+        ['membershipInconsistent', () => db().collection('audioTracks').updateOne({ _id: second }, { $set: { albumId: String(new ObjectId()) } })],
+        ['tracksNotReady', () => db().collection('audioTracks').updateOne({ _id: second }, { $set: { publicationStatus: 'pending' } })]
+    ];
+    for (const [reason, patch] of states) {
+        await patch();
+        // The body names the Album's current revision, so only the state the read names can refuse it.
+        const read = await eligibility(), routed = await request('/catalog-reviews', 'POST', await createBody(null));
+        assert.deepEqual([read.eligible, read.reason], [false, reason]);
+        assert.ok([404, 409].includes(routed.status), `${reason} answered ${routed.status}`);
+        assert.deepEqual(await stored(), [0, 0], reason);
+        await db().collection('albums').replaceOne({ _id: album }, albumBefore);
+        await db().collection('audioTracks').replaceOne({ _id: second }, memberBefore);
+    }
+    await db().collection('albums').updateOne({ _id: album }, { $set: { audioTrackIds: [] } });
+    assert.deepEqual(await eligibility(), { eligible: true, reason: null, openReviewId: null, lookupAvailable: true });
+    const created = await request('/catalog-reviews', 'POST', await createBody(null)), value = await created.json() as CatalogReviewResponse;
+    const { record, doc } = await lookupState(value.item.id);
+    assert.deepEqual([created.status, value.item.source.tracks, doc?.draftVersion, record?.run, record?.automaticRuns, record?.input], [201, [], 3, 1, 1, { trigger: 'catalog', submitted: null }]);
+    assert.deepEqual(await eligibility(), { eligible: true, reason: null, openReviewId: value.item.id, lookupAvailable: true });
+}));
+
+test('an Album whose retained filenames exceed what a review holds is refused by the eligibility read and by creation alike, storing nothing, and is created once they fit', () => withLookup(async () => {
+    const ids = Array.from({ length: 100 }, () => new ObjectId());
+    const members = (length: number) => ids.map((id, index) => ({ _id: id, title: `Track ${index + 1}`, originalFileName: `${String(index).padStart(3, '0')} ${'n'.repeat(length - 8)}.mp3`,
+        trackNumber: index + 1, uploadStatus: 'ready', publicationStatus: 'ready', s3Key: String(id), albumId: String(album), visibility: 'public', mediaType: 'audio' }));
+    await db().collection('audioTracks').insertMany(members(220));
+    await db().collection('albums').updateOne({ _id: album }, { $set: { audioTrackIds: ids.map(String) } });
+    const eligibility = () => getCatalogReviewEligibility(String(actor), { albumId: String(album) });
+    const stored = async () => [await importCollection().countDocuments({ purpose: 'catalogReview' }), await db().collection('adminImportLookups').countDocuments()];
+    // 100 filenames of 220 characters take more than the 24,000 bytes a review retains.
+    assert.deepEqual(await eligibility(), { eligible: false, reason: 'valuesUnsupported', openReviewId: null, lookupAvailable: true });
+    const refused = await request('/catalog-reviews', 'POST', await createBody(null));
+    assert.deepEqual([refused.status, await refused.json(), await stored()], [400, { code: 'ADMIN_IMPORT_INVALID_INPUT' }, [0, 0]]);
+    // Filenames of 100 characters fit: the read admits the Album, and creation stores it with its automatic run.
+    for (const track of members(100)) await db().collection('audioTracks').updateOne({ _id: track._id }, { $set: { originalFileName: track.originalFileName } });
+    assert.deepEqual(await eligibility(), { eligible: true, reason: null, openReviewId: null, lookupAvailable: true });
+    const created = await request('/catalog-reviews', 'POST', await createBody(null));
+    assert.deepEqual([created.status, await stored()], [201, [1, 1]]);
+}));
+
+test('two administrators creating a review of one Album at once store one review and one run: the later creation runs again and is refused as open', () => withLookup(async () => {
+    const reached = deferred(), release = deferred();
+    // The first creation queues its run and then waits inside its transaction, holding its creation fence write.
+    const firstCreation = createCatalogReview(String(actor), await createBody(null), { beforeInsert: async (doc, session) => {
+        await queueCatalogReviewLookup(doc, String(actor), session); reached.resolve(); await release.promise;
+    } });
+    await reached.promise;
+    const secondCreation = createCatalogReviewWithLookup(String(other), await createBody(null));
+    await new Promise(resolve => setTimeout(resolve, 200));
+    release.resolve();
+    const [created, refused] = await Promise.allSettled([firstCreation, secondCreation]);
+    assert.equal(created.status, 'fulfilled');
+    assert.ok(refused.status === 'rejected' && code('ADMIN_CATALOG_REVIEW_OPEN')(refused.reason), String(refused.status === 'rejected' ? refused.reason?.code : 'created'));
+    assert.deepEqual([await importCollection().countDocuments({ purpose: 'catalogReview' }), await db().collection('adminImportLookups').countDocuments()], [1, 1]);
+    assert.ok(((await db().collection<{ _id: string; revision: number }>('adminImportAnalysisSlots').findOne({ _id: 'catalog-review-creation' }))?.revision ?? 0) >= 1);
+}));
+
+test('while a review is open, a stale Album revision keeps its own refusal, and replaying a creation with another `another` is an operation conflict', async () => {
+    const firstBody = await createBody(null), opened = await createCatalogReview(String(actor), firstBody);
+    // The revision check comes before the open-review check, so a stale body is a source change, as without an open review.
+    await assert.rejects(createCatalogReview(String(actor), { ...(await createBody(null)), expectedRevision: `cr_${'a'.repeat(43)}` }), code('ADMIN_CATALOG_REVIEW_SOURCE_CHANGED'));
+    // `another` is part of the creation body its receipt binds: adding it, or changing it, is another request under the same operation.
+    for (const another of [true, false]) await assert.rejects(createCatalogReview(String(actor), { ...firstBody, another }), code('ADMIN_IMPORT_OPERATION_CONFLICT'), String(another));
+    const explicit = await createBody(true), again = await createCatalogReview(String(actor), explicit);
+    await assert.rejects(createCatalogReview(String(actor), { ...explicit, another: false }), code('ADMIN_IMPORT_OPERATION_CONFLICT'));
+    // Both replays answer their stored responses while the reviews are open.
+    assert.deepEqual([(await createCatalogReview(String(actor), firstBody)).item.id, (await createCatalogReview(String(actor), explicit)).item.id], [opened.item.id, again.item.id]);
+    assert.equal(await importCollection().countDocuments({ purpose: 'catalogReview' }), 2);
+});
+
+test('a creation whose transaction meets a transient error runs again and stores one review with its one automatic run', () => withLookup(async () => {
+    const body = await createBody(null), original = ClientSession.prototype.withTransaction;
+    let attempts = 0;
+    // The first attempt converts the review, stores its run and gate and inserts it, then fails with a transient error: the driver
+    // aborts it and runs the whole creation again.
+    const transient = mock.method(ClientSession.prototype, 'withTransaction', function (this: ClientSession, ...args: Parameters<ClientSession['withTransaction']>) {
+        const [work, options] = args;
+        return original.call(this, async (session: ClientSession) => {
+            const result = await work(session);
+            if (++attempts === 1) { const error = new MongoError('Synthetic transient transaction error'); error.addErrorLabel('TransientTransactionError'); throw error; }
+            return result;
+        }, options);
+    });
+    let created: CatalogReviewResponse;
+    try { created = await createCatalogReviewWithLookup(String(actor), body); } finally { transient.mock.restore(); }
+    const { record, doc } = await lookupState(created.item.id);
+    assert.deepEqual([attempts, created.item.revision, doc?.revision, doc?.receipts.map(receipt => [receipt.kind, receipt.revision]), record?.run, record?.automaticRuns, doc?.lookupGate],
+        [2, 2, 2, [['create', 1]], 1, 1, { fence: 1, run: 1, state: 'queued', blocking: true }]);
+    assert.deepEqual([await importCollection().countDocuments({ purpose: 'catalogReview' }), await db().collection('adminImportLookups').countDocuments()], [1, 1]);
+    // A replay afterwards answers the stored response and queues nothing.
+    assert.deepEqual(await createCatalogReviewWithLookup(String(actor), body), created);
+    assert.deepEqual((await lookupState(created.item.id)).record?.updatedAt, record?.updatedAt);
 }));

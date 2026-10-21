@@ -88,10 +88,10 @@ test('workbench distinguishes confirmed empty from failed load and does not quer
   const fetch = vi.fn(async (path: string, _init: RequestInit) => path.endsWith('capabilities') ? json(capabilities) : json({ code: 'unavailable' }, 503)); stubFetch(fetch);
   adminWorkspace.select('user'); mount('/admin/imports'); expect(fetch).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button', { name: 'Switch to Admin view' }));
-  await screen.findByRole('alert'); expect(screen.queryByText('No new Album imports yet. Upload music for a new Album, or choose an existing Album to edit or review.')).not.toBeInTheDocument();
+  await screen.findByRole('alert'); expect(screen.queryByText('No new Album imports yet. Upload music for a new Album, or choose an existing Album to edit or complete.')).not.toBeInTheDocument();
   fetch.mockImplementation(async () => json({ items: [], counts: { all: 0, analyzing: 0, awaitingReview: 0, needsAttention: 0, completed: 0 }, nextCursor: null }));
   fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
-  await screen.findByText('No new Album imports yet. Upload music for a new Album, or choose an existing Album to edit or review.'); expect(fetch.mock.calls[1][0]).toContain('limit=25');
+  await screen.findByText('No new Album imports yet. Upload music for a new Album, or choose an existing Album to edit or complete.'); expect(fetch.mock.calls[1][0]).toContain('limit=25');
   expect(screen.getByRole('link', { name: 'Choose existing Album' })).toHaveAttribute('href', '/admin/catalog');
 });
 
@@ -341,11 +341,11 @@ test('stage navigation keeps private edits and selected suggestions without a mu
 test('workbench refresh stays in its header while personal filtering remains with search', async () => {
   const reads: string[] = [];
   stubFetch(vi.fn(async (path: string) => { reads.push(path); return json({ items: [], counts: { all: 0, analyzing: 0, awaitingReview: 0, needsAttention: 0, completed: 0 }, nextCursor: null }); }));
-  mount('/admin/imports'); await screen.findByText('No new Album imports yet. Upload music for a new Album, or choose an existing Album to edit or review.');
+  mount('/admin/imports'); await screen.findByText('No new Album imports yet. Upload music for a new Album, or choose an existing Album to edit or complete.');
   const header = screen.getByRole('heading', { name: 'Workbench' }).closest('header')!;
   expect(within(header).getByRole('button', { name: 'Refresh status' })).toBeVisible();
   expect(within(header).getByRole('link', { name: 'Upload new Album' })).toBeVisible();
-  expect(within(header).getByRole('link', { name: 'Edit or review existing Album' })).toHaveAttribute('href', '/admin/catalog');
+  expect(within(header).getByRole('link', { name: 'Edit or complete existing Album' })).toHaveAttribute('href', '/admin/catalog');
   const search = screen.getByRole('textbox', { name: 'Search projects' }).closest('form')!;
   expect(within(search).queryByRole('button', { name: 'Refresh status' })).not.toBeInTheDocument();
   fireEvent.click(within(search).getByRole('checkbox', { name: 'Started by me' }));
@@ -364,12 +364,12 @@ test('catalog reviews are a separate read-only workbench source with search, own
     return json({ items: cursor ? [review, { ...review, id: 'ffffffffffffffffffffffff', title: 'Second Album review' }] : [review], counts, nextCursor: cursor ? null : 'next-review-page' });
   }));
   mount('/admin/imports');
-  await screen.findByText('No new Album imports yet. Upload music for a new Album, or choose an existing Album to edit or review.');
+  await screen.findByText('No new Album imports yet. Upload music for a new Album, or choose an existing Album to edit or complete.');
   expect(reads.some(path => path.includes('/catalog-reviews'))).toBe(false);
-  fireEvent.click(screen.getByRole('button', { name: 'Existing Album reviews' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Album completions' }));
   await screen.findByRole('heading', { name: 'Published Album review' });
-  expect(screen.getByRole('button', { name: 'Existing Album reviews' })).toHaveAttribute('aria-pressed', 'true');
-  expect(screen.getByRole('link', { name: 'Open review' })).toHaveAttribute('href', '/admin/catalog-reviews/eeeeeeeeeeeeeeeeeeeeeeee');
+  expect(screen.getByRole('button', { name: 'Album completions' })).toHaveAttribute('aria-pressed', 'true');
+  expect(screen.getByRole('link', { name: 'Open Album completion' })).toHaveAttribute('href', '/admin/catalog-reviews/eeeeeeeeeeeeeeeeeeeeeeee');
   expect(screen.getByRole('link', { name: 'Edit published Album' })).toHaveAttribute('href', '/admin/catalog/album/111111111111111111111111');
   expect(screen.queryByText('Upload')).not.toBeInTheDocument();
   expect(screen.queryByText('Publication')).not.toBeInTheDocument();
@@ -391,14 +391,14 @@ test('the catalog review empty state distinguishes confirmed absence from a fail
   const counts = { all: 0, analyzing: 0, awaitingReview: 0, needsAttention: 0, completed: 0 };
   stubFetch(vi.fn(async (path: string) => path.includes('/catalog-reviews?') && failed ? json({ code: 'unavailable' }, 503) : json({ items: [], counts, nextCursor: null })));
   mount('/admin/imports');
-  await screen.findByText('No new Album imports yet. Upload music for a new Album, or choose an existing Album to edit or review.');
-  fireEvent.click(screen.getByRole('button', { name: 'Existing Album reviews' }));
+  await screen.findByText('No new Album imports yet. Upload music for a new Album, or choose an existing Album to edit or complete.');
+  fireEvent.click(screen.getByRole('button', { name: 'Album completions' }));
   await screen.findByRole('alert');
-  expect(screen.queryByText('No existing Album reviews yet. Choose an Album to edit its information or use Luna AI (paid) on it.')).not.toBeInTheDocument();
+  expect(screen.queryByText('No Album completions yet. Choose an Album to complete it from MusicBrainz or edit it.')).not.toBeInTheDocument();
   expect(screen.queryByRole('link', { name: 'Choose existing Album' })).not.toBeInTheDocument();
   failed = false;
   fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
-  await screen.findByText('No existing Album reviews yet. Choose an Album to edit its information or use Luna AI (paid) on it.');
+  await screen.findByText('No Album completions yet. Choose an Album to complete it from MusicBrainz or edit it.');
   fireEvent.click(screen.getByRole('link', { name: 'Choose existing Album' }));
   expect(screen.getByRole('heading', { name: 'Existing Album selection' })).toBeVisible();
 });
@@ -410,8 +410,8 @@ test('returning to the catalog review source reads that queue without querying i
     return json({ items: [], counts: { all: 0, analyzing: 0, awaitingReview: 0, needsAttention: 0, completed: 0 }, nextCursor: null });
   }));
   mount('/admin/imports?source=catalogReviews');
-  await screen.findByText('No existing Album reviews yet. Choose an Album to edit its information or use Luna AI (paid) on it.');
-  expect(screen.getByRole('button', { name: 'Existing Album reviews' })).toHaveAttribute('aria-pressed', 'true');
+  await screen.findByText('No Album completions yet. Choose an Album to complete it from MusicBrainz or edit it.');
+  expect(screen.getByRole('button', { name: 'Album completions' })).toHaveAttribute('aria-pressed', 'true');
   expect(reads.every(path => path.startsWith('/api/admin/v1/catalog-reviews?'))).toBe(true);
   expect(writes).toEqual([]);
 });

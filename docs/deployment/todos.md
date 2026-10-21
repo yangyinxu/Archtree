@@ -30,7 +30,9 @@ that staging is active, a tie is unresolved or a conflict with an
 administrator's own value is unanswered. The Web Review and publish summary
 shows each run's status, ties and conflicts, takes a submitted Album or song
 name and offers a manual retry, and an existing-Album review's lookup summary
-does the same for the review's private draft. Without the contact below,
+does the same for the review's private draft. Creating a review from the Album
+page queues one lookup, and applying the review writes its confirmed values,
+Credits and expected tracklist to the catalog. Without the contact below,
 nothing is sent and no lookup starts.
 
 - [ ] Set `FINITUDE_ADMIN_METADATA_LOOKUP_CONTACT` in production to an operator

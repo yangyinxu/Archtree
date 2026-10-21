@@ -27,7 +27,7 @@ const lookupProse = [...['incomplete', 'itunes_unavailable', 'no_match', 'no_que
   'admin.common.lookup_unavailable', ...['not_started', 'no_query', 'no_match'].map(state => `admin.catalog_review.lookup_${state}`)];
 const lookupControls = [...['retry', 'submit', 'box', 'name', 'kind_album', 'kind_song', 'choose', 'choose_none'].map(control => `admin.lookup.${control}`),
   'admin.summary.keep_mine', 'admin.summary.use_lookup',
-  ...['keep_current', 'use_musicbrainz', 'use_itunes', 'keep_all_current', 'use_all_musicbrainz', 'use_all_itunes'].map(control => `admin.catalog_review.${control}`)];
+  ...['keep_current', 'use_musicbrainz', 'use_itunes', 'keep_all_current', 'use_all_musicbrainz', 'use_all_itunes', 'create'].map(control => `admin.catalog_review.${control}`)];
 const generic = ['Analyze', 'Analyze again', 'Review', 'Proofread', 'Complete', '分析', '校对', '重新校对', '补全'];
 /** Every [locale, key, message] for the keys, in both shipped locales. */
 const each = (keys: string[]) => Object.entries(locales).flatMap(([locale, messages]) => keys.map(key => [locale, key, messages[key]] as const));
@@ -73,4 +73,17 @@ test('lookup status text lists the free step first and ends with paid Luna AI', 
 test('metadata lookup controls never mention AI or Luna', () => {
   const mentions: Record<string, RegExp> = { 'en-US': /\bAI\b|Luna/, 'zh-Hans': /AI|Luna/ };
   for (const [locale, key, message] of each(lookupControls)) expect(message, `${locale} ${key}`).not.toMatch(mentions[locale]);
+});
+
+test('the Album page\'s lookup entry names MusicBrainz and says it is free, and its confirmation says Luna AI (paid) never starts', () => {
+  const free: Record<string, RegExp> = { 'en-US': /\bfree\b/, 'zh-Hans': /免费/ };
+  for (const [locale, key, message] of each(['admin.catalog_review.create'])) {
+    expect(message, `${locale} ${key}`).toMatch(/MusicBrainz/);
+    expect(message, `${locale} ${key}`).toMatch(free[locale]);
+  }
+  for (const [locale, key, message] of each(['admin.catalog_review.create_copy'])) {
+    expect(message, `${locale} ${key}`).toMatch(/MusicBrainz/);
+    expect(message, `${locale} ${key}`).toMatch(/Luna AI/);
+    expect(message, `${locale} ${key}`).toMatch(paid[locale]);
+  }
 });

@@ -5,19 +5,22 @@ import { observeMediaDeliveryFor } from '../middleware/mediaDeliveryMiddleware';
 import { runRequestWork } from '../services/platform/serverLifecycleService';
 import { createMediaAbortContext } from '../services/media/mediaDeliveryService';
 import { AdminImportError, objectId } from '../administration/import/adminImportContract';
-import { createCatalogReview, listCatalogReviews, getCatalogReview, analyzeCatalogReview, cancelCatalogReviewAnalysis } from '../administration/catalog/adminCatalogReviewService';
+import { listCatalogReviews, getCatalogReview, getCatalogReviewEligibility, analyzeCatalogReview, cancelCatalogReviewAnalysis } from '../administration/catalog/adminCatalogReviewService';
 import { applyCatalogReview, decideCatalogReviewIdentities, getCatalogReviewCandidates } from '../administration/catalog/adminCatalogReviewApply';
 import {
-    adoptCatalogReviewSuggestions, chooseCatalogReviewLookup, getCatalogReviewLookup, resolveCatalogReviewLookup, retryCatalogReviewLookup, saveCatalogReview, submitCatalogReviewLookup
+    adoptCatalogReviewSuggestions, chooseCatalogReviewLookup, createCatalogReviewWithLookup, getCatalogReviewLookup, resolveCatalogReviewLookup, retryCatalogReviewLookup, saveCatalogReview,
+    submitCatalogReviewLookup
 } from '../administration/lookup/catalogReviewLookupRequests';
 import { defaultItunesArtworkClient, defaultLookupArtworkClient, previewLookupCandidateArtwork } from '../administration/import/adminImportLookupCover';
 import type { CoverArtClient } from '../administration/lookup/coverArtClient';
 import type { ItunesArtworkClient } from '../administration/lookup/itunesArtworkClient';
 
 /**
- * Catalog proofreading has an independent private protocol; old import routes never accept its project IDs. Applying a review and
- * its identity rows and decisions live in adminCatalogReviewApply.ts. `artwork` and `itunesArtwork` supply the Cover Art Archive
- * and iTunes artwork clients of lookup candidate previews (tests inject them).
+ * Existing-Album reviews have an independent private protocol; old import routes never accept their project IDs. Creating a review
+ * queues its automatic metadata lookup where lookup is available (catalogReviewLookupRequests.ts), and the eligibility read tells
+ * the Web Album page whether one can be created and which open review it opens. Applying a review and its identity rows and
+ * decisions live in adminCatalogReviewApply.ts. `artwork` and `itunesArtwork` supply the Cover Art Archive and iTunes artwork
+ * clients of lookup candidate previews (tests inject them).
  */
 export function createAdminCatalogReviewRouter(artwork: () => CoverArtClient = defaultLookupArtworkClient, itunesArtwork: () => ItunesArtworkClient = defaultItunesArtworkClient) {
     const router = express.Router();
@@ -53,7 +56,9 @@ export function createAdminCatalogReviewRouter(artwork: () => CoverArtClient = d
         }
     };
     router.get('/catalog-reviews', asyncHandler(run((actor, req) => listCatalogReviews(actor, req.query))));
-    router.post('/catalog-reviews', asyncHandler(run((actor, req) => createCatalogReview(actor, req.body), 201)));
+    router.post('/catalog-reviews', asyncHandler(run((actor, req) => createCatalogReviewWithLookup(actor, req.body), 201)));
+    // Registered before the detail route, which would otherwise read `eligibility` as a review ID.
+    router.get('/catalog-reviews/eligibility', asyncHandler(run((actor, req) => getCatalogReviewEligibility(actor, req.query))));
     router.get('/catalog-reviews/:id', asyncHandler(run((actor, req) => getCatalogReview(actor, req.params.id))));
     // A save, and accepting Luna suggestions, re-rank the review's completed lookup run when they change a member's own Disc or Track
     // Number.
@@ -62,8 +67,8 @@ export function createAdminCatalogReviewRouter(artwork: () => CoverArtClient = d
     router.post('/catalog-reviews/:id/adopt', asyncHandler(run((actor, req) => adoptCatalogReviewSuggestions(actor, req.params.id, req.body))));
     router.post('/catalog-reviews/:id/cancel-analysis', asyncHandler(run((actor, req) => cancelCatalogReviewAnalysis(actor, req.params.id, req.body))));
     // Applying the selected saved values, and the identity rows and decisions an apply of Artist entries and the label waits for
-    // (adminCatalogReviewApply.ts); the Web review summary reads the candidates and saves decisions, while its apply sends fields and
-    // the value revision only.
+    // (adminCatalogReviewApply.ts); the Web review summary reads the candidates and saves decisions, and its apply confirmation sends
+    // the selected fields and members with the identity items it showed.
     router.post('/catalog-reviews/:id/apply', asyncHandler(run((actor, req) => applyCatalogReview(actor, req.params.id, req.body))));
     router.get('/catalog-reviews/:id/candidates', asyncHandler(run((actor, req) => getCatalogReviewCandidates(actor, req.params.id))));
     router.post('/catalog-reviews/:id/decisions', asyncHandler(run((actor, req) => decideCatalogReviewIdentities(actor, req.params.id, req.body))));

@@ -1,40 +1,78 @@
-import { useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router';
+import { useEffect, useId, useRef, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { Link, useNavigate } from 'react-router';
+import { z } from 'zod';
 import { ModalDialog } from '../../components/ModalDialog';
 import { useAdminAccess, useAdminText } from './AdminAccess';
+import { adminEndpointRequest } from './adminTransport';
 import type { CatalogItem } from './catalogApi';
 import { useCatalogReviewCommand } from './useCatalogReviewCommand';
 import { useOnline } from './useAdminOnline';
 import styles from './adminStyles';
 
-/** Creating a private snapshot is explicit and separate from paid analysis or catalog changes. */
+/** GET /catalog-reviews/eligibility (CatalogReviewEligibility on the server): a reason exactly when a review cannot be created. */
+const eligibilitySchema = z.object({ eligible: z.boolean(),
+  reason: z.enum(['albumNotReady', 'tooManyTracks', 'membershipInvalid', 'membershipInconsistent', 'videoTracks', 'tracksNotReady', 'valuesUnsupported']).nullable(),
+  openReviewId: z.string().regex(/^[a-f0-9]{24}$/).nullable(), lookupAvailable: z.boolean() }).strict().refine(value => value.eligible === (value.reason === null));
+
+/**
+ * The Album page's entry to an Album completion (owner rules: docs/business-rules.md, Catalog Visibility and Administration):
+ * Complete from MusicBrainz (free) creates a private existing-Album review whose free metadata lookup the server starts, never
+ * Luna AI, or one for manual editing where lookup is not configured. It reads the Album's eligibility for its current revision:
+ * disabled while that read loads, with a retry when it fails, and with the reason for an Album that cannot have a review. While an
+ * unapplied review whose source is current exists, it opens that review and creating another is an explicit choice. While
+ * catalog editing is off it still opens that review, and creating stays disabled. Creating is a separate confirmation of the
+ * frozen Album; a refused creation reads the eligibility again.
+ */
 export function CatalogReviewStart({ item, disabled = false }: { item: CatalogItem; disabled?: boolean }) {
-  const t = useAdminText(), access = useAdminAccess(), online = useOnline(), navigate = useNavigate();
-  const [target, setTarget] = useState<CatalogItem | null>(null);
+  const t = useAdminText(), access = useAdminAccess(), online = useOnline(), navigate = useNavigate(), id = useId();
+  const [target, setTarget] = useState<{ item: CatalogItem; another: boolean } | null>(null);
   const cancel = useRef<HTMLButtonElement>(null);
   const mutation = useCatalogReviewCommand(`create:${item.id}`, { albumId: item.id });
   const locked = disabled || mutation.running || Boolean(mutation.intent) || !online;
   const canCreate = item.capabilities.editing && access.catalogEditing;
+  const query = useQuery({
+    queryKey: ['admin-catalog-reviews', access.viewerId, access.epoch, access.generation, 'eligibility', item.id, item.revision],
+    queryFn: ({ signal }) => adminEndpointRequest(`/catalog-reviews/eligibility?albumId=${item.id}`, eligibilitySchema, { signal }),
+    enabled: item.kind === 'album', retry: false, gcTime: 0
+  });
   useEffect(() => {
     if (!mutation.result) return;
     const id = mutation.result.item.id;
     mutation.command.acknowledge();
     navigate(`/admin/catalog-reviews/${id}`);
   }, [mutation.result, navigate]);
+  // A creation refused because a review opened meanwhile (or anything else changed) shows what the Album offers now.
+  useEffect(() => { if (mutation.error === 'conflict') void query.refetch(); }, [mutation.error]);
   if (item.kind !== 'album') return null;
+  const state = query.data, lookup = state?.lookupAvailable ?? true, reason = state?.reason ? `${id}-reason` : undefined;
+  const label = t(lookup ? 'catalog_review.create' : 'catalog_review.create_manual');
+  const blocked = (value: CatalogItem) => locked || !canCreate || value.revision !== item.revision;
   return <>
-    <button className={styles.button} type="button" disabled={locked || !canCreate}
-      onClick={() => setTarget(item)}>{t('catalog_review.create')}</button>
+    {state?.openReviewId ? <><p className={styles.muted}>{t('catalog_review.open_copy')}</p>
+      <Link className={styles.link} to={`/admin/catalog-reviews/${state.openReviewId}`}>{t('workbench.open_review')}</Link>
+      <button className={styles.button} type="button" disabled={locked || !canCreate || !state.eligible} aria-describedby={reason}
+        onClick={() => setTarget({ item, another: true })}>{t('catalog_review.create_another')}</button></>
+      : <button className={styles.button} type="button" disabled={locked || !canCreate || !state?.eligible} aria-describedby={reason}
+        onClick={() => setTarget({ item, another: false })}>{label}</button>}
     {!canCreate && <p className={styles.muted}>{t('catalog_review.unavailable')}</p>}
+    {state?.reason && <p id={reason} className={styles.muted}>{t(`catalog_review.ineligible_${state.reason}`)}</p>}
+    {query.isError && <div role="alert" className={styles.error}><p>{t('common.error')}</p>
+      <button className={styles.button} type="button" disabled={query.isFetching || !online} onClick={() => void query.refetch()}>{t('common.retry')}</button></div>}
     {mutation.error && <div role="alert" className={styles.error}><p>{t(`common.${mutation.error}`)}</p>
       {mutation.intent && <button className={styles.button} type="button" disabled={mutation.running || !online} onClick={mutation.command.retry}>{t('common.retry_operation')}</button>}
     </div>}
-    {target?.kind === 'album' && <ModalDialog title={t('catalog_review.create')} description={t('catalog_review.create_copy')}
-      headerContent={<div className={styles.target}><strong>{target.fields.title || t('common.untitled')}</strong></div>}
+    {target?.item.kind === 'album' && <ModalDialog title={target.another ? t('catalog_review.create_another') : label}
+      description={[target.another ? t('catalog_review.open_copy') : '', t(lookup ? 'catalog_review.create_copy' : 'catalog_review.create_manual_copy')].filter(Boolean).join(' ')}
+      headerContent={<div className={styles.target}><strong>{target.item.fields.title || t('common.untitled')}</strong></div>}
       initialFocusRef={cancel} onClose={() => setTarget(null)}>
       <div className={styles.dialogActions}><button className={styles.button} ref={cancel} type="button" onClick={() => setTarget(null)}>{t('common.cancel')}</button>
-        <button className={`${styles.button} ${styles.primary}`} type="button" disabled={locked || !canCreate || target.revision !== item.revision}
-          onClick={() => { if (locked || !canCreate || target.revision !== item.revision) return; setTarget(null); mutation.command.run('/catalog-reviews', { albumId: target.id, expectedRevision: target.revision }, 'POST'); }}>{t('catalog_review.create_confirm')}</button></div>
+        <button className={`${styles.button} ${styles.primary}`} type="button" disabled={blocked(target.item)}
+          onClick={() => {
+            if (blocked(target.item)) return;
+            setTarget(null);
+            mutation.command.run('/catalog-reviews', { albumId: target.item.id, expectedRevision: target.item.revision, ...(target.another ? { another: true } : {}) }, 'POST');
+          }}>{t(lookup ? 'catalog_review.create' : 'catalog_review.create_confirm')}</button></div>
     </ModalDialog>}
   </>;
 }

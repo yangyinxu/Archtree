@@ -24,8 +24,9 @@ below default closed; the flags among them accept only the literal `true`:
 
 An existing Album review needs no staging bucket; starting Luna also requires
 the imports flag and configured provider, and its metadata lookup the imports
-flag and `FINITUDE_ADMIN_METADATA_LOOKUP_CONTACT` (without them its summary
-says lookup is not configured).
+flag and `FINITUDE_ADMIN_METADATA_LOOKUP_CONTACT` (without them the Album page
+offers a review for manual editing, creating one queues no lookup, and its
+summary says lookup is not configured).
 
 For a local administrator session with imports enabled, use the existing ignored
 `.env` for provider configuration, then start the application with:
@@ -1271,16 +1272,31 @@ input, 24-hour grants. Daily reservations are persisted in the same transaction
 as a chunk checkpoint; uncertain outcomes and dispatches stopped after
 reservation remain counted.
 
-Web **Workbench → Edit or review existing Album** exposes explicit manual editing
-and creation of an existing-Album review. The separate **Existing Album reviews**
-queue retains saved projects when the browser closes. **Unfinished** includes all
-unapplied reviews; **Album updated** confirms that this project's selected fields
-were applied. Luna progress and the original-Album update status are shown
-separately. **Save review draft** changes only the private draft and sends only
-the values edited since the saved draft was loaded (an edit changed back is no
-change), so it never overwrites another value saved meanwhile; **Update
-original Album** requires selecting saved changes and confirming their frozen
-old/new values. An unapplied review opens on its **Metadata lookup** summary,
+Web **Workbench → Edit or complete existing Album** exposes explicit manual
+editing and creation of an existing-Album review (an Album completion). The
+Album page's **Complete from MusicBrainz (free)** action reads
+`GET /catalog-reviews/eligibility` for the Album's current revision: it waits
+disabled while that read loads, offers a retry when it fails, and is shown
+disabled with its reason for an Album that cannot have a review. Where the Album
+has an unapplied review whose source is current, the page links **Open Album
+completion** instead and offers **Start another completion**, which sends
+`another: true`; a refused creation reads the eligibility again. While catalog
+editing is turned off the page still reads the eligibility and links an open
+review, and both creation actions stay disabled. Its
+confirmation says lookup completes the title, release date, Artists, label,
+track titles, Disc and Track Numbers, each track's own Artists and the expected
+tracklist but not the cover, that nothing changes until the changes are
+confirmed and that Luna AI (paid) never starts; where lookup is not configured
+the action reads **Create Album completion for manual editing**. The separate
+**Album completions** queue retains saved projects when the browser closes.
+**Unfinished** includes all unapplied reviews; **Album updated** confirms that
+this project's selected fields were applied. Luna progress and the
+original-Album update status are shown separately. **Save completion draft**
+changes only the private draft and sends only the values edited since the saved
+draft was loaded (an edit changed back is no change), so it never overwrites
+another value saved meanwhile; **Update original Album** lists every change the
+apply can write (see below), lookup-filled and lookup-answered values preselected
+and deselectable, and confirms their frozen old/new values. An unapplied review opens on its **Metadata lookup** summary,
 above its tabs and loaded as its own chunk (a chunk that cannot load, the
 summary's or one it loads, asks for a reload in its place, leaving manual
 editing usable): the lookup status with the free **Retry lookup** as its only
@@ -1393,13 +1409,52 @@ Artist entries (the Album's ordered Artist Credits until lookup changes them),
 their join phrases and its label read-only, and offers a Disc Number field only
 for Tracks whose review captured one. Metadata lookup values and conflict
 answers change the Artist entries, the label, each member's track Artist entries
-and the expected tracklist only in the review's private draft, and **Update
-original Album** still lists only title, date and Disc and Track Number changes.
-A Disc or Track Number lookup filled through its pairing is listed there but
-cannot be ticked, with a note that it applies together with the expected
-tracklist: the server applies such a number only with the tracklist that places
-it, which this step does not send yet, so the selected changes still commit as
-one. Luna's Artist and label suggestions appear only in a hint panel of the
+and the expected tracklist only in the review's private draft. **Update original
+Album** (`CatalogReviewApply.tsx`, its pure model `catalogReviewApplyModel.ts`)
+lists, in this order, the Album's title and date, its Artist entries and label
+(current and new Credits, an IDs-only change said as such), the expected
+tracklist (the rows kept and the rows it stores, with their missing-file rows
+after the selected changes), each Track's title, Disc Number and Track Number,
+and one line per member whose Credits change (current and new Credits, every
+Credit removed, and its attribution change, such as Unknown → Documented). It
+reads the review's lookup summary and its identity read (`GET /candidates`,
+whose `selection` names the Artist entry lists and label it shows and whose
+`keptTracklist` is the Album's captured tracklist): every review-only item (the
+Artist entries, label, tracklist and member lines) and every title, date or
+number lookup filled or that a conflict answered with the lookup value arrive
+selected, and so does a saved Disc or Track Number at its member's pair position
+(a number the administrator fixed, on which lookup re-ranked the pairing); any
+other manual or Luna-adopted change arrives unselected, and any can be
+deselected. An explicit choice is kept across reads while its item shows the
+same saved values (the review draft's value, Artist entries or tracklist, never
+what identity decisions resolve), so saving identity decisions never undoes a
+deselection; a newer saved or looked-up value needs choosing again. A value
+whose lookup conflict is unanswered cannot be selected and says to answer it
+first. The tracklist can be selected only while every member its pairing placed
+sits at its row after the selected numbers, otherwise its note names each member
+off its row. A Disc or Track Number lookup filled through its pairing is
+selected only with that tracklist, or alone when the Album's kept tracklist
+places the member at a row with the same position, otherwise its note says it
+applies together with the expected tracklist; a deselected one waits for
+nothing, so it can always be selected again. When the Album's primary Artist Credits change, the step says Album
+Credits are never copied to tracks and names each member whose Credits still
+credit a replaced Artist. Below the items it lists each Artist and label
+Organization the selected lists name: reused (hidden ones marked), created,
+named differently by bound entries, or still needing a record, with each
+MusicBrainz ID recorded or replaced. **Update original Album** waits while
+lookup or Luna runs, while a selected list's identity needs a record (it names
+them) and until both the lookup summary read and the identity read of this
+revision and value revision are in. Its confirmation, whose copy says only the
+listed changes update the Album, shows the same items, identities and note
+frozen, and sends
+`{expectedRevision, fields, memberCredits, preselections, musicBrainzIds,
+expectedValueRevision}`: the selected fields and members, and only the
+preselections and ID writes of the identities a selected list or label owns. A
+`409` refusal (a new candidate or ID holder, a decided record or ID changed, a
+lookup application unseen) reads the review, its summary and its identity rows
+again, so a row that needs an answer is shown in the same review, and keeps
+nothing to retry. The page's **Review changes to apply** count and the Review
+step's empty state count title, date and number changes only. Luna's Artist and label suggestions appear only in a hint panel of the
 Review step, which can keep the current values (rejecting a suggestion) but
 never adopts one or changes a Credit; acting on a hint is a separate catalog
 Credit edit.
@@ -1423,8 +1478,8 @@ box sends `POST /catalog-reviews/:id/lookup` and refuses a link in place,
 answer covering every listed conflict, is one `/lookup/resolve` request, every
 answer in it bound to the saved value it was made against. **Save decisions**
 sends `POST /catalog-reviews/:id/decisions`; the review keeps them until an
-apply sends its identity items, which the Web's apply, sending `fields` and
-`expectedValueRevision` only, does not yet do. A saved reuse or replace whose
+apply sends the identity items its confirmation showed, which the Web's
+**Update original Album** does. A saved reuse or replace whose
 record the identity read lists at another revision, or no longer lists, is
 stale: the server refuses to keep it (`409 ADMIN_IMPORT_DUPLICATE_STALE`), so
 its row shows undecided with a note, it takes no candidate from another entry
@@ -1433,9 +1488,26 @@ import page, and reads the summary and its identity rows again.
 
 Catalog review routes (relative to `/api/admin/v1`):
 
-- `POST /catalog-reviews`: `{operationId, albumId, expectedRevision}` captures a
-  ready Album and up to 100 ready Audio members. Empty Albums are supported;
-  malformed, missing, Video or inconsistent members are explicitly rejected.
+- `POST /catalog-reviews`: `{operationId, albumId, expectedRevision, another?}`
+  captures a ready Album and up to 100 ready Audio members. The route creates
+  through `createCatalogReviewWithLookup` (`catalogReviewLookupRequests.ts`):
+  where metadata lookup is available it converts the new review to format 3 and
+  queues its one automatic `catalog` run in the creation transaction (the
+  catalog trigger below), so the response shows revision 2 while the create
+  receipt keeps revision 1, and the review's `lookupGate` is written; a replay
+  returns the stored response and queues nothing, and a failure of the
+  conversion or of any write stores no review, run or gate. Without lookup the
+  review stays format 2 for manual editing. While an unapplied review of the
+  Album whose source is current exists (`ADMIN_CATALOG_REVIEW_OPEN`, `409`,
+  only its code) creation is refused and stores nothing unless `another` is
+  `true`; `another` is optional, part of the fingerprinted body, and anything
+  but a boolean is `400 ADMIN_IMPORT_INVALID_INPUT`. A replay answers before
+  that check, and a stale revision or unavailable membership keeps its own
+  refusal. Concurrent creations are serialized (each increments
+  `adminImportAnalysisSlots` `catalog-review-creation`, seeded at startup), so
+  only one succeeds without `another`: the other runs again and is refused as
+  open. Empty Albums are supported; malformed, missing, Video or inconsistent
+  members are explicitly rejected.
   Creation does not start analysis. Original filenames are allowlisted
   basenames, never storage keys. Each source Track also captures its Disc
   Number, or `null` when it stores none. The review is stored as Draft v2 with
@@ -1445,9 +1517,27 @@ Catalog review routes (relative to `/api/admin/v1`):
   case-insensitively; such a list does not show every Artist Credit, so it is
   never applied), each keeping its join phrase only
   while the next stored Credit is also shown, and the first ready, named label
-  Credit. A draft whose editable values exceed 48 KB is refused with
-  `400 ADMIN_IMPORT_INVALID_INPUT` and nothing is stored; the read-only context
-  is not counted, because it cannot be shortened from the review.
+  Credit. A draft whose editable values exceed 48 KB, retained filenames over
+  24,000 bytes, or a stored title, date, Disc or Track Number the review
+  parsers refuse is refused with `400 ADMIN_IMPORT_INVALID_INPUT` and nothing is
+  stored; the read-only context is not counted, because it cannot be shortened
+  from the review.
+- `GET /catalog-reviews/eligibility?albumId=` (registered before `/:id`):
+  `200 {eligible, reason, openReviewId, lookupAvailable}`, private no-store,
+  writing nothing. `reason` is null when a review can be created, else the
+  first refusal creation would give: `albumNotReady` (missing or not ready),
+  `membershipInvalid` (not a list, a malformed or repeated member ID),
+  `tooManyTracks` (over 100 members), `videoTracks`, `membershipInconsistent`
+  (a member linked to another Album), `tracksNotReady` (a missing or unready
+  member) or `valuesUnsupported` (values creation refuses as more than a review
+  holds: the 48 KB draft cap, retained filenames over 24,000 bytes or a stored
+  title, date, Disc or Track Number the review parsers refuse; creation and this
+  read share one check). `openReviewId` is the newest unapplied review of the
+  Album at its current revision whose source is current (of at most 25 matching
+  reviews, newest first; changed, unavailable, applied and newer-format reviews
+  are not open), whatever the reason. `lookupAvailable` is whether metadata lookup runs on this server. A
+  missing, repeated, malformed or extra query key is `400
+  ADMIN_IMPORT_INVALID_INPUT`; the route has the guards of every review route.
 - `GET /catalog-reviews` and `GET /catalog-reviews/:id`: independent bounded
   workbench pagination and private readback. `sourceStatus` distinguishes current,
   changed and unavailable sources. For a review captured for metadata lookup
@@ -1527,8 +1617,9 @@ Catalog review routes (relative to `/api/admin/v1`):
   Album deleted, not ready or changed elsewhere), the change is saved without
   a re-rank. A failure of that write aborts the whole change, writing
   nothing; the same request is then admitted afresh.
-- Metadata lookup admission (the review lookup routes below, which the Web
-  review summary calls, and the catalog trigger admit it): the first lookup
+- Metadata lookup admission (review creation where lookup is available, and
+  the review lookup routes below, which the Web review summary calls, admit
+  it): the first lookup
   admitted for a review
   stores it as format 3, only while its source is current, otherwise
   `409 ADMIN_CATALOG_REVIEW_SOURCE_CHANGED` and nothing is stored. An applied
@@ -1639,7 +1730,7 @@ Catalog review routes (relative to `/api/admin/v1`):
   this route), private WebP answer, read-only checks and error codes without a
   body; a review's candidate is never found under `/imports`, nor an import's
   here.
-- The catalog trigger (server only; review creation does not call it yet):
+- The catalog trigger (review creation calls it where lookup is available):
   `queueCatalogReviewLookup` starts a review's one automatic run in the
   caller's administrator transaction under a `create` grant, from the Album's
   saved title and first usable shown primary Artist name (see [Lookup
@@ -1648,11 +1739,13 @@ Catalog review routes (relative to `/api/admin/v1`):
   (refusals included), and queues nothing once the review had its automatic
   run.
 - `GET /catalog-reviews/:id/candidates` (the Web review summary's identity rows
-  read it and save through `/decisions`; its apply sends no identity items yet):
-  `200` the identity rows of the review's default selection, every Artist entry
-  list that may be applied and changed (the Album's and each member's) and the
-  label when it may be applied and changed, with the review's `revision` and
-  `valueRevision` (which lookup applications bump without changing `revision`),
+  read it and save through `/decisions`, and **Update original Album** reads it
+  for its confirmation): `200` the identity rows of the review's default
+  selection, every Artist entry list that may be applied and changed (the
+  Album's and each member's) and the label when it may be applied and changed,
+  which `selection` names (`{lists, label}`), the Album's expected tracklist as
+  the review captured it (`keptTracklist`, null without one), with the review's
+  `revision` and `valueRevision` (which lookup applications bump without changing `revision`),
   read in one snapshot and writing nothing. Entries crediting one artist share
   one identity across the Album and every member: by MusicBrainz ID, else by
   name case-insensitively; a row (`id`, a UUID handle derived from the review
@@ -1763,9 +1856,10 @@ Catalog review routes (relative to `/api/admin/v1`):
   `expectedValueRevision` is the `valueRevision` that confirmation read (a
   non-negative integer), required whenever the body selects one of those
   fields or lists a member (`400`), since lookup writes those values without
-  changing `revision`. A body that sends `fields` without identity items (the
-  Web today, which also sends `expectedValueRevision`) is admitted as before
-  and writes no Credits, records, IDs, tracklist or identity fence. A review
+  changing `revision`. A body that sends `fields` without identity items (an
+  older Web tab's body, which also sends `expectedValueRevision`) is admitted
+  as before and writes no Credits, records, IDs, tracklist or identity fence;
+  the Web sends every key, empty lists for a review not captured for lookup. A review
   keeps its last receipt for applying: every other
   change of a review holding 255 receipts is
   `409 ADMIN_IMPORT_OPERATION_LIMIT`, so answers and edits never leave it
@@ -1950,8 +2044,9 @@ administrator Tracks read shows it as `expected`, matched to the members, and
 metadata lookup captures a copy of its rows (see the catalog review routes),
 which lookup may fill, or propose another as a conflict, in the review's
 private draft (its lookup summary shows them with their missing-file rows);
-only applying that review (`POST /catalog-reviews/:id/apply`, server API so
-far) sets or replaces it. `GET /imports/:id/lookup` also
+only applying that review, through its **Update original Album** confirmation
+(`POST /catalog-reviews/:id/apply`), sets or replaces it.
+`GET /imports/:id/lookup` also
 reads an append target's tracklist for its summary (`appendTracklist`, see
 [Lookup routes](#lookup-routes)), and the Web shows it in an append's summary
 and confirmation. A clear is a top-level `clearExpectedTracklist:
@@ -2202,6 +2297,12 @@ roll back to:
   `artists`, `label` and `expectedTracklist` fields only through its lenient
   applied view (it drops them); the records and Credits an apply wrote are
   ordinary catalog data. Reload open admin Web tabs across it.
+- Creating reviews with their automatic lookup, the eligibility read and the
+  Album page's entry raise no floor. The release before them creates format-2
+  reviews without a run and continues runs already queued, answers the
+  eligibility route as not found and refuses a creation body with `another` as
+  invalid input; its strict Web schema refuses the identity read's `selection`
+  and `keptTracklist`. Reload open admin Web tabs across deploy or rollback.
 - Offering review lookup on the Web raises no floor: every route its summary
   calls, and the `expectedValueRevision` its apply sends, exists in the release
   before it. Looking up from the Web converts an older review to format 3,
@@ -2433,8 +2534,9 @@ roll back to:
 A server worker runs metadata lookups for import projects automatically (see
 [Lookup runs](#lookup-runs)) and applies a preselected candidate's values (see
 [Value application](#value-application)). It also runs them for existing-Album
-reviews through the review routes and applies a candidate's values to the
-review's private draft, never to the catalog (see the catalog review routes
+reviews, once automatically when a review is created and through the review
+routes, and applies a candidate's values to the review's private draft, never
+to the catalog (see the catalog review routes
 above and Existing-Album reviews under Lookup runs and Value application).
 [Routes](#lookup-routes) and the `metadataLookup` capability expose them; the
 import's Review and publish summary (see the import page above) and an
@@ -2956,8 +3058,8 @@ database, what the step stores and which request comes next.
 - **Limit.** A project runs at most three automatic lookups: the first and two
   reruns after file-set changes. Submitted names and manual retries do not
   count.
-- **Existing-Album reviews.** A review's run (submitted or retried from the Web
-  review summary; its automatic run on creation is server only so far) binds
+- **Existing-Album reviews.** A review's run (its automatic run on creation, or
+  one submitted or retried from the Web review summary) binds
   one identity per member with no upload intent or SHA-256, its digest covering
   the member IDs and their media evidence, so no file check ever marks one
   stale or supersedes the run; the members are bound through the review's
@@ -3019,8 +3121,9 @@ database, what the step stores and which request comes next.
   candidates, adoption, cover selection, analysis and navigation never run
   lookup, and a format-1 project's conversion never does either. Existing-Album
   reviews never take these triggers: their one automatic run is the catalog
-  trigger (see the catalog review routes above), and their submitted and
-  retried runs use the review lookup routes.
+  trigger, which creating a review calls where lookup is available (see the
+  catalog review routes above), and their submitted and retried runs use the
+  review lookup routes.
 - **Input.** Several files are looked up by the album and album-artist tags
   they all share (album-artist names joined by ` / `), never by per-file
   artists, and one file by its title and artist tags, together with the

@@ -31,6 +31,6 @@ test('a lookup summary chunk that cannot load asks for a reload in its place, an
   expect(adminWorkspace.getSnapshot().reloadRequired).toBe(false);
   expect(screen.getByRole('button', { name: 'Use Luna AI (paid)' })).toBeEnabled();
   fireEvent.change(screen.getByRole('textbox', { name: 'Title' }), { target: { value: 'A manual correction' } });
-  fireEvent.click(screen.getByRole('button', { name: 'Save review draft' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Save completion draft' }));
   await waitFor(() => expect(writes).toEqual([`/api/admin/v1/catalog-reviews/${reviewId}`]));
 });

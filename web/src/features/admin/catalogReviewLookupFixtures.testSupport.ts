@@ -4,7 +4,7 @@
  *              reviewTieLookupResponse, reviewAfterLookup, reviewIdentityResponse
  *   Constants: reviewRelease, reviewCandidateKey, otherReviewRelease, guestEntryKey, guestTrackEntryKey,
  *              guestHandle, leadHandle, leadRecordId, guestCandidateId, leadMusicBrainzId,
- *              leadOtherMusicBrainzId
+ *              leadOtherMusicBrainzId, leadCreditId
  * Internal
  *   Types: Overrides
  *   Functions: entry
@@ -107,12 +107,18 @@ export function reviewAfterLookup(item: CatalogReview): CatalogReview {
       : { ...track, artists: track.artists ?? [entry(memberEntryKey, 'Synthetic track Artist')] }) } };
 }
 
+/** The lead Artist's captured Album Credit, as the identity read shows Credits. */
+export const leadCreditId = 'synthetic_lead_credit';
 /**
  * The identity read of that review: the guest shared by the Album and the second member, unbound with a same-name candidate that
- * needs an answer, and the lead Artist bound to its record, which keeps another MusicBrainz ID that can be replaced; no label.
+ * needs an answer, and the lead Artist bound to its record, which keeps another MusicBrainz ID that can be replaced; no label. Its
+ * default selection is the Album's Artist entries and the second member's, whose Credits gain the guest (that member stored with
+ * Unknown attribution and none); the Album kept no expected tracklist.
  */
 export function reviewIdentityResponse(): ReviewIdentityResponse {
-  return { revision: 1, valueRevision: 1,
+  const lead = { creditId: leadCreditId, subjectType: 'artist' as const, subjectId: leadRecordId, identity: leadHandle, name: 'Synthetic catalog Artist', role: 'primary' as const, joinPhrase: null };
+  const guest = { creditId: null, subjectType: 'artist' as const, subjectId: null, identity: guestHandle, name: 'Synthetic guest', role: 'featured' as const, joinPhrase: null };
+  return { revision: 1, valueRevision: 1, selection: { lists: ['album.artists', `tracks.${slotTwo}.artists`], label: false }, keptTracklist: null,
     identities: [
       { id: guestHandle, name: 'Synthetic guest', musicBrainzId: null, names: [], entries: [{ path: 'album.artists', slotId: null, entryKey: guestEntryKey, name: 'Synthetic guest', role: 'featured' },
         { path: `tracks.${slotTwo}.artists`, slotId: slotTwo, entryKey: guestTrackEntryKey, name: 'Synthetic guest', role: 'primary' }],
@@ -123,5 +129,7 @@ export function reviewIdentityResponse(): ReviewIdentityResponse {
     label: null,
     candidates: { items: [{ kind: 'artist', id: guestCandidateId, label: 'Synthetic guest', revision: 'c'.repeat(64), albumId: null, visibility: 'public', match: 'name', matchedSlotIds: [], automaticReuse: false }],
       unavailable: [] },
-    preselections: [], musicBrainzIds: [], album: null, members: [] };
+    preselections: [], musicBrainzIds: [],
+    album: { current: [lead], next: [{ ...lead, joinPhrase: ' feat. ' }, guest], credits: true, replacedPrimaryArtistIds: [], membersNamingReplaced: [] },
+    members: [{ slotId: slotTwo, current: [], next: [{ ...guest, role: 'primary' }], removedCreditIds: [], credits: true, attribution: { from: 'unknown', to: 'documented' } }] };
 }

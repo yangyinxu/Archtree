@@ -6,6 +6,7 @@
  *   - a missing or malformed value revision, extra keys, forged paths, rows on a member path and a member that is not a slot are refused
  *   - the identity read parses bound, conflicting and unbound rows, the label, more candidates than an import reads and Credit views
  *   - a decision without its bound ID, a preselection with an extra key, an Album or track candidate and a malformed revision are refused
+ *   - the identity read's default selection and kept expected tracklist are required, strict and well formed
  *   - each list is bounded where the server bounds it: 406 answers, 25 candidates, 512 identities and the label's 31,273 candidates, 100 members, 71 new Album and 70 new member Credits
  * @end-catalog */
 
@@ -91,6 +92,19 @@ test('a decision without its bound ID, a preselection with an extra key, an Albu
   refused({ ...data, musicBrainzIds: [{ scope: 'artist', identity: leadHandle, musicBrainzId: 'not-an-id', replaces: null }] });
   refused({ ...data, members: [{ slotId, current: [], next: [], removedCreditIds: [], credits: false, attribution: null, mediaUrl: '/private' }] });
   refused({ ...data, extra: true });
+});
+
+test('the identity read\'s default selection and kept expected tracklist are required, strict and well formed', () => {
+  const data = reviewIdentityResponse(), parsed = (value: unknown) => reviewIdentitySchema.safeParse(value).success;
+  const rows = [{ discNumber: 1, trackNumber: 1, title: 'Synthetic first track', durationMs: 185_000 }];
+  expect([parsed(data), parsed({ ...data, selection: { lists: [], label: true }, keptTracklist: rows })]).toEqual([true, true]);
+  const { selection: _selection, ...withoutSelection } = data, { keptTracklist: _kept, ...withoutKept } = data;
+  for (const value of [withoutSelection, withoutKept, { ...data, selection: { ...data.selection, extra: true } }, { ...data, selection: { lists: ['album.label'], label: false } },
+    { ...data, selection: { lists: ['tracks.not-a-slot.artists'], label: false } }, { ...data, selection: { lists: [], label: 'yes' } },
+    { ...data, selection: { lists: Array.from({ length: 102 }, () => 'album.artists'), label: false } }, { ...data, keptTracklist: [] },
+    { ...data, keptTracklist: [{ ...rows[0], extra: true }] }, { ...data, keptTracklist: Array.from({ length: 101 }, (_, index) => ({ ...rows[0], trackNumber: index + 1 })) }]) {
+    expect(parsed(value), JSON.stringify(value).slice(0, 120)).toBe(false);
+  }
 });
 
 test('each list is bounded where the server bounds it: 406 answers, 25 candidates, 512 identities and the label\'s 31,273 candidates, 100 members, 71 new Album and 70 new member Credits', () => {

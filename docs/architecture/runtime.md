@@ -358,7 +358,17 @@ only by `GET /catalog-reviews/:id/candidates`. Applying a
 review that resolves identities increments the same identity-fence document
 (`adminImportAnalysisSlots`, `_id` `identity`) as a format-3 import commit, and
 a MusicBrainz ID another record took meanwhile fails that transaction on the
-unique index (`409 ADMIN_CATALOG_REVIEW_IDENTITY_CHANGED`). No index changes.
+unique index (`409 ADMIN_CATALOG_REVIEW_IDENTITY_CHANGED`). Creating a review
+where lookup is available writes its lookup record and `lookupGate` in the
+creation transaction. Every review creation increments the creation fence
+(`adminImportAnalysisSlots`, `_id` `catalog-review-creation`, seeded at startup
+like the identity fence), so concurrent creations conflict and the one that
+runs again sees the other's review. Finding an Album's open review (the
+eligibility read and the creation check) scans catalog reviews newest first
+through `admin_project_purpose_inventory` (its `purpose` prefix only), keeping
+unapplied reviews of that captured Album ID and revision, and returns at most
+25, each then source-checked, within the usual 3-second bound: its cost grows
+with the number of stored reviews, applied ones included. No index changes.
 
 Playback Audio/Video GETs that briefly overlap an older stream may wait up to two
 seconds for an existing admission slot. The pending pool is bounded to 32 per

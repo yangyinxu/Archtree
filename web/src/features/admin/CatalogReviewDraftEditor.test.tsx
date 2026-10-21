@@ -78,7 +78,7 @@ test('a review created before Credits were captured shows its earlier Artist nam
   expect(screen.getByRole('textbox', { name: 'Artist name' })).toHaveValue('Synthetic earlier Artist name');
   expect(screen.getByRole('textbox', { name: 'Artist name' })).toHaveAttribute('readonly');
   expect(screen.queryByRole('list', { name: 'Credits' })).not.toBeInTheDocument();
-  expect(screen.getByText(/Changing that Album requires creating a new review/)).toBeVisible();
+  expect(screen.getByText(/Changing that Album requires a new completion/)).toBeVisible();
   expect(screen.getByRole('link', { name: 'Edit attribution in original Album' })).toHaveAttribute('href', href);
   fireEvent.change(screen.getByRole('textbox', { name: 'Title' }), { target: { value: 'Edited Album' } });
   expect(onChange.mock.calls[0][0].album.artists).toEqual(item.draft.album.artists);

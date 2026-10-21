@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { creditRoles } from './catalogApi';
-import { uuidSchema } from './adminNamingSchema';
+import { expectedTracklistRowSchema, uuidSchema } from './adminNamingSchema';
 import { reviewLookupViewSchema, reviewValuePathSchema } from './importLookupApi';
 
 /**
@@ -42,9 +42,10 @@ const bound = z.object({ id, name, musicBrainzId: mbid.nullable(), revision, vis
 /** One current or new Credit: no Credit ID for one still to be created, no subject for a record still to be created or decided. */
 const creditView = z.object({ creditId: creditId.nullable(), subjectType: z.enum(['artist', 'organization']), subjectId: id.nullable(),
   identity: uuidSchema.nullable(), name: z.string().max(1000), role: z.enum(creditRoles), joinPhrase: z.string().min(1).max(16).nullable() }).strict();
+/** An Artist entry list's path: the Album's or a member's. */
+const listPath = z.string().regex(/^(?:album|tracks\.[^.]+)\.artists$/).refine(path => path === 'album.artists' || uuidSchema.safeParse(path.split('.')[1]).success);
 /** An Artist entry an identity covers: the Album's (`slotId` null) or a member's. */
-const entry = z.object({ path: z.string().regex(/^(?:album|tracks\.[^.]+)\.artists$/).refine(path => path === 'album.artists' || uuidSchema.safeParse(path.split('.')[1]).success),
-  slotId: uuidSchema.nullable(), entryKey: uuidSchema, name, role: z.enum(['primary', 'featured']) }).strict();
+const entry = z.object({ path: listPath, slotId: uuidSchema.nullable(), entryKey: uuidSchema, name, role: z.enum(['primary', 'featured']) }).strict();
 /**
  * One Artist identity of the default selection: every entry it covers (the Album's 20 and 20 per member), the other names credited
  * for it, its state and bound records, and the decision, preselection and ID write that answer it.
@@ -66,9 +67,14 @@ const candidate = z.object({ kind: z.enum(['artist', 'organization']), id, label
  * placed ahead of them when none were replaced, and the Album also a new label Credit (71); a member has no label (70).
  */
 const credits = (next: number) => ({ current: z.array(creditView).max(70), next: z.array(creditView).max(next), credits: z.boolean() });
-/** The identity rows, candidates, preselections, ID writes and Credit changes of the review's default selection. */
+/**
+ * The identity rows, candidates, preselections, ID writes and Credit changes of the review's default selection, which `selection`
+ * names (the Album's and each member's Artist entry lists, and the label), and the Album's expected tracklist as the review
+ * captured it (`keptTracklist`).
+ */
 export const reviewIdentitySchema = z.object({
-  revision: integer, valueRevision: integer, identities: z.array(identity).max(512), label: label.nullable(),
+  revision: integer, valueRevision: integer, selection: z.object({ lists: z.array(listPath).max(101), label: z.boolean() }).strict(),
+  keptTracklist: z.array(expectedTracklistRowSchema).min(1).max(100).nullable(), identities: z.array(identity).max(512), label: label.nullable(),
   // 20 per name of 513 identities and the label, one holder per ID, 20 per alias ID and 20 per localized name of the 512 identities.
   candidates: z.object({ items: z.array(candidate).max(31_273), unavailable: z.array(z.object({ kind: z.enum(['artist', 'organization']), label: z.string() }).strict()).max(513) }).strict(),
   preselections: z.array(preselection).max(513), musicBrainzIds: z.array(idWrite).max(513),

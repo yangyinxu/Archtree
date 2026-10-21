@@ -47,6 +47,7 @@
  *   - an apply racing another identity writer on the fence is retried against fresh state and shows the row again, so no second record is created
  *   - a review keeps its last receipt for applying: other changes stop one receipt early, and the apply is still admitted
  *   - an expected tracklist or pairing-filled numbers are refused while any stored pair cannot be read, writing nothing
+ *   - the identity read names its default selection and the Album's kept expected tracklist
  * @end-catalog */
 
 /**
@@ -121,7 +122,7 @@ after(async () => { await new Promise<void>(resolve => server?.close(() => resol
 
 /** A review created now whose submitted lookup run completed on `exchanges`, so the worker applied its exact-count preselection. */
 async function completedReview(exchanges: LookupExchange[]) {
-    const created = await createCatalogReview(String(actor), { operationId: randomUUID(), albumId: String(album), expectedRevision: adminCatalogItemRevision('album', await record('albums', album)) });
+    const created = await createCatalogReview(String(actor), { operationId: randomUUID(), albumId: String(album), expectedRevision: adminCatalogItemRevision('album', await record('albums', album)), another: true });
     const id = created.item.id;
     await submitCatalogReviewLookup(String(actor), id, { ...mutation(1), kind: 'album', text: 'Existing Album' });
     await drainLookup(exchanges);
@@ -166,7 +167,7 @@ test('candidates and decisions routes guard authentication, the current admin an
     const read = await request(`/catalog-reviews/${id}/candidates`);
     assert.match(read.headers.get('cache-control')!, /no-store/);
     const shown = await read.json() as CatalogReviewIdentityResponse;
-    assert.deepEqual(Object.keys(shown).sort(), ['album', 'candidates', 'identities', 'label', 'members', 'musicBrainzIds', 'preselections', 'revision', 'valueRevision']);
+    assert.deepEqual(Object.keys(shown).sort(), ['album', 'candidates', 'identities', 'keptTracklist', 'label', 'members', 'musicBrainzIds', 'preselections', 'revision', 'selection', 'valueRevision']);
     // Bodies up to 768 KB reach the parser (here refused for an unknown key); 800 KB is refused for its size, whatever the case.
     const revision = (await current(id)).item.revision;
     for (const path of ['apply', 'APPLY', 'decisions', 'Decisions']) {
@@ -786,10 +787,10 @@ test('identity rows and decisions exist only for a review captured for lookup an
     await assert.rejects(candidatesOf(String(new ObjectId())), code('ADMIN_CATALOG_REVIEW_NOT_FOUND'));
     await assert.rejects(decideOn(String(new ObjectId()), []).catch(async error => { throw error; }), (error: any) => error.status === 404);
     // A review never admitted to metadata lookup has no identity rows, refuses decisions and applies no review-only value.
-    const created = await createCatalogReview(String(actor), { operationId: randomUUID(), albumId: String(album), expectedRevision: adminCatalogItemRevision('album', await record('albums', album)) });
+    const created = await createCatalogReview(String(actor), { operationId: randomUUID(), albumId: String(album), expectedRevision: adminCatalogItemRevision('album', await record('albums', album)), another: true });
     const plain = created.item.id, slots = created.item.source.tracks.map(track => track.slotId);
-    assert.deepEqual(await candidatesOf(plain), { revision: created.item.revision, valueRevision: 0, identities: [], label: null, candidates: { items: [], unavailable: [] }, preselections: [],
-        musicBrainzIds: [], album: null, members: [] });
+    assert.deepEqual(await candidatesOf(plain), { revision: created.item.revision, valueRevision: 0, selection: { lists: [], label: false }, keptTracklist: null, identities: [], label: null,
+        candidates: { items: [], unavailable: [] }, preselections: [], musicBrainzIds: [], album: null, members: [] });
     await assert.rejects(decideOn(plain, []), code('ADMIN_IMPORT_LOOKUP_REFUSED'));
     for (const body of [{ fields: [field('artists')] }, { fields: [field('expectedTracklist')] }, { fields: [], memberCredits: [slots[0]] }]) {
         await assert.rejects(applyCatalogReview(String(actor), plain, { ...mutation(created.item.revision), preselections: [], musicBrainzIds: [], expectedValueRevision: 0, ...body }),
@@ -1049,7 +1050,8 @@ test('an apply racing another identity writer on the fence is retried against fr
                 try {
                     await other.withTransaction(async () => {
                         await db().collection('artists').insertOne({ _id: new ObjectId(), lifecycleStatus: 'ready', visibility: 'public', ...racer }, { session: other });
-                        await original.call(db().collection('adminImportAnalysisSlots'), { _id: 'identity' as any }, { $inc: { revision: 1 } }, { session: other, upsert: true });
+                        // The driver's typings end with a callback overload; the promise form takes three arguments.
+                        await original.apply(db().collection('adminImportAnalysisSlots'), [{ _id: 'identity' as any }, { $inc: { revision: 1 } }, { session: other, upsert: true }] as unknown as Parameters<Collection['updateOne']>);
                     });
                 } finally { await other.endSession(); }
                 raced = await catalogState();
@@ -1085,4 +1087,19 @@ test('an expected tracklist or pairing-filled numbers are refused while any stor
     assert.equal(await catalogState(), before);
     await db().collection('adminImportLookups').updateOne({ _id }, { $set: { 'applied.pairs': pairs } });
     assert.equal((await applyShown(id, [field('expectedTracklist'), ...discs])).item.state, 'applied');
+}));
+
+test('the identity read names its default selection and the Album\'s kept expected tracklist', () => withLookup(async () => {
+    // Every list that changed and the label, which an Album without a label Credit gains, are selected by default; no tracklist is kept.
+    const { id, slots } = await completedReview(run({ tracks: [[singer], [singer]] }));
+    const read = await candidatesOf(id);
+    assert.deepEqual([read.selection, read.keptTracklist], [{ lists: ['album.artists', ...slots.map(slotId => `tracks.${slotId}.artists`)], label: true }, null]);
+    // The selection is exactly what an apply of everything shows: its preselections and ID writes are the read's.
+    assert.deepEqual(shownFor(read, read.selection.lists, read.selection.label), { preselections: read.preselections, musicBrainzIds: read.musicBrainzIds });
+    // An Album keeping an expected tracklist: the read shows its rows as the review captured them.
+    const rows = [{ discNumber: 1, trackNumber: 1, title: 'Track 1', durationMs: 60_000 }, { discNumber: 1, trackNumber: 2, title: 'Track 2', durationMs: null },
+        { discNumber: 1, trackNumber: 3, title: 'Synthetic Missing Track', durationMs: null }];
+    await db().collection('albums').updateOne({ _id: album }, { $set: { expectedTracklist: { source: 'musicbrainz', appliedAt: new Date('2026-10-20T08:00:00.000Z'), rows } } });
+    const kept = await completedReview(run({ tracks: [[singer], [singer]] }));
+    assert.deepEqual((await candidatesOf(kept.id)).keptTracklist, rows);
 }));

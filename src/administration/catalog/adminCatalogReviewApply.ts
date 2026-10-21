@@ -110,9 +110,10 @@ async function markChangedTargets(resolution: ReviewIdentityResolution, session:
 
 /**
  * GET /catalog-reviews/:id/candidates: the identity rows of the review's default selection (every applicable Artist entry list
- * that changed, and the label when it may change and changed), their Artist and Organization candidates, the preselections and
- * MusicBrainz ID writes an apply of that selection must show, the Album's and each member's current and new Credits, and the
- * review's `revision` and `valueRevision` an apply binds. A row needs an answer whenever an apply would wait for it: unanswered,
+ * that changed, and the label when it may change and changed), which `selection` names, their Artist and Organization candidates,
+ * the preselections and MusicBrainz ID writes an apply of that selection must show, the Album's and each member's current and new
+ * Credits, the Album's expected tracklist as the review captured it (`keptTracklist`: the rows a kept tracklist places
+ * pairing-filled numbers at; null without one), and the review's `revision` and `valueRevision` an apply binds. A row needs an answer whenever an apply would wait for it: unanswered,
  * behind a refusal resolution reports (resolveCatalogReviewIdentities), or with a decided reuse or replace target that changed
  * since its decision. An apply that deselects lists or the label computes these items and rows narrowed by identity. An applied review, or one not captured for metadata lookup (format 3), has none; an unreadable capture asks
  * for a reload, and a source that is not current is 409 source changed. Writes nothing; candidate reads past their budget are a 503.
@@ -122,8 +123,8 @@ export function getCatalogReviewCandidates(actor: string, id: string): Promise<C
     return withImportAdmin(actor, async session => {
         const doc = await importCollection().findOne({ _id: new ObjectId(id), purpose: 'catalogReview' }, { session });
         if (!doc) return fail(404, 'ADMIN_CATALOG_REVIEW_NOT_FOUND');
-        const empty: CatalogReviewIdentityResponse = { revision: doc.revision, valueRevision: valueRevisionOf(doc), identities: [], label: null, candidates: { items: [], unavailable: [] },
-            preselections: [], musicBrainzIds: [], album: null, members: [] };
+        const empty: CatalogReviewIdentityResponse = { revision: doc.revision, valueRevision: valueRevisionOf(doc), selection: { lists: [], label: false }, keptTracklist: null,
+            identities: [], label: null, candidates: { items: [], unavailable: [] }, preselections: [], musicBrainzIds: [], album: null, members: [] };
         if (doc.catalogApplied || importDraftVersion(doc) !== CATALOG_REVIEW_DRAFT_V3) return empty;
         if (!readableCatalogCapture(doc)) return fail(409, 'ADMIN_IMPORT_RELOAD_REQUIRED');
         // A stale review shows no confirmation: its bound rows would name records as they no longer are.
@@ -148,9 +149,9 @@ export function getCatalogReviewCandidates(actor: string, id: string): Promise<C
         for (const item of model.lists) for (const credit of item.capturedCredits) if (isRecord(credit.subject) && typeof credit.subject.name === 'string') names.set(`${credit.subjectType}:${credit.subjectId}`, credit.subject.name);
         for (const item of resolution.candidates.items) names.set(`${item.kind}:${item.id}`, item.label);
         for (const record of resolution.creates) names.set(`${record.kind}:${record.id}`, record.name);
-        const label = model.label;
+        const label = model.label, kept = parseExpectedTracklistRows(doc.catalogCapture!.album.expectedTracklist);
         return {
-            revision: doc.revision, valueRevision: valueRevisionOf(doc),
+            revision: doc.revision, valueRevision: valueRevisionOf(doc), selection: { lists: [...selection.lists], label: selection.label }, keptTracklist: kept.ok ? kept.rows : null,
             identities: resolution.scoped.map(({ identity, outcome }) => ({ id: identity.handle, name: identity.name, musicBrainzId: identity.musicBrainzId, names: identity.names,
                 entries: identity.entries.map(item => ({ path: item.path, slotId: item.slotId, entryKey: item.entry.key, name: item.entry.name, role: item.entry.role })),
                 state: identity.state, bound: identity.bound.map(record => view('artist', record)), decision: outcome.decision, preselection: outcome.preselection,
@@ -253,7 +254,8 @@ type ApplyInput = { body: ReturnType<typeof parseAdminProjectMutation>; fields: 
  * non-negative safe integer). At least one field or member is selected. A body selecting the Album's Artist entries, label or
  * expected tracklist carries both shown lists; one listing members may leave them out (empty, so an apply refuses whenever it
  * computes items). Both, and any body listing a member, carry `expectedValueRevision`, since lookup writes those values without
- * changing `revision`. An apply from an editor that shows no identity rows sends `fields` only. Anything else is invalid input.
+ * changing `revision`. An apply from an older Web tab, whose confirmation showed no identity rows, sends `fields` (and the value
+ * revision) only; the Web sends every key. Anything else is invalid input.
  */
 export function parseCatalogReviewApplyBody(raw: unknown): ApplyInput {
     const body = parseAdminProjectMutation(raw, ['fields', 'preselections', 'musicBrainzIds', 'memberCredits', 'expectedValueRevision']);

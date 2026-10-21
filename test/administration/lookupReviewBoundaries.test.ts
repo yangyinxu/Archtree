@@ -54,6 +54,8 @@ test('the review service, its capture, apply, identities and Credits never load 
     // The reverse direction is the intended one: lookup admits a review through its capture, and the requests use the review policy.
     assert.ok(runtimeImports(lookupService).includes('src/administration/catalog/adminCatalogReviewCapture.ts'));
     assert.ok(runtimeImports(reviewLookupRequests).includes(reviewService));
+    // Creating a review queues its automatic run through the review lookup requests, which the route loads instead of the service.
+    assert.ok(runtimeImports('src/routes/adminCatalogReviewRoutes.ts').includes(reviewLookupRequests));
     // Applying reads what it waits for from value application, which never loads the review service or the apply back.
     assert.ok(runtimeImports(reviewApply).includes(valueApplication));
     assert.equal(runtimeImports(reviewService).includes(valueApplication), false);

@@ -10,7 +10,7 @@
  *              adoptAdminProjectSuggestions, adminImportDuplicateCandidates, importSavedIdentity,
  *              reusesOneArtistTwice, parseImportDecisions, decideAdminImportDuplicates,
  *              dailyAnalysisAttemptsUsed, runAdminImportWorkerOnce, startAdminImportWorker
- *   Constants: importPurposeFilter, adminImportIndexes
+ *   Constants: importPurposeFilter, adminImportIndexes, CATALOG_REVIEW_CREATION_FENCE_ID
  *   Re-exports: importCandidateProjection, importCandidateRevision
  * Internal
  *   Types: Receipt, Analysis, StoredSuggestion
@@ -177,11 +177,15 @@ export const adminImportIndexes = [
     { collection: 'adminAlbumImports', keys: { 'analysis.actorId': 1, 'analysis.state': 1 }, options: { name: 'admin_import_actor_admission' }, required: true },
     { collection: 'adminAlbumImports', keys: { 'media.publication.state': 1, 'media.publication.leaseUntil': 1 }, options: { name: 'admin_import_publication_worker' }, required: true }
 ] as const;
-/** Creates the admission gate and the identity fence (adminImportIdentity.ts) outside any transaction: 4.2 cannot create collections inside one. */
+/** The `adminImportAnalysisSlots` document every existing-Album review creation increments, so concurrent creations conflict. */
+export const CATALOG_REVIEW_CREATION_FENCE_ID = 'catalog-review-creation';
+/**
+ * Creates the admission gate, the identity fence (adminImportIdentity.ts) and the review creation fence outside any transaction:
+ * 4.2 cannot create collections inside one.
+ */
 export async function initializeAdminImportStorage(db: Db) {
     const slots = db.collection<{ _id: string; revision: number }>('adminImportAnalysisSlots');
-    await slots.updateOne({ _id: 'admission' }, { $setOnInsert: { revision: 0 } }, { upsert: true });
-    await slots.updateOne({ _id: IMPORT_IDENTITY_FENCE_ID }, { $setOnInsert: { revision: 0 } }, { upsert: true });
+    for (const _id of ['admission', IMPORT_IDENTITY_FENCE_ID, CATALOG_REVIEW_CREATION_FENCE_ID]) await slots.updateOne({ _id }, { $setOnInsert: { revision: 0 } }, { upsert: true });
 }
 
 /**

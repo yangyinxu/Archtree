@@ -2,12 +2,12 @@
  * Exports
  *   Types: CatalogReviewField, CatalogReviewSourceTrack, CatalogReviewSource, CatalogReviewApplied,
  *          CatalogReviewAppliedRecord, CatalogReviewReceipt, CatalogReviewDraft, CatalogReviewDetail,
- *          CatalogReviewResponse, CatalogReviewWorkbench, CreateCatalogReview, EditCatalogReview,
- *          ApplyCatalogReview, CatalogReviewShownPreselection, CatalogReviewShownIdWrite,
- *          CatalogReviewIdentityDecision, DecideCatalogReviewIdentities, CatalogReviewCreditView,
- *          CatalogReviewBoundRecord, CatalogReviewIdentityResponse, CatalogReviewCapturedSubject,
- *          CatalogReviewCapturedCredit, CatalogReviewCapturedCredits, CatalogReviewMemberDuration,
- *          CatalogReviewMemberCapture, CatalogReviewCapture
+ *          CatalogReviewResponse, CatalogReviewWorkbench, CreateCatalogReview, CatalogReviewIneligibility,
+ *          CatalogReviewEligibility, EditCatalogReview, ApplyCatalogReview, CatalogReviewShownPreselection,
+ *          CatalogReviewShownIdWrite, CatalogReviewIdentityDecision, DecideCatalogReviewIdentities,
+ *          CatalogReviewCreditView, CatalogReviewBoundRecord, CatalogReviewIdentityResponse,
+ *          CatalogReviewCapturedSubject, CatalogReviewCapturedCredit, CatalogReviewCapturedCredits,
+ *          CatalogReviewMemberDuration, CatalogReviewMemberCapture, CatalogReviewCapture
  *   Constants: CATALOG_REVIEW_MAX_FIELDS, CATALOG_REVIEW_MAX_MEMBER_CREDITS, CATALOG_REVIEW_MAX_DECISIONS
  * @end-catalog */
 
@@ -73,8 +73,18 @@ export type CatalogReviewWorkbench = {
     counts: Record<ImportWorkbenchFilter, number>; nextCursor: string | null;
 };
 
-/** POST /catalog-reviews; source data, Credits context and naming evidence are read from the server. */
-export type CreateCatalogReview = { operationId: string; albumId: string; expectedRevision: string };
+/**
+ * POST /catalog-reviews; source data, Credits context and naming evidence are read from the server. `another: true` creates a
+ * review while an unapplied review of the Album whose source is current exists (otherwise 409 ADMIN_CATALOG_REVIEW_OPEN).
+ */
+export type CreateCatalogReview = { operationId: string; albumId: string; expectedRevision: string; another?: boolean };
+/** Why an Album cannot have an existing-Album review, as its Web Album page shows it. */
+export type CatalogReviewIneligibility = 'albumNotReady' | 'tooManyTracks' | 'membershipInvalid' | 'membershipInconsistent' | 'videoTracks' | 'tracksNotReady' | 'valuesUnsupported';
+/**
+ * GET /catalog-reviews/eligibility?albumId=: whether a review can be created (`reason` null when it can), the newest unapplied
+ * review of the Album whose source is current, and whether metadata lookup runs on this server.
+ */
+export type CatalogReviewEligibility = { eligible: boolean; reason: CatalogReviewIneligibility | null; openReviewId: string | null; lookupAvailable: boolean };
 /**
  * PATCH /catalog-reviews/:id: the changed editable values, each with the value the editor started from (`base`): the Album title
  * and date and each Track's title, Disc Number and Track Number. Artist entries, the label, visibility, the expected tracklist and
@@ -121,12 +131,13 @@ export type CatalogReviewCreditView = { creditId: string | null; subjectType: 'a
 export type CatalogReviewBoundRecord = { id: string; name: string; musicBrainzId: string | null; revision: string; visibility: 'public' | 'hidden' };
 /**
  * GET /catalog-reviews/:id/candidates: the identity rows of the review's default selection (every applicable changed Artist entry
- * list and label), their candidates (Artists and Organizations only), the preselections and ID writes an apply of that selection
- * must show, the Album's and each member's current and new Credits where they change (`credits` false: only IDs change), and the
+ * list and label; `selection` names them), their candidates (Artists and Organizations only), the preselections and ID writes an
+ * apply of that selection must show, the Album's and each member's current and new Credits where they change (`credits` false:
+ * only IDs change), the Album's expected tracklist as the review captured it (`keptTracklist`, null without one), and the
  * review's `revision` and `valueRevision` (lookup applications bump only the latter), which an apply sends back.
  */
 export type CatalogReviewIdentityResponse = {
-    revision: number; valueRevision: number;
+    revision: number; valueRevision: number; selection: { lists: string[]; label: boolean }; keptTracklist: ExpectedTracklistRow[] | null;
     identities: { id: string; name: string; musicBrainzId: string | null; names: string[];
         entries: { path: string; slotId: string | null; entryKey: string; name: string; role: 'primary' | 'featured' }[];
         state: 'bound' | 'conflicting' | 'unbound'; bound: CatalogReviewBoundRecord[];
@@ -169,6 +180,8 @@ export type CatalogReviewCapture = {
 };
 
 // GET list accepts the same filter/startedByMe/q/limit/cursor as imports; it only lists catalog reviews.
+// POST creates a review and, where metadata lookup is available, queues its one automatic run in the same transaction
+// (catalogReviewLookupRequests.ts); GET /eligibility?albumId= reads what the Web Album page's action shows (CatalogReviewEligibility).
 // GET detail, POST analyze, adopt and cancel-analysis mirror import operation/revision requests.
 // GET /:id/lookup reads the review's lookup view and summary; POST /:id/lookup ({operationId, expectedRevision, kind, text}) and
 // POST /:id/lookup/retry ({operationId, expectedRevision}) queue a run with a `lookup` or `lookup-retry` receipt (8 KB bodies);
@@ -180,7 +193,8 @@ export type CatalogReviewCapture = {
 // (CatalogReviewIdentityResponse); POST /:id/decisions ({operationId, expectedRevision, decisions}, 768 KB, at most 513 items)
 // replaces the review's identity decisions with a `decisions` receipt; POST /:id/apply ({operationId, expectedRevision, fields,
 // preselections?, musicBrainzIds?, memberCredits?, expectedValueRevision?}, 768 KB) applies the selection
-// (adminCatalogReviewApply.ts). The Web review summary reads the candidates and saves decisions; its apply sends `fields` with
-// the detail's `valueRevision` as `expectedValueRevision`, and no identity items until its confirmation shows the identity rows.
+// (adminCatalogReviewApply.ts). The Web review summary reads the candidates and saves decisions; its apply confirmation sends the
+// selected `fields` and `memberCredits` with the preselections and ID writes it showed and the detail's `valueRevision` as
+// `expectedValueRevision`.
 // GET /:id/lookup/candidates/:key/artwork is a transient WebP preview (catalogReviewLookupRequests.ts, adminImportLookupCover.ts).
 // Every endpoint returns private no-store data; no asset or publication endpoint exists.

@@ -54,7 +54,7 @@ async function applyReviewedTrackArtist(): Promise<string> {
     for (const index of adminImportIndexes) await db.collection(index.collection).createIndex(index.keys, index.options);
     await initializeAdminImportStorage(db);
     const created = await createCatalogReview(actor, { operationId: randomUUID(), albumId: ids.album.toHexString(),
-        expectedRevision: adminCatalogItemRevision('album', await db.collection('albums').findOne({ _id: ids.album })) });
+        expectedRevision: adminCatalogItemRevision('album', await db.collection('albums').findOne({ _id: ids.album })), another: true });
     const id = created.item.id, slotId = created.item.source.tracks[0].slotId;
     await submitCatalogReviewLookup(actor, id, { operationId: randomUUID(), expectedRevision: created.item.revision, kind: 'album', text: 'Private Provenance Album' });
     await drainLookup([reviewSearch({ release: 'Private Provenance Album', artist: 'Private Provenance Artist' }, [[release, 1]]), reviewSearch({ release: 'Private Provenance Album' }, [[release, 1]]),

@@ -504,7 +504,9 @@ membership writes, outcome-unknown confirmation, an import append and a
 Draft v2 import's Disc Numbers, and `test/listener/listenerDtoShape.test.ts`
 keeps both numbers out of listener and legacy public responses.
 `test/administration/adminCatalogReview.integration.ts` covers an applied
-review's Disc Numbers and Album order committing with its receipt.
+review's Disc Numbers and Album order committing with its receipt, and a review
+created through the route whose automatic lookup is applied with its expected
+tracklist, Album Credits and member Credits.
 
 ## Album expected tracklists
 

@@ -16,15 +16,20 @@ import { AdminNav } from './AdminNav';
 import { adminEndpointRequest } from './adminTransport';
 import { adminWorkspace } from './adminWorkspace';
 import { CatalogReviewDraftEditor } from './CatalogReviewDraftEditor';
-import { reviewChanges, reviewDraftChanges, reviewFieldKey, reviewResponseSchema, type CatalogReview, type ReviewDraft } from './catalogReviewApi';
+import { reviewChanges, reviewDraftChanges, reviewResponseSchema, type CatalogReview, type ReviewDraft } from './catalogReviewApi';
+import type { ApplyChoice } from './catalogReviewApplyModel';
 import type { Confirmation } from './CatalogReviewConfirmation';
 import type { CatalogReviewSummary as Summary } from './CatalogReviewSummary';
 import { useCatalogReviewCommand } from './useCatalogReviewCommand';
 import { useOnline } from './useAdminOnline';
 import styles from './adminStyles';
 
-/** `base` is the saved draft the edit started from: a save sends only the values that differ from it, each with its base value. */
-interface ReviewBuffer { draft: ReviewDraft; base: ReviewDraft; revision: number; dirty: boolean; suggestions: string[]; fields: string[] }
+/**
+ * `base` is the saved draft the edit started from: a save sends only the values that differ from it, each with its base value.
+ * `choices` are the Update original Album step's explicit selections, kept across reads: each holds while its item shows the saved
+ * values it was made on (catalogReviewApplyModel.ts), so a saved identity decision never undoes a deselection.
+ */
+interface ReviewBuffer { draft: ReviewDraft; base: ReviewDraft; revision: number; valueRevision: number; dirty: boolean; suggestions: string[]; choices: Record<string, ApplyChoice> }
 /** Artist-entries and label suggestions are identity hints (CatalogReviewHints), never Review checklist items. */
 const hint = (field: string) => field === 'artists' || field === 'label';
 type Stage = 'draft' | 'review' | 'apply';
@@ -61,8 +66,8 @@ function ReviewProject({ id }: { id: string }) {
     latestRevision.current = item.revision;
     setConfirmed(item);
     setEditor(previous => previous && (previous.dirty || previous.revision > item.revision) ? previous
-      : { draft: item.draft, base: item.draft, revision: item.revision, dirty: false,
-        suggestions: previous?.revision === item.revision ? previous.suggestions : [], fields: previous?.revision === item.revision ? previous.fields : [] });
+      : { draft: item.draft, base: item.draft, revision: item.revision, valueRevision: item.valueRevision, dirty: false,
+        suggestions: previous?.revision === item.revision ? previous.suggestions : [], choices: previous?.choices ?? {} });
   }, [query.data]);
   useEffect(() => {
     if (!mutation.result) return;
@@ -72,7 +77,7 @@ function ReviewProject({ id }: { id: string }) {
       latestRevision.current = item.revision;
       setConfirmed(item);
       setEditor(previous => previous && (previous.revision > item.revision || previous.dirty && receipt.kind === 'cancel-analysis') ? previous
-        : { draft: item.draft, base: item.draft, revision: item.revision, dirty: false, suggestions: [], fields: [] });
+        : { draft: item.draft, base: item.draft, revision: item.revision, valueRevision: item.valueRevision, dirty: false, suggestions: [], choices: previous?.choices ?? {} });
     }
     mutation.command.acknowledge();
     void query.refetch();
@@ -94,13 +99,13 @@ function ReviewProject({ id }: { id: string }) {
   const reviewStatus = item?.state === 'applied' ? 'workbench.review_closed' : active ? 'workbench.review_analyzing'
     : item?.analysis.state === 'needsAttention' ? 'workbench.review_needs_attention' : pending.length ? 'workbench.review_pending'
       : item?.analysis.state === 'complete' ? 'workbench.review_handled' : item?.analysis.state === 'cancelled' ? 'state.cancelled' : 'workbench.review_not_started';
-  const selected = changes.filter(change => editor?.fields.includes(reviewFieldKey(change)));
   const filenames = item?.source.tracks.map(track => ({ slotId: track.slotId, filename: track.originalFileName ?? '',
     relativePath: track.originalFileName ?? t('catalog_review.filename_missing'), byteLength: null })) ?? [];
   const mutate = (action: string, payload: object) => {
     if (item) mutation.command.run(`${path}/${action}`, { expectedRevision: item.revision, ...payload }, 'POST');
   };
-  const setCurrent = (next: CatalogReview) => setEditor({ draft: next.draft, base: next.draft, revision: next.revision, dirty: false, suggestions: [], fields: [] });
+  const setCurrent = (next: CatalogReview) => setEditor({ draft: next.draft, base: next.draft, revision: next.revision, valueRevision: next.valueRevision, dirty: false, suggestions: [],
+    choices: editor?.choices ?? {} });
   const selectStage = (next: Stage) => { setStage(next); document.getElementById(`catalog-review-tab-${next}`)?.focus(); };
   const originalHref = item ? `/admin/catalog/album/${item.source.album.id}` : '';
   return <section className={styles.page}><AdminNav />
@@ -167,19 +172,19 @@ function ReviewProject({ id }: { id: string }) {
           album={editor.draft.album} disabled={savedOnly} onKeep={id => mutate('adopt', { generation: item.analysis.generation, selectedIds: [], rejectIds: [id] })} /></Suspense>}
       </div>
       <div hidden={stage !== 'apply'} role="tabpanel" id="catalog-review-panel-apply" aria-labelledby="catalog-review-tab-apply">
-        {stage === 'apply' && <Suspense fallback={<p role="status">{t('common.loading')}</p>}><CatalogReviewApply item={item} changes={changes}
-          selected={selected} disabled={savedOnly} onSelect={(key, checked) => setEditor({ ...editor, fields: checked
-            ? [...editor.fields, key] : editor.fields.filter(value => value !== key) })}
-          onConfirm={fields => setConfirmation({ kind: 'apply', item, fields, changes: structuredClone(changes.filter(change => fields.some(field => reviewFieldKey(field) === reviewFieldKey(change)))) })} /></Suspense>}
+        {stage === 'apply' && <Suspense fallback={<p role="status">{t('common.loading')}</p>}><CatalogReviewApply item={item} choices={editor.choices} disabled={savedOnly}
+          onChoose={(key, choice) => setEditor({ ...editor, choices: { ...editor.choices, [key]: choice } })} onConfirm={selection => setConfirmation({ kind: 'apply', item, selection })} /></Suspense>}
       </div>
       {confirmation && <Suspense fallback={<p role="status">{t('common.loading')}</p>}><CatalogReviewConfirmation confirmation={confirmation}
         disabled={savedOnly || confirmation.item.revision !== item.revision || confirmation.item.valueRevision !== item.valueRevision
           || item.sourceStatus !== 'current' || (confirmation.kind === 'analyze' ? !canAnalyze : !item.capabilities.apply)}
         onClose={() => setConfirmation(null)} onConfirm={() => {
               setConfirmation(null);
-              // Lookup writes values at the same revision: the value revision shown binds the apply to the draft it showed.
-              mutation.command.run(`${path}/${confirmation.kind}`, { expectedRevision: confirmation.item.revision,
-                ...(confirmation.kind === 'apply' ? { fields: confirmation.fields, expectedValueRevision: confirmation.item.valueRevision } : {}) }, 'POST');
+              // Lookup writes values at the same revision: the value revision shown binds the apply to the draft it showed, which
+              // carries the identity items and members the confirmation showed.
+              const shown = confirmation.kind === 'apply' ? confirmation.selection : null;
+              mutation.command.run(`${path}/${confirmation.kind}`, { expectedRevision: confirmation.item.revision, ...(shown ? { fields: shown.fields, memberCredits: shown.memberCredits,
+                preselections: shown.preselections, musicBrainzIds: shown.musicBrainzIds, expectedValueRevision: confirmation.item.valueRevision } : {}) }, 'POST');
             }} /></Suspense>}
     </>}
   </section>;
