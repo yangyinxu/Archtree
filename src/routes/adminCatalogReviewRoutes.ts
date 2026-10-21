@@ -5,7 +5,8 @@ import { observeMediaDeliveryFor } from '../middleware/mediaDeliveryMiddleware';
 import { runRequestWork } from '../services/platform/serverLifecycleService';
 import { createMediaAbortContext } from '../services/media/mediaDeliveryService';
 import { AdminImportError, objectId } from '../administration/import/adminImportContract';
-import { createCatalogReview, listCatalogReviews, getCatalogReview, analyzeCatalogReview, cancelCatalogReviewAnalysis, applyCatalogReview } from '../administration/catalog/adminCatalogReviewService';
+import { createCatalogReview, listCatalogReviews, getCatalogReview, analyzeCatalogReview, cancelCatalogReviewAnalysis } from '../administration/catalog/adminCatalogReviewService';
+import { applyCatalogReview, decideCatalogReviewIdentities, getCatalogReviewCandidates } from '../administration/catalog/adminCatalogReviewApply';
 import {
     adoptCatalogReviewSuggestions, chooseCatalogReviewLookup, getCatalogReviewLookup, resolveCatalogReviewLookup, retryCatalogReviewLookup, saveCatalogReview, submitCatalogReviewLookup
 } from '../administration/lookup/catalogReviewLookupRequests';
@@ -14,8 +15,9 @@ import type { CoverArtClient } from '../administration/lookup/coverArtClient';
 import type { ItunesArtworkClient } from '../administration/lookup/itunesArtworkClient';
 
 /**
- * Catalog proofreading has an independent private protocol; old import routes never accept its project IDs. `artwork` and
- * `itunesArtwork` supply the Cover Art Archive and iTunes artwork clients of lookup candidate previews (tests inject them).
+ * Catalog proofreading has an independent private protocol; old import routes never accept its project IDs. Applying a review and
+ * its identity rows and decisions live in adminCatalogReviewApply.ts. `artwork` and `itunesArtwork` supply the Cover Art Archive
+ * and iTunes artwork clients of lookup candidate previews (tests inject them).
  */
 export function createAdminCatalogReviewRouter(artwork: () => CoverArtClient = defaultLookupArtworkClient, itunesArtwork: () => ItunesArtworkClient = defaultItunesArtworkClient) {
     const router = express.Router();
@@ -32,12 +34,15 @@ export function createAdminCatalogReviewRouter(artwork: () => CoverArtClient = d
     });
     // A save carries each changed value and its base, so up to two copies of a 48 KB draft (as an import field save); a lookup
     // submission, retry or choice is a few fields (8 KB; Express routes ignore case, so the selectors do too); conflict answers
-    // carry up to 406 bases, member Artist entries and an expected tracklist among them (512 KB); every other body stays at 96 KB.
+    // carry up to 406 bases, member Artist entries and an expected tracklist among them (512 KB); an apply or identity decisions
+    // carry up to 513 preselections or decisions and 513 ID writes besides the selected fields and members (768 KB); every other
+    // body stays at 96 KB.
     const json = express.json({ limit: '96kb', strict: true }), fieldSaveJson = express.json({ limit: '160kb', strict: true }), lookupJson = express.json({ limit: '8kb', strict: true });
-    const answersJson = express.json({ limit: '512kb', strict: true });
+    const answersJson = express.json({ limit: '512kb', strict: true }), identityJson = express.json({ limit: '768kb', strict: true });
     router.use('/catalog-reviews', (req, res, next) => (req.method === 'PATCH' && /^\/[^/]+\/?$/.test(req.path) ? fieldSaveJson
         : req.method === 'POST' && /^\/[^/]+\/lookup(?:\/(?:retry|choose))?\/?$/i.test(req.path) ? lookupJson
-            : req.method === 'POST' && /^\/[^/]+\/lookup\/resolve\/?$/i.test(req.path) ? answersJson : json)(req, res, next));
+            : req.method === 'POST' && /^\/[^/]+\/lookup\/resolve\/?$/i.test(req.path) ? answersJson
+                : req.method === 'POST' && /^\/[^/]+\/(?:apply|decisions)\/?$/i.test(req.path) ? identityJson : json)(req, res, next));
     const run = (handler: (actor: string, req: express.Request) => Promise<unknown>, status = 200): express.RequestHandler => async (req, res) => {
         try {
             const value = await runRequestWork(req, () => handler((req as AuthenticatedRequest).auth!.userId, req));
@@ -56,7 +61,11 @@ export function createAdminCatalogReviewRouter(artwork: () => CoverArtClient = d
     router.post('/catalog-reviews/:id/analyze', asyncHandler(run((actor, req) => analyzeCatalogReview(actor, req.params.id, req.body), 202)));
     router.post('/catalog-reviews/:id/adopt', asyncHandler(run((actor, req) => adoptCatalogReviewSuggestions(actor, req.params.id, req.body))));
     router.post('/catalog-reviews/:id/cancel-analysis', asyncHandler(run((actor, req) => cancelCatalogReviewAnalysis(actor, req.params.id, req.body))));
+    // Applying the selected saved values, and the identity rows and decisions an apply of Artist entries and the label waits for
+    // (adminCatalogReviewApply.ts); the Web does not read candidates or save decisions yet.
     router.post('/catalog-reviews/:id/apply', asyncHandler(run((actor, req) => applyCatalogReview(actor, req.params.id, req.body))));
+    router.get('/catalog-reviews/:id/candidates', asyncHandler(run((actor, req) => getCatalogReviewCandidates(actor, req.params.id))));
+    router.post('/catalog-reviews/:id/decisions', asyncHandler(run((actor, req) => decideCatalogReviewIdentities(actor, req.params.id, req.body))));
     router.get('/catalog-reviews/:id/lookup', asyncHandler(run((actor, req) => getCatalogReviewLookup(actor, req.params.id))));
     router.post('/catalog-reviews/:id/lookup', asyncHandler(run((actor, req) => submitCatalogReviewLookup(actor, req.params.id, req.body), 202)));
     router.post('/catalog-reviews/:id/lookup/retry', asyncHandler(run((actor, req) => retryCatalogReviewLookup(actor, req.params.id, req.body), 202)));

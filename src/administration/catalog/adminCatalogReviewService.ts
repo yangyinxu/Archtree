@@ -2,14 +2,14 @@
  * Exports
  *   Functions: catalogReviewDto, catalogReviewEntryKey, catalogReviewCredits, isLegacyCatalogReviewDraft,
  *              parseCatalogReviewDraft, convertLegacyCatalogReview, catalogReviewOriginalFilename,
- *              readCatalogReviewSource, createCatalogReview, getCatalogReview, parseCatalogReviewChanges,
- *              editCatalogReview, analyzeCatalogReview, adoptCatalogReview, cancelCatalogReviewAnalysis,
- *              parseCatalogReviewFields, applyCatalogReview, listCatalogReviews
+ *              readCatalogReviewSubjects, readableCatalogCapture, readCatalogReviewSource, createCatalogReview,
+ *              getCatalogReview, parseCatalogReviewChanges, editCatalogReview, analyzeCatalogReview,
+ *              adoptCatalogReview, cancelCatalogReviewAnalysis, parseCatalogReviewFields, listCatalogReviews
  *   Constants: catalogReviewProjectPolicy
  * Internal
  *   Functions: fail, missing, conflict, reviewId, currentRevision, publicReceipt, response,
  *              readCatalogReviewCredits, isObject, exactly, reviewReadOnlyPath, membership, tracksForAlbum,
- *              mediaEvidence, catalogReviewSourceStatus, storedDate
+ *              mediaEvidence, capturedSubjectCredits, catalogReviewSourceStatus
  *   Constants: reviewFilter, contextRoles, policy, filters
  * @end-catalog */
 
@@ -17,24 +17,19 @@ import { randomUUID } from 'node:crypto';
 import { ObjectId, type ClientSession } from 'mongodb';
 import { getDb } from '../../infrastructure/database';
 import { readyAudioStorageFilter } from '../../utils/audioStorageKey';
+import { keepableMusicBrainzId } from '../../utils/musicBrainzId';
 import { readyArtistLifecycleFilter } from '../../services/catalog/artistReferenceFenceService';
 import { readyOrganizationLifecycleFilter } from '../../services/catalog/organizationReferenceFenceService';
-import { touchReadyAlbumReferences } from '../../services/catalog/albumReferenceFenceService';
-import { touchReadyAudioTrackReferences } from '../../services/audio/audioTrackReferenceFenceService';
-import { orderedAlbumTrackIds } from '../../services/catalog/albumTrackLinkService';
-import { withCatalogSearchUpdate } from '../../utils/catalogSearch';
 import type { CatalogCredit } from '../../models/catalogCredit';
 import { adminCatalogEditableFields, adminCatalogItemRevision, readAdminCatalogRecord } from './adminCatalogService';
 import { ADMIN_IMPORT_LIMITS as LIMITS, AdminImportError, cleanText, exact, invalidImport, objectId, parseImportDate, record, uuid, type ImportDate, type ImportManifest, type ImportWorkbenchFilter } from '../import/adminImportContract';
-import { CATALOG_REVIEW_DRAFT_V3, DRAFT_V2, DRAFT_V2_LIMITS, derivedEntryKey, draftBytes, hasOwn, parseDiscNumber, parseDraftTitle, parseTrackNumber, sameDraftValue, type ImportArtistEntry, type ImportDraftV2, type ImportLabelEntry } from '../import/adminImportDraft';
-import { applyAdministratorChanges, boundDraftChanges, boundedJson, draftWithinSizeLimit, originOf, parseDraftChanges, storedDraftV2, type ImportDraftChange, type ImportDraftPath } from '../import/adminImportValueState';
-import { adminImportDetail, adoptAdminProjectSuggestions, analyzeAdminProject, idleAnalysis, importCollection, importDigest, importLookupRecord, mutateAdminProject, parseAdminProjectMutation, withImportAdmin, type AdminImportDocument, type AdminProjectPolicy, type ProjectReceipt } from '../import/adminImportService';
-import { metadataLookupConfiguration } from '../../config/metadataLookup';
-import { lookupRunActive } from '../lookup/metadataLookupRecord';
-import { lookupAnswersNeeded } from '../lookup/lookupValueApplication';
+import { CATALOG_REVIEW_DRAFT_V3, DRAFT_V2, DRAFT_V2_LIMITS, derivedEntryKey, draftBytes, foldImportName, hasOwn, parseDiscNumber, parseDraftTitle, parseTrackNumber, sameDraftValue, type ImportArtistEntry, type ImportDraftV2, type ImportLabelEntry } from '../import/adminImportDraft';
+import { applyAdministratorChanges, boundDraftChanges, boundedJson, draftWithinSizeLimit, parseDraftChanges, storedDraftV2, type ImportDraftChange, type ImportDraftPath } from '../import/adminImportValueState';
+import { adminImportDetail, adoptAdminProjectSuggestions, analyzeAdminProject, idleAnalysis, importCollection, importDigest, mutateAdminProject, parseAdminProjectMutation, withImportAdmin, type AdminImportDocument, type AdminProjectPolicy, type ProjectReceipt } from '../import/adminImportService';
+import { importCandidateProjection, importCandidateRevision, readyImportCandidate } from '../import/adminImportIdentity';
 import { OpenAiImportAnalysisProvider, type ImportAnalysisProvider } from '../import/adminImportProvider';
-import { catalogReviewAppliedView, catalogReviewCappedDraft, catalogReviewDraftView, catalogReviewSourceDisc, catalogReviewSourceView, importDraftV2View, importDraftVersion, importDraftWritable, importProjectV2View, LEGACY_REVIEW_RECEIPT_KINDS, legacyManifestView, legacyReceiptsView } from '../import/adminImportDraftCompat';
-import { CATALOG_REVIEW_MAX_FIELDS, type CatalogReviewDetail, type CatalogReviewField, type CatalogReviewReceipt, type CatalogReviewResponse, type CatalogReviewSource, type CatalogReviewWorkbench } from './adminCatalogReviewContract';
+import { catalogReviewAppliedView, catalogReviewCappedDraft, catalogReviewDraftView, catalogReviewSourceView, importDraftV2View, importDraftVersion, importDraftWritable, importProjectV2View, LEGACY_REVIEW_RECEIPT_KINDS, legacyManifestView, legacyReceiptsView } from '../import/adminImportDraftCompat';
+import { CATALOG_REVIEW_MAX_FIELDS, type CatalogReviewCapturedSubject, type CatalogReviewDetail, type CatalogReviewField, type CatalogReviewReceipt, type CatalogReviewResponse, type CatalogReviewSource, type CatalogReviewWorkbench } from './adminCatalogReviewContract';
 
 const fail = (status: number, code: string): never => { throw new AdminImportError(status, code); };
 const missing = (): never => fail(404, 'ADMIN_CATALOG_REVIEW_NOT_FOUND');
@@ -73,10 +68,11 @@ export const catalogReviewEntryKey = (reviewId: string, creditId: string, slotId
 /**
  * Read-only review context from an owner's validated stored Credits, in stored order (the byline's order, never regrouped):
  * each primary or featured Artist Credit with a resolved non-empty name, at most 20, and the first label Credit with a resolved
- * name. As in the catalog byline, a repeated name is shown once, at its first Credit. A join phrase is kept only while the very
- * next stored Credit is also an entry, so an omitted Credit never leaves a phrase written for another name, and the last entry's
- * phrase is null. Keys are deterministic per review and Credit, and per member (`slotId`) for a member's entries, so no two lists
- * of one review share a key. Entries and the label carry the credited record's MusicBrainz ID only from `musicBrainzIds` (keyed
+ * name. A name repeated in any letter case is shown once, at its first Credit (Artist entries may not share a folded name); such
+ * a list is then not complete, so a review never applies it. A join phrase is kept only while the very next stored Credit is also
+ * an entry, so an omitted Credit never leaves a phrase written for another name, and the last entry's phrase is null. Keys are
+ * deterministic per review and Credit, and per member (`slotId`) for a member's entries, so no two lists of one review share a
+ * key. Entries and the label carry the credited record's MusicBrainz ID only from `musicBrainzIds` (keyed
  * `subjectType:subjectId`); without it they carry none. Pure.
  */
 export function catalogReviewCredits(reviewId: string, credits: readonly CatalogCredit[] | null, artistNames: ReadonlyMap<string, string>,
@@ -86,7 +82,7 @@ export function catalogReviewCredits(reviewId: string, credits: readonly Catalog
     const entries = new Set<number>(), shown = new Set<string>();
     stored.forEach((credit, index) => {
         const name = nameOf(credit);
-        if (entries.size < DRAFT_V2_LIMITS.artists && credit.subjectType === 'artist' && contextRoles.has(credit.role) && name && !shown.has(name)) { entries.add(index); shown.add(name); }
+        if (entries.size < DRAFT_V2_LIMITS.artists && credit.subjectType === 'artist' && contextRoles.has(credit.role) && name && !shown.has(foldImportName(name))) { entries.add(index); shown.add(foldImportName(name)); }
     });
     const artists = [...entries].map((index): ImportArtistEntry => {
         const credit = stored[index];
@@ -193,8 +189,36 @@ function mediaEvidence(track: any): string {
         representation: representation ? [representation.objectKey, representation.etag, representation.versionId, representation.byteLength] : null });
 }
 /**
+ * The ready credited Artists and Organizations of `credits`, keyed `subjectType:subjectId`: one bounded read per kind, each record
+ * read through the import candidate projection so its revision is the one identity decisions bind. A record not ready is absent.
+ */
+export async function readCatalogReviewSubjects(credits: readonly Pick<CatalogCredit, 'subjectType' | 'subjectId'>[], session: ClientSession): Promise<Map<string, CatalogReviewCapturedSubject>> {
+    const subjects = new Map<string, CatalogReviewCapturedSubject>();
+    for (const kind of ['artist', 'organization'] as const) {
+        const ids = [...new Set(credits.filter(credit => credit.subjectType === kind).map(credit => credit.subjectId))];
+        if (!ids.length) continue;
+        // The ready filters hold their own `$or`, so this literal never adds one.
+        const rows = await getDb()!.collection(kind === 'artist' ? 'artists' : 'organizations').find({ _id: { $in: ids.map(id => new ObjectId(id)) }, ...readyImportCandidate(kind) },
+            { session, projection: importCandidateProjection }).limit(ids.length).maxTimeMS(3_000).toArray();
+        for (const row of rows) subjects.set(`${kind}:${String(row._id)}`, { name: (adminCatalogEditableFields(kind, row).name as string).trim(), musicBrainzId: keepableMusicBrainzId(row.musicBrainzId), revision: importCandidateRevision(row) });
+    }
+    return subjects;
+}
+/** A stored capture this release can read: one member per source track. */
+export const readableCatalogCapture = (doc: AdminImportDocument) => isObject(doc.catalogCapture) && isObject(doc.catalogCapture.album)
+    && Array.isArray(doc.catalogCapture.members) && doc.catalogCapture.members.length === (doc.catalogSource?.tracks.length ?? -1);
+/** The captured Credits of a readable capture that name a record ready at capture (`subject` set), Album and members alike. */
+function capturedSubjectCredits(doc: AdminImportDocument): { subjectType: 'artist' | 'organization'; subjectId: string; revision: string }[] {
+    const lists = [doc.catalogCapture!.album.credits, ...doc.catalogCapture!.members.map(member => isObject(member) ? member.credits : null)];
+    return lists.flatMap(list => Array.isArray(list) ? list : []).flatMap(credit => isObject(credit) && (credit.subjectType === 'artist' || credit.subjectType === 'organization')
+        && objectId(credit.subjectId) && isObject(credit.subject) && typeof credit.subject.revision === 'string'
+        ? [{ subjectType: credit.subjectType, subjectId: credit.subjectId, revision: credit.subject.revision }] : []);
+}
+/**
  * Readback distinguishes missing/unready targets from a stale approved snapshot; it never rebases it. A current source comes with
- * the Album and its member records as read in `session`, the members in source order.
+ * the Album and its member records as read in `session`, the members in source order. A review captured for metadata lookup
+ * (format 3, readable capture) is also changed when an Artist or Organization its captured Credits name (a record ready at
+ * capture) is missing, not ready or at another revision: applying binds those records, and metadata lookup ends an active run then.
  */
 export async function readCatalogReviewSource(doc: AdminImportDocument, session: ClientSession):
     Promise<{ status: 'current'; album: any; tracks: any[] } | { status: 'changed' | 'unavailable' }> {
@@ -211,6 +235,10 @@ export async function readCatalogReviewSource(doc: AdminImportDocument, session:
         const current = byId.get(track.id);
         if (!current) return { status: 'unavailable' };
         if (adminCatalogItemRevision('audioTrack', current) !== track.revision || mediaEvidence(current) !== doc.catalogEvidence?.[track.id]) return { status: 'changed' };
+    }
+    if (importDraftVersion(doc) === CATALOG_REVIEW_DRAFT_V3 && readableCatalogCapture(doc)) {
+        const captured = capturedSubjectCredits(doc), subjects = await readCatalogReviewSubjects(captured, session);
+        if (captured.some(credit => subjects.get(`${credit.subjectType}:${credit.subjectId}`)?.revision !== credit.revision)) return { status: 'changed' };
     }
     return { status: 'current', album, tracks: source.tracks.map(track => byId.get(track.id)!) };
 }
@@ -251,8 +279,8 @@ export async function createCatalogReview(actor: string, raw: unknown): Promise<
     });
 }
 export const getCatalogReview = (actor: string, id: string) => withImportAdmin(actor, async session => {
-    // The server-only capture is never shown, so the read leaves it out.
-    const doc = await importCollection().findOne({ _id: reviewId(id), ...reviewFilter }, { session, projection: { catalogCapture: 0 } }); return doc ? response(doc, actor, null, session) : missing();
+    // The DTO is an allowlist, so the server-only capture is read only for the source check (the Artists and Organizations it binds).
+    const doc = await importCollection().findOne({ _id: reviewId(id), ...reviewFilter }, { session }); return doc ? response(doc, actor, null, session) : missing();
 });
 /**
  * The changes of a per-path review save: only the Album title and date and each Track's title, Disc Number and Track Number. A
@@ -312,76 +340,19 @@ export const cancelCatalogReviewAnalysis = (actor: string, id: string, raw: unkn
 }, policy);
 
 /**
- * Apply selection is separate from suggestion adoption and excludes identity/association/storage fields, Credits and labels.
- * Artist-entries and label suggestions are identity hints and never change Credits.
+ * Apply selection is separate from suggestion adoption and excludes identity/association/storage fields: the Album's title, date,
+ * Artist entries, label and expected tracklist, and each Track's title, Disc Number and Track Number, each once and at most
+ * CATALOG_REVIEW_MAX_FIELDS. An empty selection is admitted only with `allowEmpty` (an apply that selects members instead).
  */
-export function parseCatalogReviewFields(raw: unknown): CatalogReviewField[] {
-    if (!Array.isArray(raw) || !raw.length || raw.length > CATALOG_REVIEW_MAX_FIELDS) return invalidImport();
+export function parseCatalogReviewFields(raw: unknown, options: { allowEmpty?: boolean } = {}): CatalogReviewField[] {
+    if (!Array.isArray(raw) || (!raw.length && !options.allowEmpty) || raw.length > CATALOG_REVIEW_MAX_FIELDS) return invalidImport();
     const seen = new Set<string>();
     return raw.map(value => {
         const item = record(value); exact(item, ['scope', 'slotId', 'field']);
-        if (item.scope === 'album' ? item.slotId !== null || !['title', 'releaseDate'].includes(item.field as string) : item.scope !== 'track' || !uuid(item.slotId) || !['title', 'discNumber', 'trackNumber'].includes(item.field as string)) return invalidImport();
+        if (item.scope === 'album' ? item.slotId !== null || !['title', 'releaseDate', 'artists', 'label', 'expectedTracklist'].includes(item.field as string) : item.scope !== 'track' || !uuid(item.slotId) || !['title', 'discNumber', 'trackNumber'].includes(item.field as string)) return invalidImport();
         const key = `${item.scope}:${item.slotId}:${item.field}`; if (seen.has(key)) return invalidImport(); seen.add(key);
         return item as unknown as CatalogReviewField;
     });
-}
-const storedDate = (date: ImportDate | null) => date ? { year: date.year, ...(date.month === null ? {} : { month: date.month }), ...(date.day === null ? {} : { day: date.day }) } : {};
-/**
- * Writes the selected saved values after every source check, in one transaction with the automatic Album order and the receipt.
- * A Disc Number applies only to a track that captured one, and is written as a catalog edit writes it. Refused while analysis or a
- * metadata lookup run that can still send a request (queued, running or waiting for an automatic retry, within its grant, while
- * lookup is available) is active. Before any catalog write, a selected value with an unanswered lookup conflict
- * (lookupAnswersNeeded; a tie or an unselected conflict never blocks) is 409 ADMIN_IMPORT_REVIEW_REQUIRED, and a selected Disc or
- * Track Number that lookup filled (automatic: a pairing wrote it) is invalid input until the expected tracklist can be applied with
- * it.
- */
-export function applyCatalogReview(actor: string, id: string, raw: unknown): Promise<CatalogReviewResponse> {
-    const body = parseAdminProjectMutation(raw, ['fields']), selected = parseCatalogReviewFields(body.fields);
-    return mutateAdminProject(actor, id, body, 'apply', async (doc, session) => {
-        if (['queued', 'running'].includes(doc.analysis.state) || doc.analysis.chunks.some(chunk => chunk.state === 'inflight')) return fail(409, 'ADMIN_IMPORT_ANALYSIS_ACTIVE');
-        // The run's own state, read in this transaction, decides, never the review's lookup gate: an earlier release's worker ends a
-        // review run without updating that gate. A run past its grant, or while lookup is unavailable, never sends again, so it never
-        // holds apply (turning imports off cannot leave a review unappliable). A run can only become active through a change that
-        // writes the review document, which this apply replaces, so a concurrent change conflicts and is retried.
-        const run = await importLookupRecord(doc._id, session, { state: 1, grantExpiresAt: 1, run: 1, applied: 1 });
-        if (lookupRunActive(run, new Date(), metadataLookupConfiguration().available)) return fail(409, 'ADMIN_IMPORT_LOOKUP_ACTIVE');
-        const needed = new Set<string>(lookupAnswersNeeded(run, doc, { append: false }).conflicts);
-        const source = doc.catalogSource!, album = await readAdminCatalogRecord('album', source.album.id, session);
-        if (!album || adminCatalogItemRevision('album', album) !== source.album.revision) return conflict();
-        const tracks = await tracksForAlbum(album, session);
-        if (importDigest(membership(album)) !== importDigest(source.tracks.map(track => track.id))) return conflict();
-        const byId = new Map(tracks.map(track => [String(track._id), track]));
-        for (const track of source.tracks) if (!byId.has(track.id) || adminCatalogItemRevision('audioTrack', byId.get(track.id)) !== track.revision || mediaEvidence(byId.get(track.id)) !== doc.catalogEvidence?.[track.id]) return conflict();
-        const draft = storedDraftV2(doc), albumPatch: Record<string, unknown> = {}, trackPatches = new Map<string, Record<string, unknown>>();
-        for (const field of selected) {
-            const path = field.scope === 'album' ? `album.${field.field}` : `tracks.${field.slotId}.${field.field}`;
-            if (needed.has(path)) return fail(409, 'ADMIN_IMPORT_REVIEW_REQUIRED');
-            // Only lookup writes automatic values in a review: such a number came from a pairing, applied with its tracklist later.
-            if ((field.field === 'discNumber' || field.field === 'trackNumber') && originOf(doc.draftOrigins, path) === 'automatic') return invalidImport();
-            if (field.scope === 'album') albumPatch[field.field] = field.field === 'title' ? cleanText(draft.album.title, 300) : storedDate(draft.album.releaseDate);
-            else {
-                const original = source.tracks.find(track => track.slotId === field.slotId), trackDraft = draft.tracks.find(track => track.slotId === field.slotId);
-                if (!original || !trackDraft || (field.field === 'discNumber' && !catalogReviewSourceDisc(original))) return invalidImport();
-                const patch = trackPatches.get(original.id) ?? {};
-                patch[field.field] = field.field === 'title' ? cleanText(trackDraft.title, 300) : field.field === 'discNumber' ? parseDiscNumber(trackDraft.discNumber) : trackDraft.trackNumber;
-                trackPatches.set(original.id, patch);
-            }
-        }
-        // Read-only revision checks are followed by canonical write fences so concurrent deletes/legacy writers conflict.
-        await touchReadyAlbumReferences([source.album.id], session);
-        await touchReadyAudioTrackReferences(source.tracks.map(track => track.id), session);
-        for (const [trackId, patch] of trackPatches) {
-            // A Disc Number is stored with its catalog-edit source; null removes both keys, as a catalog edit does.
-            const { discNumber: disc, ...rest } = patch, hasDisc = hasOwn(patch, 'discNumber');
-            await getDb()!.collection('audioTracks').updateOne({ _id: new ObjectId(trackId), ...readyAudioStorageFilter }, {
-                $set: { ...withCatalogSearchUpdate(rest, 'title'), ...(hasDisc && disc !== null ? { discNumber: disc, discNumberSource: 'admin-catalog' } : {}), updatedAt: new Date() },
-                ...(hasDisc && disc === null ? { $unset: { discNumber: '', discNumberSource: '' } } : {}),
-                $inc: { adminRevision: 1, referenceRevision: 1 } }, { session });
-        }
-        if (selected.some(field => field.field === 'trackNumber' || field.field === 'discNumber')) albumPatch.audioTrackIds = await orderedAlbumTrackIds(session, source.tracks.map(track => track.id));
-        if (Object.keys(albumPatch).length) await getDb()!.collection('albums').updateOne({ _id: album._id }, { $set: { ...withCatalogSearchUpdate(albumPatch, 'title'), updatedAt: new Date() }, $inc: { adminRevision: 1, referenceRevision: 1 } }, { session });
-        doc.catalogApplied = { operationId: body.operationId, at: new Date().toISOString(), fields: selected };
-    }, policy);
 }
 
 const filters: Record<ImportWorkbenchFilter, Record<string, unknown>> = {

@@ -1,8 +1,9 @@
 /**
  * Module boundaries metadata lookup for existing-Album reviews relies on: lookup loads the review capture and service, so neither
- * may load the lookup service (or the review lookup requests) at run time, though the review service loads value application to
- * read what applying waits for; a review's lookup evidence, which the lookup record loads, and its value rules stay pure: no
- * database and no path back to the record. Type-only imports are erased and never count.
+ * they nor the review's apply, identity and Credit modules may load the lookup service (or the review lookup requests) at run
+ * time, though applying loads value application to read what it waits for; a review's lookup evidence, which the lookup record
+ * loads, its value rules, the Credits an apply rebuilds and the records it creates stay pure: no database and no path back to the
+ * record. Type-only imports are erased and never count.
  */
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
@@ -39,17 +40,31 @@ const reviewValues = 'src/administration/lookup/lookupReviewValues.ts';
 const valueApplication = 'src/administration/lookup/lookupValueApplication.ts';
 const database = 'src/infrastructure/database.ts';
 
-test('the review service and its capture never load the lookup service or the review lookup requests, which load them', () => {
-    for (const start of ['src/administration/catalog/adminCatalogReviewService.ts', 'src/administration/catalog/adminCatalogReviewCapture.ts']) {
+const reviewService = 'src/administration/catalog/adminCatalogReviewService.ts';
+const reviewApply = 'src/administration/catalog/adminCatalogReviewApply.ts';
+const reviewIdentity = 'src/administration/catalog/adminCatalogReviewIdentity.ts';
+const reviewCredits = 'src/administration/catalog/adminCatalogReviewCredits.ts';
+const newRecords = 'src/administration/catalog/adminNewCatalogRecords.ts';
+
+test('the review service, its capture, apply, identities and Credits never load the lookup service or the review lookup requests, which load them', () => {
+    for (const start of [reviewService, 'src/administration/catalog/adminCatalogReviewCapture.ts', reviewApply, reviewIdentity, reviewCredits]) {
         const loaded = reachable(start);
         assert.deepEqual([loaded.has(lookupService), loaded.has(reviewLookupRequests)], [false, false], start);
     }
     // The reverse direction is the intended one: lookup admits a review through its capture, and the requests use the review policy.
     assert.ok(runtimeImports(lookupService).includes('src/administration/catalog/adminCatalogReviewCapture.ts'));
-    assert.ok(runtimeImports(reviewLookupRequests).includes('src/administration/catalog/adminCatalogReviewService.ts'));
-    // The review service reads what applying waits for from value application, which never loads the review service back.
-    assert.ok(runtimeImports('src/administration/catalog/adminCatalogReviewService.ts').includes(valueApplication));
-    assert.equal(reachable(valueApplication).has('src/administration/catalog/adminCatalogReviewService.ts'), false);
+    assert.ok(runtimeImports(reviewLookupRequests).includes(reviewService));
+    // Applying reads what it waits for from value application, which never loads the review service or the apply back.
+    assert.ok(runtimeImports(reviewApply).includes(valueApplication));
+    assert.equal(runtimeImports(reviewService).includes(valueApplication), false);
+    assert.deepEqual([reachable(valueApplication).has(reviewService), reachable(valueApplication).has(reviewApply)], [false, false]);
+    // The identity model never loads the review service or its capture.
+    assert.deepEqual([reachable(reviewIdentity).has(reviewService), reachable(reviewIdentity).has('src/administration/catalog/adminCatalogReviewCapture.ts')], [false, false]);
+});
+
+test('the Credits an apply rebuilds and the records it creates are pure: no database', () => {
+    for (const start of [reviewCredits, newRecords]) assert.equal(reachable(start).has(database), false, start);
+    assert.ok(runtimeImports('src/administration/import/adminImportCatalogCommit.ts').includes(newRecords));
 });
 
 test('a review\'s value rules are pure: no database, no lookup record, value application or lookup service', () => {
@@ -69,5 +84,5 @@ test('the reader skips type-only imports and follows value imports, so the check
     assert.match(evidenceSource, /import type \{[^}]*\} from '\.\.\/import\/adminImportService'/);
     assert.equal(runtimeImports(reviewEvidence).includes('src/administration/import/adminImportService.ts'), false);
     assert.ok(runtimeImports(reviewEvidence).includes('src/administration/lookup/lookupQueryPlanner.ts'));
-    assert.ok(reachable('src/administration/catalog/adminCatalogReviewService.ts').has(database));
+    assert.ok(reachable(reviewService).has(database));
 });

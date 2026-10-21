@@ -40,6 +40,11 @@ Product behavior remains defined in [business-rules.md](../business-rules.md).
   - [Credits and identities](#credits-and-identities)
   - [Appending to an Album](#appending-to-an-album)
   - [Verification](#verification-6)
+- [Existing-Album completion](#existing-album-completion)
+  - [Credits](#credits)
+  - [Member Credits](#member-credits)
+  - [Identities](#identities)
+  - [Verification](#verification-7)
 <!-- @end-catalog -->
 
 ## Catalog application and presentation boundaries
@@ -396,6 +401,11 @@ only while the same Credit still follows it. For Album Credits `A` (phrase
 - Role changes keep `creditId` and order, so every phrase stays. The explicit
   replacements, the administrator `PATCH` and the Content Manager phrase form,
   store exactly the phrases they are given.
+- An applied existing-Album review rebuilds the Album's or a member's list
+  through `keepJoinPhrasesWithSuccessors`: every Credit keeps its stored phrase
+  only while the same Credit still follows it, and an entry's own phrase
+  replaces it only where the next Credit is the next entry (see
+  [Existing-Album completion](#existing-album-completion)).
 - The Web catalog editor mirrors the rule locally: it shows no phrase input
   for the last Credit, removing a Credit clears the phrase before it, and adding
   one clears the previous last Credit's phrase.
@@ -503,8 +513,10 @@ tracklist of the release that an applied existing-Album review used. It is
 administrator information, shown on the Web Album page and in an append's
 summary and confirmation. `src/services/catalog/albumExpectedTracklist.ts`
 validates it and derives its rows; an existing-Album review admitted to
-metadata lookup captures a private copy of its rows, and an import that appends
-to the Album reads it for its Review and publish summary (see
+metadata lookup captures a private copy of its rows, applying such a review
+sets or replaces it (see
+[Existing-Album completion](#existing-album-completion)), and an import that
+appends to the Album reads it for its Review and publish summary (see
 [Appending to an Album](#appending-to-an-album)). Its product rules are under
 Catalog Visibility and Administration in
 [business-rules.md](../business-rules.md).
@@ -545,10 +557,15 @@ revision are unaffected; an append's summary reads it apart from candidates.
 
 ### Expected tracklist writers and privacy
 
-- No writer sets it yet; a later applied existing-Album review will set or
-  replace it. An explicit catalog edit clears it: `editAdminCatalogItem` accepts
-  a top-level `clearExpectedTracklist: true` on an Album only, compares the full
-  Album revision first, refuses with
+- Only an applied existing-Album review sets or replaces it
+  (`src/administration/catalog/adminCatalogReviewApply.ts`): the rows its
+  applied release offers, with `source` from the application (`itunes` for an
+  iTunes-only candidate) and `appliedAt` the apply time, built by
+  `expectedTracklistForStorage` and `$set` in the Album update of the apply
+  transaction, after the placement check (`expectedTracklistPlaced` against the
+  stored pairing). An explicit catalog edit clears it: `editAdminCatalogItem`
+  accepts a top-level `clearExpectedTracklist: true` on an Album only, compares
+  the full Album revision first, refuses with
   `409 ADMIN_CATALOG_EXPECTED_TRACKLIST_ABSENT` when nothing (or `null`) is
   stored, and otherwise `$unset`s the key, a malformed value included, in the
   same update and transaction as its receipt. A failed receipt aborts the
@@ -559,8 +576,8 @@ revision are unaffected; an append's summary reads it apart from candidates.
   capture, and never writes the Album. Metadata lookup may fill that draft
   value (when it is `null`) or propose another as a conflict, only in the
   review's private draft, through a single pairing of the members with the
-  applied release; no review writes it to the Album yet (see the catalog review
-  routes and Value application in
+  applied release; only applying the review writes it to the Album (see the
+  catalog review routes and Value application in
   [admin-workbench.md](../features/admin-workbench.md)).
 - Import publication, appends, Credit edits and catalog edits `$set` only
   named keys. `Album.updateById` and `Album.updateCoverArtById` refuse the key
@@ -597,8 +614,9 @@ revision are unaffected; an append's summary reads it apart from candidates.
   its row without a file there.
 
 Rollback: older releases ignore the field (explicit DTOs and `$set`-only
-writers), and no Album stores one before a writer exists. A release before the
-Album Tracks list shows it neither returns its rows nor accepts a clear.
+writers), so a tracklist an applied review stored stays, unread, after a
+rollback past its writer. A release before the Album Tracks list shows it
+neither returns its rows nor accepts a clear.
 
 ### Expected tracklist verification
 
@@ -667,9 +685,9 @@ listening status, Room media (service and HTTP routes) and a Room's state.
 ## MusicBrainz IDs
 
 An Artist or Organization may keep one MusicBrainz ID (`musicBrainzId`) as
-private provenance for administrator imports. Product rules are in
-[business-rules.md](../business-rules.md) (Catalog Visibility and
-Administration; Administrator Album Imports).
+private provenance for administrator imports and existing-Album reviews.
+Product rules are in [business-rules.md](../business-rules.md) (Catalog
+Visibility and Administration; Administrator Album Imports).
 
 ### Storage and format
 
@@ -696,15 +714,17 @@ record frees its ID. Startup with existing duplicates fails closed
 
 ### Writers and privacy
 
-Only two writers set the field: an explicit existing-catalog edit
+Only three writers set the field: an explicit existing-catalog edit
 (`src/administration/catalog/adminCatalogService.ts`, which refuses an ID
 another record of the kind holds in any lifecycle state with
 `409 ADMIN_CATALOG_MUSICBRAINZ_ID_IN_USE`, also when the unique index refuses a
-concurrent setter) and import publication (below). `Artist.updateById` and
-`Artist.updateCoverArtById` drop the key silently, and `Organization.updateById`
-writes only its allowlisted fields, so legacy and Content Manager updates cannot
-set it. Every listener v1, legacy content, Search, Follow, Page, Library,
-Playlist, social and Room projection is allowlisted and never includes it.
+concurrent setter), import publication (below) and an applied existing-Album
+review (see [Existing-Album completion](#existing-album-completion)).
+`Artist.updateById` and `Artist.updateCoverArtById` drop the key silently, and
+`Organization.updateById` writes only its allowlisted fields, so legacy and
+Content Manager updates cannot set it. Every listener v1, legacy content,
+Search, Follow, Page, Library, Playlist, social and Room projection is
+allowlisted and never includes it.
 
 The admin catalog revision counts a stored ID (malformed ones included, which
 the editor shows as an empty, repairable field) only when one is stored, so
@@ -715,8 +735,8 @@ existing-Album review stored as format 3 for metadata lookup records, privately
 for administrators, the ID that each Artist and Organization its captured
 Credits name keeps, and never writes one. Metadata lookup may add a release's
 IDs to that review's Artist entries and label, or propose other ones as
-conflicts, only in the review's private draft; no review writes an ID to an
-Artist or Organization yet.
+conflicts, only in the review's private draft; only applying the review records
+or replaces an ID on an Artist or Organization.
 
 ### Verification
 
@@ -739,7 +759,9 @@ listeners and an administrator in User view;
 `test/rooms/roomMediaDiscovery.integration.ts` scan share cards, Room media
 (service and HTTP routes) and a Room's state, for a listener and an
 administrator in User view. Import cases are listed under
-[Import publication](#import-publication).
+[Import publication](#import-publication), and applied review cases (the third
+writer, and listener pages of the records it creates or records an ID on)
+under [Existing-Album completion](#existing-album-completion).
 
 ## Import publication
 
@@ -779,7 +801,10 @@ the MusicBrainz IDs it froze (see [MusicBrainz IDs](#musicbrainz-ids)).
   `legacyTrackArtistIdsFromCredits`.
 - A new Artist or label Organization takes the draft's visibility and gets its
   catalog search projection; a new Organization has `organizationType`
-  `label` and an empty description. A reused Artist or Organization is fenced
+  `label` and an empty description. The helpers that build them
+  (`src/administration/catalog/adminNewCatalogRecords.ts`) also build the
+  records an applied existing-Album review creates. A reused Artist or
+  Organization is fenced
   with `touchReadyArtistReferences` or `touchReadyOrganizationReferences` and
   keeps its type, metadata, artwork and visibility; it gains only a MusicBrainz
   ID the approval froze for it. A new record stores its frozen ID, if any.
@@ -818,10 +843,12 @@ the MusicBrainz IDs it froze (see [MusicBrainz IDs](#musicbrainz-ids)).
   document (format-1 and format-2 commits are not fenced); a preselection that
   no longer holds, because a candidate appeared meanwhile, turns the
   publication into needs attention (`identityConflict`) without minting
-  identities, and its copies stay recorded for cleanup. The fence serializes
-  import commits only: a record another editor creates concurrently with a
-  commit is not rechecked, but the unique indexes still refuse a second record
-  of the kind with one MusicBrainz ID.
+  identities, and its copies stay recorded for cleanup. An existing-Album
+  review apply that resolves identities serializes on the same fence document
+  (see [Existing-Album completion](#existing-album-completion)). The fence
+  serializes only these writers: a record another editor creates concurrently
+  with them is not rechecked, but the unique indexes still refuse a second
+  record of the kind with one MusicBrainz ID.
 
 ### Appending to an Album
 
@@ -898,3 +925,115 @@ the order is re-derived and the appended MediaTracks take the Album's primary
 Credits), and
 `web/src/api/listenerContractCompatibility.test.ts` parses
 `contracts/listener/v1/fixtures/album-multi-artist-label.json`.
+
+## Existing-Album completion
+
+Product behavior is defined in [business-rules.md](../business-rules.md) under
+Catalog Visibility and Administration. This section records how an applied
+existing-Album review writes Credits, identities and the expected tracklist;
+its routes are described in
+[admin-workbench.md](../features/admin-workbench.md).
+
+### Credits
+
+`src/administration/catalog/adminCatalogReviewCredits.ts` rebuilds an owner's
+Credits from the list the review captured (`capturedCatalogCredits`, which must
+still equal the stored list as the canonical Credit lifecycle reads it), and
+`replaceCatalogCreditsWithinTransaction` writes it with documented attribution
+in the apply transaction, which also keeps `Artist.albumIds` in step with the
+Album's primary Credits.
+
+- Selected entries take the positions of the Credits they replace in entry
+  order; extra entries follow the last of them, and they lead a list that had
+  none. The Album's entries replace its primary and featured Artist Credits; a
+  member's replace those and its legacy unspecified Credits of the Artists its
+  entries name. Every other Credit keeps its subject, role and relative order,
+  and orders are renumbered by position.
+- A label replaces the subject of the first label Credit (a new Credit keeping
+  that Credit's join phrase) or follows the last Artist Credit when the Album
+  has none; a label already naming that Organization changes nothing.
+- Join phrases follow `keepJoinPhrasesWithSuccessors`: an entry Credit that
+  keeps a captured Credit ID starts from that Credit's phrase, which stays while
+  its successor is unchanged; an entry's own phrase is stored only before the
+  next entry.
+- An entry showing a captured Credit keeps that Credit's ID and Artist; every
+  other new Credit ID is `review_` plus 40 hex digits of a digest of the
+  review, the apply's operation, the owner and the entry (`label` for the
+  label), so a retried transaction writes the same Credits.
+- A list that differs only in MusicBrainz IDs writes no Credit. More than 50
+  Credits, or one Artist in one role twice, refuse the apply before any write.
+
+### Member Credits
+
+A member's entries come only from the artist credit of its own paired release
+track (value application); the apply writes them only for members the request
+lists, each a whole list. Album Credits are never copied to members:
+`inheritedAlbumPrimaryCredits`, which appends use, is never called, a member
+whose track has no usable credit keeps its Credits, and a member Credit never
+promotes its Artist to the Album.
+
+### Identities
+
+`src/administration/catalog/adminCatalogReviewIdentity.ts` groups the entries
+of the Album and every member into identities (by MusicBrainz ID, else by name
+compared case-insensitively) and binds an entry to a captured record (an Album
+entry by the captured Credit showing it; a member entry to one of that member's
+captured Artists by Credit, kept ID, or name or found name). Unbound identities
+and a new label are resolved through `importIdentityCandidates` and
+`importIdentityPreselections` on a synthetic Draft v2 holding one entry per
+identity, with every bound record an explicit reuse so no other identity is
+preselected onto it. The apply recomputes candidates, preselections and ID
+holders inside its transaction and refuses a confirmation that showed others.
+
+- New Artists (`newArtistRecord`) and label Organizations
+  (`newLabelOrganizationRecord`,
+  `src/administration/catalog/adminNewCatalogRecords.ts`, shared with import
+  publication) take the Album's visibility; their IDs derive from the review,
+  the operation and the identity key, so an identity shared by the Album and
+  members creates one record, once across retries.
+- MusicBrainz IDs follow `musicBrainzIdWriteFor`: inserted with a new record, or
+  set on a reused one only while it still holds what was reviewed. A
+  conflicting identity records none, and neither do two colliding writes (two
+  IDs on one record, or one ID on two records) that no decision made (no answer
+  could change them). Identities are resolved over the default selection and
+  then narrowed, so an apply deselecting a list computes the confirmation's
+  items narrowed by identity and never records an ID the confirmation dropped.
+  The unique index refusing an insert or set aborts the apply with
+  `409 ADMIN_CATALOG_REVIEW_IDENTITY_CHANGED`.
+- Every identity refusal an apply makes shows on a row needing an answer in
+  `GET /catalog-reviews/:id/candidates`: an unanswered row, a decided replace
+  another record's ID now blocks, a decided write colliding with another, an
+  Artist repeated within one list, and a decided target that changed. A list
+  two of whose entries name one Artist whatever is decided is never
+  applicable, so no such refusal lacks a row. The decisions route refuses a set
+  that would collide or replace into a held ID. An apply binds the
+  `valueRevision` its confirmation read, since lookup applications change
+  values, and a review's found and localized names, without changing
+  `revision`.
+- An apply that resolves identities writes the identity fence
+  (`serializeImportIdentityCommits`), so it serializes with format-3 import
+  commits and other review applies.
+- The review is stale when any record its captured Credits name changed
+  (`readCatalogReviewSource`), so an entry bound to a captured record always
+  writes that record as reviewed.
+
+### Verification
+
+`test/administration/adminCatalogReviewCredits.test.ts` covers positions,
+phrases, Credit IDs, the label, member legacy Credits and the Credit rules.
+`test/administration/adminCatalogReviewIdentity.test.ts` covers grouping,
+binding, conflicting identities, the default selection, decisions and shown
+lists, preselections, the ID write matrix, colliding and invalid writes and
+the rows they mark, created records and Credit views.
+`test/administration/adminCatalogReviewApply.integration.ts` covers the routes
+and their limits, creates and reuses with IDs, name and alias candidates that
+need a decision, a candidate or ID holder that appears after the confirmation
+read, stale captured or decided records, positions and phrases among other
+roles, the label replaced or read-only, a name repeated in another letter
+case, placement of paired members, member Credits from their own tracks (never
+the Album's), an empty Album's all-missing tracklist, listener pages without
+MusicBrainz IDs (Discography, Collaborations, Organization releases and
+followed releases included), a late failure and Credit writes turned off
+writing nothing, a run completing after the confirmation read, an apply racing
+another identity writer on the fence, the receipt kept for applying, and
+same-intent retries minting nothing twice.

@@ -3,14 +3,14 @@
  *   Types: LookupApplicationContext, LookupApplicationIntent
  *   Functions: isLookupValuePath, lookupCandidateValues, reviewCandidateValues, sameLookupNames,
  *              sameLookupValue, lookupValueIds, lookupCandidateIds, lookupDecisionRecords,
- *              applyLookupCandidate, applyPreselectedLookup, lookupRerankNeeded, rerankStoredLookup,
- *              lookupAnswersNeeded, chooseLookupCandidate, resolveLookupConflicts
+ *              reviewRecordFoundNames, applyLookupCandidate, applyPreselectedLookup, lookupRerankNeeded,
+ *              rerankStoredLookup, lookupAnswersNeeded, chooseLookupCandidate, resolveLookupConflicts
  * Internal
  *   Types: TextResult, EntryAgreement, AddedId
  *   Functions: stale, emptyValue, emptyFor, slotOf, isRecord, isEntryLike, valueAt, applicable, lookupText,
  *              lookupEntryList, lookupArtistEntries, idOf, itemsOf, foundNames, storedValues, storedConflicts,
- *              offerKey, idPath, withLookupIds, freshGrant, keepLocalizedNames, applicationFields,
- *              restoreApplicationFields, rerankEvidence
+ *              offerKey, idPath, withLookupIds, freshGrant, bumpValueRevision, keepFoundNames,
+ *              applicationFields, restoreApplicationFields, rerankEvidence
  *   Constants: lookupPath, invisible, idsIn, noContext, LABEL, APPLICATION_FIELDS
  * @end-catalog */
 
@@ -360,6 +360,14 @@ function foundNames(release: MusicBrainzRelease | null | undefined, aliases: Rea
     return found;
 }
 
+/**
+ * The names a review's stored run found for each credited ID of its applied `release` (the release's, its label's and every track's
+ * own credit's, with the run's fetched aliases), as value application keeps them; a review reading its identities merges them
+ * with its stored names, so names a run found are read even when an earlier release stored names only for the Album's IDs.
+ */
+export const reviewRecordFoundNames = (record: Pick<MetadataLookupRecord, 'aliases'> | null | undefined, release: MusicBrainzRelease | null | undefined) =>
+    foundNames(release, lookupFetchedAliases(record), { tracks: true });
+
 /** The stored applied values and conflicts on value paths this project takes (`review`: also the review-only paths). */
 const storedValues = (application: LookupApplication | null | undefined, review: boolean): LookupAppliedValue[] =>
     Array.isArray(application?.values) ? application!.values.filter(item => isRecord(item) && isLookupValuePath(item.path, { review })) : [];
@@ -406,6 +414,8 @@ export type LookupApplicationIntent = {
 };
 /** A fresh lookup grant from `now`, as refreshLookupGrant sets it. */
 const freshGrant = (now: Date) => new Date(now.getTime() + METADATA_LOOKUP_JOB_LIMITS.grantMs);
+/** Bumps `doc`'s automatic-write revision (absent or malformed counts as 0), which a confirmation of its values binds. */
+const bumpValueRevision = (doc: AdminImportDocument) => { doc.valueRevision = (Number.isSafeInteger(doc.valueRevision) && doc.valueRevision! >= 0 ? doc.valueRevision! : 0) + 1; };
 /**
  * Applies a fetched candidate, or none, to `doc` in memory, all or nothing for the document (its caller writes it, the record
  * and the gate in one transaction). Every supplied value targets its path; every value the previous application wrote that is
@@ -436,7 +446,8 @@ const freshGrant = (now: Date) => new Date(now.getTime() + METADATA_LOOKUP_JOB_L
  * candidate appends after the agreeing saved Album entries are written into the saved list as it stands (recorded with `kept`; an
  * earlier `lookup` answer to its ID conflict is written again), and any other difference is one conflict on the whole list. A date
  * that only adds precision is a conflict marked `precision`. Reverted values return to empty (a review has no file tags), the cap
- * measures the review's capped draft, a path is written only when its value changed, and no cover is staged.
+ * measures the review's capped draft, a path is written only when its value changed, and no cover is staged. Its identity rows
+ * read the found and localized names, so a change of those alone bumps `valueRevision` too.
  */
 export function applyLookupCandidate(doc: AdminImportDocument, previous: LookupApplication | null | undefined, candidate: StoredLookupCandidate | null,
     intent: LookupApplicationIntent, context: LookupApplicationContext = noContext): { application: LookupApplication; changed: boolean } {
@@ -662,14 +673,16 @@ export function applyLookupCandidate(doc: AdminImportDocument, previous: LookupA
     const valuesChanged = paths.length > 0;
     if (valuesChanged) {
         if (Array.isArray(doc.decisions)) doc.decisions = retainBoundDecisions(kept, draft);
-        doc.valueRevision = (Number.isSafeInteger(doc.valueRevision) && doc.valueRevision! >= 0 ? doc.valueRevision! : 0) + 1;
+        bumpValueRevision(doc);
         doc.updatedAt = intent.now;
     }
-    const names = mergeImportMusicBrainzNames(doc.musicBrainzNames, found ?? foundNames(candidate?.release, context.aliases), draft);
+    const names = mergeImportMusicBrainzNames(doc.musicBrainzNames, found ?? foundNames(candidate?.release, context.aliases), draft, { review });
     let namesChanged = !sameDraftValue(names, doc.musicBrainzNames ?? []);
     if (namesChanged) doc.musicBrainzNames = names;
-    const localized = mergeImportLocalizedNames(doc.localizedNames, Array.isArray(context.localized) ? context.localized : [], draft);
+    const localized = mergeImportLocalizedNames(doc.localizedNames, Array.isArray(context.localized) ? context.localized : [], draft, { review });
     if (!sameDraftValue(localized, doc.localizedNames ?? [])) { doc.localizedNames = localized; namesChanged = true; }
+    // A review's identity rows bind member entries and find candidates by these names: a confirmation read before they changed is stale.
+    if (review && namesChanged && !valuesChanged) bumpValueRevision(doc);
     // Last, after every step that can refuse, so a refused application queues no staging. A review stages no artwork.
     const coverChanged = review ? false : noteLookupCoverApplication(doc, candidate,
         { actorId: intent.actorId, grantExpiresAt: intent.grantExpiresAt instanceof Date ? intent.grantExpiresAt : freshGrant(intent.now) }, intent.now);
@@ -685,15 +698,26 @@ export function applyLookupCandidate(doc: AdminImportDocument, previous: LookupA
 
 /**
  * Keeps on `doc` the run's localized name groups that hold a current Artist entry's name (mergeImportLocalizedNames), so identity
- * candidates read them whether or not a candidate is applied; whether `doc` changed. A malformed draft keeps none.
+ * candidates read them whether or not a candidate is applied; whether `doc` changed. A review also keeps the names its identity
+ * rows read from `record` (its applied release's credited names and this run's fetched aliases, reviewRecordFoundNames) and bumps
+ * `valueRevision` when any of its names changed, so a confirmation read before is stale. A malformed draft keeps none.
  */
-function keepLocalizedNames(doc: AdminImportDocument, context: LookupApplicationContext): boolean {
+function keepFoundNames(doc: AdminImportDocument, record: MetadataLookupRecord, context: LookupApplicationContext): boolean {
     let draft: ImportDraftV2;
     try { draft = storedDraftV2(doc); } catch (error) { if (error instanceof AdminImportError) return false; throw error; }
-    const localized = mergeImportLocalizedNames(doc.localizedNames, Array.isArray(context.localized) ? context.localized : [], draft);
-    if (sameDraftValue(localized, doc.localizedNames ?? [])) return false;
-    doc.localizedNames = localized;
-    return true;
+    const review = isCatalogReviewLookup(doc);
+    let changed = false;
+    if (review) {
+        const applied = isRecord(record.applied) && record.applied.choice !== 'none' ? record.applied : null;
+        const candidate = applied && Array.isArray(record.candidates) ? record.candidates.find(item => isRecord(item) && item.key === applied.candidateKey && item.details === 'fetched'
+            && item.releaseId === applied.releaseId) : undefined;
+        const names = mergeImportMusicBrainzNames(doc.musicBrainzNames, reviewRecordFoundNames(record, candidate?.release), draft, { review: true });
+        if (!sameDraftValue(names, doc.musicBrainzNames ?? [])) { doc.musicBrainzNames = names; changed = true; }
+    }
+    const localized = mergeImportLocalizedNames(doc.localizedNames, Array.isArray(context.localized) ? context.localized : [], draft, { review });
+    if (!sameDraftValue(localized, doc.localizedNames ?? [])) { doc.localizedNames = localized; changed = true; }
+    if (review && changed) bumpValueRevision(doc);
+    return changed;
 }
 
 /** The document fields value application changes before its last step, the cover staging (which runs only after every refusal). */
@@ -716,12 +740,13 @@ function restoreApplicationFields(doc: AdminImportDocument, saved: ReadonlyMap<s
  * refused application leaves `doc` as it was (a review's save persists `doc` whole).
  * `context` is what the caller read in its transaction (who holds each ID, the reused records' IDs, the run's aliases and its
  * localized name groups). A completed run that applies nothing still keeps its localized name groups on `doc` (`changed` then
- * says so, and the caller writes `doc`), since identity candidates read them from the import alone. The cover staging it queues
+ * says so, and the caller writes `doc`), since identity candidates read them from the import alone; a review also keeps the names
+ * its identity rows read from the run (keepFoundNames). The cover staging it queues
  * uses `grantExpiresAt`: by default the run's own grant (the worker's completion), else a fresh one.
  */
 export function applyPreselectedLookup(doc: AdminImportDocument, record: MetadataLookupRecord, now: Date, actorId: string = record.actorId,
     context: LookupApplicationContext = noContext, grantExpiresAt?: Date): { record: MetadataLookupRecord; changed: boolean } {
-    const unchanged = () => ({ record, changed: record.state === 'complete' && keepLocalizedNames(doc, context) });
+    const unchanged = () => ({ record, changed: record.state === 'complete' && keepFoundNames(doc, record, context) });
     const preselection = record.state === 'complete' ? record.ranking?.preselection : null;
     if (!preselection || typeof preselection.candidateKey !== 'string') return unchanged();
     const applied = isRecord(record.applied) ? record.applied : null;
@@ -877,9 +902,9 @@ export function resolveLookupConflicts(doc: AdminImportDocument, record: Metadat
     if (!draftWithinSizeLimit(capped(before), capped(draft))) invalidImport();
     if (Array.isArray(doc.decisions)) doc.decisions = retainBoundDecisions(doc.decisions, draft);
     const release = Array.isArray(record.candidates) ? record.candidates.find(item => item?.key === applied.candidateKey)?.release : null;
-    const names = mergeImportMusicBrainzNames(doc.musicBrainzNames, foundNames(release, lookupFetchedAliases(record), { tracks: review }), draft);
+    const names = mergeImportMusicBrainzNames(doc.musicBrainzNames, foundNames(release, lookupFetchedAliases(record), { tracks: review }), draft, { review });
     if (!sameDraftValue(names, doc.musicBrainzNames ?? [])) doc.musicBrainzNames = names;
-    const localized = mergeImportLocalizedNames(doc.localizedNames, lookupLocalizedGroups(record), draft);
+    const localized = mergeImportLocalizedNames(doc.localizedNames, lookupLocalizedGroups(record), draft, { review });
     if (!sameDraftValue(localized, doc.localizedNames ?? [])) doc.localizedNames = localized;
     return { ...record, applied: { ...applied, conflicts, values, ...(musicBrainzIds.length ? { musicBrainzIds } : {}) }, updatedAt: now };
 }

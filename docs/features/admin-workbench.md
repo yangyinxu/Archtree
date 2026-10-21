@@ -1050,12 +1050,14 @@ Import routes (relative to `/api/admin/v1`):
   storage outcome. No route returns the internal
   `ADMIN_IMPORT_IDENTITY_CONFLICT`. Every format-3 commit also increments one
   identity-fence document (`adminImportAnalysisSlots`, `_id` `identity`, created
-  at startup), so concurrent format-3 import commits serialize and a later one
-  rechecks against the records an earlier one created. The fence covers only
-  those commits: a record that a format-1 or format-2 commit, the Admin Catalog
-  or the Content Manager creates concurrently with a commit is not rechecked,
-  since names are never identity keys; the unique indexes still refuse a
-  MusicBrainz ID that a concurrent write gave another record of the kind.
+  at startup), and so does every existing-Album review apply that resolves
+  identities, so concurrent format-3 import commits and review applies
+  serialize and a later one rechecks against the records an earlier one
+  created. The fence covers only those writers: a record that a format-1 or
+  format-2 commit, the Admin Catalog or the Content Manager creates concurrently
+  with a commit is not rechecked, since names are never identity keys; the
+  unique indexes still refuse a MusicBrainz ID that a concurrent write gave
+  another record of the kind.
 - `POST /imports/:id/cancel-publication`: explicit cancellation with
   `{operationId, expectedRevision, publicationOperationId}`. The new operation
   UUID binds the exact original publication UUID, and `expectedRevision` must
@@ -1367,15 +1369,23 @@ Catalog review routes (relative to `/api/admin/v1`):
   basenames, never storage keys. Each source Track also captures its Disc
   Number, or `null` when it stores none. The review is stored as Draft v2 with
   read-only context from the Album's Credits: the ready, named primary and
-  featured Artist Credits in stored order (at most 20, a repeated name once at
-  its first Credit, as in the catalog byline), each keeping its join phrase only
+  featured Artist Credits in stored order (at most 20, a name repeated in any
+  letter case once at its first Credit, since entries may not share a name
+  case-insensitively; such a list does not show every Artist Credit, so it is
+  never applied), each keeping its join phrase only
   while the next stored Credit is also shown, and the first ready, named label
   Credit. A draft whose editable values exceed 48 KB is refused with
   `400 ADMIN_IMPORT_INVALID_INPUT` and nothing is stored; the read-only context
   is not counted, because it cannot be shortened from the review.
 - `GET /catalog-reviews` and `GET /catalog-reviews/:id`: independent bounded
   workbench pagination and private readback. `sourceStatus` distinguishes current,
-  changed and unavailable sources. Old `/imports` routes exclude these projects;
+  changed and unavailable sources. For a review captured for metadata lookup
+  (format 3), `changed` also covers each Artist and Organization its captured
+  Credits name (the Album's and every member's) that is missing, no longer ready
+  or at another identity revision, so `capabilities.apply` turns off, applying
+  is refused and metadata lookup ends the review's active run (the detail read
+  loads the server-only capture for this check only). Old `/imports` routes
+  exclude these projects;
   strict native import DTOs are unchanged. The detail's `draft` and
   `suggestions` are Draft v2, as for imports, and each `source.tracks` entry
   carries its captured `discNumber`. A review captured for metadata lookup
@@ -1459,7 +1469,9 @@ Catalog review routes (relative to `/api/admin/v1`):
   identity revision (none for a record that is not ready, so such a primary or
   featured Artist Credit leaves its list incomplete); whether the shown label is
   the Album's first label Credit; whether every primary and featured Artist
-  Credit is shown, for the Album and each member; and the Album's expected
+  Credit is shown, for the Album and each member (a Credit left out as a
+  repeated name, in any letter case, makes its list incomplete, so lookup marks
+  it `notApplicable` and applying never writes it); and the Album's expected
   tracklist rows. The draft gains those rows and each member's shown primary and
   featured Artist Credits as entries (keyed per member); the Album's entries and
   label are rebuilt from the Credits read then, keeping the keys of unchanged
@@ -1479,7 +1491,8 @@ Catalog review routes (relative to `/api/admin/v1`):
   queued, running or settling a stopped call (as apply checks both), the
   lookup answers the view's `needsAnswer` lists (a tie and each unanswered
   conflict of the applied candidate that still differs, those on member Artist
-  entries and the expected tracklist included; no identity rows yet), and
+  entries and the expected tracklist included; identity rows are read from
+  `GET /catalog-reviews/:id/candidates`), and
   whether this server's configuration lets lookup run. An applied review reads
   too; an import or a bad id is `404 ADMIN_CATALOG_REVIEW_NOT_FOUND`, and the
   import lookup routes never find a review.
@@ -1554,33 +1567,205 @@ Catalog review routes (relative to `/api/admin/v1`):
   configured, rechecks the administrator, converts the review as above
   (refusals included), and queues nothing once the review had its automatic
   run.
-- `POST /catalog-reviews/:id/apply`: `{operationId, expectedRevision, fields}`
-  selects saved Album `title`/`releaseDate` or Track
-  `title`/`discNumber`/`trackNumber` paths. A Track `discNumber` is accepted
-  only where the source captured one (otherwise `400 ADMIN_IMPORT_INVALID_INPUT`
-  before any write). It is written with `discNumberSource: 'admin-catalog'`, or
-  `null` removes both keys, as a catalog edit does, and a Disc or Track Number
-  re-derives the Album order. Revisions, membership, readiness and internal
-  filename/media evidence are checked in the same transaction as metadata/order
-  updates and the receipt. Stale sources reject the whole operation. While a
-  metadata lookup run of the review can still send a request (queued, running
-  or waiting for an automatic retry, within its one-hour grant, while lookup is
-  available), apply is `409 ADMIN_IMPORT_LOOKUP_ACTIVE` and writes nothing. It
-  reads the run's own state and grant in its transaction, not the review's
-  gate; a run past its grant, or while lookup is unavailable (imports turned
-  off included), never holds apply, and the worker later ends such a run
-  without a request (`grantExpired`, `notConfigured`, or `projectClosed` once
-  the review is applied). A run becomes active only through a change that
-  writes the review document, which apply replaces, so the two conflict and
-  retry. Before any catalog write, a selected value with an unanswered lookup
-  conflict whose current value still differs from the lookup value (the
-  Album title or date, or a Track's title, Disc Number or Track Number) is
-  `409 ADMIN_IMPORT_REVIEW_REQUIRED`; a tie and conflicts of values not
-  selected never hold apply. A selected Disc or Track Number whose value is
-  automatic, which in a review only a lookup pairing writes, is
-  `400 ADMIN_IMPORT_INVALID_INPUT` until the expected tracklist can be applied
-  with it. Applied projects become read-only;
-  no upload, duplicate-decision, S3 or publication endpoint exists for them.
+- `GET /catalog-reviews/:id/candidates` (server API, like the two routes after
+  it; the Web does not call them yet, and its apply sends `fields` only):
+  `200` the identity rows of the review's default selection, every Artist entry
+  list that may be applied and changed (the Album's and each member's) and the
+  label when it may be applied and changed, with the review's `revision` and
+  `valueRevision` (which lookup applications bump without changing `revision`),
+  read in one snapshot and writing nothing. Entries crediting one artist share
+  one identity across the Album and every member: by MusicBrainz ID, else by
+  name case-insensitively; a row (`id`, a UUID handle derived from the review
+  and the identity) names the identity after its first entry (the Album's first,
+  then members in manifest order), lists its other credited names (`names`),
+  each entry it covers (`path`, `slotId`, `entryKey`, `name`, `role`) and the
+  records its entries are bound to (`bound`, with their visibility and the
+  captured `revision` a `replace` decision names). An Album entry a captured
+  Credit shows is bound to that Credit's Artist; a member entry is bound to one
+  of that member's captured Artists of any role (the Credit showing it, else the
+  first keeping the entry's MusicBrainz ID, else the first whose saved name
+  equals the entry's name or a name lookup found for its ID). `state` is
+  `bound` (one record: every entry of the identity resolves to it),
+  `conflicting` (bound entries naming different Artists: each keeps its own,
+  no ID is recorded, and its unbound entries need a decision) or `unbound`
+  (the import identity rules decide: the record keeping the identity's ID is
+  preselected as reuse, create is preselected without any candidate, and a
+  name, alias or localized-name candidate needs a decision). Names found for
+  an ID are the review's stored names merged with what its stored run found
+  (the applied release's and every track's credited names and the run's fetched
+  aliases), so a review whose lookup an earlier release applied still lists
+  alias candidates for an artist only members credit; localized-name groups
+  naming a member's entry are kept for reviews too (up to 512 groups). Each row
+  carries its stored `decision` (rebuilt from its seven known keys), its
+  `preselection`, `needsAnswer` and the `musicBrainzIdWrite` an apply would
+  make (`{scope, identity, musicBrainzId, replaces}`: recorded while the record
+  keeps none and no other record of the kind holds it, replaced only by an
+  explicit `replace`). `needsAnswer` marks every row an apply would wait for:
+  one without a decision or preselection, a decided `replace` that can no
+  longer apply (another ready record now holds the new ID), a decided write
+  colliding with any other write (two IDs on one record, or one ID on two
+  records; each decided row), an identity whose entry repeats an Artist within
+  one list (unless that entry is bound to its record), and a decided reuse or
+  replace target that is no longer ready or at another revision. Two colliding
+  ID writes that no decision made (two bound identities each recording an
+  entry's ID on one record, which no answer can change) are dropped: the record
+  keeps what it holds, as for a conflicting identity. `label` is the same
+  for the label (bound while it names the Album's first label Organization by
+  name, kept ID or a found name), or `null` when the label is not selected.
+  `candidates` lists the Artist and Organization candidates
+  (`ImportDuplicateCandidate`) and the names whose candidate is unavailable;
+  `preselections` and `musicBrainzIds` are the lists an apply of this
+  selection must show, each item naming its identity, so a confirmation that
+  deselects a list or the label shows only the items of identities it still
+  selects. An apply resolves every identity of the default selection before
+  narrowing to its own, so what it computes is always this read narrowed by
+  identity: a write dropped here stays dropped, and a row marked `needsAnswer`
+  must be answered whenever any list holding it (or, for `label`, the label) is
+  selected. `album`
+  (when its Artist entries or label are selected) and `members` (each selected
+  member) give the current and new Credits (`creditId` null for a new Credit,
+  `subjectId` null for a record still to be created or an identity not
+  answered), whether more than IDs change (`credits`), each member's removed
+  Credit IDs and attribution change, the Album's primary Artists its new
+  Credits drop (`replacedPrimaryArtistIds`) and the members whose Credits still
+  name one of them (`membersNamingReplaced`). An applied review, or one not
+  captured for lookup, has no rows; an unreadable capture is
+  `409 ADMIN_IMPORT_RELOAD_REQUIRED`, a source that is not current
+  `409 ADMIN_CATALOG_REVIEW_SOURCE_CHANGED`; candidate reads over their
+  10-second budget are `503 ADMIN_CATALOG_REVIEW_UNAVAILABLE`. Up to 512
+  identities are read through one synthetic entry each (the import's 40-name
+  query bound is raised for reviews only).
+- `POST /catalog-reviews/:id/decisions`
+  `{operationId, expectedRevision, decisions}` replaces the review's identity
+  decisions (at most 513 flat items of at most 1 KB, each exactly `{scope,
+  identity, boundName, action, candidateId, candidateRevision}`: an Artist
+  identity by its handle, or the label with `identity: null`, at most once
+  each; `action` `reuse` or `replace` naming an ObjectId candidate at a 64-hex
+  revision, or `create-distinct` with both null): `200` with the review response
+  and receipt `decisions`, which
+  replays its intent and which the detail's `receipts` never list. Bodies are
+  at most 768 KB, whatever the path's letter case. It runs through the review
+  mutation path (receipt, revision, applied and limit refusals) and is admitted
+  only for a format-3 review (`409 ADMIN_IMPORT_LOOKUP_REFUSED`) whose capture
+  is readable (`409 ADMIN_IMPORT_RELOAD_REQUIRED`) and whose source is current
+  (`409 ADMIN_CATALOG_REVIEW_SOURCE_CHANGED`). An item naming a handle that is
+  no identity of the default selection (a lookup application, such as a
+  candidate choice crediting the name under another MusicBrainz ID, replaced
+  it since the read), the label while it is not selected, or a `boundName`
+  other than the identity's current name is `409 ADMIN_IMPORT_DECISION_STALE`:
+  read the rows again. An action the identity's state refuses (a bound
+  identity or label only replaces its record's ID, naming that record at its
+  captured revision; a conflicting one only reuses or creates; `replace` needs
+  an identity ID) is `400 ADMIN_IMPORT_INVALID_INPUT`, and so are two entries
+  of one list resolving to one Artist and a decided ID write landing on a
+  record or ID another write of the set lands on (such as identities of two
+  lists reusing one record that keeps no ID, each recording its own). A reuse
+  or replace target that is not ready, at another revision, or (replace) keeps
+  no other keepable ID, and a replace whose new ID another ready record holds,
+  are `409 ADMIN_IMPORT_DUPLICATE_STALE`. These checks read ID holders and the
+  targets, never candidates. A bound identity's `replace` that can no longer
+  apply is answered by a set without it: its record keeps the ID it holds.
+  Each stored decision binds its identity's name and MusicBrainz ID
+  (`catalogIdentityDecisions`, never projected elsewhere) and applies only
+  while both are current; value application never reads it.
+- `POST /catalog-reviews/:id/apply`: `{operationId, expectedRevision, fields,
+  preselections?, musicBrainzIds?, memberCredits?, expectedValueRevision?}` (at
+  most 768 KB, whatever the path's letter case) selects saved Album `title`,
+  `releaseDate`, `artists`, `label` and `expectedTracklist` and Track
+  `title`/`discNumber`/`trackNumber` paths (at most 305), and the members whose
+  Artist entries apply (`memberCredits`, at most 100 distinct slots). Something
+  must be selected; `fields` may be `[]` when members are. `preselections` and
+  `musicBrainzIds` are what the confirmation showed (`GET /candidates`, at most
+  513 well-formed items each); missing ones count as empty, so a body listing
+  only members may leave them out (the apply then refuses whenever it computes
+  items), but a body selecting the Album's Artist entries, label or expected
+  tracklist must carry both (`400 ADMIN_IMPORT_INVALID_INPUT`).
+  `expectedValueRevision` is the `valueRevision` that confirmation read (a
+  non-negative integer), required whenever the body selects one of those
+  fields or lists a member (`400`), since lookup writes those values without
+  changing `revision`. A body from an editor that sends `fields` only (the Web
+  today) is admitted as before and writes no Credits, records, IDs, tracklist
+  or identity fence. A review keeps its last receipt for applying: every other
+  change of a review holding 255 receipts is
+  `409 ADMIN_IMPORT_OPERATION_LIMIT`, so answers and edits never leave it
+  unappliable. Checks, each refusing before any write: analysis active
+  (`409 ADMIN_IMPORT_ANALYSIS_ACTIVE`); a metadata lookup run that can still
+  send a request (queued, running or waiting for an automatic retry, within its
+  grant, while lookup is available; read from the run itself, never the
+  review's gate, so a run past its grant or while lookup is unavailable never
+  holds apply, and the worker later ends it with `grantExpired`,
+  `notConfigured` or `projectClosed`): `409 ADMIN_IMPORT_LOOKUP_ACTIVE`; an
+  `expectedValueRevision` other than the review's current one (a run completed
+  or a re-rank applied values since the confirmation was read):
+  `409 ADMIN_IMPORT_REVISION_CONFLICT`; the
+  source (revisions, membership, readiness, filename/media evidence and, for a
+  format-3 review, every captured credited record):
+  `409 ADMIN_CATALOG_REVIEW_SOURCE_CHANGED`; a review-only selection on a
+  review not captured for lookup: `400`; a selected value (members' entries
+  included) with an unanswered lookup conflict whose current value still
+  differs: `409 ADMIN_IMPORT_REVIEW_REQUIRED` (a tie and unselected conflicts
+  never hold apply); a selection that may not apply: `400` (a Track
+  `discNumber` only where the source captured one; `artists`, `label`, member
+  lists and `expectedTracklist` only while they differ from what the review
+  captured; `artists` and member lists only while the review shows every
+  primary and featured Artist Credit of the owner, the list holds no two names
+  equal case-insensitively and no two of its entries resolve to one Artist
+  whatever is decided (each bound to one record, by its own binding or its
+  identity's, or both of one identity neither is bound through: no answer
+  could tell them apart, so such a list is never in the default selection), a
+  member list also non-empty; `label` only
+  while the first label Credit is shown or none exists; `expectedTracklist`
+  only as the applied release offers it, with its whole pairing stored and
+  readable, which pairing-filled numbers need too; titles, dates and numbers
+  are applied as saved, even when equal to the captured value); placement
+  (`400`): a selected tracklist must place every member its pairing placed at
+  its row once the selected numbers apply (an unselected number counts as
+  captured), and a Disc or Track Number the pairing filled (automatic) applies
+  only as its pair says and only with that tracklist or the Album's kept
+  tracklist placing it at a row with the same position; identities, when Artist
+  entries, the label or a member are selected: shown preselections or ID writes
+  other than those computed now, an identity row without an answer, one list
+  resolving one Artist twice or a decided ID write colliding with another
+  (`409 ADMIN_IMPORT_REVIEW_REQUIRED`, the review stays usable: a fresh
+  `GET /candidates` shows the items to send and marks the row behind each
+  other refusal `needsAnswer`), a decided record not
+  ready or at another revision (`409 ADMIN_IMPORT_DUPLICATE_STALE`); each
+  changing owner's stored Credits as the canonical lifecycle reads them (an
+  unmigrated Album's linked Artists included) must equal the captured list
+  (`409 ADMIN_CATALOG_REVIEW_SOURCE_CHANGED`); a Credit list the Credit rules
+  refuse (such as more than 50 Credits) is `400`; Credit writes turned off are
+  `503 ADMIN_CATALOG_REVIEW_UNAVAILABLE`. One transaction then writes the
+  reference fences, the identity fence (`adminImportAnalysisSlots` `identity`,
+  shared with format-3 import commits, when identities were resolved), new
+  Artists and label Organizations (the Album's visibility, a MusicBrainz ID
+  only when its write records one, IDs derived from the review, operation and
+  identity, so one identity shared by the Album and members creates one
+  record, once across retries), ID writes on reused records (only while each
+  still holds what was reviewed), each selected member's Credits (its primary
+  and featured Artist Credits and its legacy unspecified Credits of the
+  Artists its entries name replaced; documented attribution), Track values, the
+  Album's Credits (entries take the replaced positions in entry order, extras
+  follow the last of them and lead a list without any; the label replaces the
+  first label Credit's subject, keeping its phrase, or follows the last Artist
+  Credit; other Credits keep their order, orders are renumbered, a phrase
+  stays only while its successor is unchanged and an entry's own phrase only
+  before the next entry; an entry showing a captured Credit keeps its Credit ID
+  and Artist, new Credit IDs derive from the review, operation and entry;
+  documented attribution, and each Artist's `albumIds` follows the primary
+  Credits), the Album's values, order and expected tracklist (`source` from the
+  application, `appliedAt` now), and the receipt with `catalogApplied`
+  (`memberCredits` stored, not projected). A list that changed only in
+  MusicBrainz IDs writes those IDs and no Credit. Album Credits are never copied
+  to members and member Credits never promote an Artist to the Album. A
+  MusicBrainz ID that another record took meanwhile (a holder that is not
+  ready included) is refused by the unique index:
+  `409 ADMIN_CATALOG_REVIEW_IDENTITY_CHANGED`, writing nothing; a reference
+  fence or Credit lifecycle conflict is
+  `409 ADMIN_CATALOG_REVIEW_SOURCE_CHANGED`. Retries use the original intent and
+  replay the receipt; any failure aborts the whole transaction. Applied projects
+  become read-only; no upload, S3 or publication endpoint exists for them.
+  Reload open admin Web tabs across a deploy or rollback of this API (the Web
+  accepts the new applied fields and the `decisions` receipt).
 
 The publisher reserves immutable approvals and catalog IDs before copying
 objects. It uses version-bound GET and conditional checksum PUT to canonical
@@ -1680,10 +1865,11 @@ An Album may store an expected tracklist (`expectedTracklist`; format, writers
 and privacy in
 [catalog.md](../architecture/catalog.md#album-expected-tracklists)). The
 administrator Tracks read shows it as `expected`, matched to the members, and
-`PATCH /catalog/album/:id` clears it; no route sets it yet, and an
-existing-Album review admitted to metadata lookup captures a copy of its rows
-(see the catalog review routes), which lookup may fill, or propose another as
-a conflict, in the review's private draft. `GET /imports/:id/lookup` also
+`PATCH /catalog/album/:id` clears it. An existing-Album review admitted to
+metadata lookup captures a copy of its rows (see the catalog review routes),
+which lookup may fill, or propose another as a conflict, in the review's
+private draft; only applying that review (`POST /catalog-reviews/:id/apply`,
+server API so far) sets or replaces it. `GET /imports/:id/lookup` also
 reads an append target's tracklist for its summary (`appendTracklist`, see
 [Lookup routes](#lookup-routes)), and the Web shows it in an append's summary
 and confirmation. A clear is a top-level `clearExpectedTracklist:
@@ -1926,6 +2112,14 @@ roll back to:
   save and apply, Disc and Track Numbers included, since it lacks the apply
   guards for unanswered conflicts and pairing-filled numbers. Reload open admin
   Web tabs after deploying or rolling back across it.
+- Applying existing-Album reviews' Artist entries, label, member Artist entries
+  and expected tracklist, and their identity rows and decisions, raise no
+  floor. The release before them has no candidates or decisions route, ignores
+  `catalogIdentityDecisions` and `catalogApplied.memberCredits`, refuses an
+  apply body with the new keys or fields as invalid input, and shows applied
+  `artists`, `label` and `expectedTracklist` fields only through its lenient
+  applied view (it drops them); the records and Credits an apply wrote are
+  ordinary catalog data. Reload open admin Web tabs across it.
 - Version-2 tag evidence, `valueRevision`, the once-only `automation` marker
   and per-asset automation markers do not raise the first floor above, the
   release that allowlists Draft v2 DTOs. Older releases show only the five
@@ -2978,18 +3172,24 @@ fills only empty or automatic values that are still as it saw them.
   applied by its completing worker step; a re-rank applies one only while the
   run has applied nothing. Conflicts on the review-only paths are listed in
   `needsAnswer` until answered; applying waits only for unanswered conflicts of
-  the values it is asked to apply, and cannot apply the review-only values yet.
-  Up to 406 answers fit one request. Applying a review writes none of these
-  values to the catalog yet: it still applies only the selected title, date and
-  numbers.
+  the values it is asked to apply. Up to 406 answers fit one request. A review
+  keeps the names found for the IDs its members' entries carry too, up to 513
+  IDs (one per identity and the label), so a track-only artist gets alias and
+  localized-name candidates. Its identity rows bind member entries and find
+  candidates by these names and its localized-name groups, so an application
+  that changes only those, or a completed run that applies nothing (which
+  keeps the names the run fetched for the applied release), still bumps
+  `valueRevision`: a confirmation read before is stale. Only applying the
+  review writes these values to the catalog (`POST /catalog-reviews/:id/apply`).
 - **Scope.** Value application writes only the project document (an import
   or an existing-Album review) and its lookup record, never a catalog
   collection. A published Album or MediaTrack
   and its search projection carry only the reviewed names and values, never
   a release, recording or iTunes identifier. In the catalog, only an Artist or
-  Organization keeps a MusicBrainz ID, written by the publication commit or an
-  explicit catalog edit (see
-  [MusicBrainz IDs](../architecture/catalog.md#musicbrainz-ids)).
+  Organization keeps a MusicBrainz ID, written by the publication commit, an
+  applied existing-Album review or an explicit catalog edit (see
+  [MusicBrainz IDs](../architecture/catalog.md#musicbrainz-ids)); an Album's
+  expected tracklist, which an applied review stores, carries none.
 
 ### Lookup routes
 

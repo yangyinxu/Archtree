@@ -2,10 +2,9 @@
  * Internal
  *   Types: Change
  *   Functions: db, mutation, code, deferred, createBody, create, current, edit, apply, save, admitLookup,
- *              request, downgrade, capturedAlbumFixture, lookupJson, lookupMbid, reviewSearch, reviewSearches,
- *              pairableRelease, drainLookup, withLookup, trackCreditedRelease, completedReview, post,
- *              catalogSnapshot, memberCreditedReview
- *   Constants: actor, other, user, album, artist, first, second, albumTitle, provider, lookupContact
+ *              request, downgrade, capturedAlbumFixture, completedReview, post, catalogSnapshot,
+ *              memberCreditedReview
+ *   Constants: actor, other, user, album, artist, first, second, albumTitle, provider
  *   Variables: harness, server, base, token, userToken
  * Tests
  *   - private routing rejects anonymous, ordinary users and mismatched viewer before body; current admin reads shared reviews
@@ -62,7 +61,8 @@
  *   - review choose and resolve routes guard authentication, the current admin and the viewer, keep their body limits in any letter case, answer with replaying receipts, and every refusal writes nothing
  *   - renumbering a member re-ranks the review's completed run in the save, without a request, and applies a sole preselection only while the run applied nothing; a title save re-ranks nothing
  *   - a failed write inside a choice, an answer or a re-ranking save stores nothing, and the same request is then admitted once and replays
- *   - applying a review refuses a selected value with an unanswered lookup conflict until it is answered, never for a tie or an unselected conflict, and refuses a number a pairing filled
+ *   - applying a review refuses a selected value with an unanswered lookup conflict until it is answered, never for a tie or an unselected conflict, and refuses a number a pairing filled without its tracklist
+ *   - pairing-filled Disc Numbers apply together with the expected tracklist that places them, which is stored with the Album
  *   - several answers are all or nothing, and a review at its receipt limit or whose stored capture cannot be read refuses choices and answers, writing nothing
  *   - a re-ranking save whose lookup record no longer matches the run it read is a revision conflict that writes nothing, and the same save is then admitted once
  *   - unanswered conflicts on a member's Artist entries or the expected tracklist never hold applying the selected values, and applying writes none of the review's lookup values to the catalog
@@ -79,7 +79,8 @@ import { createApp } from '../../src/app';
 import { getDb } from '../../src/infrastructure/database';
 import { createSession } from '../../src/services/auth/authSessionService';
 import { adminCatalogItemRevision } from '../../src/administration/catalog/adminCatalogService';
-import { createCatalogReview, getCatalogReview, listCatalogReviews, editCatalogReview, analyzeCatalogReview, adoptCatalogReview, applyCatalogReview, cancelCatalogReviewAnalysis } from '../../src/administration/catalog/adminCatalogReviewService';
+import { createCatalogReview, getCatalogReview, listCatalogReviews, editCatalogReview, analyzeCatalogReview, adoptCatalogReview, cancelCatalogReviewAnalysis } from '../../src/administration/catalog/adminCatalogReviewService';
+import { applyCatalogReview, getCatalogReviewCandidates } from '../../src/administration/catalog/adminCatalogReviewApply';
 import { adminImportIndexes, createAdminImport, getAdminImport, listAdminImports, editAdminImport, analyzeAdminImport, adoptAdminImportSuggestions, cancelAdminImportAnalysis, adminImportDuplicateCandidates, decideAdminImportDuplicates, importCandidateProjection, importCandidateRevision, importCollection, initializeAdminImportStorage, runAdminImportWorkerOnce, withImportAdmin } from '../../src/administration/import/adminImportService';
 import { catalogReviewForLookup } from '../../src/administration/catalog/adminCatalogReviewCapture';
 import { publishAdminImport, resumeAdminImportPublication, cancelAdminImportPublication } from '../../src/administration/import/adminImportPublisher';
@@ -97,8 +98,8 @@ import {
 } from '../../src/administration/lookup/catalogReviewLookupRequests';
 import { installNetworkGuard } from '../support/networkGuard';
 import { runMetadataLookupOnce } from '../../src/administration/lookup/metadataLookupService';
-import { createMusicBrainzClient, musicBrainzUrls, type MusicBrainzReleaseQuery } from '../../src/administration/lookup/musicBrainzClient';
-import { emptyItunesClient, fixtureTransport, immediateGate, type LookupExchange } from '../support/metadataLookupFixtures';
+import type { LookupExchange } from '../support/metadataLookupFixtures';
+import { drainLookup, lookupContact, lookupMbid, pairableRelease, reviewSearches, trackCreditedRelease, withLookup } from '../support/catalogReviewRunFixtures';
 
 let harness: MongoReplicaSetHarness, server: Server, base = '', token = '', userToken = '';
 const actor = new ObjectId(), other = new ObjectId(), user = new ObjectId(), album = new ObjectId(), artist = new ObjectId(), first = new ObjectId(), second = new ObjectId();
@@ -1213,33 +1214,6 @@ test('on a format-3 review an accepted suggestion replaces an automatic value wr
     assert.deepEqual((doc.draft as typeof review.item.draft).tracks.map(track => track.artists), [[], []]);
 });
 
-const lookupContact = 'lookup-operator@example.test';
-const lookupJson = (url: string, body: unknown): LookupExchange => ({ url, status: 200, headers: { 'content-type': 'application/json' }, body });
-const lookupMbid = (index: number) => `0000000d-0000-4000-8000-${String(index).padStart(12, '0')}`;
-const reviewSearch = (query: MusicBrainzReleaseQuery, releases: [string, number][]) => lookupJson(musicBrainzUrls.releaseSearch(query).href, { count: releases.length, offset: 0,
-    releases: releases.map(([id, trackCount], index) => ({ id, title: `Synthetic Release ${index}`, score: 100 - index, 'track-count': trackCount })) });
-/** The review's two searches (its saved title with and without its primary Artist), each finding `releases`. */
-const reviewSearches = (releases: [string, number][] = []) => [reviewSearch({ release: 'Existing Album', artist: 'Existing Artist' }, releases), reviewSearch({ release: 'Existing Album' }, releases)];
-/** A two-track release credited to Existing Artist with a label, whose one-minute tracks pair with the review's members. */
-const pairableRelease = (id: string) => [lookupJson(musicBrainzUrls.release(id).href, { id, title: 'Looked Up Album', date: '2019-04-01',
-    'artist-credit': [{ name: 'Existing Artist', joinphrase: '', artist: { id: lookupMbid(30), name: 'Existing Artist' } }],
-    'label-info': [{ 'catalog-number': 'SYN-1', label: { id: lookupMbid(40), name: 'Looked Up Label' } }],
-    media: [{ position: 1, format: 'CD', tracks: [60_000, 60_000].map((length, index) => ({ position: index + 1, number: String(index + 1), title: `Looked Up Track ${index + 1}`, length,
-        recording: { id: lookupMbid(900 + index), length } })) }] }),
-    lookupJson(musicBrainzUrls.artistAliases(lookupMbid(30)).href, { id: lookupMbid(30), name: 'Existing Artist', aliases: [] }),
-    lookupJson(musicBrainzUrls.labelAliases(lookupMbid(40)).href, { id: lookupMbid(40), name: 'Looked Up Label', aliases: [] })];
-/** Runs the lookup worker over fixture MusicBrainz answers (iTunes answers nothing) until nothing is due; returns what was sent. */
-async function drainLookup(exchanges: LookupExchange[]) {
-    const fixture = fixtureTransport(exchanges), musicBrainz = createMusicBrainzClient({ gate: immediateGate(), transport: fixture.transport, sleep: async () => undefined });
-    for (let tick = 0; tick < 10 && await runMetadataLookupOnce({ musicBrainz, itunes: emptyItunesClient() }); tick++);
-    return fixture.requests;
-}
-/** Runs `work` with the metadata lookup operator contact configured. */
-async function withLookup(work: () => Promise<void>) {
-    process.env.FINITUDE_ADMIN_METADATA_LOOKUP_CONTACT = lookupContact;
-    try { await work(); } finally { delete process.env.FINITUDE_ADMIN_METADATA_LOOKUP_CONTACT; }
-}
-
 test('review lookup routes guard authentication, the current admin and the viewer before parsing, stay private and within 8 KB, and answer with 202 receipts that replay and a view with its summary', () => withLookup(async () => {
     const review = await create(), id = review.item.id, _id = new ObjectId(id), path = `/catalog-reviews/${id}/lookup`;
     const raw = (route: string, body: string, access = '', headers: Record<string, string> = {}) => fetch(base + '/api/admin/v1' + route, { method: 'POST',
@@ -1372,19 +1346,6 @@ test('metadata lookup for a review never writes the catalog collections: a run t
     assert.deepEqual(read.summary.needsAnswer.conflicts.slice(0, 2), ['album.title', 'album.releaseDate']);
 }));
 
-/**
- * A two-track release like pairableRelease whose tracks credit their own artists (an artist ID and name each; null: no stored
- * credit), with every alias answer its run asks for.
- */
-const trackCreditedRelease = (id: string, trackArtists: ([string, string] | null)[]) => [lookupJson(musicBrainzUrls.release(id).href, { id, title: 'Looked Up Album', date: '2019-04-01',
-    'artist-credit': [{ name: 'Existing Artist', joinphrase: '', artist: { id: lookupMbid(30), name: 'Existing Artist' } }],
-    'label-info': [{ 'catalog-number': 'SYN-1', label: { id: lookupMbid(40), name: 'Looked Up Label' } }],
-    media: [{ position: 1, format: 'CD', tracks: trackArtists.map((credited, index) => ({ position: index + 1, number: String(index + 1), title: `Looked Up Track ${index + 1}`, length: 60_000,
-        recording: { id: lookupMbid(900 + index), length: 60_000 }, ...(credited ? { 'artist-credit': [{ name: credited[1], joinphrase: '', artist: { id: credited[0], name: credited[1] } }] } : {}) })) }] }),
-    lookupJson(musicBrainzUrls.artistAliases(lookupMbid(30)).href, { id: lookupMbid(30), name: 'Existing Artist', aliases: [] }),
-    lookupJson(musicBrainzUrls.labelAliases(lookupMbid(40)).href, { id: lookupMbid(40), name: 'Looked Up Label', aliases: [] }),
-    ...[...new Map(trackArtists.filter((credited): credited is [string, string] => credited !== null)).entries()]
-        .map(([artistId, name]) => lookupJson(musicBrainzUrls.artistAliases(artistId).href, { id: artistId, name, aliases: [] }))];
 /**
  * A review whose submitted run completed on `exchanges` (the pairable release by default), so the worker applied its exact-count
  * preselection; with readers of its stored document and lookup record.
@@ -1579,13 +1540,13 @@ test('a failed write inside a choice, an answer or a re-ranking save stores noth
     assert.deepEqual(receipts.filter(kind => kind !== 'create' && kind !== 'lookup'), ['lookup-choose', 'lookup-choose', 'lookup-resolve', 'edit']);
 }));
 
-test('applying a review refuses a selected value with an unanswered lookup conflict until it is answered, never for a tie or an unselected conflict, and refuses a number a pairing filled', () => withLookup(async () => {
+test('applying a review refuses a selected value with an unanswered lookup conflict until it is answered, never for a tie or an unselected conflict, and refuses a number a pairing filled without its tracklist', () => withLookup(async () => {
     const { id, _id, slots, record } = await completedReview(), candidateKey = `musicbrainz:${lookupMbid(1)}`;
     const catalog = await catalogSnapshot();
     let review = await current(id);
     await assert.rejects(apply(review, [albumTitle]), code('ADMIN_IMPORT_REVIEW_REQUIRED'));
     await assert.rejects(apply(review, [{ scope: 'track', slotId: slots[0], field: 'title' }]), code('ADMIN_IMPORT_REVIEW_REQUIRED'));
-    // The Disc Number the pairing filled is applied only with its expected tracklist, which a later change offers.
+    // The Disc Number the pairing filled is applied only with its expected tracklist or a kept one placing it; this Album keeps none.
     await assert.rejects(apply(review, [{ scope: 'track', slotId: slots[0], field: 'discNumber' }]), code('ADMIN_IMPORT_INVALID_INPUT'));
     assert.deepEqual([await catalogSnapshot(), (await current(id)).item.state, (await current(id)).item.revision], [catalog, 'reviewing', review.item.revision]);
     // Once the title is answered it applies, while the unselected date conflict and a tie between matching groups never block.
@@ -1596,6 +1557,26 @@ test('applying a review refuses a selected value with an unanswered lookup confl
     assert.deepEqual([summary.tie, summary.conflicts.includes('album.releaseDate')], [true, true]);
     const applied = await apply(review, [albumTitle, { scope: 'track', slotId: slots[0], field: 'trackNumber' }]);
     assert.deepEqual([applied.item.state, applied.receipt?.kind, (await db().collection('albums').findOne({ _id: album }))!.title], ['applied', 'apply', 'Existing Album']);
+}));
+
+test('pairing-filled Disc Numbers apply together with the expected tracklist that places them, which is stored with the Album', () => withLookup(async () => {
+    const { id, slots } = await completedReview();
+    const review = await current(id), rows = review.item.draft.album.expectedTracklist!;
+    assert.deepEqual(rows.map(row => [row.discNumber, row.trackNumber, row.title]), [[1, 1, 'Looked Up Track 1'], [1, 2, 'Looked Up Track 2']]);
+    const fields: CatalogReviewField[] = [{ scope: 'album', slotId: null, field: 'expectedTracklist' }, ...slots.map(slotId => ({ scope: 'track' as const, slotId, field: 'discNumber' as const }))];
+    // Selecting the tracklist needs the shown identity lists, even empty ones, and the value revision the confirmation read.
+    const { valueRevision } = await getCatalogReviewCandidates(String(actor), id);
+    await assert.rejects(applyCatalogReview(String(actor), id, { ...mutation(review.item.revision), fields, expectedValueRevision: valueRevision }), code('ADMIN_IMPORT_INVALID_INPUT'));
+    await assert.rejects(applyCatalogReview(String(actor), id, { ...mutation(review.item.revision), fields, preselections: [], musicBrainzIds: [] }), code('ADMIN_IMPORT_INVALID_INPUT'));
+    const before = (await db().collection('albums').findOne({ _id: album }))!;
+    const applied = await applyCatalogReview(String(actor), id, { ...mutation(review.item.revision), fields, preselections: [], musicBrainzIds: [], expectedValueRevision: valueRevision });
+    assert.deepEqual([applied.item.state, applied.item.applied?.fields.map(field => field.field)], ['applied', ['expectedTracklist', 'discNumber', 'discNumber']]);
+    const after = (await db().collection('albums').findOne({ _id: album }))!, tracks = await db().collection('audioTracks').find({}).sort({ _id: 1 }).toArray();
+    assert.deepEqual([after.expectedTracklist.source, after.expectedTracklist.rows, after.expectedTracklist.appliedAt instanceof Date], ['musicbrainz', rows, true]);
+    assert.notEqual(adminCatalogItemRevision('album', after), adminCatalogItemRevision('album', before));
+    assert.deepEqual(tracks.map(track => [track.discNumber, track.discNumberSource]), [[1, 'admin-catalog'], [1, 'admin-catalog']]);
+    // Credits and identities are untouched: only the tracklist, the numbers and the order were selected.
+    assert.deepEqual([after.credits, await db().collection('organizations').countDocuments()], [before.credits, 0]);
 }));
 
 test('several answers are all or nothing, and a review at its receipt limit or whose stored capture cannot be read refuses choices and answers, writing nothing', () => withLookup(async () => {

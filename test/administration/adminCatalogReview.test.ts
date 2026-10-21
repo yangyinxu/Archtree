@@ -4,10 +4,11 @@
  *   Constants: reviewId, slotA, slotB, revision
  * Tests
  *   - review naming evidence accepts only actual bounded basenames and preserves missing evidence
- *   - apply selection cannot mutate Artist identity, Credits, label, visibility, files or another scope
+ *   - apply selection takes the Album's Artist entries, label and expected tracklist on the Album scope only, and never Credits, visibility, files or another scope
  *   - catalog analysis cannot claim nonexistent folder or missing filename evidence, and its Disc and Track Numbers need a filename
- *   - apply selection holds at most the two Album fields and three per Track
- *   - review context keeps stored Credit order, primary and featured Artists only, each name once, adjacent join phrases and the first named label
+ *   - apply selection holds at most the five Album fields and three per Track
+ *   - an apply body takes optional shown preselections, ID writes, member slots and value revision; Album review-only fields need both shown lists, lookup values the value revision, and something must be selected
+ *   - review context keeps stored Credit order, primary and featured Artists only, each name once in any letter case, adjacent join phrases and the first named label
  *   - only a draft with an own Album artistName is a v1 review draft
  *   - a review save keeps the stored Credits context, label, visibility and uncaptured Disc Numbers and parses only titles, date and numbers
  *   - a v1 review converts to Draft v2 with the legacy entry, its baseline and suggestions, and no value origins; anything else is unchanged
@@ -22,6 +23,7 @@ import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
 import { ObjectId } from 'mongodb';
 import { catalogReviewCredits, catalogReviewEntryKey, catalogReviewOriginalFilename, convertLegacyCatalogReview, isLegacyCatalogReviewDraft, parseCatalogReviewChanges, parseCatalogReviewDraft, parseCatalogReviewFields } from '../../src/administration/catalog/adminCatalogReviewService';
+import { parseCatalogReviewApplyBody } from '../../src/administration/catalog/adminCatalogReviewApply';
 import { derivedEntryKey, draftBytes } from '../../src/administration/import/adminImportDraft';
 import { validateLunaSuggestions, type AnalysisInput } from '../../src/administration/import/adminImportProvider';
 import { uuid } from '../../src/administration/import/adminImportContract';
@@ -56,14 +58,18 @@ test('review naming evidence accepts only actual bounded basenames and preserves
     for (const input of [undefined, null, '', '/private/music/song.mp3', 'C:\\music\\song.mp3', '../song.mp3', '\ud800', 'Song\u0000.mp3', 'x'.repeat(256)]) assert.equal(catalogReviewOriginalFilename(input), null);
     assert.equal(catalogReviewOriginalFilename(' 01 标题.mp3 '), '01 标题.mp3');
 });
-test('apply selection cannot mutate Artist identity, Credits, label, visibility, files or another scope', () => {
+test('apply selection takes the Album\'s Artist entries, label and expected tracklist on the Album scope only, and never Credits, visibility, files or another scope', () => {
     const slotId = randomUUID();
     assert.deepEqual(parseCatalogReviewFields([{ scope: 'track', slotId, field: 'trackNumber' }]), [{ scope: 'track', slotId, field: 'trackNumber' }]);
     assert.deepEqual(parseCatalogReviewFields([{ scope: 'track', slotId, field: 'discNumber' }]), [{ scope: 'track', slotId, field: 'discNumber' }]);
-    for (const field of ['artistName', 'artists', 'label', 'discNumber', 'credits', 'visibility', 's3Key', 'albumId']) assert.throws(() => parseCatalogReviewFields([{ scope: 'album', slotId: null, field }]), field);
-    for (const field of ['artists', 'label', 'releaseDate', 'visibility']) assert.throws(() => parseCatalogReviewFields([{ scope: 'track', slotId, field }]), field);
+    for (const field of ['artists', 'label', 'expectedTracklist']) assert.deepEqual(parseCatalogReviewFields([{ scope: 'album', slotId: null, field }]), [{ scope: 'album', slotId: null, field }]);
+    for (const field of ['artistName', 'discNumber', 'trackNumber', 'credits', 'visibility', 's3Key', 'albumId']) assert.throws(() => parseCatalogReviewFields([{ scope: 'album', slotId: null, field }]), field);
+    for (const field of ['artists', 'label', 'expectedTracklist', 'releaseDate', 'visibility']) assert.throws(() => parseCatalogReviewFields([{ scope: 'track', slotId, field }]), field);
     for (const input of [[], [{ scope: 'artist', slotId: null, field: 'title' }], [{ scope: 'track', slotId, field: 'releaseDate' }], [{ scope: 'album', slotId, field: 'title' }], [{ scope: 'album', slotId: null, field: 'title', value: 'Not saved' }]]) assert.throws(() => parseCatalogReviewFields(input));
     const repeated = { scope: 'album', slotId: null, field: 'title' }; assert.throws(() => parseCatalogReviewFields([repeated, repeated]));
+    // An empty selection is admitted only where members are selected instead.
+    assert.deepEqual(parseCatalogReviewFields([], { allowEmpty: true }), []);
+    assert.throws(() => parseCatalogReviewFields(null, { allowEmpty: true }));
 });
 test('catalog analysis cannot claim nonexistent folder or missing filename evidence, and its Disc and Track Numbers need a filename', () => {
     const slotId = randomUUID();
@@ -86,14 +92,51 @@ test('catalog analysis cannot claim nonexistent folder or missing filename evide
     trackInput.manifest.files[0].filename = '';
     for (const field of ['trackNumber', 'discNumber']) assert.throws(() => validateLunaSuggestions({ suggestions: [{ ...suggestion, scope: 'track', slotId, field, text: null, number: 3, source: 'filename' }] }, trackInput));
 });
-test('apply selection holds at most the two Album fields and three per Track', () => {
+test('apply selection holds at most the five Album fields and three per Track', () => {
     const tracks = (count: number) => Array.from({ length: count }, () => randomUUID()).flatMap(slotId => ['title', 'discNumber', 'trackNumber'].map(field => ({ scope: 'track', slotId, field })));
-    const album = [{ scope: 'album', slotId: null, field: 'title' }, { scope: 'album', slotId: null, field: 'releaseDate' }];
-    assert.equal(parseCatalogReviewFields([...album, ...tracks(100)]).length, 302);
+    const album = ['title', 'releaseDate', 'artists', 'label', 'expectedTracklist'].map(field => ({ scope: 'album', slotId: null, field }));
+    assert.equal(parseCatalogReviewFields([...album, ...tracks(100)]).length, 305);
     assert.throws(() => parseCatalogReviewFields([...album, ...tracks(100), { scope: 'track', slotId: randomUUID(), field: 'title' }]));
 });
+test('an apply body takes optional shown preselections, ID writes, member slots and value revision; Album review-only fields need both shown lists, lookup values the value revision, and something must be selected', () => {
+    const slotId = randomUUID(), body = (extra: Record<string, unknown>) => ({ operationId: randomUUID(), expectedRevision: 2, fields: [{ scope: 'album', slotId: null, field: 'title' }], ...extra });
+    // An editor that shows no identity rows sends fields only: missing lists count as empty, no member is selected and no value revision is bound.
+    const plain = parseCatalogReviewApplyBody(body({}));
+    assert.deepEqual([plain.fields.length, plain.memberCredits, plain.preselections, plain.musicBrainzIds, plain.expectedValueRevision], [1, [], [], [], null]);
+    // A value revision sent with fields only is still bound.
+    assert.equal(parseCatalogReviewApplyBody(body({ expectedValueRevision: 3 })).expectedValueRevision, 3);
+    const identity = '0000000a-0000-4000-8000-000000000001', mbid = '0000000b-0000-4000-8000-000000000001';
+    const preselection = { scope: 'artist', identity, boundName: 'Synthetic Artist', action: 'reuse', candidateId: 'a'.repeat(24), candidateRevision: 'b'.repeat(64) };
+    const write = { scope: 'label', identity: null, musicBrainzId: mbid, replaces: null };
+    const full = parseCatalogReviewApplyBody(body({ fields: [], memberCredits: [slotId], preselections: [preselection], musicBrainzIds: [write], expectedValueRevision: 0 }));
+    assert.deepEqual([full.fields, full.memberCredits, full.preselections, full.musicBrainzIds, full.expectedValueRevision], [[], [slotId], [preselection], [write], 0]);
+    // The Album's Artist entries, label or expected tracklist need both shown lists, even empty ones, and the value revision.
+    for (const field of ['artists', 'label', 'expectedTracklist']) {
+        const fields = [{ scope: 'album', slotId: null, field }];
+        assert.throws(() => parseCatalogReviewApplyBody(body({ fields, preselections: [], expectedValueRevision: 0 })), field);
+        assert.throws(() => parseCatalogReviewApplyBody(body({ fields, preselections: [], musicBrainzIds: [] })), field);
+        assert.equal(parseCatalogReviewApplyBody(body({ fields, preselections: [], musicBrainzIds: [], expectedValueRevision: 0 })).fields[0].field, field);
+    }
+    // Members alone may leave the shown lists out (they count as empty, so the apply refuses whenever it computes items), but never the value revision.
+    const members = parseCatalogReviewApplyBody(body({ fields: [], memberCredits: [slotId], expectedValueRevision: 4 }));
+    assert.deepEqual([members.preselections, members.musicBrainzIds, members.expectedValueRevision], [[], [], 4]);
+    assert.throws(() => parseCatalogReviewApplyBody(body({ fields: [], memberCredits: [slotId], preselections: [], musicBrainzIds: [] })));
+    // Nothing selected, malformed or repeated members, more than 100 members, malformed shown items and malformed value revisions are invalid input.
+    for (const extra of [{ fields: [] }, { fields: [], memberCredits: [], preselections: [], musicBrainzIds: [] }, { memberCredits: [slotId, slotId] }, { memberCredits: ['not-a-slot'] },
+        { memberCredits: slotId }, { memberCredits: Array.from({ length: 101 }, () => randomUUID()) }, { preselections: [{ ...preselection, extra: 1 }], musicBrainzIds: [] },
+        { preselections: [{ ...preselection, identity: identity.toUpperCase() }], musicBrainzIds: [] }, { preselections: [{ ...preselection, action: 'replace' }], musicBrainzIds: [] },
+        { preselections: [{ ...preselection, action: 'create-distinct' }], musicBrainzIds: [] }, { preselections: [], musicBrainzIds: [{ ...write, replaces: mbid }] },
+        { preselections: [], musicBrainzIds: [{ ...write, identity }] }, { preselections: [], musicBrainzIds: [{ ...write, musicBrainzId: '89ad4ac3-39f7-470e-963a-56509c546377' }] },
+        { preselections: Array.from({ length: 514 }, () => preselection), musicBrainzIds: [] }, { preselections: [[preselection]], musicBrainzIds: [] }, { extra: true },
+        { expectedValueRevision: -1 }, { expectedValueRevision: 1.5 }, { expectedValueRevision: '1' }, { expectedValueRevision: null }, { expectedValueRevision: 2 ** 53 }]) {
+        assert.throws(() => parseCatalogReviewApplyBody(body(extra)), JSON.stringify(extra).slice(0, 80));
+    }
+    // Up to 100 members and 513 shown items are admitted.
+    assert.equal(parseCatalogReviewApplyBody(body({ memberCredits: Array.from({ length: 100 }, () => randomUUID()), preselections: Array.from({ length: 513 }, () => preselection), musicBrainzIds: [],
+        expectedValueRevision: 0 })).memberCredits.length, 100);
+});
 
-test('review context keeps stored Credit order, primary and featured Artists only, each name once, adjacent join phrases and the first named label', () => {
+test('review context keeps stored Credit order, primary and featured Artists only, each name once in any letter case, adjacent join phrases and the first named label', () => {
     const names = new Map([[subject(10), ' Synthetic A '], [subject(11), 'Synthetic B'], [subject(12), 'Synthetic C'], [subject(13), 'Synthetic Performer'], [subject(14), 'Synthetic D'],
         [subject(16), '   '], [subject(17), 'Synthetic Legacy'], [subject(18), 'Synthetic F'], [subject(19), 'Synthetic A']]);
     const organizations = new Map([[subject(31), 'Synthetic Label'], [subject(32), 'Second Synthetic Label'], [subject(33), 'Synthetic Publisher'], [subject(10), 'Not an Artist']]);
@@ -111,6 +154,11 @@ test('review context keeps stored Credit order, primary and featured Artists onl
         ['Synthetic A', 'primary', ' & '], ['Synthetic B', 'featured', ' feat. '], ['Synthetic C', 'primary', null], ['Synthetic D', 'featured', null],
         ['Synthetic F', 'primary', null]
     ]);
+    // A name repeated in another letter case is shown once, at its first Credit (Artist entries may not share a folded name).
+    const cased = new Map([...names, [subject(20), 'SYNTHETIC B'], [subject(21), 'synthetic c']]);
+    const repeated = [credit('r1', 'artist', 11, 'primary', ' & '), credit('r2', 'artist', 20, 'primary', ' / '), credit('r3', 'artist', 12, 'featured', ' x '), credit('r4', 'artist', 21, 'featured')];
+    assert.deepEqual(catalogReviewCredits(reviewId, repeated, cased, organizations).artists.map(({ name, role, joinPhrase }) => [name, role, joinPhrase]),
+        [['Synthetic B', 'primary', null], ['Synthetic C', 'featured', null]]);
     // One Artist credited as primary and featured is shown once, at its first Credit, as the catalog byline shows it.
     const twice = [credit('t1', 'artist', 11, 'primary', 0, ' & '), credit('t2', 'artist', 11, 'featured', 1, ' with '), credit('t3', 'artist', 12, 'featured', 2)];
     assert.deepEqual(catalogReviewCredits(reviewId, twice, names, organizations).artists.map(({ name, role, joinPhrase }) => [name, role, joinPhrase]),

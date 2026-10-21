@@ -28,7 +28,7 @@ import { getDatabaseClient, getDb } from '../../infrastructure/database';
 import { ADMIN_IMPORT_LIMITS as LIMITS, AdminImportError, IMPORT_APPROVAL_FIELDS, cleanText, exact, importEnabled, invalidImport, legacyDefaultDraftV1, objectId, parseDraft, parseManifest, record, uuid, type AdminImportDetail, type AdminImportDetailV2, type AdminImportResponse, type ImportAnalysisState, type ImportDraft, type ImportDuplicateDecision, type ImportEmbeddedTags, type ImportIssue, type ImportManifest, type ImportReceipt, type ImportSuggestion, type ImportWorkbenchFilter, type ImportWorkbenchResponse } from './adminImportContract';
 import { type AnalysisInput, type ImportAnalysisProvider, ImportProviderError, OpenAiImportAnalysisProvider } from './adminImportProvider';
 import { LUNA_SUGGESTION_LIMIT, lunaAnalysisChunks, lunaAnalysisInput, lunaContextRecord, lunaDispatchIssue, lunaIdentityProposals, lunaLookupContextFor, lunaSuggestionV1, lunaSuggestionV2, type AnalysisChunk, type LunaContextRecord, type StoredLunaLookupContext } from './adminImportLuna';
-import type { CatalogReviewSource, CatalogReviewApplied, CatalogReviewCapture } from '../catalog/adminCatalogReviewContract';
+import type { CatalogReviewSource, CatalogReviewAppliedRecord, CatalogReviewCapture, CatalogReviewIdentityDecision } from '../catalog/adminCatalogReviewContract';
 import type { ImportMedia } from './adminImportMediaTypes';
 import { importPrivateStorageReady } from './adminImportMediaTypes';
 import { catalogReviewSourceDisc, importDraftV2FromV1, importDraftV2View, importDraftVersion, importDraftWritable, importSuggestionsV2View, LEGACY_IMPORT_RECEIPT_KINDS, legacyAdministratorOrigins, importDecisionsV2View, importPublishedV2View, legacyAnalysisView, legacyAssetsView, legacyDecisionsView, legacyDraftView, legacyManifestView, legacyPublicationView, legacyReceiptsView, legacySelectedCover, legacySuggestionsView, legacyTagsView, importProjectV2View, isWritableDraftV2, writableDraftFilter } from './adminImportDraftCompat';
@@ -54,13 +54,19 @@ type Analysis = { state: ImportAnalysisState; generation: number; operationId: s
 /** A stored suggestion: v1 or Draft v2, a Luna one with the context its chunk sent (`lookupContext`, server-only). */
 type StoredSuggestion = (ImportSuggestion | ImportSuggestionV2) & { lookupContext?: LunaContextRecord };
 export type AdminImportDocument = {
-    purpose?: 'import' | 'catalogReview' | null; catalogSource?: CatalogReviewSource; catalogEvidence?: Record<string, string>; catalogApplied?: CatalogReviewApplied;
+    purpose?: 'import' | 'catalogReview' | null; catalogSource?: CatalogReviewSource; catalogEvidence?: Record<string, string>; catalogApplied?: CatalogReviewAppliedRecord;
     /**
      * What a catalog review captured from the catalog when metadata lookup was first admitted for it (adminCatalogReviewCapture.ts):
      * member durations, ordered Credits with their records' revisions, attribution states and the expected tracklist. Server-only,
      * never projected.
      */
     catalogCapture?: CatalogReviewCapture;
+    /**
+     * A catalog review's identity decisions (adminCatalogReviewApply.ts), one per identity and the label, replaced as a whole set.
+     * Projected only by GET /catalog-reviews/:id/candidates; value application never reads them (it reads `decisions`, which reviews
+     * never fill).
+     */
+    catalogIdentityDecisions?: CatalogReviewIdentityDecision[];
     /**
      * Absent, null or 1 is a v1 draft; 2 is Draft v2 (imports and catalog reviews); 3 is a catalog review captured for metadata
      * lookup (Draft v2 plus review-only values); any other value is read-only here.
@@ -301,7 +307,9 @@ export async function mutateAdminProject<T>(actor: string, id: string, body: Rec
             && (publication.state !== 'cancelled' || (publication.cleanupPending && !['edit', 'adopt', 'decisions'].includes(kind)))) throw conflict('ADMIN_IMPORT_PUBLICATION_LOCKED');
         // Recovery admits one intent per previously admitted asset/approval; cleanup never consumes new-work capacity.
         const recovery = kind === 'cleanup' || kind === 'cancel-publication';
-        if ((recovery ? doc.recoveryReceipts?.length ?? 0 : doc.receipts.length) >= LIMITS.receipts) throw conflict('ADMIN_IMPORT_OPERATION_LIMIT');
+        // A catalog review keeps its last ordinary receipt for applying, so many answers and edits never leave it unappliable.
+        const reserved = policy.purpose === 'catalogReview' && !recovery && kind !== 'apply' ? 1 : 0;
+        if ((recovery ? doc.recoveryReceipts?.length ?? 0 : doc.receipts.length) >= LIMITS.receipts - reserved) throw conflict('ADMIN_IMPORT_OPERATION_LIMIT');
         const observed = doc.revision;
         // A format-1 project is stored in this release's format with its first admitted change other than stopping work or recovery;
         // a refused change aborts the transaction, conversion included.

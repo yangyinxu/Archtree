@@ -115,7 +115,8 @@ import {
     runMetadataLookupOnce as runLookupWorkerOnce, startMetadataLookupWorker as startLookupWorker, type MetadataLookupRequest, type MetadataLookupWorkerDependencies
 } from '../../src/administration/lookup/metadataLookupService';
 import { getCatalogReviewLookup, retryCatalogReviewLookup, submitCatalogReviewLookup } from '../../src/administration/lookup/catalogReviewLookupRequests';
-import { applyCatalogReview, createCatalogReview, getCatalogReview } from '../../src/administration/catalog/adminCatalogReviewService';
+import { createCatalogReview, getCatalogReview } from '../../src/administration/catalog/adminCatalogReviewService';
+import { applyCatalogReview } from '../../src/administration/catalog/adminCatalogReviewApply';
 import { adminCatalogItemRevision } from '../../src/administration/catalog/adminCatalogService';
 import { loadImportFixture } from '../support/adminImportFixtures';
 import {

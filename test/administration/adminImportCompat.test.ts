@@ -364,14 +364,17 @@ test('catalog review sources keep known fields and a captured Disc Number, appli
         [{ value: 999 }, { value: null }, null, null, null]);
     const applied = { operationId: '00000009-0000-4000-8000-0000000000d4', at: '2026-11-01T09:00:00.000Z', fields: [{ scope: 'album', slotId: null, field: 'title' }, { scope: 'track', slotId: slot, field: 'discNumber' },
         { scope: 'album', slotId: null, field: 'title' }, { scope: 'album', slotId: null, field: 'discNumber' }, { scope: 'label', slotId: null, field: 'title' }, { scope: 'track', slotId: slot, field: 'trackNumber', extra: true },
-        { scope: 'track', slotId: slot, field: 'artists' }], extra: 1 } as unknown as CatalogReviewApplied;
+        { scope: 'track', slotId: slot, field: 'artists' }, { scope: 'album', slotId: null, field: 'artists' }, { scope: 'album', slotId: null, field: 'label' },
+        { scope: 'album', slotId: null, field: 'expectedTracklist' }, { scope: 'track', slotId: slot, field: 'expectedTracklist' }], extra: 1 } as unknown as CatalogReviewApplied;
+    // The Album's Artist entries, label and expected tracklist are applied fields on the Album scope only.
     assert.deepEqual(catalogReviewAppliedView(applied, new Set([slot, slotTwo])), { operationId: applied.operationId, at: applied.at,
-        fields: [{ scope: 'album', slotId: null, field: 'title' }, { scope: 'track', slotId: slot, field: 'discNumber' }, { scope: 'track', slotId: slot, field: 'trackNumber' }] });
+        fields: [{ scope: 'album', slotId: null, field: 'title' }, { scope: 'track', slotId: slot, field: 'discNumber' }, { scope: 'track', slotId: slot, field: 'trackNumber' },
+            { scope: 'album', slotId: null, field: 'artists' }, { scope: 'album', slotId: null, field: 'label' }, { scope: 'album', slotId: null, field: 'expectedTracklist' }] });
     assert.deepEqual(catalogReviewAppliedView({ ...applied, fields: 'x' } as unknown as CatalogReviewApplied), { operationId: applied.operationId, at: applied.at, fields: [] });
     assert.equal(catalogReviewAppliedView(undefined), null);
-    // At most 2 + 3 per file fields are shown.
+    // At most 5 + 3 per file fields are shown.
     const many = Array.from({ length: 110 }, (_, index) => ['title', 'discNumber', 'trackNumber'].map(field => ({ scope: 'track', slotId: `00000009-0000-4000-a000-${String(index).padStart(12, '0')}`, field }))).flat();
-    assert.equal(catalogReviewAppliedView({ ...applied, fields: [...applied.fields, ...many] } as unknown as CatalogReviewApplied)!.fields.length, 302);
+    assert.equal(catalogReviewAppliedView({ ...applied, fields: [...applied.fields, ...many] } as unknown as CatalogReviewApplied)!.fields.length, 305);
     // Views never throw on malformed stored data.
     for (const raw of [null, 'x', [], { album: null, tracks: 'x' }, { album: [], tracks: [null, 1, { slotId: 'bad' }] }]) {
         assert.doesNotThrow(() => catalogReviewSourceView(raw)); assert.deepEqual(catalogReviewSourceView(raw).tracks, [], JSON.stringify(raw));

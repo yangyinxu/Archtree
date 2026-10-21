@@ -38,6 +38,7 @@ import { importCandidateProjection, importCandidateRevision, importCollection, i
 import { assertImportPreselectionsCurrent, serializeImportIdentityCommits } from './adminImportIdentity';
 import { importPrivateStorageReady, importPublicationFormat, type ImportMusicBrainzIdWriteFrozen, type ImportPublication, type ImportPublicationArtist, type ImportPublicationLabel } from './adminImportMediaTypes';
 import { boundArtistDecision, boundLabelDecision, type ImportArtistEntry, type ImportDecisionV2, type ImportDraftV2 } from './adminImportDraft';
+import { newArtistRecord, newLabelOrganizationRecord } from '../catalog/adminNewCatalogRecords';
 
 export const importPublicationConflict = () => new AdminImportError(409, 'ADMIN_IMPORT_PUBLICATION_CONFLICT');
 const conflict = importPublicationConflict;
@@ -225,8 +226,9 @@ const draftV2CommitValues = (publication: ImportPublication): LegacyValues => {
 };
 /** The single primary Artist Credit of formats 1 and 2; an entry's join phrase is kept with it. */
 const legacyCredits = (artistId: string, joinPhrase: string | null) => normalizeCatalogCredits([{ creditId: `import_primary_${artistId}`, subjectType: 'artist', subjectId: artistId, role: 'primary', order: 0, ...(joinPhrase ? { joinPhrase } : {}) }]);
-/** A new Artist record; it keeps a MusicBrainz ID only when its frozen identity records one. */
-const newArtist = (id: string, name: string, albumIds: string[], actorId: string, visibility: 'public' | 'hidden', musicBrainzId: string | null = null) => ({ _id: oid(id), name, bio: '', birthDate: {}, coverArtUrl: '', albumIds, createdBy: actorId, lifecycleStatus: 'ready', lifecycleUpdatedAt: new Date(), lifecycleError: null, referenceRevision: 0, visibility, ...catalogSearchProjection(name), ...(musicBrainzId ? { musicBrainzId } : {}) });
+/** A new Artist record (adminNewCatalogRecords.ts); it keeps a MusicBrainz ID only when its frozen identity records one. */
+const newArtist = (id: string, name: string, albumIds: string[], actorId: string, visibility: 'public' | 'hidden', musicBrainzId: string | null = null) =>
+    newArtistRecord({ id, name, albumIds, actorId, visibility, musicBrainzId });
 
 /** Formats 1 and 2, unchanged: one primary Artist credited on the Album and every track. */
 async function legacyGraph(publication: ImportPublication, format: 1 | 2, session: ClientSession): Promise<CommitGraph> {
@@ -302,7 +304,8 @@ async function approvedGraph(publication: ImportPublication, doc: AdminImportDoc
         if (reusedPrimaries.length) await db.collection('artists').updateMany({ _id: { $in: reusedPrimaries } }, { $addToSet: { albumIds: publication.albumId } } as any, { session });
         if (label?.newOrganization) {
             const name = snapshot.album.label!.name;
-            await db.collection('organizations').insertOne({ _id: oid(label.organizationId), name, organizationType: 'label', description: '', createdBy: publication.actorId, lifecycleStatus: 'ready', lifecycleUpdatedAt: new Date(), lifecycleError: null, referenceRevision: 0, visibility: snapshot.album.visibility, ...catalogSearchProjection(name), ...(label.musicBrainzIdWrite ? { musicBrainzId: label.musicBrainzIdWrite.musicBrainzId } : {}) }, { session });
+            await db.collection('organizations').insertOne(newLabelOrganizationRecord({ id: label.organizationId, name, actorId: publication.actorId, visibility: snapshot.album.visibility,
+                musicBrainzId: label.musicBrainzIdWrite?.musicBrainzId ?? null }), { session });
         }
     }
     const releaseDate = existingAlbum ? storedSimpleDate(existingAlbum.releaseDate) : date(snapshot.album.releaseDate);

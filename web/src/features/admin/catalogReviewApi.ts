@@ -5,7 +5,8 @@
  *   Constants: reviewDetailSchema, reviewResponseSchema, reviewMutationSchema, reviewWorkbenchSchema
  * Internal
  *   Functions: differs
- *   Constants: id, uuid, integer, revision, analysis, receipt, field, source, expectedRow, reviewDraftSchema
+ *   Constants: id, uuid, integer, revision, analysis, receipt, albumFields, field, source, expectedRow,
+ *              reviewDraftSchema
  * @end-catalog */
 
 import { z } from 'zod';
@@ -16,10 +17,13 @@ const uuid = z.string().uuid();
 const integer = z.number().int().nonnegative();
 const revision = z.string().regex(/^cr_[A-Za-z0-9_-]{43}$/);
 const analysis = analysisSchema;
-// `lookup` and `lookup-retry` answer the review's metadata lookup routes; the detail's history never lists them.
-const receipt = z.object({ operationId: uuid, revision: integer, kind: z.enum(['create', 'edit', 'analyze', 'adopt', 'cancel-analysis', 'apply', 'lookup', 'lookup-retry']) }).strict();
-const field = z.object({ scope: z.enum(['album', 'track']), slotId: uuid.nullable(), field: z.enum(['title', 'releaseDate', 'discNumber', 'trackNumber']) }).strict()
-  .refine(value => value.scope === 'album' ? value.slotId === null && (value.field === 'title' || value.field === 'releaseDate') : value.slotId !== null && value.field !== 'releaseDate');
+// `lookup` and `lookup-retry` answer the review's metadata lookup routes, and `decisions` its identity decisions; the detail's
+// history never lists them.
+const receipt = z.object({ operationId: uuid, revision: integer, kind: z.enum(['create', 'edit', 'analyze', 'adopt', 'cancel-analysis', 'apply', 'lookup', 'lookup-retry', 'decisions']) }).strict();
+// The Album's Artist entries, label and expected tracklist are applied on the Album scope only.
+const albumFields: readonly string[] = ['title', 'releaseDate', 'artists', 'label', 'expectedTracklist'];
+const field = z.object({ scope: z.enum(['album', 'track']), slotId: uuid.nullable(), field: z.enum(['title', 'releaseDate', 'artists', 'label', 'expectedTracklist', 'discNumber', 'trackNumber']) }).strict()
+  .refine(value => value.scope === 'album' ? value.slotId === null && albumFields.includes(value.field) : value.slotId !== null && ['title', 'discNumber', 'trackNumber'].includes(value.field));
 const source = z.object({
   album: z.object({ id, revision, title: z.string().max(300), releaseDate: importDateSchema.nullable(), visibility: z.enum(['public', 'hidden']) }).strict(),
   // An absent discNumber was not captured (a review created before Disc Numbers were); null means the Track stored none.
@@ -40,7 +44,7 @@ const reviewDraftSchema = z.object({
 export const reviewDetailSchema = z.object({ id, revision: integer, createdAt: z.string(), updatedAt: z.string(), startedByMe: z.boolean(),
   state: z.enum(['reviewing', 'applied']), source, sourceStatus: z.enum(['current', 'changed', 'unavailable']), draft: reviewDraftSchema,
   analysis, suggestions: z.array(importSuggestionV2Schema).max(1000), capabilities: z.object({ analysis: z.boolean(), apply: z.boolean() }).strict(),
-  applied: z.object({ operationId: uuid, at: z.string(), fields: z.array(field).max(302) }).strict().nullable(), receipts: z.array(receipt).max(256)
+  applied: z.object({ operationId: uuid, at: z.string(), fields: z.array(field).max(305) }).strict().nullable(), receipts: z.array(receipt).max(256)
 }).strict().superRefine((item, ctx) => {
   const slots = new Set(item.source.tracks.map(track => track.slotId));
   if (slots.size !== item.source.tracks.length || new Set(item.source.tracks.map(track => track.id)).size !== slots.size

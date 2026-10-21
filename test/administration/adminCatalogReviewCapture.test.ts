@@ -7,7 +7,7 @@
  *   - the label state is none without a label Credit, first when its first label Credit is shown, and other otherwise
  *   - a list is complete only when every primary and featured Artist Credit is shown
  *   - legacy unspecified Credits are captured but shown as no entry, and leave a list complete
- *   - captured entries keep stored Credit order, a featured Artist before a primary one included, and names differing only in case
+ *   - captured entries keep stored Credit order, a featured Artist before a primary one included, and show a name differing only in case once
  *   - a member's attribution state keeps an explicit unknown apart from an absent or unrecognized one
  *   - a member's duration is its exact media duration, else its legacy whole-second text, else unknown
  * @end-catalog */
@@ -94,8 +94,10 @@ test('a list is complete only when every primary and featured Artist Credit is s
     // A name another Credit already shows is shown once; the byline does the same, so the list is not complete.
     assert.deepEqual(both([credit('a', 'artist', 10, 'primary'), credit('b', 'artist', 10, 'featured')]), [false, false], 'one Artist twice');
     assert.deepEqual(both([credit('a', 'artist', 10, 'primary'), credit('b', 'artist', 13, 'featured')]), [true, true]);
-    // Names are compared exactly, as review context compares them.
-    assert.deepEqual(both([credit('a', 'artist', 10, 'primary'), credit('b', 'artist', 11, 'featured')]), [true, true]);
+    // A name repeated in another letter case is shown once too (Artist entries may not share a folded name), so the Album's and
+    // a member's list are not complete, and such a list is never applied.
+    assert.deepEqual(both([credit('a', 'artist', 10, 'primary'), credit('b', 'artist', 11, 'featured')]), [false, false]);
+    assert.deepEqual(complete([credit('a', 'artist', 10, 'primary'), credit('b', 'artist', 11, 'featured')]).album.credits?.map(value => value.entryKey === null), [false, true]);
     // A Credit whose record is not ready is captured without a subject and is not shown.
     const unready = complete([credit('a', 'artist', 10, 'primary'), credit('u', 'artist', 99, 'featured')]);
     assert.deepEqual([unready.album.artistsComplete, unready.album.credits?.[1].subject, unready.album.credits?.[1].entryKey], [false, null, null]);
@@ -120,15 +122,20 @@ test('legacy unspecified Credits are captured but shown as no entry, and leave a
     assert.deepEqual([empty.memberArtists.get(slotA), empty.capture.members[0].artistsComplete, empty.capture.album.artistsComplete], [[], true, true]);
 });
 
-test('captured entries keep stored Credit order, a featured Artist before a primary one included, and names differing only in case', () => {
+test('captured entries keep stored Credit order, a featured Artist before a primary one included, and show a name differing only in case once', () => {
     // Captured lists are catalog context: compared by position later and never re-parsed as a proposed value would be.
     const known = subjects([['artist', 10, subject('Synthetic Featured')], ['artist', 11, subject('Synthetic Primary')], ['artist', 12, subject('SYNTHETIC PRIMARY')]]);
     const member = [credit('f1', 'artist', 10, 'featured', ' with '), credit('p1', 'artist', 11, 'primary', ' & '), credit('p2', 'artist', 12, 'primary')];
-    const result = capture([], [{ slotId: slotA, credits: member }], known);
+    const result = capture(member, [{ slotId: slotA, credits: member }], known);
+    // The second spelling is never an entry: the phrase before it is cleared, as before any Credit that is not shown.
     assert.deepEqual(result.memberArtists.get(slotA)?.map(entry => [entry.name, entry.role, entry.joinPhrase]),
-        [['Synthetic Featured', 'featured', ' with '], ['Synthetic Primary', 'primary', ' & '], ['SYNTHETIC PRIMARY', 'primary', null]]);
-    assert.deepEqual(result.capture.members[0].credits?.map(value => value.creditId), ['f1', 'p1', 'p2']);
-    assert.equal(result.capture.members[0].artistsComplete, true);
+        [['Synthetic Featured', 'featured', ' with '], ['Synthetic Primary', 'primary', null]]);
+    assert.deepEqual(result.album.artists.map(entry => entry.name), ['Synthetic Featured', 'Synthetic Primary']);
+    assert.deepEqual(result.capture.members[0].credits?.map(value => [value.creditId, value.entryKey === null]), [['f1', false], ['p1', false], ['p2', true]]);
+    // Both lists are then not complete, so neither is ever applied; every other captured value is unchanged.
+    assert.deepEqual([result.capture.album.artistsComplete, result.capture.members[0].artistsComplete], [false, false]);
+    assert.deepEqual(result.capture.members[0].credits?.map(value => value.subject?.name), ['Synthetic Featured', 'Synthetic Primary', 'SYNTHETIC PRIMARY']);
+    assert.deepEqual([result.capture.album.label, result.capture.album.expectedTracklist, result.capture.members[0].attributionStatus], ['none', null, null]);
 });
 
 test('a member\'s attribution state keeps an explicit unknown apart from an absent or unrecognized one', () => {

@@ -57,6 +57,9 @@
  *   - an Album without members gets an all-missing expected tracklist and an empty pairing; an ambiguous pairing writes Album values only
  *   - choosing B after A writes B's pairing from the review's own numbers, and a re-rank right after an application changes nothing
  *   - a paired member's Artist entries come only from its own track: filled without Artist Credits, absent when agreeing, else one conflict
+ *   - a review keeps the names lookup found for IDs only its members' entries carry, when a candidate is applied and when a member conflict is answered
+ *   - a review keeps the localized name groups naming an artist only its members' entries carry, which an import never keeps
+ *   - names alone that a review's identity rows read bump its valueRevision, whether an application or a completed run that applies nothing found them; an import's never do
  *   - a member whose track has no usable credit, or whose capture is incomplete, is left as it is and flagged; an iTunes-only track artist stays one entry
  *   - choosing B after A, or none, replaces or removes automatic member entries and removes a member MusicBrainz ID that A supplied
  *   - a lookup answer never records the IDs the saved entries kept, so choosing none keeps them and a later renamed credit still agrees by ID
@@ -88,6 +91,7 @@ import type { ImportAsset } from '../../src/administration/import/adminImportMed
 import type { AdminImportDocument } from '../../src/administration/import/adminImportService';
 import { applyAdministratorChanges, applyAutomaticValues, importAutomationMarkers, parseDraftChanges } from '../../src/administration/import/adminImportValueState';
 import { planImportAutomation } from '../../src/administration/import/adminImportAutomation';
+import { mergeImportLocalizedNames } from '../../src/administration/import/adminImportLocalizedNames';
 import { METADATA_LOOKUP_JOB_LIMITS, type LookupArtistCredit, type MusicBrainzRelease } from '../../src/administration/lookup/lookupContract';
 import {
     applyLookupCandidate, applyPreselectedLookup, chooseLookupCandidate, isLookupValuePath, lookupAnswersNeeded, lookupCandidateIds, lookupCandidateValues, lookupDecisionRecords, lookupRerankNeeded,
@@ -1324,6 +1328,56 @@ test('a paired member\'s Artist entries come only from its own track: filled wit
         [['Other Singer'], [['Synthetic Singer', 'primary', syntheticMbid(5)], ['Synthetic Guest', 'featured', syntheticMbid(6)]], 'administrator']);
     assert.ok(took.applied!.musicBrainzIds!.some(item => item.path === `tracks.${slot(6)}.artists` && item.entryKey === reviewKey('Synthetic Guest', slot(6)) && item.musicBrainzId === syntheticMbid(6)));
     assert.deepEqual(lookupAnswersNeeded(took, doc, { append: false }).conflicts.filter(path => path.endsWith('.artists')), [`tracks.${slot(5)}.artists`]);
+});
+
+test('a review keeps the names lookup found for IDs only its members\' entries carry, when a candidate is applied and when a member conflict is answered', () => {
+    const doc = reviewLookupDocument({ albumEntries: [{ name: 'Synthetic Ensemble' }],
+        members: [{ durationMs: 200_000, trackNumber: 1 }, { durationMs: 210_000, trackNumber: 2, artists: [{ name: 'Other Singer' }] }] });
+    const candidate = reviewRelease(1, [200_000, 210_000], { credits: [credit('Synthetic Singer', syntheticMbid(5)), credit('Synthetic Guest', syntheticMbid(6))] });
+    const { application } = applyLookupCandidate(doc, null, candidate, intent());
+    // The first member is filled with its own track's artist, whose ID only that member carries: its names are kept with the Album's.
+    assert.deepEqual(doc.musicBrainzNames, [{ musicBrainzId: syntheticMbid(1), names: ['Synthetic Ensemble'] }, { musicBrainzId: syntheticMbid(5), names: ['Synthetic Singer'] }]);
+    // The second member's differing list is a conflict, so no entry carries its ID yet; answering it with the lookup list does.
+    const record = { ...completed(doc, [candidate]), applied: application };
+    resolveLookupConflicts(doc, record, { run: 1, candidateKey: candidate.key,
+        answers: [{ path: `tracks.${reviewSlot(1)}.artists`, answer: 'lookup', base: structuredClone(reviewDraftOf(doc).tracks[1].artists) }] }, now);
+    assert.deepEqual(doc.musicBrainzNames?.map(item => item.musicBrainzId), [syntheticMbid(1), syntheticMbid(5), syntheticMbid(6)]);
+});
+
+test('a review keeps the localized name groups naming an artist only its members\' entries carry, which an import never keeps', () => {
+    const doc = reviewLookupDocument({ albumEntries: [{ name: 'Synthetic Ensemble' }], members: [{ durationMs: 200_000, trackNumber: 1 }, { durationMs: 210_000, trackNumber: 2 }] });
+    const candidate = reviewRelease(1, [200_000, 210_000], { credits: [credit('Synthetic Singer', syntheticMbid(5)), credit('Synthetic Singer', syntheticMbid(5))] });
+    const localized = [['Synthetic Singer', 'シンセ シンガー'], ['Unrelated', 'Other']];
+    applyLookupCandidate(doc, null, candidate, intent(), { identity: { holders: new Map(), storedIds: new Map() }, aliases: new Map(), localized });
+    // Both members are filled with their own track's artist, so its group is kept for the review's identity candidates.
+    assert.deepEqual([reviewDraftOf(doc).tracks.map(track => track.artists.map(entry => entry.name)), doc.localizedNames], [[['Synthetic Singer'], ['Synthetic Singer']], [localized[0]]]);
+    // An import counts only its Album entries, so the same draft keeps no group naming the member-only artist.
+    assert.deepEqual(mergeImportLocalizedNames([], localized, reviewDraftOf(doc) as unknown as ImportDraftV2), []);
+});
+
+test('names alone that a review\'s identity rows read bump its valueRevision, whether an application or a completed run that applies nothing found them; an import\'s never do', () => {
+    const doc = reviewLookupDocument({ albumEntries: [{ name: 'Synthetic Ensemble' }], members: [{ durationMs: 200_000, trackNumber: 1 }, { durationMs: 210_000, trackNumber: 2 }] });
+    const candidate = reviewRelease(1, [200_000, 210_000], { credits: [credit('Synthetic Singer', syntheticMbid(5)), credit('Synthetic Singer', syntheticMbid(5))] });
+    const first = applyLookupCandidate(doc, null, candidate, intent()), revision = doc.valueRevision!;
+    // The same candidate in a later run writes no value, but a newly fetched alias of the members' artist changes what binds them.
+    const aliased = aliasContext([[syntheticMbid(5), ['Synthetic Alias Singer']]]);
+    const again = applyLookupCandidate(doc, first.application, candidate, intent({ run: 2 }), aliased);
+    assert.deepEqual([again.application.paths, again.changed, doc.valueRevision, doc.musicBrainzNames?.find(item => item.musicBrainzId === syntheticMbid(5))?.names],
+        [[], true, revision + 1, ['Synthetic Singer', 'Synthetic Alias Singer']]);
+    // The same names again change nothing; new localized names alone bump it too.
+    assert.deepEqual([applyLookupCandidate(doc, again.application, candidate, intent({ run: 2 }), aliased).changed, doc.valueRevision], [false, revision + 1]);
+    applyLookupCandidate(doc, again.application, candidate, intent({ run: 2 }), { ...aliased, localized: [['Synthetic Singer', 'シンセ シンガー']] });
+    assert.equal(doc.valueRevision, revision + 2);
+    // A later run that preselects nothing applies nothing, yet the names it fetched for the applied release are kept and bump it.
+    const later = completed(doc, [candidate], { run: 3, applied: { ...again.application, run: 2 }, aliases: [{ kind: 'artist', id: syntheticMbid(5), state: 'fetched', names: ['Synthetic Third Name'] }] });
+    const kept = applyPreselectedLookup(doc, { ...later, ranking: { ...later.ranking!, preselection: null } }, now);
+    assert.deepEqual([kept.changed, doc.valueRevision, doc.musicBrainzNames?.find(item => item.musicBrainzId === syntheticMbid(5))?.names.at(-1)], [true, revision + 3, 'Synthetic Third Name']);
+    // An import's names never bump it: only its values do.
+    const imported = project(2, timed), release = synthetic(1);
+    applyLookupCandidate(imported, null, stored(release), intent());
+    const importRevision = imported.valueRevision;
+    const named = applyLookupCandidate(imported, null, stored(release), intent({ run: 2 }), aliasContext([[release.artistCredit[0].artistId, ['Synthetic Import Alias']]]));
+    assert.deepEqual([named.changed, named.application.paths, imported.valueRevision, imported.musicBrainzNames?.[0].names.includes('Synthetic Import Alias')], [true, [], importRevision, true]);
 });
 
 test('a member whose track has no usable credit, or whose capture is incomplete, is left as it is and flagged; an iTunes-only track artist stays one entry', () => {

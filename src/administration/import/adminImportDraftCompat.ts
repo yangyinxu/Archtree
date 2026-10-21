@@ -414,7 +414,7 @@ export function catalogReviewCappedDraft(draft: ImportDraftV2): Record<string, u
     }) };
 }
 const reviewField = (value: unknown, slots?: ReadonlySet<string>): value is CatalogReviewField => isRecord(value) && (value.scope === 'album'
-    ? value.slotId === null && oneOf(value.field, ['title', 'releaseDate'] as const)
+    ? value.slotId === null && oneOf(value.field, ['title', 'releaseDate', 'artists', 'label', 'expectedTracklist'] as const)
     : value.scope === 'track' && uuid(value.slotId) && (!slots || slots.has(value.slotId)) && oneOf(value.field, ['title', 'discNumber', 'trackNumber'] as const));
 /** Applied evidence is never dropped: an applied review must keep showing that it was applied. */
 export function catalogReviewAppliedView(raw: unknown, slots?: ReadonlySet<string>): CatalogReviewApplied | null {

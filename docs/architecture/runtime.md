@@ -322,8 +322,10 @@ duplicates with an aggregate such as `[{ $match: { musicBrainzId: { $type:
 { $match: { count: { $gt: 1 } } }]` on each collection and clear the extra IDs
 through the admin catalog editor. A write that would duplicate an ID fails
 inside its transaction (see [MusicBrainz IDs](catalog.md#musicbrainz-ids)): an
-Admin catalog edit returns `409 ADMIN_CATALOG_MUSICBRAINZ_ID_IN_USE`, and an
-import commit becomes needs attention (`identityConflict`). Once IDs are
+Admin catalog edit returns `409 ADMIN_CATALOG_MUSICBRAINZ_ID_IN_USE`, an
+import commit becomes needs attention (`identityConflict`), and an
+existing-Album review apply returns `409 ADMIN_CATALOG_REVIEW_IDENTITY_CHANGED`
+and writes nothing. Once IDs are
 stored, the release before them is the rollback floor (see
 [Rollback floors](../features/admin-workbench.md#rollback-floors)); it keeps
 the indexes (harmless: its writers never set the field, and listener DTOs were
@@ -343,6 +345,20 @@ saved while rolled back for an entry or label carrying an ID bind none after
 rolling forward and are cleared. The lookup worker sends at most 16 extra
 artist or label alias lookups per run, through the same deployment-wide
 MusicBrainz gate, and a source failure ends that alias phase at once.
+
+An existing-Album review document (`adminAlbumImports`, `purpose`
+`catalogReview`) also keeps its identity decisions (`catalogIdentityDecisions`,
+at most 513, replaced as a whole set) and, once applied, the slots of the
+members whose Artist entries it applied (`catalogApplied.memberCredits`); its
+`musicBrainzNames` keep names for the IDs its members' entries carry too, at
+most 513 IDs of 32 names (an import keeps 21), and its `localizedNames` keep
+the groups naming its members' entries too, at most 512. Neither the decisions
+nor the member slots appear in the review detail; the decisions are returned
+only by `GET /catalog-reviews/:id/candidates`. Applying a
+review that resolves identities increments the same identity-fence document
+(`adminImportAnalysisSlots`, `_id` `identity`) as a format-3 import commit, and
+a MusicBrainz ID another record took meanwhile fails that transaction on the
+unique index (`409 ADMIN_CATALOG_REVIEW_IDENTITY_CHANGED`). No index changes.
 
 Playback Audio/Video GETs that briefly overlap an older stream may wait up to two
 seconds for an existing admission slot. The pending pool is bounded to 32 per
