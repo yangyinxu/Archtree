@@ -143,7 +143,17 @@ primary Artist Credit at 1280 px in English and 390 px in Chinese with an axe
 scan. Its open clear confirmation turns stale when the Album changes elsewhere,
 and after the page rereads the Album and its tracks, one confirmed request
 clears it at the newer revision, after which the Tracks section returns to the
-plain Album order.
+plain Album order. An existing-Album review opens on its metadata lookup
+summary, whose Look up button is in the first screen above the paid Luna AI
+button, also for 100 tracks. At 1280 px in English and 390 px in Chinese it
+looks up the Album by its prefilled saved title, shows the run queued and then
+applied after the review detail is read again, answers one conflict with Keep
+current and the rest, a track's Artists included, with Use all MusicBrainz in
+one request each made against the saved values, shows a member filled from its
+own release track, the expected tracklist with its row without a file, and the
+guest Artist shared by the Album and a track as one identity row saved as
+created, with axe scans and reflow down to 320 px, and never applies. An
+iTunes-only result says Use iTunes and flags every value it wrote.
 
 The historical 2026-08-19 MediaTrack amendment passed
 304/304 server tests, 214/214 Web unit/component tests, 148/148 integration
@@ -553,6 +563,25 @@ player control still works.
   after the lookup controls; with iTunes unreachable, confirm the summary says
   iTunes was unavailable with the name box as the next step and Publish stops
   waiting once its retries end. Repeat with a screen reader at 320 CSS px.
+- As an administrator, with metadata lookup configured against MusicBrainz in a
+  development environment, open an existing-Album review of an Album that lacks
+  some tracks of its release and has a track without Artists. Look up the
+  Album's title from the name box and confirm the summary applies the release,
+  fills empty values without asking, shows each differing value as a conflict
+  with Keep current and Use MusicBrainz, and that Use all MusicBrainz answers
+  them all, each answered value then folded once among the values that need no
+  answer. Confirm the member without Artists shows its own track's artists from
+  MusicBrainz, never the Album's; a member with other Artists shows one
+  conflict; a member whose track has no usable credit stays unchanged with its
+  reason; choosing a release whose tracks pair with the members in no single way
+  says that track values and track Artists are not applied and lists every
+  member as unpaired; each identity row names the members it covers; the
+  expected tracklist shows the missing tracks as No file yet; Use Luna AI (paid)
+  follows the lookup summary and is never primary; and Update original Album
+  lists only title, date and number changes, a track number lookup filled being
+  shown but not selectable. For an Album only iTunes knows, confirm the buttons
+  read Use iTunes and the values are flagged iTunes only. Repeat in Simplified
+  Chinese (保留当前, 使用 MusicBrainz) and with a screen reader at 320 CSS px.
 - As an administrator, in English and then in Simplified Chinese, open an
   import's Draft section and Review and publish summary and an existing-Album
   review. Confirm every control that starts Luna reads "Use Luna AI (paid)" or

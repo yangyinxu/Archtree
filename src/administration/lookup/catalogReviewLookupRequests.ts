@@ -37,11 +37,12 @@ import {
  * this server offers lookup at all.
  */
 export type CatalogReviewLookupSummary = { waiting: { lookup: boolean; analysis: boolean }; needsAnswer: { tie: boolean; conflicts: string[] }; lookupAvailable: boolean };
-export type CatalogReviewLookupResponse = { lookup: CatalogReviewLookupView | null; revision: number; summary: CatalogReviewLookupSummary };
+/** `valueRevision` counts lookup applications, which change the draft without a new `revision`, so a reader notices them. */
+export type CatalogReviewLookupResponse = { lookup: CatalogReviewLookupView | null; revision: number; valueRevision: number; summary: CatalogReviewLookupSummary };
 const notFound = () => new AdminImportError(404, 'ADMIN_CATALOG_REVIEW_NOT_FOUND');
 
 /**
- * The review's lookup view (null before any run), its revision and its summary, read in one snapshot. The review is read without
+ * The review's lookup view (null before any run), its revision and value revision and its summary, read in one snapshot. The review is read without
  * its server-only capture; an applied review reads too. A malformed ID or a project that is not a review is not found.
  */
 export async function getCatalogReviewLookup(actor: string, id: string, configuration: () => MetadataLookupConfiguration = metadataLookupConfiguration): Promise<CatalogReviewLookupResponse> {
@@ -54,6 +55,7 @@ export async function getCatalogReviewLookup(actor: string, id: string, configur
         const available = configuration().available, analysis = doc.analysis;
         return {
             lookup: stored ? catalogReviewLookupView(stored, doc) : null, revision: doc.revision,
+            valueRevision: Number.isSafeInteger(doc.valueRevision) && doc.valueRevision! >= 0 ? doc.valueRevision! : 0,
             summary: {
                 // The run's own state, never the review's gate, which an earlier release's worker may leave blocking; analysis also
                 // waits for a stopped call the worker still settles, which apply refuses too.

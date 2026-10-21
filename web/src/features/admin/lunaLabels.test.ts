@@ -24,9 +24,10 @@ const status = [...family('admin.analysis.'),
   ...family('admin.workbench.').filter(key => key.includes('analyzing')), 'admin.workbench.review_stage',
   ...['analysis_limit', 'analysis_running', 'empty_attention', 'empty_cancelled', 'empty_no_suggestions'].map(copy => `admin.catalog_review.${copy}`)];
 const lookupProse = [...['incomplete', 'itunes_unavailable', 'no_match', 'no_query', 'no_release', 'not_configured', 'not_started', 'stopped', 'unavailable'].map(state => `admin.lookup.${state}`),
-  'admin.common.lookup_unavailable'];
+  'admin.common.lookup_unavailable', ...['not_started', 'no_query', 'no_match'].map(state => `admin.catalog_review.lookup_${state}`)];
 const lookupControls = [...['retry', 'submit', 'box', 'name', 'kind_album', 'kind_song', 'choose', 'choose_none'].map(control => `admin.lookup.${control}`),
-  'admin.summary.keep_mine', 'admin.summary.use_lookup'];
+  'admin.summary.keep_mine', 'admin.summary.use_lookup',
+  ...['keep_current', 'use_musicbrainz', 'use_itunes', 'keep_all_current', 'use_all_musicbrainz', 'use_all_itunes'].map(control => `admin.catalog_review.${control}`)];
 const generic = ['Analyze', 'Analyze again', 'Review', 'Proofread', 'Complete', '分析', '校对', '重新校对', '补全'];
 /** Every [locale, key, message] for the keys, in both shipped locales. */
 const each = (keys: string[]) => Object.entries(locales).flatMap(([locale, messages]) => keys.map(key => [locale, key, messages[key]] as const));

@@ -1,6 +1,5 @@
 import { useId, useState } from 'react';
 import { useAdminText } from './AdminAccess';
-import type { ImportLookupView } from './importLookupApi';
 import styles from './adminStyles';
 
 /** A link in place of a name; the server refuses it too (ADMIN_IMPORT_LOOKUP_INVALID_NAME). */
@@ -8,13 +7,17 @@ const link = (text: string) => /:\/\/|^www\./i.test(text);
 
 /**
  * The summary's name box: an Album or song name for metadata lookup, prefilled with the last submitted name or, after a
- * folder-name run, the folder name for editing. It accepts names only, keeps no history (no autocomplete and nothing stored) and
- * is not listener Search: it neither uses the search landmark nor restores global music search to the administration layout.
+ * folder-name run, the folder name for editing; otherwise with `defaultText` (an existing-Album review's saved Album title). It
+ * accepts names only, keeps no history (no autocomplete and nothing stored) and is not listener Search: it neither uses the search
+ * landmark nor restores global music search to the administration layout.
  */
-export function LookupBox({ lookup, rootLabel, disabled, onSubmit }: { lookup: ImportLookupView | null; rootLabel: string; disabled: boolean; onSubmit: (kind: 'album' | 'song', text: string) => void }) {
+export function LookupBox({ lookup, rootLabel, defaultText, disabled, onSubmit }: {
+  lookup: { input: { trigger: string; submitted: { kind: 'album' | 'song'; text: string } | null } } | null; rootLabel: string; defaultText?: string; disabled: boolean;
+  onSubmit: (kind: 'album' | 'song', text: string) => void;
+}) {
   const t = useAdminText(), id = useId();
   const [kind, setKind] = useState<'album' | 'song'>(lookup?.input.submitted?.kind ?? 'album');
-  const [text, setText] = useState(lookup?.input.submitted?.text ?? (lookup?.input.trigger === 'folder' ? rootLabel : ''));
+  const [text, setText] = useState(lookup?.input.submitted?.text ?? (lookup?.input.trigger === 'folder' ? rootLabel : defaultText ?? ''));
   const [refused, setRefused] = useState(false);
   return <form className={styles.editor} noValidate onSubmit={event => {
     event.preventDefault();

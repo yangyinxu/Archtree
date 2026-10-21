@@ -18,7 +18,7 @@ export const artistEntryKey = '50000000-0000-4000-8000-000000000001';
  */
 export function catalogReview(): CatalogReview {
   return {
-    id: reviewId, revision: 1, createdAt: '2026-10-01T00:00:00.000Z', updatedAt: '2026-10-01T00:00:00.000Z', startedByMe: true,
+    id: reviewId, revision: 1, valueRevision: 0, createdAt: '2026-10-01T00:00:00.000Z', updatedAt: '2026-10-01T00:00:00.000Z', startedByMe: true,
     state: 'reviewing', sourceStatus: 'current',
     source: {
       album: { id: albumId, revision: albumRevision, title: 'Synthetic catalog Album', releaseDate: null, visibility: 'public' },

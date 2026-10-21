@@ -55,8 +55,12 @@ export type CatalogReviewDraft = Omit<ImportDraftV2, 'album' | 'tracks'> & {
     album: ImportDraftV2['album'] & { expectedTracklist?: ExpectedTracklistRow[] | null };
     tracks: (ImportDraftV2['tracks'][number] & { artists?: ImportArtistEntry[] })[];
 };
+/**
+ * A review's detail. `valueRevision` counts the draft writes lookup applications make without changing `revision`; an apply sends it
+ * back as `expectedValueRevision`, so a run that completed after the confirmation was read is refused rather than applied unseen.
+ */
 export type CatalogReviewDetail = {
-    id: string; revision: number; createdAt: string; updatedAt: string; startedByMe: boolean;
+    id: string; revision: number; valueRevision: number; createdAt: string; updatedAt: string; startedByMe: boolean;
     state: 'reviewing' | 'applied'; sourceStatus: 'current' | 'changed' | 'unavailable'; source: CatalogReviewSource; draft: CatalogReviewDraft;
     analysis: AdminImportDetail['analysis']; suggestions: ImportSuggestionV2[];
     capabilities: { analysis: boolean; apply: boolean }; applied: CatalogReviewApplied | null;
@@ -170,12 +174,13 @@ export type CatalogReviewCapture = {
 // POST /:id/lookup/retry ({operationId, expectedRevision}) queue a run with a `lookup` or `lookup-retry` receipt (8 KB bodies);
 // POST /:id/lookup/choose ({operationId, expectedRevision, run, candidateKey}, 8 KB) applies a candidate or none to the review's
 // draft with a `lookup-choose` receipt, and POST /:id/lookup/resolve ({operationId, expectedRevision, run, candidateKey, answers},
-// 512 KB, 1 to 406 answers) answers its conflicts with a `lookup-resolve` receipt; the Web does not call either yet. PATCH /:id
+// 512 KB, 1 to 406 answers) answers its conflicts with a `lookup-resolve` receipt; the Web review summary calls all four. PATCH /:id
 // re-ranks a completed run when a save changes a member's own Disc or Track Number.
 // GET /:id/candidates reads the identity rows, candidates, preselections, ID writes and Credit changes of the default selection
 // (CatalogReviewIdentityResponse); POST /:id/decisions ({operationId, expectedRevision, decisions}, 768 KB, at most 513 items)
 // replaces the review's identity decisions with a `decisions` receipt; POST /:id/apply ({operationId, expectedRevision, fields,
 // preselections?, musicBrainzIds?, memberCredits?, expectedValueRevision?}, 768 KB) applies the selection
-// (adminCatalogReviewApply.ts). The Web calls neither the candidates read nor decisions yet, and its apply sends `fields` only.
+// (adminCatalogReviewApply.ts). The Web review summary reads the candidates and saves decisions; its apply sends `fields` with
+// the detail's `valueRevision` as `expectedValueRevision`, and no identity items until its confirmation shows the identity rows.
 // GET /:id/lookup/candidates/:key/artwork is a transient WebP preview (catalogReviewLookupRequests.ts, adminImportLookupCover.ts).
 // Every endpoint returns private no-store data; no asset or publication endpoint exists.

@@ -51,7 +51,8 @@ export async function catalogReviewDto(doc: AdminImportDocument, actor: string, 
     const shared = adminImportDetail(doc, actor), sourceStatus = await catalogReviewSourceStatus(doc, session), source = catalogReviewSourceView(doc.catalogSource);
     const view = catalogReviewDraftView(doc);
     return {
-        id: shared.id, revision: shared.revision, createdAt: shared.createdAt, updatedAt: shared.updatedAt,
+        // `valueRevision` counts lookup applications, which change the draft without a new revision; an apply sends it back.
+        id: shared.id, revision: shared.revision, valueRevision: shared.valueRevision, createdAt: shared.createdAt, updatedAt: shared.updatedAt,
         startedByMe: shared.startedByMe, sourceStatus, state: doc.catalogApplied ? 'applied' : 'reviewing',
         // A review never changes visibility, so its draft always shows the frozen source visibility.
         source, draft: { ...view, album: { ...view.album, visibility: source.album.visibility } }, analysis: shared.analysis, suggestions: shared.suggestions,

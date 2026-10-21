@@ -28,6 +28,9 @@ const musicBrainzId = z.string().regex(/^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{1
 const name = z.string().min(1).max(200);
 export const artistEntrySchema = z.object({ key: uuid, name, role: z.enum(['primary', 'featured']), joinPhrase: z.string().min(1).max(16).nullable(), musicBrainzId: musicBrainzId.nullable() }).strict();
 export const labelEntrySchema = z.object({ name, musicBrainzId: musicBrainzId.nullable() }).strict();
+/** One row of an Album's expected tracklist, as a review draft and a review lookup value carry it. */
+export const expectedTracklistRowSchema = z.object({ discNumber: z.number().int().min(1).max(999), trackNumber: z.number().int().min(1).max(9999), title: z.string().min(1).max(300),
+  durationMs: z.number().int().positive().nullable() }).strict();
 const artistEntries = z.array(artistEntrySchema).max(20);
 export const importDraftV2Schema = z.object({
   album: z.object({ title: z.string().max(300), artists: artistEntries, label: labelEntrySchema.nullable(), releaseDate: date.nullable(), visibility: z.enum(['public', 'hidden']) }).strict(),

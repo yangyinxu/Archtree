@@ -1382,6 +1382,7 @@ test('a review run end to end on fixtures: only the saved title and primary Arti
     const { id } = await seededReview([200_000, 210_000]);
     await queueReview(id);
     const queued = await stored(id);
+    const before = (await getCatalogReview(by, id)).item;
     const client = fixtureClient([countedSearch(albumQuery, [[mbid(2), 3], [mbid(1), 2]]), countedSearch({ release: 'Synthetic Album' }, [[mbid(1), 2], [mbid(3), 1]]),
         creditedRelease(mbid(1), [200_000, 210_000], [mbid(31), 'Synthetic Guest']), creditedRelease(mbid(2), [200_000, 210_000, 230_000]), creditedRelease(mbid(3), [200_000]),
         aliasAnswer(mbid(30), 'Synthetic Ensemble'), aliasAnswer(mbid(31), 'Synthetic Guest')]);
@@ -1409,13 +1410,16 @@ test('a review run end to end on fixtures: only the saved title and primary Arti
     // Values never move the revision or add a receipt; they count once in valueRevision, and the gate moved with the run.
     for (const key of ['revision', 'receipts'] as const) assert.deepEqual(doc[key], queued[key], key);
     assert.deepEqual([doc.valueRevision, doc.lookupGate], [1, { fence: 3, run: 1, state: 'complete', blocking: false }]);
+    // The review detail shows that count at an unchanged revision, so a confirmation read before the run is refused on apply.
+    const after = (await getCatalogReview(by, id)).item;
+    assert.deepEqual([before.revision, before.valueRevision, after.revision, after.valueRevision], [queued.revision, 0, queued.revision, 1]);
     // No request carries a Track title, an original filename or a catalog ID.
     const text = sentText(client.requests);
     for (const sentinel of ['Secret Track Title', 'Secret Filename', String(queued.catalogSource!.album.id)]) assert.equal(text.includes(sentinel), false, sentinel);
     // The review's view shows the catalog run, the exact-count preselection and each candidate's subset comparison.
     const read = await getCatalogReviewLookup(by, id);
-    assert.deepEqual([read.revision, read.lookup!.input, read.lookup!.preselection?.basis, read.lookup!.candidates.map(candidate => [candidate.status, candidate.comparison?.subset?.missingTrackCount]),
-        read.summary], [doc.revision, { trigger: 'catalog', submitted: null }, 'exactTrackCount', [['matching', 0], ['matching', 1], ['notMatching', null]],
+    assert.deepEqual([read.revision, read.valueRevision, read.lookup!.input, read.lookup!.preselection?.basis, read.lookup!.candidates.map(candidate => [candidate.status, candidate.comparison?.subset?.missingTrackCount]),
+        read.summary], [doc.revision, 1, { trigger: 'catalog', submitted: null }, 'exactTrackCount', [['matching', 0], ['matching', 1], ['notMatching', null]],
         { waiting: { lookup: false, analysis: false }, needsAnswer: { tie: false, conflicts: slots.map(slot => `tracks.${slot}.title`) }, lookupAvailable: true }]);
 });
 

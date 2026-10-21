@@ -356,11 +356,11 @@ test('reviews keep the last-administrator-receipt window for edits, adoption and
     await runAdminImportWorkerOnce(provider); assert.ok((await current(id)).item.revision > moved.item.revision);
     const rejected = await adoptCatalogReview(String(actor), id, { ...mutation(moved.item.revision), generation: 1, selectedIds: [], rejectIds: [suggestion.id] });
     assert.equal(rejected.receipt!.kind, 'adopt');
-    // Tag automation never reads a review, and a review never stores or shows automatic values.
+    // Tag automation never reads a review, and a review never stores or shows automatic values: its detail's value revision stays 0.
     assert.deepEqual(await runImportAutomation(String(actor), id), { ran: false, written: [], skipped: [], album: false });
-    const doc = await importCollection().findOne({ _id }), json = JSON.stringify(await current(id));
-    assert.deepEqual(['valueRevision' in doc!, 'automation' in doc!, 'draftOrigins' in doc!], [false, false, false]);
-    for (const key of ['valueRevision', 'automaticPaths', 'lookupPaths', 'possibleLabelEntryKeys', 'approvalDigest', 'boundName', 'coverChoice']) assert.equal(json.includes(key), false, key);
+    const doc = await importCollection().findOne({ _id }), read = await current(id), json = JSON.stringify(read);
+    assert.deepEqual(['valueRevision' in doc!, 'automation' in doc!, 'draftOrigins' in doc!, read.item.valueRevision], [false, false, false, 0]);
+    for (const key of ['automaticPaths', 'lookupPaths', 'possibleLabelEntryKeys', 'approvalDigest', 'boundName', 'coverChoice']) assert.equal(json.includes(key), false, key);
 });
 
 test('a review saved in a newer draft format reads through the Draft v2 allowlist and admits only stopping its analysis', async () => {
@@ -1242,7 +1242,7 @@ test('review lookup routes guard authentication, the current admin and the viewe
     const empty = await request(path);
     assert.match(empty.headers.get('cache-control')!, /no-store/);
     assert.deepEqual([empty.status, await empty.json()], [200,
-        { lookup: null, revision: 1, summary: { waiting: { lookup: false, analysis: false }, needsAnswer: { tie: false, conflicts: [] }, lookupAvailable: true } }]);
+        { lookup: null, revision: 1, valueRevision: 0, summary: { waiting: { lookup: false, analysis: false }, needsAnswer: { tie: false, conflicts: [] }, lookupAvailable: true } }]);
     // A submission is a 202 receipt (the review's conversion advanced the revision once before it) that replays.
     const body = { ...mutation(1), kind: 'album', text: 'Existing Album' };
     const submitted = await request(path, 'POST', body), value = await submitted.json();

@@ -5,21 +5,20 @@
  *   Constants: reviewDetailSchema, reviewResponseSchema, reviewMutationSchema, reviewWorkbenchSchema
  * Internal
  *   Functions: differs
- *   Constants: id, uuid, integer, revision, analysis, receipt, albumFields, field, source, expectedRow,
- *              reviewDraftSchema
+ *   Constants: id, uuid, integer, revision, analysis, receipt, albumFields, field, source, reviewDraftSchema
  * @end-catalog */
 
 import { z } from 'zod';
-import { importDateSchema, analysisSchema, artistEntrySchema, importDraftV2Schema, importSuggestionV2Schema } from './adminNamingSchema';
+import { importDateSchema, analysisSchema, artistEntrySchema, expectedTracklistRowSchema, importDraftV2Schema, importSuggestionV2Schema } from './adminNamingSchema';
 
 const id = z.string().regex(/^[a-f0-9]{24}$/);
 const uuid = z.string().uuid();
 const integer = z.number().int().nonnegative();
 const revision = z.string().regex(/^cr_[A-Za-z0-9_-]{43}$/);
 const analysis = analysisSchema;
-// `lookup` and `lookup-retry` answer the review's metadata lookup routes, and `decisions` its identity decisions; the detail's
-// history never lists them.
-const receipt = z.object({ operationId: uuid, revision: integer, kind: z.enum(['create', 'edit', 'analyze', 'adopt', 'cancel-analysis', 'apply', 'lookup', 'lookup-retry', 'decisions']) }).strict();
+// `lookup`, `lookup-retry`, `lookup-choose` and `lookup-resolve` answer the review's metadata lookup routes, and `decisions` its
+// identity decisions; the detail's history never lists them.
+const receipt = z.object({ operationId: uuid, revision: integer, kind: z.enum(['create', 'edit', 'analyze', 'adopt', 'cancel-analysis', 'apply', 'lookup', 'lookup-retry', 'lookup-choose', 'lookup-resolve', 'decisions']) }).strict();
 // The Album's Artist entries, label and expected tracklist are applied on the Album scope only.
 const albumFields: readonly string[] = ['title', 'releaseDate', 'artists', 'label', 'expectedTracklist'];
 const field = z.object({ scope: z.enum(['album', 'track']), slotId: uuid.nullable(), field: z.enum(['title', 'releaseDate', 'artists', 'label', 'expectedTracklist', 'discNumber', 'trackNumber']) }).strict()
@@ -31,17 +30,16 @@ const source = z.object({
     originalFileName: z.string().min(1).max(255).refine(value => value.trim() === value && !/[\\/:\u0000-\u001f\u007f-\u009f]/u.test(value)
       && !/[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/u.test(value) && value !== '.' && value !== '..').nullable() }).strict()).max(100)
 }).strict();
-const expectedRow = z.object({ discNumber: z.number().int().min(1).max(999), trackNumber: z.number().int().min(1).max(9999), title: z.string().min(1).max(300),
-  durationMs: z.number().int().positive().nullable() }).strict();
 /**
  * A review's draft: Draft v2, plus the review-only values a review captured for metadata lookup carries (the Album's expected
  * tracklist, null without one, and each Track's Artist entries). Import responses keep the plain Draft v2 schema.
  */
 const reviewDraftSchema = z.object({
-  album: z.object({ ...importDraftV2Schema.shape.album.shape, expectedTracklist: z.array(expectedRow).min(1).max(100).nullable().optional() }).strict(),
+  album: z.object({ ...importDraftV2Schema.shape.album.shape, expectedTracklist: z.array(expectedTracklistRowSchema).min(1).max(100).nullable().optional() }).strict(),
   tracks: z.array(z.object({ ...importDraftV2Schema.shape.tracks.element.shape, artists: z.array(artistEntrySchema).max(20).optional() }).strict()).max(100)
 }).strict();
-export const reviewDetailSchema = z.object({ id, revision: integer, createdAt: z.string(), updatedAt: z.string(), startedByMe: z.boolean(),
+/** `valueRevision` counts lookup applications, which change the draft at the same `revision`; an apply sends it back. */
+export const reviewDetailSchema = z.object({ id, revision: integer, valueRevision: integer, createdAt: z.string(), updatedAt: z.string(), startedByMe: z.boolean(),
   state: z.enum(['reviewing', 'applied']), source, sourceStatus: z.enum(['current', 'changed', 'unavailable']), draft: reviewDraftSchema,
   analysis, suggestions: z.array(importSuggestionV2Schema).max(1000), capabilities: z.object({ analysis: z.boolean(), apply: z.boolean() }).strict(),
   applied: z.object({ operationId: uuid, at: z.string(), fields: z.array(field).max(305) }).strict().nullable(), receipts: z.array(receipt).max(256)

@@ -2,14 +2,16 @@
  * Internal
  *   Types: Locale, Write, CatalogPresentation, RemainingCatalogKind
  *   Functions: label, remainingCatalogItems, setup, enter, expectStandaloneAdministration, capture,
- *              resetMainScroll, saveDraftGeometry, expectInFirstMainScreen, titleChangeName, expectFrozenTitle,
- *              expectManualChange, editManualAlbum, captureManualDialog, reflow, expectDecodedPrivateCover,
- *              catalogItemName, catalogCategoryLabel, catalogArtworkLabel, expectOrganizationMark
+ *              resetMainScroll, saveDraftGeometry, expectInFirstMainScreen, expectLookupFirst, titleChangeName,
+ *              expectFrozenTitle, expectManualChange, editManualAlbum, captureManualDialog, reflow,
+ *              expectDecodedPrivateCover, catalogItemName, catalogCategoryLabel, catalogArtworkLabel,
+ *              expectOrganizationMark
  *   Constants: shots, localizedViewports, privateCoverPath, coverSvg, coverPalettes, privateCoverFixtures,
  *              remainingCatalogKinds
  *   Variables: locale
  * Tests
  *   - private Album covers disappear on User view or role loss and make no later private image reads
+ *   - an iTunes-only lookup result names iTunes on its answers and flags every value it wrote
  *   - a Luna label suggestion is only an identity hint: it is never a Review item, and Keep current rejects it without changing the label
  *   - a long direct catalog confirmation starts at the first old/new field and keeps its actions reachable at 390px
  *   - reverting catalog edits restores review and cover actions without issuing a catalog mutation
@@ -30,8 +32,10 @@ import AxeBuilder from '@axe-core/playwright';
 import sharp from 'sharp';
 import { capabilities, session, viewer } from '../src/features/admin/adminFixtures.testSupport';
 import { albumId, catalogAlbum, catalogAlbumTracks, catalogAlbumTracksWithExpected, catalogReview, reviewId, slotId, slotTwo, titleSuggestionId } from '../src/features/admin/catalogReviewFixtures.testSupport';
+import { guestHandle, reviewAfterLookup, reviewIdentityResponse, reviewItunesLookupResponse, reviewLookupResponse } from '../src/features/admin/catalogReviewLookupFixtures.testSupport';
 import type { CatalogAlbumTracks } from '../src/features/admin/catalogAlbumTracksApi';
 import type { CatalogReview, ReviewDraftChange, ReviewField } from '../src/features/admin/catalogReviewApi';
+import type { ReviewDecisionItem, ReviewIdentityResponse, ReviewLookupResponse } from '../src/features/admin/catalogReviewLookupApi';
 import type { CatalogItem, CatalogKind } from '../src/features/admin/catalogApi';
 
 const shots = process.env.FINITUDE_CATALOG_E2E_SCREENSHOTS_DIR ?? '/tmp/finitude-first-use-fixed-20261014';
@@ -115,6 +119,21 @@ async function setup(page: Page, administrator = true, initialReleaseDate: { yea
     const value = { operationId: String(body.operationId), kind, revision: review.revision };
     review.receipts.push(value);
     return { item: review, receipt: value };
+  };
+  // The review's metadata lookup: its view (none before a run), the response a submitted run completes with, whether the next
+  // read still sees that run queued, and the identity rows. Lookup and decision receipts are answered, never listed in the detail.
+  let lookup: ReviewLookupResponse['lookup'] = null, completion: ReviewLookupResponse['lookup'] = reviewLookupResponse().lookup, queuedReads = 0;
+  let identities: ReviewIdentityResponse = reviewIdentityResponse();
+  const lookupReceipt = (body: Record<string, unknown>, kind: CatalogReview['receipts'][number]['kind']) => {
+    review = { ...review, revision: review.revision + 1, updatedAt: new Date(Date.parse(review.updatedAt) + 60_000).toISOString() };
+    return { item: review, receipt: { operationId: String(body.operationId), kind, revision: review.revision } };
+  };
+  const queue = (input: NonNullable<ReviewLookupResponse['lookup']>['input']) => {
+    const run = (lookup?.run ?? 0) + 1;
+    completion = { ...completion!, run, input, applied: completion!.applied && { ...completion!.applied, run } };
+    lookup = { ...completion, state: 'queued', outcome: null, candidates: [], groups: [], preselection: null, disclosure: null, applied: lookup?.applied ?? null,
+      needsAnswer: { tie: false, conflicts: lookup?.needsAnswer.conflicts ?? [] }, blocking: true };
+    queuedReads = 1;
   };
   await page.route('**/api/admin/v1/**', async route => {
     const request = route.request(), path = new URL(request.url()).pathname, method = request.method();
@@ -204,6 +223,20 @@ async function setup(page: Page, administrator = true, initialReleaseDate: { yea
       review = { ...review, revision: review.revision + 1, draft };
       return route.fulfill({ json: receipt(body, 'edit'), headers });
     }
+    if (path === `/api/admin/v1/catalog-reviews/${reviewId}/lookup` && method === 'GET') {
+      // The first read after a submission sees its run queued; the next completes it, writing its values at the same revision and the
+      // next value revision.
+      if (lookup?.state === 'queued' && !queuedReads--) {
+        lookup = completion; review = { ...reviewAfterLookup(review), updatedAt: new Date(Date.parse(review.updatedAt) + 1_000).toISOString() };
+      }
+      const active = Boolean(lookup && ['queued', 'running', 'retrying'].includes(lookup.state));
+      return route.fulfill({ json: { lookup, revision: review.revision, valueRevision: review.valueRevision, summary: { waiting: { lookup: active, analysis: ['queued', 'running'].includes(review.analysis.state) },
+        needsAnswer: { tie: lookup?.needsAnswer.tie ?? false, conflicts: lookup?.needsAnswer.conflicts ?? [] }, lookupAvailable: true } }, headers });
+    }
+    if (path === `/api/admin/v1/catalog-reviews/${reviewId}/candidates`) {
+      expect(method).toBe('GET');
+      return route.fulfill({ json: { ...identities, revision: review.revision }, headers });
+    }
     if (path.startsWith(`/api/admin/v1/catalog-reviews/${reviewId}/`) && method === 'POST') {
       const body = request.postDataJSON(); writes.push({ path, method, body });
       expect(body.expectedRevision).toBe(review.revision);
@@ -222,6 +255,44 @@ async function setup(page: Page, administrator = true, initialReleaseDate: { yea
         review = { ...review, revision: review.revision + 1, draft: { ...review.draft, album: { ...review.draft.album, title: String(selected.value) } },
           suggestions: review.suggestions.map(value => value.id === titleSuggestionId ? { ...value, decision: 'accepted' } : value) };
         return route.fulfill({ json: receipt(body, 'adopt'), headers });
+      }
+      if (path.endsWith('/lookup')) {
+        expect(Object.keys(body).sort()).toEqual(['expectedRevision', 'kind', 'operationId', 'text']);
+        queue({ trigger: 'submitted', submitted: { kind: body.kind as 'album' | 'song', text: String(body.text) } });
+        return route.fulfill({ status: 202, json: lookupReceipt(body, 'lookup'), headers });
+      }
+      if (path.endsWith('/lookup/retry')) { queue(lookup!.input); return route.fulfill({ status: 202, json: lookupReceipt(body, 'lookup-retry'), headers }); }
+      if (path.endsWith('/lookup/choose')) {
+        expect(body.run).toBe(lookup!.run);
+        const key = body.candidateKey as string | null;
+        lookup = { ...lookup!, applied: { ...completion!.applied!, candidateKey: key, choice: key ? 'chosen' : 'none', basis: key ? 'chosen' : null } };
+        return route.fulfill({ json: lookupReceipt(body, 'lookup-choose'), headers });
+      }
+      if (path.endsWith('/lookup/resolve')) {
+        // Each answer is made against the saved value; using the lookup value writes it into the review's draft and, as the server
+        // stores it, lists its path among the applied values too.
+        const answers = body.answers as Array<{ path: string; answer: 'mine' | 'lookup'; base: unknown }>, draft = structuredClone(review.draft);
+        for (const answer of answers) {
+          const conflict = lookup!.applied!.conflicts.find(item => item.path === answer.path)!, [scope, first, second] = answer.path.split('.');
+          const holder = (scope === 'album' ? draft.album : draft.tracks.find(track => track.slotId === first)!) as Record<string, unknown>;
+          expect(answer.base).toEqual(holder[scope === 'album' ? first : second] ?? null);
+          if (answer.answer === 'lookup') holder[scope === 'album' ? first : second] = conflict.lookup;
+        }
+        review = { ...review, draft };
+        const used = answers.filter(answer => answer.answer === 'lookup' && !lookup!.applied!.values.some(value => value.path === answer.path))
+          .map(answer => ({ path: answer.path, slotId: answer.path.startsWith('tracks.') ? answer.path.split('.')[1] : null }));
+        lookup = { ...lookup!, applied: { ...lookup!.applied!, values: [...lookup!.applied!.values, ...used],
+          conflicts: lookup!.applied!.conflicts.map(item => ({ ...item, answer: answers.find(answer => answer.path === item.path)?.answer ?? item.answer })) },
+          needsAnswer: { ...lookup!.needsAnswer, conflicts: lookup!.needsAnswer.conflicts.filter(item => !answers.some(answer => answer.path === item)) } };
+        return route.fulfill({ json: lookupReceipt(body, 'lookup-resolve'), headers });
+      }
+      if (path.endsWith('/decisions')) {
+        const decisions = body.decisions as ReviewDecisionItem[];
+        identities = { ...identities, identities: identities.identities.map(row => {
+          const decision = decisions.find(item => item.identity === row.id);
+          return decision ? { ...row, decision: { ...decision, boundMusicBrainzId: row.musicBrainzId }, needsAnswer: false } : { ...row, decision: null };
+        }) };
+        return route.fulfill({ json: lookupReceipt(body, 'decisions'), headers });
       }
       expect(path.endsWith('/apply')).toBe(true);
       // Each test asserts its own selected fields through api.writes; only a selected Album title changes the mocked Album.
@@ -242,7 +313,10 @@ async function setup(page: Page, administrator = true, initialReleaseDate: { yea
     ready: () => { created = true; }, changeSource: (reason: 'metadata' | 'media') => {
       if (reason === 'metadata') album = { ...album, revision: `cr_${'d'.repeat(43)}`, fields: { ...album.fields, title: 'Externally renamed Album' } };
       review = { ...review, sourceStatus: 'changed', capabilities: { ...review.capabilities, apply: false } };
-    }, externalDraft: () => { review = { ...review, revision: review.revision + 1, draft: { ...review.draft, album: { ...review.draft.album, title: 'Another saved review value' } } }; }
+    }, externalDraft: () => { review = { ...review, revision: review.revision + 1, draft: { ...review.draft, album: { ...review.draft.album, title: 'Another saved review value' } } }; },
+    /** A completed lookup already applied to the review, as `response` shows it. */
+    looked: (response: ReviewLookupResponse) => { lookup = response.lookup; completion = response.lookup; review = reviewAfterLookup(review); },
+    lookup: () => lookup, identities: () => identities
   };
 }
 
@@ -318,6 +392,25 @@ async function expectInFirstMainScreen(page: Page, action: Locator) {
   expect(await page.getByRole('main').evaluate(element => element.scrollTop)).toBe(0);
   expect(button!.y).toBeGreaterThanOrEqual(main!.y);
   expect(button!.y + button!.height).toBeLessThanOrEqual(main!.y + main!.height);
+}
+
+/**
+ * Metadata lookup comes first on an existing-Album review: the summary's Look up button is in the first main screen, and the paid
+ * Luna AI button follows it, above the first track title, without the class that styles the draft's Save as the primary action
+ * (production builds hash class names, so the two buttons' class lists are compared).
+ */
+async function expectLookupFirst(page: Page) {
+  const submit = page.getByRole('region', { name: label('admin.catalog_review.lookup_title'), exact: true }).getByRole('button', { name: label('admin.lookup.submit'), exact: true });
+  await expectInFirstMainScreen(page, submit);
+  const start = page.getByRole('button', { name: label('admin.catalog_review.analysis_confirm'), exact: true });
+  const firstTrack = page.getByRole('textbox', { name: `1 · ${label('admin.field.title')}`, exact: true });
+  const [submitBox, startBox, trackBox] = await Promise.all([submit.boundingBox(), start.boundingBox(), firstTrack.boundingBox()]);
+  expect(startBox!.y).toBeGreaterThan(submitBox!.y);
+  expect(startBox!.y).toBeLessThan(trackBox!.y);
+  const classes = async (button: Locator) => (await button.getAttribute('class') ?? '').split(/\s+/).filter(Boolean);
+  const luna = await classes(start), save = await classes(page.getByRole('button', { name: label('admin.catalog_review.save_draft'), exact: true }));
+  expect(save.filter(name => !luna.includes(name))).not.toEqual([]);
+  return start;
 }
 
 function titleChangeName(target: string) {
@@ -688,10 +781,9 @@ for (const variant of localizedViewports) {
     await expect(page.getByRole('textbox', { name: label('admin.field.title'), exact: true })).toHaveValue('Manually corrected synthetic Album');
     await expect(page.getByRole('textbox', { name: label('admin.field.artist_name'), exact: true })).toHaveAttribute('readonly', '');
     expect(api.writes.map(value => value.path)).toEqual([`/api/admin/v1/catalog/album/${albumId}`, '/api/admin/v1/catalog-reviews']);
+    await expect(page.getByRole('textbox', { name: label('admin.lookup.name'), exact: true })).toHaveValue('Manually corrected synthetic Album');
     await capture(page, '05-review-draft', width); await reflow(page);
-    const start = page.getByRole('button', { name: label('admin.catalog_review.analysis_confirm'), exact: true });
-    await expectInFirstMainScreen(page, start);
-    expect((await start.boundingBox())!.y).toBeLessThan((await page.getByRole('textbox', { name: `1 · ${label('admin.field.title')}`, exact: true }).boundingBox())!.y);
+    const start = await expectLookupFirst(page);
     await page.getByRole('tab', { name: label('admin.catalog_review.review_tab'), exact: true }).click();
     const empty = page.getByText(label('admin.catalog_review.empty_idle'), { exact: true });
     const nextStep = page.getByRole('button', { name: label('admin.catalog_review.draft_tab'), exact: true });
@@ -785,7 +877,7 @@ for (const variant of localizedViewports) {
 }
 
 for (const width of [1280, 390]) {
-  test(`100-track review keeps the paid start action discoverable without scrolling at ${width}px`, async ({ page }) => {
+  test(`100-track review keeps metadata lookup first and the paid Luna AI action after it at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: width === 1280 ? 720 : 844 });
     const api = await setup(page); api.ready();
     const item = api.review();
@@ -799,17 +891,107 @@ for (const width of [1280, 390]) {
     item.analysis = { ...item.analysis, state: 'idle', generation: 0, operationId: null, completedChunks: 0, totalChunks: 0, attemptsUsed: 0 };
     item.suggestions = [];
     await enter(page, `/finitude/admin/catalog-reviews/${reviewId}`);
-    const start = page.getByRole('button', { name: label('admin.catalog_review.analysis_confirm'), exact: true });
+    await expect(page.getByText(label('admin.catalog_review.lookup_not_started'), { exact: true })).toBeVisible();
     await capture(page, '16-hundred-track-first-screen', width, false);
-    await expectInFirstMainScreen(page, start);
+    const start = await expectLookupFirst(page);
     await expect(start).toBeEnabled();
-    const firstTrack = page.getByRole('textbox', { name: `1 · ${label('admin.field.title')}`, exact: true });
     await expect(page.getByRole('textbox', { name: `100 · ${label('admin.field.title')}`, exact: true })).toHaveCount(1);
-    expect((await start.boundingBox())!.y).toBeLessThan((await firstTrack.boundingBox())!.y);
     await reflow(page);
     expect(api.writes).toEqual([]);
   });
 }
+
+for (const variant of localizedViewports) {
+  const { width } = variant;
+  test(`an existing-Album review looks up its Album first, answers lookup values and decides its identities at ${width}px ${variant.locale}`, async ({ page }) => {
+    locale = variant.locale; test.setTimeout(60_000);
+    await page.setViewportSize({ width, height: width === 1280 ? 720 : 844 });
+    const api = await setup(page); api.ready();
+    const item = api.review();
+    item.analysis = { ...item.analysis, state: 'idle', generation: 0, operationId: null, completedChunks: 0, totalChunks: 0, attemptsUsed: 0 }; item.suggestions = [];
+    await enter(page, `/finitude/admin/catalog-reviews/${reviewId}`);
+    const summary = page.getByRole('region', { name: label('admin.catalog_review.lookup_title'), exact: true });
+    await expect(summary.getByText(label('admin.catalog_review.lookup_not_started'), { exact: true })).toBeVisible();
+    await expect(summary.getByRole('textbox', { name: label('admin.lookup.name'), exact: true })).toHaveValue('Synthetic catalog Album');
+    await expectLookupFirst(page);
+    await capture(page, '30-review-lookup-not-started', width); await reflow(page);
+    await summary.getByRole('button', { name: label('admin.lookup.submit'), exact: true }).click();
+    await expect(summary.getByText(label('admin.lookup.active'), { exact: true })).toBeVisible();
+    expect(api.writes.filter(write => write.path.endsWith('/lookup')).map(write => write.body)).toEqual([
+      { expectedRevision: 1, kind: 'album', text: 'Synthetic catalog Album', operationId: expect.any(String) }]);
+    // The run completes in the background at the same revision: the summary shows it and the review detail is read again.
+    const release = reviewLookupResponse().lookup!.candidates[0].title!;
+    await expect(summary.getByText(label('admin.lookup.applied', { title: release }), { exact: true })).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByRole('textbox', { name: label('admin.field.artist_name'), exact: true })).toHaveValue('Synthetic catalog Artist feat. Synthetic guest');
+    const conflicts = summary.getByRole('region', { name: label('admin.catalog_review.conflicts'), exact: true });
+    const card = (heading: string) => conflicts.getByRole('listitem').filter({ has: page.getByText(heading, { exact: true }) });
+    await expect(conflicts.getByRole('listitem')).toHaveCount(2);
+    await expect(card(`${label('admin.field.release_date')} · ${label('admin.catalog_review.adds_precision')}`)).toBeVisible();
+    for (const name of ['admin.catalog_review.keep_all_current', 'admin.catalog_review.use_all_musicbrainz'] as const)
+      await expect(summary.getByRole('button', { name: label(name), exact: true })).toBeVisible();
+    const members = summary.getByRole('region', { name: label('admin.catalog_review.members_title'), exact: true });
+    await expect(members.getByText(`Synthetic guest · ${label('admin.catalog_review.member_filled')}`, { exact: true })).toBeVisible();
+    const memberConflict = members.getByRole('listitem').filter({ has: page.getByText('1 · Synthetic first track', { exact: true }) });
+    await expect(memberConflict.getByText('Synthetic release track Artist', { exact: true })).toBeVisible();
+    await expect(memberConflict.getByRole('button', { name: label('admin.catalog_review.use_musicbrainz'), exact: true })).toBeVisible();
+    const expected = summary.getByRole('region', { name: label('admin.catalog.album_expected'), exact: true });
+    await expect(expected.getByText(locale === 'zh-Hans' ? /共 3 行.*1 行缺文件/ : /^3 rows, 1 without a file$/)).toBeVisible();
+    const position = (track: string) => label('admin.publication.track_position', { disc: '1', track });
+    await expect(expected.getByRole('listitem')).toHaveText([`${position('1')} · Synthetic first track · 1 · Synthetic first track`,
+      `${position('2')} · Synthetic missing track · ${label('admin.catalog.album_expected_no_file')}`, `${position('3')} · Synthetic second track · 2 · Synthetic second track`]);
+    // The guest credited by the Album and the second track is one identity, decided once.
+    const identities = summary.getByRole('region', { name: label('admin.catalog_review.identities_title'), exact: true });
+    const guest = identities.getByRole('listitem').filter({ has: page.getByText(label('admin.catalog_review.needs_decision'), { exact: true }) });
+    await expect(guest.getByRole('listitem')).toHaveText([`${label('admin.catalog_review.target_album')} · Synthetic guest · ${label('catalog.credit.featured')}`,
+      `2 · Synthetic second track · Synthetic guest · ${label('catalog.credit.primary')}`]);
+    await capture(page, '31-review-lookup-applied', width); await reflow(page);
+    await guest.getByRole('combobox').selectOption({ label: label('admin.duplicates.distinct') });
+    await identities.getByRole('button', { name: label('admin.action.save_decisions'), exact: true }).click();
+    await expect.poll(() => api.writes.filter(write => write.path.endsWith('/decisions')).map(write => write.body.decisions)).toEqual([
+      [{ scope: 'artist', identity: guestHandle, boundName: 'Synthetic guest', action: 'create-distinct', candidateId: null, candidateRevision: null }]]);
+    await expect(identities.getByText(label('admin.catalog_review.needs_decision'), { exact: true })).toHaveCount(0);
+    // One conflict is answered on its own, then every open one, the member's included, in one request.
+    const keepTitle = card(label('admin.field.title')).getByRole('button', { name: label('admin.catalog_review.keep_current'), exact: true });
+    await expect(keepTitle).toBeEnabled(); await keepTitle.click();
+    const resolve = () => api.writes.filter(write => write.path.endsWith('/lookup/resolve')).map(write => ({ ...write.body, operationId: undefined, expectedRevision: undefined }));
+    const candidateKey = reviewLookupResponse().lookup!.applied!.candidateKey;
+    await expect.poll(resolve).toEqual([{ run: 1, candidateKey, answers: [{ path: 'album.title', answer: 'mine', base: 'Synthetic catalog Album' }] }]);
+    const useAll = summary.getByRole('button', { name: label('admin.catalog_review.use_all_musicbrainz'), exact: true });
+    await expect(useAll).toBeEnabled(); await useAll.click();
+    await expect.poll(() => resolve().length).toBe(2);
+    expect(resolve()[1]).toEqual({ run: 1, candidateKey, answers: [{ path: 'album.releaseDate', answer: 'lookup', base: { year: 2020, month: null, day: null } },
+      { path: `tracks.${slotId}.artists`, answer: 'lookup', base: [{ key: '50000000-0000-4000-8000-000000000002', name: 'Synthetic track Artist', role: 'primary', joinPhrase: null, musicBrainzId: null }] }] });
+    await expect(conflicts).toHaveCount(0);
+    await expect(members.getByText(`Synthetic release track Artist · ${label('admin.catalog_review.used_lookup', { source: 'MusicBrainz' })}`, { exact: true })).toBeVisible();
+    // The date answered with the lookup value is also an applied value; it folds away once, as answered.
+    const folded = summary.locator('details').filter({ has: page.getByText(label('admin.summary.values'), { exact: true }) });
+    await expect(folded.locator('dt').filter({ hasText: new RegExp(`^${label('admin.field.release_date')}$`) })).toHaveCount(1);
+    expect(api.review().draft.album.releaseDate).toEqual({ year: 2020, month: 5, day: 1 });
+    expect(api.writes.some(write => write.path.endsWith('/apply') || write.path.endsWith('/analyze'))).toBe(false);
+    await capture(page, '32-review-lookup-answered', width); await reflow(page);
+    await page.setViewportSize({ width: 320, height: 844 });
+    await reflow(page);
+  });
+}
+
+test('an iTunes-only lookup result names iTunes on its answers and flags every value it wrote', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const api = await setup(page); api.ready(); api.looked(reviewItunesLookupResponse());
+  await enter(page, `/finitude/admin/catalog-reviews/${reviewId}`);
+  const summary = page.getByRole('region', { name: label('admin.catalog_review.lookup_title'), exact: true });
+  const release = reviewItunesLookupResponse().lookup!.candidates[0].title!;
+  await expect(summary.getByText(label('admin.lookup.applied_itunes_unchecked', { title: release }), { exact: true })).toBeVisible();
+  const conflicts = summary.getByRole('region', { name: label('admin.catalog_review.conflicts'), exact: true });
+  await expect(summary.getByRole('button', { name: label('admin.catalog_review.use_all_itunes'), exact: true })).toBeVisible();
+  await expect(conflicts.getByRole('button', { name: label('admin.catalog_review.use_itunes'), exact: true })).toHaveCount(2);
+  await expect(summary.getByRole('button', { name: /MusicBrainz/ })).toHaveCount(0);
+  const flagged = summary.getByRole('list', { name: label('admin.summary.flagged'), exact: true }).getByRole('listitem');
+  await expect(flagged).toHaveCount(5);
+  for (const index of [0, 1, 2, 3]) await expect(flagged.nth(index)).toContainText(`${label('admin.lookup.itunes_only')} · ${label('admin.lookup.not_checked')}`);
+  await expect(flagged.nth(4)).toHaveText(`${label('admin.field.label')}: ${label('admin.catalog_review.flag_not_applicable')}`);
+  await capture(page, '33-review-lookup-itunes', 390); await reflow(page);
+  expect(api.writes).toEqual([]);
+});
 
 for (const width of [320, 768, 1440]) {
   test(`read-only Credits and label context stay readable while a captured Disc Number is edited and applied at ${width}px`, async ({ page }) => {

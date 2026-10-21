@@ -3,12 +3,12 @@
  *   Functions: AdminCatalogReviewPage
  * Internal
  *   Types: ReviewBuffer, Stage
- *   Functions: hint, ReviewProject
+ *   Functions: hint, SummaryUnavailable, ReviewProject
  *   Constants: ImportReview, CatalogReviewHints, CatalogReviewEmptyState, CatalogReviewApply,
- *              CatalogReviewConfirmation
+ *              CatalogReviewConfirmation, CatalogReviewSummary
  * @end-catalog */
 
-import { lazy, Suspense, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState, type ComponentProps, type ComponentType } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router';
 import { AdminGate, useAdminAccess, useAdminText } from './AdminAccess';
@@ -18,6 +18,7 @@ import { adminWorkspace } from './adminWorkspace';
 import { CatalogReviewDraftEditor } from './CatalogReviewDraftEditor';
 import { reviewChanges, reviewDraftChanges, reviewFieldKey, reviewResponseSchema, type CatalogReview, type ReviewDraft } from './catalogReviewApi';
 import type { Confirmation } from './CatalogReviewConfirmation';
+import type { CatalogReviewSummary as Summary } from './CatalogReviewSummary';
 import { useCatalogReviewCommand } from './useCatalogReviewCommand';
 import { useOnline } from './useAdminOnline';
 import styles from './adminStyles';
@@ -33,6 +34,10 @@ const CatalogReviewHints = lazy(() => import('./CatalogReviewHints').then(module
 const CatalogReviewEmptyState = lazy(() => import('./CatalogReviewEmptyState').then(module => ({ default: module.CatalogReviewEmptyState })));
 const CatalogReviewApply = lazy(() => import('./CatalogReviewApply').then(module => ({ default: module.CatalogReviewApply })));
 const CatalogReviewConfirmation = lazy(() => import('./CatalogReviewConfirmation').then(module => ({ default: module.CatalogReviewConfirmation })));
+/** Stands in for a lookup summary whose chunk cannot load (a deploy replaced it); manual editing stays usable. */
+function SummaryUnavailable() { const t = useAdminText(); return <p role="alert">{t('common.reload')}</p>; }
+const CatalogReviewSummary = lazy<ComponentType<ComponentProps<typeof Summary>>>(() => import('./CatalogReviewSummary')
+  .then(module => ({ default: module.CatalogReviewSummary }), () => ({ default: SummaryUnavailable })));
 
 /** Existing-catalog suggestions stay private until a separately frozen field selection is approved. */
 function ReviewProject({ id }: { id: string }) {
@@ -116,8 +121,10 @@ function ReviewProject({ id }: { id: string }) {
         <div><dt>{t('workbench.review_album')}</dt><dd>{t(item.state === 'applied' ? 'workbench.review_updated' : 'workbench.review_not_updated')}</dd></div></dl>
       {item.state === 'applied' ? <section className={styles.notice} role="status"><h2>{t('catalog_review.applied')}</h2><p>{t('catalog_review.applied_copy')}</p></section>
         : item.sourceStatus !== 'current' && <p role="alert" className={styles.error}>{t(`catalog_review.source_${item.sourceStatus}`)}</p>}
+      {item.state !== 'applied' && <Suspense fallback={null}><CatalogReviewSummary item={item} error={mutation.error}
+        disabled={locked || editor.dirty || conflict || item.sourceStatus !== 'current'} onRun={mutate} /></Suspense>}
       {item.state !== 'applied' && <>
-        {/* Luna AI is a paid, secondary action, never styled as the primary one, even when nothing else is offered. */}
+        {/* Luna AI follows the metadata lookup summary as a paid, secondary action; never primary. */}
         <div className={styles.actions}>{active
           ? <button className={styles.button} type="button" disabled={mutation.running || Boolean(mutation.intent) || !online} onClick={() => mutate('cancel-analysis', {})}>{t('analysis.stop')}</button>
           : <button className={styles.button} type="button" disabled={!canAnalyze} onClick={() => setConfirmation({ kind: 'analyze', item })}>{t(item.analysis.generation ? 'catalog_review.analysis_again' : 'catalog_review.analysis_confirm')}</button>}
@@ -166,12 +173,13 @@ function ReviewProject({ id }: { id: string }) {
           onConfirm={fields => setConfirmation({ kind: 'apply', item, fields, changes: structuredClone(changes.filter(change => fields.some(field => reviewFieldKey(field) === reviewFieldKey(change)))) })} /></Suspense>}
       </div>
       {confirmation && <Suspense fallback={<p role="status">{t('common.loading')}</p>}><CatalogReviewConfirmation confirmation={confirmation}
-        disabled={savedOnly || confirmation.item.revision !== item.revision
+        disabled={savedOnly || confirmation.item.revision !== item.revision || confirmation.item.valueRevision !== item.valueRevision
           || item.sourceStatus !== 'current' || (confirmation.kind === 'analyze' ? !canAnalyze : !item.capabilities.apply)}
         onClose={() => setConfirmation(null)} onConfirm={() => {
               setConfirmation(null);
+              // Lookup writes values at the same revision: the value revision shown binds the apply to the draft it showed.
               mutation.command.run(`${path}/${confirmation.kind}`, { expectedRevision: confirmation.item.revision,
-                ...(confirmation.kind === 'apply' ? { fields: confirmation.fields } : {}) }, 'POST');
+                ...(confirmation.kind === 'apply' ? { fields: confirmation.fields, expectedValueRevision: confirmation.item.valueRevision } : {}) }, 'POST');
             }} /></Suspense>}
     </>}
   </section>;

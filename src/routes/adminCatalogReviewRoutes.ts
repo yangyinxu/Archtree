@@ -62,7 +62,8 @@ export function createAdminCatalogReviewRouter(artwork: () => CoverArtClient = d
     router.post('/catalog-reviews/:id/adopt', asyncHandler(run((actor, req) => adoptCatalogReviewSuggestions(actor, req.params.id, req.body))));
     router.post('/catalog-reviews/:id/cancel-analysis', asyncHandler(run((actor, req) => cancelCatalogReviewAnalysis(actor, req.params.id, req.body))));
     // Applying the selected saved values, and the identity rows and decisions an apply of Artist entries and the label waits for
-    // (adminCatalogReviewApply.ts); the Web does not read candidates or save decisions yet.
+    // (adminCatalogReviewApply.ts); the Web review summary reads the candidates and saves decisions, while its apply sends fields and
+    // the value revision only.
     router.post('/catalog-reviews/:id/apply', asyncHandler(run((actor, req) => applyCatalogReview(actor, req.params.id, req.body))));
     router.get('/catalog-reviews/:id/candidates', asyncHandler(run((actor, req) => getCatalogReviewCandidates(actor, req.params.id))));
     router.post('/catalog-reviews/:id/decisions', asyncHandler(run((actor, req) => decideCatalogReviewIdentities(actor, req.params.id, req.body))));

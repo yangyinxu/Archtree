@@ -510,9 +510,10 @@ review's Disc Numbers and Album order committing with its receipt.
 
 An Album may keep one expected tracklist (`expectedTracklist`): the audio
 tracklist of the release that an applied existing-Album review used. It is
-administrator information, shown on the Web Album page and in an append's
-summary and confirmation. `src/services/catalog/albumExpectedTracklist.ts`
-validates it and derives its rows; an existing-Album review admitted to
+administrator information, shown on the Web Album page, in existing-Album
+reviews and in an append's summary and confirmation.
+`src/services/catalog/albumExpectedTracklist.ts` validates it and derives its
+rows; an existing-Album review admitted to
 metadata lookup captures a private copy of its rows, applying such a review
 sets or replaces it (see
 [Existing-Album completion](#existing-album-completion)), and an import that

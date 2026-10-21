@@ -10,6 +10,7 @@
  *   - a candidate's artwork flag and the cover-staging wait default to false for a server that sends neither, and are never addresses
  *   - an iTunes-only candidate parses with its collection ID, source and not-checked mark agreeing with its key, and the iTunes status defaults to not queried
  *   - an append target's expected rows parse strictly within their bounds, and a server that sends none reads as null
+ *   - an import view refuses everything only a review view carries: the catalog trigger, the exact-count basis, review paths, precision, pairs and subset comparisons
  * @end-catalog */
 
 import { lookupResponseSchema, lookupViewSchema } from './importLookupApi';
@@ -164,4 +165,19 @@ test('an append target\'s expected rows parse strictly within their bounds, and 
   refused(value => { value.numbering[0].title = ''; });
   refused(value => { value.albumId = 'A'.repeat(24); });
   refused(value => { value.durationToleranceMs = 60_001; });
+});
+
+test('an import view refuses everything only a review view carries: the catalog trigger, the exact-count basis, review paths, precision, pairs and subset comparisons', () => {
+  const item = view(), refused = (value: unknown) => expect(lookupViewSchema.safeParse(value).success).toBe(false);
+  refused({ ...item, input: { trigger: 'catalog', submitted: null } });
+  refused({ ...item, preselection: { ...item.preselection, basis: 'exactTrackCount' } });
+  refused({ ...item, applied: { ...item.applied, basis: 'exactTrackCount' } });
+  refused({ ...item, applied: { ...item.applied, values: [{ path: 'album.expectedTracklist', slotId: null }] } });
+  refused({ ...item, applied: { ...item.applied, values: [{ path: `tracks.${slot}.artists`, slotId: slot }] } });
+  refused({ ...item, needsAnswer: { tie: false, conflicts: [`tracks.${slot}.artists`] } });
+  refused({ ...item, applied: { ...item.applied, conflicts: [{ ...item.applied.conflicts[0], precision: false }] } });
+  refused({ ...item, applied: { ...item.applied, flagged: [{ path: 'album.label', reason: 'notApplicable' }] } });
+  refused({ ...item, applied: { ...item.applied, pairs: null } });
+  refused({ ...item, candidates: [{ ...item.candidates[0], comparison: { ...item.candidates[0].comparison, subset: null } }] });
+  refused({ ...item, candidates: [{ ...item.candidates[0], comparison: { ...item.candidates[0].comparison, differences: ['pairing'] } }] });
 });
