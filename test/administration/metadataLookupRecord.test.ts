@@ -15,6 +15,8 @@
  *   - candidates are distinct after normalization, capped at 25 in a stable order, and a release found by ID is fetched
  *   - admission prefers releases whose reported track count can match the files, and a search is complete only when every offered release that could match was admitted
  *   - details record missing, failed and compact fetched releases, and a release over the byte budget is omitted
+ *   - a stored release keeps distinct track credits and stores one equal to the release credit as a marker that reads back as that credit
+ *   - track credits count toward the candidate byte budget: repeated credits fit through the marker, and distinct ones over the budget omit the release
  *   - ranking a record compares stored candidates with the current files and leaves incomplete ones unranked
  *   - candidates and ranking together stay within the record budget by omitting the largest fetched releases
  *   - ranking reads the iTunes localized names and the check of each iTunes-only candidate; an iTunes-only candidate is admitted once, within the shared bound
@@ -41,13 +43,13 @@ import { uuid, type ImportManifest } from '../../src/administration/import/admin
 import { defaultDraftV2 } from '../../src/administration/import/adminImportDraft';
 import type { ImportAsset } from '../../src/administration/import/adminImportMediaTypes';
 import type { AdminImportDocument } from '../../src/administration/import/adminImportService';
-import { METADATA_LOOKUP_JOB_LIMITS, type MusicBrainzRelease } from '../../src/administration/lookup/lookupContract';
+import { METADATA_LOOKUP_JOB_LIMITS, SAME_AS_RELEASE_CREDIT, type LookupArtistCredit, type MusicBrainzRelease } from '../../src/administration/lookup/lookupContract';
 import {
     automaticLookupOperationId, importLookupFileSet, isBlockingLookupState, lookupFileEvidence, lookupGateFor, lookupHitsAdmitted, lookupReportedTrackCount, lookupRetryAt,
     admitItunesCandidate, lookupFetchedAliases, lookupStaleSlots, mergeLookupCandidates, planImportLookup, rankLookupRecord, rankLookupWithinBudget, recordLookupDetails, refreshLookupGrant, startLookupRun,
-    type MetadataLookupRecord, type MetadataLookupState, type StoredLookupCandidate
+    withCandidateRelease, type MetadataLookupRecord, type MetadataLookupState, type StoredLookupCandidate
 } from '../../src/administration/lookup/metadataLookupRecord';
-import { lookupTrackCountPlausible } from '../../src/administration/lookup/lookupRanking';
+import { lookupTrackCountPlausible, lookupTrackCredit } from '../../src/administration/lookup/lookupRanking';
 import { metadataLookupAccepted, runMetadataLookupOnce, startMetadataLookupWorker } from '../../src/administration/lookup/metadataLookupService';
 import { parseMusicBrainzRelease } from '../../src/administration/lookup/musicBrainzClient';
 import { fixtureRoot, loadLookupFixture } from '../support/metadataLookupFixtures';
@@ -284,6 +286,48 @@ test('details record missing, failed and compact fetched releases, and a release
     const budget = recordLookupDetails(mergeLookupCandidates(candidates, [{ releaseId: huge.releaseId }], 'albumText'), huge.releaseId, huge);
     assert.deepEqual([budget[3].details, budget[3].release], ['omitted', null]);
     assert.equal(mergeLookupCandidates(candidates, [{ releaseId: huge.releaseId, release: huge }], 'releaseId')[3].details, 'omitted');
+});
+
+test('a stored release keeps distinct track credits and stores one equal to the release credit as a marker that reads back as that credit', () => {
+    const base = releases.find(release => release.releaseId.startsWith('24ae881f'))!;
+    const guest: LookupArtistCredit[] = [{ name: 'Synthetic Guest', joinPhrase: '', artistId: releaseId(7), artistName: 'Synthetic Guest' }];
+    const reordered: LookupArtistCredit[] = [{ ...base.artistCredit[0], joinPhrase: ' & ' }];
+    const credits = [structuredClone(base.artistCredit), guest, reordered, undefined];
+    const credited: MusicBrainzRelease = { ...base, media: base.media.map(medium => ({ ...medium, tracks: medium.tracks.map((track, index) =>
+        credits[index] === undefined ? track : { ...track, artistCredit: credits[index] }) })) };
+    const candidates = recordLookupDetails(mergeLookupCandidates([], [{ releaseId: base.releaseId }], 'albumText'), base.releaseId, credited);
+    const stored = candidates[0].release!, tracks = stored.media[0].tracks;
+    assert.deepEqual([candidates[0].details, tracks[0].artistCredit, tracks[1].artistCredit, tracks[2].artistCredit, 'artistCredit' in tracks[3]],
+        ['fetched', SAME_AS_RELEASE_CREDIT, guest, reordered, false], 'only a credit equal field for field is the marker; another join phrase is kept');
+    assert.deepEqual(tracks.slice(0, 4).map(track => lookupTrackCredit(stored, track)), [base.artistCredit, guest, reordered, null]);
+    assert.deepEqual(Object.keys(tracks[0]), ['position', 'number', 'title', 'lengthMs', 'recordingId', 'isrcs', 'artistCredit']);
+    // Storing a stored release again changes nothing: the marker is no credit list.
+    assert.deepEqual(withCandidateRelease(candidates, 0, stored), candidates);
+    // The marker follows the release credit: with the guest as the release's credit, the guest's track is the marked one.
+    const reshaped = recordLookupDetails(mergeLookupCandidates([], [{ releaseId: base.releaseId }], 'albumText'), base.releaseId, { ...credited, artistCredit: guest });
+    assert.deepEqual(reshaped[0].release!.media[0].tracks.slice(0, 3).map(track => track.artistCredit), [base.artistCredit, SAME_AS_RELEASE_CREDIT, reordered]);
+    // An iTunes-only candidate stores its songs' credits the same way.
+    const ensemble: LookupArtistCredit[] = [{ name: 'Synthetic Ensemble', joinPhrase: '', artistId: '', artistName: 'Synthetic Ensemble' }];
+    const soloist: LookupArtistCredit[] = [{ name: 'Synthetic Soloist', joinPhrase: '', artistId: '', artistName: 'Synthetic Soloist' }];
+    const itunes: MusicBrainzRelease = { ...base, releaseId: '1689358563', artistCredit: ensemble, media: [{ position: 1, format: null,
+        tracks: [{ ...base.media[0].tracks[0], recordingId: '', isrcs: [], artistCredit: structuredClone(ensemble) }, { ...base.media[0].tracks[1], recordingId: '', isrcs: [], artistCredit: soloist }] }] };
+    const admitted = admitItunesCandidate([], { key: 'itunes:1689358563', source: 'itunes', releaseId: '1689358563', basis: 'itunes', summary: null, release: itunes, details: 'fetched' })!;
+    assert.deepEqual([admitted[0].details, admitted[0].release!.media[0].tracks.map(track => track.artistCredit)], ['fetched', [SAME_AS_RELEASE_CREDIT, soloist]]);
+});
+
+test('track credits count toward the candidate byte budget: repeated credits fit through the marker, and distinct ones over the budget omit the release', () => {
+    const base = releases.find(release => release.releaseId.startsWith('24ae881f'))!;
+    const wide: LookupArtistCredit[] = Array.from({ length: 50 }, (_unused, index) => ({ name: String(index).padEnd(1000, 'x'), joinPhrase: ', ', artistId: releaseId(100 + index), artistName: 'Synthetic' }));
+    const many = (distinct: boolean): MusicBrainzRelease => ({ ...base, releaseId: releaseId(5), artistCredit: wide, media: [{ position: 1, format: 'CD',
+        tracks: Array.from({ length: 100 }, (_unused, index) => ({ position: index + 1, number: String(index + 1), title: 'Synthetic', lengthMs: 200_000, recordingId: releaseId(6), isrcs: [],
+            artistCredit: wide.map((credit, entry) => distinct && entry === 49 ? { ...credit, joinPhrase: String(index) } : { ...credit }) })) }] });
+    assert.ok(Buffer.byteLength(JSON.stringify(many(false))) > METADATA_LOOKUP_JOB_LIMITS.candidateBytes, 'the uncompacted release is over the budget');
+    const fits = recordLookupDetails(mergeLookupCandidates([], [{ releaseId: releaseId(5) }], 'albumText'), releaseId(5), many(false));
+    assert.equal(fits[0].details, 'fetched');
+    assert.ok(fits[0].release!.media[0].tracks.every(track => track.artistCredit === SAME_AS_RELEASE_CREDIT));
+    assert.ok(Buffer.byteLength(JSON.stringify(fits)) < 100 * 1024);
+    const over = recordLookupDetails(mergeLookupCandidates([], [{ releaseId: releaseId(5) }], 'albumText'), releaseId(5), many(true));
+    assert.deepEqual([over[0].details, over[0].release], ['omitted', null]);
 });
 
 test('ranking a record compares stored candidates with the current files and leaves incomplete ones unranked', () => {

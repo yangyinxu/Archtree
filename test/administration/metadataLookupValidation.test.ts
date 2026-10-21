@@ -5,9 +5,12 @@
  * Tests
  *   - a projection keeps only declared keys in declaration order, copies values and is idempotent
  *   - wrong types, bounds, patterns, lone surrogates and non-plain objects reject the whole value
+ *   - a lenient field keeps a valid value and leaves out an invalid, over-bound or null one instead of rejecting, and its projection projects to itself
+ *   - outside an object field a lenient shape validates its own shape strictly
  *   - date() accepts empty, year, month and day precision on a real calendar and nothing else
  *   - decoding is fatal UTF-8 followed by the complete JSON parser
  *   - a minimal MusicBrainz release parses with explicit nulls, and track length falls back to the recording
+ *   - a MusicBrainz release keeps each track's own artist credit, and an invalid, over-bound, null or non-array one leaves only that track without one
  *   - MusicBrainz bounds, identifiers and codes reject the whole response, while a malformed barcode is only no barcode
  *   - MusicBrainz searches, browse and ISRC answers parse their allowlisted fields and enforce their bounds
  *   - iTunes keeps collections and songs only, at day precision, with artwork only on the fixed image hosts
@@ -25,7 +28,7 @@ import { MetadataLookupInputError } from '../../src/administration/lookup/lookup
 import { isPlaceholderCredit, lookupTermProblem } from '../../src/administration/lookup/lookupIdentifiers';
 import { MUSICBRAINZ_SPECIAL_PURPOSE_ARTIST_IDS, MUSICBRAINZ_SPECIAL_PURPOSE_LABEL_IDS } from '../../src/utils/musicBrainzId';
 import {
-    LookupShapeError, array, boolean, date, decodeLookupJson, integer, object, oneOf, parseLookupDate, string, validateLookupShape, type LookupShape
+    LookupShapeError, array, boolean, date, decodeLookupJson, integer, lenient, object, oneOf, parseLookupDate, string, validateLookupShape, type LookupShape
 } from '../../src/administration/lookup/lookupResponseShape';
 import {
     musicBrainzDestination, musicBrainzUrls, parseMusicBrainzBrowse, parseMusicBrainzIsrc, parseMusicBrainzRecordingSearch,
@@ -77,6 +80,33 @@ test('wrong types, bounds, patterns, lone surrogates and non-plain objects rejec
     const id = oneOf(integer(1, 100), string(5, { pattern: /^\d+$/ }));
     assert.equal(validateLookupShape(id, 7), 7); assert.equal(validateLookupShape(id, '123'), '123');
     for (const value of [0, 'abc', true, null, [1]]) invalid(id, value);
+});
+
+test('a lenient field keeps a valid value and leaves out an invalid, over-bound or null one instead of rejecting, and its projection projects to itself', () => {
+    const shape = object({ id: string(4), credit: lenient(array(object({ name: string(5) }), 2)), after: integer(0, 9, { optional: true }) });
+    const kept = validateLookupShape<Record<string, unknown>>(shape, { after: 1, credit: [{ name: 'Lead', extra: true }], id: 'a' });
+    assert.deepEqual(Object.keys(kept), ['id', 'credit', 'after']);
+    assert.deepEqual(kept, { id: 'a', credit: [{ name: 'Lead' }], after: 1 });
+    assert.deepEqual(validateLookupShape(shape, kept), kept);
+    for (const credit of [null, 'Lead', 7, {}, [{ name: 'Too long' }], [{ name: 'a' }, { name: 'b' }, { name: 'c' }], [{ name: `a${loneHigh}` }], [{}], [null]]) {
+        const dropped = validateLookupShape<Record<string, unknown>>(shape, { id: 'a', credit, after: 2 });
+        assert.deepEqual(Object.keys(dropped), ['id', 'after'], JSON.stringify(credit));
+        assert.deepEqual(validateLookupShape(shape, dropped), dropped, 'a left-out value stays absent');
+    }
+    assert.deepEqual(validateLookupShape(shape, { id: 'a' }), { id: 'a' }, 'an absent lenient field is fine');
+    // The other fields stay strict: their invalid values still reject the whole value.
+    invalid(shape, { id: 'abcde', credit: [{ name: 'Lead' }] });
+    invalid(shape, { credit: [{ name: 'Lead' }] });
+});
+
+test('outside an object field a lenient shape validates its own shape strictly', () => {
+    invalid(lenient(string(2)), 'abc'); invalid(lenient(string(2)), null); invalid(lenient(string(2)), undefined);
+    assert.equal(validateLookupShape(lenient(string(2)), 'ab'), 'ab');
+    assert.equal(validateLookupShape(lenient(string(2, { nullable: true })), null), null);
+    invalid(array(lenient(integer(0, 1)), 3), [0, 2]);
+    assert.deepEqual(validateLookupShape(array(lenient(integer(0, 1)), 3), [0, 1]), [0, 1]);
+    assert.equal(validateLookupShape(oneOf(lenient(integer(0, 1)), string(3)), 'abc'), 'abc');
+    invalid(oneOf(lenient(integer(0, 1)), string(3)), 2);
 });
 
 test('date() accepts empty, year, month and day precision on a real calendar and nothing else', () => {
@@ -133,6 +163,36 @@ test('a minimal MusicBrainz release parses with explicit nulls, and track length
     assert.deepEqual(credited.artistCredit, [{ name: 'Eagles', joinPhrase: '', artistId: mbid(3), artistName: 'Eagles' }], 'a missing join phrase is empty');
     assert.deepEqual([credited.releaseGroupId, credited.primaryType, credited.secondaryTypes, credited.groupFirstReleaseDate, credited.date, credited.frontArtwork, credited.country],
         [mbid(4), 'Album', ['Soundtrack'], { year: 1976, month: 12, day: 8 }, null, true, 'XW']);
+});
+
+test('a MusicBrainz release keeps each track\'s own artist credit, and an invalid, over-bound, null or non-array one leaves only that track without one', () => {
+    const credit = (index: number, extra: Record<string, unknown> = {}) => ({ name: `Artist ${index}`, joinphrase: ' feat. ', artist: { id: mbid(100 + index), name: `Artist ${index}` }, ...extra });
+    const tracks = (credits: unknown[]) => minimalRelease({ media: [{ position: 1, tracks: credits.map((artistCredit, index) => ({ position: index + 1, number: String(index + 1),
+        title: `Track ${index + 1}`, recording: { id: mbid(2) }, ...(artistCredit === undefined ? {} : { 'artist-credit': artistCredit }) })) }] });
+    const parsed = parseMusicBrainzRelease(tracks([[credit(1), { name: 'B', artist: { id: mbid(3), name: 'B' } }], undefined]));
+    assert.deepEqual(parsed.media[0].tracks[0].artistCredit, [{ name: 'Artist 1', joinPhrase: ' feat. ', artistId: mbid(101), artistName: 'Artist 1' },
+        { name: 'B', joinPhrase: '', artistId: mbid(3), artistName: 'B' }], 'a missing join phrase is empty, as for the release credit');
+    assert.deepEqual(Object.keys(parsed.media[0].tracks[0]), ['position', 'number', 'title', 'lengthMs', 'recordingId', 'isrcs', 'artistCredit']);
+    assert.deepEqual(Object.keys(parsed.media[0].tracks[1]), ['position', 'number', 'title', 'lengthMs', 'recordingId', 'isrcs'], 'a track without a credit has none');
+    const rejected: [string, unknown][] = [
+        ['bad MBID', [credit(1, { artist: { id: '00000000-0000-0000-0000-00000000000g', name: 'X' } })]],
+        ['uppercase MBID', [credit(1, { artist: { id: mbid(1).toUpperCase().replace('-4000-', '-4ABC-'), name: 'X' } })]],
+        ['lone surrogate', [credit(1, { name: `A${loneHigh}` })]], ['lone surrogate in the artist name', [credit(1, { artist: { id: mbid(5), name: `${loneLow}A` } })]],
+        ['1001-character name', [credit(1, { name: 'x'.repeat(1001) })]], ['201-character join phrase', [credit(1, { joinphrase: 'x'.repeat(201) })]],
+        ['51 entries', Array.from({ length: 51 }, (_unused, index) => credit(index))],
+        ['null', null], ['an object', credit(1)], ['a string', 'Artist 1'], ['a missing artist', [{ name: 'X' }]], ['a null entry', [null]]
+    ];
+    for (const [label, invalidCredit] of rejected) {
+        const release = parseMusicBrainzRelease(tracks([[credit(1)], invalidCredit, [credit(2)]]));
+        assert.deepEqual(release.media[0].tracks.map(track => track.artistCredit?.[0].name ?? null), ['Artist 1', null, 'Artist 2'], label);
+        assert.equal('artistCredit' in release.media[0].tracks[1], false, label);
+        assert.equal(release.trackCount, 3, label);
+    }
+    assert.equal(parseMusicBrainzRelease(tracks([Array.from({ length: 50 }, (_unused, index) => credit(index))])).media[0].tracks[0].artistCredit!.length, 50);
+    assert.equal(parseMusicBrainzRelease(tracks([[credit(1, { name: 'x'.repeat(1000), joinphrase: 'y'.repeat(200) })]])).media[0].tracks[0].artistCredit![0].name.length, 1000);
+    assert.deepEqual(parseMusicBrainzRelease(tracks([[]])).media[0].tracks[0].artistCredit, [], 'an empty credit is kept as given');
+    // The release's own credit stays strict.
+    assert.throws(() => parseMusicBrainzRelease(minimalRelease({ 'artist-credit': [credit(1, { artist: { id: 'bad', name: 'X' } })] })), LookupShapeError);
 });
 
 test('MusicBrainz bounds, identifiers and codes reject the whole response, while a malformed barcode is only no barcode', () => {

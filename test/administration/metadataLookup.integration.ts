@@ -46,6 +46,7 @@
  *   - a run whose stored progress cannot be advanced is retried after its lease and stays bounded by its grant
  *   - a manual retry replaces a run waiting for an automatic retry and waits for the gate, and a retry past the grant ends the run unavailable
  *   - a release-ID query answered by a merged release keeps the fetched release under its current ID and ranks it
+ *   - a fetched release stores each track's own artist credit, one equal to the release's as the marker, and no response carries one
  *   - a submitted run's first 503 with Retry-After 0 is retried as busy within seconds and then waits, never 30 seconds
  *   - a matching MusicBrainz release sends nothing to iTunes
  *   - iTunes unavailable while MusicBrainz answered: the run retries iTunes automatically, blocking Publish, then completes with MusicBrainz's answer and iTunes unavailable
@@ -1057,6 +1058,23 @@ test('a release-ID query answered by a merged release keeps the fetched release 
         ['complete', [[mbid(2), 'fetched', 'releaseId']], ['matching'], 3]);
     // The old tagged ID does not preselect it by identifier; it is preselected as the only matching group.
     assert.deepEqual([record.ranking!.preselection?.candidateKey, record.ranking!.preselection?.basis], [`musicbrainz:${mbid(2)}`, 'onlyMatchingGroup']);
+});
+
+test('a fetched release stores each track\'s own artist credit, one equal to the release\'s as the marker, and no response carries one', async () => {
+    const releaseId = '00000000-0000-4000-8000-000000000020', lengths = [200_000, 210_000, 220_000, 230_000, 240_000, 250_000];
+    const id = await seeded(6, index => v2({ album: 'Synthetic Album', albumArtists: ['Synthetic Ensemble'], durationMs: lengths[index] }));
+    await requestAutomaticMetadataLookup(by, id, 'upload');
+    const client = fixtureClient([searchAnswer(albumQuery, [releaseId]), searchAnswer({ release: 'Synthetic Album' }, []),
+        ...loadLookupFixture('musicbrainz/synthetic-release-track-credits.json').exchanges]);
+    await drain({ musicBrainz: client.musicBrainz });
+    const record = (await lookup(id))!;
+    assert.deepEqual([record.state, record.candidates.map(candidate => [candidate.releaseId, candidate.details]), record.ranking!.preselection?.basis],
+        ['complete', [[releaseId, 'fetched']], 'onlyMatchingGroup']);
+    // Read back from MongoDB: the marker, a credit of its own, and no credit where MusicBrainz gave none or an invalid one.
+    assert.deepEqual(record.candidates[0].release!.media[0].tracks.map(track => typeof track.artistCredit === 'string' || track.artistCredit === undefined
+        ? track.artistCredit ?? null : track.artistCredit.map(credit => credit.name)), ['release', ['Synthetic A', 'Synthetic B'], ['Various Artists'], null, null, null]);
+    const responses = [await getAdminImport(by, id), await listAdminImports(by, {}), await getAdminImportLookup(by, id)].map(value => JSON.stringify(value));
+    for (const response of responses) for (const text of ['Synthetic B', 'Various Artists', '000000000a02', '000000000a03', 'artistCredit']) assert.equal(response.includes(text), false, text);
 });
 
 test('a submitted run\'s first 503 with Retry-After 0 is retried as busy within seconds and then waits, never 30 seconds', async () => {

@@ -1755,7 +1755,10 @@ The wire protocol and operational bounds are documented in
   represented by a deterministically chosen member that prefers front artwork;
   the others stay in evidence. Metadata lookup preselects the matching candidate
   that an embedded identifier shared by every file matches alone, and otherwise
-  the only matching group. A preselection whose credited artist agrees with no
+  the only matching group of a complete comparison. A comparison is partial
+  when not every release the search found could be compared; the only
+  matching group of a partial comparison is offered, not applied, and needs no
+  answer. A preselection whose credited artist agrees with no
   non-empty artist tag of the files, directly or through a MusicBrainz alias or
   iTunes localized name that the lookup found, is flagged and never collapsed. A
   preselection is a proposal that the publication approval confirms. An

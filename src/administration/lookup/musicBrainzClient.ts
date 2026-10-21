@@ -19,13 +19,16 @@ import {
     type MusicBrainzRelease, type MusicBrainzReleaseSummary, type MusicBrainzTrack
 } from './lookupContract';
 import { cleanLookupTerm, normalizeGtin, normalizeIsrc, normalizeMusicBrainzId } from './lookupIdentifiers';
-import { array, boolean, date, integer, object, parseLookupDate, string, validateLookupShape, type LookupShape } from './lookupResponseShape';
+import { array, boolean, date, integer, lenient, object, parseLookupDate, string, validateLookupShape, type LookupShape } from './lookupResponseShape';
 import { requestLookupJson, type LookupCallOptions, type LookupClientDependencies } from './lookupSourceRequest';
 
 /**
  * MusicBrainz web-service client: Lucene field queries with every special character escaped,
  * release and ISRC lookups, release-group browse, and complete allowlisted response parsing.
- * Every identifier is format-checked before anything is sent.
+ * Every identifier is format-checked before anything is sent. A release lookup keeps each track's
+ * own artist credit within the release credit's bounds; an invalid one is left out for that track
+ * only, so the release still parses as it did before track credits were kept. It also counts each
+ * medium's pregap and data tracks, which are otherwise dropped; invalid ones are not counted.
  */
 export type MusicBrainzReleaseQuery = {
     release?: string; artist?: string; label?: string; catno?: string; barcode?: string;
@@ -154,12 +157,16 @@ export const musicBrainzShapes: Readonly<Record<'releaseSearch' | 'release' | 'r
         media: array(object({
             position: integer(1, 999),
             format: typeName,
+            // Counted as left out only: a pregap track and the data tracks MusicBrainz lists apart from `tracks`.
+            pregap: lenient(object({ position: integer(0, 9999) })),
+            'data-tracks': lenient(array(object({ position: integer(0, 9999) }), 999)),
             tracks: array(object({
                 position: integer(1, 9999),
                 number: string(32),
                 title: string(text),
                 length,
-                recording: object({ id: mbid, length, isrcs: array(string(12, { pattern: /^[A-Z]{2}[A-Z0-9]{3}\d{7}$/ }), 100, { optional: true }) })
+                recording: object({ id: mbid, length, isrcs: array(string(12, { pattern: /^[A-Z]{2}[A-Z0-9]{3}\d{7}$/ }), 100, { optional: true }) }),
+                'artist-credit': lenient(artistCredit)
             }), 999, { optional: true })
         }), 100)
     }),
@@ -192,8 +199,9 @@ type RawReleaseCommon = { id: string; title: string; status?: string | null; 'ar
     date?: string | null; country?: string | null; barcode?: string | null; 'label-info'?: RawLabelInfo[] };
 type RawSummary = RawReleaseCommon & { score?: number; 'track-count'?: number; media?: { format?: string | null; 'track-count': number }[] };
 type RawRelease = RawReleaseCommon & { 'cover-art-archive'?: { front: boolean };
-    media: { position: number; format?: string | null; tracks?: { position: number; number: string; title: string; length?: number | null;
-        recording: { id: string; length?: number | null; isrcs?: string[] } }[] }[] };
+    media: { position: number; format?: string | null; pregap?: { position: number }; 'data-tracks'?: { position: number }[];
+        tracks?: { position: number; number: string; title: string; length?: number | null;
+        recording: { id: string; length?: number | null; isrcs?: string[] }; 'artist-credit'?: RawCredit[] }[] }[] };
 
 const credits = (raw: RawCredit[] | undefined): LookupArtistCredit[] => (raw ?? []).map(credit => ({
     name: credit.name, joinPhrase: credit.joinphrase ?? '', artistId: credit.artist.id, artistName: credit.artist.name
@@ -224,13 +232,19 @@ export const parseMusicBrainzBrowse = (json: unknown): MusicBrainzReleaseSummary
 
 export const parseMusicBrainzRelease = (json: unknown): MusicBrainzRelease => {
     const raw = validateLookupShape<RawRelease>(musicBrainzShapes.release, json);
-    const media = raw.media.map(medium => ({
-        position: medium.position, format: medium.format ?? null,
-        tracks: (medium.tracks ?? []).map((track): MusicBrainzTrack => ({
-            position: track.position, number: track.number, title: track.title,
-            lengthMs: track.length ?? track.recording.length ?? null, recordingId: track.recording.id, isrcs: [...(track.recording.isrcs ?? [])]
-        }))
-    }));
+    const media = raw.media.map(medium => {
+        // Absent when none, so a release without pregap or data tracks parses and stores as before they were counted.
+        const hiddenTracks = (medium.pregap ? 1 : 0) + (medium['data-tracks']?.length ?? 0);
+        return {
+            position: medium.position, format: medium.format ?? null,
+            tracks: (medium.tracks ?? []).map((track): MusicBrainzTrack => ({
+                position: track.position, number: track.number, title: track.title,
+                lengthMs: track.length ?? track.recording.length ?? null, recordingId: track.recording.id, isrcs: [...(track.recording.isrcs ?? [])],
+                ...(track['artist-credit'] === undefined ? {} : { artistCredit: credits(track['artist-credit']) })
+            })),
+            ...(hiddenTracks ? { hiddenTracks } : {})
+        };
+    });
     return {
         ...common(raw), trackCount: media.reduce((sum, medium) => sum + medium.tracks.length, 0), media,
         groupFirstReleaseDate: parseLookupDate(raw['release-group']?.['first-release-date']),

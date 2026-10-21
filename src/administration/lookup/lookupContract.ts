@@ -7,8 +7,8 @@
  *   Classes: MetadataLookupSourceError, MetadataLookupInputError
  *   Functions: isLookupCandidateKey, lookupCandidateSource
  *   Constants: metadataLookupSources, METADATA_LOOKUP_RATES, METADATA_LOOKUP_LIMITS, METADATA_LOOKUP_RETRY,
- *              METADATA_LOOKUP_HOSTS, ITUNES_STOREFRONTS, ADMIN_IMPORT_LOOKUP_COLLECTION,
- *              METADATA_LOOKUP_JOB_LIMITS, metadataLookupIndexes
+ *              METADATA_LOOKUP_HOSTS, ITUNES_STOREFRONTS, SAME_AS_RELEASE_CREDIT,
+ *              ADMIN_IMPORT_LOOKUP_COLLECTION, METADATA_LOOKUP_JOB_LIMITS, metadataLookupIndexes
  * Internal
  *   Constants: failureCodes
  * @end-catalog */
@@ -106,10 +106,23 @@ export type MusicBrainzReleaseSummary = {
     country: string | null; date: LookupDate | null; primaryType: string | null; secondaryTypes: string[];
     trackCount: number; media: { format: string | null; trackCount: number }[]; score: number | null;
 };
-export type MusicBrainzTrack = { position: number; number: string; title: string; lengthMs: number | null; recordingId: string; isrcs: string[] };
+/** Marks a stored track credit equal to its release's (metadataLookupRecord.ts); read every track credit through lookupTrackCredit. */
+export const SAME_AS_RELEASE_CREDIT = 'release' as const;
+export type MusicBrainzTrack = {
+    position: number; number: string; title: string; lengthMs: number | null; recordingId: string; isrcs: string[];
+    /**
+     * The track's own credit from the release lookup (an iTunes-only candidate's: its song's single artist string); absent when
+     * none, invalid, or stored before track credits were kept; the marker in stored candidates.
+     */
+    artistCredit?: LookupArtistCredit[] | typeof SAME_AS_RELEASE_CREDIT;
+};
 export type MusicBrainzRelease = Omit<MusicBrainzReleaseSummary, 'score' | 'media'> & {
     groupFirstReleaseDate: LookupDate | null;
-    media: { position: number; format: string | null; tracks: MusicBrainzTrack[] }[];
+    /**
+     * `hiddenTracks`: how many pregap and data tracks MusicBrainz lists apart from the medium's `tracks` (absent when none); they
+     * are never compared and only counted as left out.
+     */
+    media: { position: number; format: string | null; tracks: MusicBrainzTrack[]; hiddenTracks?: number }[];
     /** Cover Art Archive front-artwork flag from the release lookup; null when not reported. */
     frontArtwork: boolean | null;
 };

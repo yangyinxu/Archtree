@@ -11,8 +11,8 @@
  *              startLookupRun, lookupFetchedAliases, refreshLookupGrant
  * Internal
  *   Types: LookupSource, FoundLookupRelease
- *   Functions: sha256, manifestFiles, readyAsset, evidence, shared, names, tagEvidence, compactRelease,
- *              candidateBytes, reportedCount
+ *   Functions: sha256, manifestFiles, readyAsset, evidence, shared, names, tagEvidence, sameCredit,
+ *              compactRelease, candidateBytes, reportedCount
  *   Constants: withRelease
  * @end-catalog */
 
@@ -29,7 +29,10 @@ import type { ImportAsset } from '../import/adminImportMediaTypes';
 import type { AdminImportDocument } from '../import/adminImportService';
 import { importAssetDurationEvidence, importTagsV2View } from '../import/adminImportTags';
 import type { ImportDraftPath } from '../import/adminImportValueState';
-import { METADATA_LOOKUP_JOB_LIMITS, type ItunesStorefront, type LookupEntityAliases, type MusicBrainzRelease, type MusicBrainzReleaseSummary } from './lookupContract';
+import {
+    METADATA_LOOKUP_JOB_LIMITS, SAME_AS_RELEASE_CREDIT, type ItunesStorefront, type LookupArtistCredit, type LookupEntityAliases, type MusicBrainzRelease,
+    type MusicBrainzReleaseSummary
+} from './lookupContract';
 import { normalizeMusicBrainzId } from './lookupIdentifiers';
 import type { LookupItunesStage } from './lookupItunesStage';
 import { planMetadataLookup, type LookupPlan, type LookupPlanInput, type PlannedLookupQuery } from './lookupQueryPlanner';
@@ -229,9 +232,18 @@ export function lookupFileEvidence(doc: Pick<AdminImportDocument, '_id' | 'manif
     });
 }
 
-/** Stored releases drop ISRCs: ranking and value application never read them, and they would only grow the record. */
+/** Whether a track credit lists the release credit's entries, field for field, in the same order. */
+const sameCredit = (track: unknown, release: readonly LookupArtistCredit[]) => Array.isArray(track) && Array.isArray(release) && track.length === release.length
+    && track.every((credit: Partial<LookupArtistCredit> | null, index) => (['name', 'joinPhrase', 'artistId', 'artistName'] as const)
+        .every(field => typeof credit?.[field] === 'string' && credit[field] === release[index]?.[field]));
+/**
+ * Stored releases drop ISRCs: ranking and value application never read them, and they would only grow the record. A track credit
+ * equal to the release's is stored as SAME_AS_RELEASE_CREDIT, so releases that credit every track alike barely grow; any other
+ * track credit is kept and an absent one stays absent. Compacting a compact release changes nothing.
+ */
 const compactRelease = (release: MusicBrainzRelease): MusicBrainzRelease => ({
-    ...release, media: release.media.map(medium => ({ ...medium, tracks: medium.tracks.map(track => ({ ...track, isrcs: [] })) }))
+    ...release, media: release.media.map(medium => ({ ...medium, tracks: medium.tracks.map(track => ({ ...track, isrcs: [],
+        ...(sameCredit(track.artistCredit, release.artistCredit) ? { artistCredit: SAME_AS_RELEASE_CREDIT } : {}) })) }))
 });
 const candidateBytes = (candidates: readonly StoredLookupCandidate[]) => Buffer.byteLength(JSON.stringify(candidates));
 /** A fetched release is stored while every candidate together fits the byte budget; otherwise it is omitted and incomplete. */

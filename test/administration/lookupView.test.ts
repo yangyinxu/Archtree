@@ -9,6 +9,7 @@
  *   - needsAnswer and blocking show a tie until a choice, unanswered conflicts, and ignore Album conflicts once an explicit Album reuse makes it an append
  *   - a partial comparison is disclosed, and its single matching group is offered without a preselection but needs no answer
  *   - the view never carries what the strict Web schema refuses: an impossible calendar date shows as unknown and a repeated difference once
+ *   - a ranking from a subset comparison stays within the import view's allowlist: no subset fields, subset-only differences, completeness or exact-count basis
  *   - a candidate shows a front-artwork preview only when its fetched release reports one, and never an address
  *   - an iTunes-only candidate shows as such with its collection ID, whether it was checked against MusicBrainz and an artwork flag, never its address, storefront or localized names
  *   - the iTunes status: not queried without a stage or once a run ended before it answered, running or retrying while an iTunes request waits, else as the stage ended
@@ -31,8 +32,11 @@ import type { AdminImportDocument } from '../../src/administration/import/adminI
 import type { MusicBrainzRelease } from '../../src/administration/lookup/lookupContract';
 import { applyPreselectedLookup } from '../../src/administration/lookup/lookupValueApplication';
 import { importLookupView } from '../../src/administration/lookup/lookupView';
+import { rankLookupCandidates } from '../../src/administration/lookup/lookupRanking';
 import { itunesRelease } from '../../src/administration/lookup/lookupItunesStage';
-import { rankLookupWithinBudget, type MetadataLookupRecord, type StoredLookupCandidate } from '../../src/administration/lookup/metadataLookupRecord';
+import {
+    lookupFileEvidence, rankLookupWithinBudget, withCandidateRelease, type MetadataLookupRecord, type StoredLookupCandidate
+} from '../../src/administration/lookup/metadataLookupRecord';
 
 const importId = '0000000000000000000000d2', actor = '0000000000000000000000e1';
 const now = new Date('2026-10-19T00:00:00Z');
@@ -92,6 +96,15 @@ test('the view allowlists evidence: no link, ISRC, recording ID, account, grant,
     assert.deepEqual([view.applied!.choice, view.applied!.basis, view.applied!.candidateKey, view.applied!.values.map(value => value.path).slice(0, 2), view.applied!.conflicts, view.applied!.flagged,
         view.applied!.source, view.applied!.notChecked], ['preselected', 'onlyMatchingGroup', `musicbrainz:${mbid(1)}`, ['album.title', 'album.artists'], [], [], 'musicbrainz', false]);
     assert.deepEqual([view.needsAnswer, view.blocking, view.itunes], [{ tie: false, conflicts: [] }, false, 'notQueried']);
+    // Stored track credits, the same-as-release marker included, give the same view as none.
+    const guest = { name: 'Synthetic Guest', joinPhrase: '', artistId: mbid(3), artistName: 'Synthetic Guest' };
+    const credited = release(1, { media: [{ position: 1, format: 'CD', tracks: [{ ...track(1, 'First Song'), artistCredit: release(1).artistCredit }, { ...track(2, 'Second Song'), artistCredit: [guest] }] }] });
+    const storedOf = (value: MusicBrainzRelease) => withCandidateRelease([{ ...stored(value), release: null, details: 'pending' }], 0, value);
+    assert.deepEqual(storedOf(credited)[0].release!.media[0].tracks.map(item => item.artistCredit), ['release', [guest]]);
+    const viewOf = (candidates: StoredLookupCandidate[]) => { const shown = project(); return importLookupView(applyPreselectedLookup(shown, record(shown, candidates), now).record, shown)!; };
+    const withCredits = viewOf(storedOf(credited));
+    assert.deepEqual(withCredits, viewOf(storedOf(release(1))));
+    assert.equal(JSON.stringify(withCredits).includes('Synthetic Guest'), false);
 });
 
 test('candidates follow the ranking when ranked and the stored order as incomplete otherwise; an unreadable record is no view', () => {
@@ -175,6 +188,24 @@ test('the view never carries what the strict Web schema refuses: an impossible c
     for (const [date, shown] of [[{ year: 2020, month: 2, day: 29 }, true], [{ year: 2000, month: 2, day: 29 }, true], [{ year: 1900, month: 2, day: 29 }, false],
         [{ year: 2021, month: 4, day: 31 }, false], [{ year: 2021, month: 2, day: null }, true], [{ year: 2021, month: null, day: null }, true], [{ year: 2021, month: null, day: 1 }, false]] as const)
         assert.deepEqual(importLookupView(record(doc, [stored(release(2, { date }))]), doc)!.candidates[0].date, shown ? date : null, JSON.stringify(date));
+});
+
+test('a ranking from a subset comparison stays within the import view\'s allowlist: no subset fields, subset-only differences, completeness or exact-count basis', () => {
+    const doc = project(), files = lookupFileEvidence(doc);
+    const longer = release(3, { trackCount: 3, media: [{ position: 1, format: 'CD', tracks: [track(1, 'First Song'), track(2, 'Second Song'), track(3, 'Bonus Song')] }] });
+    // The second member's duration fits no track of this release, so it has no pairing.
+    const unpairable = release(4, { media: [{ position: 1, format: 'CD', tracks: [track(1, 'First Song'), { ...track(2, 'Second Song'), lengthMs: 900_000 }] }] });
+    const candidates = [stored(release(1)), stored(longer), stored(unpairable)];
+    const subset = rankLookupCandidates(candidates, files, { comparison: 'subset', searchComplete: true });
+    assert.deepEqual([subset.preselection?.basis, subset.groups.length, subset.candidates.find(entry => entry.releaseId === mbid(4))!.comparison!.differences], ['exactTrackCount', 2, ['pairing']]);
+    const base = record(doc, candidates);
+    const view = importLookupView({ ...base, ranking: { ...subset, rankedAt: now, files } }, doc)!;
+    assert.equal(view.preselection, null, 'a basis the import view does not know preselects nothing there');
+    assert.deepEqual(view.candidates.map(entry => [entry.releaseId, entry.status, entry.comparison!.differences, Object.keys(entry.comparison!).sort()]), [
+        [mbid(1), 'matching', [], ['differences', 'discCount', 'trackCount', 'unknownCandidateDurations', 'unknownLocalDurations']],
+        [mbid(3), 'matching', [], ['differences', 'discCount', 'trackCount', 'unknownCandidateDurations', 'unknownLocalDurations']],
+        [mbid(4), 'notMatching', [], ['differences', 'discCount', 'trackCount', 'unknownCandidateDurations', 'unknownLocalDurations']]]);
+    assert.doesNotMatch(JSON.stringify(view), /subset|completeness|exactTrackCount|pairing|missingTrack|unpairable|leftOut/);
 });
 
 test('a candidate shows a front-artwork preview only when its fetched release reports one, and never an address', () => {

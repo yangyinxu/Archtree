@@ -329,7 +329,8 @@ const positive = (value: number | null) => value !== null && Number.isSafeIntege
  * The values of an iTunes collection in the release shape candidates store: the collection name as given, its single artist string
  * as one primary entry without a MusicBrainz ID (never split), no label or country, the iTunes date at day precision as the
  * release's own date (no first-release date), the barcode only when a UPC lookup found it, media by disc number with tracks in
- * track-number order and durations in milliseconds, and front artwork only for an allowlisted artwork address.
+ * track-number order and durations in milliseconds, each track credited with its song's single artist string as one entry
+ * (never split), and front artwork only for an allowlisted artwork address.
  */
 export function itunesRelease(collection: ItunesCollection, songs: readonly ItunesTrack[], barcode: string | null): MusicBrainzRelease {
     const discs = new Map<number, { song: ItunesTrack; order: number }[]>();
@@ -339,7 +340,8 @@ export function itunesRelease(collection: ItunesCollection, songs: readonly Itun
         tracks: [...list].sort((left, right) => (positive(left.song.trackNumber) ?? Number.MAX_SAFE_INTEGER) - (positive(right.song.trackNumber) ?? Number.MAX_SAFE_INTEGER) || left.order - right.order)
             .map(({ song }, index): MusicBrainzTrack => {
                 const number = positive(song.trackNumber) ?? index + 1;
-                return { position: number, number: String(number), title: song.trackName, lengthMs: positive(song.trackTimeMillis), recordingId: '', isrcs: [] };
+                return { position: number, number: String(number), title: song.trackName, lengthMs: positive(song.trackTimeMillis), recordingId: '', isrcs: [],
+                    artistCredit: [{ name: song.artistName, joinPhrase: '', artistId: '', artistName: song.artistName }] };
             })
     }));
     const upc = normalizeGtin(barcode)?.digits ?? null;

@@ -5,6 +5,7 @@
  *              lookupRecord, tags, seed
  * Tests
  *   - the applied release context carries only allowlisted values of that release, labelled as untrusted MusicBrainz context
+ *   - stored track credits, the same-as-release marker included, never reach the applied release context
  *   - no context without an applied MusicBrainz release that still holds fetched details of that release
  *   - no iTunes data reaches Luna: an applied iTunes-only candidate sends no context, and the draft values it wrote carry no collection ID, storefront, artwork or localized name
  *   - the context fit is deterministic, keeps the longest track prefix in medium order and keeps every chunk input within 48 KB
@@ -71,6 +72,16 @@ test('the applied release context carries only allowlisted values of that releas
         media: [{ position: 1, format: 'CD', tracks: [{ position: 1, number: '1', title: 'Ipsum track 1', lengthMs: 2000 }] }, { position: 2, format: 'CD', tracks: [{ position: 1, number: '1', title: 'Ipsum second disc', lengthMs: 1000 }] }] } });
     assert.doesNotMatch(json, uuidPattern);
     for (const text of ['Other Release', 'iTunes', 'itunes', '4006381333931', 'AMET-001', 'CAT-2', 'JPAB01234567', 'Official', 'JP', 'frontArtwork', 'recordingId', 'isrcs', 'barcode', 'catalogNumber', 'labelId', 'artistId']) assert.ok(!json.includes(text), text);
+});
+
+test('stored track credits, the same-as-release marker included, never reach the applied release context', () => {
+    const plain = releaseOf(releaseId, 'Ipsum', 4);
+    const guest = [{ name: 'Sit Guest', joinPhrase: '', artistId: '88888888-9999-4aaa-8bbb-cccccccccccc', artistName: 'Sit Guest' }];
+    const credited = { ...plain, media: plain.media.map(medium => ({ ...medium, tracks: medium.tracks.map((track, index) => ({ ...track, artistCredit: index % 2 ? guest : 'release' })) })) };
+    const contextOf = (release: unknown) => lunaLookupContextFor({ applied: applied(), candidate: candidate(`musicbrainz:${releaseId}`, release as ReturnType<typeof releaseOf>) })!;
+    assert.deepEqual(contextOf(credited), contextOf(plain));
+    assert.ok(contextOf(credited).context.release.media.flatMap(medium => medium.tracks).every(track => Object.keys(track).join() === 'position,number,title,lengthMs'));
+    assert.ok(!JSON.stringify(contextOf(credited)).includes('Sit Guest'));
 });
 
 test('no context without an applied MusicBrainz release that still holds fetched details of that release', () => {

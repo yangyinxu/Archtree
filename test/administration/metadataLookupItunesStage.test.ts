@@ -11,6 +11,7 @@
  *   - a collection lookup that gives fewer songs than the collection has, or may be cut off at the lookup limit, gives an incomplete iTunes-only candidate
  *   - collection lookups stop at their bound: a further result is skipped without a request, making the stage incomplete
  *   - an iTunes-only release keeps the single artist string as one entry, milliseconds, discs in order, the day date, no label or country, a UPC barcode and allowlisted artwork only
+ *   - each iTunes-only track is credited with its song's single artist string as one primary entry, never split, apart from the release credit
  *   - localized name groups are one result's distinct artist names across storefronts, case-folded, at least two, bounded, and a malformed stage gives none
  *   - a stored stage from another release is read without its unknown parts, and an unreadable one is none
  *   - iTunes unavailable skips its remaining requests; a result left without its collection lookup makes the stage incomplete, skipped searches do not
@@ -31,7 +32,7 @@ import {
     planItunesBridge, recordBridgeAnswer, recordItunesAnswer, startItunesStage, storedItunesStage, type LookupItunesItem, type LookupItunesStage
 } from '../../src/administration/lookup/lookupItunesStage';
 import type { PlannedLookupQuery } from '../../src/administration/lookup/lookupQueryPlanner';
-import { proposalForRelease, rankLookupCandidates, type LocalFileEvidence } from '../../src/administration/lookup/lookupRanking';
+import { proposalForRelease, rankLookupCandidates, trackArtistProposal, type LocalFileEvidence } from '../../src/administration/lookup/lookupRanking';
 import { installNetworkGuard } from '../support/networkGuard';
 
 const guard = installNetworkGuard();
@@ -246,6 +247,19 @@ test('an iTunes-only release keeps the single artist string as one entry, millis
     const plain = itunesRelease(collection('5', 'X', 'A', 1, { artworkUrl: 'https://example.test/image/thumb/x/100x100bb.jpg' }), [song('6', '5', 'X', 'A')], null);
     assert.deepEqual([plain.barcode, plain.barcodeText, plain.frontArtwork], [null, null, false]);
     assert.equal(itunesRelease(collection('5', 'X', 'A', 1), [song('6', '5', 'X', 'A')], '000000000000').barcode, null);
+});
+
+test('each iTunes-only track is credited with its song\'s single artist string as one primary entry, never split, apart from the release credit', () => {
+    const built = itunesRelease(collection('5', 'X', 'Synthetic Ensemble', 2), [song('6', '5', 'One', 'Synthetic A feat. Synthetic B', { trackNumber: 1 }),
+        song('7', '5', 'Two', 'Synthetic Ensemble', { trackNumber: 2 })], null);
+    assert.deepEqual(built.media[0].tracks.map(track => track.artistCredit), [
+        [{ name: 'Synthetic A feat. Synthetic B', joinPhrase: '', artistId: '', artistName: 'Synthetic A feat. Synthetic B' }],
+        [{ name: 'Synthetic Ensemble', joinPhrase: '', artistId: '', artistName: 'Synthetic Ensemble' }]]);
+    assert.deepEqual(built.media[0].tracks.map(track => trackArtistProposal(built, track)), [
+        { artists: [{ name: 'Synthetic A feat. Synthetic B', role: 'primary', joinPhrase: null, musicBrainzId: null }] },
+        { artists: [{ name: 'Synthetic Ensemble', role: 'primary', joinPhrase: null, musicBrainzId: null }] }]);
+    // The Album's entries still come from the collection's artist string alone.
+    assert.deepEqual(proposalForRelease(built).artists, [{ name: 'Synthetic Ensemble', role: 'primary', joinPhrase: null, musicBrainzId: null }]);
 });
 
 test('localized name groups are one result\'s distinct artist names across storefronts, case-folded, at least two, bounded, and a malformed stage gives none', () => {

@@ -1807,6 +1807,18 @@ roll back to:
   holding one as changed on the other (a catalog edit or cover operation
   answers `409 ADMIN_CATALOG_REVISION_CONFLICT`); capture it again or reload
   open workbench tabs.
+- Track artist credits need no floor of their own; no collection, index or
+  Web schema changes. The release before them drops each release track's
+  artist credit and each medium's pregap and data tracks from MusicBrainz
+  answers again and reads stored releases without a schema, so it ignores
+  the track credits, same-as-release markers and pregap and data-track
+  counts stored since; its import rankings, groups and values are the same
+  as this release's, except where this release omitted a fetched release
+  because its track credits no longer fit the candidate budget (see
+  [Deployment todos](../deployment/todos.md)). A record it stores has
+  tracks without a credit, which this release reads as no usable credit. No
+  response carries a track credit or such a count, so open workbench tabs
+  need no reload.
 - Credit join phrases and Disc Numbers have their own floor in the
   [catalog Credit rollout runbook](../deployment/catalog-credit-rollout-runbook.md#join-phrase-and-disc-number-rollback-floor).
 
@@ -1885,11 +1897,17 @@ below). The source layer, the jobs and their routes live in
   complete UTF-8 and the complete JSON parser (duplicate keys and nesting deeper
   than 20 rejected), then an allowlisted shape. Unknown fields are dropped;
   wrong types, out-of-bound values, lone surrogates and impossible dates reject
-  the whole response. MBIDs, barcodes (GTIN check digit, all-zero rejected),
-  ISRCs, iTunes IDs and Cover Art Archive image IDs are format-checked before
-  they are sent or compared. A failure is reported as `unavailable`,
-  `invalidResponse`, `rateLimited`, `busy`, `cancelled` or `notConfigured`,
-  never as an empty result.
+  the whole response. The lenient fields are a release track's own artist
+  credit (`artist-credit` on each track of a release lookup) and a medium's
+  `pregap` and `data-tracks`, of which only the positions are read, to count
+  them: an invalid one, such as a credit of more than 50 entries, a name over
+  1000 characters, a join phrase over 200 or a lone surrogate, is dropped
+  alone (that track then has no credit, or the medium counts no such
+  tracks), and the release still parses. MBIDs, barcodes (GTIN check
+  digit, all-zero rejected), ISRCs, iTunes IDs and Cover Art Archive image IDs
+  are format-checked before they are sent or compared. A failure is reported
+  as `unavailable`, `invalidResponse`, `rateLimited`, `busy`, `cancelled` or
+  `notConfigured`, never as an empty result.
 - **Cache.** Validated JSON answers, including 404 answers, stay in a
   process-local LRU of 128 entries, 8 MiB and 15 minutes. Failures and artwork
   bytes are never cached.
@@ -1980,12 +1998,82 @@ below). The source layer, the jobs and their routes live in
     group is offered but not applied, and needs no answer; two or more
     matching groups are a tie as always. An identifier every file shares still
     preselects the candidate it matches alone.
+  - The ranking also offers a subset comparison (`comparison: 'subset'`, with
+    pairing in `src/administration/lookup/lookupSubset.ts`) for completing an
+    existing Album, which no lookup run, route or Web page uses yet; imports
+    keep the exact comparison above, and their rankings, groups and values are
+    unchanged apart from releases newly omitted for the candidate budget (see
+    the track artist credit rollback note). It counts only a release's tracks
+    on audio media: a medium whose format is DVD, DVD-Video, Blu-ray,
+    Blu-ray-R, HD-DVD, VCD, SVCD, VHS, Betamax, LaserDisc, VHD, CED, UMD,
+    CD-ROM, DVD-ROM, Data CD or Data DVD (compared case-insensitively) is left
+    out with its tracks counted, as is a track whose position is not a
+    positive integer and each pregap or data track, which MusicBrainz lists
+    apart from a medium's tracks. Discs keep the numbering an import of the
+    release gives them, among the media that have tracks, so a CD after a
+    DVD-Video with a tracklist is Disc 2. Those tracks, with these Disc
+    Numbers and their durations when they are whole positive milliseconds
+    (otherwise unknown), are the rows of the release's expected tracklist; a
+    release without audio tracks offers none. Each member pairs with a
+    distinct track whose disc and position equal the member's own Disc and
+    Track Number where it has them and whose duration agrees within the same
+    tolerance where both are known. One pairing of every member is found by
+    augmenting paths (at most 100 by 100); it is the only one when no member
+    could take an unpaired track and no members could exchange tracks in a
+    cycle. A candidate does not match when it has fewer audio tracks than the
+    Album has members, or none (`trackCount`), no expected tracklist within
+    its bounds or no pairing (`pairing`). The bounds are at most 100 audio
+    tracks and 32 KiB of serialized rows (`tooManyTracks`), and distinct
+    positions, Disc Numbers up to 999, Track Numbers up to 9999 and non-empty
+    NFC, trimmed titles of at most 300 characters without control, invisible
+    formatting or lone surrogate characters (`tracklistInvalid`). Otherwise it
+    matches when its pairing is the only one, the Album has members and every
+    paired duration is known, and it is unverified (listed, never preselected)
+    when several pairings exist, a paired duration is unknown or the Album has
+    no members (the empty pairing, so any candidate can still be chosen). The
+    comparison lists the pairs, the tracks no member pairs with (the
+    missing-file rows it would add, also counted), the tracks left out and the
+    members no audio track can pair with (for releases of at most 100 audio
+    tracks). Equal proposals form different groups, so a tie, when their
+    pairings, their expected rows with durations or their paired tracks'
+    Artist entries differ. Groups compare the proposal's Album values with
+    those rows, pairs and paired tracks' entries, never the proposal's own
+    tracks, so equal Album values with equal rows, pairs and paired-track
+    entries form one group whatever the video media: a CD edition and its
+    CD+DVD edition share a group, and the exact-count preference below applies
+    to it. A paired track's entries come from that track's own artist credit
+    through the loop that gives the Album's (roles, placeholders, repeats and
+    MusicBrainz IDs as in [Value application](#value-application)), or carry a
+    left-out reason when the track has no usable credit or no entry remains.
+    Two completeness flags (`completeness`) replace the single test: `exact`
+    holds when the search left out no release that could have exactly as many
+    audio tracks as members (`exactSearchComplete`, which defaults to
+    `searchComplete`) and no incomplete candidate could, and `subset` when no
+    left-out or incomplete release could have at least as many; without
+    `subset` the comparison is partial. An incomplete candidate's audio count
+    is its release's audio tracks, else its search summary's audio media, else
+    a reported total, and an unknown count could be anything; a release or
+    summary whose every medium is video or data has none and can hide no
+    group. After the identifier rules, while `exact` holds, the one matching
+    group whose release has exactly as many audio tracks as members is
+    preselected (`exactTrackCount`) even beside matching groups with more
+    tracks; otherwise the only matching group of a complete comparison is
+    (`onlyMatchingGroup`). Admission helpers for these comparisons accept a
+    release with an unknown count or at least as many audio tracks as members,
+    never one known to have none, and order them by fewest extra tracks,
+    unknown counts next and smaller counts last. The pairs every largest
+    pairing contains (forced pairs) are computed for numbering appended files.
 - **Fixtures.** `npm run record:metadata-lookup-fixtures -- --live` re-records
   the trimmed public responses in `test/fixtures/metadataLookup/`. It contacts
   the live services with a recorder User-Agent and the contract rates, so only
   an operator runs it; tests and CI never do. Lookup tests install
   `test/support/networkGuard.ts`, which fails any non-loopback DNS query,
-  socket or `fetch`.
+  socket or `fetch`. The recorded release lookups were trimmed before track
+  credits were kept and carry none; a live re-record keeps them, since the
+  recorder trims with the same shapes. The synthetic
+  `musicbrainz/synthetic-release-track-credits.json` holds track credits: one
+  equal to the release's, a featuring credit, Various Artists, none, one with
+  an invalid artist ID and one with 51 entries.
 
 ### iTunes fallback and MusicBrainz bridge
 
@@ -2055,8 +2143,9 @@ below). The source layer, the jobs and their routes live in
   no label, the iTunes release date at day precision as the release's own date
   (no first-release date; an iTunes date is used only for an iTunes-only
   candidate), no country, the UPC as barcode only when a UPC lookup found it,
-  media by disc number with tracks in track-number order and durations in
-  milliseconds, and front artwork only for an allowlisted artwork address.
+  media by disc number with tracks in track-number order, durations in
+  milliseconds and each song's artist string as that track's one credit entry
+  (never split), and front artwork only for an allowlisted artwork address.
 - **Preselection.** Groups never mix sources: an iTunes group's key also names
   the source, and MusicBrainz group keys are unchanged. An iTunes-only
   candidate may be preselected (by a shared barcode its UPC lookup found, or as
@@ -2238,7 +2327,15 @@ database, what the step stores and which request comes next.
   allowlisted artwork address. Ranking compares each file's known duration
   (version-2 milliseconds, else a stored `mm:ss` with 1-second precision), the
   draft's Disc and Track Numbers, the version-2 artist and album-artist tags and
-  the identifiers every file shares.
+  the identifiers every file shares. Each stored track also keeps its own
+  artist credit (MusicBrainz's, or an iTunes song's artist string); one equal
+  to the release's credit, entry for entry, is stored as the same-as-release
+  marker `"release"`, so only tracks credited apart from their release, as on
+  compilations, add bytes. A track stored without one, as in a record from
+  before track credits, has no usable credit. A medium with pregap or data
+  tracks also keeps how many (`hiddenTracks`, absent when none). Import
+  ranking, groups and values never read track credits or that count, and no
+  response or Luna context carries them.
 - **Limit.** A project runs at most three automatic lookups: the first and two
   reruns after file-set changes. Submitted names and manual retries do not
   count.

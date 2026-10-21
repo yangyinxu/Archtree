@@ -33,6 +33,7 @@
  *   - an ID another entry already carries is never added to a second entry; the differing first entry is an ID conflict
  *   - an administrator save wins over IDs lookup added or removed meanwhile: a base without them is current, the save keeps them, and a real difference still conflicts
  *   - answering lookup on an ID conflict writes the release's IDs; the run's aliases join the names found for each ID
+ *   - track credits never change the values an import application writes, the candidate IDs it reads or the names it finds
  *   - the identity state an application needs is every fetched candidate's credited IDs and the records explicit decisions reuse
  *   - a release with front artwork queues its cover staging under the intent's actor and grant, as a change that never bumps valueRevision
  *   - the worker's preselection stages under the run's grant, while a re-rank and a choice stage under a fresh grant of the administrator acting
@@ -743,6 +744,22 @@ test('answering lookup on an ID conflict writes the release\'s IDs; the run\'s a
     assert.deepEqual(draftOf(doc).album.label, { name: 'Synthetic Label', musicBrainzId: mbid(10) });
     assert.ok(answered.applied!.musicBrainzIds!.some(item => item.entryKey === null && item.musicBrainzId === mbid(10)));
     assert.deepEqual(lookupAnswersNeeded(answered, doc, { append: false }).conflicts, []);
+});
+
+test('track credits never change the values an import application writes, the candidate IDs it reads or the names it finds', () => {
+    const guest = { name: 'Synthetic Guest', joinPhrase: ' feat. ', artistId: mbid(3), artistName: 'Synthetic Guest' };
+    const plain = synthetic(1);
+    const credited = synthetic(1, { media: [{ position: 1, format: 'CD', tracks: [{ ...track(1, 'First Song'), artistCredit: 'release' as const },
+        { ...track(2, 'Second Song'), artistCredit: [guest, { name: 'Track Lead Spelling', joinPhrase: '', artistId: mbid(1), artistName: 'Track Lead Spelling' }] }] }] });
+    assert.deepEqual(valuesOf(project(2, timed), credited), valuesOf(project(2, timed), plain));
+    assert.deepEqual(lookupCandidateIds({ candidates: [stored(credited)] }), lookupCandidateIds({ candidates: [stored(plain)] }));
+    // Applying the preselection writes the same draft, origins and found names: a track's other spelling of the lead adds no name.
+    const applied = (release: MusicBrainzRelease) => {
+        const doc = project(2, timed), result = applyPreselectedLookup(doc, completed(doc, [stored(release)]), now);
+        return { changed: result.changed, values: result.record.applied!.values, draft: doc.draft, origins: doc.draftOrigins, names: doc.musicBrainzNames };
+    };
+    assert.deepEqual(applied(credited), applied(plain));
+    assert.ok(!/Synthetic Guest|Track Lead Spelling/.test(JSON.stringify(applied(credited))));
 });
 
 test('the identity state an application needs is every fetched candidate\'s credited IDs and the records explicit decisions reuse', () => {

@@ -45,6 +45,10 @@ no lookup starts.
       `500x500bb.jpg` thumbnails, and that one run stays within its iTunes
       bounds (at most 2 UPC lookups, 3 searches and 4 collection lookups, and 4
       MusicBrainz bridge searches).
+- [ ] During release verification of track artist credits, run lookups for
+      a few compilations in the administrator's library and confirm their
+      fetched releases still fit the 4 MiB candidate budget (none newly
+      `omitted`).
 
 ## Artist Follow and New Releases Rollout
 

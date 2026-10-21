@@ -2,8 +2,8 @@
  * Exports
  *   Types: LookupShape
  *   Classes: LookupShapeError
- *   Functions: string, integer, boolean, array, object, oneOf, date, parseLookupDate, validateLookupShape,
- *              decodeLookupJson
+ *   Functions: string, integer, boolean, array, object, oneOf, date, lenient, parseLookupDate,
+ *              validateLookupShape, decodeLookupJson
  * Internal
  *   Types: Presence
  *   Functions: invalid, isPlainObject, validate
@@ -17,7 +17,9 @@ import type { LookupDate } from './lookupContract';
  * Allowlist DSL for untrusted lookup responses. Validation returns a projection that holds only the
  * declared keys, in declaration order, with raw values unchanged, so unknown fields are dropped and
  * projecting a projection is the identity (the fixture recorder relies on this). Wrong types, bound
- * violations, lone surrogates, pattern mismatches and non-plain objects reject the whole response.
+ * violations, lone surrogates, pattern mismatches and non-plain objects reject the whole response,
+ * except inside a lenient object field, whose invalid value is left out instead; a kept value
+ * validates again and a left-out one stays absent, so projecting a projection stays the identity.
  */
 export class LookupShapeError extends Error {
     constructor() { super('METADATA_LOOKUP_INVALID_RESPONSE'); this.name = 'LookupShapeError'; }
@@ -32,6 +34,7 @@ export type LookupShape = Presence & (
     | { kind: 'object'; fields: Readonly<Record<string, LookupShape>> }
     | { kind: 'oneOf'; options: readonly LookupShape[] }
     | { kind: 'date' }
+    | { kind: 'lenient'; shape: LookupShape }
 );
 
 export const string = (max: number, options: Presence & { pattern?: RegExp } = {}): LookupShape => ({ kind: 'string', max, ...options });
@@ -42,6 +45,8 @@ export const object = (fields: Record<string, LookupShape>, options: Presence = 
 export const oneOf = (...options: LookupShape[]): LookupShape => ({ kind: 'oneOf', options });
 /** `''`, `YYYY`, `YYYY-MM` or `YYYY-MM-DD` with a real calendar day; the raw string is kept. */
 export const date = (options: Presence = {}): LookupShape => ({ kind: 'date', ...options });
+/** An object field whose invalid value (wrong type, over a bound, null, a lone surrogate) is left out instead of rejecting the response; absent is fine. Elsewhere it validates its shape strictly. */
+export const lenient = (shape: LookupShape): LookupShape => ({ kind: 'lenient', shape, optional: true });
 
 const loneSurrogate = /\p{Cs}/u;
 const invalid = (): never => { throw new LookupShapeError(); };
@@ -66,6 +71,8 @@ export const parseLookupDate = (value: unknown): LookupDate | null => {
 };
 
 const validate = (shape: LookupShape, value: unknown): unknown => {
+    // Outside an object field a lenient shape is its inner shape, null included.
+    if (shape.kind === 'lenient') return validate(shape.shape, value);
     if (value === null) return shape.nullable ? null : invalid();
     switch (shape.kind) {
         case 'string':
@@ -90,6 +97,10 @@ const validate = (shape: LookupShape, value: unknown): unknown => {
             for (const [key, field] of Object.entries(shape.fields)) {
                 const present = Object.prototype.hasOwnProperty.call(value, key) && value[key] !== undefined;
                 if (!present) { if (field.optional) continue; return invalid(); }
+                if (field.kind === 'lenient') {
+                    try { output[key] = validate(field.shape, value[key]); } catch (error) { if (!(error instanceof LookupShapeError)) throw error; }
+                    continue;
+                }
                 output[key] = validate(field, value[key]);
             }
             return output;
