@@ -13,19 +13,23 @@ import { cleanLookupTerm, isPlaceholderCredit, lookupTermProblem, normalizeGtin,
 import { musicBrainzLuceneQuery, type MusicBrainzRecordingQuery, type MusicBrainzReleaseQuery } from './musicBrainzClient';
 
 /**
- * Pure planner from the import's evidence to at most six MusicBrainz queries: valid embedded
- * identifiers first, then album or song text, then a cleaned folder name. It accepts names, never
- * links or file names; an identifier that fails its format check is dropped and never sent. Submitted
- * text is only normalized (NFC, collapsed whitespace), so a link, an over-long name or a control or
- * format character rejects the plan; tag and folder text is cleaned instead. Queries carry only that
- * text, its credited names and the identifiers; the file count is never sent (the run uses it locally,
- * lookupRunStep.ts). Fallback queries follow the text searches, sent only when those found nothing: tag
- * or folder text in its normalized spelling (NFKC, the wave dash as `~`, "Sound Track" as one word, a
+ * Pure planner from an import's evidence, or an existing-Album review's saved Album title and primary
+ * Artist names, to at most six MusicBrainz queries: valid embedded identifiers first, then album or
+ * song text, then a cleaned folder name. It accepts names, never links or file names; an identifier
+ * that fails its format check is dropped and never sent. Submitted text is only normalized (NFC,
+ * collapsed whitespace), so a link, an over-long name or a control or format character rejects the
+ * plan; tag, folder and saved-title text is cleaned instead. Queries carry only that text, its credited
+ * names and the identifiers; the file count is never sent (the run uses it locally, lookupRunStep.ts).
+ * Fallback queries follow the text searches, sent only when those found nothing: tag, folder or saved
+ * title text in its normalized spelling (NFKC, the wave dash as `~`, "Sound Track" as one word, a
  * trailing remaster note dropped), the credited search first.
  */
 export type LookupPlanInput = {
-    trigger: 'submitted' | 'tags' | 'folder';
+    /** `catalog`: an existing Album, looked up by its saved title (`tags.album`) and `credited` names only. */
+    trigger: 'submitted' | 'tags' | 'folder' | 'catalog';
     submitted?: { kind: 'album' | 'song'; text: string };
+    /** Credited Artist names given as a list (catalog reviews): never split on ` / `, never read as labels. */
+    credited?: readonly string[];
     tags?: { album: string | null; albumArtist: string | null; title: string | null; artist: string | null };
     folderName?: string | null;
     fileCount: number;
@@ -117,8 +121,11 @@ export const planMetadataLookup = (input: LookupPlanInput): LookupPlan => {
     }
     const queries: PlannedLookupQuery[] = [];
     const tags = input.tags;
-    const credited = splitCreditedNames(tags?.albumArtist ?? tags?.artist ?? null);
-    const songArtist = splitCreditedNames(tags?.artist ?? tags?.albumArtist ?? null).artists[0];
+    // A credited list is cleaned name by name; placeholders are dropped, so the first usable name is the one sent.
+    const credited = input.credited
+        ? { artists: input.credited.map(tagTerm).filter((name): name is string => !!name && !isPlaceholderCredit(name)), labels: [] as string[] }
+        : splitCreditedNames(tags?.albumArtist ?? tags?.artist ?? null);
+    const songArtist = input.credited ? credited.artists[0] : splitCreditedNames(tags?.artist ?? tags?.albumArtist ?? null).artists[0];
     /**
      * Credited then bare release text, then with `normalize` the fallbacks in the normalized spelling: the credited search
      * respelled, then the bare text respelled, except a folder's whole "Artist - Album" name, which names no release.
@@ -179,6 +186,10 @@ export const planMetadataLookup = (input: LookupPlanInput): LookupPlan => {
         if (title) songQueries(title, true);
         else if (album) albumQueries(album, true);
         else folderQueries();
+    } else if (input.trigger === 'catalog') {
+        // An existing Album is looked up by its saved title only: never a Track title, file name, folder or identifier.
+        const album = tagTerm(tags?.album);
+        if (album) albumQueries(album, true);
     } else folderQueries();
 
     // The plan keeps its order: identifiers first, then each text search before its fallbacks, so the cap drops fallbacks first.

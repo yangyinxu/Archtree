@@ -169,14 +169,15 @@ export class MetadataLookupInputError extends Error {
     }
 }
 
-/** One record per import project; its `_id` is the project's `_id` (metadataLookupService.ts). */
+/** One record per import project or existing-Album review; its `_id` is the project's `_id` (metadataLookupService.ts). */
 export const ADMIN_IMPORT_LOOKUP_COLLECTION = 'adminImportLookups';
 /**
  * Fixed job bounds: the grant, the worker lease and the per-request step deadline (shorter than the lease, and shorter than
  * a wait-mode request with its gate waits and in-call retries, which the deadline then aborts as unavailable), the candidate
  * bounds, the JSON budget of candidates plus ranking (well under MongoDB's 16 MiB document limit), the automatic runs per
- * project, and the automatic retries per run with the longest Retry-After they honour. The first automatic retry after a
- * 503/429 follows its Retry-After within `rateLimitedRetryMs`; retries are counted per source. Per attempt, a run sends at most
+ * import project (`automaticRuns`) and per existing-Album review (`reviewAutomaticRuns`), and the automatic retries per run
+ * with the longest Retry-After they honour. The first automatic retry after a 503/429 follows its Retry-After within
+ * `rateLimitedRetryMs`; retries are counted per source. Per attempt, a run sends at most
  * `plannedQueries` MusicBrainz searches, `candidates` release lookups (MusicBrainz and iTunes-only candidates share the bound) and
  * `aliasLookups` artist or label alias lookups, keeping at most `aliasNames` names per entity. Its iTunes stage, alongside those,
  * sends at most `itunesUpcLookups` UPC lookups, `itunesSearches` iTunes searches and `itunesCollectionLookups` collection lookups,
@@ -185,7 +186,7 @@ export const ADMIN_IMPORT_LOOKUP_COLLECTION = 'adminImportLookups';
  */
 export const METADATA_LOOKUP_JOB_LIMITS = Object.freeze({
     grantMs: 60 * 60 * 1000, leaseMs: 180_000, stepDeadlineMs: 120_000, workerIntervalMs: 2_000,
-    candidates: 25, aliasLookups: 16, aliasNames: 32, candidateBytes: 4 * 1024 * 1024, recordBytes: 12 * 1024 * 1024, automaticRuns: 3,
+    candidates: 25, aliasLookups: 16, aliasNames: 32, candidateBytes: 4 * 1024 * 1024, recordBytes: 12 * 1024 * 1024, automaticRuns: 3, reviewAutomaticRuns: 1,
     retryDelaysMs: Object.freeze([30_000, 120_000, 300_000]), retryAfterMaximumMs: 60_000,
     rateLimitedRetryMs: Object.freeze({ minimum: 2_000, maximum: 10_000 }),
     itunesUpcLookups: 2, itunesSearches: 3, itunesItems: 4, itunesCollectionLookups: 4, bridgeSearches: 4, localizedGroups: 4, localizedNames: 4

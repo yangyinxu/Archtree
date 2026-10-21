@@ -5,6 +5,7 @@
  *              catalogReviewOriginalFilename, readCatalogReviewSource, createCatalogReview, getCatalogReview,
  *              parseCatalogReviewChanges, editCatalogReview, analyzeCatalogReview, adoptCatalogReview,
  *              cancelCatalogReviewAnalysis, parseCatalogReviewFields, applyCatalogReview, listCatalogReviews
+ *   Constants: catalogReviewProjectPolicy
  * Internal
  *   Functions: fail, missing, conflict, reviewId, currentRevision, publicReceipt, response,
  *              readCatalogReviewCredits, isObject, exactly, reviewReadOnlyPath, membership, tracksForAlbum,
@@ -27,7 +28,9 @@ import { adminCatalogEditableFields, adminCatalogItemRevision, readAdminCatalogR
 import { ADMIN_IMPORT_LIMITS as LIMITS, AdminImportError, cleanText, exact, invalidImport, objectId, parseImportDate, record, uuid, type ImportDate, type ImportManifest, type ImportWorkbenchFilter } from '../import/adminImportContract';
 import { CATALOG_REVIEW_DRAFT_V3, DRAFT_V2, DRAFT_V2_LIMITS, derivedEntryKey, draftBytes, hasOwn, parseDiscNumber, parseDraftTitle, parseTrackNumber, sameDraftValue, type ImportArtistEntry, type ImportDraftV2, type ImportLabelEntry } from '../import/adminImportDraft';
 import { applyAdministratorChanges, boundDraftChanges, boundedJson, draftWithinSizeLimit, parseDraftChanges, storedDraftV2, type ImportDraftChange, type ImportDraftPath } from '../import/adminImportValueState';
-import { adminImportDetail, adoptAdminProjectSuggestions, analyzeAdminProject, idleAnalysis, importCollection, importDigest, mutateAdminProject, parseAdminProjectMutation, withImportAdmin, type AdminImportDocument, type AdminProjectPolicy, type ProjectReceipt } from '../import/adminImportService';
+import { adminImportDetail, adoptAdminProjectSuggestions, analyzeAdminProject, idleAnalysis, importCollection, importDigest, importLookupRecord, mutateAdminProject, parseAdminProjectMutation, withImportAdmin, type AdminImportDocument, type AdminProjectPolicy, type ProjectReceipt } from '../import/adminImportService';
+import { metadataLookupConfiguration } from '../../config/metadataLookup';
+import { lookupRunActive } from '../lookup/metadataLookupRecord';
 import { OpenAiImportAnalysisProvider, type ImportAnalysisProvider } from '../import/adminImportProvider';
 import { catalogReviewAppliedView, catalogReviewDraftView, catalogReviewSourceDisc, catalogReviewSourceView, importDraftV2View, importDraftVersion, importDraftWritable, importProjectV2View, LEGACY_REVIEW_RECEIPT_KINDS, legacyManifestView, legacyReceiptsView } from '../import/adminImportDraftCompat';
 import { CATALOG_REVIEW_MAX_FIELDS, type CatalogReviewDetail, type CatalogReviewField, type CatalogReviewReceipt, type CatalogReviewResponse, type CatalogReviewSource, type CatalogReviewWorkbench } from './adminCatalogReviewContract';
@@ -165,14 +168,16 @@ const reviewReadOnlyPath = (path: string) => /^album\.(artists|label|visibility|
  * Existing-Album reviews: Artist-entries and label suggestions are identity hints and never change Credits, so adopting one is
  * invalid input (rejecting, Keep current, stays allowed); visibility is never suggested. A whole-draft save is refused with a
  * reload request when it is a v1 draft or the review is format 3 (whose review-only values a whole draft would not carry).
+ * Exported for the review's metadata lookup requests (catalogReviewLookupRequests.ts), which this module never imports.
  */
-const policy: AdminProjectPolicy<CatalogReviewResponse> = {
+export const catalogReviewProjectPolicy: AdminProjectPolicy<CatalogReviewResponse> = {
     purpose: 'catalogReview', response,
     reloadRequired: (kind, body, doc) => kind === 'edit' && hasOwn(body, 'draft') && (isLegacyCatalogReviewDraft(body.draft) || importDraftVersion(doc) === CATALOG_REVIEW_DRAFT_V3),
     convert: convertLegacyCatalogReview,
     readOnlyPaths: new Set<ImportDraftPath>(['album.artists', 'album.label', 'album.visibility']),
     cappedDraft: catalogReviewCappedDraft
 };
+const policy = catalogReviewProjectPolicy;
 
 /** Preserve only an actual bounded basename. Device paths and missing historical evidence are never invented. */
 export function catalogReviewOriginalFilename(raw: unknown): string | null {
@@ -326,12 +331,20 @@ export function parseCatalogReviewFields(raw: unknown): CatalogReviewField[] {
 const storedDate = (date: ImportDate | null) => date ? { year: date.year, ...(date.month === null ? {} : { month: date.month }), ...(date.day === null ? {} : { day: date.day }) } : {};
 /**
  * Writes the selected saved values after every source check, in one transaction with the automatic Album order and the receipt.
- * A Disc Number applies only to a track that captured one, and is written as a catalog edit writes it.
+ * A Disc Number applies only to a track that captured one, and is written as a catalog edit writes it. Refused while analysis or a
+ * metadata lookup run that can still send a request (queued, running or waiting for an automatic retry, within its grant, while
+ * lookup is available) is active.
  */
 export function applyCatalogReview(actor: string, id: string, raw: unknown): Promise<CatalogReviewResponse> {
     const body = parseAdminProjectMutation(raw, ['fields']), selected = parseCatalogReviewFields(body.fields);
     return mutateAdminProject(actor, id, body, 'apply', async (doc, session) => {
         if (['queued', 'running'].includes(doc.analysis.state) || doc.analysis.chunks.some(chunk => chunk.state === 'inflight')) return fail(409, 'ADMIN_IMPORT_ANALYSIS_ACTIVE');
+        // The run's own state, read in this transaction, decides, never the review's lookup gate: an earlier release's worker ends a
+        // review run without updating that gate. A run past its grant, or while lookup is unavailable, never sends again, so it never
+        // holds apply (turning imports off cannot leave a review unappliable). A run can only become active through a change that
+        // writes the review document, which this apply replaces, so a concurrent change conflicts and is retried.
+        const run = await importLookupRecord(doc._id, session, { state: 1, grantExpiresAt: 1 });
+        if (lookupRunActive(run, new Date(), metadataLookupConfiguration().available)) return fail(409, 'ADMIN_IMPORT_LOOKUP_ACTIVE');
         const source = doc.catalogSource!, album = await readAdminCatalogRecord('album', source.album.id, session);
         if (!album || adminCatalogItemRevision('album', album) !== source.album.revision) return conflict();
         const tracks = await tracksForAlbum(album, session);

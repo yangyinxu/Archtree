@@ -1428,8 +1428,9 @@ Catalog review routes (relative to `/api/admin/v1`):
   review saved in a newer format offers neither analysis nor apply, and refuses
   edit, analyze, adopt and apply with `409 ADMIN_IMPORT_RELOAD_REQUIRED`, while
   `/cancel-analysis` stays admitted.
-- Metadata lookup admission (server only; no route or Web control offers
-  metadata lookup for reviews yet): the first lookup admitted for a review
+- Metadata lookup admission (the review lookup routes below and the catalog
+  trigger admit it; the Web does not offer them yet): the first lookup
+  admitted for a review
   stores it as format 3, only while its source is current, otherwise
   `409 ADMIN_CATALOG_REVIEW_SOURCE_CHANGED` and nothing is stored. An applied
   review is `409 ADMIN_CATALOG_REVIEW_APPLIED`, and a newer format or a
@@ -1453,6 +1454,57 @@ Catalog review routes (relative to `/api/admin/v1`):
   where it showed none. Admission adds no receipt and advances the revision
   once, when it converts, and a format-3 review is only checked again, never
   captured again.
+- `GET /catalog-reviews/:id/lookup` (server API, like the two routes after it;
+  the Web does not call them yet): `200 {lookup, revision, summary}`, read in
+  one snapshot. `lookup` is the review's lookup view (`null` before any run;
+  see [Lookup routes](#lookup-routes)), and `summary` is
+  `{waiting: {lookup, analysis}, needsAnswer: {tie, conflicts}, lookupAvailable}`:
+  `waiting.lookup` while the run can still send a request (queued, running or
+  retrying, within its grant, while lookup is available; read from the run
+  itself, never from the review's gate), `waiting.analysis` while Luna is
+  queued, running or settling a stopped call (as apply checks both), the
+  lookup answers the view's `needsAnswer` lists, and whether this server's
+  configuration lets lookup run. An applied review reads
+  too; an import or a bad id is `404 ADMIN_CATALOG_REVIEW_NOT_FOUND`, and the
+  import lookup routes never find a review.
+- `POST /catalog-reviews/:id/lookup` `{operationId, expectedRevision, kind,
+  text}` (`kind` `album` or `song`, text at most 1000 characters) looks up a
+  submitted name with the review's shown primary Artist names, and
+  `POST /catalog-reviews/:id/lookup/retry` `{operationId, expectedRevision}`
+  repeats the last run's input and queries (a `catalog` run's too): `202` with
+  the review response and receipt `lookup` or `lookup-retry`. Bodies are at
+  most 8 KB of JSON, whatever the path's letter case; a malformed one is
+  `400 ADMIN_IMPORT_INVALID_INPUT`. Each runs through the review mutation path:
+  one review receipt that replays its intent (a changed body under the same
+  `operationId` is `409 ADMIN_IMPORT_OPERATION_CONFLICT`), bound to the last
+  administrator change like every review change
+  (`409 ADMIN_IMPORT_REVISION_CONFLICT` before it), and refused with
+  `409 ADMIN_IMPORT_RELOAD_REQUIRED` (a newer format),
+  `409 ADMIN_CATALOG_REVIEW_APPLIED` or `409 ADMIN_IMPORT_OPERATION_LIMIT`. The
+  run is admitted in the same transaction, which converts the review to format 3
+  first: `503 ADMIN_IMPORT_LOOKUP_UNAVAILABLE`,
+  `400 ADMIN_IMPORT_LOOKUP_INVALID_NAME`, `409 ADMIN_IMPORT_LOOKUP_ACTIVE` (a
+  retry while a run is queued or running),
+  `409 ADMIN_IMPORT_LOOKUP_NOTHING_TO_RETRY` and
+  `409 ADMIN_CATALOG_REVIEW_SOURCE_CHANGED` refuse it, and a refusal stores
+  no conversion, run or receipt. The detail's `receipts` never list `lookup` or
+  `lookup-retry`, though they move the review's last-administrator-receipt
+  window like any review change; the Web's review response schema already
+  accepts both receipt kinds.
+- `GET /catalog-reviews/:id/lookup/candidates/:key/artwork`: the import
+  candidate preview (see [Lookup routes](#lookup-routes)) for a review's
+  candidate, with the same guards (`?viewer=<account id>` admitted only on
+  this route), private WebP answer, read-only checks and error codes without a
+  body; a review's candidate is never found under `/imports`, nor an import's
+  here.
+- The catalog trigger (server only; review creation does not call it yet):
+  `queueCatalogReviewLookup` starts a review's one automatic run in the
+  caller's administrator transaction under a `create` grant, from the Album's
+  saved title and first usable shown primary Artist name (see [Lookup
+  runs](#lookup-runs)). It admits and stores nothing while lookup is not
+  configured, rechecks the administrator, converts the review as above
+  (refusals included), and queues nothing once the review had its automatic
+  run.
 - `POST /catalog-reviews/:id/apply`: `{operationId, expectedRevision, fields}`
   selects saved Album `title`/`releaseDate` or Track
   `title`/`discNumber`/`trackNumber` paths. A Track `discNumber` is accepted
@@ -1461,9 +1513,18 @@ Catalog review routes (relative to `/api/admin/v1`):
   `null` removes both keys, as a catalog edit does, and a Disc or Track Number
   re-derives the Album order. Revisions, membership, readiness and internal
   filename/media evidence are checked in the same transaction as metadata/order
-  updates and the receipt. Stale sources reject the whole operation. Applied
-  projects become read-only; no upload, duplicate-decision, S3 or publication
-  endpoint exists for them.
+  updates and the receipt. Stale sources reject the whole operation. While a
+  metadata lookup run of the review can still send a request (queued, running
+  or waiting for an automatic retry, within its one-hour grant, while lookup is
+  available), apply is `409 ADMIN_IMPORT_LOOKUP_ACTIVE` and writes nothing. It
+  reads the run's own state and grant in its transaction, not the review's
+  gate; a run past its grant, or while lookup is unavailable (imports turned
+  off included), never holds apply, and the worker later ends such a run
+  without a request (`grantExpired`, `notConfigured`, or `projectClosed` once
+  the review is applied). A run becomes active only through a change that
+  writes the review document, which apply replaces, so the two conflict and
+  retry. Applied projects become read-only;
+  no upload, duplicate-decision, S3 or publication endpoint exists for them.
 
 The publisher reserves immutable approvals and catalog IDs before copying
 objects. It uses version-bound GET and conditional checksum PUT to canonical
@@ -1787,8 +1848,16 @@ roll back to:
   review body limit) and never replays one, and a Web tab opened before them
   sends whole-draft saves, which a format-3 review refuses with
   `409 ADMIN_IMPORT_RELOAD_REQUIRED`; reload open admin Web tabs after deploying
-  or rolling back across them. No format-3 review exists until metadata lookup
-  is offered for reviews.
+  or rolling back across them. A review becomes format 3 only when metadata
+  lookup is first admitted for it.
+- Metadata lookup runs for reviews raise no floor. The release before them
+  keeps format-3 reviews writable, and its worker ends a review's queued run
+  `superseded` (`projectClosed`), because its import-only read finds no
+  project, without updating the review's `lookupGate`; applying a review and
+  the review's lookup summary therefore read the run's own state, never that
+  gate, so a gate left blocking never holds apply after rolling forward again.
+  Releases before format-3 reviews treat them as newer: read-only, with
+  stopping their analysis admitted.
 - Version-2 tag evidence, `valueRevision`, the once-only `automation` marker
   and per-asset automation markers do not raise the first floor above, the
   release that allowlists Draft v2 DTOs. Older releases show only the five
@@ -2013,7 +2082,10 @@ roll back to:
 
 A server worker runs metadata lookups for import projects automatically (see
 [Lookup runs](#lookup-runs)) and applies a preselected candidate's values (see
-[Value application](#value-application)). [Routes](#lookup-routes) and the
+[Value application](#value-application)). It also runs them for existing-Album
+reviews through their server API, storing and ranking candidates only; the Web
+does not offer review lookup yet (see the catalog review routes above and
+Existing-Album reviews under Lookup runs). [Routes](#lookup-routes) and the
 `metadataLookup` capability expose them, and the import's Review and publish
 summary (see the import page above) is their Web control. MusicBrainz is the
 primary source; only when it returns no matching candidate is the iTunes
@@ -2187,8 +2259,9 @@ below). The source layer, the jobs and their routes live in
     preselects the candidate it matches alone.
   - The ranking also offers a subset comparison (`comparison: 'subset'`, with
     pairing in `src/administration/lookup/lookupSubset.ts`) for completing an
-    existing Album, which no lookup run, route or Web page uses yet; imports
-    keep the exact comparison above, and their rankings, groups and values are
+    existing Album, which review runs use (see Existing-Album reviews under
+    [Lookup runs](#lookup-runs)) and no Web page shows yet; imports keep the
+    exact comparison above, and their rankings, groups and values are
     unchanged apart from releases newly omitted for the candidate budget (see
     the track artist credit rollback note). It counts only a release's tracks
     on audio media: a medium whose format is DVD, DVD-Video, Blu-ray,
@@ -2406,10 +2479,11 @@ below). The source layer, the jobs and their routes live in
 `lookupRunStep.ts` performs each step's request and decides, without a
 database, what the step stores and which request comes next.
 
-- **Record.** `adminImportLookups` keeps one record per import project (its
-  `_id` is the project's): the run number, state, issue and outcome, the grant,
-  the bound file set (`fileSetDigest` and each manifest slot's confirmed upload
-  intent and SHA-256), the input (`tags`, `folder` or `submitted`), at most six
+- **Record.** `adminImportLookups` keeps one record per import project or
+  existing-Album review (its `_id` is the project's): the run number, state,
+  issue and outcome, the grant, the bound file set (`fileSetDigest` and each
+  manifest slot's confirmed upload intent and SHA-256), the input (`tags`,
+  `folder`, `submitted` or, for a review, `catalog`), at most six
   planned queries with their progress and `phase` (`search`, `details`,
   `itunes`, `bridge`, `aliases` or `done`), the failed attempts per source
   (`attempts.musicbrainz` and `attempts.itunes`), the sources whose retries ran
@@ -2456,8 +2530,9 @@ database, what the step stores and which request comes next.
   unavailable) the run looks up `GET /ws/2/artist/<MBID>?inc=aliases&fmt=json`
   or `/ws/2/label/<MBID>?inc=aliases&fmt=json` for at most 16 entities, in
   ranked order (the preselected candidate first): each fetched release's
-  credited artists in credit order, then its first label, each once, never a
-  placeholder. Each alias lookup waits for the gate (within the step deadline,
+  credited artists in credit order, then its first label (and, in a review
+  run, its tracks' credited artists), each once, never a placeholder. Each
+  alias lookup waits for the gate (within the step deadline,
   so a gate held by another run does not drop the aliases); a source failure
   (busy, throttled or unavailable) records that target and every remaining one
   as `failed` and ranks in the same step, never retried or counted as an
@@ -2526,9 +2601,43 @@ database, what the step stores and which request comes next.
 - **Limit.** A project runs at most three automatic lookups: the first and two
   reruns after file-set changes. Submitted names and manual retries do not
   count.
+- **Existing-Album reviews.** A review's run (server API only so far) binds
+  one identity per member with no upload intent or SHA-256, its digest covering
+  the member IDs and their media evidence, so no file check ever marks one
+  stale or supersedes the run; the members are bound through the review's
+  source check instead. Its input is `catalog` (the Album's saved title as the
+  review captured it, with its first usable shown primary Artist name) or a
+  submitted name, and it compares in subset mode (a release may have more audio
+  tracks than the Album has members). Searches and bridge searches admit
+  releases by audio track count, fewest extra tracks first, then unknown
+  counts, then those with fewer tracks than members, and pending details are
+  fetched in that order. Beside `searchComplete`, which for a review means that
+  no release left out could have at least as many audio tracks as members, the
+  record keeps `exactSearchComplete`: no release left out could have exactly as
+  many (an unknown count or an equal one; absent on import runs, false when a
+  review record lacks it). A refused search, and the candidate bound stopping a
+  planned search, clear both, so a release left out with more tracks blocks only
+  the preselection of the only matching group, never the exact-count one. Its
+  iTunes stage keeps collections with at least as many tracks as members or an
+  unknown count, fewest extra first across the stage's answers (unknown counts
+  last, earlier answers first on a tie), within the bound of four, and keeps
+  both flags too (`complete` and `exactComplete`, with each kept collection's
+  reported `trackCount`; an import's stage has neither key): a collection left
+  out by that bound, or whose collection lookup was skipped or failed, clears
+  `exactComplete` only when its reported count is unknown or equals the member
+  count, and a song always does. Its alias lookups add each fetched release's audio-track artists, in
+  track order after that release's credit and first label, within the same 16.
+  Each stored step also requires a format-3 review that is not applied and whose
+  source is current (the Album ready and unchanged, its membership, member
+  revisions and media evidence unchanged); otherwise the run ends `superseded`
+  (`projectClosed`) without a request, keeping earlier candidates. A review run
+  stores and ranks candidates only: no preselection is applied, and the review
+  document changes only through its `lookupGate`. A review runs at most one
+  automatic lookup (the catalog trigger, a `noQuery` run included); submitted
+  names and manual retries do not count.
 - **Fence.** Starting a run (including one that completes at once as
   `noQuery`) and every state change write `lookupGate`
-  `{ fence, run, state, blocking }` on the import document in the same
+  `{ fence, run, state, blocking }` on the project document in the same
   transaction, the gate before the record, with `fence` incremented so the
   write always conflicts with a concurrent transaction that also writes the
   document. A re-rank of stored candidates writes it too, and the publish gate
@@ -2550,8 +2659,10 @@ database, what the step stores and which request comes next.
   yet. A reconciliation that finds the file already ready, cover and
   embedded-artwork slots, typing, saving, reading, listing, decisions,
   candidates, adoption, cover selection, analysis and navigation never run
-  lookup, and a format-1 project's conversion never does either. Catalog
-  reviews never accept lookup.
+  lookup, and a format-1 project's conversion never does either. Existing-Album
+  reviews never take these triggers: their one automatic run is the catalog
+  trigger (see the catalog review routes above), and their submitted and
+  retried runs use the review lookup routes.
 - **Input.** Several files are looked up by the album and album-artist tags
   they all share (album-artist names joined by ` / `), never by per-file
   artists, and one file by its title and artist tags, together with the
@@ -2578,6 +2689,7 @@ database, what the step stores and which request comes next.
   | A submitted name | `submit` | the submitter |
   | A manual retry | `retry` | the one retrying |
   | Choosing a candidate or none | `choose` | the one choosing |
+  | An existing-Album review's catalog trigger | `create` | the review's creator |
 
   Admitting a submitted or retried run, a choice or conflict answers rechecks
   that administrator's role in the same transaction, and every stored step
@@ -2587,7 +2699,8 @@ database, what the step stores and which request comes next.
   stores nothing from that step and ends the run as `stopped`; earlier
   candidates stay as evidence and are never ranked or applied. A project that no
   longer accepts lookup (a publication lock, completion, a newer format or a
-  malformed draft) ends it as `superseded` (`projectClosed`).
+  malformed draft), or a review that is applied, not format 3 or whose source
+  is not current, ends it as `superseded` (`projectClosed`).
 - **Refusals.** Submitted and retried runs are admitted inside the caller's
   administrator transaction, which the [routes](#lookup-routes) provide. They
   are refused with 503 `ADMIN_IMPORT_LOOKUP_UNAVAILABLE` while lookup is not
@@ -2741,7 +2854,9 @@ fills only empty or automatic values that are still as it saw them.
 ### Lookup routes
 
 All are under `/imports/:id`, behind the same administrator, current-viewer
-and `no-store` guards as every import route, parsed after those guards.
+and `no-store` guards as every import route, parsed after those guards. They
+never accept a review's ID; a review's runs have their own routes (see the
+catalog review routes above).
 Submissions, retries and choices accept at most 8 KB of JSON, whatever the
 path's letter case (Express matches routes case-insensitively); conflict
 answers keep the 96 KB limit. Changes run through the import mutation path, so
@@ -2799,6 +2914,20 @@ introduced, and `musicBrainzId` marking a conflict only in IDs) and flags; stale
 files; and `needsAnswer` and `blocking`. It carries no URL, ISRC, recording ID,
 storefront, localized name, account, grant, lease, fence, file-set digest or
 query.
+
+An existing-Album review's view (`GET /catalog-reviews/:id/lookup`) is the same
+allowlist with the `catalog` input trigger, the `exactTrackCount` basis for the
+preselection and the applied candidate, the subset differences `pairing`,
+`tooManyTracks` and `tracklistInvalid`, and on each candidate's comparison a
+`subset` object: `leftOutTracks` (video, data and pregap tracks),
+`pairing` (`unique`, `ambiguous`, `none`, or `null` when the track count or the
+tracklist ruled the release out first), `pairs` (`{slotId, discNumber,
+trackNumber}` per paired member, at most 100), `missingTrackCount` (the
+missing-file rows the release would add, or `null`) and `unpairableSlotIds`
+(members no audio track can pair with). Pairs and members of another slot are
+dropped; any other value out of bounds shows `subset` as `null`. Its
+`needsAnswer` never treats the review as an append. An import's view never
+carries these keys, and a run with the `catalog` input has no import view.
 
 The `summary` is the import's Review and publish state, computed by
 `src/administration/import/adminImportSummary.ts` from the same snapshot:
@@ -2869,14 +2998,19 @@ publication confirmation. The approval and the publication commit never read
 - To MusicBrainz, only the planner's URLs under `https://musicbrainz.org/ws/2/`:
   the shared album text and album-artist names, or a one-file import's title
   and artist; shared identifiers that pass their format checks; a submitted
-  name; the cleaned folder name only when no usable tags exist, only for
+  name; for an existing-Album review, the Album's saved title as the review
+  captured it with its first usable shown primary Artist name (never split on
+  ` / ` or read as a label), or a submitted name with that name; the cleaned
+  folder name only when no usable tags exist, only for
   folder-chosen imports and automatically only once per project (a manual
   retry of that run repeats it); release MBIDs from earlier results of the
   same run; artist and label MBIDs credited by releases the same run fetched
-  (alias lookups, at most 16); normalized spellings of tag or folder text
+  (alias lookups, at most 16; a review's also the artists their audio tracks
+  credit); normalized spellings of tag, folder or saved-title text
   as fallbacks; and the bridge terms, the titles and artist names the iTunes
   Search API showed for the same run (at most 4 searches). The
-  number of selected files is never sent; the run uses it only locally.
+  number of selected files, or of a review's members, is never sent; the run
+  uses it only locally.
 - To Apple's iTunes Search API, only when MusicBrainz returned no matching
   candidate, and only `https://itunes.apple.com/search` and `/lookup` (at most
   9 requests per run attempt): the run's search term (its text and credited
@@ -2886,8 +3020,11 @@ publication confirmation. The approval and the publication commit never read
   hosts, only the rewritten path of an iTunes-only candidate's stored artwork
   address.
 - Cover Art Archive front-artwork URLs the server builds from release MBIDs of
-  the same import's lookup candidates (a staged cover or a preview), and the
+  the same import's or review's lookup candidates (a staged cover or a
+  preview; a review only previews), and the
   archive.org redirects they lead to.
+- A review never sends its Track titles, original filenames, folders, labels,
+  catalog IDs or identifiers.
 - Never file names, relative path segments, account data (including any
   account's email address) or audio. The only contact sent is the operator
   contact configured in `FINITUDE_ADMIN_METADATA_LOOKUP_CONTACT`, in the

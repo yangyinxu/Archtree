@@ -16,7 +16,8 @@ const uuid = z.string().uuid();
 const integer = z.number().int().nonnegative();
 const revision = z.string().regex(/^cr_[A-Za-z0-9_-]{43}$/);
 const analysis = analysisSchema;
-const receipt = z.object({ operationId: uuid, revision: integer, kind: z.enum(['create', 'edit', 'analyze', 'adopt', 'cancel-analysis', 'apply']) }).strict();
+// `lookup` and `lookup-retry` answer the review's metadata lookup routes; the detail's history never lists them.
+const receipt = z.object({ operationId: uuid, revision: integer, kind: z.enum(['create', 'edit', 'analyze', 'adopt', 'cancel-analysis', 'apply', 'lookup', 'lookup-retry']) }).strict();
 const field = z.object({ scope: z.enum(['album', 'track']), slotId: uuid.nullable(), field: z.enum(['title', 'releaseDate', 'discNumber', 'trackNumber']) }).strict()
   .refine(value => value.scope === 'album' ? value.slotId === null && (value.field === 'title' || value.field === 'releaseDate') : value.slotId !== null && value.field !== 'releaseDate');
 const source = z.object({

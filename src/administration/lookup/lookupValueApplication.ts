@@ -46,9 +46,10 @@ import { METADATA_LOOKUP_JOB_LIMITS, type MusicBrainzRelease } from './lookupCon
 import { normalizeItunesId, normalizeMusicBrainzId } from './lookupIdentifiers';
 import { lookupLocalizedGroups, storedItunesStage } from './lookupItunesStage';
 import { lookupTrackAssignment, proposalForRelease, type LocalFileEvidence } from './lookupRanking';
+import { isCatalogReviewLookup } from './lookupReviewEvidence';
 import {
-    importLookupFileSet, isBlockingLookupState, lookupFetchedAliases, lookupFileEvidence, rankLookupWithinBudget, refreshLookupGrant, type LookupApplication, type LookupAppliedValue,
-    type LookupConflict, type LookupValueFlag, type MetadataLookupRecord, type StoredLookupCandidate
+    isBlockingLookupState, lookupEvidenceFor, lookupFetchedAliases, lookupFileEvidence, lookupFileSetFor, rankLookupWithinBudget, refreshLookupGrant, type LookupApplication,
+    type LookupAppliedValue, type LookupConflict, type LookupValueFlag, type MetadataLookupRecord, type StoredLookupCandidate
 } from './metadataLookupRecord';
 
 /** The value paths lookup supplies: never visibility. */
@@ -466,37 +467,47 @@ export function applyPreselectedLookup(doc: AdminImportDocument, record: Metadat
 }
 
 /**
- * File evidence a re-rank compares: everything but Disc and Track Numbers, which an application itself writes (in the ranking's
- * file order, so they never change a ranking) and which would otherwise make every later trigger re-rank without new evidence.
+ * Import file evidence a re-rank compares: everything but Disc and Track Numbers, which an application itself writes (in the
+ * ranking's file order, so they never change a ranking) and which would otherwise make every later trigger re-rank without new
+ * evidence. A review's evidence is compared whole: it never holds a number lookup wrote, and its own numbers constrain pairing.
  */
 const rerankEvidence = (files: unknown) => Array.isArray(files)
     ? files.map(file => isRecord(file) ? Object.fromEntries(Object.entries(file).filter(([name]) => name !== 'discNumber' && name !== 'trackNumber')) : file) : files;
 /**
- * Whether rerankStoredLookup would re-rank: a completed run with candidates whose ranking evidence differs from the import's now.
+ * Whether rerankStoredLookup would re-rank: a completed run with candidates whose ranking evidence differs from the project's now.
  * Callers check it before reading the application context, so an unchanged confirmation spends no holder queries.
  */
 export function lookupRerankNeeded(doc: AdminImportDocument, record: MetadataLookupRecord): boolean {
     if (record.state !== 'complete' || record.outcome !== 'candidates' || !isRecord(record.ranking) || !Array.isArray(record.candidates)) return false;
+    if (isCatalogReviewLookup(doc)) return !sameDraftValue(lookupEvidenceFor(doc), record.ranking.files);
     return !sameDraftValue(rerankEvidence(lookupFileEvidence(doc)), rerankEvidence(record.ranking.files));
 }
 /**
- * Re-ranks a completed run's stored candidates when the import's ranking evidence changed (newly known durations, tags,
- * identifiers or files), then applies a new preselection as `actorId`. The run then binds the file set it re-ranked, so a stale
- * slot whose file was confirmed again is no longer stale (one still without a confirmed file stays stale), while `fileSetDigest`
- * keeps governing automatic reruns. A run whose searches were not complete (or that predates the record) stays a partial
- * comparison. The run's fetched aliases still count. Never makes a request; null when nothing needs re-ranking. A cover staging
- * a new preselection queues uses a fresh grant: the confirming administrator's.
+ * Re-ranks a completed run's stored candidates when the project's ranking evidence changed (newly known durations, tags,
+ * identifiers or files; a review's own Disc and Track Numbers), then applies a new preselection as `actorId`. The run then binds
+ * the file set it re-ranked, so a stale slot whose file was confirmed again is no longer stale (one still without a confirmed file
+ * stays stale), while `fileSetDigest` keeps governing automatic reruns; a review binds its members, which are never stale. A run
+ * whose searches were not complete (or that predates the record) stays a partial comparison, and a review's run keeps its
+ * exact-count flag. The run's fetched aliases still count. Never makes a request; null when nothing needs re-ranking. A cover
+ * staging a new preselection queues uses a fresh grant: the confirming administrator's. A review's re-rank stores the ranking
+ * only: nothing is applied to a review's draft.
  */
 export function rerankStoredLookup(doc: AdminImportDocument, record: MetadataLookupRecord, now: Date, actorId: string = record.actorId,
     context: LookupApplicationContext = noContext): { record: MetadataLookupRecord; changed: boolean } | null {
     if (!lookupRerankNeeded(doc, record)) return null;
-    // A run whose iTunes stage left a plausible result out stays partial, as when it completed.
-    const searchComplete = record.searchComplete === true && storedItunesStage(record.itunesStage)?.complete !== false;
-    const ranked = rankLookupWithinBudget(record.candidates, doc, now, { searchComplete, aliases: lookupFetchedAliases(record), localized: lookupLocalizedGroups(record) });
-    const files = importLookupFileSet(doc).files;
+    const review = isCatalogReviewLookup(doc);
+    // A run whose iTunes stage left a plausible result out stays partial, as when it completed; a review's stage keeps its own
+    // exact-count flag.
+    const stage = storedItunesStage(record.itunesStage), searchComplete = record.searchComplete === true && stage?.complete !== false;
+    const exactSearchComplete = record.exactSearchComplete === true && (stage?.exactComplete ?? stage?.complete) !== false;
+    const ranked = rankLookupWithinBudget(record.candidates, doc, now, { searchComplete, ...(review ? { exactSearchComplete } : {}),
+        aliases: lookupFetchedAliases(record), localized: lookupLocalizedGroups(record) });
+    const files = lookupFileSetFor(doc).files;
     const confirmed = new Set(files.filter(file => file.operationId !== null && file.sha256 !== null).map(file => file.slotId));
     const staleSlotIds = (Array.isArray(record.staleSlotIds) ? record.staleSlotIds : []).filter(slot => !confirmed.has(slot));
-    return applyPreselectedLookup(doc, { ...record, files, staleSlotIds, candidates: ranked.candidates, ranking: ranked.ranking, updatedAt: now }, now, actorId, context, freshGrant(now));
+    const reranked: MetadataLookupRecord = { ...record, files, staleSlotIds, candidates: ranked.candidates, ranking: ranked.ranking, updatedAt: now };
+    if (review) return { record: reranked, changed: false };
+    return applyPreselectedLookup(doc, reranked, now, actorId, context, freshGrant(now));
 }
 
 /**

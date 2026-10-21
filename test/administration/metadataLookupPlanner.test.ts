@@ -18,6 +18,9 @@
  *   - the cap keeps identifiers and text searches before their fallbacks
  *   - a one-file song plans its normalized title as fallbacks, with the artist first
  *   - file names are not an accepted input
+ *   - an existing Album is looked up by its saved title with its first primary Artist name and normalized fallbacks, never a Track title, label or split name
+ *   - a review's submitted name is sent as typed with its primary names, as an album or a song
+ *   - an unusable Album title plans nothing
  * @end-catalog */
 
 import assert from 'node:assert/strict';
@@ -238,4 +241,47 @@ test('a one-file song plans its normalized title as fallbacks, with the artist f
 test('file names are not an accepted input', () => {
     const input = { trigger: 'tags', fileCount: 1, tags: noTags, fileName: '01 Hotel California.flac' } as LookupPlanInput;
     assert.deepEqual(planMetadataLookup(input), { queries: [], rejected: 'empty' });
+});
+
+test('an existing Album is looked up by its saved title with its first primary Artist name and normalized fallbacks, never a Track title, label or split name', () => {
+    const catalog = (album: string | null, credited: string[], fileCount = 3) =>
+        planMetadataLookup({ trigger: 'catalog', fileCount, tags: { ...noTags, album }, credited });
+    // One member or many: always release searches, never a recording search, and the file count is never sent.
+    for (const fileCount of [1, 3]) {
+        assert.deepEqual(catalog('Hotel California (2013 Remaster)', ['Eagles', 'Don Henley'], fileCount), { rejected: null, queries: [
+            release({ release: 'Hotel California (2013 Remaster)', artist: 'Eagles' }), release({ release: 'Hotel California (2013 Remaster)' }),
+            release({ release: 'Hotel California', artist: 'Eagles' }, 'albumText', true), release({ release: 'Hotel California' }, 'albumText', true)
+        ] }, String(fileCount));
+    }
+    // A credited list is never split on " / " and a company-like primary stays an artist term: no label term is ever sent.
+    assert.deepEqual(catalog('Duets', ['Synthetic / Duo']).queries, [release({ release: 'Duets', artist: 'Synthetic / Duo' }), release({ release: 'Duets' })]);
+    assert.deepEqual(catalog('Soundtrack', ['NEXON Games']).queries, [release({ release: 'Soundtrack', artist: 'NEXON Games' }), release({ release: 'Soundtrack' })]);
+    // A placeholder primary is dropped; the first usable name is the one sent.
+    assert.deepEqual(catalog('Hits', ['Various Artists']).queries, [release({ release: 'Hits' })]);
+    assert.deepEqual(catalog('Hits', ['Various Artists', 'Eagles']).queries, [release({ release: 'Hits', artist: 'Eagles' }), release({ release: 'Hits' })]);
+    assert.deepEqual(catalog('Hits', []).queries, [release({ release: 'Hits' })]);
+    for (const fileCount of [1, 3]) {
+        const queries = catalog('Hotel California', ['Asylum Records'], fileCount).queries;
+        assert.equal(queries.some(query => query.kind === 'musicBrainzRecordingSearch'), false);
+        assert.equal(JSON.stringify(queries).includes('label'), false);
+    }
+    // Track titles, file names and identifiers are no catalog input, even when given.
+    assert.deepEqual(planMetadataLookup({ trigger: 'catalog', fileCount: 1, tags: { album: 'Hits', albumArtist: 'Eagles / Asylum Records', title: 'Take It Easy', artist: 'Eagles' },
+        credited: ['Glenn Frey'], folderName: 'Eagles - Hits [FLAC]' }).queries, [release({ release: 'Hits', artist: 'Glenn Frey' }), release({ release: 'Hits' })]);
+});
+
+test('a review\'s submitted name is sent as typed with its primary names, as an album or a song', () => {
+    const submitted = (kind: 'album' | 'song', text: string, credited: string[]) => planMetadataLookup({ trigger: 'submitted', fileCount: 3, submitted: { kind, text }, credited }).queries;
+    assert.deepEqual(submitted('album', 'Hotel California (2013 Remaster)', ['Eagles / Glenn Frey']),
+        [release({ release: 'Hotel California (2013 Remaster)', artist: 'Eagles / Glenn Frey' }), release({ release: 'Hotel California (2013 Remaster)' })]);
+    assert.deepEqual(submitted('song', 'Take It Easy', ['Various Artists', 'Eagles']), [recording({ recording: 'Take It Easy', artist: 'Eagles' }), recording({ recording: 'Take It Easy' })]);
+    assert.deepEqual(submitted('album', 'Hits', []), [release({ release: 'Hits' })]);
+    assert.deepEqual(planMetadataLookup({ trigger: 'submitted', fileCount: 3, submitted: { kind: 'album', text: 'https://example.test/a' }, credited: ['Eagles'] }), { queries: [], rejected: 'url' });
+});
+
+test('an unusable Album title plans nothing', () => {
+    for (const album of [null, '', '   ', '\u200b']) {
+        assert.deepEqual(planMetadataLookup({ trigger: 'catalog', fileCount: 3, tags: { ...noTags, album }, credited: ['Eagles'] }), { queries: [], rejected: 'empty' }, JSON.stringify(album));
+    }
+    assert.deepEqual(planMetadataLookup({ trigger: 'catalog', fileCount: 3, credited: ['Eagles'] }), { queries: [], rejected: 'empty' });
 });

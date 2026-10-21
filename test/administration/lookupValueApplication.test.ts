@@ -42,6 +42,7 @@
  *   - the run's localized name groups that hold a current Artist entry's name join the import, and stay after choosing none while the entry keeps that name
  *   - a completed run that applies nothing still keeps its localized name groups for the current Artist entries; a run still active, an unchanged one or a malformed draft writes none
  *   - an iTunes-only candidate queues its iTunes artwork with the stored address; a MusicBrainz candidate the bridge found never gets iTunes artwork or an iTunes date
+ *   - re-ranking a review record keeps its member identities (never stale), compares its own numbers, ranks in subset mode with its searches' and iTunes stage's exact flags and applies nothing
  * @end-catalog */
 
 /**
@@ -65,15 +66,17 @@ import { applyAdministratorChanges, applyAutomaticValues, importAutomationMarker
 import { planImportAutomation } from '../../src/administration/import/adminImportAutomation';
 import { METADATA_LOOKUP_JOB_LIMITS, type MusicBrainzRelease } from '../../src/administration/lookup/lookupContract';
 import {
-    applyLookupCandidate, applyPreselectedLookup, chooseLookupCandidate, lookupAnswersNeeded, lookupCandidateIds, lookupCandidateValues, lookupDecisionRecords, rerankStoredLookup,
+    applyLookupCandidate, applyPreselectedLookup, chooseLookupCandidate, lookupAnswersNeeded, lookupCandidateIds, lookupCandidateValues, lookupDecisionRecords, lookupRerankNeeded, rerankStoredLookup,
     resolveLookupConflicts, sameLookupNames, sameLookupValue, type LookupApplicationIntent
 } from '../../src/administration/lookup/lookupValueApplication';
 import {
     lookupFileEvidence, rankLookupWithinBudget, type LookupApplication, type MetadataLookupRecord, type StoredLookupCandidate
 } from '../../src/administration/lookup/metadataLookupRecord';
 import { parseMusicBrainzRelease } from '../../src/administration/lookup/musicBrainzClient';
-import { itunesCandidate } from '../../src/administration/lookup/lookupItunesStage';
+import { itunesCandidate, type LookupItunesStage } from '../../src/administration/lookup/lookupItunesStage';
 import { fixtureRoot, loadLookupFixture } from '../support/metadataLookupFixtures';
+import { catalogReviewLookupFileSet } from '../../src/administration/lookup/lookupReviewEvidence';
+import { numberedMembers, reviewLookupDocument } from '../support/catalogReviewLookupFixtures';
 import { installNetworkGuard } from '../support/networkGuard';
 
 const guard = installNetworkGuard();
@@ -930,4 +933,43 @@ test('an iTunes-only candidate queues its iTunes artwork with the stored address
     const forged = project(2, timed);
     applyLookupCandidate(forged, null, { ...stored(synthetic(2, { frontArtwork: true })), itunes: { storefront: 'jp', artworkUrl: mzstatic, check: 'noRelease' } }, intent());
     assert.equal(forged.media!.lookupCover!.artworkUrl, undefined);
+});
+
+test('re-ranking a review record keeps its member identities (never stale), compares its own numbers, ranks in subset mode with its searches\' and iTunes stage\'s exact flags and applies nothing', () => {
+    // Two members whose durations fit the synthetic releases' first two tracks: the two-track release and a three-track one both match.
+    const doc = reviewLookupDocument({ primaryNames: ['Synthetic Lead'], members: numberedMembers([210_000, 220_000]) });
+    const longer = synthetic(3, { trackCount: 3, media: [{ position: 1, format: 'CD', tracks: [track(1, 'First Song'), track(2, 'Second Song'), track(3, 'Bonus Song')] }] });
+    const files = catalogReviewLookupFileSet(doc).files, before = copy(doc);
+    const run = completed(doc, [stored(synthetic(1)), stored(longer)], { input: { trigger: 'catalog', submitted: null }, grantSource: 'create', files, exactSearchComplete: true });
+    assert.equal(rerankStoredLookup(doc, run, now), null, 'unchanged evidence re-ranks nothing');
+    // A ranking against other evidence is re-ranked with the run's exact flag: the exact-count group is preselected, but not applied.
+    const outdated = { ...run, ranking: { ...run.ranking!, files: [] } };
+    const reranked = rerankStoredLookup(doc, outdated, now, other)!;
+    assert.deepEqual([reranked.changed, reranked.record.ranking!.preselection?.basis, reranked.record.ranking!.preselection?.candidateKey, reranked.record.ranking!.completeness,
+        reranked.record.applied, reranked.record.files, reranked.record.staleSlotIds], [false, 'exactTrackCount', `musicbrainz:${mbid(1)}`, { exact: true, subset: true }, null, files, []]);
+    assert.ok(reranked.record.ranking!.candidates.every(candidate => candidate.comparison?.subset !== undefined));
+    assert.deepEqual(doc, before, 'nothing is written to the review');
+    // Without the exact flag (incomplete, or absent), two matching groups preselect nothing.
+    for (const flag of [false, undefined]) {
+        const partial = rerankStoredLookup(doc, { ...outdated, exactSearchComplete: flag }, now)!;
+        assert.deepEqual([partial.record.ranking!.preselection, partial.record.ranking!.completeness], [null, { exact: false, subset: true }], String(flag));
+    }
+    // The run's iTunes stage counts too: one that left out only collections with more tracks than members keeps the exact-count
+    // preselection; one that left out a collection that could match exactly, or a stage without its own flag, does not.
+    const stage = (flags: { exactComplete?: boolean }): LookupItunesStage => ({ reason: 'noMatch', text: null, requests: [], requestIndex: 0, items: [], bridge: [], bridgeIndex: 0,
+        bridgeOutcomes: [], state: 'answered', complete: false, finalized: true, ...flags });
+    for (const [flags, basis, completeness] of [[{ exactComplete: true }, 'exactTrackCount', { exact: true, subset: false }], [{ exactComplete: false }, undefined, { exact: false, subset: false }],
+        [{}, undefined, { exact: false, subset: false }]] as const) {
+        const ranked = rerankStoredLookup(doc, { ...outdated, itunesStage: stage(flags) }, now)!.record.ranking!;
+        assert.deepEqual([ranked.preselection?.basis, ranked.completeness], [basis, completeness], JSON.stringify(flags));
+    }
+    // A member's own Track Number is ranking evidence for a review (an import ignores numbers, which its applications write).
+    assert.equal(lookupRerankNeeded(doc, reranked.record), false);
+    (doc.draft as ImportDraftV2).tracks[0].trackNumber = 3;
+    assert.equal(lookupRerankNeeded(doc, reranked.record), true);
+    const renumbered = rerankStoredLookup(doc, reranked.record, now)!;
+    assert.deepEqual([renumbered.record.ranking!.files[0].trackNumber, renumbered.record.ranking!.preselection, renumbered.changed], [3, null, false]);
+    // A number lookup wrote (automatic) never constrains pairing.
+    doc.draftOrigins = { [`tracks:${(doc.draft as ImportDraftV2).tracks[0].slotId}:trackNumber`]: 'automatic' };
+    assert.equal(rerankStoredLookup(doc, renumbered.record, now)!.record.ranking!.files[0].trackNumber, null);
 });

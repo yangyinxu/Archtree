@@ -5,7 +5,8 @@
  *              json, unavailable, mbid, searchUrl, releaseUrl, searchAnswer, releaseAnswer, fixtureClient,
  *              recordingGate, runMetadataLookupOnce, startMetadataLookupWorker, drain, onNextProjectRead,
  *              queue, submit, preparingPublication, syntheticAlbum, png, image, holdFirstSearch,
- *              albumSearchUrl, collectionUrl, syntheticCollection
+ *              albumSearchUrl, collectionUrl, syntheticCollection, seededReview, queueReview, countedSearch,
+ *              creditedRelease, aliasAnswer, unconfigured, sentText
  *   Constants: guard, actor, other, by, byOther, contact, sharedFrames, albumQuery, albumDecision, hotelBase,
  *              hotelLengths, albumTerm, mzstatic
  *   Variables: harness
@@ -55,6 +56,20 @@
  *   - a run that preselects nothing still keeps its localized names: review lists the Artist named with the other name, and create is not preselected
  *   - the MusicBrainz and iTunes gates both hold for two workers with their own database handles on two imports
  *   - a free manual retry after iTunes stayed unavailable repeats the iTunes requests of the stored queries, and the result MusicBrainz then rules out is applied unflagged
+ *   - the catalog trigger converts a review and queues one subset run under a create grant from its title and first primary Artist; a second call queues nothing; unconfigured lookup admits and stores nothing
+ *   - a review run end to end on fixtures: only the saved title and primary Artist are sent, releases are admitted and fetched fewest extra first, track artists are looked up, and nothing is applied
+ *   - a submitted name and a manual retry of a catalog run replay their receipts, repeat the catalog input and queries, and every refusal stores nothing
+ *   - a review run ends superseded, without a request, when its Album is deleted, loses readiness, changes revision or a member's media changes, keeping earlier candidates
+ *   - an applied review and one whose source is not current admit no lookup; nothing is converted or stored
+ *   - a review run is never superseded by a file-set check, and its iTunes fallback keeps only collections with at least as many tracks as members, as iTunes-only candidates
+ *   - a role loss or an expired grant stops a review run as for imports
+ *   - lookup admission converts a review only when asked: a check admits a current format-3 review unchanged and refuses an older format or an applied review, an import keeps its acceptance, and a database failure propagates
+ *   - a review run waiting for an automatic retry keeps its one automatic run and is replaced by a manual retry of its catalog input; unconfigured lookup ends a queued review run without a request
+ *   - two racing submissions convert a review once: one queues its run and the other is refused as stale
+ *   - a run queued while an apply is in flight conflicts with that apply, whose retry is refused while the run is active
+ *   - a review applied while its run was queued, as a release that did not check lookup could apply it, supersedes the run without a request
+ *   - the review lookup summary reads a tie between matching groups, analysis in progress or settling a stopped call and whether lookup is configured, and the read exposes no internal state
+ *   - a review saved in a newer format admits no lookup request and its queued run ends superseded without a request, while its lookup still reads
  * @end-catalog */
 
 /**
@@ -93,9 +108,12 @@ import type { MetadataLookupRecord } from '../../src/administration/lookup/metad
 import { createItunesSearchClient } from '../../src/administration/lookup/iTunesSearchClient';
 import { getAdminImportLookup } from '../../src/administration/lookup/metadataLookupRequests';
 import {
-    adminImportLookupCollection, queueMetadataLookup, requestAutomaticMetadataLookup, runMetadataLookupOnce as runLookupWorkerOnce, startMetadataLookupWorker as startLookupWorker,
-    type MetadataLookupRequest, type MetadataLookupWorkerDependencies
+    adminImportLookupCollection, admitMetadataLookup, metadataLookupAdmitted, noteMetadataLookupFiles, queueCatalogReviewLookup, queueMetadataLookup, requestAutomaticMetadataLookup,
+    runMetadataLookupOnce as runLookupWorkerOnce, startMetadataLookupWorker as startLookupWorker, type MetadataLookupRequest, type MetadataLookupWorkerDependencies
 } from '../../src/administration/lookup/metadataLookupService';
+import { getCatalogReviewLookup, retryCatalogReviewLookup, submitCatalogReviewLookup } from '../../src/administration/lookup/catalogReviewLookupRequests';
+import { applyCatalogReview, createCatalogReview, getCatalogReview } from '../../src/administration/catalog/adminCatalogReviewService';
+import { adminCatalogItemRevision } from '../../src/administration/catalog/adminCatalogService';
 import { loadImportFixture } from '../support/adminImportFixtures';
 import {
     emptyItunesClient, fixtureTransport, hotelCaliforniaExchanges, immediateGate, itunesAnswer, itunesCollectionResult, itunesFixtureClient, itunesSongResult, loadLookupFixture, type LookupExchange
@@ -225,7 +243,9 @@ before(async () => { harness = await startMongoReplicaSet('archtree-metadata-loo
 beforeEach(async () => {
     Object.assign(process.env, { FINITUDE_ADMIN_IMPORTS_ENABLED: 'true', FINITUDE_ADMIN_IMPORT_PRIVATE_STORAGE_READY: 'true', ADMIN_IMPORT_S3_BUCKET_NAME: 'synthetic-private-imports',
         S3_BUCKET_NAME: 'synthetic-catalog', FINITUDE_ADMIN_METADATA_LOOKUP_CONTACT: contact });
-    for (const name of ['users', 'adminAlbumImports', 'adminImportLookups', 'adminMetadataLookupGates', 'adminImportAnalysisSlots']) await getDb()!.collection(name).deleteMany({});
+    for (const name of ['users', 'adminAlbumImports', 'adminImportLookups', 'adminMetadataLookupGates', 'adminImportAnalysisSlots', 'albums', 'artists', 'organizations', 'audioTracks']) {
+        await getDb()!.collection(name).deleteMany({});
+    }
     await getDb()!.collection('users').insertMany([{ _id: actor, email: 'lookup-admin@example.test', role: 'admin' }, { _id: other, email: 'lookup-other@example.test', role: 'admin' }]);
     await initializeAdminImportStorage(getDb()!);
 });
@@ -524,8 +544,9 @@ test('a submitted run is busy before it is sent, then waits; links, reviews, unc
     await assert.rejects(queue(by, id, submit('https://example.test/album')), code('ADMIN_IMPORT_LOOKUP_INVALID_NAME'));
     await assert.rejects(queue(by, id, submit('   ')), code('ADMIN_IMPORT_LOOKUP_INVALID_NAME'));
     await assert.rejects(queue(by, id, submit('Synthetic Album'), { configuration: () => ({ available: false, reason: 'contactMissing' }) }), code('ADMIN_IMPORT_LOOKUP_UNAVAILABLE'));
+    // A project marked as a review without a captured source is no review lookup can admit.
     await projects().updateOne({ _id: new ObjectId(id) }, { $set: { purpose: 'catalogReview' } });
-    await assert.rejects(queue(by, id, submit('Synthetic Album')), code('ADMIN_IMPORT_LOOKUP_REFUSED'));
+    await assert.rejects(queue(by, id, submit('Synthetic Album')), code('ADMIN_CATALOG_REVIEW_NOT_FOUND'));
     const fresh = await seeded(1, () => v2());
     await assert.rejects(queue(by, fresh, () => ({ kind: 'retry', actorId: by, operationId: randomUUID() })), code('ADMIN_IMPORT_LOOKUP_NOTHING_TO_RETRY'));
 });
@@ -1282,4 +1303,412 @@ test('a free manual retry after iTunes stayed unavailable repeats the iTunes req
     assert.deepEqual([view.itunes, view.applied!.source, view.applied!.notChecked, view.preselection!.notChecked, view.candidates[0].notChecked],
         ['answered', 'itunes', false, false, false]);
     assert.equal((await stored(id)).draft.album.title, 'Synthetic Album');
+});
+
+/**
+ * An existing-Album review of a ready Album titled `title`, credited to a ready primary Artist named Synthetic Ensemble, with one
+ * ready audio Track per entry of `lengths` (its exact media duration, or none), numbered 1..n, whose titles and filenames are
+ * sentinels lookup must never send.
+ */
+async function seededReview(lengths: (number | null)[], title = 'Synthetic Album') {
+    const albumId = new ObjectId(), artistId = new ObjectId(), trackIds = lengths.map(() => new ObjectId());
+    await getDb()!.collection('artists').insertOne({ _id: artistId, name: 'Synthetic Ensemble', lifecycleStatus: 'ready', visibility: 'hidden' });
+    await getDb()!.collection('albums').insertOne({ _id: albumId, title, releaseDate: { year: 2020 }, visibility: 'hidden', lifecycleStatus: 'ready', audioTrackIds: trackIds.map(String),
+        credits: [{ creditId: 'primary_artist', subjectType: 'artist', subjectId: String(artistId), role: 'primary', order: 0 }], attributionStatus: 'documented' });
+    if (trackIds.length) await getDb()!.collection('audioTracks').insertMany(trackIds.map((_id, index) => ({ _id, title: `Secret Track Title ${index + 1}`,
+        originalFileName: `0${index + 1} Secret Filename.flac`, trackNumber: index + 1, uploadStatus: 'ready', publicationStatus: 'ready', s3Key: String(_id), albumId: String(albumId),
+        visibility: 'public', mediaType: 'audio', ...(lengths[index] === null ? {} : { mediaRepresentation: { durationMs: lengths[index] } }) })));
+    const album = await getDb()!.collection('albums').findOne({ _id: albumId });
+    const created = await createCatalogReview(by, { operationId: randomUUID(), albumId: String(albumId), expectedRevision: adminCatalogItemRevision('album', album) });
+    return { id: created.item.id, albumId, artistId, trackIds };
+}
+/** The catalog trigger in an administrator transaction that persists the review guarded by the revision it read, as a caller must. */
+const queueReview = (id: string, actorId = by, options: Parameters<typeof queueCatalogReviewLookup>[3] = {}) => withImportAdmin(actorId, async session => {
+    const doc = (await projects().findOne({ _id: new ObjectId(id) }, { session }))!, observed = doc.revision;
+    const outcome = await queueCatalogReviewLookup(doc, actorId, session, options);
+    assert.equal((await projects().replaceOne({ _id: doc._id, revision: observed }, doc, { session })).matchedCount, 1);
+    return outcome;
+});
+/** A release search answer whose releases report their track counts. */
+const countedSearch = (query: MusicBrainzReleaseQuery, releases: [string, number][]) => json(searchUrl(query), { count: releases.length, offset: 0,
+    releases: releases.map(([id, trackCount], index) => ({ id, title: `Synthetic Release ${index}`, score: 100 - index, 'track-count': trackCount })) });
+/** A release credited to Synthetic Ensemble (`mbid(30)`), whose second track (when `trackArtist` is given) credits that artist. */
+const creditedRelease = (id: string, lengths: number[], trackArtist?: [string, string]) => json(releaseUrl(id), { id, title: 'Synthetic Album',
+    'artist-credit': [{ name: 'Synthetic Ensemble', joinphrase: '', artist: { id: mbid(30), name: 'Synthetic Ensemble' } }],
+    media: [{ position: 1, format: 'CD', tracks: lengths.map((length, index) => ({ position: index + 1, number: String(index + 1), title: `Synthetic Track ${index + 1}`, length,
+        recording: { id: mbid(900 + index), length }, ...(trackArtist && index === 1 ? { 'artist-credit': [{ name: trackArtist[1], joinphrase: '', artist: { id: trackArtist[0], name: trackArtist[1] } }] } : {}) })) }] });
+const aliasAnswer = (id: string, name: string) => json(musicBrainzUrls.artistAliases(id).href, { id, name, aliases: [] });
+const unconfigured = () => ({ available: false as const, reason: 'contactMissing' as const });
+/** Every request URL as sent, decoded, so a sentinel cannot hide behind percent-encoding. */
+const sentText = (requests: { url: string }[]) => requests.map(request => decodeURIComponent(request.url.replace(/\+/g, ' '))).join('\n');
+
+test('the catalog trigger converts a review and queues one subset run under a create grant from its title and first primary Artist; a second call queues nothing; unconfigured lookup admits and stores nothing', async () => {
+    const { id } = await seededReview([200_000, 210_000]), before = await stored(id);
+    assert.deepEqual(await queueReview(id, by, { configuration: unconfigured }), { queued: false, run: null, reason: 'unavailable' });
+    assert.deepEqual([(await stored(id)).draftVersion, (await stored(id)).revision, await lookup(id)], [2, before.revision, null]);
+    assert.deepEqual(await queueReview(id), { queued: true, run: 1, reason: 'queued' });
+    const doc = await stored(id), record = (await lookup(id))!;
+    // The conversion advances the revision once without a receipt; the gate is written with the run.
+    assert.deepEqual([doc.draftVersion, doc.revision, doc.receipts, doc.lookupGate], [3, before.revision + 1, before.receipts, { fence: 1, run: 1, state: 'queued', blocking: true }]);
+    assert.deepEqual([record.state, record.grantSource, record.actorId, record.automatic, record.automaticRuns, record.input, record.searchComplete, record.exactSearchComplete],
+        ['queued', 'create', by, true, 1, { trigger: 'catalog', submitted: null }, true, true]);
+    assert.deepEqual(record.files, doc.manifest.files.map(file => ({ slotId: file.slotId, operationId: null, sha256: null })));
+    assert.deepEqual(record.queries.map(query => (query as { query: unknown }).query), [{ release: 'Synthetic Album', artist: 'Synthetic Ensemble' }, { release: 'Synthetic Album' }]);
+    // One automatic run per review: a second trigger, by anyone, queues nothing and changes nothing.
+    assert.deepEqual(await queueReview(id, byOther), { queued: false, run: null, reason: 'limit' });
+    assert.deepEqual([(await lookup(id))!.run, (await stored(id)).revision, (await stored(id)).lookupGate!.fence], [1, before.revision + 1, 1]);
+    // A run planned without any usable query completes at once and spends the automatic run too.
+    const untitled = await seededReview([200_000]);
+    await projects().updateOne({ _id: new ObjectId(untitled.id) }, { $set: { 'catalogSource.album.title': '\u200b' } });
+    assert.deepEqual(await queueReview(untitled.id), { queued: false, run: 1, reason: 'noQuery' });
+    assert.deepEqual([(await lookup(untitled.id))!.state, (await lookup(untitled.id))!.outcome, (await stored(untitled.id)).lookupGate!.blocking], ['complete', 'noQuery', false]);
+    assert.deepEqual(await queueReview(untitled.id), { queued: false, run: null, reason: 'limit' });
+    // The acting administrator is rechecked, and an import is no review.
+    await getDb()!.collection('users').updateOne({ _id: other }, { $set: { role: 'user' } });
+    const third = await seededReview([200_000]);
+    await assert.rejects(withImportAdmin(by, async session => queueCatalogReviewLookup((await projects().findOne({ _id: new ObjectId(third.id) }, { session }))!, byOther, session)),
+        code('ADMIN_IMPORT_ADMIN_REQUIRED'));
+    const imported = await seeded(1, () => v2());
+    await assert.rejects(withImportAdmin(by, async session => queueCatalogReviewLookup((await projects().findOne({ _id: new ObjectId(imported) }, { session }))!, by, session)),
+        code('ADMIN_CATALOG_REVIEW_NOT_FOUND'));
+    assert.deepEqual([(await stored(third.id)).draftVersion, await lookup(third.id), await lookup(imported)], [2, null, null]);
+});
+
+test('a review run end to end on fixtures: only the saved title and primary Artist are sent, releases are admitted and fetched fewest extra first, track artists are looked up, and nothing is applied', async () => {
+    const { id } = await seededReview([200_000, 210_000]);
+    await queueReview(id);
+    const queued = await stored(id);
+    const client = fixtureClient([countedSearch(albumQuery, [[mbid(2), 3], [mbid(1), 2]]), countedSearch({ release: 'Synthetic Album' }, [[mbid(1), 2], [mbid(3), 1]]),
+        creditedRelease(mbid(1), [200_000, 210_000], [mbid(31), 'Synthetic Guest']), creditedRelease(mbid(2), [200_000, 210_000, 230_000]), creditedRelease(mbid(3), [200_000]),
+        aliasAnswer(mbid(30), 'Synthetic Ensemble'), aliasAnswer(mbid(31), 'Synthetic Guest')]);
+    const calls: string[] = [];
+    await drain({ musicBrainz: client.musicBrainz, itunes: emptyItunesClient(calls) });
+    const record = (await lookup(id))!, doc = await stored(id);
+    const fetched = client.requests.map(request => /\/release\/([0-9a-f-]{36})\?/.exec(request.url)?.[1]).filter(Boolean);
+    assert.deepEqual([record.state, record.issue, record.outcome, record.candidates.map(candidate => candidate.releaseId), fetched], ['complete', null, 'candidates', [mbid(1), mbid(2), mbid(3)], [mbid(1), mbid(2), mbid(3)]]);
+    // The release credit and the second track's own artist are looked up; iTunes is never asked, as a release matches.
+    assert.deepEqual(record.aliases!.map(entry => [entry.id, entry.state]), [[mbid(30), 'fetched'], [mbid(31), 'fetched']]);
+    assert.deepEqual(calls, []);
+    assert.deepEqual([record.searchComplete, record.exactSearchComplete, record.ranking!.completeness, record.ranking!.preselection?.basis, record.ranking!.preselection?.candidateKey, record.applied],
+        [true, true, { exact: true, subset: true }, 'exactTrackCount', `musicbrainz:${mbid(1)}`, null]);
+    // Nothing reaches the review: its draft, origins, revision and receipts are as queued; only its gate moved with the run.
+    for (const key of ['draft', 'draftOrigins', 'revision', 'receipts', 'valueRevision', 'musicBrainzNames', 'localizedNames'] as const) assert.deepEqual(doc[key], queued[key], key);
+    assert.deepEqual(doc.lookupGate, { fence: 3, run: 1, state: 'complete', blocking: false });
+    // No request carries a Track title, an original filename or a catalog ID.
+    const text = sentText(client.requests);
+    for (const sentinel of ['Secret Track Title', 'Secret Filename', String(queued.catalogSource!.album.id)]) assert.equal(text.includes(sentinel), false, sentinel);
+    // The review's view shows the catalog run, the exact-count preselection and each candidate's subset comparison.
+    const read = await getCatalogReviewLookup(by, id);
+    assert.deepEqual([read.revision, read.lookup!.input, read.lookup!.preselection?.basis, read.lookup!.candidates.map(candidate => [candidate.status, candidate.comparison?.subset?.missingTrackCount]),
+        read.summary], [doc.revision, { trigger: 'catalog', submitted: null }, 'exactTrackCount', [['matching', 0], ['matching', 1], ['notMatching', null]],
+        { waiting: { lookup: false, analysis: false }, needsAnswer: { tie: false, conflicts: [] }, lookupAvailable: true }]);
+});
+
+test('a submitted name and a manual retry of a catalog run replay their receipts, repeat the catalog input and queries, and every refusal stores nothing', async () => {
+    const { id } = await seededReview([200_000, 210_000]);
+    const exchanges = () => [countedSearch(albumQuery, [[mbid(1), 2]]), countedSearch({ release: 'Synthetic Album' }, [[mbid(1), 2]]), creditedRelease(mbid(1), [200_000, 210_000]),
+        aliasAnswer(mbid(30), 'Synthetic Ensemble')];
+    // Nothing to retry yet: the refusal converts nothing.
+    await assert.rejects(retryCatalogReviewLookup(by, id, mutation(1)), code('ADMIN_IMPORT_LOOKUP_NOTHING_TO_RETRY'));
+    assert.deepEqual([(await stored(id)).draftVersion, (await stored(id)).revision, (await stored(id)).receipts.length], [2, 1, 1]);
+    await queueReview(id);
+    await drain({ musicBrainz: fixtureClient(exchanges()).musicBrainz });
+    const automatic = (await lookup(id))!;
+    // A manual retry repeats the catalog input and queries as a new subset run under the retrying administrator.
+    const body = mutation((await stored(id)).revision);
+    const retried = await retryCatalogReviewLookup(byOther, id, body);
+    const record = (await lookup(id))!;
+    assert.deepEqual([retried.receipt?.kind, retried.item.revision, record.run, record.state, record.grantSource, record.actorId, record.automatic, record.automaticRuns, record.input, record.queries,
+        record.exactSearchComplete], ['lookup-retry', (await stored(id)).revision, 2, 'queued', 'retry', byOther, false, 1, automatic.input, automatic.queries, true]);
+    // A lost response replays; a retry while the run is queued or running is refused and stores nothing.
+    assert.deepEqual(await retryCatalogReviewLookup(byOther, id, body), retried);
+    await assert.rejects(retryCatalogReviewLookup(byOther, id, mutation(retried.item.revision)), code('ADMIN_IMPORT_LOOKUP_ACTIVE'));
+    await getDb()!.collection('adminImportLookups').updateOne({ _id: new ObjectId(id) }, { $set: { state: 'running' } });
+    await assert.rejects(retryCatalogReviewLookup(byOther, id, mutation(retried.item.revision)), code('ADMIN_IMPORT_LOOKUP_ACTIVE'));
+    await getDb()!.collection('adminImportLookups').updateOne({ _id: new ObjectId(id) }, { $set: { state: 'queued' } });
+    assert.deepEqual([(await lookup(id))!.run, (await stored(id)).revision], [2, retried.item.revision]);
+    await drain({ musicBrainz: fixtureClient(exchanges()).musicBrainz });
+    // A submitted song name is sent as typed with the primary Artist.
+    const submitted = await submitCatalogReviewLookup(by, id, { ...mutation(retried.item.revision), kind: 'song', text: 'Synthetic Song' });
+    const song = (await lookup(id))!;
+    assert.deepEqual([submitted.receipt?.kind, song.run, song.grantSource, song.input, song.queries.map(query => (query as { query: unknown }).query)],
+        ['lookup', 3, 'submit', { trigger: 'submitted', submitted: { kind: 'song', text: 'Synthetic Song' } }, [{ recording: 'Synthetic Song', artist: 'Synthetic Ensemble' }, { recording: 'Synthetic Song' }]]);
+    // Refusals: a link, a stale revision, unconfigured lookup and a malformed body each store nothing.
+    const settled = { revision: (await stored(id)).revision, receipts: (await stored(id)).receipts.length, run: song.run };
+    await assert.rejects(submitCatalogReviewLookup(by, id, { ...mutation(settled.revision), kind: 'album', text: 'https://example.test/album' }), code('ADMIN_IMPORT_LOOKUP_INVALID_NAME'));
+    await assert.rejects(submitCatalogReviewLookup(by, id, { ...mutation(settled.revision - 1), kind: 'album', text: 'Synthetic Album' }), code('ADMIN_IMPORT_REVISION_CONFLICT'));
+    await assert.rejects(submitCatalogReviewLookup(by, id, { ...mutation(settled.revision), kind: 'label', text: 'Synthetic Album' }), code('ADMIN_IMPORT_INVALID_INPUT'));
+    process.env.FINITUDE_ADMIN_METADATA_LOOKUP_CONTACT = '';
+    try { await assert.rejects(submitCatalogReviewLookup(by, id, { ...mutation(settled.revision), kind: 'album', text: 'Synthetic Album' }), code('ADMIN_IMPORT_LOOKUP_UNAVAILABLE')); }
+    finally { process.env.FINITUDE_ADMIN_METADATA_LOOKUP_CONTACT = contact; }
+    assert.deepEqual([(await stored(id)).revision, (await stored(id)).receipts.length, (await lookup(id))!.run], [settled.revision, settled.receipts, settled.run]);
+    // Another intent under a used operation ID conflicts; the review's detail never lists lookup receipts.
+    await assert.rejects(submitCatalogReviewLookup(by, id, { ...body, kind: 'album', text: 'Synthetic Album' }), code('ADMIN_IMPORT_OPERATION_CONFLICT'));
+    assert.deepEqual((await getCatalogReview(by, id)).item.receipts.map(receipt => receipt.kind), ['create']);
+});
+
+test('a review run ends superseded, without a request, when its Album is deleted, loses readiness, changes revision or a member\'s media changes, keeping earlier candidates', async () => {
+    const changes: [string, (review: Awaited<ReturnType<typeof seededReview>>) => Promise<unknown>][] = [
+        ['deleted', review => getDb()!.collection('albums').deleteOne({ _id: review.albumId })],
+        ['not ready', review => getDb()!.collection('albums').updateOne({ _id: review.albumId }, { $set: { lifecycleStatus: 'deleting' } })],
+        ['changed', review => getDb()!.collection('albums').updateOne({ _id: review.albumId }, { $set: { title: 'Changed Elsewhere' } })],
+        ['media replaced', review => getDb()!.collection('audioTracks').updateOne({ _id: review.trackIds[0] }, { $set: { originalFileName: '01 Replaced.flac' } })]
+    ];
+    for (const [label, change] of changes) {
+        const review = await seededReview([200_000, 210_000]);
+        await queueReview(review.id);
+        await change(review);
+        const client = fixtureClient([]);
+        await runMetadataLookupOnce({ musicBrainz: client.musicBrainz });
+        const record = (await lookup(review.id))!;
+        assert.deepEqual([record.state, record.issue, client.requests.length, (await stored(review.id)).lookupGate], ['superseded', 'projectClosed', 0,
+            { fence: 2, run: 1, state: 'superseded', blocking: false }], label);
+    }
+    // A change while a release lookup is in flight: the searches' candidates stay, the answer is discarded and nothing more is sent.
+    const review = await seededReview([200_000, 210_000]);
+    await queueReview(review.id);
+    const fixture = fixtureClient([countedSearch(albumQuery, [[mbid(1), 2]]), countedSearch({ release: 'Synthetic Album' }, []), creditedRelease(mbid(1), [200_000, 210_000])]);
+    const musicBrainz: MusicBrainzClient = { ...fixture.musicBrainz, async lookupRelease(releaseId, options) {
+        const release = await fixture.musicBrainz.lookupRelease(releaseId, options);
+        await getDb()!.collection('albums').updateOne({ _id: review.albumId }, { $set: { title: 'Changed Elsewhere' } });
+        return release;
+    } };
+    await drain({ musicBrainz });
+    const record = (await lookup(review.id))!;
+    assert.deepEqual([record.state, record.issue, record.candidates.map(candidate => [candidate.releaseId, candidate.details]), fixture.requests.length],
+        ['superseded', 'projectClosed', [[mbid(1), 'pending']], 3]);
+});
+
+test('an applied review and one whose source is not current admit no lookup; nothing is converted or stored', async () => {
+    const applied = await seededReview([200_000]);
+    await applyCatalogReview(by, applied.id, { ...mutation(1), fields: [{ scope: 'album', slotId: null, field: 'title' }] });
+    const appliedBefore = await stored(applied.id);
+    await assert.rejects(queueReview(applied.id), code('ADMIN_CATALOG_REVIEW_APPLIED'));
+    await assert.rejects(submitCatalogReviewLookup(by, applied.id, { ...mutation(appliedBefore.revision), kind: 'album', text: 'Synthetic Album' }), code('ADMIN_CATALOG_REVIEW_APPLIED'));
+    await assert.rejects(retryCatalogReviewLookup(by, applied.id, mutation(appliedBefore.revision)), code('ADMIN_CATALOG_REVIEW_APPLIED'));
+    assert.deepEqual([await stored(applied.id), await lookup(applied.id)], [appliedBefore, null]);
+    // An applied review still reads its (empty) lookup.
+    assert.deepEqual((await getCatalogReviewLookup(by, applied.id)).lookup, null);
+    const changed = await seededReview([200_000]);
+    await getDb()!.collection('albums').updateOne({ _id: changed.albumId }, { $set: { title: 'Changed Elsewhere' } });
+    const changedBefore = await stored(changed.id);
+    await assert.rejects(queueReview(changed.id), code('ADMIN_CATALOG_REVIEW_SOURCE_CHANGED'));
+    await assert.rejects(submitCatalogReviewLookup(by, changed.id, { ...mutation(1), kind: 'album', text: 'Synthetic Album' }), code('ADMIN_CATALOG_REVIEW_SOURCE_CHANGED'));
+    await assert.rejects(retryCatalogReviewLookup(by, changed.id, mutation(1)), code('ADMIN_CATALOG_REVIEW_SOURCE_CHANGED'));
+    assert.deepEqual([await stored(changed.id), await lookup(changed.id)], [changedBefore, null]);
+    // A format-3 review that lost its source is refused in the same way, and an unknown review is not found.
+    const converted = await seededReview([200_000]);
+    await queueReview(converted.id);
+    await drain({ musicBrainz: fixtureClient([countedSearch(albumQuery, []), countedSearch({ release: 'Synthetic Album' }, [])]).musicBrainz });
+    await getDb()!.collection('albums').updateOne({ _id: converted.albumId }, { $set: { lifecycleStatus: 'deleting' } });
+    const convertedBefore = await stored(converted.id), record = await lookup(converted.id);
+    await assert.rejects(retryCatalogReviewLookup(by, converted.id, mutation(convertedBefore.revision)), code('ADMIN_CATALOG_REVIEW_SOURCE_CHANGED'));
+    assert.deepEqual([await stored(converted.id), await lookup(converted.id)], [convertedBefore, record]);
+    await assert.rejects(getCatalogReviewLookup(by, new ObjectId().toHexString()), code('ADMIN_CATALOG_REVIEW_NOT_FOUND'));
+    await assert.rejects(getCatalogReviewLookup(by, 'not-an-id'), code('ADMIN_CATALOG_REVIEW_NOT_FOUND'));
+    await assert.rejects(getCatalogReviewLookup(by, await seeded(1, () => v2())), code('ADMIN_CATALOG_REVIEW_NOT_FOUND'));
+});
+
+test('a review run is never superseded by a file-set check, and its iTunes fallback keeps only collections with at least as many tracks as members, as iTunes-only candidates', async () => {
+    const { id } = await seededReview([200_000, 210_000]);
+    await queueReview(id);
+    // File cleanup admission is import-only: it marks nothing on a review's run.
+    await withImportAdmin(by, async session => noteMetadataLookupFiles((await projects().findOne({ _id: new ObjectId(id) }, { session }))!, session));
+    const musicBrainz = fixtureClient([countedSearch(albumQuery, []), countedSearch({ release: 'Synthetic Album' }, []),
+        searchAnswer({ release: 'Synthetic Two', artist: 'Synthetic Ensemble' }, []), searchAnswer({ release: 'Synthetic Three', artist: 'Synthetic Ensemble' }, [])]);
+    // One collection has fewer tracks than the members and is never kept; the exact-count one is kept before the longer one.
+    const itunes = itunesFixtureClient([
+        itunesAnswer(albumSearchUrl('us'), [itunesCollectionResult(9101, 'Synthetic One', 'Synthetic Ensemble', 1), itunesCollectionResult(9103, 'Synthetic Three', 'Synthetic Ensemble', 3),
+            itunesCollectionResult(9102, 'Synthetic Two', 'Synthetic Ensemble', 2)]),
+        itunesAnswer(albumSearchUrl('jp'), []),
+        itunesAnswer(collectionUrl(9102), syntheticCollection(9102, 'Synthetic Two', 'Synthetic Ensemble', [200_000, 210_000])),
+        itunesAnswer(collectionUrl(9103), syntheticCollection(9103, 'Synthetic Three', 'Synthetic Ensemble', [200_000, 210_000, 230_000]))]);
+    await drain({ musicBrainz: musicBrainz.musicBrainz, itunes: itunes.itunes });
+    const record = (await lookup(id))!;
+    assert.deepEqual([record.state, record.issue, record.staleSlotIds, record.itunesStage!.items.map(item => [item.collectionId, item.bridge, item.collection]), record.itunesStage!.complete],
+        ['complete', null, [], [['9102', 'noRelease', 'fetched'], ['9103', 'noRelease', 'fetched']], true]);
+    assert.deepEqual([record.candidates.map(candidate => candidate.key), record.ranking!.preselection?.candidateKey, record.ranking!.preselection?.basis, record.applied],
+        [['itunes:9102', 'itunes:9103'], 'itunes:9102', 'exactTrackCount', null]);
+    const text = sentText([...musicBrainz.requests, ...itunes.requests]);
+    for (const sentinel of ['Secret Track Title', 'Secret Filename']) assert.equal(text.includes(sentinel), false, sentinel);
+});
+
+test('a role loss or an expired grant stops a review run as for imports', async () => {
+    const lost = await seededReview([200_000]);
+    await queueReview(lost.id, byOther);
+    await getDb()!.collection('users').updateOne({ _id: other }, { $set: { role: 'user' } });
+    const client = fixtureClient([]);
+    await runMetadataLookupOnce({ musicBrainz: client.musicBrainz });
+    assert.deepEqual([(await lookup(lost.id))!.state, (await lookup(lost.id))!.issue, client.requests.length, (await stored(lost.id)).lookupGate!.blocking], ['stopped', 'permissionLost', 0, false]);
+    const expired = await seededReview([200_000]);
+    await queueReview(expired.id);
+    await runMetadataLookupOnce({ musicBrainz: client.musicBrainz, now: () => later(2 * 60 * 60 * 1000) });
+    assert.deepEqual([(await lookup(expired.id))!.state, (await lookup(expired.id))!.issue, client.requests.length], ['stopped', 'grantExpired', 0]);
+});
+
+test('lookup admission converts a review only when asked: a check admits a current format-3 review unchanged and refuses an older format or an applied review, an import keeps its acceptance, and a database failure propagates', async () => {
+    const { id } = await seededReview([200_000]), _id = new ObjectId(id), before = await stored(id);
+    // A format-2 review: a check refuses it and changes nothing, while a conversion captures it in memory only.
+    const converted = await withImportAdmin(by, async session => {
+        const doc = (await projects().findOne({ _id }, { session }))!;
+        await assert.rejects(admitMetadataLookup(doc, session, 'check'), code('ADMIN_IMPORT_LOOKUP_REFUSED'));
+        assert.equal(await metadataLookupAdmitted(doc, session), false);
+        assert.deepEqual(doc, before);
+        await admitMetadataLookup(doc, session, 'convert');
+        return doc;
+    });
+    assert.deepEqual([converted.draftVersion, converted.revision, converted.receipts, typeof converted.catalogCapture], [3, before.revision + 1, before.receipts, 'object']);
+    assert.deepEqual(await stored(id), before, 'the caller persists a conversion; admission alone stores nothing');
+    // Stored as format 3, a check admits it and changes nothing, and a conversion only checks it.
+    await projects().replaceOne({ _id, revision: before.revision }, converted);
+    const current = await stored(id);
+    await withImportAdmin(by, async session => {
+        const doc = (await projects().findOne({ _id }, { session }))!;
+        await admitMetadataLookup(doc, session, 'check');
+        assert.equal(await metadataLookupAdmitted(doc, session), true);
+        await admitMetadataLookup(doc, session, 'convert');
+        assert.deepEqual(doc, current);
+    });
+    // An applied review is refused in either mode; a refusal is false, never a failure.
+    await projects().updateOne({ _id }, { $set: { catalogApplied: { operationId: randomUUID(), at: new Date().toISOString(), fields: [] } } });
+    await withImportAdmin(by, async session => {
+        const doc = (await projects().findOne({ _id }, { session }))!;
+        for (const mode of ['check', 'convert'] as const) await assert.rejects(admitMetadataLookup(doc, session, mode), code('ADMIN_CATALOG_REVIEW_APPLIED'), mode);
+        assert.equal(await metadataLookupAdmitted(doc, session), false);
+    });
+    // An import is admitted while lookup accepts it, else refused, in either mode.
+    const imported = await seeded(1, () => v2());
+    await withImportAdmin(by, async session => {
+        const doc = (await projects().findOne({ _id: new ObjectId(imported) }, { session }))!;
+        for (const mode of ['check', 'convert'] as const) await admitMetadataLookup(doc, session, mode);
+        assert.equal(await metadataLookupAdmitted(doc, session), true);
+        const locked = { ...doc, media: { ...doc.media!, publication: preparingPublication() } } as unknown as AdminImportDocument;
+        for (const mode of ['check', 'convert'] as const) await assert.rejects(admitMetadataLookup(locked, session, mode), code('ADMIN_IMPORT_LOOKUP_REFUSED'), mode);
+        assert.equal(await metadataLookupAdmitted(locked, session), false);
+    });
+    // A failure to read the review's source is no refusal: it propagates, so a worker step aborts instead of ending its run.
+    const review = await seededReview([200_000]);
+    await queueReview(review.id);
+    const ended = getDatabaseClient().startSession();
+    await ended.endSession();
+    await assert.rejects(metadataLookupAdmitted(await stored(review.id), ended), error => !(error instanceof AdminImportError));
+});
+
+test('a review run waiting for an automatic retry keeps its one automatic run and is replaced by a manual retry of its catalog input; unconfigured lookup ends a queued review run without a request', async () => {
+    const { id } = await seededReview([200_000]);
+    await queueReview(id);
+    await runMetadataLookupOnce({ musicBrainz: fixtureClient(unavailable(searchUrl(albumQuery), 3)).musicBrainz });
+    const waiting = (await lookup(id))!;
+    // An automatic retry is the same run: it spends no automatic run, and the review keeps waiting on it.
+    await runMetadataLookupOnce({ musicBrainz: fixtureClient(unavailable(searchUrl(albumQuery), 3)).musicBrainz, now: () => waiting.retryAt! });
+    const retrying = (await lookup(id))!;
+    assert.deepEqual([waiting.state, retrying.state, retrying.run, retrying.automaticRuns, retrying.attempts.musicbrainz, (await getCatalogReviewLookup(by, id)).summary.waiting.lookup],
+        ['retrying', 'retrying', 1, 1, 2, true]);
+    // A manual retry replaces it as a new run of the same catalog input and queries, compared in subset mode.
+    const retried = await retryCatalogReviewLookup(byOther, id, mutation((await stored(id)).revision));
+    const replaced = (await lookup(id))!;
+    assert.deepEqual([retried.receipt?.kind, replaced.run, replaced.state, replaced.grantSource, replaced.automatic, replaced.automaticRuns, replaced.attempts, replaced.input, replaced.queries,
+        replaced.exactSearchComplete, (await stored(id)).lookupGate!.run], ['lookup-retry', 2, 'queued', 'retry', false, 1, { musicbrainz: 0, itunes: 0 }, retrying.input, retrying.queries, true, 2]);
+    await drain({ musicBrainz: fixtureClient([countedSearch(albumQuery, []), countedSearch({ release: 'Synthetic Album' }, [])]).musicBrainz });
+    assert.deepEqual([(await lookup(id))!.state, await queueReview(id)], ['complete', { queued: false, run: null, reason: 'limit' }]);
+    // Lookup unconfigured after a review run was queued ends it unavailable, sending nothing and releasing the review.
+    const unconfiguredReview = await seededReview([200_000]);
+    await queueReview(unconfiguredReview.id);
+    const client = fixtureClient([]);
+    delete process.env.FINITUDE_ADMIN_METADATA_LOOKUP_CONTACT;
+    try { await drain({ musicBrainz: client.musicBrainz }); } finally { process.env.FINITUDE_ADMIN_METADATA_LOOKUP_CONTACT = contact; }
+    const ended = (await lookup(unconfiguredReview.id))!;
+    assert.deepEqual([ended.state, ended.issue, client.requests.length, (await stored(unconfiguredReview.id)).lookupGate!.blocking], ['unavailable', 'notConfigured', 0, false]);
+});
+
+test('two racing submissions convert a review once: one queues its run and the other is refused as stale', async () => {
+    const { id } = await seededReview([200_000, 210_000]);
+    const results = await Promise.allSettled([by, byOther].map(actorId => submitCatalogReviewLookup(actorId, id, { ...mutation(1), kind: 'album', text: 'Synthetic Album' })));
+    const refused = results.flatMap(result => result.status === 'rejected' ? [(result.reason as AdminImportError).code] : []);
+    assert.deepEqual([results.filter(result => result.status === 'fulfilled').length, refused], [1, ['ADMIN_IMPORT_REVISION_CONFLICT']]);
+    // One conversion, one receipt and one run; the gate fenced the race on the review itself.
+    const doc = await stored(id), record = (await lookup(id))!;
+    assert.deepEqual([doc.draftVersion, doc.revision, doc.receipts.map(receipt => [receipt.kind, receipt.revision]), record.run, record.automaticRuns, doc.lookupGate],
+        [3, 3, [['create', 1], ['lookup', 3]], 1, 0, { fence: 1, run: 1, state: 'queued', blocking: true }]);
+});
+
+test('a run queued while an apply is in flight conflicts with that apply, whose retry is refused while the run is active', async t => {
+    const review = await seededReview([200_000]);
+    // A submitted run converts the review and completes; its one automatic run is still unspent.
+    await submitCatalogReviewLookup(by, review.id, { ...mutation(1), kind: 'album', text: 'Synthetic Album' });
+    await drain({ musicBrainz: fixtureClient([countedSearch(albumQuery, []), countedSearch({ release: 'Synthetic Album' }, [])]).musicBrainz });
+    assert.equal((await lookup(review.id))!.state, 'complete');
+    // Right before apply reads the run's state (after its snapshot began), another administrator's catalog trigger commits a run.
+    const observed: (string | null)[] = [], original = Collection.prototype.findOne;
+    let armed = true, triggered: unknown = null;
+    t.mock.method(Collection.prototype, 'findOne', async function (this: Collection, ...args: unknown[]) {
+        const applyRead = this.collectionName === 'adminImportLookups' && (args[1] as { projection?: Record<string, unknown> } | undefined)?.projection?.state === 1;
+        if (applyRead && armed) { armed = false; triggered = await queueReview(review.id, byOther); }
+        const found = await (original as (...values: unknown[]) => Promise<unknown>).apply(this, args);
+        if (applyRead) observed.push((found as { state?: string } | null)?.state ?? null);
+        return found;
+    });
+    const before = await stored(review.id), album = await getDb()!.collection('albums').findOne({ _id: review.albumId });
+    await assert.rejects(applyCatalogReview(by, review.id, { ...mutation(before.revision), fields: [{ scope: 'album', slotId: null, field: 'title' }] }), code('ADMIN_IMPORT_LOOKUP_ACTIVE'));
+    // The first attempt read the finished run, and its write of the review conflicted with the trigger's gate; its retry read the new run.
+    assert.deepEqual([triggered, observed], [{ queued: true, run: 2, reason: 'queued' }, ['complete', 'queued']]);
+    const after = await stored(review.id);
+    assert.deepEqual([after.catalogApplied, after.receipts, after.revision, after.lookupGate!.run, after.lookupGate!.blocking, await getDb()!.collection('albums').findOne({ _id: review.albumId })],
+        [undefined, before.receipts, before.revision, 2, true, album]);
+});
+
+test('a review applied while its run was queued, as a release that did not check lookup could apply it, supersedes the run without a request', async () => {
+    const review = await seededReview([200_000]);
+    await queueReview(review.id);
+    await projects().updateOne({ _id: new ObjectId(review.id) }, { $set: { catalogApplied: { operationId: randomUUID(), at: new Date().toISOString(), fields: [] } } });
+    const client = fixtureClient([]);
+    await runMetadataLookupOnce({ musicBrainz: client.musicBrainz });
+    const record = (await lookup(review.id))!;
+    assert.deepEqual([record.state, record.issue, client.requests.length, (await stored(review.id)).lookupGate], ['superseded', 'projectClosed', 0,
+        { fence: 2, run: 1, state: 'superseded', blocking: false }]);
+});
+
+test('the review lookup summary reads a tie between matching groups, analysis in progress or settling a stopped call and whether lookup is configured, and the read exposes no internal state', async () => {
+    const { id } = await seededReview([200_000, 210_000]);
+    await queueReview(id);
+    // Two releases of exactly the member count under other titles are two matching groups, so neither is preselected.
+    const retitled = (exchange: LookupExchange, title: string): LookupExchange => ({ ...exchange, body: { ...(exchange.body as Record<string, unknown>), title } });
+    await drain({ musicBrainz: fixtureClient([countedSearch(albumQuery, [[mbid(1), 2], [mbid(2), 2]]), countedSearch({ release: 'Synthetic Album' }, []),
+        creditedRelease(mbid(1), [200_000, 210_000]), retitled(creditedRelease(mbid(2), [200_000, 210_000]), 'Synthetic Album (Deluxe)'), aliasAnswer(mbid(30), 'Synthetic Ensemble')]).musicBrainz });
+    const tied = await getCatalogReviewLookup(by, id);
+    assert.deepEqual([tied.lookup!.state, tied.lookup!.preselection, tied.lookup!.candidates.map(candidate => candidate.status), tied.summary], ['complete', null, ['matching', 'matching'],
+        { waiting: { lookup: false, analysis: false }, needsAnswer: { tie: true, conflicts: [] }, lookupAvailable: true }]);
+    // The read is allowlisted: no fence, grant, bound file set, stored query, capture or source evidence.
+    const wire = JSON.stringify(tied);
+    for (const key of ['lookupGate', 'fence', 'grantExpiresAt', 'fileSetDigest', 'musicBrainzReleaseSearch', 'staleSlotIds', 'queryIndex', 'exactSearchComplete', 'catalogCapture',
+        'catalogEvidence', 'durationPrecisionMs', 'Secret Filename']) assert.equal(wire.includes(key), false, key);
+    for (const [state, waiting] of [['queued', true], ['running', true], ['complete', false], ['idle', false]] as const) {
+        await projects().updateOne({ _id: new ObjectId(id) }, { $set: { 'analysis.state': state } });
+        assert.equal((await getCatalogReviewLookup(by, id)).summary.waiting.analysis, waiting, state);
+    }
+    // A stopped analysis still waits while a call the worker settles is in flight, as apply refuses then; once settled it does not.
+    const inflight = { index: 0, slots: [], album: true, hash: 'a'.repeat(64), state: 'inflight', attemptId: randomUUID(), startedAt: new Date(), completedAt: null };
+    await projects().updateOne({ _id: new ObjectId(id) }, { $set: { 'analysis.state': 'cancelled', 'analysis.chunks': [inflight] } });
+    assert.equal((await getCatalogReviewLookup(by, id)).summary.waiting.analysis, true);
+    const settling = await stored(id);
+    await assert.rejects(applyCatalogReview(by, id, { ...mutation(settling.revision), fields: [{ scope: 'album', slotId: null, field: 'title' }] }), code('ADMIN_IMPORT_ANALYSIS_ACTIVE'));
+    await projects().updateOne({ _id: new ObjectId(id) }, { $set: { 'analysis.chunks': [{ ...inflight, state: 'unknown' }] } });
+    assert.equal((await getCatalogReviewLookup(by, id)).summary.waiting.analysis, false);
+    assert.deepEqual((await getCatalogReviewLookup(by, id, unconfigured)).summary, { ...tied.summary, lookupAvailable: false });
+});
+
+test('a review saved in a newer format admits no lookup request and its queued run ends superseded without a request, while its lookup still reads', async () => {
+    const review = await seededReview([200_000]), _id = new ObjectId(review.id);
+    await queueReview(review.id);
+    await projects().updateOne({ _id }, { $set: { draftVersion: 4 } });
+    const before = await stored(review.id), queued = await lookup(review.id);
+    await assert.rejects(submitCatalogReviewLookup(by, review.id, { ...mutation(before.revision), kind: 'album', text: 'Synthetic Album' }), code('ADMIN_IMPORT_RELOAD_REQUIRED'));
+    await assert.rejects(retryCatalogReviewLookup(by, review.id, mutation(before.revision)), code('ADMIN_IMPORT_RELOAD_REQUIRED'));
+    assert.deepEqual([await stored(review.id), await lookup(review.id)], [before, queued]);
+    assert.deepEqual([(await getCatalogReviewLookup(by, review.id)).lookup!.state, (await getCatalogReviewLookup(by, review.id)).summary.waiting.lookup], ['queued', true]);
+    const client = fixtureClient([]);
+    await runMetadataLookupOnce({ musicBrainz: client.musicBrainz });
+    const record = (await lookup(review.id))!, after = await stored(review.id);
+    assert.deepEqual([record.state, record.issue, client.requests.length, after.lookupGate, after.draftVersion, after.revision], ['superseded', 'projectClosed', 0,
+        { fence: 2, run: 1, state: 'superseded', blocking: false }, 4, before.revision]);
 });

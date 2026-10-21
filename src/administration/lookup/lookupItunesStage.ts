@@ -8,7 +8,7 @@
  *              itunesRelease, itunesCandidate, lookupLocalizedGroups
  * Internal
  *   Functions: isRecord, fold, term, storefront, canonicalQuery, itunesTextSearch, storedRequest, storedItem,
- *              durationPlausible, answerItems, bridgeQuery, positive
+ *              durationPlausible, answerItems, itemTrackCount, leaveOut, bridgeQuery, positive
  *   Constants: itemStates
  * @end-catalog */
 
@@ -20,7 +20,8 @@ import { itunesArtworkAddress, itunesStorefrontsForBarcode, itunesStorefrontsFor
 import { itunesArtworkUrl } from './itunesArtworkClient';
 import { cleanLookupTerm, isPlaceholderCredit, normalizeGtin, normalizeItunesId } from './lookupIdentifiers';
 import { isFallbackLookupQuery, type PlannedLookupQuery } from './lookupQueryPlanner';
-import { lookupTrackCountPlausible, type LocalFileEvidence } from './lookupRanking';
+import { lookupTrackCountPlausible, type LocalFileEvidence, type LookupComparisonMode } from './lookupRanking';
+import { lookupSubsetTrackCountPlausible, lookupSurplusRank } from './lookupSubset';
 import { musicBrainzLuceneQuery } from './musicBrainzClient';
 import type { MetadataLookupRecord, StoredLookupCandidate } from './metadataLookupRecord';
 
@@ -28,8 +29,9 @@ import type { MetadataLookupRecord, StoredLookupCandidate } from './metadataLook
  * The iTunes fallback stage of a lookup run and its MusicBrainz bridge (pure; lookupRunStep.ts sends the requests). It starts only
  * when MusicBrainz returned no matching candidate, from the run's own planned queries: at most two UPC lookups of a valid embedded
  * barcode (storefronts by GS1 prefix, stopping at the first that answers a collection), then the first text search in at most three
- * storefronts chosen by script. At most four plausible results are kept (a collection whose track count can equal the files, a song
- * whose duration matches a single file), each with the title and artist every storefront showed. Their name pairs are searched again
+ * storefronts chosen by script. At most four plausible results are kept (a collection whose track count can equal the files, or for
+ * an existing-Album review can be at least its members, fewest extra first across the stage's answers; a song whose duration
+ * matches a single file), each with the title and artist every storefront showed. Their name pairs are searched again
  * in MusicBrainz (at most four bridge searches, names that differ from the searched text first, ` - Single`/` - EP` dropped from a
  * collection title, never respelled). A result whose bridge found a MusicBrainz release is evidence only; any other result is
  * resolved through a collection lookup (at most four; so a song's own collection name, which may be a box set's sub-album, is never
@@ -46,13 +48,15 @@ export type LookupItunesName = { storefront: ItunesStorefront; title: string; ar
 /**
  * One kept iTunes result. `bridge` is pending until the bridge ends; `collection` is the collection lookup of a result that becomes
  * a candidate (`notNeeded` for a bridged one or a repeat of another result's collection). `unbridged`: some name pair of it was not
- * searched (it could not be built or was over the bridge bound).
+ * searched (it could not be built or was over the bridge bound). `trackCount`, only on a review's collection, is the count iTunes
+ * reported (null when unknown): it orders the kept results across answers and tells whether leaving one out could hide an
+ * exact-count match.
  */
 export type LookupItunesItem = {
     key: string; kind: 'song' | 'collection'; collectionId: string; names: LookupItunesName[]; barcode: string | null;
     bridge: 'pending' | 'found' | 'noRelease' | 'unavailable' | 'notRun';
     collection: 'notNeeded' | 'pending' | 'fetched' | 'missing' | 'failed' | 'skipped';
-    unbridged?: true;
+    unbridged?: true; trackCount?: number | null;
 };
 /** A bridge search and the results whose names it searches. */
 export type LookupItunesBridgeQuery = PlannedLookupQuery & { itemKeys: string[] };
@@ -60,13 +64,15 @@ export type LookupItunesBridgeQuery = PlannedLookupQuery & { itemKeys: string[] 
  * A run's iTunes stage. `reason`: MusicBrainz answered without a matching candidate, or its searches stayed unavailable. `text` is
  * the folded release or recording text the term came from (null for a barcode-only run). `complete` turns false when a plausible
  * result was left out (the result or candidate bound, or a collection lookup iTunes never answered); the run's comparison is then
- * partial.
+ * partial. A review's stage (subset mode) also keeps `exactComplete`, which turns false only when a result left out could have
+ * exactly as many tracks as members (an unknown count or an equal one), so leaving out larger collections never blocks the
+ * exact-count preselection; an import's stage has no such key.
  */
 export type LookupItunesStage = {
     reason: 'noMatch' | 'searchUnavailable'; text: string | null;
     requests: PlannedItunesRequest[]; requestIndex: number; items: LookupItunesItem[];
     bridge: LookupItunesBridgeQuery[] | null; bridgeIndex: number; bridgeOutcomes: ('found' | 'none' | 'refused' | 'unsent')[];
-    state: 'running' | 'answered' | 'unavailable'; complete: boolean; finalized: boolean;
+    state: 'running' | 'answered' | 'unavailable'; complete: boolean; finalized: boolean; exactComplete?: boolean;
 };
 /** The next iTunes-stage request: an iTunes search or UPC lookup, a bridge search, or a collection lookup. */
 export type LookupItunesAction =
@@ -109,12 +115,13 @@ export function itunesRequestsFor(queries: readonly unknown[]): PlannedItunesReq
     return requests;
 }
 
-/** A new stage for the run's queries, or null when they give no iTunes request. */
-export function startItunesStage(queries: readonly unknown[], reason: LookupItunesStage['reason']): LookupItunesStage | null {
+/** A new stage for the run's queries (a review's, in `subset` mode, with `exactComplete`), or null when they give no iTunes request. */
+export function startItunesStage(queries: readonly unknown[], reason: LookupItunesStage['reason'], comparison: LookupComparisonMode = 'exact'): LookupItunesStage | null {
     const requests = itunesRequestsFor(queries);
     if (!requests.length) return null;
     const text = itunesTextSearch((Array.isArray(queries) ? queries : []).filter(isRecord))?.text ?? null;
-    return { reason, text, requests, requestIndex: 0, items: [], bridge: null, bridgeIndex: 0, bridgeOutcomes: [], state: 'running', complete: true, finalized: false };
+    return { reason, text, requests, requestIndex: 0, items: [], bridge: null, bridgeIndex: 0, bridgeOutcomes: [], state: 'running', complete: true, finalized: false,
+        ...(comparison === 'subset' ? { exactComplete: true } : {}) };
 }
 
 const itemStates = { bridge: ['pending', 'found', 'noRelease', 'unavailable', 'notRun'], collection: ['notNeeded', 'pending', 'fetched', 'missing', 'failed', 'skipped'] } as const;
@@ -134,7 +141,7 @@ function storedItem(raw: unknown): LookupItunesItem | null {
     const collectionId = normalizeItunesId(raw.collectionId);
     if (!names.length || !collectionId) return null;
     return { key: raw.key, kind: raw.kind, collectionId, names, barcode: normalizeGtin(raw.barcode)?.digits ?? null, bridge: raw.bridge, collection: raw.collection,
-        ...(raw.unbridged === true ? { unbridged: true as const } : {}) };
+        ...(raw.unbridged === true ? { unbridged: true as const } : {}), ...(raw.trackCount === null || positive(raw.trackCount) !== null ? { trackCount: raw.trackCount as number | null } : {}) };
 }
 /**
  * The stored stage as this release reads it, or null when there is none or it is unreadable (another release's shape): requests,
@@ -149,7 +156,8 @@ export function storedItunesStage(raw: unknown): LookupItunesStage | null {
     const outcomes = bridge ? bridge.map((_query, at) => ['found', 'none', 'refused', 'unsent'].includes(raw.bridgeOutcomes?.[at]) ? raw.bridgeOutcomes[at] : 'unsent') : [];
     const index = (value: unknown, max: number) => Number.isSafeInteger(value) && (value as number) >= 0 ? Math.min(value as number, max) : 0;
     return { reason: raw.reason, text: typeof raw.text === 'string' ? raw.text : null, requests, requestIndex: index(raw.requestIndex, requests.length), items,
-        bridge, bridgeIndex: index(raw.bridgeIndex, bridge?.length ?? 0), bridgeOutcomes: outcomes, state: raw.state, complete: raw.complete === true, finalized: raw.finalized === true };
+        bridge, bridgeIndex: index(raw.bridgeIndex, bridge?.length ?? 0), bridgeOutcomes: outcomes, state: raw.state, complete: raw.complete === true, finalized: raw.finalized === true,
+        ...(typeof raw.exactComplete === 'boolean' ? { exactComplete: raw.exactComplete } : {}) };
 }
 
 /** Whether a song's duration can match the import's only file: always, unless both durations are known and differ beyond the tolerance. */
@@ -158,38 +166,67 @@ const durationPlausible = (song: ItunesTrack, files: readonly LocalFileEvidence[
     if (!file || file.durationMs === null || song.trackTimeMillis === null || song.trackTimeMillis <= 0) return true;
     return Math.abs(file.durationMs - song.trackTimeMillis) <= METADATA_LOOKUP_LIMITS.durationToleranceMs + file.durationPrecisionMs;
 };
-/** The plausible results of one answer in answer order: collections by track count, songs by duration. */
-function answerItems(request: PlannedItunesRequest, result: ItunesSearchResult, files: readonly LocalFileEvidence[]): LookupItunesItem[] {
+/**
+ * The plausible results of one answer in answer order: collections by track count (in `subset` mode, a review's, those with at
+ * least as many tracks as members or an unknown count, each with the count iTunes reported), songs by duration.
+ */
+function answerItems(request: PlannedItunesRequest, result: ItunesSearchResult, files: readonly LocalFileEvidence[], comparison: LookupComparisonMode = 'exact'): LookupItunesItem[] {
     const base = { bridge: 'pending' as const, collection: 'notNeeded' as const };
     if (request.kind === 'itunesSearch' && request.entity === 'song') {
         return result.tracks.filter(song => normalizeItunesId(song.trackId) && normalizeItunesId(song.collectionId) && durationPlausible(song, files)).map(song => ({
             ...base, key: `song:${song.trackId}`, kind: 'song' as const, collectionId: song.collectionId, barcode: null,
             names: [{ storefront: request.storefront, title: song.trackName, artist: song.artistName }] }));
     }
-    return result.collections.filter(collection => normalizeItunesId(collection.collectionId) && lookupTrackCountPlausible(collection.trackCount, files.length)).map(collection => ({
+    const subset = comparison === 'subset';
+    return result.collections.filter(collection => normalizeItunesId(collection.collectionId)
+        && (subset ? lookupSubsetTrackCountPlausible(collection.trackCount, files.length) : lookupTrackCountPlausible(collection.trackCount, files.length))).map(collection => ({
         ...base, key: `collection:${collection.collectionId}`, kind: 'collection' as const, collectionId: collection.collectionId,
-        barcode: request.kind === 'itunesUpc' ? request.barcode : null, names: [{ storefront: request.storefront, title: collection.collectionName, artist: collection.artistName }] }));
+        barcode: request.kind === 'itunesUpc' ? request.barcode : null, names: [{ storefront: request.storefront, title: collection.collectionName, artist: collection.artistName }],
+        ...(subset ? { trackCount: positive(collection.trackCount) } : {}) }));
+}
+
+/** A review's result count for ordering and exact-count checks: a song's collection, or a result without a stored count, is unknown. */
+const itemTrackCount = (item: LookupItunesItem) => item.kind === 'collection' ? item.trackCount ?? null : null;
+/**
+ * The completeness flags after leaving `left` out: `complete` turns false for any, and a review's `exactComplete` only for one that
+ * could have exactly `memberCount` tracks (an unknown count or an equal one; any one when the count is not given). An import's
+ * stage never gains `exactComplete`.
+ */
+function leaveOut(stage: LookupItunesStage, left: readonly LookupItunesItem[], memberCount?: number): Pick<LookupItunesStage, 'complete' | 'exactComplete'> {
+    if (!left.length) return { complete: stage.complete, ...(stage.exactComplete === undefined ? {} : { exactComplete: stage.exactComplete }) };
+    if (stage.exactComplete === undefined) return { complete: false };
+    const exact = memberCount === undefined || left.some(item => lookupTrackCountPlausible(itemTrackCount(item), memberCount));
+    return { complete: false, exactComplete: stage.exactComplete && !exact };
 }
 
 /**
- * Stores the answer to the stage's current request `index` (null: no such release): its plausible results join the kept ones (a
- * result already kept gains this storefront's names, once per storefront), up to the result bound, beyond which a plausible result
- * makes the stage incomplete. A UPC lookup that answers a collection ends the UPC lookups. A full search page does not make the
- * stage incomplete: iTunes reports no total.
+ * Stores the answer to the stage's current request `index` (null: no such release): its plausible results (answerItems, compared
+ * as `comparison` says) join the kept ones (a result already kept gains this storefront's names, once per storefront), up to the
+ * result bound, beyond which a plausible result makes the stage incomplete. An import keeps results in answer order. A review
+ * (`subset`) orders every result of the stage's answers by fewest extra tracks (then unknown counts and songs; a stable sort, so
+ * earlier results first on a tie) before the bound, and one it leaves out clears `exactComplete` only when it could have exactly
+ * as many tracks as members. Reordering is safe because nothing is bridged or looked up until every answer is in. A UPC lookup
+ * that answers a collection ends the UPC lookups. A full search page does not make the stage incomplete: iTunes reports no total.
  */
-export function recordItunesAnswer(stage: LookupItunesStage, index: number, result: ItunesSearchResult | null, files: readonly LocalFileEvidence[]): LookupItunesStage {
+export function recordItunesAnswer(stage: LookupItunesStage, index: number, result: ItunesSearchResult | null, files: readonly LocalFileEvidence[],
+    comparison: LookupComparisonMode = 'exact'): LookupItunesStage {
     if (index !== stage.requestIndex || index >= stage.requests.length) return stage;
-    const request = stage.requests[index], items = [...stage.items];
-    let complete = stage.complete, requestIndex = index + 1;
-    for (const item of result ? answerItems(request, result, files) : []) {
+    const request = stage.requests[index], subset = comparison === 'subset', items = [...stage.items], left: LookupItunesItem[] = [];
+    let requestIndex = index + 1;
+    for (const item of result ? answerItems(request, result, files, comparison) : []) {
         const at = items.findIndex(existing => existing.key === item.key);
         if (at >= 0) {
             if (!items[at].names.some(name => name.storefront === request.storefront)) items[at] = { ...items[at], names: [...items[at].names, ...item.names] };
-        } else if (items.length < JOB.itunesItems) items.push(item);
-        else complete = false;
+        } else if (subset || items.length < JOB.itunesItems) items.push(item);
+        else left.push(item);
     }
     if (request.kind === 'itunesUpc' && result?.collections.length) while (stage.requests[requestIndex]?.kind === 'itunesUpc') requestIndex++;
-    return { ...stage, items, complete, requestIndex };
+    if (!subset) return { ...stage, items, ...leaveOut(stage, left), requestIndex };
+    const ordered = items.map((item, at) => ({ item, at, rank: lookupSurplusRank(itemTrackCount(item), files.length) }))
+        .sort((one, other) => one.rank - other.rank || one.at - other.at).map(({ item }) => item);
+    // A review's stage read from a record without the flag starts from `complete`, as the ranking would.
+    const from: LookupItunesStage = { ...stage, exactComplete: stage.exactComplete ?? stage.complete };
+    return { ...stage, items: ordered.slice(0, JOB.itunesItems), ...leaveOut(from, ordered.slice(JOB.itunesItems), files.length), requestIndex };
 }
 
 /** A refused request (its input failed a format check) is skipped. */
@@ -293,34 +330,42 @@ export function nextItunesSearchAction(stage: LookupItunesStage, musicBrainzExha
 /**
  * After the bridge and the bridged releases' details: ends the bridge, then the next collection lookup (in the result's first
  * storefront). A result the candidate bound, or the `itunesCollectionLookups` bound (counting every result whose lookup has an
- * outcome), would leave out is skipped without a request, making the stage incomplete.
+ * outcome), would leave out is skipped without a request, making the stage incomplete (for a review's exact-count flag, as
+ * leaveOut says with `memberCount`).
  */
-export function nextItunesCollectionAction(stage: LookupItunesStage, candidateCount: number, musicBrainzExhausted: boolean): { stage: LookupItunesStage; action: LookupItunesAction | null } {
+export function nextItunesCollectionAction(stage: LookupItunesStage, candidateCount: number, musicBrainzExhausted: boolean, memberCount?: number):
+    { stage: LookupItunesStage; action: LookupItunesAction | null } {
     let next = finishItunesBridge(stage, musicBrainzExhausted);
     const item = next.items.find(entry => entry.collection === 'pending');
     if (!item) return { stage: next, action: null };
     const looked = next.items.filter(entry => entry.collection !== 'notNeeded' && entry.collection !== 'pending').length;
     if (next.state === 'unavailable' || candidateCount >= JOB.candidates || looked >= JOB.itunesCollectionLookups) {
-        next = { ...next, complete: false, items: next.items.map(entry => entry.collection === 'pending' ? { ...entry, collection: next.state === 'unavailable' ? 'failed' : 'skipped' } : entry) };
+        const outcome = next.state === 'unavailable' ? 'failed' as const : 'skipped' as const;
+        next = { ...next, ...leaveOut(next, next.items.filter(entry => entry.collection === 'pending'), memberCount),
+            items: next.items.map(entry => entry.collection === 'pending' ? { ...entry, collection: outcome } : entry) };
         return { stage: next, action: null };
     }
     return { stage: next, action: { kind: 'itunesCollection', itemKey: item.key, collectionId: item.collectionId, storefront: item.names[0].storefront } };
 }
 
-/** Records a collection lookup's outcome on its pending result; `skipped` and `failed` leave a plausible result out (incomplete). */
-export function recordItunesCollection(stage: LookupItunesStage, itemKey: string, outcome: 'fetched' | 'missing' | 'failed' | 'skipped'): LookupItunesStage {
-    if (!stage.items.some(item => item.key === itemKey && item.collection === 'pending')) return stage;
-    return { ...stage, complete: stage.complete && (outcome === 'fetched' || outcome === 'missing'),
+/**
+ * Records a collection lookup's outcome on its pending result; `skipped` and `failed` leave a plausible result out (incomplete; for
+ * a review's exact-count flag, as leaveOut says with `memberCount`).
+ */
+export function recordItunesCollection(stage: LookupItunesStage, itemKey: string, outcome: 'fetched' | 'missing' | 'failed' | 'skipped', memberCount?: number): LookupItunesStage {
+    const pending = stage.items.filter(item => item.key === itemKey && item.collection === 'pending');
+    if (!pending.length) return stage;
+    return { ...stage, ...leaveOut(stage, outcome === 'fetched' || outcome === 'missing' ? [] : pending, memberCount),
         items: stage.items.map(item => item.key === itemKey && item.collection === 'pending' ? { ...item, collection: outcome } : item) };
 }
 
 /**
  * iTunes stayed unavailable through its automatic retries: nothing more is sent to it, and the run continues with what it has (the
- * view reports iTunes unavailable). A result left without its collection lookup makes the stage incomplete; skipped searches do not.
+ * view reports iTunes unavailable). A result left without its collection lookup makes the stage incomplete (for a review's
+ * exact-count flag, as leaveOut says with `memberCount`); skipped searches do not.
  */
-export function itunesUnavailable(stage: LookupItunesStage): LookupItunesStage {
-    const left = stage.items.some(item => item.collection === 'pending');
-    return { ...stage, state: 'unavailable', requestIndex: stage.requests.length, complete: stage.complete && !left,
+export function itunesUnavailable(stage: LookupItunesStage, memberCount?: number): LookupItunesStage {
+    return { ...stage, state: 'unavailable', requestIndex: stage.requests.length, ...leaveOut(stage, stage.items.filter(item => item.collection === 'pending'), memberCount),
         items: stage.items.map(item => item.collection === 'pending' ? { ...item, collection: 'failed' } : item) };
 }
 

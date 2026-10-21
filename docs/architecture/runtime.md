@@ -241,7 +241,8 @@ by `_id`, so the application account needs insert/update on that collection. The
 lookup response cache stays process-local: each lookup worker keeps its own.
 
 Metadata lookup jobs live in `adminImportLookups`, one record per import project
-(`_id` is the project's `_id`; a new run replaces the previous one). A record
+or existing-Album review (`_id` is the project's `_id`; a new run replaces the
+previous one). A record
 holds its run number, state (`queued`, `running`, `retrying`, `complete`,
 `unavailable`, `stopped` or `superseded`), the granting administrator and a
 one-hour grant, the bound file set, the planned queries and progress, at most 25
@@ -259,8 +260,8 @@ is idle while imports are disabled. The required index
 `admin_import_lookup_worker` (`{ state: 1, leaseUntil: 1, retryAt: 1 }`) also
 creates the collection at startup, so no transaction ever creates it, and
 `requiredIndexRevision` was then `required-indexes-v10-metadata-lookups`. The
-application account needs insert/update on `adminImportLookups`. Import
-documents gain `lookupGate`, a never-projected fence written in the same
+application account needs insert/update on `adminImportLookups`. Import and
+review documents gain `lookupGate`, a never-projected fence written in the same
 transaction as every lookup run started, every lookup state change and every
 re-rank of stored candidates, which never changes the project's `revision`. It
 conflicts only with transactions that also write the import document, so the

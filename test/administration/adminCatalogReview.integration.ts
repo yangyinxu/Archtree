@@ -2,8 +2,9 @@
  * Internal
  *   Types: Change
  *   Functions: db, mutation, code, deferred, createBody, create, current, edit, apply, save, admitLookup,
- *              request, downgrade, capturedAlbumFixture
- *   Constants: actor, other, user, album, artist, first, second, albumTitle, provider
+ *              request, downgrade, capturedAlbumFixture, lookupJson, lookupMbid, reviewSearch, reviewSearches,
+ *              pairableRelease, drainLookup, withLookup
+ *   Constants: actor, other, user, album, artist, first, second, albumTitle, provider, lookupContact
  *   Variables: harness, server, base, token, userToken
  * Tests
  *   - private routing rejects anonymous, ordinary users and mismatched viewer before body; current admin reads shared reviews
@@ -52,6 +53,10 @@
  *   - a per-path save converts a review stored before Draft v2 with only the sent values as the administrator's own; a refused save converts nothing
  *   - a per-path save replays after the review became format 3, and is refused on a newer format, a format-3 draft missing its review-only values and an applied review
  *   - on a format-3 review an accepted suggestion replaces an automatic value written after its baseline, while an administrator value written since conflicts
+ *   - review lookup routes guard authentication, the current admin and the viewer before parsing, stay private and within 8 KB, and answer with 202 receipts that replay and a view with its summary
+ *   - apply is refused with ADMIN_IMPORT_LOOKUP_ACTIVE while a review run is queued, running or retrying, and admitted after it completes; a gate left blocking with a finished record does not hold apply
+ *   - a review run that can no longer send a request never holds apply: imports turned off or a grant past its end admit apply, and the worker later ends the run without a request
+ *   - metadata lookup for a review never writes the catalog collections: a run that preselects a release, a retry and the view leave Albums, Tracks, Artists and Organizations unchanged
  * @end-catalog */
 
 import assert from 'node:assert/strict';
@@ -76,6 +81,10 @@ import { migratedCatalogCreditId } from '../../src/models/catalogCredit';
 import { ImportProviderError, type AnalysisInput, type ImportAnalysisProvider } from '../../src/administration/import/adminImportProvider';
 import type { CatalogReviewField, CatalogReviewResponse } from '../../src/administration/catalog/adminCatalogReviewContract';
 import { startMongoReplicaSet, type MongoReplicaSetHarness } from '../support/mongoReplicaSet';
+import { getCatalogReviewLookup, retryCatalogReviewLookup, submitCatalogReviewLookup } from '../../src/administration/lookup/catalogReviewLookupRequests';
+import { runMetadataLookupOnce } from '../../src/administration/lookup/metadataLookupService';
+import { createMusicBrainzClient, musicBrainzUrls, type MusicBrainzReleaseQuery } from '../../src/administration/lookup/musicBrainzClient';
+import { emptyItunesClient, fixtureTransport, immediateGate, type LookupExchange } from '../support/metadataLookupFixtures';
 
 let harness: MongoReplicaSetHarness, server: Server, base = '', token = '', userToken = '';
 const actor = new ObjectId(), other = new ObjectId(), user = new ObjectId(), album = new ObjectId(), artist = new ObjectId(), first = new ObjectId(), second = new ObjectId();
@@ -109,7 +118,9 @@ before(async () => {
     const address = server.address(); assert.ok(address && typeof address !== 'string'); base = `http://127.0.0.1:${address.port}`;
 });
 beforeEach(async () => {
-    for (const name of ['users', 'authSessions', 'adminAlbumImports', 'adminImportAnalysisSlots', 'albums', 'artists', 'audioTracks', 'organizations']) await db().collection(name).deleteMany({});
+    for (const name of ['users', 'authSessions', 'adminAlbumImports', 'adminImportAnalysisSlots', 'albums', 'artists', 'audioTracks', 'organizations', 'adminImportLookups', 'adminMetadataLookupGates']) {
+        await db().collection(name).deleteMany({});
+    }
     process.env.FINITUDE_ADMIN_IMPORTS_ENABLED = 'true';
     const account = { _id: actor, email: 'review-admin@example.test', emailVerified: true, role: 'admin' }, ordinary = { _id: user, email: 'review-user@example.test', emailVerified: true, role: 'user' };
     await db().collection('users').insertMany([account, ordinary, { _id: other, role: 'admin' }]);
@@ -175,6 +186,21 @@ test('review projects never enter legacy import inventory/read/mutations/asset/d
     let put = 0; const storage = { put: async () => { put++; throw new Error(); } } as unknown as ImportObjectStorage;
     process.env.FINITUDE_ADMIN_IMPORT_PRIVATE_STORAGE_READY = 'true';
     try { await assert.rejects(uploadAdminImportAsset(String(actor), id, slotId, mutation(1), { size: 1, mimetype: 'audio/mpeg', originalname: 'Song.mp3', buffer: Buffer.from('x') } as Express.Multer.File, storage), code('ADMIN_IMPORT_NOT_FOUND')); } finally { process.env.FINITUDE_ADMIN_IMPORT_PRIVATE_STORAGE_READY = 'false'; }
+    // Its metadata lookup is served only under /catalog-reviews: the import lookup routes never find it.
+    for (const [method, path, body] of [['GET', `/imports/${id}/lookup`, undefined], ['POST', `/imports/${id}/lookup`, { ...mutation(1), kind: 'album', text: 'Existing Album' }],
+        ['POST', `/imports/${id}/lookup/retry`, mutation(1)]] as const) {
+        const response = await request(path, method, body);
+        assert.deepEqual([response.status, await response.json()], [404, { code: 'ADMIN_IMPORT_NOT_FOUND' }], `${method} ${path}`);
+    }
+    // Nor do the review lookup routes find an import, which they leave unchanged.
+    const imported = await importCollection().findOne({ _id: new ObjectId(legacy.item.id) });
+    for (const [method, path, body, expected] of [['GET', `/catalog-reviews/${legacy.item.id}/lookup`, undefined, 'ADMIN_CATALOG_REVIEW_NOT_FOUND'],
+        ['POST', `/catalog-reviews/${legacy.item.id}/lookup`, { ...mutation(1), kind: 'album', text: 'Existing Album' }, 'ADMIN_IMPORT_NOT_FOUND'],
+        ['POST', `/catalog-reviews/${legacy.item.id}/lookup/retry`, mutation(1), 'ADMIN_IMPORT_NOT_FOUND']] as const) {
+        const response = await request(path, method, body);
+        assert.deepEqual([response.status, await response.json()], [404, { code: expected }], `${method} ${path}`);
+    }
+    assert.deepEqual(await importCollection().findOne({ _id: new ObjectId(legacy.item.id) }), imported);
     assert.equal(put, 0); assert.equal((await current(id)).item.revision, 1);
 });
 test('source status distinguishes changed metadata and unavailable lifecycle and prevents apply without blocking private draft repair', async () => {
@@ -1157,3 +1183,158 @@ test('on a format-3 review an accepted suggestion replaces an automatic value wr
     assert.deepEqual([review.item.draft.album.title, doc.draftOrigins!['album:title'], review.item.suggestions[0].decision, doc.draftVersion], ['Proposed Album', 'administrator', 'accepted', 3]);
     assert.deepEqual((doc.draft as typeof review.item.draft).tracks.map(track => track.artists), [[], []]);
 });
+
+const lookupContact = 'lookup-operator@example.test';
+const lookupJson = (url: string, body: unknown): LookupExchange => ({ url, status: 200, headers: { 'content-type': 'application/json' }, body });
+const lookupMbid = (index: number) => `0000000d-0000-4000-8000-${String(index).padStart(12, '0')}`;
+const reviewSearch = (query: MusicBrainzReleaseQuery, releases: [string, number][]) => lookupJson(musicBrainzUrls.releaseSearch(query).href, { count: releases.length, offset: 0,
+    releases: releases.map(([id, trackCount], index) => ({ id, title: `Synthetic Release ${index}`, score: 100 - index, 'track-count': trackCount })) });
+/** The review's two searches (its saved title with and without its primary Artist), each finding `releases`. */
+const reviewSearches = (releases: [string, number][] = []) => [reviewSearch({ release: 'Existing Album', artist: 'Existing Artist' }, releases), reviewSearch({ release: 'Existing Album' }, releases)];
+/** A two-track release credited to Existing Artist with a label, whose one-minute tracks pair with the review's members. */
+const pairableRelease = (id: string) => [lookupJson(musicBrainzUrls.release(id).href, { id, title: 'Looked Up Album', date: '2019-04-01',
+    'artist-credit': [{ name: 'Existing Artist', joinphrase: '', artist: { id: lookupMbid(30), name: 'Existing Artist' } }],
+    'label-info': [{ 'catalog-number': 'SYN-1', label: { id: lookupMbid(40), name: 'Looked Up Label' } }],
+    media: [{ position: 1, format: 'CD', tracks: [60_000, 60_000].map((length, index) => ({ position: index + 1, number: String(index + 1), title: `Looked Up Track ${index + 1}`, length,
+        recording: { id: lookupMbid(900 + index), length } })) }] }),
+    lookupJson(musicBrainzUrls.artistAliases(lookupMbid(30)).href, { id: lookupMbid(30), name: 'Existing Artist', aliases: [] }),
+    lookupJson(musicBrainzUrls.labelAliases(lookupMbid(40)).href, { id: lookupMbid(40), name: 'Looked Up Label', aliases: [] })];
+/** Runs the lookup worker over fixture MusicBrainz answers (iTunes answers nothing) until nothing is due; returns what was sent. */
+async function drainLookup(exchanges: LookupExchange[]) {
+    const fixture = fixtureTransport(exchanges), musicBrainz = createMusicBrainzClient({ gate: immediateGate(), transport: fixture.transport, sleep: async () => undefined });
+    for (let tick = 0; tick < 10 && await runMetadataLookupOnce({ musicBrainz, itunes: emptyItunesClient() }); tick++);
+    return fixture.requests;
+}
+/** Runs `work` with the metadata lookup operator contact configured. */
+async function withLookup(work: () => Promise<void>) {
+    process.env.FINITUDE_ADMIN_METADATA_LOOKUP_CONTACT = lookupContact;
+    try { await work(); } finally { delete process.env.FINITUDE_ADMIN_METADATA_LOOKUP_CONTACT; }
+}
+
+test('review lookup routes guard authentication, the current admin and the viewer before parsing, stay private and within 8 KB, and answer with 202 receipts that replay and a view with its summary', () => withLookup(async () => {
+    const review = await create(), id = review.item.id, _id = new ObjectId(id), path = `/catalog-reviews/${id}/lookup`;
+    const raw = (route: string, body: string, access = '', headers: Record<string, string> = {}) => fetch(base + '/api/admin/v1' + route, { method: 'POST',
+        headers: { ...(access ? { Authorization: `Bearer ${access}` } : {}), 'Content-Type': 'application/json', ...headers }, body });
+    const before = await importCollection().findOne({ _id });
+    const anonymous = await raw(path, '{broken');
+    assert.deepEqual([anonymous.status, anonymous.headers.get('cache-control')], [401, 'private, no-store']);
+    assert.equal((await raw(`${path}/retry`, '{broken', userToken)).status, 403);
+    assert.equal((await fetch(base + '/api/admin/v1' + path, { headers: { Cookie: `session_token=${token}`, 'X-Finitude-Account-Viewer': String(other) } })).status, 409);
+    // Submissions and retries are a few fields: 9 KB is refused, whatever the path's case.
+    const padding = 'p'.repeat(9 * 1024);
+    for (const route of [path, `${path}/retry`, path.replace(/lookup$/, 'LOOKUP'), `${path.replace(/lookup$/, 'Lookup')}/Retry`]) {
+        assert.equal((await request(route, 'POST', { ...mutation(1), kind: 'album', text: 'Existing Album', padding })).status, 413, route);
+    }
+    // Every other review body keeps its own limit: the same 9 KB reaches an apply's parser, which refuses the unknown key.
+    const padded = await request(`/catalog-reviews/${id}/apply`, 'POST', { ...mutation(1), fields: [], padding });
+    assert.deepEqual([padded.status, await padded.json()], [400, { code: 'ADMIN_IMPORT_INVALID_INPUT' }]);
+    assert.equal((await raw(path, '{broken', token)).status, 400);
+    for (const [route, value] of [[path, { ...mutation(1), kind: 'artist', text: 'Name' }], [path, { ...mutation(1), kind: 'album' }], [path, { ...mutation(1), kind: 'album', text: 'x'.repeat(1001) }],
+        [path, { operationId: 'not-a-uuid', expectedRevision: 1, kind: 'album', text: 'Name' }], [`${path}/retry`, { ...mutation(1), kind: 'album' }]] as const) {
+        const response = await request(route, 'POST', value);
+        assert.deepEqual([response.status, await response.json()], [400, { code: 'ADMIN_IMPORT_INVALID_INPUT' }], JSON.stringify(value).slice(0, 60));
+    }
+    assert.deepEqual(await importCollection().findOne({ _id }), before, 'no refusal wrote anything');
+    // Before any run the view is null and lookup is available.
+    const empty = await request(path);
+    assert.match(empty.headers.get('cache-control')!, /no-store/);
+    assert.deepEqual([empty.status, await empty.json()], [200,
+        { lookup: null, revision: 1, summary: { waiting: { lookup: false, analysis: false }, needsAnswer: { tie: false, conflicts: [] }, lookupAvailable: true } }]);
+    // A submission is a 202 receipt (the review's conversion advanced the revision once before it) that replays.
+    const body = { ...mutation(1), kind: 'album', text: 'Existing Album' };
+    const submitted = await request(path, 'POST', body), value = await submitted.json();
+    assert.deepEqual([submitted.status, value.receipt, value.item.revision, value.item.receipts.map((receipt: { kind: string }) => receipt.kind)],
+        [202, { operationId: body.operationId, kind: 'lookup', revision: 3 }, 3, ['create']]);
+    const replay = await request(path, 'POST', body);
+    assert.deepEqual([replay.status, await replay.json()], [202, value]);
+    const queued = await (await request(path)).json();
+    assert.deepEqual([queued.revision, queued.lookup.state, queued.lookup.input, queued.lookup.blocking, queued.summary.waiting], [3, 'queued',
+        { trigger: 'submitted', submitted: { kind: 'album', text: 'Existing Album' } }, true, { lookup: true, analysis: false }]);
+    const active = await request(`${path}/retry`, 'POST', mutation(3));
+    assert.deepEqual([active.status, await active.json()], [409, { code: 'ADMIN_IMPORT_LOOKUP_ACTIVE' }]);
+    await drainLookup(reviewSearches());
+    const retry = mutation(3), retried = await request(`${path}/retry`, 'POST', retry), retriedValue = await retried.json();
+    assert.deepEqual([retried.status, retriedValue.receipt], [202, { operationId: retry.operationId, kind: 'lookup-retry', revision: 4 }]);
+    assert.deepEqual(await (await request(`${path}/retry`, 'POST', retry)).json(), retriedValue);
+    // The detail never lists lookup receipts, while they bind the next change's revision.
+    assert.deepEqual((await current(id)).item.receipts.map(receipt => receipt.kind), ['create']);
+    const stale = await request(path, 'POST', { ...mutation(3), kind: 'album', text: 'Existing Album' });
+    assert.deepEqual([stale.status, await stale.json()], [409, { code: 'ADMIN_IMPORT_REVISION_CONFLICT' }]);
+    // A demoted administrator is refused before anything is read.
+    await db().collection('users').updateOne({ _id: actor }, { $set: { role: 'user' } });
+    assert.equal((await request(path)).status, 403);
+}));
+
+test('apply is refused with ADMIN_IMPORT_LOOKUP_ACTIVE while a review run is queued, running or retrying, and admitted after it completes; a gate left blocking with a finished record does not hold apply', () => withLookup(async () => {
+    const review = await create(), id = review.item.id, _id = new ObjectId(id);
+    const submitted = await submitCatalogReviewLookup(String(actor), id, { ...mutation(1), kind: 'album', text: 'Existing Album' });
+    for (const state of ['queued', 'running', 'retrying']) {
+        await db().collection('adminImportLookups').updateOne({ _id }, { $set: { state } });
+        const before = await importCollection().findOne({ _id }), catalog = await db().collection('albums').findOne({ _id: album });
+        await assert.rejects(apply(submitted), code('ADMIN_IMPORT_LOOKUP_ACTIVE'), state);
+        assert.deepEqual([await importCollection().findOne({ _id }), await db().collection('albums').findOne({ _id: album })], [before, catalog], state);
+    }
+    await db().collection('adminImportLookups').updateOne({ _id }, { $set: { state: 'queued' } });
+    await drainLookup(reviewSearches());
+    assert.equal((await db().collection('adminImportLookups').findOne({ _id }))!.state, 'complete');
+    // An earlier release's worker can end a review run without updating the review's gate: the run's own state decides.
+    await importCollection().updateOne({ _id }, { $set: { lookupGate: { fence: 9, run: 1, state: 'queued', blocking: true } } });
+    assert.equal((await getCatalogReviewLookup(String(actor), id)).summary.waiting.lookup, false);
+    const applied = await apply(await current(id));
+    assert.deepEqual([applied.item.state, applied.receipt?.kind], ['applied', 'apply']);
+}));
+
+test('a review run that can no longer send a request never holds apply: imports turned off or a grant past its end admit apply, and the worker later ends the run without a request', () => withLookup(async () => {
+    const review = await create(), id = review.item.id, _id = new ObjectId(id);
+    await submitCatalogReviewLookup(String(actor), id, { ...mutation(1), kind: 'album', text: 'Existing Album' });
+    const run = async () => (await db().collection('adminImportLookups').findOne({ _id }))!;
+    // Within its grant while lookup is available, a queued run refuses apply and the summary waits for it.
+    await assert.rejects(apply(await current(id)), code('ADMIN_IMPORT_LOOKUP_ACTIVE'));
+    assert.equal((await getCatalogReviewLookup(String(actor), id)).summary.waiting.lookup, true);
+    // With imports turned off the worker is idle and lookup unavailable: the queued run sends nothing, so apply is admitted.
+    process.env.FINITUDE_ADMIN_IMPORTS_ENABLED = 'false';
+    try {
+        assert.equal(await runMetadataLookupOnce({ now: () => new Date(Date.now() + 3 * 3_600_000) }), false);
+        assert.equal((await run()).state, 'queued');
+        assert.deepEqual((await getCatalogReviewLookup(String(actor), id)).summary.waiting, { lookup: false, analysis: false });
+        // Without the operator contact the server is unconfigured too; neither reads the run as active.
+        delete process.env.FINITUDE_ADMIN_METADATA_LOOKUP_CONTACT;
+        assert.equal((await getCatalogReviewLookup(String(actor), id)).summary.waiting.lookup, false);
+    } finally { process.env.FINITUDE_ADMIN_IMPORTS_ENABLED = 'true'; process.env.FINITUDE_ADMIN_METADATA_LOOKUP_CONTACT = lookupContact; }
+    // The same holds for a run whose grant ended while it was queued, with lookup available again.
+    await db().collection('adminImportLookups').updateOne({ _id }, { $set: { grantExpiresAt: new Date(Date.now() - 1000) } });
+    assert.equal((await getCatalogReviewLookup(String(actor), id)).summary.waiting.lookup, false);
+    const applied = await apply(await current(id));
+    assert.deepEqual([applied.item.state, applied.receipt?.kind], ['applied', 'apply']);
+    // The worker then ends the run as its grant says, before anything is sent.
+    assert.deepEqual(await drainLookup([]), []);
+    assert.deepEqual([(await run()).state, (await run()).issue], ['stopped', 'grantExpired']);
+    // A second review's queued run, still within its grant, never holds apply while imports are off either.
+    const second = await create(), secondId = new ObjectId(second.item.id);
+    await submitCatalogReviewLookup(String(actor), second.item.id, { ...mutation(1), kind: 'album', text: 'Existing Album' });
+    process.env.FINITUDE_ADMIN_IMPORTS_ENABLED = 'false';
+    try {
+        const admitted = await apply(await current(second.item.id));
+        assert.deepEqual([admitted.item.state, (await db().collection('adminImportLookups').findOne({ _id: secondId }))!.state], ['applied', 'queued']);
+    } finally { process.env.FINITUDE_ADMIN_IMPORTS_ENABLED = 'true'; }
+    // Once imports are on again, the applied review ends the run without a request.
+    assert.deepEqual(await drainLookup([]), []);
+    assert.deepEqual([(await db().collection('adminImportLookups').findOne({ _id: secondId }))!.state, (await db().collection('adminImportLookups').findOne({ _id: secondId }))!.issue],
+        ['superseded', 'projectClosed']);
+}));
+
+test('metadata lookup for a review never writes the catalog collections: a run that preselects a release, a retry and the view leave Albums, Tracks, Artists and Organizations unchanged', () => withLookup(async () => {
+    const snapshot = async () => JSON.stringify(await Promise.all(['albums', 'audioTracks', 'artists', 'organizations'].map(async name => [name, await db().collection(name).find({}).sort({ _id: 1 }).toArray()])));
+    const review = await create(), id = review.item.id, before = await snapshot();
+    await submitCatalogReviewLookup(String(actor), id, { ...mutation(1), kind: 'album', text: 'Existing Album' });
+    await drainLookup([...reviewSearches([[lookupMbid(1), 2]]), ...pairableRelease(lookupMbid(1))]);
+    const record = (await db().collection('adminImportLookups').findOne({ _id: new ObjectId(id) }))!;
+    assert.deepEqual([record.state, record.ranking.preselection?.basis, record.applied], ['complete', 'exactTrackCount', null]);
+    await retryCatalogReviewLookup(String(actor), id, mutation((await current(id)).item.revision));
+    await drainLookup([...reviewSearches([[lookupMbid(1), 2]]), ...pairableRelease(lookupMbid(1))]);
+    const read = await getCatalogReviewLookup(String(actor), id);
+    assert.deepEqual([read.lookup!.run, read.lookup!.preselection?.basis, read.lookup!.candidates.map(candidate => candidate.comparison?.subset?.pairing)], [2, 'exactTrackCount', ['unique']]);
+    assert.equal(await snapshot(), before);
+    // The review itself keeps its draft: the release's title, Artist and label are not applied.
+    assert.equal((await current(id)).item.draft.album.title, 'Existing Album');
+}));

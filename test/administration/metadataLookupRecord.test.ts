@@ -22,9 +22,15 @@
  *   - ranking reads the iTunes localized names and the check of each iTunes-only candidate; an iTunes-only candidate is admitted once, within the shared bound
  *   - automatic retries run after 30 seconds, 2 minutes and 5 minutes, or a longer Retry-After of at most a minute, then stop; a first 503/429 within seconds
  *   - every fence write increments from absent, and only queued, running and retrying runs block
+ *   - a run is active only while it can still send a request: a blocking state within its grant while lookup is available
  *   - a new run replaces the previous results and carries only the automatic count, folder use and applied values
  *   - an automatic run intent is deterministic and UUID-shaped
  *   - the worker is idle without reaching the database while imports are disabled or it is stopping, and stops cleanly
+ *   - subset admission orders releases by audio track count, fewest extra first, then unknown counts, then fewer than the members; the import order is unchanged
+ *   - subset completeness records whether a left-out release could have at least as many, or exactly as many, audio tracks as the members
+ *   - a review run starts with both completeness flags under a create grant from its catalog input, and an import run has no exact flag
+ *   - a review ranks its stored candidates in subset mode against its members, and an incomplete exact-count search never preselects the exact-count group
+ *   - the file set and ranking evidence of a project follow its purpose
  * @end-catalog */
 
 /**
@@ -45,10 +51,12 @@ import type { ImportAsset } from '../../src/administration/import/adminImportMed
 import type { AdminImportDocument } from '../../src/administration/import/adminImportService';
 import { METADATA_LOOKUP_JOB_LIMITS, SAME_AS_RELEASE_CREDIT, type LookupArtistCredit, type MusicBrainzRelease } from '../../src/administration/lookup/lookupContract';
 import {
-    automaticLookupOperationId, importLookupFileSet, isBlockingLookupState, lookupFileEvidence, lookupGateFor, lookupHitsAdmitted, lookupReportedTrackCount, lookupRetryAt,
-    admitItunesCandidate, lookupFetchedAliases, lookupStaleSlots, mergeLookupCandidates, planImportLookup, rankLookupRecord, rankLookupWithinBudget, recordLookupDetails, refreshLookupGrant, startLookupRun,
-    withCandidateRelease, type MetadataLookupRecord, type MetadataLookupState, type StoredLookupCandidate
+    automaticLookupOperationId, importLookupFileSet, isBlockingLookupState, lookupFileEvidence, lookupGateFor, lookupHitsAdmitted, lookupReportedTrackCount, lookupRetryAt, lookupRunActive,
+    admitItunesCandidate, lookupEvidenceFor, lookupFetchedAliases, lookupFileSetFor, lookupStaleSlots, lookupSubsetHitsAdmitted, mergeLookupCandidates, planImportLookup, rankLookupRecord,
+    rankLookupWithinBudget, recordLookupDetails, refreshLookupGrant, startLookupRun, withCandidateRelease, type MetadataLookupRecord, type MetadataLookupState, type StoredLookupCandidate
 } from '../../src/administration/lookup/metadataLookupRecord';
+import { catalogReviewFileEvidence, catalogReviewLookupFileSet, planCatalogReviewLookup } from '../../src/administration/lookup/lookupReviewEvidence';
+import { numberedMembers, reviewLookupDocument, storedCandidate, syntheticMbid, syntheticRelease } from '../support/catalogReviewLookupFixtures';
 import { lookupTrackCountPlausible, lookupTrackCredit } from '../../src/administration/lookup/lookupRanking';
 import { metadataLookupAccepted, runMetadataLookupOnce, startMetadataLookupWorker } from '../../src/administration/lookup/metadataLookupService';
 import { parseMusicBrainzRelease } from '../../src/administration/lookup/musicBrainzClient';
@@ -430,6 +438,17 @@ test('every fence write increments from absent, and only queued, running and ret
     assert.deepEqual(lookupGateFor({ run: 2, state: 'complete' }, { fence: -4, run: 1, state: 'queued', blocking: true }), { fence: 1, run: 2, state: 'complete', blocking: false });
 });
 
+test('a run is active only while it can still send a request: a blocking state within its grant while lookup is available', () => {
+    const now = new Date('2026-10-21T00:00:00Z'), later = new Date(now.getTime() + 1), earlier = new Date(now.getTime() - 1);
+    const states: MetadataLookupState[] = ['queued', 'running', 'retrying', 'complete', 'unavailable', 'stopped', 'superseded'];
+    assert.deepEqual(states.filter(state => lookupRunActive({ state, grantExpiresAt: later }, now, true)), ['queued', 'running', 'retrying']);
+    // Past or at its grant, the worker ends the run before sending; while lookup is unavailable it sends nothing.
+    for (const grantExpiresAt of [now, earlier, undefined, '2099-01-01T00:00:00Z']) {
+        assert.equal(lookupRunActive({ state: 'queued', grantExpiresAt } as never, now, true), false, String(grantExpiresAt));
+    }
+    assert.deepEqual([lookupRunActive({ state: 'running', grantExpiresAt: later }, now, false), lookupRunActive(null, now, true), lookupRunActive(undefined, now, true)], [false, false, false]);
+});
+
 test('a new run replaces the previous results and carries only the automatic count, folder use and applied values', () => {
     const now = new Date('2026-10-19T00:00:00Z'), fileSet = importLookupFileSet(project([asset(slotA, null), asset(slotB, null)]));
     const query = { kind: 'musicBrainzReleaseSearch' as const, query: { release: 'Synthetic Album' }, basis: 'albumText' as const };
@@ -485,4 +504,110 @@ test('the worker is idle without reaching the database while imports are disable
     await new Promise(resolve => setTimeout(resolve, 20));
     await stop();
     assert.ok(tracked >= 1);
+});
+
+test('subset admission orders releases by audio track count, fewest extra first, then unknown counts, then fewer than the members; the import order is unchanged', () => {
+    const summary = (index: number, trackCount: number, media?: { format: string | null; trackCount: number }[]) =>
+        ({ releaseId: releaseId(index), summary: { trackCount, ...(media ? { media } : {}) } as never });
+    const found = [summary(8, 10, [{ format: 'DVD-Video', trackCount: 10 }]), summary(1, 2), summary(2, 12), { releaseId: releaseId(3) }, summary(4, 10),
+        summary(5, 14, [{ format: 'CD', trackCount: 10 }, { format: 'DVD-Video', trackCount: 4 }]), summary(7, 11), { releaseId: releaseId(9), trackCount: 13 }];
+    // Ten members: the CD and the CD+DVD edition (ten audio tracks each) first in found order, then one, two and three extra, then the
+    // unknown count, then the video-only edition and the two-track one, which can pair nothing.
+    assert.deepEqual(mergeLookupCandidates([], found, 'albumText', 10, 'subset').map(candidate => candidate.releaseId),
+        [4, 5, 7, 2, 9, 3, 8, 1].map(releaseId));
+    // An import keeps admitting releases whose reported total can equal its files first, in found order.
+    const exact = [8, 3, 4, 1, 2, 5, 7, 9].map(releaseId);
+    assert.deepEqual(mergeLookupCandidates([], found, 'albumText', 10).map(candidate => candidate.releaseId), exact);
+    assert.deepEqual(mergeLookupCandidates([], found, 'albumText', 10, 'exact').map(candidate => candidate.releaseId), exact);
+    // The bound keeps the fewest-extra releases: 30 found, the five extra-heavy ones first, then 25 with one extra track.
+    const crowded = [...Array.from({ length: 5 }, (_unused, index) => summary(100 + index, 15)), ...Array.from({ length: 25 }, (_unused, index) => summary(200 + index, 11))];
+    const admitted = mergeLookupCandidates([], crowded, 'albumText', 10, 'subset');
+    assert.deepEqual(admitted.map(candidate => candidate.releaseId), Array.from({ length: 25 }, (_unused, index) => releaseId(200 + index)));
+    // Without a member count, the found order is kept in either mode.
+    assert.deepEqual(mergeLookupCandidates([], found, 'albumText', undefined, 'subset').map(candidate => candidate.releaseId), found.map(item => item.releaseId));
+});
+
+test('subset completeness records whether a left-out release could have at least as many, or exactly as many, audio tracks as the members', () => {
+    const summary = (index: number, trackCount: number, media?: { format: string | null; trackCount: number }[]) =>
+        ({ releaseId: releaseId(index), summary: { trackCount, ...(media ? { media } : {}) } as never });
+    const admitted = mergeLookupCandidates([], [summary(1, 10)], 'albumText', 10, 'subset');
+    const leftOut = (item: ReturnType<typeof summary> | { releaseId: string; trackCount?: number }) => lookupSubsetHitsAdmitted(admitted, [summary(1, 10), item], 10);
+    assert.deepEqual(lookupSubsetHitsAdmitted(admitted, [summary(1, 10)], 10), { subset: true, exact: true });
+    // More tracks could pair every member, but never exactly; an equal or unknown count could do both.
+    assert.deepEqual(leftOut(summary(2, 12)), { subset: false, exact: true });
+    assert.deepEqual(leftOut(summary(3, 10)), { subset: false, exact: false });
+    assert.deepEqual(leftOut({ releaseId: releaseId(4) }), { subset: false, exact: false });
+    assert.deepEqual(leftOut({ releaseId: releaseId(5), trackCount: 14 }), { subset: false, exact: true });
+    // Audio media only: a CD+DVD edition with ten CD tracks could match exactly; a video-only edition or fewer tracks hide nothing.
+    assert.deepEqual(leftOut(summary(6, 14, [{ format: 'CD', trackCount: 10 }, { format: 'DVD-Video', trackCount: 4 }])), { subset: false, exact: false });
+    assert.deepEqual(leftOut(summary(7, 10, [{ format: 'DVD-Video', trackCount: 10 }])), { subset: true, exact: true });
+    assert.deepEqual(leftOut(summary(8, 9)), { subset: true, exact: true });
+    // Invalid IDs never count, and an already-known release counts as admitted.
+    assert.deepEqual(lookupSubsetHitsAdmitted(admitted, [{ releaseId: 'not-an-mbid' }, { releaseId: releaseId(1).toUpperCase() }], 10), { subset: true, exact: true });
+    // An empty Album: any release could pair its no members, but only an unknown count could have exactly none.
+    assert.deepEqual(lookupSubsetHitsAdmitted([], [summary(2, 12)], 0), { subset: false, exact: true });
+    assert.deepEqual(lookupSubsetHitsAdmitted([], [{ releaseId: releaseId(4) }], 0), { subset: false, exact: false });
+});
+
+test('a review run starts with both completeness flags under a create grant from its catalog input, and an import run has no exact flag', () => {
+    const now = new Date('2026-10-19T00:00:00Z'), doc = reviewLookupDocument({ members: numberedMembers([200_000, 210_000]) });
+    const fileSet = catalogReviewLookupFileSet(doc), planned = planCatalogReviewLookup(doc);
+    const review = startLookupRun(null, { importId: doc._id, actorId: '0000000000000000000000e1', grantSource: 'create', operationId: automaticLookupOperationId(doc._id.toHexString(), 1, fileSet.digest),
+        automatic: true, input: planned.input, queries: planned.plan.queries, fileSet, now, comparison: 'subset' });
+    assert.deepEqual([review.grantSource, review.input, review.searchComplete, review.exactSearchComplete, review.automaticRuns, review.files, review.fileSetDigest],
+        ['create', { trigger: 'catalog', submitted: null }, true, true, 1, fileSet.files, fileSet.digest]);
+    // An import record keeps exactly the keys it always had, in the same order.
+    const importSet = importLookupFileSet(project([asset(slotA, null), asset(slotB, null)]));
+    const init = { importId: new ObjectId(importId), actorId: '0000000000000000000000e1', grantSource: 'upload' as const, operationId: automaticLookupOperationId(importId, 1, importSet.digest),
+        automatic: true, input: { trigger: 'tags' as const, submitted: null }, queries: [], fileSet: importSet, now };
+    const keys = ['_id', 'run', 'state', 'issue', 'outcome', 'operationId', 'actorId', 'grantSource', 'grantExpiresAt', 'automatic', 'input', 'queries', 'queryIndex', 'phase', 'fileSetDigest',
+        'files', 'attempts', 'retryAt', 'itunesStage', 'exhausted', 'candidates', 'ranking', 'aliases', 'searchComplete', 'applied', 'staleSlotIds', 'automaticRuns', 'folderUsed', 'leaseOwner',
+        'leaseUntil', 'createdAt', 'updatedAt', 'completedAt'];
+    for (const comparison of [undefined, 'exact' as const]) {
+        const imported = startLookupRun(null, { ...init, comparison });
+        assert.deepEqual(Object.keys(imported), keys, String(comparison));
+        assert.deepEqual(imported, startLookupRun(null, init));
+    }
+    // A review's next run keeps the flag fresh, whatever the previous one recorded.
+    assert.equal(startLookupRun({ ...review, exactSearchComplete: false, searchComplete: false }, { ...init, importId: doc._id, fileSet, comparison: 'subset' }).exactSearchComplete, true);
+});
+
+test('a review ranks its stored candidates in subset mode against its members, and an incomplete exact-count search never preselects the exact-count group', () => {
+    const now = new Date('2026-10-19T00:00:00Z'), doc = reviewLookupDocument({ members: numberedMembers([200_000, 210_000]) });
+    const exactRelease = syntheticRelease(syntheticMbid(1), [{ tracks: [{ lengthMs: 200_000 }, { lengthMs: 210_000 }] }]);
+    const largerRelease = syntheticRelease(syntheticMbid(2), [{ tracks: [{ lengthMs: 200_000 }, { lengthMs: 210_000 }, { lengthMs: 230_000 }] }]);
+    const candidates = [storedCandidate(largerRelease), storedCandidate(exactRelease)];
+    const ranked = rankLookupRecord(candidates, doc, now, { searchComplete: true, exactSearchComplete: true });
+    assert.deepEqual(ranked.files, catalogReviewFileEvidence(doc));
+    assert.deepEqual([ranked.candidates.map(candidate => [candidate.releaseId, candidate.status, candidate.comparison?.subset?.pairing]), ranked.groups.length, ranked.completeness],
+        [[[syntheticMbid(1), 'matching', 'unique'], [syntheticMbid(2), 'matching', 'unique']], 2, { exact: true, subset: true }]);
+    assert.deepEqual([ranked.preselection?.candidateKey, ranked.preselection?.basis], [`musicbrainz:${syntheticMbid(1)}`, 'exactTrackCount']);
+    // A search that left out a release of exactly the member count keeps the exact-count group from being preselected, and so does
+    // a record without the flag; two matching groups are never an only matching group.
+    for (const options of [{ searchComplete: true, exactSearchComplete: false }, { searchComplete: true }]) {
+        const partial = rankLookupRecord(candidates, doc, now, options);
+        assert.deepEqual([partial.preselection, partial.completeness], [null, { exact: false, subset: true }], JSON.stringify(options));
+    }
+    // With only the larger release, a complete comparison preselects its only matching group.
+    const only = rankLookupWithinBudget([storedCandidate(largerRelease)], doc, now, { searchComplete: true, exactSearchComplete: false });
+    assert.equal(only.ranking.preselection?.basis, 'onlyMatchingGroup');
+    // An import ranks exactly as before: no subset comparison or completeness, whatever exact flag is passed.
+    const importDoc = project([asset(slotA, tags({ durationMs: 200_000 })), asset(slotB, tags({ durationMs: 210_000 }))], looseManifest);
+    const imported = rankLookupRecord(candidates, importDoc, now, { searchComplete: true, exactSearchComplete: false });
+    assert.deepEqual(imported, rankLookupRecord(candidates, importDoc, now, { searchComplete: true }));
+    assert.equal('completeness' in imported, false);
+    assert.ok(imported.candidates.every(candidate => candidate.comparison === null || !('subset' in candidate.comparison)));
+    assert.equal(imported.preselection?.candidateKey, `musicbrainz:${syntheticMbid(1)}`);
+});
+
+test('the file set and ranking evidence of a project follow its purpose', () => {
+    const review = reviewLookupDocument({ members: numberedMembers([200_000, null]) });
+    const imported = project([asset(slotA, tags({ durationMs: 200_000 })), asset(slotB, null)]);
+    assert.deepEqual(lookupFileSetFor(review), catalogReviewLookupFileSet(review));
+    assert.deepEqual(lookupEvidenceFor(review), catalogReviewFileEvidence(review));
+    assert.deepEqual(lookupFileSetFor(imported), importLookupFileSet(imported));
+    assert.deepEqual(lookupEvidenceFor(imported), lookupFileEvidence(imported));
+    // A legacy import without a purpose is an import.
+    const legacy = { ...imported, purpose: undefined } as AdminImportDocument;
+    assert.deepEqual([lookupFileSetFor(legacy), lookupEvidenceFor(legacy)], [importLookupFileSet(legacy), lookupFileEvidence(legacy)]);
 });

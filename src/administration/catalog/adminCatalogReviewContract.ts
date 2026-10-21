@@ -16,7 +16,8 @@ export type CatalogReviewSource = {
     tracks: CatalogReviewSourceTrack[];
 };
 export type CatalogReviewApplied = { operationId: string; at: string; fields: CatalogReviewField[] };
-export type CatalogReviewReceipt = Omit<ImportReceipt, 'kind'> & { kind: 'create' | 'edit' | 'analyze' | 'adopt' | 'cancel-analysis' | 'apply' };
+/** `lookup` and `lookup-retry` receipts are stored and replayed, but the detail never lists them (LEGACY_REVIEW_RECEIPT_KINDS). */
+export type CatalogReviewReceipt = Omit<ImportReceipt, 'kind'> & { kind: 'create' | 'edit' | 'analyze' | 'adopt' | 'cancel-analysis' | 'apply' | 'lookup' | 'lookup-retry' };
 /**
  * A review's draft: Draft v2, plus the review-only values a review captured for metadata lookup holds (format 3): the Album's
  * expected tracklist rows (null without one) and each member's track Artist entries. Formats 1 and 2 carry neither key.
@@ -79,4 +80,7 @@ export type CatalogReviewCapture = {
 
 // GET list accepts the same filter/startedByMe/q/limit/cursor as imports; it only lists catalog reviews.
 // GET detail, POST analyze, adopt and cancel-analysis mirror import operation/revision requests.
+// GET /:id/lookup reads the review's lookup view and summary; POST /:id/lookup ({operationId, expectedRevision, kind, text}) and
+// POST /:id/lookup/retry ({operationId, expectedRevision}) queue a run with a `lookup` or `lookup-retry` receipt (8 KB bodies);
+// GET /:id/lookup/candidates/:key/artwork is a transient WebP preview (catalogReviewLookupRequests.ts, adminImportLookupCover.ts).
 // Every endpoint returns private no-store data; no asset, duplicate-decision or publication endpoint exists.
