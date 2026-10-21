@@ -150,8 +150,8 @@ Cleanup removes only owned tabs, so a user-added tab keeps its window open.
 Extension `0.1.9` enforces the selected content window itself rather than
 trusting Bilibili's search filter: each source needs a confirmed publish time
 inside the window, and undated sources are skipped with a warning. The retired
-动态 search is replaced by 专栏 article search, and the portal requires `0.1.9`
-before starting or resuming live collection.
+dynamic-post search is replaced by article search, and the portal requires
+`0.1.9` before starting or resuming live collection.
 
 `npm run stage:eb-artifact` includes this separately prepared distribution when
 present and revalidates its provenance. Prepare it before staging any release
