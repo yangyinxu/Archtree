@@ -39,6 +39,7 @@
  *   - a stale Carousel rewrite cannot resurrect a deleted Album reference
  *   - moving Carousel items persists the normalized fenced identity
  *   - Library writes roll back catalog touches when the account deletion fence has won
+ *   - legacy and Content Manager Album updates neither set, replace nor clear an expected tracklist
  * @end-catalog */
 
 import assert from 'node:assert/strict';
@@ -2269,4 +2270,148 @@ test('Library writes roll back catalog touches when the account deletion fence h
         (await getDb()!.collection('albums').findOne({ _id: albumId }))!.referenceRevision,
         0
     );
+});
+
+test('legacy and Content Manager Album updates neither set, replace nor clear an expected tracklist', async () => {
+    const db = getDb()!;
+    const albumId = new ObjectId();
+    const plainId = new ObjectId();
+    const firstTrackId = new ObjectId();
+    const secondTrackId = new ObjectId();
+    const oldCoverArtId = new ObjectId().toHexString();
+    const newCoverArtId = new ObjectId().toHexString();
+    const tracklist = {
+        source: 'itunes',
+        appliedAt: new Date('2026-10-20T08:00:00.000Z'),
+        rows: [
+            { discNumber: 1, trackNumber: 1, title: 'Synthetic Expected One', durationMs: 180_000 },
+            { discNumber: 1, trackNumber: 2, title: 'Synthetic Expected Two', durationMs: null },
+            { discNumber: 1, trackNumber: 3, title: 'Synthetic Expected Missing', durationMs: 240_000 }
+        ]
+    };
+    const replacement = { ...tracklist, source: 'musicbrainz', rows: [tracklist.rows[0]] };
+    await Promise.all([
+        db.collection('albums').insertMany([
+            {
+                _id: albumId,
+                title: 'Tracklist Before',
+                coverArtId: oldCoverArtId,
+                coverArtUrl: `/content/images/${oldCoverArtId}`,
+                audioTrackIds: [firstTrackId.toHexString()],
+                lifecycleStatus: 'ready',
+                referenceRevision: 0,
+                expectedTracklist: tracklist
+            },
+            { _id: plainId, title: 'Plain Before', audioTrackIds: [], lifecycleStatus: 'ready', referenceRevision: 0 }
+        ]),
+        db.collection('audioTracks').insertMany([firstTrackId, secondTrackId].map((_id, index) => ({
+            _id,
+            albumId: index === 0 ? albumId.toHexString() : '',
+            trackNumber: index + 1,
+            uploadStatus: 'ready',
+            publicationStatus: 'ready',
+            s3Key: _id.toHexString()
+        })))
+    ]);
+    const stored = async (id: ObjectId) => (await db.collection('albums').findOne({ _id: id }))!;
+
+    // The model writers refuse the key and every dotted path under it, in the plain and the member-replacement branch, before
+    // writing anything.
+    const refused = { statusCode: 409, code: 'catalog_expected_tracklist_operation_required' };
+    const refusedUpdates: Array<() => Promise<unknown>> = [
+        async () => Album.updateById(albumId.toHexString(), { title: 'Tracklist Renamed', expectedTracklist: replacement }),
+        async () => Album.updateById(albumId.toHexString(), { expectedTracklist: replacement }),
+        async () => Album.updateById(albumId.toHexString(), {
+            title: 'Tracklist Dotted',
+            'expectedTracklist.rows': [],
+            'expectedTracklist.source': 'musicbrainz'
+        }),
+        async () => Album.updateById(albumId.toHexString(), {
+            expectedTracklist: null,
+            audioTrackIds: [secondTrackId.toHexString(), firstTrackId.toHexString()]
+        }),
+        async () => Album.updateCoverArtById(albumId.toHexString(), oldCoverArtId, {
+            coverArtId: newCoverArtId,
+            coverArtUrl: `/content/images/${newCoverArtId}`,
+            expectedTracklist: replacement
+        }),
+        async () => Album.updateCoverArtById(albumId.toHexString(), oldCoverArtId, {
+            title: 'Tracklist Cover',
+            'expectedTracklist.appliedAt': new Date(),
+            audioTrackIds: [secondTrackId.toHexString()]
+        }),
+        async () => Album.updateCoverArtById(albumId.toHexString(), oldCoverArtId, { coverArtId: null, coverArtUrl: '', expectedTracklist: null })
+    ];
+    for (const update of refusedUpdates) await assert.rejects(update, refused);
+    let album = await stored(albumId);
+    assert.equal(album.title, 'Tracklist Before');
+    assert.equal(album.coverArtId, oldCoverArtId);
+    assert.deepEqual(album.audioTrackIds, [firstTrackId.toHexString()]);
+    assert.deepEqual(album.expectedTracklist, tracklist);
+
+    // Updates that do not name it keep it, in the plain and the member-replacement branch.
+    await Album.updateById(albumId.toHexString(), { title: 'Tracklist Renamed' });
+    await Album.updateById(albumId.toHexString(), { audioTrackIds: [secondTrackId.toHexString(), firstTrackId.toHexString()] });
+    album = await stored(albumId);
+    assert.equal(album.title, 'Tracklist Renamed');
+    assert.deepEqual(album.audioTrackIds, [firstTrackId.toHexString(), secondTrackId.toHexString()]);
+    assert.deepEqual(album.expectedTracklist, tracklist);
+    await Album.updateCoverArtById(albumId.toHexString(), oldCoverArtId, {
+        coverArtId: newCoverArtId,
+        coverArtUrl: `/content/images/${newCoverArtId}`
+    });
+    await Album.updateCoverArtById(albumId.toHexString(), newCoverArtId, {
+        title: 'Tracklist Cover',
+        audioTrackIds: [firstTrackId.toHexString()]
+    });
+    album = await stored(albumId);
+    assert.equal(album.coverArtId, newCoverArtId);
+    assert.equal(album.title, 'Tracklist Cover');
+    assert.deepEqual(album.audioTrackIds, [firstTrackId.toHexString()]);
+    assert.deepEqual(album.expectedTracklist, tracklist);
+
+    // The legacy JSON route and the Content Manager form ignore the field in their bodies.
+    const capture: { status?: number } = {};
+    await updateAlbum({
+        auth: { userId: new ObjectId().toHexString(), role: 'admin' },
+        params: { albumId: albumId.toHexString() },
+        body: { title: 'Legacy Renamed', expectedTracklist: replacement, 'expectedTracklist.rows': [] }
+    } as any, {
+        status(status: number) { capture.status = status; return this; },
+        json() { return this; }
+    } as any, (error) => { throw error; });
+    assert.equal(capture.status, 200);
+    assert.equal((await stored(albumId)).title, 'Legacy Renamed');
+    let redirectTarget = '';
+    await updateAlbumWeb({
+        auth: { userId: new ObjectId().toHexString(), role: 'admin' },
+        body: { albumId: albumId.toHexString(), title: 'Manager Renamed', expectedTracklist: JSON.stringify(replacement) }
+    } as any, {
+        redirect(target: string) { redirectTarget = target; return this; }
+    } as any, (error) => { throw error; });
+    assert.match(redirectTarget, /Album%20updated%20successfully/);
+    album = await stored(albumId);
+    assert.equal(album.title, 'Manager Renamed');
+    assert.deepEqual(album.expectedTracklist, tracklist);
+
+    // An Album without one gains none.
+    await assert.rejects(async () => Album.updateById(plainId.toHexString(), {
+        title: 'Plain Renamed',
+        expectedTracklist: tracklist,
+        'expectedTracklist.rows': tracklist.rows
+    }), refused);
+    await assert.rejects(async () => Album.updateCoverArtById(plainId.toHexString(), null, { expectedTracklist: tracklist, coverArtUrl: '' }), refused);
+    await Album.updateById(plainId.toHexString(), { title: 'Plain Renamed' });
+    const plain = await stored(plainId);
+    assert.equal(plain.title, 'Plain Renamed');
+    assert.equal('expectedTracklist' in plain, false);
+
+    // Clearing the cover keeps the tracklist too; deleting the Album then deletes its only copy.
+    await Album.updateCoverArtById(albumId.toHexString(), newCoverArtId, { coverArtId: null, coverArtUrl: '' });
+    album = await stored(albumId);
+    assert.equal(album.coverArtId, null);
+    assert.deepEqual(album.expectedTracklist, tracklist);
+    assert.equal((await deleteAlbumAndReferences(albumId.toHexString())).ownerDeleted, true);
+    assert.equal(await db.collection('albums').findOne({ _id: albumId }), null);
+    assert.equal(await db.collection('albums').countDocuments({ expectedTracklist: { $exists: true } }), 0);
 });

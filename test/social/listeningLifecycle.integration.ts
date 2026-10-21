@@ -23,6 +23,7 @@
  *   - concurrent account deletion and an in-flight report cannot leave a publication or resurrect its owner state
  *   - shared-room status requires the exact current ready playing controller and a live authority on both reports and reads
  *   - the listening-friends read pages every fresh friend in social-ID order across several listening pages
+ *   - friend listening status for a track of an Album with an expected tracklist carries none of it
  * @end-catalog */
 
 import assert from 'node:assert/strict';
@@ -494,4 +495,24 @@ test('the listening-friends read pages every fresh friend in social-ID order acr
     enabled = true;
     now += 900_001;
     await assert.rejects(api.listeningFriends(viewer.actor, 2, first.nextCursor), isError('invalid_cursor'));
+});
+
+test('friend listening status for a track of an Album with an expected tracklist carries none of it', async () => {
+    const { a, b } = await pair(), album = new ObjectId(), forbidden = ['expectedTracklist', 'Unheard Listening Row'];
+    // The track sits at row one; row two is a missing-file row that only an administrator may see.
+    await db().collection('albums').insertOne({ _id: album, title: 'Listening synthetic Album', lifecycleStatus: 'ready', audioTrackIds: [tracks[0]],
+        expectedTracklist: { source: 'musicbrainz', appliedAt: new Date(now), rows: [
+            { discNumber: 1, trackNumber: 1, title: 'Unheard Listening Row One', durationMs: 120_000 },
+            { discNumber: 1, trackNumber: 2, title: 'Unheard Listening Row Two', durationMs: null }
+        ] } });
+    await db().collection('audioTracks').updateOne({ _id: new ObjectId(tracks[0]) }, { $set: { albumId: album.toHexString(), discNumber: 1, trackNumber: 1 } });
+    await begin(a);
+    const statuses = await status(b, a);
+    assert.equal(statuses.length, 1); assert.equal(statuses[0].track.title, 'Public Audio 0');
+    const friendsPage = await api.listeningFriends(b.actor, 20);
+    assert.equal(friendsPage.items.length, 1);
+    for (const payload of [statuses, friendsPage, await api.ownListening(a.actor), await publications().find({}).toArray(), await states().find({}).toArray()]) {
+        const text = JSON.stringify(payload);
+        for (const value of forbidden) assert.equal(text.includes(value), false, value);
+    }
 });

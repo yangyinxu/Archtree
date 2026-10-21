@@ -27,6 +27,11 @@ Product behavior remains defined in [business-rules.md](../business-rules.md).
   - [Disc Number storage](#disc-number-storage)
   - [Sort key](#sort-key)
   - [Verification](#verification-4)
+- [Album expected tracklists](#album-expected-tracklists)
+  - [Expected tracklist storage](#expected-tracklist-storage)
+  - [Expected tracklist revision](#expected-tracklist-revision)
+  - [Expected tracklist writers and privacy](#expected-tracklist-writers-and-privacy)
+  - [Expected tracklist verification](#expected-tracklist-verification)
 - [MusicBrainz IDs](#musicbrainz-ids)
   - [Storage and format](#storage-and-format)
   - [Writers and privacy](#writers-and-privacy)
@@ -490,6 +495,109 @@ Draft v2 import's Disc Numbers, and `test/listener/listenerDtoShape.test.ts`
 keeps both numbers out of listener and legacy public responses.
 `test/administration/adminCatalogReview.integration.ts` covers an applied
 review's Disc Numbers and Album order committing with its receipt.
+
+## Album expected tracklists
+
+An Album may keep one expected tracklist (`expectedTracklist`): the audio
+tracklist of the release that an applied existing-Album review used. It is
+administrator information. `src/services/catalog/albumExpectedTracklist.ts`
+validates it and derives its rows; no route reads, writes or clears it yet, and
+no product rule describes it until the Web shows one.
+
+### Expected tracklist storage
+
+The stored value is `{source, appliedAt, rows}`: `source` is `musicbrainz` or
+`itunes`, `appliedAt` is a date, and each row is
+`{discNumber, trackNumber, title, durationMs}`. `parseExpectedTracklistRows`
+validates the rows, which are also a review's draft value (two container
+levels):
+
+- 1 to 100 rows at distinct Disc and Track Number positions; Disc Numbers
+  1-999 and Track Numbers 1-9999, as in the [sort key](#sort-key).
+- Titles are NFC-normalized and trimmed, required, at most 300 UTF-16 units,
+  and refused when they contain a control, invisible formatting character or
+  lone surrogate (the lookup automatic-text rule).
+- `durationMs` is a positive whole number, or `null` when unknown. Writers
+  store an unknown duration, including the iTunes 0, as `null`.
+- At most 32,768 UTF-8 bytes of the normalized, sorted rows JSON.
+- Rows are stored sorted by Disc then Track Number with a fixed key order, so
+  parsing them again returns them unchanged; writers store only parser output.
+
+It keeps no release, recording or iTunes ID and no MediaTrack reference, and it
+has no index. An Album without one has no key. `storedExpectedTracklist` reads
+a malformed stored value (a wrong source, an invalid date or refused rows) as
+none and ignores unknown top-level keys.
+
+### Expected tracklist revision
+
+A stored value enters the admin catalog revision as raw metadata only when one
+is stored, malformed values included, so Albums without one (or with `null`)
+keep their revisions byte for byte and no captured review, conversion intent,
+catalog cover operation or create retry goes stale. It is never an editable
+field and never part of a catalog snapshot. The import candidate projection
+does not read it, so import duplicate decisions and appends are unaffected.
+
+### Expected tracklist writers and privacy
+
+- No writer exists yet. A later applied existing-Album review sets or replaces
+  it, and an explicit catalog edit clears it by removing the key; both compare
+  full Album revisions, so they are stale-safe.
+- Import publication, appends, Credit edits and catalog edits `$set` only
+  named keys. `Album.updateById` and `Album.updateCoverArtById` refuse the key
+  and any dotted path under it, including their member-replacement branch,
+  with `409 catalog_expected_tracklist_operation_required` before writing
+  anything. The legacy and Content Manager Album routes build their updates
+  from named body fields and never forward it, so they cannot set or clear it
+  either.
+- Deleting the Album deletes it; no other copy exists.
+- Listener v1 and legacy public DTOs are allowlisted. The listener reads that
+  load whole Album documents also exclude it: the expanded Page's placed and
+  linked Albums (`getExpandedPageBySlug` in
+  `src/controllers/pageController.ts`), the Library page's saved and linked
+  Albums (`UserLibrary.list`) and the artist carousel's Album cursor
+  (`src/models/carousel.ts`) with `withoutExpectedTracklistProjection`, and the
+  followed-release Album pipeline with `withoutExpectedTracklistStage` right
+  after its `$match`, which keeps the release-date index bounds.
+- Rows are matched to members by position whenever they are read
+  (`expectedTrackRows`): a member's missing or invalid Disc Number counts as
+  disc 1, every member at a row's position fills it whatever its lifecycle
+  state or visibility, a row without one is a missing-file row, and a member at
+  no row's position is outside the tracklist. `expectedTracklistPlaced` checks
+  that each paired member keeps a row's position after selected number changes.
+
+Rollback: older releases ignore the field (explicit DTOs and `$set`-only
+writers), and no Album stores one before a writer exists.
+
+### Expected tracklist verification
+
+`test/catalog/albumExpectedTracklist.test.ts` covers the bounds, size,
+normalization, positions, the stored reader, derived rows and placement.
+`test/administration/revisionStability.test.ts` pins the revision of an Album
+with a stored tracklist and shows that one without it, its editable fields and
+its import candidate revision are unchanged.
+`test/listener/listenerDtoShape.test.ts` stores one on its fixture Album while
+every listener v1 and legacy public key set stays frozen.
+`test/catalog/albumLifecycle.integration.ts` shows that model updates naming
+the key or a dotted path under it are refused and write nothing, that other
+model updates (member replacement and cover updates included), the legacy Album
+route and the Content Manager form keep a tracklist, that an Album without one
+gains none, and that deleting the Album removes it.
+`test/administration/adminCatalog.integration.ts` shows that a stored tracklist
+changes the revision but no catalog item, list, PATCH, cover or track list
+response, that a title PATCH and a cover change keep it, that a PATCH naming it
+is invalid input that writes nothing, and that `null` and a removed key give
+one revision.
+`test/administration/adminCatalogReview.integration.ts` shows that an external
+tracklist change makes a review's source changed and its apply write nothing.
+`test/listener/expectedTracklistPrivacy.integration.ts` scans listener, legacy,
+Search, Page, Follow, Library and Playlist responses for anonymous callers,
+listeners and an administrator in User view, shows that row titles never match
+Search or add listener tracks, and profiles the four whole-document readers to
+show each one excludes the field;
+`test/social/musicShareLifecycle.integration.ts`,
+`test/social/listeningLifecycle.integration.ts` and
+`test/rooms/roomMediaDiscovery.integration.ts` scan share cards, friend
+listening status, Room media (service and HTTP routes) and a Room's state.
 
 ## MusicBrainz IDs
 

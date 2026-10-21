@@ -25,6 +25,7 @@ import { readyAudioStorageFilter } from '../../utils/audioStorageKey';
 import { catalogSearchFilter, withCatalogSearchUpdate } from '../../utils/catalogSearch';
 import { normalizeJoinPhrase, normalizeStoredCatalogCredits } from '../../models/catalogCredit';
 import { embeddedDiscNumber } from '../../services/audio/audioMetadataService';
+import { hasStoredExpectedTracklist } from '../../services/catalog/albumExpectedTracklist';
 import { organizationTypes } from '../../models/organization';
 import { replaceCatalogCreditsWithinTransaction } from '../../services/catalog/catalogCreditService';
 import { requireCatalogCreditWrites } from '../../config/catalogCreditRollout';
@@ -73,8 +74,9 @@ const visibility = (value: unknown) => value === undefined ? 'public' : value ==
 /** A metadata hash detects edits through legacy writers as well as this new API. */
 const revision = (value: unknown) => `cr_${createHash('sha256').update(JSON.stringify(value)).digest('base64url')}`;
 /**
- * Only a stored Disc Number or MusicBrainz ID enters the revision, so records without one keep their earlier revisions byte for
- * byte.
+ * A stored Disc Number, MusicBrainz ID or Album expected tracklist enters the revision only when one is stored, so records without
+ * one keep their earlier revisions byte for byte. The expected tracklist is never an editable field: it enters only the raw
+ * metadata, as stored.
  */
 const hasStoredDiscNumber = (doc: any) => doc.discNumber !== undefined && doc.discNumber !== null;
 const hasStoredMusicBrainzId = (doc: any) => doc.musicBrainzId !== undefined && doc.musicBrainzId !== null;
@@ -97,7 +99,7 @@ export const adminCatalogEditableFields = (kind: AdminCatalogKind, doc: any): Re
 };
 const fields = adminCatalogEditableFields;
 const stateForRevision = (kind: AdminCatalogKind, doc: any) => ({
-    fields: fields(kind, doc), rawMetadata: [doc.title, doc.name, doc.bio, doc.description, doc.birthDate, doc.releaseDate, doc.credits, doc.attributionStatus, doc.trackNumber, doc.organizationType, ...(hasStoredDiscNumber(doc) ? [doc.discNumber] : []), ...(hasStoredMusicBrainzId(doc) ? [doc.musicBrainzId] : [])], visibility: doc.visibility ?? 'public', coverArtId: doc.coverArtId ?? null,
+    fields: fields(kind, doc), rawMetadata: [doc.title, doc.name, doc.bio, doc.description, doc.birthDate, doc.releaseDate, doc.credits, doc.attributionStatus, doc.trackNumber, doc.organizationType, ...(hasStoredDiscNumber(doc) ? [doc.discNumber] : []), ...(hasStoredMusicBrainzId(doc) ? [doc.musicBrainzId] : []), ...(hasStoredExpectedTracklist(doc) ? [doc.expectedTracklist] : [])], visibility: doc.visibility ?? 'public', coverArtId: doc.coverArtId ?? null,
     coverArtUrl: doc.coverArtUrl ?? null, artistIds: doc.artistIds ?? null, albumId: doc.albumId ?? null,
     audioTrackIds: doc.audioTrackIds ?? null, creditRevision: doc.creditRevision ?? null,
     adminRevision: doc.adminRevision ?? 0, lifecycleStatus: doc.lifecycleStatus ?? null,

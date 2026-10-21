@@ -34,6 +34,7 @@
  *   - an edit that grows a review draft past 48 KB is refused and writes nothing; an oversized stored draft still accepts edits that do not grow it
  *   - a pre-Draft v2 review refuses label and visibility edits unconverted, converts once under concurrent edits, and converts when analysis or apply is its first change
  *   - a pre-Draft v2 review whose analysis was queued before deploy converts at a later edit and the worker then suggests against the legacy entry
+ *   - an external expected tracklist change makes the source changed and prevents apply
  * @end-catalog */
 
 import assert from 'node:assert/strict';
@@ -672,4 +673,28 @@ test('a pre-Draft v2 review whose analysis was queued before deploy converts at 
     const title = review.item.suggestions.find(value => value.field === 'title')!;
     review = await adoptCatalogReview(String(actor), id, { ...mutation(review.item.revision), generation: review.item.analysis.generation, selectedIds: [title.id], rejectIds: [] });
     assert.deepEqual([review.item.draft.album.title, review.item.draft.tracks[1].title, review.item.draft.album.artists], ['Proposed Album', 'Edited before dispatch', [legacyEntry]]);
+});
+
+test('an external expected tracklist change makes the source changed and prevents apply', async () => {
+    const tracklist = (secondTitle: string) => ({ source: 'musicbrainz', appliedAt: new Date('2026-10-20T08:00:00.000Z'), rows: [
+        { discNumber: 1, trackNumber: 1, title: 'Track 1', durationMs: 60_000 },
+        { discNumber: 1, trackNumber: 2, title: secondTitle, durationMs: null },
+        { discNumber: 1, trackNumber: 3, title: 'Synthetic Missing Track', durationMs: null }
+    ] });
+    await db().collection('albums').updateOne({ _id: album }, { $set: { expectedTracklist: tracklist('Track 2') } });
+    let review = await create();
+    assert.equal(review.item.sourceStatus, 'current');
+    review = await edit(review, draft => { draft.album.title = 'Reviewed Album'; });
+    assert.equal(review.item.sourceStatus, 'current'); assert.equal(review.item.capabilities.apply, true);
+    const saved = (await importCollection().findOne({ _id: new ObjectId(review.item.id) }))!;
+    await db().collection('albums').updateOne({ _id: album }, { $set: { 'expectedTracklist.rows.1.title': 'Externally Edited Track' } });
+    review = await current(review.item.id);
+    assert.equal(review.item.sourceStatus, 'changed'); assert.equal(review.item.capabilities.apply, false);
+    await assert.rejects(apply(review), code('ADMIN_CATALOG_REVIEW_SOURCE_CHANGED'));
+    // Nothing is written: the Album keeps its title and the external tracklist, and the review gains no receipt.
+    const storedAlbum = (await db().collection('albums').findOne({ _id: album }))!;
+    assert.equal(storedAlbum.title, 'Existing Album'); assert.deepEqual(storedAlbum.expectedTracklist, tracklist('Externally Edited Track'));
+    const unchanged = (await importCollection().findOne({ _id: new ObjectId(review.item.id) }))!;
+    assert.deepEqual([unchanged.revision, unchanged.receipts.length], [saved.revision, saved.receipts.length]);
+    assert.equal((await current(review.item.id)).item.applied, null);
 });

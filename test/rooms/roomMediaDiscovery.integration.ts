@@ -14,6 +14,7 @@
  *   - room media discovery requires an active social profile and an unrevoked session
  *   - room media HTTP routes retain auth, viewer, strict query and legacy response boundaries
  *   - room media search, lookup and room state never carry a credited Artist's or label's private MusicBrainz ID, for a listener or an administrator in User view
+ *   - room media search, lookup and room state never carry the expected tracklist of a member's Album
  * @end-catalog */
 
 import assert from 'node:assert/strict';
@@ -256,5 +257,38 @@ test('room media search, lookup and room state never carry a credited Artist\'s 
         }
     } finally {
         await db().collection('artists').deleteMany({ _id: artist }); await db().collection('organizations').deleteMany({ _id: label });
+    }
+});
+
+test('room media search, lookup and room state never carry the expected tracklist of a member\'s Album', async () => {
+    const who = await account(), admin = await account(true, 'admin'), api = service(), album = new ObjectId(), forbidden = ['expectedTracklist', 'Unheard Room Row'];
+    await db().collection('albums').insertOne({ _id: album, title: 'Room synthetic Album', lifecycleStatus: 'ready', audioTrackIds: [id(1)],
+        expectedTracklist: { source: 'musicbrainz', appliedAt: new Date(now), rows: [
+            { discNumber: 1, trackNumber: 1, title: 'Unheard Room Row One', durationMs: 10_000 },
+            { discNumber: 1, trackNumber: 2, title: 'Unheard Room Row Two', durationMs: null }
+        ] } });
+    await db().collection('audioTracks').insertOne({ ...media(1, 'Tracklist Melody'), albumId: album.toHexString(), discNumber: 1, trackNumber: 1 });
+    const payloads: unknown[] = [await api.searchMedia(who.actor, {}), await api.searchMedia(who.actor, { query: 'Tracklist' }), await api.mediaTrack(who.actor, id(1)), await api.eligibleMedia(who.actor)];
+    assert.equal((payloads[0] as RoomMediaPage).items[0]?.mediaTrackId, id(1));
+    // Room search matches the member's own title, never a row title.
+    assert.deepEqual((await api.searchMedia(who.actor, { query: 'Unheard' })).items, []);
+    // The HTTP routes answer the same descriptors, for a listener and for an administrator in User view (no admin header).
+    for (const caller of [who, admin]) {
+        for (const path of ['/room-media', '/room-media/search?q=Tracklist', `/room-media/${id(1)}`]) payloads.push(await json(await request(caller, path)));
+        assert.deepEqual((await json<RoomMediaPage>(await request(caller, '/room-media/search?q=Unheard'))).items, []);
+    }
+    assert.equal((payloads[payloads.length - 1] as { item: RoomMediaDescriptor | null }).item?.mediaTrackId, id(1));
+    // A room queueing the member carries it as the current item of its state, read by the service and over HTTP.
+    const rooms = createRoomService({ enabled: () => true, now: () => now, secret: () => secret, assertAuthority: async () => 1, inspectAuthority: async () => 1 });
+    const scope = await createSocialService({ enabled: () => true, secret: () => secret }).issueScope(admin.actor);
+    assert.equal((await rooms.mutate(admin.actor, { action: 'create', scopeToken: scope.scopeToken, commandId: randomUUID(), mediaTrackIds: [id(1)] })).outcome, 'applied');
+    const state = await rooms.currentRoom(admin.actor);
+    assert.equal(state?.queue.length, 1);
+    const current = await json<{ room: { queue: unknown[] } | null }>(await request(admin, '/rooms/current'));
+    assert.equal(current.room?.queue.length, 1);
+    payloads.push(state, current);
+    for (const payload of payloads) {
+        const text = JSON.stringify(payload);
+        for (const value of forbidden) assert.equal(text.includes(value), false, value);
     }
 });

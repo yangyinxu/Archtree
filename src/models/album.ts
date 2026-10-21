@@ -2,6 +2,8 @@
  * Exports
  *   Classes: Album
  *   Re-exports: AlbumCreationOutcomeUnknownError, confirmAlbumCreationAfterWriteError
+ * Internal
+ *   Functions: refuseExpectedTracklistUpdate
  * @end-catalog */
 
 import { preserveCatalogVisibilityUpdate } from '../services/catalog/catalogVisibilityService';
@@ -20,10 +22,25 @@ import { replaceReadyAlbumAudioTracks } from '../services/catalog/albumTrackLink
 import { withDerivedCoverArtUrl } from '../utils/coverArt';
 import { catalogSearchFilter, withCatalogSearchUpdate } from '../utils/catalogSearch';
 import type { AttributionStatus, CatalogCredit } from './catalogCredit';
+import type { AlbumExpectedTracklist } from '../services/catalog/albumExpectedTracklist';
 export {
     AlbumCreationOutcomeUnknownError,
     confirmAlbumCreationAfterWriteError
 } from '../repositories/catalog/albumPublicationRepository';
+
+/**
+ * Legacy and Content Manager updates never write the expected tracklist: only an applied existing-Album review sets it and an
+ * explicit catalog edit clears it. An update naming the key (or any dotted path under it) is refused before anything is written,
+ * so a writer routed here by mistake fails loudly instead of reporting a successful no-op.
+ */
+const refuseExpectedTracklistUpdate = <T extends Record<string, unknown>>(update: T): T => {
+    if (Object.keys(update).some(key => key === 'expectedTracklist' || key.startsWith('expectedTracklist.'))) {
+        throw Object.assign(new Error('The expected tracklist requires the dedicated catalog operation.'), {
+            statusCode: 409, code: 'catalog_expected_tracklist_operation_required'
+        });
+    }
+    return update;
+};
 
 /** Catalog Album record with compatibility persistence entry points. */
 export class Album {
@@ -42,6 +59,11 @@ export class Album {
     credits?: CatalogCredit[];
     attributionStatus?: AttributionStatus;
     creditRevision?: number;
+    /**
+     * Administrator-only: set only by an applied existing-Album review and cleared only by an explicit catalog edit; never in
+     * listener responses. Declared without an initializer, so a new Album stores no key.
+     */
+    expectedTracklist?: AlbumExpectedTracklist;
 
     constructor(
         title: string,
@@ -135,7 +157,7 @@ export class Album {
     static updateById(albumId: string, update: Record<string, unknown>) {
         const db = getDb();
         const albumObjectId = ObjectId.createFromHexString(albumId);
-        const normalizedUpdate = withCatalogSearchUpdate(preserveCatalogVisibilityUpdate(update), 'title');
+        const normalizedUpdate = withCatalogSearchUpdate(preserveCatalogVisibilityUpdate(refuseExpectedTracklistUpdate(update)), 'title');
         const mutate = async (session?: import('mongodb').ClientSession) => {
             const result = await db!
                 .collection('albums')
@@ -164,7 +186,7 @@ export class Album {
         expectedImageId: string | undefined | null,
         update: Record<string, unknown>
     ) {
-        const normalizedUpdate = withCatalogSearchUpdate(preserveCatalogVisibilityUpdate(update), 'title');
+        const normalizedUpdate = withCatalogSearchUpdate(preserveCatalogVisibilityUpdate(refuseExpectedTracklistUpdate(update)), 'title');
         if (Object.prototype.hasOwnProperty.call(normalizedUpdate, 'audioTrackIds')) {
             if (!Array.isArray(normalizedUpdate.audioTrackIds)) {
                 throw new Error('audioTrackIds must be an array.');

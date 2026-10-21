@@ -26,6 +26,8 @@ import {
 import { artistAlbumSection } from '../services/catalog/artistAlbumClassificationService';
 import { deleteCarouselAndPageReferences } from '../services/content/pageReferenceLifecycleService';
 import { mutateManualComposition, type ManualCompositionHooks } from '../services/catalog/manualCompositionService';
+// Listener and content reads exclude a catalog-owned administrator field.
+import { withoutExpectedTracklistProjection } from '../services/catalog/albumExpectedTracklist';
 
 const collectionId = 'carousels';
 const maximumManualCarouselItems = 500;
@@ -300,7 +302,7 @@ export class Carousel {
             const cursor = db!.collection('albums').find({ $and: [readyPublicAlbumFilter, { $or: [
                 { credits: { $elemMatch: { subjectType: 'artist', subjectId: artistId } } },
                 { _id: { $in: [...legacyDiscographyIds, ...relatedAlbumIds] } }
-            ] }] }).sort(sort).batchSize(100).maxTimeMS(3_000);
+            ] }] }).project(withoutExpectedTracklistProjection).sort(sort).batchSize(100).maxTimeMS(3_000);
             try {
                 // Classify before the output limit, so unrelated roles and non-ready Albums cannot consume slots.
                 while (content.length < itemLimit && await cursor.hasNext()) {

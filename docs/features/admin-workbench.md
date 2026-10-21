@@ -1411,6 +1411,16 @@ reviewing the latest saved state. Client confirmation dialogs retain the opened
 revision and exact publication/asset identity; a background refresh invalidates
 the confirmation rather than replacing its approved target.
 
+An Album may store an expected tracklist (`expectedTracklist`; format, writers
+and privacy in
+[catalog.md](../architecture/catalog.md#album-expected-tracklists)). No route
+reads, writes or clears it yet, and the Web does not show it. Catalog item,
+list, PATCH and cover snapshots and `GET /catalog/album/:id/tracks` never
+include it, and a PATCH that names it, as a field or at the top level, is
+`400 ADMIN_CATALOG_INVALID_INPUT` like any other unknown key. It enters the
+Album revision only when one is stored, so Albums without one keep their
+revisions. Rollback floor: none.
+
 `POST /catalog/:kind/:id/cover` takes
 `{operationId, expectedRevision, importId, slotId, expectedSourceRevision}`;
 `DELETE` takes `{operationId, expectedRevision}`. The owner digest and numeric
@@ -1762,6 +1772,15 @@ roll back to:
   iTunes-only candidate, `itunes`, `source` or `notChecked`, or a candidates
   response with `localizedName` items, so reload open workbench tabs after
   deploying or rolling back across it.
+- Expected tracklists need no floor of their own. A release before them
+  ignores a stored `expectedTracklist`: its listener DTOs are allowlisted and
+  its Album writers set fields with `$set`, so it keeps the tracklist without
+  showing or clearing it. Its revisions leave the tracklist out, so an
+  existing-Album review, MP3 conversion, catalog edit or catalog cover
+  operation captured on one side of a rollback across them reads an Album
+  holding one as changed on the other (a catalog edit or cover operation
+  answers `409 ADMIN_CATALOG_REVISION_CONFLICT`); capture it again or reload
+  open workbench tabs.
 - Credit join phrases and Disc Numbers have their own floor in the
   [catalog Credit rollout runbook](../deployment/catalog-credit-rollout-runbook.md#join-phrase-and-disc-number-rollback-floor).
 

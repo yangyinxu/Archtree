@@ -28,6 +28,7 @@
  *   - Disc and Track Numbers saved together reorder once, and an unassigned MediaTrack stores its disc without an Album write
  *   - concurrent Disc Number edits in one Album serialize and the final order reflects both
  *   - an Artist or Organization MusicBrainz ID is set, replaced and cleared through explicit edits, one per kind, and never by another caller
+ *   - an Album's stored expected tracklist changes its revision but never its snapshot, and catalog patches and cover changes neither write nor drop it
  * @end-catalog */
 
 import assert from 'node:assert/strict';
@@ -582,4 +583,68 @@ test('an Artist or Organization MusicBrainz ID is set, replaced and cleared thro
     await db().collection('organizations').insertOne({ _id: freed, name: 'Successor Label', organizationType: 'label', description: '', lifecycleStatus: 'ready' });
     await edit('organization', freed.toHexString(), mbid(2));
     assert.equal((await db().collection('organizations').findOne({ _id: freed }))!.musicBrainzId, mbid(2));
+});
+
+test('an Album\'s stored expected tracklist changes its revision but never its snapshot, and catalog patches and cover changes neither write nor drop it', async () => {
+    const actor = admin.toHexString(), albumId = album.toHexString(), path = `/api/admin/v1/catalog/album/${albumId}`;
+    const tracklist = { source: 'musicbrainz', appliedAt: new Date('2026-10-20T08:00:00.000Z'), rows: [
+        { discNumber: 1, trackNumber: 1, title: 'Unheard Catalog Row One', durationMs: 200_000 },
+        { discNumber: 1, trackNumber: 2, title: 'Unheard Catalog Row Two', durationMs: null }
+    ] };
+    const expectAbsent = (label: string, payload: unknown) => {
+        const text = JSON.stringify(payload);
+        for (const forbidden of ['expectedTracklist', 'Unheard Catalog Row']) assert.equal(text.includes(forbidden), false, `${label} carried ${forbidden}`);
+    };
+    const read = async () => (await getAdminCatalogItem(actor, 'album', albumId)).item;
+    const before = await read();
+    // A raw write (no route writes it yet) changes the revision, so earlier reviews and edits become stale.
+    await db().collection('albums').updateOne({ _id: album }, { $set: { expectedTracklist: tracklist } });
+    const stored = await read();
+    assert.notEqual(stored.revision, before.revision);
+    assert.deepEqual(stored.fields, before.fields);
+    for (const route of [path, '/api/admin/v1/catalog/album', `${path}/tracks`]) {
+        const response = await request(route); assert.equal(response.status, 200, route);
+        const body = await response.json(); expectAbsent(route, body);
+        if (route === path) assert.deepEqual(Object.keys(body.item.fields).sort(), Object.keys(before.fields).sort());
+        if (route === '/api/admin/v1/catalog/album') assert.ok(body.items.some((item: any) => item.id === albumId), 'list includes the Album');
+    }
+    // A stale revision from before the write is a conflict.
+    await assert.rejects(editAdminCatalogItem(actor, 'album', albumId, { operationId: randomUUID(), expectedRevision: before.revision, fields: { title: 'Stale title' } }),
+        code('ADMIN_CATALOG_REVISION_CONFLICT'));
+    // A title PATCH keeps the stored tracklist and answers no part of it.
+    const patched = await request(path, { operationId: randomUUID(), expectedRevision: stored.revision, fields: { title: 'Patched Synthetic Album' } });
+    assert.equal(patched.status, 200);
+    const patchBody = await patched.json(); expectAbsent('PATCH', patchBody);
+    assert.deepEqual(Object.keys(patchBody.item.fields).sort(), Object.keys(before.fields).sort());
+    let document = (await db().collection('albums').findOne({ _id: album }))!;
+    assert.equal(document.title, 'Patched Synthetic Album'); assert.deepEqual(document.expectedTracklist, tracklist);
+    // A cover change answers the same snapshot without it and keeps it stored.
+    const cleared = await fetch(`${base}${path}/cover`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ operationId: randomUUID(), expectedRevision: (await read()).revision }) });
+    assert.equal(cleared.status, 200);
+    const coverBody = await cleared.json(); expectAbsent('cover DELETE', coverBody);
+    assert.equal(coverBody.item.id, albumId); assert.equal(coverBody.coverOperation.state, 'complete');
+    assert.deepEqual(Object.keys(coverBody.item.fields).sort(), Object.keys(before.fields).sort());
+    document = (await db().collection('albums').findOne({ _id: album }))!;
+    assert.equal(document.title, 'Patched Synthetic Album'); assert.deepEqual(document.expectedTracklist, tracklist);
+    // Naming the field, inside fields or at the top level, is invalid input that writes nothing and stores no receipt.
+    const current = (await read()).revision, receipts = await db().collection('adminCatalogMutations').countDocuments();
+    for (const body of [
+        { operationId: randomUUID(), expectedRevision: current, fields: { expectedTracklist: null } },
+        { operationId: randomUUID(), expectedRevision: current, fields: { title: 'Named title', expectedTracklist: tracklist } },
+        { operationId: randomUUID(), expectedRevision: current, expectedTracklist: null },
+        { operationId: randomUUID(), expectedRevision: current, fields: { title: 'Named title' }, expectedTracklist: tracklist }
+    ]) {
+        const response = await request(path, body);
+        assert.equal(response.status, 400, JSON.stringify(body)); assert.deepEqual(await response.json(), { code: 'ADMIN_CATALOG_INVALID_INPUT' });
+    }
+    assert.equal(await db().collection('adminCatalogMutations').countDocuments(), receipts);
+    document = (await db().collection('albums').findOne({ _id: album }))!;
+    assert.equal(document.title, 'Patched Synthetic Album'); assert.deepEqual(document.expectedTracklist, tracklist);
+    // A null value reads as none: it and a removed key give one revision.
+    await db().collection('albums').updateOne({ _id: album }, { $set: { expectedTracklist: null } });
+    const nullRevision = (await read()).revision;
+    await db().collection('albums').updateOne({ _id: album }, { $unset: { expectedTracklist: '' } });
+    assert.equal((await read()).revision, nullRevision);
+    assert.equal(adminCatalogItemRevision('album', (await db().collection('albums').findOne({ _id: album }))!), nullRevision);
 });

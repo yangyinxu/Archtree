@@ -19,6 +19,8 @@ import { composePlainNameByline } from '../services/catalog/catalogByline';
 import { withReadyCatalogItemReferences } from '../services/catalog/catalogItemReferenceFenceService';
 import { touchActiveAccount, withActiveAccount } from '../services/account/accountReferenceFenceService';
 import { escapeRegex } from '../utils/search';
+// Listener and content reads exclude a catalog-owned administrator field.
+import { withoutExpectedTracklistProjection } from '../services/catalog/albumExpectedTracklist';
 
 export type LibraryContentType = 'album' | 'audioTrack';
 export type ActivitySource = 'recentlySaved' | 'recentlyPlayed';
@@ -285,7 +287,7 @@ export class UserLibrary {
                 ? db.collection('albums').find({
                     _id: { $in: albumIds },
                     ...readyPublicAlbumFilter
-                }).maxTimeMS(3_000).toArray()
+                }).project(withoutExpectedTracklistProjection).maxTimeMS(3_000).toArray()
                 : [],
             trackIds.length > 0
                 ? findPublicAudioAccessRecords({
@@ -306,7 +308,7 @@ export class UserLibrary {
             ? await db.collection('albums').find({
                 _id: { $in: linkedAlbumIds.map((id) => ObjectId.createFromHexString(id)) },
                 ...readyPublicAlbumFilter
-            }).maxTimeMS(3_000).toArray()
+            }).project(withoutExpectedTracklistProjection).maxTimeMS(3_000).toArray()
             : [];
         const trackArtistIds = tracks.flatMap((track: any) =>
             (Array.isArray(track.artistIds) ? track.artistIds : [])

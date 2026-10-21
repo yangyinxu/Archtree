@@ -23,6 +23,7 @@
  *   - revoked sessions and simultaneous account deletion cannot leave shares or resurrect outboxes
  *   - recipient deletion winning send admission leaves no orphan share, recipient budget or outbox
  *   - a share card of a track credited to an Artist and a label with private MusicBrainz IDs names them without either ID
+ *   - an album share card of an Album with an expected tracklist carries none of it
  * @end-catalog */
 
 import assert from 'node:assert/strict';
@@ -345,4 +346,21 @@ test('a share card of a track credited to an Artist and a label with private Mus
     } finally {
         await db().collection('artists').deleteMany({ _id: artist }); await db().collection('organizations').deleteMany({ _id: label });
     }
+});
+
+test('an album share card of an Album with an expected tracklist carries none of it', async () => {
+    const { a, b } = await pair(), rowTitles = ['Unshared Synthetic Row One', 'Unshared Synthetic Row Two'];
+    // The administrator-only tracklist names a missing-file row; neither its key nor any row title may reach a share.
+    await db().collection('albums').updateOne({ _id: new ObjectId(albumIds[0]) }, { $set: { expectedTracklist: { source: 'itunes', appliedAt: new Date(now),
+        rows: rowTitles.map((title, index) => ({ discNumber: 1, trackNumber: index + 1, title, durationMs: index ? null : 120_000 })) } } });
+    assert.equal((await send(a, b, albumIds[0], 'album')).outcome, 'applied');
+    const [incoming, outgoing] = [(await list(b)).items[0], (await list(a, 'outgoing')).items[0]];
+    for (const card of [incoming, outgoing]) {
+        assert.equal(card.contentType, 'album'); assert.equal(card.content?.title, 'Public album 0');
+        const text = JSON.stringify(card);
+        for (const forbidden of ['expectedTracklist', 'Unshared Synthetic Row']) assert.equal(text.includes(forbidden), false, forbidden);
+    }
+    // The share stores only references, so no copy of the tracklist outlives an Album edit.
+    const stored = JSON.stringify(await shares().find({}).toArray());
+    for (const forbidden of ['expectedTracklist', 'Unshared Synthetic Row']) assert.equal(stored.includes(forbidden), false, forbidden);
 });
