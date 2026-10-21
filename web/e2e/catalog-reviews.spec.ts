@@ -29,7 +29,8 @@ import chinese from '../../localization/locales/zh-Hans.json' with { type: 'json
 import AxeBuilder from '@axe-core/playwright';
 import sharp from 'sharp';
 import { capabilities, session, viewer } from '../src/features/admin/adminFixtures.testSupport';
-import { albumId, catalogAlbum, catalogAlbumTracks, catalogReview, reviewId, slotId, slotTwo, titleSuggestionId } from '../src/features/admin/catalogReviewFixtures.testSupport';
+import { albumId, catalogAlbum, catalogAlbumTracks, catalogAlbumTracksWithExpected, catalogReview, reviewId, slotId, slotTwo, titleSuggestionId } from '../src/features/admin/catalogReviewFixtures.testSupport';
+import type { CatalogAlbumTracks } from '../src/features/admin/catalogAlbumTracksApi';
 import type { CatalogReview, ReviewDraftChange, ReviewField } from '../src/features/admin/catalogReviewApi';
 import type { CatalogItem, CatalogKind } from '../src/features/admin/catalogApi';
 
@@ -61,7 +62,7 @@ const coverPalettes = [['#122c3c', '#f3cda0', '#ca5e4b', '#213c4c', '#e59759'],
   ['#293242', '#d5e1e3', '#628eac', '#334a65', '#9bb8c0']];
 const privateCoverFixtures = coverPalettes.map(palette => sharp(Buffer.from(coverSvg.replace(/#[a-f0-9]{6}/g,
   color => palette[coverPalettes[0].indexOf(color)] ?? color))).png().toBuffer());
-type CatalogPresentation = { title?: string; cover?: 'ready' | 'missing' | 'failed'; additionalAlbums?: number };
+type CatalogPresentation = { title?: string; cover?: 'ready' | 'missing' | 'failed'; additionalAlbums?: number; albumTracks?: CatalogAlbumTracks };
 const remainingCatalogKinds = ['artist', 'audioTrack', 'organization'] as const;
 type RemainingCatalogKind = typeof remainingCatalogKinds[number];
 
@@ -96,8 +97,10 @@ async function setup(page: Page, administrator = true, initialReleaseDate: { yea
         releaseDate: { year: 2023 + index, month: null, day: null } } };
   });
   const otherItems = remainingCatalogKinds.flatMap(kind => remainingCatalogItems(kind));
-  // The Album's read-only members; its first ready member also opens as its own catalog page.
-  const albumTracks = catalogAlbumTracks(), [firstMember] = albumTracks.tracks;
+  // The Album's read-only members; its first ready member also opens as its own catalog page. A confirmed clear removes the
+  // expected tracklist from later reads.
+  let albumTracks = presentation.albumTracks ?? catalogAlbumTracks();
+  const [firstMember] = albumTracks.tracks;
   const memberItem: CatalogItem = { ...catalogAlbum(), kind: 'audioTrack', id: firstMember.id,
     fields: { ...catalogAlbum().fields, title: 'title' in firstMember ? firstMember.title : '', discNumber: 1, trackNumber: 1 } };
   const reads: string[] = [], writes: Write[] = [];
@@ -151,6 +154,12 @@ async function setup(page: Page, administrator = true, initialReleaseDate: { yea
       const body = request.postDataJSON(); writes.push({ path, method, body });
       expect(body.expectedRevision).toBe(album.revision);
       if (body.visibility !== undefined) expect(['public', 'hidden']).toContain(body.visibility);
+      if (body.clearExpectedTracklist !== undefined) {
+        // The Web sends a clear alone, as one explicit true.
+        expect(Object.keys(body).sort()).toEqual(['clearExpectedTracklist', 'expectedRevision', 'operationId']);
+        expect(body.clearExpectedTracklist).toBe(true);
+        albumTracks = { ...albumTracks, expected: null };
+      }
       album = { ...album, revision: `cr_${'b'.repeat(43)}`, visibility: body.visibility ?? album.visibility,
         effectiveVisibility: body.visibility ?? album.effectiveVisibility, fields: { ...album.fields, ...body.fields } };
       return route.fulfill({ json: { item: album, receipt: { operationId: body.operationId } }, headers });
@@ -501,6 +510,56 @@ for (const variant of [{ width: 320, locale: 'zh-Hans' }, { width: 768, locale: 
     await expect(page.getByRole('region', { name: label('admin.catalog.album_tracks'), exact: true })).toHaveCount(0);
     expect([...new Set(api.reads.filter(path => path.endsWith('/tracks')))]).toEqual([`/api/admin/v1/catalog/album/${albumId}/tracks`]);
     expect(api.writes).toEqual([]);
+  });
+}
+
+for (const variant of localizedViewports) {
+  test(`an Album's expected tracklist shows rows without a file and clears at the latest revision through a confirmation at ${variant.width}px ${variant.locale}`, async ({ page }) => {
+    locale = variant.locale;
+    await page.setViewportSize({ width: variant.width, height: variant.width === 1280 ? 720 : 844 });
+    const api = await setup(page, true, null, { albumTracks: catalogAlbumTracksWithExpected() });
+    await enter(page, `/finitude/admin/catalog/album/${albumId}`);
+    const tracks = page.getByRole('region', { name: label('admin.catalog.album_tracks'), exact: true });
+    // label() cannot expand plurals, so the summary is found by its untranslated source name.
+    await expect(tracks.getByText(/MusicBrainz/)).toBeVisible();
+    await expect(tracks.getByText(label('admin.catalog.album_expected_copy'), { exact: true })).toBeVisible();
+    const rows = tracks.getByRole('list', { name: label('admin.catalog.album_expected'), exact: true }).getByRole('listitem');
+    await expect(rows).toHaveCount(4);
+    await expect(rows.nth(1)).toContainText('Synthetic expected interlude'); await expect(rows.nth(1).getByRole('link')).toHaveCount(0);
+    await expect(tracks.getByText(label('admin.catalog.album_expected_no_file'), { exact: true })).toHaveCount(2);
+    await expect(tracks.getByRole('heading', { level: 3, name: label('admin.catalog.album_expected_outside'), exact: true })).toBeVisible();
+    await expect(tracks.getByText(label('admin.catalog.album_expected_upload_only'), { exact: true })).toBeVisible();
+    await capture(page, '28-album-expected', variant.width); await reflow(page);
+    await tracks.getByRole('button', { name: label('admin.catalog.album_expected_clear'), exact: true }).click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByRole('heading', { name: label('admin.catalog.album_expected'), exact: true })).toBeVisible();
+    await expect(dialog.getByText(/MusicBrainz/)).toBeVisible();
+    await expect(dialog.getByText(label('admin.catalog.album_expected_none'), { exact: true })).toBeVisible();
+    // The Album changes elsewhere while the confirmation is open: it turns stale and cannot clear.
+    api.changeSource('metadata');
+    await page.evaluate(() => window.dispatchEvent(new Event('visibilitychange')));
+    await expect(dialog.getByRole('alert')).toHaveText(label('admin.catalog.confirm_stale'));
+    await expect(dialog.getByRole('button', { name: label('admin.catalog.album_expected_clear'), exact: true })).toBeDisabled();
+    expect(api.writes).toEqual([]);
+    await dialog.getByRole('button', { name: label('admin.common.cancel'), exact: true }).click();
+    await expect(dialog).toHaveCount(0);
+    // The page adopts the newer revision and rereads the tracks before a clear can be confirmed again.
+    await expect(page.getByRole('heading', { level: 1, name: 'Externally renamed Album', exact: true })).toBeVisible();
+    const clear = tracks.getByRole('button', { name: label('admin.catalog.album_expected_clear'), exact: true });
+    await expect(clear).toBeEnabled();
+    await clear.click();
+    await expect(dialog.getByRole('alert')).toHaveCount(0);
+    expect(api.writes).toEqual([]);
+    await dialog.getByRole('button', { name: label('admin.catalog.album_expected_clear'), exact: true }).click();
+    await expect(dialog).toHaveCount(0);
+    // The confirmed clear rereads the section, which shows the Album order without the tracklist.
+    await expect(tracks.getByText(/MusicBrainz/)).toHaveCount(0);
+    expect(api.writes).toHaveLength(1);
+    expect(api.writes[0]).toMatchObject({ path: `/api/admin/v1/catalog/album/${albumId}`, method: 'PATCH', body: { clearExpectedTracklist: true, expectedRevision: `cr_${'d'.repeat(43)}` } });
+    await expect(tracks.getByRole('list').getByRole('listitem')).toHaveCount(4);
+    await expect(tracks.getByText(label('admin.catalog.album_tracks_copy'), { exact: true })).toBeVisible();
+    await expect(tracks.getByRole('button')).toHaveCount(0);
+    await reflow(page);
   });
 }
 

@@ -1537,6 +1537,74 @@
       ],
       "variables": {}
     },
+    "admin.catalog.album_expected": {
+      "description": "Administrator workbench: Album catalog page, Tracks section, heading of the expected tracklist rows, the item of its clear confirmation and the accessible name of its row list.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.album_expected_clear": {
+      "description": "Administrator workbench: Album catalog page, Tracks section, button that opens, and in its confirmation applies, clearing the Album's expected tracklist.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.album_expected_clear_copy": {
+      "description": "Administrator workbench: Album catalog page, Tracks section, confirmation note that clearing removes only the expected tracklist and its rows without a file.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.album_expected_copy": {
+      "description": "Administrator workbench: Album catalog page, Tracks section, explanation shown instead of the ordering explanation when the Album keeps an expected tracklist.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.album_expected_no_file": {
+      "description": "Administrator workbench: Album catalog page, Tracks section, badge for an expected tracklist row that no track fills yet.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.album_expected_none": {
+      "description": "Administrator workbench: Album catalog page, Tracks section, confirmation value after clearing: the Album keeps no expected tracklist.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.album_expected_outside": {
+      "description": "Administrator workbench: Album catalog page, Tracks section, heading of the tracks at no expected tracklist row's Disc and Track Number, listed with missing MediaTrack records.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.album_expected_summary": {
+      "description": "Administrator workbench: Album catalog page, Tracks section, summary of the expected tracklist: its source (MusicBrainz or iTunes, untranslated), the date it was applied, its row count and how many rows have no file yet.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "date": "string",
+        "noFile": "number",
+        "rows": "number",
+        "source": "string"
+      }
+    },
+    "admin.catalog.album_expected_upload_only": {
+      "description": "Administrator workbench: Album catalog page, Tracks section, note that an Album without a primary Artist Credit cannot be appended to, so only a Content Manager Audio upload fills its rows without a file.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.catalog.album_track_linked_elsewhere": {
       "description": "Administrator workbench: Album catalog page, read-only Tracks section, badge for a member whose own Album link is absent or names another Album.",
       "delivery": [

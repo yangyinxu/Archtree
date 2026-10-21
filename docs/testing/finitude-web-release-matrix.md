@@ -129,7 +129,13 @@ Artist Credits and label read-only, saves a Disc Number change as one per-value
 change (never sending Credits, the label or visibility) and applies it, that its
 Luna button reads Use Luna AI (paid) and opens a confirmation titled as a paid
 AI service, and that a Luna label suggestion shows only as an identity hint that
-Keep current rejects.
+Keep current rejects. Another shows an Album's expected tracklist with its rows
+without a file, the members outside it and the note for an Album without a
+primary Artist Credit at 1280 px in English and 390 px in Chinese with an axe
+scan. Its open clear confirmation turns stale when the Album changes elsewhere,
+and after the page rereads the Album and its tracks, one confirmed request
+clears it at the newer revision, after which the Tracks section returns to the
+plain Album order.
 
 The historical 2026-08-19 MediaTrack amendment passed
 304/304 server tests, 214/214 Web unit/component tests, 148/148 integration

@@ -72,7 +72,23 @@ export const catalogAlbumTracks = (): CatalogAlbumTracks => ({
     { position: 2, id: '444444444444444444444444', title: 'Synthetic second track', discNumber: null, trackNumber: null, duration: '1:02:03', mediaType: 'video', visibility: 'hidden', state: 'ready', linkedElsewhere: false },
     { position: 3, id: 'c1c1c1c1c1c1c1c1c1c1c1c1', title: 'Synthetic unfinished upload', discNumber: 2, trackNumber: 3, duration: null, mediaType: 'audio', visibility: 'public', state: 'pending', linkedElsewhere: false },
     { position: 4, id: 'c2c2c2c2c2c2c2c2c2c2c2c2', state: 'missing' }
-  ]
+  ], expected: null
+});
+
+/**
+ * The same members with an applied MusicBrainz tracklist: the first and the unfinished upload fill their rows, two rows have no
+ * file, the second member sits at no row and the missing record is in neither list. Midday UTC keeps the applied date in all
+ * common time zones.
+ */
+export const catalogAlbumTracksWithExpected = (): CatalogAlbumTracks => ({
+  ...catalogAlbumTracks(), expected: {
+    source: 'musicbrainz', appliedAt: '2026-10-20T12:00:00.000Z', rows: [
+      { discNumber: 1, trackNumber: 1, title: 'Synthetic first track', durationMs: 185_000, memberIds: ['333333333333333333333333'] },
+      { discNumber: 1, trackNumber: 2, title: 'Synthetic expected interlude', durationMs: 61_000, memberIds: [] },
+      { discNumber: 2, trackNumber: 1, title: 'Synthetic second disc opening', durationMs: null, memberIds: [] },
+      { discNumber: 2, trackNumber: 3, title: 'Synthetic unfinished upload', durationMs: 240_000, memberIds: ['c1c1c1c1c1c1c1c1c1c1c1c1'] }
+    ], outsideMemberIds: ['444444444444444444444444']
+  }
 });
 
 export const reviewJson = (value: unknown, status = 200, account = viewer) => new Response(JSON.stringify(value), {

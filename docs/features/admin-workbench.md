@@ -1261,8 +1261,34 @@ linked to this Album, and a note counts stored entries that are malformed or
 repeated, since either blocks a catalog review of the Album. A legacy Album's
 note says its tracks are listed by title instead of the Disc and Track Number
 explanation. Only a ready member links to its own catalog page, where it is
-edited; the section has no ordering or editing controls, loads in its own chunk
-and rereads only when the page's Refresh is used after it loaded. Direct catalog saves also confirm the frozen
+edited; the section has no ordering or member-editing controls and loads in its
+own chunk once the Album itself has been read. It rereads after the page's
+Refresh once the Album answers, whenever the page adopts a newer Album revision
+(a confirmed edit or cover change, Load saved, or a later read such as on
+returning to the tab) and after a refused clear. When the Album keeps an
+expected tracklist, the section lists its rows by Disc then Track Number
+instead, under one ordering note: a row with members shows each member's usual
+line, which keeps its number in the order listeners receive (several members at
+one position each keep their own line, with no disc headers), and a row without
+one shows No file yet with its title, Disc and Track Numbers and duration when
+known, without a number or a link. Members at no row's position and missing
+records follow under Outside the expected tracklist, in the Album order. An
+empty Album with a tracklist shows every row as No file yet instead of the empty
+state. A summary names the source (MusicBrainz or iTunes, untranslated), the
+date it was applied in the viewer's locale and time zone, its row count and how
+many rows have no file; on an Album without a primary Artist Credit (the append
+refusal's test, read from the saved Album) that has such a row, a note says only
+a Content Manager Audio upload can fill them. On a truncated Album a row's
+member may be past the read bound, so no row is marked No file yet, no note is
+shown and the summary reads only Expected tracklist. Administrators who may edit
+the catalog see Clear expected tracklist. It opens the catalog confirmation,
+which shows the summary against No expected tracklist and says that tracks,
+files, the Album order and listeners are unchanged, and sends the clear alone at
+the Album revision the confirmation captured. It is disabled while a field edit
+is unsaved, an operation is running or unconfirmed, the Album changed elsewhere,
+the page is offline, or the Tracks list is loading or failed to load, so the
+confirmation names rows read after the revision it sends; a stale confirmation
+cannot be confirmed. Direct catalog saves also confirm the frozen
 partial patch with per-field saved and proposed values, including coupled
 Credits with their join phrases and attribution, a MediaTrack's Disc Number and
 an Artist's or Organization's MusicBrainz ID. Every Artist and Organization
@@ -1429,7 +1455,8 @@ remains counted even after an operation is cancelled.
 Existing catalog routes use metadata-digest revisions so legacy edits also cause
 conflicts: `GET /catalog/:kind`, `GET/PATCH /catalog/:kind/:id`, where `kind` is
 `artist`, `album`, `audioTrack` or `organization`. A patch contains
-`{operationId, expectedRevision, fields?, visibility?}`. Credits and attribution
+`{operationId, expectedRevision, fields?, visibility?, clearExpectedTracklist?}`
+(the last for Albums only; see below). Credits and attribution
 must be supplied together; memberships and storage keys are never editable
 fields. Snapshot Credits have the five fields `creditId`, `subjectType`,
 `subjectId`, `role` and `order`, plus `joinPhrase` only when a valid phrase is
@@ -1447,21 +1474,36 @@ their earlier revisions. A Web bundle from before this release rejects
 `discNumber` and `joinPhrase`, so reload open workbench tabs after deploying.
 Disc and Track Number edits recompute the parent's automatic order in the same
 transaction as the receipt. `GET /catalog/album/:id/tracks` returns that Tracks
-list as `{albumId, order, truncated, skipped, tracks}`. `order` is `declared` (the
-`Album.audioTrackIds` order, skipping malformed and repeated IDs as the listener
-read does) or `legacyAlbumLinks` (a legacy Album without declared IDs: its ready
-linked MediaTracks by title, the listener fallback). At most 500 members are read,
-the listener Album bound; `truncated` reports more, and `skipped` counts the
-malformed or repeated declared entries within that bound (always 0 for
-`legacyAlbumLinks`). Each member is `{position, id, title, discNumber,
-trackNumber, duration, mediaType, visibility, state, linkedElsewhere}`, where
+list as `{albumId, order, truncated, skipped, tracks, expected}`. `order` is
+`declared` (the `Album.audioTrackIds` order, skipping malformed and repeated
+IDs as the listener read does) or `legacyAlbumLinks` (a legacy Album without
+declared IDs: its ready linked MediaTracks by title, the listener fallback). At
+most 500 members are read, the listener Album bound; `truncated` reports more,
+and `skipped` counts the malformed or repeated declared entries within that
+bound (always 0 for `legacyAlbumLinks`). Each member is `{position, id, title,
+discNumber, trackNumber, duration, mediaType, visibility, state,
+linkedElsewhere}`, where
 `state` is `ready`, `pending`, `failed`, `deleting`, `unpublished` or
 `unavailable` (uploaded and published, but its stored object does not belong to
 it) and `linkedElsewhere` reports that its own `albumId` is absent or names
 another Album, or `{position, id, state: 'missing'}` for an ID without a
-record. No storage key, URL, filename, MusicBrainz ID or revision is returned;
-the read writes no catalog record and changes no revision. A missing or
-non-ready Album is `404 ADMIN_CATALOG_NOT_FOUND`. `GET /pages/:slug` and
+record. `expected` is `null` when the Album keeps no expected tracklist or a
+malformed one (an `appliedAt` outside years 0000-9999 included), and otherwise
+`{source, appliedAt, rows, outsideMemberIds}`: `source` is `musicbrainz` or
+`itunes`, `appliedAt` an ISO 8601 UTC instant with milliseconds, and each row
+`{discNumber, trackNumber, title, durationMs, memberIds}` in Disc then Track
+Number order. The rows are matched when read to the same listed member records
+(for `declared`, every lifecycle state and visibility; for `legacyAlbumLinks`,
+the ready linked MediaTracks it lists; at most the 500 listed): a member fills
+the row at its stored Disc Number (missing or invalid counts as disc 1) and
+Track Number, `memberIds` and `outsideMemberIds` (members at no row's position)
+follow the Album order, an empty `memberIds` is a row without a file, and an ID
+without a record is in neither list (it stays a `missing` member). `tracks`, its
+numbering and its states are the same with or without a tracklist. No storage
+key, URL, filename, MusicBrainz ID, release, recording or iTunes ID, or revision
+is returned; the read writes no catalog record and changes no revision. A
+missing or non-ready Album is
+`404 ADMIN_CATALOG_NOT_FOUND`. `GET /pages/:slug` and
 `PATCH /pages/:slug/items/:itemId` address one Page placement, preserving
 reusable definitions and order. Each placement includes bounded `name`,
 `sourceMode` (`manual`, `dynamic` or null) and `referenceStatus`
@@ -1477,14 +1519,29 @@ the confirmation rather than replacing its approved target.
 
 An Album may store an expected tracklist (`expectedTracklist`; format, writers
 and privacy in
-[catalog.md](../architecture/catalog.md#album-expected-tracklists)). No route
-writes or clears it yet, and the Web does not show it; an existing-Album review
-admitted to metadata lookup captures a copy of its rows (see the catalog review
-routes). Catalog item, list, PATCH and cover snapshots and
-`GET /catalog/album/:id/tracks` never include it, and a PATCH that names it, as
-a field or at the top level, is `400 ADMIN_CATALOG_INVALID_INPUT` like any other
-unknown key. It enters the Album revision only when one is stored, so Albums
-without one keep their revisions. Rollback floor: none.
+[catalog.md](../architecture/catalog.md#album-expected-tracklists)). The
+administrator Tracks read shows it as `expected`, matched to the members, and
+`PATCH /catalog/album/:id` clears it; no route sets it yet, and an
+existing-Album review admitted to metadata lookup captures a copy of its rows
+(see the catalog review routes). A clear is a top-level `clearExpectedTracklist:
+true` with `expectedRevision`, never a field: any other value, the key on
+another kind or inside `fields` is `400 ADMIN_CATALOG_INVALID_INPUT` before any
+transaction or receipt. After the full revision check (`409
+ADMIN_CATALOG_REVISION_CONFLICT`), an Album with no stored value (or `null`)
+answers `409 ADMIN_CATALOG_EXPECTED_TRACKLIST_ABSENT` and writes nothing;
+otherwise the key is removed (a malformed value too), the Album revision changes
+and the response is the ordinary `{item, receipt}`, whose snapshot never names
+the tracklist. A clear may be combined with `fields` and `visibility` in one
+update; the Web sends it alone. The receipt replays a same-body retry, and the
+same `operationId` with another body is `409
+ADMIN_CATALOG_IDEMPOTENCY_CONFLICT`. Catalog item, list, PATCH and cover
+snapshots never include it, and a PATCH that names the `expectedTracklist` key,
+as a field or at the top level, is `400 ADMIN_CATALOG_INVALID_INPUT` like any
+other unknown key. It enters the Album revision only when one is stored, so
+Albums without one keep their revisions. Rollback floor: none; reload admin Web
+tabs across deploy or rollback. A tab from before this release refuses a Tracks
+response with `expected`, and a current tab reads a response without the key as
+no tracklist.
 
 `POST /catalog/:kind/:id/cover` takes
 `{operationId, expectedRevision, importId, slotId, expectedSourceRevision}`;
@@ -1871,7 +1928,9 @@ roll back to:
   operation captured on one side of a rollback across them reads an Album
   holding one as changed on the other (a catalog edit or cover operation
   answers `409 ADMIN_CATALOG_REVISION_CONFLICT`); capture it again or reload
-  open workbench tabs.
+  open workbench tabs. A release before the Album page shows them can neither
+  show nor clear one: its Tracks read omits `expected`, and its catalog PATCH
+  refuses `clearExpectedTracklist` as an unknown key.
 - Track artist credits need no floor of their own; no collection, index or
   Web schema changes. The release before them drops each release track's
   artist credit and each medium's pregap and data tracks from MusicBrainz

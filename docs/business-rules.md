@@ -823,6 +823,32 @@ The wire protocol and operational bounds are documented in
   Track Numbers follow numbered tracks on the same disc, and duplicate or
   missing-number ties use canonical MediaTrack ID order so request order cannot
   change the result.
+- An Album may keep one expected tracklist, as rows of Disc Number, Track
+  Number, title and, when known, duration, ordered by Disc Number then Track
+  Number. It keeps no release, recording or iTunes identifier and no reference
+  to a MediaTrack, only whether it came from MusicBrainz or an iTunes-only
+  candidate and when it was applied. It holds at most 100 rows at distinct
+  positions within a bounded size, each title at most 300 characters. Only an
+  explicit existing-catalog edit clears it; imports and appends, Content
+  Manager, Luna and metadata lookup by itself never change it. Deleting the
+  Album deletes it.
+- Each expected row shows the Album's members whose Disc Number, a missing one
+  counting as disc 1, and Track Number equal the row's, whatever their
+  lifecycle state or visibility. A row with no such member is a missing-file
+  row, and a member at no row's position is shown as outside the expected
+  tracklist. Rows are derived whenever they are read, so adding, appending,
+  renumbering, hiding, unlinking or deleting a member changes which rows have a
+  file, never the expected tracklist itself.
+- The expected tracklist and its missing-file rows are administrator
+  information, shown on the Web Album page. An Album without a primary Artist
+  Credit cannot be appended to, so its Album page says that its missing-file
+  rows can be filled only by a Content Manager Audio upload. A missing-file row
+  is not a MediaTrack and has no media. Neither ever enters
+  `Album.audioTrackIds`, the Album order, playback, queues, downloads, shared
+  playback rooms (room queues, recommendations and music selection), Direct
+  Music Shares, friend listening status, Search, Library, Playlists, Carousels
+  and Page items, Follow releases, bylines, member limits or duplicate
+  candidates, or any listener, legacy public, social, iOS or Android response.
 - The guided Artist release workflow may create or reuse an Artist, create and
   link an Album through a primary Credit, and optionally create or reuse a
   dynamic Artist Album Carousel and attach it to a Page. A dynamic Artist
@@ -1058,7 +1084,9 @@ The wire protocol and operational bounds are documented in
 - Web, iOS and Android number Album MediaTrack rows by their position in that
   canonical order across the whole Album. Listener clients receive no Disc or
   Track Number, so a multi-disc Album plays and downloads in disc order without
-  disc headers or per-disc numbering.
+  disc headers or per-disc numbering. An Album's expected tracklist and its
+  missing-file rows never reach listener clients and never change this
+  numbering.
 - Album attribution is derived from its ordered, role-bearing Credits. During
   migration only, a client that receives no canonical Credits may display the
   server-maintained legacy Artist relationship as a compatibility fallback;

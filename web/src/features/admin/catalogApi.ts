@@ -36,3 +36,7 @@ export function catalogPatch(item: CatalogItem, fields: CatalogItem['fields'], v
   }
   return { expectedRevision: item.revision, ...(Object.keys(changed).length ? { fields: changed } : {}), ...(visibility !== item.visibility ? { visibility } : {}) };
 }
+/** Clears an Album's expected tracklist, alone, at the Album revision its confirmation showed. */
+export type CatalogClearExpectedPatch = { expectedRevision: string; clearExpectedTracklist: true };
+/** A frozen catalog command body: a partial field and visibility patch, or an expected tracklist clear. */
+export type CatalogEditPatch = ReturnType<typeof catalogPatch> | CatalogClearExpectedPatch;

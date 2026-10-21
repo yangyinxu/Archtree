@@ -76,7 +76,7 @@ const revision = (value: unknown) => `cr_${createHash('sha256').update(JSON.stri
 /**
  * A stored Disc Number, MusicBrainz ID or Album expected tracklist enters the revision only when one is stored, so records without
  * one keep their earlier revisions byte for byte. The expected tracklist is never an editable field: it enters only the raw
- * metadata, as stored.
+ * metadata, as stored, and an explicit clear removes the key.
  */
 const hasStoredDiscNumber = (doc: any) => doc.discNumber !== undefined && doc.discNumber !== null;
 const hasStoredMusicBrainzId = (doc: any) => doc.musicBrainzId !== undefined && doc.musicBrainzId !== null;
@@ -228,18 +228,26 @@ const receipt = async (actor: string, body: { operationId: string }, fingerprint
     await receipts().insertOne({ actor, operationId: body.operationId, fingerprint, result, expiresAt: new Date(Date.now() + 7 * 86_400_000) }, { session });
 };
 
-/** Partial metadata patches never reassign media, replace memberships, or mutate a reused entity implicitly. */
+/**
+ * Partial metadata patches never reassign media, replace memberships, or mutate a reused entity implicitly. An Album's expected
+ * tracklist is never a field: a top-level `clearExpectedTracklist: true` removes a stored one at the captured revision.
+ */
 export const editAdminCatalogItem = (actor: string, kind: AdminCatalogKind, rawId: string, raw: unknown) => {
-    const body = parseMutation(raw, ['fields', 'visibility']);
+    const body = parseMutation(raw, ['fields', 'visibility', 'clearExpectedTracklist']);
+    // Only an Album keeps an expected tracklist; the one accepted value is an explicit true.
+    const clearExpected = body.clearExpectedTracklist !== undefined;
+    if (clearExpected && (body.clearExpectedTracklist !== true || kind !== 'album')) fail(400, 'ADMIN_CATALOG_INVALID_INPUT');
     const patch = body.fields === undefined ? {} : parseFields(kind, body.fields);
     const desiredVisibility = body.visibility;
     if (desiredVisibility !== undefined && desiredVisibility !== 'public' && desiredVisibility !== 'hidden') fail(400, 'ADMIN_CATALOG_INVALID_INPUT');
-    if (!Object.keys(patch).length && desiredVisibility === undefined) fail(400, 'ADMIN_CATALOG_INVALID_INPUT');
+    if (!Object.keys(patch).length && desiredVisibility === undefined && !clearExpected) fail(400, 'ADMIN_CATALOG_INVALID_INPUT');
     const fingerprint = revision([kind, rawId, body]);
     return withCurrentAdministrator(actor, async session => {
         const previous = await replay(actor, body, fingerprint, session); if (previous) return previous;
         const doc = await readAdminCatalogRecord(kind, rawId, session); if (!doc) return fail(404, 'ADMIN_CATALOG_NOT_FOUND');
         if (revision(stateForRevision(kind, doc)) !== body.expectedRevision) fail(409, 'ADMIN_CATALOG_REVISION_CONFLICT');
+        // The confirmation named a stored tracklist; with none stored there is nothing to clear, and nothing is written.
+        if (clearExpected && !hasStoredExpectedTracklist({ expectedTracklist: doc.expectedTracklist })) fail(409, 'ADMIN_CATALOG_EXPECTED_TRACKLIST_ABSENT');
         if (desiredVisibility === 'hidden' && visibility(doc.visibility) !== 'hidden') await assertHiddenDelivery(kind, doc, session);
         const actualPatch = { ...patch };
         if (hasOwn(actualPatch, 'credits')) {
@@ -256,8 +264,9 @@ export const editAdminCatalogItem = (actor: string, kind: AdminCatalogKind, rawI
         // Another record of the same kind in any lifecycle state holds the ID: no two Artists, and no two Organizations, share one.
         if (idChanged && musicBrainzId && await getDb()!.collection(configs[kind].collection).findOne({ musicBrainzId, _id: { $ne: doc._id } }, { session, projection: { _id: 1 } })) idInUse();
         // Clearing a Disc Number removes both keys rather than storing null, so the record orders as disc 1 and keeps no stale source;
-        // clearing a MusicBrainz ID removes its key too, so the record holds none and its revision counts none.
-        const unset = { ...(discChanged && discNumber === null ? { discNumber: '', discNumberSource: '' } : {}), ...(idChanged && musicBrainzId === null ? { musicBrainzId: '' } : {}) };
+        // clearing a MusicBrainz ID or an expected tracklist removes its key too, so the record holds none and its revision counts none.
+        const unset = { ...(discChanged && discNumber === null ? { discNumber: '', discNumberSource: '' } : {}), ...(idChanged && musicBrainzId === null ? { musicBrainzId: '' } : {}),
+            ...(clearExpected ? { expectedTracklist: '' } : {}) };
         try {
             await getDb()!.collection(configs[kind].collection).updateOne({ _id: doc._id, ...configs[kind].ready }, {
                 $set: { ...withCatalogSearchUpdate(actualPatch, configs[kind].field), ...(desiredVisibility !== undefined ? { visibility: desiredVisibility } : {}),

@@ -500,10 +500,11 @@ review's Disc Numbers and Album order committing with its receipt.
 
 An Album may keep one expected tracklist (`expectedTracklist`): the audio
 tracklist of the release that an applied existing-Album review used. It is
-administrator information. `src/services/catalog/albumExpectedTracklist.ts`
-validates it and derives its rows; no route writes or clears it yet (an
-existing-Album review admitted to metadata lookup captures a private copy of its
-rows), and no product rule describes it until the Web shows one.
+administrator information, shown only on the Web Album page.
+`src/services/catalog/albumExpectedTracklist.ts` validates it and derives its
+rows; an existing-Album review admitted to metadata lookup captures a private
+copy of its rows. Its product rules are under Catalog Visibility and
+Administration in [business-rules.md](../business-rules.md).
 
 ### Expected tracklist storage
 
@@ -540,14 +541,19 @@ does not read it, so import duplicate decisions and appends are unaffected.
 
 ### Expected tracklist writers and privacy
 
-- No writer exists yet. A later applied existing-Album review sets or replaces
-  it, and an explicit catalog edit clears it by removing the key; both compare
-  full Album revisions, so they are stale-safe.
+- No writer sets it yet; a later applied existing-Album review will set or
+  replace it. An explicit catalog edit clears it: `editAdminCatalogItem` accepts
+  a top-level `clearExpectedTracklist: true` on an Album only, compares the full
+  Album revision first, refuses with
+  `409 ADMIN_CATALOG_EXPECTED_TRACKLIST_ABSENT` when nothing (or `null`) is
+  stored, and otherwise `$unset`s the key, a malformed value included, in the
+  same update and transaction as its receipt. A failed receipt aborts the
+  clear, and nothing else needs cleanup.
 - An existing-Album review stored as format 3 for metadata lookup copies the
   rows `storedExpectedTracklist` reads into its private draft
   (`album.expectedTracklist`, `null` without a valid one) and its server-only
-  capture, and never writes the Album; no route stores one yet (see the catalog
-  review routes in [admin-workbench.md](../features/admin-workbench.md)).
+  capture, and never writes the Album; no review route stores one yet (see the
+  catalog review routes in [admin-workbench.md](../features/admin-workbench.md)).
 - Import publication, appends, Credit edits and catalog edits `$set` only
   named keys. `Album.updateById` and `Album.updateCoverArtById` refuse the key
   and any dotted path under it, including their member-replacement branch,
@@ -568,15 +574,23 @@ does not read it, so import duplicate decisions and appends are unaffected.
   (`src/models/carousel.ts`) with `withoutExpectedTracklistProjection`, and the
   followed-release Album pipeline with `withoutExpectedTracklistStage` right
   after its `$match`, which keeps the release-date index bounds.
+- The administrator Tracks read (`getAdminCatalogAlbumTracks` in
+  `src/administration/catalog/adminCatalogAlbumTracks.ts`) is the only response
+  that carries rows; catalog snapshots, lists and receipts never do.
 - Rows are matched to members by position whenever they are read
   (`expectedTrackRows`): a member's missing or invalid Disc Number counts as
   disc 1, every member at a row's position fills it whatever its lifecycle
   state or visibility, a row without one is a missing-file row, and a member at
   no row's position is outside the tracklist. `expectedTracklistPlaced` checks
   that each paired member keeps a row's position after selected number changes.
+  The administrator Tracks read matches the members it lists: the declared
+  member records, or for a legacy Album without declared IDs its listed ready
+  linked MediaTracks, at most 500, so a linked upload that is not ready leaves
+  its row without a file there.
 
 Rollback: older releases ignore the field (explicit DTOs and `$set`-only
-writers), and no Album stores one before a writer exists.
+writers), and no Album stores one before a writer exists. A release before the
+Album Tracks list shows it neither returns its rows nor accepts a clear.
 
 ### Expected tracklist verification
 
@@ -593,10 +607,23 @@ model updates (member replacement and cover updates included), the legacy Album
 route and the Content Manager form keep a tracklist, that an Album without one
 gains none, and that deleting the Album removes it.
 `test/administration/adminCatalog.integration.ts` shows that a stored tracklist
-changes the revision but no catalog item, list, PATCH, cover or track list
-response, that a title PATCH and a cover change keep it, that a PATCH naming it
-is invalid input that writes nothing, and that `null` and a removed key give
-one revision.
+changes the revision but no catalog item, list, PATCH or cover response, that
+only the track list shows its rows, that a title PATCH and a cover change keep
+it, that a PATCH naming it is invalid input that writes nothing, and that
+`null` and a removed key give one revision. It also shows that a clear removes
+only the key at the captured revision, leaves the members and the listener
+Album unchanged and replays its receipt; that a stale, absent, invalid,
+non-Album or unauthorized clear writes nothing; that two concurrent clears
+commit once; and that a refused receipt keeps the tracklist.
+`test/administration/adminCatalogAlbumTracks.integration.ts` shows the rows
+matched to members of every state and visibility, rows without a file, members
+outside the tracklist and missing records in neither list, renumbered, unlinked
+and deleted members changing only which rows have a file, iTunes, malformed (an
+applied instant outside years 0000-9999 included), empty, hidden, legacy and
+oversized Albums, and that only administrators read rows.
+`web/src/features/admin/catalogAlbumTracksApi.test.ts`,
+`CatalogAlbumTracks.test.tsx` and `AdminCatalog.test.tsx` cover the strict
+schema, the rows, the summary and notes, and the clear and its confirmation.
 `test/administration/adminCatalogReview.integration.ts` shows that an external
 tracklist change makes a review's source changed and its apply write nothing.
 `test/listener/expectedTracklistPrivacy.integration.ts` scans listener, legacy,
