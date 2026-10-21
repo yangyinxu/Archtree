@@ -15,7 +15,7 @@ export function CatalogReviewConfirmation({ confirmation, disabled, onClose, onC
 }) {
   const t = useAdminText();
   const cancel = useRef<HTMLButtonElement>(null);
-  return <ModalDialog title={t(confirmation.kind === 'analyze' ? 'catalog_review.analysis_confirm' : 'catalog_review.apply_confirm')}
+  return <ModalDialog title={t(confirmation.kind === 'analyze' ? 'catalog_review.analysis_confirm_title' : 'catalog_review.apply_confirm')}
     description={t(confirmation.kind === 'analyze' ? 'catalog_review.analysis_copy' : 'catalog_review.apply_copy')}
     headerContent={<div className={styles.target}><strong>{confirmation.item.source.album.title || t('common.untitled')}</strong>
       {confirmation.kind === 'apply' && <p>{t('catalog_review.selected', { count: confirmation.fields.length })}</p>}</div>}

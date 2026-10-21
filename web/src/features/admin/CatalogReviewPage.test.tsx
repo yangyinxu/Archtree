@@ -37,6 +37,7 @@ import { AdminCatalogReviewPage } from './AdminCatalogReviewPage';
 import { AdminControls } from './AdminControls';
 import type { CatalogReview, ReviewField } from './catalogReviewApi';
 import { artistEntryKey, catalogAlbum, catalogReview, legacyCatalogReview, otherReviewId, reviewId, reviewJson, session, titleSuggestionId, trackSuggestionId, viewer } from './catalogReviewFixtures.testSupport';
+import styles from './adminStyles';
 
 function client() {
   const value = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -150,7 +151,7 @@ test('reopening and manual editing touch only the private review, preserving cat
   expect(screen.getByText('Original filename not retained')).toBeVisible();
   fireEvent.change(title, { target: { value: 'Private human correction' } });
   fireEvent.change(screen.getByRole('spinbutton', { name: '2 · Disc number' }), { target: { value: '2' } });
-  expect(screen.getByRole('button', { name: 'Run Luna review again' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Use Luna AI again (paid)' })).toBeDisabled();
   fireEvent.click(screen.getByRole('button', { name: 'Save review draft' }));
   await waitFor(() => expect(writes).toHaveLength(1));
   await waitFor(() => expect(screen.getByRole('button', { name: 'Save review draft' })).toBeDisabled());
@@ -168,13 +169,13 @@ test('Luna analysis requires its own confirmation and a lost acknowledgement nev
     if (init.method === 'POST') { bodies.push(String(init.body)); throw new TypeError('Synthetic connection loss'); }
     return reviewJson({ item, receipt: null });
   }));
-  mountPage(); fireEvent.click(await screen.findByRole('button', { name: 'Start Luna review' }));
-  const dialog = within(await screen.findByRole('dialog'));
-  expect(dialog.getByText(/may incur an AI service charge/)).toBeVisible();
+  mountPage(); fireEvent.click(await screen.findByRole('button', { name: 'Use Luna AI (paid)' }));
+  const dialog = within(await screen.findByRole('dialog', { name: 'Use Luna AI? This is a paid AI service' }));
+  expect(dialog.getByText(/It is a paid AI service and may incur a charge/)).toBeVisible();
   expect(bodies).toEqual([]);
-  fireEvent.click(dialog.getByRole('button', { name: 'Start Luna review' }));
+  fireEvent.click(dialog.getByRole('button', { name: 'Use Luna AI (paid)' }));
   const retry = await screen.findByRole('button', { name: 'Retry original operation' });
-  fireEvent.click(screen.getByRole('tab', { name: 'Review Luna suggestions' }));
+  fireEvent.click(screen.getByRole('tab', { name: 'Review Luna AI suggestions' }));
   fireEvent.click(screen.getByRole('tab', { name: 'Edit draft' }));
   fireEvent.click(screen.getByRole('button', { name: 'Refresh status' }));
   await waitFor(() => expect(screen.getByRole('button', { name: 'Refresh status' })).toBeEnabled());
@@ -184,16 +185,35 @@ test('Luna analysis requires its own confirmation and a lost acknowledgement nev
   expect(JSON.parse(bodies[0])).toMatchObject({ expectedRevision: 1 });
 });
 
+test.each([['without saved changes', false], ['with a saved change', true]] as const)('Luna AI is a secondary paid action %s, never the primary one, while its own confirmation keeps a primary confirm', async (_case, changed) => {
+  const item = catalogReview(); item.analysis = { ...item.analysis, state: 'idle', generation: 0, operationId: null, completedChunks: 0, totalChunks: 0, attemptsUsed: 0 }; item.suggestions = [];
+  if (changed) item.draft.album.title = 'Saved Album correction';
+  vi.stubGlobal('fetch', vi.fn(async () => reviewJson({ item, receipt: null })));
+  mountPage();
+  const luna = await screen.findByRole('button', { name: 'Use Luna AI (paid)' });
+  expect(luna).not.toHaveClass(styles.primary);
+  if (changed) {
+    const review = screen.getByRole('button', { name: 'Review changes to apply (1)' });
+    expect(review).toHaveClass(styles.primary);
+    // The action row keeps its order: Luna AI first, then the primary step to the saved changes.
+    expect(luna.compareDocumentPosition(review) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  } else expect(screen.queryByRole('button', { name: /^Review changes to apply/ })).not.toBeInTheDocument();
+  fireEvent.click(luna);
+  const dialog = within(await screen.findByRole('dialog', { name: 'Use Luna AI? This is a paid AI service' }));
+  expect(dialog.getByRole('button', { name: 'Use Luna AI (paid)' })).toHaveClass(styles.primary);
+  expect(dialog.getByRole('button', { name: 'Cancel' })).not.toHaveClass(styles.primary);
+});
+
 test('a durable unknown provider outcome prevents another paid generation while retaining manual review', async () => {
   const item = catalogReview(); item.analysis = { ...item.analysis, state: 'needsAttention', issue: 'providerOutcomeUnknown' };
   item.suggestions = [];
   const fetch = vi.fn(async (_path: string, _init: RequestInit) => reviewJson({ item, receipt: null })); vi.stubGlobal('fetch', fetch);
   mountPage();
-  expect(await screen.findByRole('button', { name: 'Run Luna review again' })).toBeDisabled();
+  expect(await screen.findByRole('button', { name: 'Use Luna AI again (paid)' })).toBeDisabled();
   expect(screen.getByRole('textbox', { name: 'Title' })).toBeEnabled();
   expect(screen.queryByRole('button', { name: 'Retry original operation' })).not.toBeInTheDocument();
-  fireEvent.click(screen.getByRole('tab', { name: 'Review Luna suggestions' }));
-  expect(await within(screen.getByRole('tabpanel', { name: 'Review Luna suggestions' })).findByText('Luna review needs attention. Check the issue above or continue editing manually.')).toBeVisible();
+  fireEvent.click(screen.getByRole('tab', { name: 'Review Luna AI suggestions' }));
+  expect(await within(screen.getByRole('tabpanel', { name: 'Review Luna AI suggestions' })).findByText('Luna AI needs attention. Check the issue above or continue editing manually.')).toBeVisible();
   expect(fetch.mock.calls.every(([, init]) => !init?.method || init.method === 'GET')).toBe(true);
 });
 
@@ -203,8 +223,8 @@ test('Artist-only suggestions explain separate attribution management without of
     { key: '50000000-0000-4000-8000-000000000002', name: 'A second clue', role: 'featured', joinPhrase: null, musicBrainzId: null }] }];
   const fetch = vi.fn(async () => reviewJson({ item, receipt: null })); vi.stubGlobal('fetch', fetch);
   mountPage(); await screen.findByRole('textbox', { name: 'Title' });
-  fireEvent.click(screen.getByRole('tab', { name: 'Review Luna suggestions' }));
-  const panel = within(screen.getByRole('tabpanel', { name: 'Review Luna suggestions' }));
+  fireEvent.click(screen.getByRole('tab', { name: 'Review Luna AI suggestions' }));
+  const panel = within(screen.getByRole('tabpanel', { name: 'Review Luna AI suggestions' }));
   expect(await panel.findByText('Artist and label suggestions are shown below as identity hints. Confirm attribution and the label in the original Album.')).toBeVisible();
   // Entries read as their byline: the baseline and current context, and the suggested names joined by their phrases.
   expect(await panel.findByText('A synthetic identity clue & A second clue')).toBeVisible();
@@ -226,8 +246,8 @@ test('a label suggestion is an identity hint beside the Artist hints that can on
     return reviewJson({ item, receipt: null });
   }));
   mountPage(); await screen.findByRole('textbox', { name: 'Title' });
-  fireEvent.click(screen.getByRole('tab', { name: 'Review Luna suggestions' }));
-  const panel = within(screen.getByRole('tabpanel', { name: 'Review Luna suggestions' }));
+  fireEvent.click(screen.getByRole('tab', { name: 'Review Luna AI suggestions' }));
+  const panel = within(screen.getByRole('tabpanel', { name: 'Review Luna AI suggestions' }));
   // The Disc Number is an ordinary Review item; the label is never one.
   expect(await panel.findByRole('checkbox', { name: '1 · Disc number' })).toBeInTheDocument();
   expect(panel.getAllByRole('checkbox')).toHaveLength(1);
@@ -245,8 +265,8 @@ test('a label-only review points Review at its hint, reads a missing label as no
   item.suggestions = [{ ...title, id: '666666666666666666666666', field: 'label' as const, baseline: null, value: { name: 'A synthetic label hint', musicBrainzId: null } }];
   vi.stubGlobal('fetch', vi.fn(async () => reviewJson({ item, receipt: null })));
   mountPage(); await screen.findByRole('textbox', { name: 'Title' });
-  fireEvent.click(screen.getByRole('tab', { name: 'Review Luna suggestions' }));
-  let panel = within(screen.getByRole('tabpanel', { name: 'Review Luna suggestions' }));
+  fireEvent.click(screen.getByRole('tab', { name: 'Review Luna AI suggestions' }));
+  let panel = within(screen.getByRole('tabpanel', { name: 'Review Luna AI suggestions' }));
   // Nothing is left to adopt, yet the pending hint is not "handled": the empty state points at it.
   expect(await panel.findByText('Artist and label suggestions are shown below as identity hints. Confirm attribution and the label in the original Album.')).toBeVisible();
   expect(panel.queryByRole('checkbox')).not.toBeInTheDocument();
@@ -257,8 +277,8 @@ test('a label-only review points Review at its hint, reads a missing label as no
   cleanup();
   // Kept, the hint stays readable without an action, and Review reads as handled.
   item.suggestions = [{ ...item.suggestions[0], decision: 'rejected' }];
-  mountPage(); fireEvent.click(await screen.findByRole('tab', { name: 'Review Luna suggestions' }));
-  panel = within(screen.getByRole('tabpanel', { name: 'Review Luna suggestions' }));
+  mountPage(); fireEvent.click(await screen.findByRole('tab', { name: 'Review Luna AI suggestions' }));
+  panel = within(screen.getByRole('tabpanel', { name: 'Review Luna AI suggestions' }));
   expect(await panel.findByText('Suggestions have been handled. The saved review draft has no changes to apply.')).toBeVisible();
   hint = (await panel.findByText('A synthetic label hint')).closest('article') as HTMLElement;
   expect(within(hint).queryByRole('button', { name: 'Keep current' })).not.toBeInTheDocument();
@@ -271,8 +291,8 @@ test('an Artist hint for an Album without Credits context reads the empty baseli
   mountPage(); await screen.findByRole('textbox', { name: 'Title' });
   expect(screen.getByRole('textbox', { name: 'Artist name' })).toHaveValue('');
   expect(screen.queryByRole('list', { name: 'Credits' })).not.toBeInTheDocument();
-  fireEvent.click(screen.getByRole('tab', { name: 'Review Luna suggestions' }));
-  const panel = within(screen.getByRole('tabpanel', { name: 'Review Luna suggestions' }));
+  fireEvent.click(screen.getByRole('tab', { name: 'Review Luna AI suggestions' }));
+  const panel = within(screen.getByRole('tabpanel', { name: 'Review Luna AI suggestions' }));
   const hint = (await panel.findByText('A synthetic identity clue')).closest('article')!;
   expect(within(hint as HTMLElement).getAllByText('—')).toHaveLength(2);
   expect(within(hint as HTMLElement).getByRole('button', { name: 'Keep current' })).toBeEnabled();
@@ -303,8 +323,8 @@ test('an applied historical review remains read-only on every stage and never st
   }));
   mountPage(); expect(await screen.findByRole('textbox', { name: 'Title' })).toBeDisabled();
   expect(screen.getByRole('heading', { name: 'Changes applied to the existing Album' })).toBeVisible();
-  expect(screen.queryByRole('button', { name: 'Run Luna review again' })).not.toBeInTheDocument();
-  fireEvent.click(screen.getByRole('tab', { name: 'Review Luna suggestions' }));
+  expect(screen.queryByRole('button', { name: 'Use Luna AI again (paid)' })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('tab', { name: 'Review Luna AI suggestions' }));
   expect(await screen.findByRole('checkbox', { name: 'Title' })).toBeDisabled();
   fireEvent.click(screen.getByRole('tab', { name: 'Update original Album' }));
   expect(screen.getByRole('button', { name: /^Update original Album \(/ })).toBeDisabled();
@@ -327,14 +347,14 @@ test('selected suggestion adoption and independent rejection preserve manual val
     return reviewJson({ item, receipt: null });
   }));
   const query = mountPage(); query.setQueryData(['listener', 'album', catalogAlbum().id], 'Catalog projection');
-  await screen.findByRole('textbox', { name: 'Title' }); fireEvent.click(screen.getByRole('tab', { name: 'Review Luna suggestions' }));
+  await screen.findByRole('textbox', { name: 'Title' }); fireEvent.click(screen.getByRole('tab', { name: 'Review Luna AI suggestions' }));
   const conflict = await screen.findByRole('checkbox', { name: 'Title' });
   expect(conflict).toBeDisabled();
   expect(screen.queryByRole('checkbox', { name: 'Artist name' })).not.toBeInTheDocument();
   expect(await screen.findByText('Another synthetic Artist identity hint')).toBeVisible();
   fireEvent.click(screen.getByRole('checkbox', { name: '1 · Title' }));
   fireEvent.click(screen.getByRole('tab', { name: 'Edit draft' }));
-  fireEvent.click(screen.getByRole('tab', { name: 'Review Luna suggestions' }));
+  fireEvent.click(screen.getByRole('tab', { name: 'Review Luna AI suggestions' }));
   expect(await screen.findByRole('checkbox', { name: '1 · Title' })).toBeChecked();
   expect(writes).toEqual([]);
   fireEvent.click(screen.getByRole('button', { name: 'Apply selected' }));
@@ -364,7 +384,8 @@ test('catalog application confirms only selected saved fields and invalidates pr
   await screen.findByRole('textbox', { name: 'Title' }); fireEvent.click(screen.getByRole('tab', { name: 'Update original Album' }));
   fireEvent.click(screen.getByRole('checkbox', { name: 'Update Album · Synthetic catalog Album · Title' }));
   fireEvent.click(screen.getByRole('button', { name: /^Update original Album \(/ }));
-  const dialog = within(await screen.findByRole('dialog')); expect(dialog.getByText('Selected changes: 1')).toBeVisible();
+  // The update keeps its own title; only the Luna AI confirmation is titled as a paid AI service.
+  const dialog = within(await screen.findByRole('dialog', { name: 'Confirm updating the original Album' })); expect(dialog.getByText('Selected changes: 1')).toBeVisible();
   await waitFor(() => expect(screen.getByRole('dialog')).toHaveFocus());
   expect(dialog.getByText('Saved Album correction')).toBeVisible();
   expect(dialog.queryByText('Unselected Track correction')).not.toBeInTheDocument();
@@ -516,7 +537,7 @@ test('analysis progress never makes a local edit stale, while another administra
   // A worker tick: a newer revision without an administrator receipt keeps the local edit savable.
   item = { ...item, revision: 3, analysis: { ...item.analysis, completedChunks: 2 } };
   fireEvent.click(screen.getByRole('button', { name: 'Refresh status' }));
-  await screen.findByText('Luna is reviewing in the background. You can leave this page; results will be saved here.');
+  await screen.findByText('Luna AI is running in the background. You can leave this page; results will be saved here.');
   await waitFor(() => expect(screen.getByRole('button', { name: 'Refresh status' })).toBeEnabled());
   expect(screen.queryByRole('button', { name: 'Discard local edits and load saved version' })).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'Save review draft' }));
@@ -547,15 +568,15 @@ test.each(['idle', 'running', 'empty', 'handled', 'manual', 'cancelled'] as cons
   }));
   mountPage();
   await screen.findByRole('textbox', { name: 'Title' });
-  fireEvent.click(screen.getByRole('tab', { name: 'Review Luna suggestions' }));
-  const panel = within(screen.getByRole('tabpanel', { name: 'Review Luna suggestions' }));
+  fireEvent.click(screen.getByRole('tab', { name: 'Review Luna AI suggestions' }));
+  const panel = within(screen.getByRole('tabpanel', { name: 'Review Luna AI suggestions' }));
   const copy = {
-    idle: 'Luna has not run yet. Start a review or edit the draft manually.',
-    running: 'Luna is reviewing in the background. You can leave this page; results will be saved here.',
-    empty: 'Luna did not suggest changes. You can still edit the draft manually.',
+    idle: 'Luna AI has not run yet. Edit the draft manually, or use Luna AI (paid).',
+    running: 'Luna AI is running in the background. You can leave this page; results will be saved here.',
+    empty: 'Luna AI did not suggest changes. You can still edit the draft manually.',
     handled: 'Suggestions have been handled. The saved review draft has no changes to apply.',
     manual: 'Changes are saved to the draft. The original Album has not been updated yet.',
-    cancelled: 'The Luna review was stopped. You can still edit the draft manually.'
+    cancelled: 'Luna AI was stopped. You can still edit the draft manually.'
   };
   expect(await panel.findByText(copy[state])).toBeVisible();
   expect(panel.queryByText('There are no pending suggestions.')).not.toBeInTheDocument();
@@ -576,9 +597,9 @@ test('completed review guidance is read-only and no longer invites draft editing
   mountPage();
   await screen.findByRole('textbox', { name: 'Title' });
   expect(screen.queryByText(/You are editing a review draft/)).not.toBeInTheDocument();
-  expect(screen.queryByRole('button', { name: /Luna review/ })).not.toBeInTheDocument();
-  fireEvent.click(screen.getByRole('tab', { name: 'Review Luna suggestions' }));
-  const panel = within(screen.getByRole('tabpanel', { name: 'Review Luna suggestions' }));
+  expect(screen.queryByRole('button', { name: /Luna AI/ })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('tab', { name: 'Review Luna AI suggestions' }));
+  const panel = within(screen.getByRole('tabpanel', { name: 'Review Luna AI suggestions' }));
   expect(await panel.findByText(/This review is complete and read-only/)).toBeVisible();
   expect(panel.queryByRole('button')).not.toBeInTheDocument();
 });

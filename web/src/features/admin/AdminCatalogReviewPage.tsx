@@ -115,9 +115,10 @@ function ReviewProject({ id }: { id: string }) {
       {item.state === 'applied' ? <section className={styles.notice} role="status"><h2>{t('catalog_review.applied')}</h2><p>{t('catalog_review.applied_copy')}</p></section>
         : item.sourceStatus !== 'current' && <p role="alert" className={styles.error}>{t(`catalog_review.source_${item.sourceStatus}`)}</p>}
       {item.state !== 'applied' && <>
+        {/* Luna AI is a paid, secondary action, never styled as the primary one, even when nothing else is offered. */}
         <div className={styles.actions}>{active
           ? <button className={styles.button} type="button" disabled={mutation.running || Boolean(mutation.intent) || !online} onClick={() => mutate('cancel-analysis', {})}>{t('analysis.stop')}</button>
-          : <button className={`${styles.button} ${changes.length ? '' : styles.primary}`} type="button" disabled={!canAnalyze} onClick={() => setConfirmation({ kind: 'analyze', item })}>{t(item.analysis.generation ? 'catalog_review.analysis_again' : 'catalog_review.analysis_confirm')}</button>}
+          : <button className={styles.button} type="button" disabled={!canAnalyze} onClick={() => setConfirmation({ kind: 'analyze', item })}>{t(item.analysis.generation ? 'catalog_review.analysis_again' : 'catalog_review.analysis_confirm')}</button>}
           {changes.length > 0 && stage === 'draft' && <button className={`${styles.button} ${styles.primary}`} type="button" disabled={Boolean(editor.dirty)} onClick={() => selectStage('apply')}>{t('catalog_review.view_changes', { count: changes.length })}</button>}
         </div>
         {active && <p role="status" className={styles.muted}>{t('catalog_review.analysis_running')}</p>}

@@ -2,7 +2,6 @@
  * Exports
  *   Functions: ImportSummary
  * Internal
- *   Types: Step
  *   Functions: valueAt, valueText, idText
  *   Constants: LookupBox, CandidateChooser, ImportAnalysisConfirmation
  * @end-catalog */
@@ -25,12 +24,11 @@ import type { AdminMutation } from './useAdminMutation';
 import type { ImportUploadQueueView } from './useImportUploadQueue';
 import styles from './adminStyles';
 
-// The name box, the candidate chooser and the Analyze confirmation load only when this summary shows them.
+// The name box, the candidate chooser and the Luna AI confirmation load only when this summary shows them.
 const LookupBox = lazy(() => import('./LookupBox').then(module => ({ default: module.LookupBox })));
 const CandidateChooser = lazy(() => import('./CandidateChooser').then(module => ({ default: module.CandidateChooser })));
 const ImportAnalysisConfirmation = lazy(() => import('./ImportAnalysisConfirmation').then(module => ({ default: module.ImportAnalysisConfirmation })));
 
-type Step = 'retry' | 'luna';
 /** A lookup path's saved value, or the shown one with `draft`. */
 const valueAt = (draft: ImportDraftV2, path: string): unknown => {
   const [scope, first, second] = path.split('.');
@@ -46,12 +44,13 @@ const idText = (value: unknown) => (Array.isArray(value) ? value : value ? [valu
  * it shows as needing an answer or holding Publish (the lookup view's `needsAnswer` and the summary state, identity rows to answer
  * in Review included); this component only presents it, adding this browser's own upload queue and, for the placeholder-only
  * notice, a primary Artist entry the unsaved changes add, since Publish includes them. It shows the metadata lookup status with
- * its next step (a free retry or Luna, per the owner's next-step rules; no lookup step where this server cannot run lookup), the
- * name box, a tie or conflict that needs an answer, the lone matching release of a partial comparison as an optional choice, the
- * values flagged as resting on file tags or an iTunes-only candidate (and as not checked against MusicBrainz), an artist mismatch
- * and the Luna suggestions with their ticks (the administrator's toggles
- * are kept in the workspace for the confirmation; an append marks its Album ones as not applied), and folds every row that needs
- * no answer. Its Publish opens the media panel's one-step confirmation. Owner rules: docs/business-rules.md (Administrator Album
+ * the free retry as its only next-step button while lookup is busy, unavailable or stopped (none where this server cannot run
+ * lookup), the name box, a tie or conflict that needs an answer, the lone matching release of a partial comparison as an optional
+ * choice, the values flagged as resting on file tags or an iTunes-only candidate (and as not checked against MusicBrainz), an
+ * artist mismatch, then Luna AI as a paid, secondary button in every lookup state (never a next step or the primary action, and
+ * disabled where Luna AI cannot start, a locked publication or a pending cleanup included), and the Luna AI suggestions with
+ * their ticks (the administrator's toggles are kept in the workspace for the confirmation; an append marks its Album ones as not
+ * applied), and folds every row that needs no answer. Its Publish opens the media panel's one-step confirmation. Owner rules: docs/business-rules.md (Administrator Album
  * Imports, Review and publish summary; Administrator Metadata Lookup).
  */
 export function ImportSummary({ item, operation, uploads, disabled, publishDisabled, approval, onPublish }: {
@@ -75,36 +74,41 @@ export function ImportSummary({ item, operation, uploads, disabled, publishDisab
     return scope === 'album' ? name : t('summary.track_field', { position: item.draft.tracks.findIndex(track => track.slotId === slot) + 1, field: name });
   };
   const role = (value: string) => shared(`catalog.credit.${value}` as MessageKey);
-  // The status, the next step and the step beside it (owner rules: Administrator Metadata Lookup, next-step bullet). Without a
-  // run, lookup is not configured here, waits for uploads, or did not start (its trigger failed); a retry or a name needs it configured.
+  // The status and whether the free retry is offered (owner rules: Administrator Metadata Lookup, next-step bullet). The retry
+  // is the only next-step button, offered while lookup is busy, unavailable, stopped or superseded, or when release details or
+  // the MusicBrainz check of an applied iTunes-only result could not be fetched; when nothing matches, nothing can be looked up
+  // or lookup was not configured, the name box is the next step. Luna AI is never a next step. Without a run, lookup is not
+  // configured here, waits for uploads, or did not start (its trigger failed); a retry or a name needs it configured.
   const applied = lookup?.applied, tie = Boolean(lookup?.needsAnswer.tie), available = summary?.lookupAvailable !== false;
   // Nothing the run found matched or was applied; a completed run keeps MusicBrainz's issue when its retries ran out.
   const unmatched = !lookup?.groups.length && (applied?.run !== lookup?.run || applied?.choice === 'none');
   const musicBrainzDown = lookup?.issue === 'sourceUnavailable' || lookup?.issue === 'sourceBusy';
-  const [status, next, beside]: [string, Step | null, Step | null] = !lookup ? [!available ? 'lookup.not_configured' : summary?.waiting.uploads ? 'lookup.not_run' : 'lookup.not_started', summary?.waiting.uploads && available ? null : 'luna', null]
-    : lookup.state === 'queued' || lookup.state === 'running' ? [lookup.itunes === 'running' ? 'lookup.active_itunes' : 'lookup.active', null, null]
-    : lookup.state === 'retrying' ? [lookup.itunes === 'retrying' ? 'lookup.retrying_itunes' : 'lookup.retrying', 'retry', 'luna']
-    : lookup.state === 'unavailable' ? [lookup.issue === 'notConfigured' ? 'lookup.not_configured' : 'lookup.unavailable', 'luna', 'retry']
-    : lookup.state !== 'complete' ? [`lookup.${lookup.state}`, 'retry', 'luna']
-    // MusicBrainz answered without a match and iTunes stayed unavailable: a free retry may still find it.
-    : unmatched && lookup.itunes === 'unavailable' && !musicBrainzDown ? ['lookup.itunes_unavailable', 'luna', 'retry']
+  const [status, retry]: [string, boolean] = !lookup ? [!available ? 'lookup.not_configured' : summary?.waiting.uploads ? 'lookup.not_run' : 'lookup.not_started', false]
+    : lookup.state === 'queued' || lookup.state === 'running' ? [lookup.itunes === 'running' ? 'lookup.active_itunes' : 'lookup.active', false]
+    : lookup.state === 'retrying' ? [lookup.itunes === 'retrying' ? 'lookup.retrying_itunes' : 'lookup.retrying', true]
+    // A run that found lookup unconfigured offers no retry: the name box is next where this server can now run lookup.
+    : lookup.state === 'unavailable' ? [lookup.issue === 'notConfigured' ? 'lookup.not_configured' : 'lookup.unavailable', lookup.issue !== 'notConfigured']
+    : lookup.state !== 'complete' ? [`lookup.${lookup.state}`, true]
+    // MusicBrainz answered without a match and iTunes stayed unavailable: nothing matched, so the name box is next.
+    : unmatched && lookup.itunes === 'unavailable' && !musicBrainzDown ? ['lookup.itunes_unavailable', false]
     // MusicBrainz stayed unavailable, so nothing is "no match": details it could not fetch are incomplete, anything else unavailable.
-    : unmatched && musicBrainzDown ? (lookup.candidates.some(candidate => candidate.status === 'incomplete') ? ['lookup.incomplete', 'retry', 'luna'] : ['lookup.unavailable', 'luna', 'retry'])
-    : lookup.outcome === 'noRelease' || lookup.outcome === 'noQuery' ? [lookup.outcome === 'noQuery' ? 'lookup.no_query' : 'lookup.no_release', 'luna', null]
-    : tie ? ['lookup.tie', null, null]
+    : unmatched && musicBrainzDown ? [lookup.candidates.some(candidate => candidate.status === 'incomplete') ? 'lookup.incomplete' : 'lookup.unavailable', true]
+    : lookup.outcome === 'noRelease' || lookup.outcome === 'noQuery' ? [lookup.outcome === 'noQuery' ? 'lookup.no_query' : 'lookup.no_release', false]
+    : tie ? ['lookup.tie', false]
     // The only matching release of a partial comparison is offered, never applied unasked; it needs no answer.
-    : lookup.groups.length === 1 && !lookup.preselection && lookup.disclosure?.partialComparison && applied?.run !== lookup.run ? ['lookup.single_choice', null, null]
-    : applied?.run === lookup.run && applied.choice !== 'none' ? (applied.source !== 'itunes' ? ['lookup.applied', null, null]
-      : applied.notChecked ? ['lookup.applied_itunes_unchecked', 'luna', 'retry'] : ['lookup.applied_itunes', null, null])
-    : lookup.groups.length ? ['lookup.applied_none', null, null]
+    : lookup.groups.length === 1 && !lookup.preselection && lookup.disclosure?.partialComparison && applied?.run !== lookup.run ? ['lookup.single_choice', false]
+    : applied?.run === lookup.run && applied.choice !== 'none' ? (applied.source !== 'itunes' ? ['lookup.applied', false]
+      : applied.notChecked ? ['lookup.applied_itunes_unchecked', true] : ['lookup.applied_itunes', false])
+    : lookup.groups.length ? ['lookup.applied_none', false]
     // Candidates whose details could not be fetched are no proof that nothing matches.
-    : lookup.candidates.some(candidate => candidate.status === 'incomplete') ? ['lookup.incomplete', 'retry', 'luna']
-    : [applied?.run === lookup.run ? 'lookup.applied_none' : 'lookup.no_match', 'luna', null];
-  const steps = [next, beside].filter((kind): kind is Step => Boolean(kind) && (kind !== 'retry' || available));
+    : lookup.candidates.some(candidate => candidate.status === 'incomplete') ? ['lookup.incomplete', true]
+    : [applied?.run === lookup.run ? 'lookup.applied_none' : 'lookup.no_match', false];
+  const retryOffered = retry && available;
   const release = lookup?.candidates.find(candidate => candidate.key === applied?.candidateKey)?.title ?? '—';
-  const luna = access.analysis && item.capabilities.analysis && !['queued', 'running'].includes(item.analysis.state) && item.analysis.issue !== 'providerOutcomeUnknown' && Boolean(summary?.analysis.runs);
-  const step = (kind: Step, primary: boolean) => <button key={kind} type="button" className={`${styles.button} ${primary ? styles.primary : ''}`} disabled={disabled || (kind === 'luna' && !luna)}
-    onClick={() => kind === 'retry' ? run('lookup/retry') : setAnalyzing(true)}>{t(kind === 'retry' ? 'lookup.retry' : 'lookup.luna')}</button>;
+  // The server refuses Luna AI while the publication is locked or its cancelled approval still has cleanup pending.
+  const locked = ['preparing', 'needsAttention', 'complete'].includes(item.publication), cleanupPending = item.publication === 'cancelled' && Boolean(item.publicationRecovery?.cleanupPending);
+  const luna = access.analysis && item.capabilities.analysis && !['queued', 'running'].includes(item.analysis.state) && item.analysis.issue !== 'providerOutcomeUnknown' && Boolean(summary?.analysis.runs)
+    && !locked && !cleanupPending;
   const needed = new Set(lookup?.needsAnswer.conflicts ?? []), conflicts = applied?.conflicts ?? [], open = conflicts.filter(conflict => needed.has(conflict.path));
   const resolve = (target: string, answer: 'mine' | 'lookup') => run('lookup/resolve', { run: applied!.run, candidateKey: applied!.candidateKey, answers: [{ path: target, answer, base: valueAt(item.draft, target) }] });
   // Values resting only on file tags (not on the applied candidate, not changed here), or on an iTunes-only candidate, are flagged and never folded.
@@ -118,7 +122,7 @@ export function ImportSummary({ item, operation, uploads, disabled, publishDisab
   const toggle = (suggestion: string, value: boolean) => { const next = { ...toggles, [suggestion]: value }; setToggles(next); adminWorkspace.retain(lunaTicksKey(item.id), next, access); };
   // This browser's own upload queue holds Publish too, before the server has seen its transfers.
   const waiting = summary ? (['uploads', 'lookup', 'cover', 'analysis'] as const).filter(work => summary.waiting[work] || (work === 'uploads' && uploads.running)) : [];
-  const identities = summary?.identityAnswers ?? 0, answers = (tie ? 1 : 0) + open.length + identities, locked = ['preparing', 'needsAttention', 'complete'].includes(item.publication);
+  const identities = summary?.identityAnswers ?? 0, answers = (tie ? 1 : 0) + open.length + identities;
   const placeholder = summary?.placeholderOnly && !draft.album.artists.some(entry => entry.role === 'primary');
   const notApplied = (text: string) => append ? `${text} · ${t('publication.not_applied')}` : text;
   const row = (target: string, text: string) => <div key={target}><dt>{label(target)}</dt><dd>{text}</dd></div>;
@@ -131,7 +135,7 @@ export function ImportSummary({ item, operation, uploads, disabled, publishDisab
     {data && <>
       <p role="status">{t(status, { title: release })}</p>
       {lookup && lookup.staleFiles.length > 0 && <p>{t('lookup.stale_files', { count: lookup.staleFiles.length })}</p>}
-      {steps.length > 0 && <div className={styles.actions}>{steps.map((kind, index) => step(kind, !index))}</div>}
+      {retryOffered && <div className={styles.actions}><button type="button" className={`${styles.button} ${styles.primary}`} disabled={disabled} onClick={() => run('lookup/retry')}>{t('lookup.retry')}</button></div>}
       {available && <Suspense fallback={null}><LookupBox key={lookup?.run ?? 0} lookup={lookup} rootLabel={item.manifest.rootLabel} disabled={disabled} onSubmit={(kind, text) => run('lookup', { kind, text })} /></Suspense>}
       {lookup?.state === 'complete' && lookup.candidates.length > 0 && <Suspense fallback={null}><CandidateChooser importId={item.id} viewerId={access.viewerId} lookup={lookup} disabled={disabled} onChoose={key => run('lookup/choose', { run: lookup.run, candidateKey: key })} /></Suspense>}
       {open.length > 0 && <section aria-labelledby={`${id}-conflicts`}><h3 id={`${id}-conflicts`}>{t('summary.conflicts')}</h3><ul className={styles.cards}>{open.map(conflict =>
@@ -142,6 +146,9 @@ export function ImportSummary({ item, operation, uploads, disabled, publishDisab
       {(flaggedPaths.length > 0 || (lookup?.preselection?.artistMismatch && applied?.choice === 'preselected' && applied.run === lookup.run)) && <ul aria-label={t('summary.flagged')}>
         {lookup?.preselection?.artistMismatch && applied?.choice === 'preselected' && applied.run === lookup.run && <li>{t('summary.artist_mismatch')}</li>}
         {flaggedPaths.map(target => <li key={target}>{`${label(target)}: ${valueText(valueAt(draft, target))} · ${fromTags.includes(target) ? t('publication.tags_only') : itunesMark}`}</li>)}</ul>}
+      {/* Luna AI is a paid, secondary alternative after every lookup control (retry, name box, chooser, conflict answers), in every
+          lookup state; it is never the next step or the primary action. */}
+      <div className={styles.actions}><button type="button" className={styles.button} disabled={disabled || !luna} onClick={() => setAnalyzing(true)}>{t('lookup.luna')}</button></div>
       {suggestions.length > 0 && <fieldset className={styles.editor}><legend>{t('summary.luna')}</legend><p className={styles.muted}>{t('summary.luna_help')}</p>
         {suggestions.map(suggestion => {
           const target = suggestionPath(suggestion), blocked = ticks.get(suggestion.id) === 'conflict' || changed.has(target);

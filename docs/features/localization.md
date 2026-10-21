@@ -240,7 +240,13 @@ Removing or renaming a v2 runtime key, `admin.*` included, is therefore a
 breaking change while any supported Web, iOS or Android release still packages
 it; keep retired keys, unused, until then. In a production build, lookup must
 never expose a raw key, blank placeholder, or partially formatted message to the
-listener.
+listener. When the sibling native repositories are present beside the main
+checkout (or the repositories named by `FINITUDE_IOS_ROOT` and
+`FINITUDE_ANDROID_ROOT`), `test/platform/localizationNativeCompat.test.ts`
+checks that every key of the iOS and Android packaged `en-US.json` exists in
+the generated `en-US` and `zh-Hans` bundles with the same variable names the
+native clients read (their `{name}` / `{name,` pattern); it is skipped
+otherwise.
 
 Until migration is complete, existing native resource systems remain valid:
 

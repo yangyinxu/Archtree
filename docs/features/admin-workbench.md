@@ -195,35 +195,45 @@ outside the import route's initial JavaScript. The server decides what holds
 Publish; the summary only presents it:
 
 - **Status and next step.** Not run yet while uploads are awaited, not run
-  although every needed file is uploaded (its automatic trigger failed; Luna
-  next, beside the name box), looking up (queued or running), retrying (busy or
-  unavailable, next step the free **Retry lookup**, Luna beside it),
-  unavailable after the automatic retries (next step **Analyze with Luna**, the
-  retry beside it), not configured (Luna next), stopped (retry first, Luna
-  beside it), superseded, no release or nothing to look up (Luna next, beside
-  the name box), no matching release or none applied where nothing matched
-  (Luna next; every candidate stays choosable), release details that could not
-  be fetched (retry first, Luna beside it), a tie (no next step), one
-  matching release from a partial comparison that was not applied (no next
-  step; choosing it, another release or none is optional), or the applied
-  release. With the iTunes fallback it also says when lookup searches the
-  iTunes Search API (no next step) or retries it (retry first, Luna beside it),
-  when MusicBrainz answered without a match and iTunes stayed unavailable (Luna
-  first, the retry beside it), and when an iTunes-only result was applied (no
-  next step) or applied without a check against MusicBrainz (Luna first, the
-  retry beside it). A completed run whose MusicBrainz retries ran out and that
-  matched nothing reports lookup unavailable, or release details that could
-  not be fetched, never no match. Where the server cannot run lookup
-  (`lookupAvailable` false) the summary says it is not configured, before any
-  run too, and offers neither a retry nor the name box. Stale files are counted.
-  While the applied release's front artwork is being staged (`waiting.cover`)
-  the summary says Publish waits for it; a staging that failed or was skipped is
-  not shown, and the cover choice stays as it was.
+  although every needed file is uploaded (its automatic trigger failed; the name
+  box next), looking up (queued or running), retrying (busy or unavailable, next
+  step the free **Retry lookup**), unavailable after the automatic retries (the
+  retry still next), not configured (no next step; the name box where this
+  server can now run lookup), stopped (the retry next), superseded (the retry
+  next), no release or nothing to look up (the name box next), no matching
+  release or none applied where nothing matched (the name box next; every
+  candidate stays choosable), release details that could not be fetched (the
+  retry next), a tie (no next step), one matching release from a partial
+  comparison that was not applied (no next step; choosing it, another release or
+  none is optional), or the applied release. With the iTunes fallback it also
+  says when lookup searches the iTunes Search API (no next step) or retries it
+  (the retry next), when MusicBrainz answered without a match and iTunes stayed
+  unavailable (the name box next), and when an iTunes-only result was applied
+  (no next step) or applied without a check against MusicBrainz (the retry
+  next). Only the free retry is ever a next-step button; Luna never is. A
+  completed run whose MusicBrainz retries ran out and that matched nothing
+  reports lookup unavailable, or release details that could not be fetched,
+  never no match. Where the server cannot run lookup (`lookupAvailable` false)
+  the summary says it is not configured, before any run too, and offers neither
+  a retry nor the name box. Stale files are counted. While the applied release's
+  front artwork is being staged (`waiting.cover`) the summary says Publish waits
+  for it; a staging that failed or was skipped is not shown, and the cover
+  choice stays as it was.
 - **Name box.** An Album or song name; a folder-name run prefills the folder
   name for editing, a submitted run its name. A link is refused in place
   (`Enter a name, not a link`), and the box has no autocomplete and stores
   nothing. It is a plain form, never the search landmark, and the
   administration layout still has no global search.
+- **Luna AI.** In every lookup state, also where lookup is not configured and
+  after a release was applied, **Use Luna AI (paid)** comes after the summary's
+  lookup controls (the retry, the name box and the candidate chooser, where
+  shown) as a secondary button: never the next step and never styled as the
+  primary action. It stays visible, disabled while Luna cannot start (without
+  analysis access or the import's analysis capability, while an analysis is
+  queued or running, after an unknown provider outcome, with no runs left for
+  the project, or while the publication is locked or its cleanup is pending),
+  and opens the confirmation described under Luna ticks. Status
+  text about Luna work names Luna AI.
 - **Needs an answer.** A tie lists each group's representative with only the
   proposal values that differ (title, Artist entries, label, date, tracks) and
   its barcode, catalogue number, country and medium, plus **Use none of
@@ -295,9 +305,11 @@ Publish; the summary only presents it:
   which saves them to the draft and closes it, so Review can answer that row. A
   suggestion equal to the current value is hidden from the summary but stays
   pending in storage, and Review still lists it as already matching, until an
-  approval accepts it. **Analyze with Luna** opens the same confirmation as the
-  Draft section's Analyze, which shows the runs and AI calls left for the
-  project and the AI calls left today and starts nothing until confirmed.
+  approval accepts it. **Use Luna AI (paid)** opens the same confirmation as the
+  Draft section's button of that name (**Use Luna AI again (paid)** after a
+  run), titled "Use Luna AI? This is a paid AI service", which shows the Luna AI
+  runs and paid AI calls left for the project and the paid Luna AI calls left
+  today and starts nothing until **Start paid Luna AI** is chosen.
 - **Refusals.** Each lookup refusal (`ADMIN_IMPORT_LOOKUP_ACTIVE`,
   `…_UNAVAILABLE`, `…_REFUSED`, `…_INVALID_NAME`, `…_NOTHING_TO_RETRY`,
   `…_STALE`, `…_CANDIDATE_INCOMPLETE`) has its own message, is never
@@ -1218,8 +1230,11 @@ unapplied reviews; **Album updated** confirms that this project's selected field
 were applied. Luna progress and the original-Album update status are shown
 separately. **Save review draft** changes only the private draft; **Update
 original Album** requires selecting saved changes and confirming their frozen
-old/new values. **Start Luna review** is available above the track editor and
-always has its own confirmation. All `/finitude/admin/*` pages use a dedicated
+old/new values. **Use Luna AI (paid)** (**Use Luna AI again (paid)** after a
+run) is available above the track editor, is never styled as the primary
+action and always has its own confirmation, titled "Use Luna AI? This is a
+paid AI service", whose confirm button keeps the primary style and repeats
+**Use Luna AI (paid)**. All `/finitude/admin/*` pages use a dedicated
 administration layout with management navigation, language/account controls and
 the Admin/User view switch. Listener navigation, global music search and
 playback controls are absent. Switching back to User view restores the listener
@@ -1669,6 +1684,17 @@ roll back to:
   its Review and publish summary shows an error and its confirmation cannot be
   approved while a suggestion is pending; reload open workbench tabs after
   deploying or rolling back across them.
+- The Luna AI labels and the lookup-first summary need no floor of their own:
+  they change message values and the order and styling of buttons, add one
+  message key (`admin.catalog_review.analysis_confirm_title`) and store nothing.
+  A release before them offers Luna as the summary's next step again, with the
+  earlier labels. Every earlier key and its variables are kept, so Web, iOS and
+  Android clients accept this release's remote bundles. A Web tab opened after
+  them keeps its active bundle instead of accepting a remote bundle from a
+  release before them, which lacks the new key, so reload open workbench tabs
+  after rolling back across them. After deploying them, a Web client's cached
+  bundle from before them is refused once for lacking that key, so it shows
+  English until the new bundle loads.
 - Automatic covers need no floor of their own. A release before them shows and
   publishes only a stored, explicit `selectedCoverSlotId`, so an import whose
   choice is still automatic shows No cover there and publishes no cover unless
@@ -2068,17 +2094,17 @@ below). The source layer, the jobs and their routes live in
   `unavailable`. The summary says when lookup searches iTunes (without saying
   why: the stage also runs after MusicBrainz stayed unavailable) or retries
   it, when MusicBrainz answered without a match and iTunes stayed unavailable
-  (Luna first, a free retry beside it), and when an iTunes-only result was
-  applied, checked (no next step) or not checked against MusicBrainz (Luna
-  first, a free retry beside it; the copy names no cause, since a `notRun`
-  candidate chosen explicitly is not checked either). A completed run that
-  keeps MusicBrainz's issue (`sourceUnavailable` or `sourceBusy`: its retries
-  ran out) and has no matching group or applied candidate is never "no
-  match": it reports release details that could not be fetched (retry first,
-  Luna beside it) when a candidate is incomplete, else lookup unavailable
-  (Luna first, the retry beside it). Values resting on an applied iTunes-only
+  (the name box next), and when an iTunes-only result was applied, checked (no
+  next step) or not checked against MusicBrainz (a free retry next; the copy
+  names no cause, since a `notRun` candidate chosen explicitly is not checked
+  either). A completed run that keeps MusicBrainz's issue (`sourceUnavailable`
+  or `sourceBusy`: its retries ran out) and has no matching group or applied
+  candidate is never "no match": it reports release details that could not be
+  fetched (the retry next) when a candidate is incomplete, else lookup
+  unavailable (the retry next). Values resting on an applied iTunes-only
   candidate are flagged "iTunes only" (and "Not checked against MusicBrainz")
-  outside the fold, and the chooser marks such candidates the same way.
+  outside the fold, and the chooser marks such candidates the same way. In each
+  case **Use Luna AI (paid)** follows the lookup controls as a secondary button.
 - **Localized names.** The distinct artist names one kept result showed across
   storefronts (case-folded, without placeholders, at most 200 characters) form
   a localized name group when there are at least two: at most four groups of

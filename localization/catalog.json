@@ -872,7 +872,7 @@
       "variables": {}
     },
     "admin.action.analyze": {
-      "description": "Starts naming-context analysis after approval.",
+      "description": "Administrator workbench: Draft section button that opens the paid Luna AI confirmation; names Luna, AI and paid.",
       "delivery": [
         "runtime"
       ],
@@ -963,7 +963,7 @@
       "variables": {}
     },
     "admin.action.reanalyze": {
-      "description": "Requests another allowed analysis generation.",
+      "description": "Administrator workbench: Draft section button that opens the paid Luna AI confirmation for another run; names Luna, AI and paid.",
       "delivery": [
         "runtime"
       ],
@@ -1012,7 +1012,7 @@
       "variables": {}
     },
     "admin.analysis.budget_daily": {
-      "description": "Administrator workbench: Luna analysis confirmation, what is left today across the deployment.",
+      "description": "Administrator workbench: paid Luna AI confirmation, the paid Luna AI calls left today across the deployment.",
       "delivery": [
         "runtime"
       ],
@@ -1021,7 +1021,7 @@
       }
     },
     "admin.analysis.budget_project": {
-      "description": "Administrator workbench: Luna analysis confirmation, what is left for this project.",
+      "description": "Administrator workbench: paid Luna AI confirmation, the Luna AI runs and paid AI calls left for this project.",
       "delivery": [
         "runtime"
       ],
@@ -1031,49 +1031,49 @@
       }
     },
     "admin.analysis.confirm": {
-      "description": "Analyze confirmation: what Luna receives (folder and file names, current draft values, file tags and the applied MusicBrainz release, if any); it only suggests values and may incur a provider charge.",
+      "description": "Administrator workbench: paid Luna AI confirmation, what Luna AI receives (folder and file names, current draft values, file tags and the applied MusicBrainz release, if any); it only suggests values and is a paid AI service that may incur a provider charge.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.analysis.confirm_action": {
-      "description": "Administrator workbench: Luna analysis confirmation, starts the paid analysis.",
+      "description": "Administrator workbench: confirm button of the Luna AI confirmation that starts the paid run; names Luna, AI and paid.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.analysis.confirm_title": {
-      "description": "Administrator workbench: Luna analysis confirmation title.",
+      "description": "Administrator workbench: title of the Luna AI confirmation; names Luna, says it is AI and says it is paid.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.analysis.reanalyze": {
-      "description": "Administrator workbench: analysis reanalyze.",
+      "description": "Administrator workbench: starts another paid Luna AI run. Unused; kept because shipped Web, iOS and Android packaged bundles contain it.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.analysis.start": {
-      "description": "Administrator workbench: analysis start.",
+      "description": "Administrator workbench: starts a paid Luna AI run. Unused; kept because shipped Web, iOS and Android packaged bundles contain it.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.analysis.stop": {
-      "description": "Administrator workbench: analysis stop.",
+      "description": "Administrator workbench: stops a queued or running Luna AI run.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.analysis.unavailable": {
-      "description": "Administrator workbench: analysis unavailable.",
+      "description": "Administrator workbench: Luna AI is unavailable; the draft stays editable by hand.",
       "delivery": [
         "runtime"
       ],
@@ -1136,35 +1136,42 @@
       "variables": {}
     },
     "admin.catalog_review.analysis_again": {
-      "description": "Run Luna review again",
+      "description": "Existing-Album review: starts another paid Luna AI run; names Luna, AI and paid.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.catalog_review.analysis_confirm": {
-      "description": "Start Luna review",
+      "description": "Existing-Album review: starts a paid Luna AI run (also its confirm button); names Luna, AI and paid.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.analysis_confirm_title": {
+      "description": "Existing-Album review: title of the confirmation dialog for a paid Luna AI run; names Luna, says it is AI and says it is paid.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.catalog_review.analysis_copy": {
-      "description": "Luna will use the saved metadata and available original filenames. This may incur an AI service charge. It creates suggestions only; applying them requires a separate confirmation.",
+      "description": "Existing-Album review: what Luna AI uses, that it is a paid AI service, and that it only suggests.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.catalog_review.analysis_limit": {
-      "description": "This project has reached its analysis limit. Continue reviewing manually.",
+      "description": "Existing-Album review: this project reached its Luna AI run limit; manual review continues.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.catalog_review.analysis_running": {
-      "description": "Luna is reviewing in the background. You can leave this page; results will be saved here.",
+      "description": "Existing-Album review: Luna AI runs in the background and saves its results to this review.",
       "delivery": [
         "runtime"
       ],
@@ -1236,14 +1243,14 @@
       "variables": {}
     },
     "admin.catalog_review.context_copy": {
-      "description": "Luna uses saved metadata and retained original filenames. Missing historical filenames and folder names stay unknown.",
+      "description": "Existing-Album review: what Luna AI can use (saved metadata and retained original filenames); missing historical names stay unknown.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.catalog_review.context_title": {
-      "description": "What Luna can use",
+      "description": "Existing-Album review: heading of the section on what Luna AI can use.",
       "delivery": [
         "runtime"
       ],
@@ -1264,7 +1271,7 @@
       "variables": {}
     },
     "admin.catalog_review.create_copy": {
-      "description": "Create a private review of the current saved Album and its tracks. Start Luna separately after reviewing the saved context. Creating this project does not change the catalog.",
+      "description": "Existing-Album review creation: the review is private, paid Luna AI is used separately afterwards, and creating it does not change the catalog.",
       "delivery": [
         "runtime"
       ],
@@ -1306,14 +1313,14 @@
       "variables": {}
     },
     "admin.catalog_review.empty_attention": {
-      "description": "Luna review needs attention. Check the issue above or continue editing manually.",
+      "description": "Existing-Album review: Luna AI needs attention; check the issue shown or keep editing by hand.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.catalog_review.empty_cancelled": {
-      "description": "The Luna review was stopped. You can still edit the draft manually.",
+      "description": "Existing-Album review: Luna AI was stopped; the draft stays editable by hand.",
       "delivery": [
         "runtime"
       ],
@@ -1327,14 +1334,14 @@
       "variables": {}
     },
     "admin.catalog_review.empty_idle": {
-      "description": "Luna has not run yet. Start a review or edit the draft manually.",
+      "description": "Existing-Album review: Luna AI has not run yet; editing by hand comes first, then paid Luna AI.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.catalog_review.empty_no_suggestions": {
-      "description": "Luna did not suggest changes. You can still edit the draft manually.",
+      "description": "Existing-Album review: Luna AI suggested no changes; the draft stays editable by hand.",
       "delivery": [
         "runtime"
       ],
@@ -1383,7 +1390,7 @@
       "variables": {}
     },
     "admin.catalog_review.no_changes": {
-      "description": "The saved review draft has no changes to apply. Edit the draft or review Luna suggestions to prepare changes.",
+      "description": "Existing-Album review: the saved draft has no changes to apply; edit it or review Luna AI suggestions first.",
       "delivery": [
         "runtime"
       ],
@@ -1404,7 +1411,7 @@
       "variables": {}
     },
     "admin.catalog_review.review_tab": {
-      "description": "Review Luna suggestions",
+      "description": "Existing-Album review: tab that lists the Luna AI suggestions to review.",
       "delivery": [
         "runtime"
       ],
@@ -1418,7 +1425,7 @@
       "variables": {}
     },
     "admin.catalog_review.save_draft_first": {
-      "description": "Save your draft edits before running Luna, adopting suggestions or updating the original Album.",
+      "description": "Existing-Album review: unsaved draft edits must be saved before using Luna AI, adopting suggestions or updating the original Album.",
       "delivery": [
         "runtime"
       ],
@@ -1439,7 +1446,7 @@
       "variables": {}
     },
     "admin.catalog_review.scope_copy": {
-      "description": "You are editing a review draft visible to administrators. Saving or adopting suggestions does not update the original Album; confirm that update separately. Luna is optional.",
+      "description": "Existing-Album review: the draft is visible to administrators, saving or adopting does not update the original Album until that update is confirmed separately, and Luna AI is optional.",
       "delivery": [
         "runtime"
       ],
@@ -3346,49 +3353,49 @@
       "variables": {}
     },
     "admin.issue.budget_exhausted": {
-      "description": "This project reached its analysis limit. Continue reviewing or editing the saved draft.",
+      "description": "Luna AI issue in imports and existing-Album reviews: the project reached its Luna AI run limit; review or edit the saved draft.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.issue.grant_expired": {
-      "description": "Analysis permission expired. Review its confirmed status before continuing.",
+      "description": "Luna AI issue in imports and existing-Album reviews: the Luna AI permission expired; check its confirmed status before continuing.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.issue.permission_lost": {
-      "description": "Analysis stopped because its initiating administrator no longer has permission.",
+      "description": "Luna AI issue in imports and existing-Album reviews: Luna AI stopped because its initiating administrator lost permission.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.issue.provider_invalid_response": {
-      "description": "The analysis could not be validated. No suggestions from that response were applied.",
+      "description": "Luna AI issue in imports and existing-Album reviews: the Luna AI response failed validation, so none of its suggestions were applied.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.issue.provider_outcome_unknown": {
-      "description": "The provider outcome is unknown. Another paid analysis is blocked until the outcome is reconciled.",
+      "description": "Luna AI issue in imports and existing-Album reviews: the Luna AI outcome is unknown; another paid Luna AI run is blocked until it is reconciled.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.issue.provider_rejected": {
-      "description": "The analysis request was declined. Review the draft before requesting another analysis.",
+      "description": "Luna AI issue in imports and existing-Album reviews: the Luna AI request was declined; review the draft before using Luna AI again.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.issue.provider_unavailable": {
-      "description": "Analysis is unavailable. The saved draft remains editable.",
+      "description": "Luna AI issue in imports and existing-Album reviews: Luna AI is unavailable; the saved draft stays editable.",
       "delivery": [
         "runtime"
       ],
@@ -3591,7 +3598,7 @@
       "variables": {}
     },
     "admin.lookup.itunes_unavailable": {
-      "description": "Administrator workbench: import summary, MusicBrainz answered without a matching release and the iTunes Search API stayed unavailable through its automatic retries.",
+      "description": "Administrator workbench: import summary, MusicBrainz answered without a matching release and the iTunes Search API stayed unavailable through its automatic retries; another name comes first, then paid Luna AI.",
       "delivery": [
         "runtime"
       ],
@@ -3619,7 +3626,7 @@
       "variables": {}
     },
     "admin.lookup.luna": {
-      "description": "Administrator workbench: import summary, opens the Luna analysis confirmation.",
+      "description": "Administrator workbench: import summary, secondary button after the lookup controls that opens the paid Luna AI confirmation; names Luna, AI and paid.",
       "delivery": [
         "runtime"
       ],
@@ -4295,7 +4302,7 @@
       }
     },
     "admin.publication.luna_names": {
-      "description": "Administrator workbench: publication confirmation, ticked Luna suggestions add names that match existing records, so those rows need an explicit decision; offers to apply them first and answer them in Review.",
+      "description": "Administrator workbench: publication confirmation, ticked Luna AI suggestions add names that match existing records, so those rows need an explicit decision; offers to apply them first and answer them in Review.",
       "delivery": [
         "runtime"
       ],
@@ -4464,21 +4471,21 @@
       "variables": {}
     },
     "admin.review.baseline": {
-      "description": "Administrator workbench: review baseline.",
+      "description": "Administrator workbench: Review heading for the value a suggestion was based on when Luna AI ran.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.review.changed": {
-      "description": "Compact conflict status; detailed baseline guard explanation is secondary.",
+      "description": "Administrator workbench: compact status that the draft changed after Luna AI ran; the detailed baseline guard explanation is secondary.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.review.conflict": {
-      "description": "Administrator workbench: review conflict.",
+      "description": "Administrator workbench: a value changed after Luna AI ran; edit the draft by hand or keep its current value.",
       "delivery": [
         "runtime"
       ],
@@ -4566,7 +4573,7 @@
       }
     },
     "admin.review.suggested": {
-      "description": "Administrator workbench: review suggested.",
+      "description": "Administrator workbench: Review heading for the value Luna AI suggested.",
       "delivery": [
         "runtime"
       ],
@@ -4636,7 +4643,7 @@
       "variables": {}
     },
     "admin.stage.analysis": {
-      "description": "Administrator workbench: stage analysis.",
+      "description": "Administrator workbench: heading and progress label for Luna AI.",
       "delivery": [
         "runtime"
       ],
@@ -4822,7 +4829,7 @@
       "variables": {}
     },
     "admin.summary.luna": {
-      "description": "Administrator workbench: import summary and publication confirmation, Luna suggestions.",
+      "description": "Administrator workbench: import summary and publication confirmation, heading of the Luna AI suggestions.",
       "delivery": [
         "runtime"
       ],
@@ -4843,7 +4850,7 @@
       "variables": {}
     },
     "admin.summary.luna_mark": {
-      "description": "Administrator workbench: import summary, marks a value suggested by Luna.",
+      "description": "Administrator workbench: import summary, marks a value suggested by Luna AI.",
       "delivery": [
         "runtime"
       ],
@@ -4937,7 +4944,7 @@
       "variables": {}
     },
     "admin.summary.waiting_analysis": {
-      "description": "Administrator workbench: import summary, Publish waits for Luna analysis.",
+      "description": "Administrator workbench: import summary, Publish waits while Luna AI runs.",
       "delivery": [
         "runtime"
       ],
@@ -5194,7 +5201,7 @@
       "variables": {}
     },
     "admin.workbench.analyzing": {
-      "description": "Administrator workbench: workbench analyzing.",
+      "description": "Administrator workbench: status that Luna AI is queued or running.",
       "delivery": [
         "runtime"
       ],
@@ -5299,7 +5306,7 @@
       "variables": {}
     },
     "admin.workbench.review_analyzing": {
-      "description": "In progress",
+      "description": "Existing-Album review status: Luna AI is queued or running.",
       "delivery": [
         "runtime"
       ],
@@ -5320,7 +5327,7 @@
       "variables": {}
     },
     "admin.workbench.review_empty": {
-      "description": "No existing Album reviews yet. Choose an Album to edit its information or start a Luna review.",
+      "description": "Administrator workbench: no existing-Album reviews yet; choose an Album to edit its information, or use paid Luna AI on it.",
       "delivery": [
         "runtime"
       ],
@@ -5371,7 +5378,7 @@
       "variables": {}
     },
     "admin.workbench.review_stage": {
-      "description": "Luna review",
+      "description": "Existing-Album review status label for Luna AI progress.",
       "delivery": [
         "runtime"
       ],

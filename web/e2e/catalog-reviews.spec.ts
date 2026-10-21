@@ -638,8 +638,8 @@ for (const variant of localizedViewports) {
     await saveDraft.scrollIntoViewIfNeeded(); await expect(saveDraft).toBeInViewport();
     await capture(page, '05c-review-editor-save', width, false, false);
     await start.click();
-    const analysis = page.getByRole('dialog', { name: label('admin.catalog_review.analysis_confirm') });
-    await expect(analysis.getByRole('heading', { name: label('admin.catalog_review.analysis_confirm'), exact: true })).toBeVisible();
+    const analysis = page.getByRole('dialog', { name: label('admin.catalog_review.analysis_confirm_title') });
+    await expect(analysis.getByRole('heading', { name: label('admin.catalog_review.analysis_confirm_title'), exact: true })).toBeVisible();
     await expect(analysis.getByText('Manually corrected synthetic Album', { exact: true })).toBeVisible();
     await expect(analysis.getByRole('button', { name: label('admin.catalog_review.analysis_confirm'), exact: true })).toBeVisible();
     expect(api.writes.filter(value => value.path.endsWith('/analyze'))).toHaveLength(0);

@@ -103,7 +103,7 @@ test('manual edits save only the private draft and never start analysis or publi
   }));
   mount(`/admin/imports/${projectId}`);
   fireEvent.change(await screen.findByRole('textbox', { name: 'Title' }), { target: { value: 'Human title' } });
-  expect(writes).toHaveLength(0); expect(screen.getByRole('button', { name: 'Analyze again' })).toBeDisabled();
+  expect(writes).toHaveLength(0); expect(screen.getByRole('button', { name: 'Use Luna AI again (paid)' })).toBeDisabled();
   fireEvent.click(screen.getByRole('button', { name: 'Save' }));
   await waitFor(() => expect(screen.getByText('Saved to private draft')).toBeVisible());
   expect(writes).toHaveLength(1); expect(writes[0].path).toBe(`/api/admin/v1/imports/${projectId}`);
@@ -306,7 +306,7 @@ test('cancelled publication cleanup permits manual review while analysis and sou
   mount(`/admin/imports/${projectId}`);
   const title = await screen.findByRole('textbox', { name: 'Title' });
   expect(title).toBeEnabled();
-  expect(screen.getByRole('button', { name: 'Analyze again' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Use Luna AI again (paid)' })).toBeDisabled();
   fireEvent.click(screen.getByRole('tab', { name: 'Review' }));
   fireEvent.click(await screen.findByRole('checkbox', { name: '1 · Track number' }));
   expect(screen.getByRole('button', { name: 'Apply selected' })).toBeEnabled();
@@ -394,11 +394,11 @@ test('the catalog review empty state distinguishes confirmed absence from a fail
   await screen.findByText('No new Album imports yet. Upload music for a new Album, or choose an existing Album to edit or review.');
   fireEvent.click(screen.getByRole('button', { name: 'Existing Album reviews' }));
   await screen.findByRole('alert');
-  expect(screen.queryByText('No existing Album reviews yet. Choose an Album to edit its information or start a Luna review.')).not.toBeInTheDocument();
+  expect(screen.queryByText('No existing Album reviews yet. Choose an Album to edit its information or use Luna AI (paid) on it.')).not.toBeInTheDocument();
   expect(screen.queryByRole('link', { name: 'Choose existing Album' })).not.toBeInTheDocument();
   failed = false;
   fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
-  await screen.findByText('No existing Album reviews yet. Choose an Album to edit its information or start a Luna review.');
+  await screen.findByText('No existing Album reviews yet. Choose an Album to edit its information or use Luna AI (paid) on it.');
   fireEvent.click(screen.getByRole('link', { name: 'Choose existing Album' }));
   expect(screen.getByRole('heading', { name: 'Existing Album selection' })).toBeVisible();
 });
@@ -410,7 +410,7 @@ test('returning to the catalog review source reads that queue without querying i
     return json({ items: [], counts: { all: 0, analyzing: 0, awaitingReview: 0, needsAttention: 0, completed: 0 }, nextCursor: null });
   }));
   mount('/admin/imports?source=catalogReviews');
-  await screen.findByText('No existing Album reviews yet. Choose an Album to edit its information or start a Luna review.');
+  await screen.findByText('No existing Album reviews yet. Choose an Album to edit its information or use Luna AI (paid) on it.');
   expect(screen.getByRole('button', { name: 'Existing Album reviews' })).toHaveAttribute('aria-pressed', 'true');
   expect(reads.every(path => path.startsWith('/api/admin/v1/catalog-reviews?'))).toBe(true);
   expect(writes).toEqual([]);
@@ -436,8 +436,8 @@ test('catalog review Unfinished filtering preserves the private queue contract w
 
 test.each([
   { analysisState: 'idle', pendingSuggestions: 0, applied: false, label: 'Not started' },
-  { analysisState: 'queued', pendingSuggestions: 0, applied: false, label: 'In progress · 2/2' },
-  { analysisState: 'running', pendingSuggestions: 1, applied: false, label: 'In progress · 2/2' },
+  { analysisState: 'queued', pendingSuggestions: 0, applied: false, label: 'Luna AI running · 2/2' },
+  { analysisState: 'running', pendingSuggestions: 1, applied: false, label: 'Luna AI running · 2/2' },
   { analysisState: 'complete', pendingSuggestions: 2, applied: false, label: 'Suggestions awaiting review · 2' },
   { analysisState: 'complete', pendingSuggestions: 0, applied: false, label: 'No pending suggestions' },
   { analysisState: 'needsAttention', pendingSuggestions: 0, applied: false, label: 'Needs attention' },
@@ -454,7 +454,7 @@ test.each([
   }));
   mount('/admin/imports?source=catalogReviews');
   const card = within((await screen.findByRole('heading', { name: 'Existing Album task' })).closest('li')!);
-  expect(card.getByText('Luna review')).toBeVisible();
+  expect(card.getByText('Luna AI')).toBeVisible();
   expect(card.getByText(label)).toBeVisible();
   expect(card.getByText('Original Album')).toBeVisible();
   expect(card.getByText(applied ? 'Updated' : 'Not updated')).toBeVisible();
@@ -796,7 +796,7 @@ test('the import page opens on the Review and publish summary above its four sec
   expect(within(tabs).getAllByRole('tab').map(tab => [tab.textContent, tab.getAttribute('aria-selected')])).toEqual([['Draft', 'true'], ['Review', 'false'], ['Files', 'false'], ['Publish', 'false']]);
   // An unsaved title edit unticks the title suggestion; the track number is ticked by hand in the summary.
   fireEvent.change(await screen.findByRole('textbox', { name: 'Title' }), { target: { value: 'Approved Title' } });
-  const luna = within(summary).getByRole('group', { name: 'Luna suggestions' });
+  const luna = within(summary).getByRole('group', { name: 'Luna AI suggestions' });
   await waitFor(() => expect(within(luna).getByRole('checkbox', { name: /^Title: Approved Title → Suggested Album/ })).toBeDisabled());
   fireEvent.click(within(luna).getByRole('checkbox', { name: /^Track 1 · Track number/ }));
   fireEvent.click(within(summary).getByRole('button', { name: 'Review and approve publishing' }));

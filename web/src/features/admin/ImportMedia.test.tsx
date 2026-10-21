@@ -733,7 +733,7 @@ test('a ticked label named like an existing record needs a decision, and only th
   mount(item, operation, 'publication');
   fireEvent.click(screen.getByRole('button', { name: 'Publish Album' }));
   const dialog = screen.getByRole('dialog');
-  expect(await within(dialog).findByText(/^Ticked Luna suggestions add names that match existing records/)).toHaveAttribute('role', 'note');
+  expect(await within(dialog).findByText(/^Ticked Luna AI suggestions add names that match existing records/)).toHaveAttribute('role', 'note');
   expect(within(dialog).getByText('Amet Records · Needs a decision in Review')).toBeInTheDocument();
   expect(within(dialog).getByRole('button', { name: 'Publish Album' })).toBeDisabled();
   fireEvent.click(within(dialog).getByRole('button', { name: 'Apply ticked suggestions now' }));

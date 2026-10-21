@@ -29,7 +29,7 @@ test('manual saved differences identify the original values and distinguish an A
   expect(within(album.closest('article')!).getByText('Value to apply')).toBeVisible();
   expect(within(album.closest('article')!).getByText('Manual Album correction')).toBeVisible();
   expect(within(track.closest('article')!).getByText('Manual track correction')).toBeVisible();
-  expect(screen.queryByText('When analyzed')).not.toBeInTheDocument();
+  expect(screen.queryByText('When Luna AI ran')).not.toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Update original Album (0)' })).toBeDisabled();
   fireEvent.click(track);
   expect(onSelect).toHaveBeenCalledWith(reviewFieldKey(reviewChanges(item)[1]), true);

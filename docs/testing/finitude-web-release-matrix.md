@@ -101,29 +101,34 @@ no decision and no Luna tick; that a tie lists only the values that differ with
 each release's barcode, catalogue number, country and medium and is chosen from
 the keyboard; that a conflict with the administrator's label is kept from the
 keyboard while the summary reflows at 320, 768 and 1440 px; that an unavailable
-lookup offers Luna first beside a free retry, that a retry that stays
-unavailable keeps both, and that Luna starts only after its confirmation shows
-the budget, its suggestion for an empty title then arriving ticked; that an
-import without a folder or usable tags offers Luna beside an empty name box that
-looks up a typed name from the keyboard and stores nothing; and that after a
-lookup finds no release Luna is offered, and its ticked Artist entries, label
-and Disc Number are preselected in one confirmation, which offers no Apply
-ticked suggestions now and approves with their preselections and ticks, with axe
+lookup offers the free Retry lookup as its only next step and Use Luna AI (paid)
+after the name box without the retry's primary style, that a retry that stays
+unavailable keeps that order, and that Luna starts only after its paid AI
+confirmation shows the budget, its suggestion for an empty title then arriving
+ticked; that an import without a folder or usable tags offers no step button and
+an empty name box that looks up a typed name from the keyboard and stores
+nothing, with Use Luna AI (paid) after it; and that after a lookup finds no
+release Use Luna AI (paid) is offered after the name box without a retry, and
+its ticked Artist entries, label and Disc Number are preselected in one
+confirmation, which offers no Apply ticked suggestions now and approves with
+their preselections and ticks, with axe
 scans throughout. Another shows a candidate whose release reports front artwork
 through the protected administrator preview (a mocked WebP; no request reaches a
 lookup host), checks that the summary says Publish waits while the applied
 release's cover is staged and keeps Publish disabled, and that once the staged
 lookup cover arrives it is chosen automatically, named in the summary and the
 confirmation, and carried by the one publish request. Another applies an
-iTunes-only result after MusicBrainz stayed unavailable: the summary says it
-was not checked against MusicBrainz with Luna first beside a free retry, its
-values are flagged as iTunes only and not checked, the chooser marks the
-candidate the same way with an axe scan, the summary reflows at 320, 768 and
-1440 px, and one confirmation publishes it.
+iTunes-only result after MusicBrainz stayed unavailable: the summary says it was
+not checked against MusicBrainz with a free retry as its only next step and Use
+Luna AI (paid) after it, its values are flagged as iTunes only and not checked,
+the chooser marks the candidate the same way with an axe scan, the summary
+reflows at 320, 768 and 1440 px, and one confirmation publishes it.
 
 The catalog reviews spec checks that an existing-Album review shows the Album's
-Artist Credits and label read-only and applies a Disc Number change, and that a
-Luna label suggestion shows only as an identity hint that Keep current rejects.
+Artist Credits and label read-only and applies a Disc Number change, that its
+Luna button reads Use Luna AI (paid) and opens a confirmation titled as a paid
+AI service, and that a Luna label suggestion shows only as an identity hint that
+Keep current rejects.
 
 The historical 2026-08-19 MediaTrack amendment passed
 304/304 server tests, 214/214 Web unit/component tests, 148/148 integration
@@ -478,22 +483,24 @@ player control still works.
   release with nothing to answer, and publishes after one confirmation; that the
   second lists only the values that differ with each edition's barcode,
   catalogue number, country and medium, and that Publish waits until one or
-  none is chosen; and that the third offers Luna beside an empty name box.
-  Type a name of your own for one Artist entry or the label before the lookup
-  applies and confirm Keep mine and Use lookup value appear and Publish waits
-  for the answer. Make lookup unavailable and confirm Retry lookup comes first,
-  then Analyze with Luna once the automatic retries end, and that Analyze shows
-  the project and daily budget and starts nothing until confirmed; confirm
-  Luna's suggestions for empty or tag values arrive ticked, others unticked, and
-  that unticking keeps the current value at approval. With no tags and no
-  match, let Luna suggest the Album title, the Artist entries and the label, and
-  confirm the same publication confirmation preselects them as new; then name an
+  none is chosen; and that the third offers an empty name box as the next step,
+  with Use Luna AI (paid) after it as a secondary button. Type a name of your
+  own for one Artist entry or the label before the lookup applies and confirm
+  Keep mine and Use lookup value appear and Publish waits for the answer. Make
+  lookup unavailable and confirm Retry lookup stays the next step, also once the
+  automatic retries end, with Use Luna AI (paid) after the name box and never
+  primary, and that Use Luna AI (paid) names a paid AI service, shows the
+  project and daily budget and starts nothing until confirmed; confirm Luna's
+  suggestions for empty or tag values arrive ticked, others unticked, and that
+  unticking keeps the current value at approval. With no tags and no match, let
+  Luna suggest the Album title, the Artist entries and the label, and confirm
+  the same publication confirmation preselects them as new; then name an
   existing Organization like the suggested label and confirm its row needs a
   decision and Apply ticked suggestions now appears only then. Confirm the name
   box refuses a link, keeps no history and that no global search appears.
   Without an operator contact, confirm the summary says lookup is not
-  configured, offers Luna and shows neither a retry nor the name box. Repeat
-  with a screen reader at 320 CSS px.
+  configured, offers Use Luna AI (paid) as a secondary button and shows neither
+  a retry nor the name box. Repeat with a screen reader at 320 CSS px.
 - As an administrator, with metadata lookup configured against MusicBrainz in a
   development environment, import a popular Album with many editions (for
   example Hotel California by Eagles) whose files match exactly one edition
@@ -527,9 +534,19 @@ player control still works.
   its iTunes artwork is staged and chosen automatically while the browser
   requests no mzstatic address, and Publish needs one confirmation. With
   MusicBrainz unreachable, confirm the result is also marked Not checked
-  against MusicBrainz with Luna first beside a free retry; with iTunes
-  unreachable, confirm the summary says iTunes was unavailable and Publish
-  stops waiting once its retries end. Repeat with a screen reader at 320 CSS px.
+  against MusicBrainz with a free retry as the next step and Use Luna AI (paid)
+  after the lookup controls; with iTunes unreachable, confirm the summary says
+  iTunes was unavailable with the name box as the next step and Publish stops
+  waiting once its retries end. Repeat with a screen reader at 320 CSS px.
+- As an administrator, in English and then in Simplified Chinese, open an
+  import's Draft section and Review and publish summary and an existing-Album
+  review. Confirm every control that starts Luna reads "Use Luna AI (paid)" or
+  "Use Luna AI again (paid)", or "使用 Luna AI 补全（付费）" or "再次使用 Luna
+  AI 补全（付费）", comes after any lookup controls on the page, is never styled
+  as the primary action, and opens a confirmation that names a paid AI service
+  before anything starts; that Stop Luna AI, the budget lines and Luna status
+  text name Luna AI; and that no control labelled only Analyze, Review, 校对 or
+  分析 starts Luna.
 
 ## Media Session observations
 

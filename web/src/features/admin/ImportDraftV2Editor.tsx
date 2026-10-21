@@ -50,7 +50,7 @@ const ImportAnalysisConfirmation = lazy(() => import('./ImportAnalysisConfirmati
 
 /**
  * The Draft tab's analysis controls, loaded with this editor so the import route stays inside its initial JavaScript budget.
- * Analyze opens the paid-analysis confirmation with its budget; only confirming it starts analysis.
+ * Use Luna AI (paid) opens the paid Luna AI confirmation with its budget; only confirming it starts analysis.
  */
 export function ImportAnalysisControls({ item, available, active, startDisabled, stopDisabled, onAction }: { item: ImportDetail; available: boolean; active: boolean; startDisabled: boolean; stopDisabled: boolean; onAction: (action: 'analyze' | 'cancel-analysis') => void }) {
   const t = useAdminText(), [confirming, setConfirming] = useState(false);

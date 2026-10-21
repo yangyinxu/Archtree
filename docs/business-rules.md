@@ -1525,6 +1525,18 @@ The wire protocol and operational bounds are documented in
   automatic paid replay; administrators may continue manual review.
   The deployment-wide daily allowance resets at UTC midnight; budget exhaustion
   becomes needs attention without dispatching another provider request.
+- Luna is a paid AI service offered as an explicit, secondary alternative to
+  metadata lookup in every lookup state, never as the next step or the
+  emphasized action, and always visible where offered. Every control that
+  starts or confirms a Luna analysis, in imports and existing-Album reviews,
+  names Luna, says it is AI and says it is paid, in every supported language,
+  for example "Use Luna AI (paid)" and "使用 Luna AI 补全（付费）". A generic
+  label alone, such as Analyze, Review, Proofread or Complete, or 分析, 校对 or
+  补全, never starts Luna, and status text about Luna work names Luna AI.
+  Outside its own confirmation dialog, which keeps its primary confirm button,
+  a Luna control comes after the metadata lookup controls and is never styled
+  as the primary action; lookup controls name metadata lookup or MusicBrainz
+  and never mention AI.
 - Name matches, identical bytes, external identifiers and matching durations are
   candidates, not proof of Artist or Organization identity, Album edition, or
   recording identity. Candidates load automatically, matching names
@@ -1809,13 +1821,14 @@ The wire protocol and operational bounds are documented in
   keep a MusicBrainz ID, as described in Administrator Album Imports.
 - When metadata lookup finds no release or no matching release, or cannot run
   because no usable tags, folder name or submitted name exist, the summary
-  offers Luna analysis as the next step beside the name box. When lookup is
-  unavailable or busy, the next step is the free retry and Luna is a secondary
-  choice until the automatic retries are exhausted; Luna is then offered as the
-  next step beside the manual retry. Luna remains an explicitly confirmed paid
-  step that shows the remaining project and daily budget; offering it starts
-  nothing, a lookup result never starts it, and it may also run beside applied
-  lookup values. Luna suggestions return to the summary labelled as Luna and are
+  offers the name box as the next step. When lookup is unavailable, busy or
+  stopped, the next step is the free retry, also after the automatic retries
+  are exhausted. In every lookup state, also after a release was applied, the
+  summary offers Luna as a secondary choice after the lookup controls, never
+  as the next step. Luna remains an explicitly confirmed paid step that shows
+  the remaining project and daily budget; offering it starts nothing, a lookup
+  result never starts it, and it may also run beside applied lookup values. In
+  an import, Luna suggestions return to the summary labelled as Luna AI and are
   never collapsed: those for empty values or values from file tags arrive
   ticked, the others arrive unticked and keep the current value unless ticked,
   unticking rejects one, and none is applied until the administrator accepts it
