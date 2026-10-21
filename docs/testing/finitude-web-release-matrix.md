@@ -122,7 +122,15 @@ iTunes-only result after MusicBrainz stayed unavailable: the summary says it was
 not checked against MusicBrainz with a free retry as its only next step and Use
 Luna AI (paid) after it, its values are flagged as iTunes only and not checked,
 the chooser marks the candidate the same way with an axe scan, the summary
-reflows at 320, 768 and 1440 px, and one confirmation publishes it.
+reflows at 320, 768 and 1440 px, and one confirmation publishes it. Another
+appends two unnumbered files to an Album with an expected tracklist: the
+summary says they fill none of its two missing-file rows and flags each file
+without a Track Number while Publish stays available, with an axe scan and
+reflow at 320, 768 and 1440 px; Number from the Album's expected tracklist
+sends one field save of the proposed Disc and Track Numbers and row title,
+after which each file names the row it fills and the button is gone; and the
+confirmation names the row each new track fills without the numbering button,
+with an axe scan and reflow at 320 px, before one approval publishes it.
 
 The catalog reviews spec checks that an existing-Album review shows the Album's
 Artist Credits and label read-only, saves a Disc Number change as one per-value

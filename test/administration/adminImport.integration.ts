@@ -1171,8 +1171,9 @@ test('the summary state is computed by the server: a public default changed in p
     // A saved Album reuse (an append to an existing Album) applies no Album value, so its title conflict needs no answer.
     await rewrite(id, doc => { doc.decisions = [{ scope: 'album', slotId: null, entryKey: null, boundName: null, action: 'reuse', candidateId: new ObjectId().toHexString(), candidateRevision: 'f'.repeat(64) } as ImportDecisionV2]; });
     const appended = await getAdminImportLookup(by, id);
-    // The target has no member like the file, so its track is preselected as a new member and no identity row needs an answer.
-    assert.deepEqual([appended.summary.append, appended.lookup!.needsAnswer.conflicts, appended.summary.identityAnswers], [true, [track], 0]);
+    // The target has no member like the file, so its track is preselected as a new member and no identity row needs an answer;
+    // a target that does not exist lists no expected tracklist.
+    assert.deepEqual([appended.summary.append, appended.lookup!.needsAnswer.conflicts, appended.summary.identityAnswers, 'appendTracklist' in appended.summary], [true, [track], 0, false]);
     // Saving the lookup's own value answers the track conflict without an explicit answer.
     await editAdminImport(by, id, { ...mutation(song.item.revision), changes: [{ path: track, base: 'My Song', value: 'Lookup Song' }] });
     assert.deepEqual((await getAdminImportLookup(by, id)).lookup!.needsAnswer.conflicts, []);

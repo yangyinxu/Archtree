@@ -9,6 +9,7 @@
  *   - proposals, ID conflicts and the found names carry MusicBrainz IDs, defaulting to none for a server that sends none
  *   - a candidate's artwork flag and the cover-staging wait default to false for a server that sends neither, and are never addresses
  *   - an iTunes-only candidate parses with its collection ID, source and not-checked mark agreeing with its key, and the iTunes status defaults to not queried
+ *   - an append target's expected rows parse strictly within their bounds, and a server that sends none reads as null
  * @end-catalog */
 
 import { lookupResponseSchema, lookupViewSchema } from './importLookupApi';
@@ -134,4 +135,33 @@ test('an iTunes-only candidate parses with its collection ID, source and not-che
   expect(lookupViewSchema.safeParse({ ...item, itunes: 'searching' }).success).toBe(false);
   // A MusicBrainz ID is still required where one is named: never a collection ID.
   expect(lookupResponseSchema.safeParse({ lookup: null, revision: 1, valueRevision: 0, summary: summary(), musicBrainzNames: [{ musicBrainzId: '1689358563', names: [] }] }).success).toBe(false);
+});
+
+test('an append target\'s expected rows parse strictly within their bounds, and a server that sends none reads as null', () => {
+  const tracklist = () => ({ albumId: 'a'.repeat(24), durationToleranceMs: 3000,
+    rows: [{ discNumber: 1, trackNumber: 1, title: 'First Row', durationMs: 200_000, filled: true }, { discNumber: 1, trackNumber: 2, title: 'Second Row', durationMs: null, filled: false }],
+    files: [{ slotId: slot, durationMs: 241_000, durationPrecisionMs: 1000, appended: true }, { slotId: slotTwo, durationMs: null, durationPrecisionMs: 0, appended: false }],
+    numbering: [{ slotId: slot, discNumber: 1, trackNumber: 2, title: 'Second Row' }, { slotId: slotTwo, discNumber: 1, trackNumber: 3, title: null }] });
+  const parse = (value: unknown) => lookupResponseSchema.safeParse({ lookup: null, revision: 1, valueRevision: 0, summary: { ...summary(), appendTracklist: value } });
+  expect(parse(tracklist()).data?.summary.appendTracklist).toEqual(tracklist());
+  expect(parse(null).data?.summary.appendTracklist).toBeNull();
+  expect(lookupResponseSchema.parse({ lookup: null, revision: 1, valueRevision: 0, summary: summary() }).summary.appendTracklist).toBeNull();
+  const refused = (edit: (value: ReturnType<typeof tracklist>) => void) => { const value = tracklist(); edit(value); expect(parse(value).success).toBe(false); };
+  refused(value => Object.assign(value, { source: 'musicbrainz' }));
+  refused(value => Object.assign(value.rows[0], { memberIds: [] }));
+  refused(value => Object.assign(value.files[0], { filename: '01.flac' }));
+  refused(value => { value.rows = Array.from({ length: 101 }, (_row, index) => ({ discNumber: 1, trackNumber: index + 1, title: 'Row', durationMs: null, filled: false })); });
+  refused(value => { value.rows = []; });
+  refused(value => { value.files[0].slotId = 'not-a-slot'; });
+  refused(value => { value.numbering[0].slotId = '../album'; });
+  refused(value => { value.rows[0].trackNumber = 0; });
+  refused(value => { value.rows[0].discNumber = 1000; });
+  refused(value => { value.numbering[0].trackNumber = 10_000; });
+  refused(value => { value.rows[0].title = 'x'.repeat(301); });
+  refused(value => { value.rows[0].durationMs = 1.5; });
+  refused(value => { value.files[0].durationMs = 0; });
+  refused(value => { (value.files[0] as { durationPrecisionMs: number }).durationPrecisionMs = 500; });
+  refused(value => { value.numbering[0].title = ''; });
+  refused(value => { value.albumId = 'A'.repeat(24); });
+  refused(value => { value.durationToleranceMs = 60_001; });
 });

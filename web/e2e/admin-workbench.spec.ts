@@ -32,6 +32,7 @@
  *   - an image every file shares is chosen automatically until the administrator chooses, and the summary and confirmation show the choice
  *   - a release with front artwork shows a protected preview, Publish waits while its cover is staged, and the staged lookup cover is then chosen automatically and published
  *   - an iTunes-only result applied after MusicBrainz stayed unavailable is marked iTunes only and not checked against MusicBrainz, its values stay flagged, and it publishes after one confirmation
+ *   - an append to an Album with an expected tracklist shows each file's row and flags, numbers the files in one field save, lists the rows in the confirmation, and reflows at 320 px
  * @end-catalog */
 
 import { expect, test, type Page, type Request } from '@playwright/test';
@@ -775,15 +776,16 @@ function uploadedProject(): Item {
 }
 /**
  * Serves one import project and its summary read (GET …/lookup answers `state.lookup` and `state.summary` over the defaults);
- * `write` applies each write and returns its receipt kind, and every write is recorded. Registered after setup, so it serves
- * every request for this project.
+ * `write` applies each write and returns its receipt kind, and every write is recorded. The duplicate candidates read lists
+ * `candidates` (none by default). Registered after setup, so it serves every request for this project.
  */
-async function summaryProject(page: Page, initial: Item, write: (state: { item: Item; lookup: Record<string, unknown> | null; summary: Record<string, unknown> }, action: string, body: any) => string) {
+async function summaryProject(page: Page, initial: Item, write: (state: { item: Item; lookup: Record<string, unknown> | null; summary: Record<string, unknown> }, action: string, body: any) => string,
+  candidates: unknown[] = []) {
   const headers = { 'X-Finitude-Account-Viewer': viewer, 'Cache-Control': 'no-store' };
   const state = { item: initial, lookup: null as Record<string, unknown> | null, summary: {} as Record<string, unknown>, writes: [] as { action: string; body: any }[] };
   await page.route(`**/api/admin/v1/imports/${projectId}**`, async route => {
     const request = route.request(), action = new URL(request.url()).pathname.split('/').slice(6).join('/');
-    if (action === 'duplicate-candidates') return route.fulfill({ json: { items: [], memberMatchesComplete: true }, headers });
+    if (action === 'duplicate-candidates') return route.fulfill({ json: { items: candidates, memberMatchesComplete: true }, headers });
     if (request.method() === 'GET') return route.fulfill({ json: action === 'lookup' ? { lookup: state.lookup, revision: state.item.revision, valueRevision: state.item.valueRevision,
       summary: { ...lookupResponse().summary, ...state.summary } } : { item: state.item, receipt: null }, headers });
     const body = request.postDataJSON(); state.writes.push({ action, body });
@@ -1169,4 +1171,58 @@ test('an iTunes-only result applied after MusicBrainz stayed unavailable is mark
   await page.getByRole('dialog').getByRole('button', { name: 'Publish Album', exact: true }).click();
   await expect.poll(() => server.writes.map(write => write.action)).toEqual(['publish']);
   expect(server.writes[0].body).toEqual(expect.objectContaining({ approvalDigest: expect.any(String), decisions: item.decisions }));
+});
+
+test('an append to an Album with an expected tracklist shows each file\'s row and flags, numbers the files in one field save, lists the rows in the confirmation, and reflows at 320 px', async ({ page }) => {
+  await setup(page);
+  const item = uploadedProject(), [first, second] = item.draft.tracks, albumId = '3'.repeat(24);
+  Object.assign(first, { discNumber: null, trackNumber: null }); Object.assign(second, { title: '', discNumber: null, trackNumber: null });
+  item.decisions = [{ scope: 'album', slotId: null, entryKey: null, boundName: null, action: 'reuse', candidateId: albumId, candidateRevision: 'r-album' },
+    ...distinctDecisions(item).filter(decision => decision.scope === 'track')];
+  const target = { kind: 'album', id: albumId, label: 'Existing Album', revision: 'r-album', albumId: null, visibility: 'public', match: 'name', matchedSlotIds: [], automaticReuse: false };
+  const tracklist = { albumId, durationToleranceMs: 3000,
+    rows: [{ discNumber: 1, trackNumber: 1, title: 'Opening', durationMs: null, filled: true }, { discNumber: 1, trackNumber: 2, title: 'Second Row', durationMs: 200_000, filled: false },
+      { discNumber: 1, trackNumber: 3, title: 'Third Row', durationMs: 300_000, filled: false }],
+    files: [{ slotId: first.slotId, durationMs: 200_500, durationPrecisionMs: 0, appended: true }, { slotId: second.slotId, durationMs: 300_000, durationPrecisionMs: 0, appended: true }],
+    numbering: [{ slotId: first.slotId, discNumber: 1, trackNumber: 2, title: null }, { slotId: second.slotId, discNumber: 1, trackNumber: 3, title: 'Third Row' }] };
+  const changes = [{ path: `tracks.${first.slotId}.discNumber`, base: null, value: 1 }, { path: `tracks.${first.slotId}.trackNumber`, base: null, value: 2 },
+    { path: `tracks.${second.slotId}.discNumber`, base: null, value: 1 }, { path: `tracks.${second.slotId}.trackNumber`, base: null, value: 3 }, { path: `tracks.${second.slotId}.title`, base: '', value: 'Third Row' }];
+  const server = await summaryProject(page, item, (state, action, body) => {
+    if (action === 'publish') return 'publish';
+    // The numbering is an ordinary field save of the saved values; afterwards the numbers are the administrator's own, so none is proposed.
+    expect([action, body]).toEqual(['', { operationId: expect.any(String), expectedRevision: state.item.revision, changes }]);
+    state.item = { ...state.item, draft: applyDraftChanges(state.item.draft, body.changes) };
+    state.summary = { append: true, appendTracklist: { ...tracklist, numbering: [] } };
+    return 'edit';
+  }, [target]);
+  server.summary = { append: true, appendTracklist: tracklist };
+  await page.goto(`/finitude/admin/imports/${projectId}`); await page.getByRole('button', { name: 'Switch to Admin view' }).click();
+  const rows = summaryRegion(page).getByRole('region', { name: 'Album\'s expected tracklist', exact: true });
+  await expect(rows.getByText('These files fill 0 of the Album\'s 2 missing-file rows.', { exact: true })).toBeVisible();
+  await expect(rows.getByRole('listitem')).toHaveText(['Disc 1 · Track — · First · No row · No Track Number', 'Disc 1 · Track — · 02 Second.mp3 · No row · No Track Number']);
+  // Flags never hold Publish.
+  await expect(publishFromSummary(page)).toBeEnabled();
+  const number = rows.getByRole('button', { name: 'Number from the Album\'s expected tracklist', exact: true });
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+  for (const width of [320, 768, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    expect(await noOverflow(page)).toBe(true);
+    await expect(number).toBeVisible();
+  }
+  await number.click();
+  await expect.poll(() => server.writes.map(write => write.action)).toEqual(['']);
+  await expect(rows.getByRole('listitem')).toHaveText(['Disc 1 · Track 2 · First · Row Disc 1 · Track 2: Second Row', 'Disc 1 · Track 3 · Third Row · Row Disc 1 · Track 3: Third Row']);
+  await expect(rows.getByText('These files fill 2 of the Album\'s 2 missing-file rows.', { exact: true })).toBeVisible();
+  await expect(number).toHaveCount(0);
+  await expect(publishFromSummary(page)).toBeEnabled();
+  await publishFromSummary(page).click();
+  const dialog = page.getByRole('dialog'), checklist = dialog.getByRole('region', { name: 'What becomes catalog content', exact: true });
+  const confirmed = checklist.getByText('Album\'s expected tracklist', { exact: true }).locator('xpath=following-sibling::dd');
+  await expect(confirmed.getByRole('listitem')).toHaveText(['Disc 1 · Track 2 · First · Row Disc 1 · Track 2: Second Row', 'Disc 1 · Track 3 · Third Row · Row Disc 1 · Track 3: Third Row']);
+  await expect(confirmed.getByRole('button')).toHaveCount(0);
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+  await page.setViewportSize({ width: 320, height: 900 }); expect(await noOverflow(page)).toBe(true);
+  await dialog.getByRole('button', { name: 'Publish Album', exact: true }).click();
+  await expect.poll(() => server.writes.map(write => write.action)).toEqual(['', 'publish']);
+  expect(server.writes[1].body).toEqual(expect.objectContaining({ changes: [], decisions: item.decisions }));
 });

@@ -4,7 +4,7 @@
  *   Functions: getAdminImportLookup, submitAdminImportLookup, retryAdminImportLookup, chooseAdminImportLookup,
  *              resolveAdminImportLookup
  * Internal
- *   Functions: notFound, boundRunAndCandidate, storeLookupRecord
+ *   Functions: notFound, boundRunAndCandidate, storeLookupRecord, readAppendTarget
  *   Constants: maximumAnswers
  * @end-catalog */
 
@@ -16,13 +16,13 @@
  * writes nothing, and a lost response replays. Bodies are bounded and shaped before their intent is fingerprinted.
  */
 import { ObjectId, type ClientSession } from 'mongodb';
-import { AdminImportError, exact, invalidImport, objectId, record } from '../import/adminImportContract';
-import { DRAFT_V2_LIMITS, hasOwn } from '../import/adminImportDraft';
+import { ADMIN_IMPORT_LIMITS, AdminImportError, exact, invalidImport, objectId, record } from '../import/adminImportContract';
+import { DRAFT_V2_LIMITS, hasOwn, type ImportDecisionV2 } from '../import/adminImportDraft';
 import {
     dailyAnalysisAttemptsUsed, importCollection, importLookupRecord, importPurposeFilter, importSavedIdentity, mutateAdminImport, parseAdminProjectMutation, withImportAdmin
 } from '../import/adminImportService';
 import { importIdentityPreselections } from '../import/adminImportIdentity';
-import { importIdentityAnswers, importSummaryView, type ImportSummaryView } from '../import/adminImportSummary';
+import { importIdentityAnswers, importSummaryView, type ImportAppendTarget, type ImportSummaryView } from '../import/adminImportSummary';
 import { metadataLookupConfiguration, type MetadataLookupConfiguration } from '../../config/metadataLookup';
 import { boundedJson, parseDraftPath } from '../import/adminImportValueState';
 import { isLookupCandidateKey, METADATA_LOOKUP_LIMITS } from './lookupContract';
@@ -31,6 +31,9 @@ import { chooseLookupCandidate, isLookupValuePath, resolveLookupConflicts } from
 import { adminImportLookupCollection, metadataLookupAccepted, queueMetadataLookup, readLookupApplicationContext } from './metadataLookupService';
 import { importMusicBrainzNameMap } from '../import/adminImportMusicBrainzIds';
 import type { MetadataLookupRecord } from './metadataLookupRecord';
+import { getDb } from '../../infrastructure/database';
+import { readyAlbumLifecycleFilter } from '../../services/catalog/albumReferenceFenceService';
+import { hasStoredExpectedTracklist } from '../../services/catalog/albumExpectedTracklist';
 
 /** One answer per draft value: the five album paths and three per file. */
 const maximumAnswers = 5 + 3 * 100;
@@ -47,12 +50,32 @@ async function storeLookupRecord(next: MetadataLookupRecord, session: ClientSess
     if (written.matchedCount !== 1) throw new AdminImportError(409, 'ADMIN_IMPORT_REVISION_CONFLICT');
 }
 
+/**
+ * The saved append's target for the summary, read in the caller's snapshot: the ready Album a saved Album reuse names, with its
+ * stored expected tracklist and the Disc and Track Numbers of its declared members of any lifecycle state. Member IDs are read as
+ * the Album page and listener reads normalize them (trimmed, lower case, first occurrence kept); a malformed or dangling one fills
+ * nothing, and a legacy Album without declared IDs has no members, as the append commit keeps only declared ones. Null without
+ * such a reuse, for a missing or not ready Album, one without a tracklist, or one over the member bound publishing enforces.
+ */
+async function readAppendTarget(decisions: readonly ImportDecisionV2[], session: ClientSession): Promise<ImportAppendTarget | null> {
+    const reuse = decisions.find(decision => decision.scope === 'album' && decision.action === 'reuse');
+    if (!reuse || !objectId(reuse.candidateId)) return null;
+    const db = getDb()!, bound = ADMIN_IMPORT_LIMITS.appendTargetMembers;
+    const album = await db.collection('albums').findOne({ _id: new ObjectId(reuse.candidateId), ...readyAlbumLifecycleFilter }, { session, projection: { expectedTracklist: 1, audioTrackIds: 1 }, maxTimeMS: 3_000 });
+    if (!album || !hasStoredExpectedTracklist({ expectedTracklist: album.expectedTracklist }) || !Array.isArray(album.audioTrackIds) || album.audioTrackIds.length > bound) return null;
+    const ids = [...new Set(album.audioTrackIds.flatMap((value: unknown) => { const id = String(value ?? '').trim().toLowerCase(); return objectId(id) ? [id] : []; }))];
+    const members = ids.length ? await db.collection('audioTracks').find({ _id: { $in: ids.map(value => new ObjectId(value)) } }, { session, projection: { discNumber: 1, trackNumber: 1 }, maxTimeMS: 3_000 })
+        .limit(bound).toArray() : [];
+    return { albumId: album._id.toHexString(), tracklist: album.expectedTracklist, members: members.map(member => ({ discNumber: member.discNumber, trackNumber: member.trackNumber })) };
+}
+
 export type ImportLookupResponse = { lookup: ImportLookupView | null; revision: number; valueRevision: number; summary: ImportSummaryView;
     musicBrainzNames: { musicBrainzId: string; names: string[] }[] };
 /**
  * The import's lookup view (null before any run), its revision and automatic-write counter, and the Review and publish summary
  * state (importSummaryView) read in the same snapshot: with the provider calls used today, this server's lookup configuration
- * and the identity rows of the saved draft that neither a saved decision nor a preselection answers (the candidates Review reads).
+ * and the identity rows of the saved draft that neither a saved decision nor a preselection answers (the candidates Review reads),
+ * and, for a saved append whose publication is not complete, its target's expected tracklist and members (readAppendTarget).
  * `musicBrainzNames` are the names lookup found for each MusicBrainz ID the saved draft carries: a renamed entry keeps its ID
  * only under one of them.
  */
@@ -62,11 +85,15 @@ export async function getAdminImportLookup(actor: string, id: string, configurat
         const doc = await importCollection().findOne({ _id: new ObjectId(id), ...importPurposeFilter }, { session });
         if (!doc) throw notFound();
         const stored = await importLookupRecord(doc._id, session), now = new Date(), identity = await importSavedIdentity(doc, session);
-        const identityAnswers = importIdentityAnswers(identity.draft, identity.decisions, importIdentityPreselections(identity.draft, identity.decisions, identity.candidates));
+        const preselections = importIdentityPreselections(identity.draft, identity.decisions, identity.candidates);
+        const identityAnswers = importIdentityAnswers(identity.draft, identity.decisions, preselections);
+        // A complete publication lists no rows (importSummaryView), so its target is not read.
+        const appendTarget = doc.media?.publication?.state === 'complete' ? null : await readAppendTarget(identity.decisions, session);
         return { lookup: stored ? importLookupView(stored, doc) : null, revision: doc.revision,
             musicBrainzNames: [...importMusicBrainzNameMap(doc.musicBrainzNames, identity.draft)].map(([musicBrainzId, names]) => ({ musicBrainzId, names })),
             valueRevision: Number.isSafeInteger(doc.valueRevision) && doc.valueRevision! >= 0 ? doc.valueRevision! : 0,
-            summary: importSummaryView(doc, stored, { now, dailyAttemptsUsed: await dailyAnalysisAttemptsUsed(now, session), lookupAvailable: configuration().available, identityAnswers }) };
+            summary: importSummaryView(doc, stored, { now, dailyAttemptsUsed: await dailyAnalysisAttemptsUsed(now, session), lookupAvailable: configuration().available, identityAnswers,
+                appendTarget, preselections }) };
     });
 }
 

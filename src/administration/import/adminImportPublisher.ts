@@ -117,7 +117,7 @@ export async function publishAdminImport(actor: string, id: string, raw: unknown
         if (append) {
             existingAlbum = await getDb()!.collection('albums').findOne({ _id: new ObjectId(albumDecision.candidateId!), ...readyAlbumLifecycleFilter }, { session, projection: candidateProjection });
             if (!existingAlbum || importCandidateRevision(existingAlbum) !== albumDecision.candidateRevision) throw new AdminImportError(409, 'ADMIN_IMPORT_DUPLICATE_STALE');
-            if (!Array.isArray(existingAlbum.audioTrackIds) || existingAlbum.audioTrackIds.length > 5000) throw new AdminImportError(409, 'ADMIN_IMPORT_TARGET_TOO_LARGE');
+            if (!Array.isArray(existingAlbum.audioTrackIds) || existingAlbum.audioTrackIds.length > ADMIN_IMPORT_LIMITS.appendTargetMembers) throw new AdminImportError(409, 'ADMIN_IMPORT_TARGET_TOO_LARGE');
         }
         const selected = draft.tracks.filter(track => decisions.find(decision => decision.scope === 'track' && decision.slotId === track.slotId)?.action !== 'skip');
         if ((!selected.length && !existingAlbum) || selected.some(track => !track.title)) throw new AdminImportError(400, 'ADMIN_IMPORT_DRAFT_INCOMPLETE');

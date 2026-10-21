@@ -840,10 +840,11 @@ The wire protocol and operational bounds are documented in
   renumbering, hiding, unlinking or deleting a member changes which rows have a
   file, never the expected tracklist itself.
 - The expected tracklist and its missing-file rows are administrator
-  information, shown on the Web Album page. An Album without a primary Artist
-  Credit cannot be appended to, so its Album page says that its missing-file
-  rows can be filled only by a Content Manager Audio upload. A missing-file row
-  is not a MediaTrack and has no media. Neither ever enters
+  information, shown on the Web Album page and in the summary and confirmation
+  of an append to the Album. An Album without a primary Artist Credit cannot be
+  appended to, so its Album page says that its missing-file rows can be filled
+  only by a Content Manager Audio upload. A missing-file row is not a MediaTrack
+  and has no media. Neither ever enters
   `Album.audioTrackIds`, the Album order, playback, queues, downloads, shared
   playback rooms (room queues, recommendations and music selection), Direct
   Music Shares, friend listening status, Search, Library, Playlists, Carousels
@@ -1708,6 +1709,21 @@ The wire protocol and operational bounds are documented in
   by their Disc and Track Numbers, as the confirmation shows. A hidden Album
   continues to hide its Tracks until its own visibility changes; a newly created
   hidden Artist or Organization is not exposed by publishing a private import.
+  Appending never changes the target Album's expected tracklist; its new
+  members fill missing-file rows by their Disc and Track Numbers.
+- When the target of an append has an expected tracklist, the Review and
+  publish summary and the publication confirmation show the row each appended
+  file fills, and flag a file without a Track Number, a file without a Disc
+  Number when the expected tracklist has more than one disc, one at a position
+  outside the expected tracklist or already filled, and one whose duration
+  differs from its row's by more than the metadata lookup tolerance; flags
+  never hold Publish. The administrator may number the files from the expected
+  tracklist in one step. It pairs the files without the administrator's own
+  Disc and Track Numbers with the missing-file rows; numbers that lookup wrote
+  automatically do not constrain the pairing and are replaced. Each file that
+  every largest such pairing places at the same row takes that row's Disc and
+  Track Number and, when its title is empty or automatic, the row's title, as
+  the administrator's own values; other files keep their values.
 - An unconfirmed existing-catalog cover approval may be explicitly cancelled by
   a current administrator after its active worker lease ends. Cancellation leaves
   the saved cover unchanged and retains the unused object's identity and source

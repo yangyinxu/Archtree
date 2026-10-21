@@ -500,11 +500,14 @@ review's Disc Numbers and Album order committing with its receipt.
 
 An Album may keep one expected tracklist (`expectedTracklist`): the audio
 tracklist of the release that an applied existing-Album review used. It is
-administrator information, shown only on the Web Album page.
-`src/services/catalog/albumExpectedTracklist.ts` validates it and derives its
-rows; an existing-Album review admitted to metadata lookup captures a private
-copy of its rows. Its product rules are under Catalog Visibility and
-Administration in [business-rules.md](../business-rules.md).
+administrator information, shown on the Web Album page and in an append's
+summary and confirmation. `src/services/catalog/albumExpectedTracklist.ts`
+validates it and derives its rows; an existing-Album review admitted to
+metadata lookup captures a private copy of its rows, and an import that appends
+to the Album reads it for its Review and publish summary (see
+[Appending to an Album](#appending-to-an-album)). Its product rules are under
+Catalog Visibility and Administration in
+[business-rules.md](../business-rules.md).
 
 ### Expected tracklist storage
 
@@ -537,7 +540,8 @@ is stored, malformed values included, so Albums without one (or with `null`)
 keep their revisions byte for byte and no captured review, conversion intent,
 catalog cover operation or create retry goes stale. It is never an editable
 field and never part of a catalog snapshot. The import candidate projection
-does not read it, so import duplicate decisions and appends are unaffected.
+does not read it, so import duplicate decisions and an append's reviewed target
+revision are unaffected; an append's summary reads it apart from candidates.
 
 ### Expected tracklist writers and privacy
 
@@ -626,6 +630,26 @@ oversized Albums, and that only administrators read rows.
 schema, the rows, the summary and notes, and the clear and its confirmation.
 `test/administration/adminCatalogReview.integration.ts` shows that an external
 tracklist change makes a review's source changed and its apply write nothing.
+`test/administration/adminImportSummary.test.ts` covers an append's
+`appendTracklist`: rows filled by members at their position whatever their
+state, file durations and files appended by saved decisions and
+preselections, forced numbering with an extra bonus file and ambiguous
+durations, automatic lookup numbers replaced while file-tag numbers
+constrain, the administrator's own numbers kept, no file proposed for a
+position an unmoved appended file keeps, row titles, the draft size cap, and
+no `appendTracklist` for an import that is no Album reuse, a target without a
+tracklist or a malformed one, or a complete publication.
+`test/administration/adminImportMedia.integration.ts` shows an append to an
+Album with a tracklist numbered in one field save, the tracklist unchanged
+after publishing, the order re-derived, the appended member filling its row
+with exactly the Album's primary Credit (not the applied release track's
+credit), no rows once the publication is complete, and no rows for a target
+that is not ready, holds a malformed tracklist or none, or exceeds 5000
+members. It also shows that member IDs are read whatever their case, padding
+or stored type, that a legacy Album without declared IDs has no members, that
+an undecided file follows its identity preselection, and that the numbering
+save is all or nothing: a number another administrator saved refuses it, and
+its lost response replays even after the approval locks the draft.
 `test/listener/expectedTracklistPrivacy.integration.ts` scans listener, legacy,
 Search, Page, Follow, Library and Playlist responses for anonymous callers,
 listeners and an administrator in User view, shows that row titles never match
@@ -809,6 +833,19 @@ They store their reviewed Disc and Track Numbers, and join its order by Disc
 Number, Track Number and MediaTrack ID ([Sort key](#sort-key)). A selected cover
 is not copied, and no MusicBrainz ID is recorded.
 
+An append never writes the target Album's
+[expected tracklist](#album-expected-tracklists), and the commit is the same
+with or without one: rows are matched to members by position when read
+(`expectedTrackRows`), so the new MediaTracks fill the missing-file rows at
+their Disc and Track Numbers. They still take the Album's primary Credits,
+never a release track's credit, which the tracklist does not store. The import's
+Review and publish summary reads the target's stored tracklist
+(`storedExpectedTracklist`, a malformed value reading as none) and the Disc and
+Track Numbers of its members in the same read to show the rows, and computes
+the numbering proposal with `lookupForcedPairs` from
+`src/administration/lookup/lookupSubset.ts`; nothing it shows is frozen by the
+approval, and numbering is an ordinary draft field save.
+
 ### Verification
 
 `test/administration/adminImportCatalogCommit.test.ts` covers the Credit
@@ -848,6 +885,9 @@ approval in which two entries would record one ID.
 preselections and their recheck, approvals bound to the preselections they
 showed, byte matches read apart from title matches, a byte match on another
 Album that needs no answer, append visibility and the sixteen-approval bound
-with a new import of the same files, and
+with a new import of the same files, an append to an Album with an expected
+tracklist (its new members fill missing-file rows, the tracklist is unchanged,
+the order is re-derived and the appended MediaTracks take the Album's primary
+Credits), and
 `web/src/api/listenerContractCompatibility.test.ts` parses
 `contracts/listener/v1/fixtures/album-multi-artist-label.json`.

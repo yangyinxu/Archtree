@@ -3,14 +3,16 @@
  *   Types: ApprovalState
  *   Functions: ImportApprovalChecklist
  * Internal
- *   Constants: identityKeys
+ *   Functions: RowsUnavailable
+ *   Constants: identityKeys, ImportExpectedRows
  * @end-catalog */
 
-import { useEffect, useId, useState } from 'react';
+import { lazy, Suspense, useEffect, useId, useState, type ComponentProps, type ComponentType } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useLocalization } from '../../localization/LocalizationProvider';
 import type { MessageKey } from '../../localization/contract';
 import { useAdminAccess, useAdminText } from './AdminAccess';
+import type { ImportExpectedRows as ExpectedRows } from './ImportExpectedRows';
 import { adminRequest, duplicateEditsKey, importPath, lookupCoverName, type DecisionEdits, type ImportDecision, type ImportDetail, type ImportDraftV2 } from './adminApi';
 import { candidatesSchema, identityPreselections, musicBrainzIdWrites, type MusicBrainzIdWrite } from './importIdentity';
 import { adminWorkspace } from './adminWorkspace';
@@ -29,6 +31,12 @@ import styles from './adminStyles';
 export interface ApprovalState { body: ApprovalBody & { preselections: ImportDecision[]; suggestionTicks: ReturnType<typeof suggestionTicks>; musicBrainzIds: MusicBrainzIdWrite[] }; ready: boolean }
 
 const identityKeys = { new: 'publication.new_record', needsDecision: 'publication.needs_decision', changed: 'publication.decision_changed', notApplied: 'publication.not_applied' } as const;
+/** Stands in for expected rows whose chunk cannot load. */
+function RowsUnavailable() { const t = useAdminText(); return <p role="alert">{t('common.reload')}</p>; }
+// An append target's expected rows load only with a confirmation that shows them; a chunk that cannot load (a deploy replaced it)
+// asks for a reload in their place. The rows are information only, so approval does not wait for them.
+const ImportExpectedRows = lazy<ComponentType<ComponentProps<typeof ExpectedRows>>>(() => import('./ImportExpectedRows')
+  .then(module => ({ default: module.ImportExpectedRows }), () => ({ default: RowsUnavailable })));
 
 /**
  * The publication confirmation's list of everything that becomes catalog content, built from the project, the editor's draft and
@@ -40,7 +48,10 @@ const identityKeys = { new: 'publication.new_record', needsDecision: 'publicatio
  * applied, while an unsaved rename still needs a decision. The checklist reads only the decisions still bound once the ticks are
  * written (as the approval keeps them), and the body sends the shown decisions unchanged. A ticked row can still need an explicit
  * answer when its name matches an existing record; only then it offers to apply the ticked suggestions to the saved draft now
- * (`onAdopt`, the summary's same adopt body), after which Review answers it. Loaded on demand with the confirmation.
+ * (`onAdopt`, the summary's same adopt body), after which Review answers it. An append waits for the summary read to answer too
+ * and lists the target's missing-file rows the shown new tracks fill (information only, so a failed read shows its error without
+ * holding approval), or, when Review's unsaved decisions target another Album than the saved one, says to save them first.
+ * Loaded on demand with the confirmation.
  */
 export function ImportApprovalChecklist({ item, draft, changes, onChange, onAdopt }: {
   item: ImportDetail; draft: ImportDraftV2; changes: ImportDraftChange[]; onChange: (approval: ApprovalState | null) => void;
@@ -53,12 +64,17 @@ export function ImportApprovalChecklist({ item, draft, changes, onChange, onAdop
     return decisions && approvalBody(item, changes, decisions);
   });
   const [toggles] = useState(() => adminWorkspace.buffer<Record<string, boolean>>(lunaTicksKey(item.id)) ?? {});
-  // The server's tick state, shared with the summary; only a project with pending suggestions waits for it.
   const pending = item.suggestions.filter(suggestion => suggestion.decision === 'pending');
-  const summary = useQuery({ ...importSummaryQuery(access, item), enabled: pending.length > 0 });
+  // The Album the shown decisions append to, and the one the saved decisions do: the summary lists the saved target's rows.
+  const shownTarget = body?.decisions.find(decision => decision.scope === 'album' && decision.action === 'reuse')?.candidateId ?? null;
+  const savedTarget = item.decisions.find(decision => decision.scope === 'album' && decision.action === 'reuse')?.candidateId ?? null, append = Boolean(shownTarget);
+  // The server's tick state and an append target's rows, shared with the summary; only a project with pending suggestions, or an
+  // append, waits for it. Pending ticks need the read to succeed; an append's rows only need it to answer, since they are
+  // information only.
+  const summary = useQuery({ ...importSummaryQuery(access, item), enabled: pending.length > 0 || append });
   const ticks = new Map(summary.data?.summary.luna.map(entry => [entry.id, entry.tick]));
   const luna = suggestionTicks(item, ticks, toggles, new Set(changes.map(change => change.path)));
-  const lunaReady = !pending.length || summary.isSuccess;
+  const lunaReady = !pending.length || summary.isSuccess, rowsReady = !append || summary.isSuccess || summary.isError, tracklist = summary.data?.summary.appendTracklist ?? null;
   const shown = tickedDraft(draft, item.suggestions, luna.ticked), read = [item.draft, lunaProposals(item)];
   const bound = body ? boundDecisions(body.decisions, shown) : [];
   // The same candidate read Review uses (and shares while Review keeps it): reuses are shown by name and visibility from it, and
@@ -75,7 +91,7 @@ export function ImportApprovalChecklist({ item, draft, changes, onChange, onAdop
   const ticked = new Set(luna.ticked.map(id => suggestionPath(item.suggestions.find(suggestion => suggestion.id === id)!)));
   const checklist = body && candidates.isSuccess && lunaReady ? approvalChecklist(shown, bound, candidates.data.items,
     { automaticPaths: item.automaticPaths, lookupPaths: item.lookupPaths, possibleLabelEntryKeys: item.possibleLabelEntryKeys, changedPaths: [...changes.map(change => change.path), ...ticked] }, preselections, writes) : null;
-  const ready = Boolean(checklist && checklist.blocked === 0 && !candidates.isFetching && !summary.isFetching);
+  const ready = Boolean(checklist && checklist.blocked === 0 && !candidates.isFetching && !summary.isFetching && rowsReady);
   // Rows a ticked suggestion introduces that still need an explicit answer (a same-name record and no preselection): the same
   // checklist without the ticks blocks fewer rows.
   const untickedDecisions = body ? boundDecisions(body.decisions, draft) : [];
@@ -101,7 +117,7 @@ export function ImportApprovalChecklist({ item, draft, changes, onChange, onAdop
     <h3 id={heading}>{t('publication.checklist')}</h3>
     {changes.length > 0 && <p role="note">{t('publication.unsaved_included')}</p>}
     {!body && <p role="alert">{t('publication.decisions_conflict')}</p>}
-    {body && (candidates.isPending || !lunaReady && !summary.isError) && <p role="status">{t('common.loading')}</p>}
+    {body && (candidates.isPending || (!lunaReady || !rowsReady) && !summary.isError) && <p role="status">{t('common.loading')}</p>}
     {body && (candidates.isError || summary.isError) && <p role="alert">{t('common.error')}</p>}
     {checklist && <>
       {checklist.append && <p role="note">{t('publication.append_not_applied')}</p>}
@@ -124,6 +140,10 @@ export function ImportApprovalChecklist({ item, draft, changes, onChange, onAdop
           ? [track.identity.kind !== 'reused' && (track.title || t('common.untitled')), identity(track.identity), t('publication.existing_member')]
           : [t('publication.track_position', { disc: String(track.discNumber ?? 1), track: track.trackNumber === null ? '—' : String(track.trackNumber) }),
             track.title || t('common.untitled'), identity(track.identity)]).filter(Boolean).join(' · ')}</li>)}</ol></dd></div>
+        {/* Rows are read for the saved target only; Review's unsaved decisions naming another Album need saving first. */}
+        {checklist.append && shownTarget !== savedTarget ? <div><dt>{t('append_rows.title')}</dt><dd><p role="note">{t('append_rows.unsaved_target')}</p></dd></div>
+          : tracklist && tracklist.albumId === shownTarget && <div><dt>{t('append_rows.title')}</dt><dd><Suspense fallback={null}>
+            <ImportExpectedRows heading={false} tracklist={tracklist} tracks={checklist.tracks.filter(track => !track.existing)} filenames={item.manifest.files} /></Suspense></dd></div>}
       </dl>
     </>}
   </section>;

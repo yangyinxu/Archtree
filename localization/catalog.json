@@ -1079,6 +1079,99 @@
       ],
       "variables": {}
     },
+    "admin.append_rows.already_filled": {
+      "description": "Administrator workbench: flags an appended file whose expected-tracklist row already has a file, or that another listed file also fills.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.append_rows.duration": {
+      "description": "Administrator workbench: flags an appended file whose duration differs from its expected-tracklist row's by more than the lookup tolerance.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "seconds": "number"
+      }
+    },
+    "admin.append_rows.fills": {
+      "description": "Administrator workbench: how many of the append target Album's missing-file rows the shown files fill.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "filled": "number",
+        "missing": "number"
+      }
+    },
+    "admin.append_rows.no_disc_number": {
+      "description": "Administrator workbench: flags an appended file without a Disc Number when the expected tracklist has several discs.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.append_rows.no_row": {
+      "description": "Administrator workbench: an appended file fills no row of the target Album's expected tracklist.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.append_rows.no_track_number": {
+      "description": "Administrator workbench: flags an appended file without a Track Number.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.append_rows.number": {
+      "description": "Administrator workbench: secondary button that numbers appended files from the target Album's expected tracklist in one field save.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.append_rows.number_help": {
+      "description": "Administrator workbench: explains which files numbering from the expected tracklist changes and when it also sets their titles.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.append_rows.outside": {
+      "description": "Administrator workbench: flags an appended file whose position is not a row of the expected tracklist.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.append_rows.row": {
+      "description": "Administrator workbench: the expected-tracklist row an appended file fills, with its disc, track and title.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "disc": "string",
+        "title": "string",
+        "track": "string"
+      }
+    },
+    "admin.append_rows.title": {
+      "description": "Administrator workbench: heading of the append target Album's expected tracklist rows in the summary and confirmation.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.append_rows.unsaved_target": {
+      "description": "Administrator workbench: the confirmation's Review decisions target another Album than the saved ones, so its rows are not shown.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.asset.cleanup_failed": {
       "description": "Cleanup needs attention",
       "delivery": [

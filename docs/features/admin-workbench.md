@@ -191,8 +191,12 @@ within seconds) and while the applied release's cover is being staged
 that sees a newer saved project reloads the page's project read. The summary
 components (`ImportSummary.tsx`, `LookupBox.tsx`, `CandidateChooser.tsx` and
 the shared `ImportAnalysisConfirmation.tsx`) load lazily from the media panel,
-outside the import route's initial JavaScript. The server decides what holds
-Publish; the summary only presents it:
+outside the import route's initial JavaScript. An append's expected tracklist
+rows (`ImportExpectedRows.tsx`) load in a chunk of their own, from the
+summary and the publication confirmation, only for an append to an Album that
+has one; a chunk that cannot load asks for a reload in their place and holds
+neither Publish nor Approve. The server decides what holds Publish; the
+summary only presents it:
 
 - **Status and next step.** Not run yet while uploads are awaited, not run
   although every needed file is uploaded (its automatic trigger failed; the name
@@ -272,6 +276,31 @@ Publish; the summary only presents it:
   MusicBrainz did not rule it out), a preselection whose artist matches no
   artist tag, directly or through an alias or iTunes localized name the lookup
   found, and pending Luna suggestions with their ticks.
+- **Expected tracklist.** When the saved Album decision appends to an Album
+  that has an expected tracklist (`appendTracklist`, until the publication is
+  complete), the summary, under
+  "Album's expected tracklist", says how many of the Album's missing-file rows
+  the appended files fill, then lists each file the append adds (the saved
+  track decision, else its preselection, neither skips nor reuses it) in
+  approved order, never folded, with the shown draft's Disc Number (unknown as
+  1) and Track Number, unsaved changes included, its title or filename, and
+  the row those numbers reach or No row. `importAppendRows.ts` places the files
+  as the server places members and flags: no Track Number; no Disc Number while
+  the tracklist has more than one disc; a position outside the tracklist; a
+  row an existing member already fills or another listed file also reaches; a
+  duration that differs from its row's by more than `durationToleranceMs`, one
+  more second for a legacy whole-second duration (both known). Flags need no
+  answer and never hold Publish. While `numbering` is not empty, **Number from
+  the Album's expected tracklist** (an ordinary secondary button after the
+  flagged values and before Luna AI, never the next step) saves it as one
+  `PATCH /imports/:id` field save of each proposed file's
+  `tracks.<slotId>.discNumber`, `.trackNumber` and, where proposed, `.title`,
+  with the saved values as `base`, so they become the administrator's own. It
+  is disabled while other saves are (unsaved editor changes included), while
+  the publication is locked, and while the summary read is of another revision
+  or automatic-write revision; a changed numbered value is
+  `409 ADMIN_IMPORT_FIELD_CONFLICT`, after which the page reads the project and
+  the summary again, as for any field conflict.
 - **Folded.** Every other row: title, Artist entries with roles and join
   phrases, label, date, visibility (changed in place by a field save, public by
   default), cover (one chosen automatically says so, and a lookup cover is
@@ -366,6 +395,19 @@ ticks with the approval; a refused approval keeps all three, and a confirmed one
 leaves the editor showing the saved draft. If the Web was updated after the page
 loaded and the confirmation cannot load its checklist, it asks for a reload and
 Approve stays disabled, while the page and its unsaved edits stay open.
+
+For an append, the confirmation also reads the summary state, and Approve waits
+until that read answers. The rows are information only, so a failed read shows
+an error and no rows without holding Approve (pending Luna ticks still need the
+read to succeed); reopening the confirmation reads it again. When the state has
+`appendTracklist` for
+the Album the shown decisions append to, the confirmation lists under "Album's
+expected tracklist" how many missing-file rows the tracks the approval adds
+fill and the row each one's shown Disc and Track Number reach, or No row, with
+the flags the summary describes, derived for the shown draft with its unsaved
+changes and without the numbering button; neither the rows nor the flags hold
+Approve. When Review's unsaved decisions append to another Album than the
+saved ones, it says to save them first instead of showing rows.
 
 The workbench is Web-only. Finitude iOS and Android expose listener features even
 for administrator accounts; they do not load administrator capabilities, private
@@ -1523,7 +1565,10 @@ and privacy in
 administrator Tracks read shows it as `expected`, matched to the members, and
 `PATCH /catalog/album/:id` clears it; no route sets it yet, and an
 existing-Album review admitted to metadata lookup captures a copy of its rows
-(see the catalog review routes). A clear is a top-level `clearExpectedTracklist:
+(see the catalog review routes). `GET /imports/:id/lookup` also reads an
+append target's tracklist for its summary (`appendTracklist`, see
+[Lookup routes](#lookup-routes)), and the Web shows it in an append's summary
+and confirmation. A clear is a top-level `clearExpectedTracklist:
 true` with `expectedRevision`, never a field: any other value, the key on
 another kind or inside `fields` is `400 ADMIN_CATALOG_INVALID_INPUT` before any
 transaction or receipt. After the full revision check (`409
@@ -1943,6 +1988,24 @@ roll back to:
   tracks without a credit, which this release reads as no usable credit. No
   response carries a track credit or such a count, so open workbench tabs
   need no reload.
+- Expected tracklist rows in an append's summary need no floor of their own;
+  no collection, index, approval format or publication commit changes, and the
+  numbering is an ordinary field save. The release before them sends no
+  `summary.appendTracklist`, which this Web reads as null, so its summary and
+  confirmation show no rows or flags and offer no numbering, and it keeps
+  numbers saved through numbering as ordinary administrator values. Every other
+  summary read keeps its earlier shape, since the key is sent only for an
+  append to an Album with an expected tracklist whose publication is not
+  complete. A Web tab opened before them cannot parse such a read, so the
+  workbench asks for a reload, that import's summary shows an error and its
+  confirmation cannot be approved while a Luna suggestion is pending; reload
+  open workbench tabs after deploying or rolling back across them. Every
+  earlier key and its variables are kept, so Web, iOS and Android clients
+  accept this release's remote bundles. A Web tab opened after them keeps its
+  active bundle instead of accepting a remote bundle from a release before
+  them, which lacks the `admin.append_rows.*` keys. After deploying them, a Web
+  client's cached bundle from before them is refused once for lacking those
+  keys, so it shows English until the new bundle loads.
 - Credit join phrases and Disc Numbers have their own floor in the
   [catalog Credit rollout runbook](../deployment/catalog-credit-rollout-runbook.md#join-phrase-and-disc-number-rollback-floor).
 
@@ -2751,14 +2814,55 @@ placeholder such as Various Artists, or the applied candidate was flagged
 `placeholder`), `luna` (each pending suggestion the editor shows with its tick
 state), `analysis` (`runs`, `attempts` and `daily`: what is left of the
 project's two runs and 22 calls and of the deployment's 220 calls today),
-`lookupAvailable` (whether this server's configuration lets lookup run) and
+`lookupAvailable` (whether this server's configuration lets lookup run),
 `identityAnswers` (the identity rows of the saved draft that neither a saved
-decision nor a preselection answers, read with the same candidates as Review).
+decision nor a preselection answers, read with the same candidates as Review)
+and, only where it applies, `appendTracklist` (below).
 The lookup view's `needsAnswer` remains the list of lookup answers Publish waits
 for. A stored manifest in a shape this release does not know is read through its
 sanitized view. The publish transaction rechecks all of it; an upload still in
 flight, or a file a published track needs without a confirmed upload, is
 `409 ADMIN_IMPORT_UPLOAD_INCOMPLETE`, writing nothing.
+
+`appendTracklist` is absent unless the saved decisions reuse an Album that is
+ready, stores a valid expected tracklist and lists at most 5000 member IDs
+(publishing refuses a larger target with `ADMIN_IMPORT_TARGET_TOO_LARGE`; both
+read one bound, `ADMIN_IMPORT_LIMITS.appendTargetMembers`), and the import's
+publication is not complete: once it is, the import's own new members fill the
+rows, so the target is not read. Every other summary keeps the shape it had
+before; the Web schema reads a missing key as null. The Album and the Disc and
+Track Numbers of its declared members, whatever their lifecycle state or
+visibility, are read in the summary's snapshot; member IDs are trimmed and
+lower-cased as the Album page and listener reads take them, whether stored as
+text or as an ObjectId, and a legacy Album without declared IDs has no members,
+as the append commit keeps only declared ones. It is
+`{albumId, durationToleranceMs, rows, files, numbering}`:
+`durationToleranceMs` is the metadata lookup duration tolerance (3000);
+`rows` (1 to 100) are the tracklist in Disc then Track Number order, each
+`{discNumber, trackNumber, title, durationMs, filled}`, where `filled` says a
+member sits at that position (a missing Disc Number counting as 1); `files`
+are each manifest file's `{slotId, durationMs, durationPrecisionMs, appended}`,
+where the duration is the evidence lookup ranking uses (`null` when unknown,
+precision 0 for version-2 tag milliseconds and 1000 for a legacy `m:ss`
+duration) and `appended` says that its saved track decision, else the
+preselection Review shows, neither skips nor reuses it; and `numbering` (at
+most 100) holds the values that numbering from the tracklist saves, each
+`{slotId, discNumber, trackNumber, title}` (`title` is `null` where the file
+keeps its own). `numbering` comes from `lookupForcedPairs` between the
+appended files whose Disc and Track Numbers are not both the administrator's
+own and the rows that are neither filled nor taken by an appended file with
+both of its own numbers: a file's numbers constrain the pairing unless lookup
+wrote them (`lookupPaths`), durations agree within the tolerance where both
+are known, and only a file that every largest pairing places at the same row
+is proposed, with the row's title when its own title is empty or automatic
+(`automaticPaths`). A row an appended file keeps is never offered: a file the
+numbering does not move (file-tag numbers whose duration fits no row, or lookup
+numbers that pair nowhere) keeps its position, so a file proposed for that
+position is left out, and it then keeps its own position in turn. None is
+proposed when it would grow the draft past its 48 KB cap. The Web derives each appended file's row and flags from these keys
+(`importAppendRows.ts`), for the shown draft in the summary and in the
+publication confirmation. The approval and the publication commit never read
+`appendTracklist`.
 
 ### What lookup sends
 

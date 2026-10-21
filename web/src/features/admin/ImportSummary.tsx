@@ -2,15 +2,16 @@
  * Exports
  *   Functions: ImportSummary
  * Internal
- *   Functions: valueAt, valueText, idText
- *   Constants: LookupBox, CandidateChooser, ImportAnalysisConfirmation
+ *   Functions: RowsUnavailable, valueAt, valueText, idText
+ *   Constants: LookupBox, ImportExpectedRows, CandidateChooser, ImportAnalysisConfirmation
  * @end-catalog */
 
-import { lazy, Suspense, useEffect, useId, useState, useSyncExternalStore } from 'react';
+import { lazy, Suspense, useEffect, useId, useState, useSyncExternalStore, type ComponentProps, type ComponentType } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useLocalization } from '../../localization/LocalizationProvider';
 import type { MessageKey } from '../../localization/contract';
 import { useAdminAccess, useAdminText } from './AdminAccess';
+import type { ImportExpectedRows as ExpectedRows } from './ImportExpectedRows';
 import { importPath, lookupCoverName, type ImportDetail, type ImportDraftV2 } from './adminApi';
 import { adminWorkspace } from './adminWorkspace';
 import { entriesByline } from './artistEntriesByline';
@@ -24,8 +25,13 @@ import type { AdminMutation } from './useAdminMutation';
 import type { ImportUploadQueueView } from './useImportUploadQueue';
 import styles from './adminStyles';
 
-// The name box, the candidate chooser and the Luna AI confirmation load only when this summary shows them.
+// The name box, the candidate chooser, an append target's expected rows and the Luna AI confirmation load only when this summary shows them.
 const LookupBox = lazy(() => import('./LookupBox').then(module => ({ default: module.LookupBox })));
+/** Stands in for expected rows whose chunk cannot load. */
+function RowsUnavailable() { const t = useAdminText(); return <p role="alert">{t('common.reload')}</p>; }
+// An expected-rows chunk that cannot load (a deploy replaced it) asks for a reload in its place, keeping the page and its edits.
+const ImportExpectedRows = lazy<ComponentType<ComponentProps<typeof ExpectedRows>>>(() => import('./ImportExpectedRows')
+  .then(module => ({ default: module.ImportExpectedRows }), () => ({ default: RowsUnavailable })));
 const CandidateChooser = lazy(() => import('./CandidateChooser').then(module => ({ default: module.CandidateChooser })));
 const ImportAnalysisConfirmation = lazy(() => import('./ImportAnalysisConfirmation').then(module => ({ default: module.ImportAnalysisConfirmation })));
 
@@ -47,7 +53,10 @@ const idText = (value: unknown) => (Array.isArray(value) ? value : value ? [valu
  * the free retry as its only next-step button while lookup is busy, unavailable or stopped (none where this server cannot run
  * lookup), the name box, a tie or conflict that needs an answer, the lone matching release of a partial comparison as an optional
  * choice, the values flagged as resting on file tags or an iTunes-only candidate (and as not checked against MusicBrainz), an
- * artist mismatch, then Luna AI as a paid, secondary button in every lookup state (never a next step or the primary action, and
+ * artist mismatch, for a saved append to an Album with an expected tracklist the rows the shown draft's appended files fill with
+ * their flags (never holding Publish) and the server's one-step numbering as a field save of the saved draft (disabled like other
+ * saves, while the publication is locked or while this read is of another revision), then Luna AI as a paid, secondary button in
+ * every lookup state (never a next step or the primary action, and
  * disabled where Luna AI cannot start, a locked publication or a pending cleanup included), and the Luna AI suggestions with
  * their ticks (the administrator's toggles are kept in the workspace for the confirmation; an append marks its Album ones as not
  * applied), and folds every row that needs no answer. Its Publish opens the media panel's one-step confirmation. Owner rules: docs/business-rules.md (Administrator Album
@@ -67,6 +76,7 @@ export function ImportSummary({ item, operation, uploads, disabled, publishDisab
   // A lookup refusal means the lookup changed or ended elsewhere: the project and this summary are read again.
   useEffect(() => { if (failed?.startsWith('lookup_')) void client.invalidateQueries({ queryKey: project }); }, [failed]);
   const path = importPath(item.id), draft = approval.draft, changed = new Set(approval.changes.map(change => change.path)), append = Boolean(summary?.append);
+  const tracklist = append ? summary?.appendTracklist ?? null : null;
   const run = (action: string, payload: object = {}) => operation.run(`${path}/${action}`, 'POST', { expectedRevision: item.revision, ...payload });
   const label = (target: string) => {
     const [scope, slot, field] = target.split('.');
@@ -146,6 +156,11 @@ export function ImportSummary({ item, operation, uploads, disabled, publishDisab
       {(flaggedPaths.length > 0 || (lookup?.preselection?.artistMismatch && applied?.choice === 'preselected' && applied.run === lookup.run)) && <ul aria-label={t('summary.flagged')}>
         {lookup?.preselection?.artistMismatch && applied?.choice === 'preselected' && applied.run === lookup.run && <li>{t('summary.artist_mismatch')}</li>}
         {flaggedPaths.map(target => <li key={target}>{`${label(target)}: ${valueText(valueAt(draft, target))} · ${fromTags.includes(target) ? t('publication.tags_only') : itunesMark}`}</li>)}</ul>}
+      {/* The rows the shown files fill are information only; the numbering saves the server's proposal for the saved draft it read. */}
+      {tracklist && <Suspense fallback={null}><ImportExpectedRows heading tracklist={tracklist} filenames={item.manifest.files}
+        tracks={draft.tracks.filter(track => tracklist.files.find(file => file.slotId === track.slotId)?.appended)}
+        numbering={{ saved: item.draft, disabled: disabled || locked || data.revision !== item.revision || data.valueRevision !== item.valueRevision,
+          onSave: changes => operation.run(path, 'PATCH', { expectedRevision: item.revision, changes }) }} /></Suspense>}
       {/* Luna AI is a paid, secondary alternative after every lookup control (retry, name box, chooser, conflict answers), in every
           lookup state; it is never the next step or the primary action. */}
       <div className={styles.actions}><button type="button" className={styles.button} disabled={disabled || !luna} onClick={() => setAnalyzing(true)}>{t('lookup.luna')}</button></div>
