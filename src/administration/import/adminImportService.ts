@@ -28,10 +28,10 @@ import { getDatabaseClient, getDb } from '../../infrastructure/database';
 import { ADMIN_IMPORT_LIMITS as LIMITS, AdminImportError, IMPORT_APPROVAL_FIELDS, cleanText, exact, importEnabled, invalidImport, legacyDefaultDraftV1, objectId, parseDraft, parseManifest, record, uuid, type AdminImportDetail, type AdminImportDetailV2, type AdminImportResponse, type ImportAnalysisState, type ImportDraft, type ImportDuplicateDecision, type ImportEmbeddedTags, type ImportIssue, type ImportManifest, type ImportReceipt, type ImportSuggestion, type ImportWorkbenchFilter, type ImportWorkbenchResponse } from './adminImportContract';
 import { type AnalysisInput, type ImportAnalysisProvider, ImportProviderError, OpenAiImportAnalysisProvider } from './adminImportProvider';
 import { LUNA_SUGGESTION_LIMIT, lunaAnalysisChunks, lunaAnalysisInput, lunaContextRecord, lunaDispatchIssue, lunaIdentityProposals, lunaLookupContextFor, lunaSuggestionV1, lunaSuggestionV2, type AnalysisChunk, type LunaContextRecord, type StoredLunaLookupContext } from './adminImportLuna';
-import type { CatalogReviewSource, CatalogReviewApplied } from '../catalog/adminCatalogReviewContract';
+import type { CatalogReviewSource, CatalogReviewApplied, CatalogReviewCapture } from '../catalog/adminCatalogReviewContract';
 import type { ImportMedia } from './adminImportMediaTypes';
 import { importPrivateStorageReady } from './adminImportMediaTypes';
-import { catalogReviewSourceDisc, importDraftV2FromV1, importDraftV2View, importDraftVersion, importDraftWritable, importSuggestionsV2View, LEGACY_IMPORT_RECEIPT_KINDS, legacyAdministratorOrigins, importDecisionsV2View, importPublishedV2View, legacyAnalysisView, legacyAssetsView, legacyDecisionsView, legacyDraftView, legacyManifestView, legacyPublicationView, legacyReceiptsView, legacySelectedCover, legacySuggestionsView, legacyTagsView, importProjectV2View, writableDraftFilter } from './adminImportDraftCompat';
+import { catalogReviewSourceDisc, importDraftV2FromV1, importDraftV2View, importDraftVersion, importDraftWritable, importSuggestionsV2View, LEGACY_IMPORT_RECEIPT_KINDS, legacyAdministratorOrigins, importDecisionsV2View, importPublishedV2View, legacyAnalysisView, legacyAssetsView, legacyDecisionsView, legacyDraftView, legacyManifestView, legacyPublicationView, legacyReceiptsView, legacySelectedCover, legacySuggestionsView, legacyTagsView, importProjectV2View, isWritableDraftV2, writableDraftFilter } from './adminImportDraftCompat';
 import { DRAFT_V2, DRAFT_V2_LIMITS, defaultDraftV2, draftBytes, hasOwn, importApprovalDigest, isDraftV2, retainBoundDecisions, sameDraftValue, type ImportDecisionV2, type ImportDraftOrigins, type ImportDraftV2, type ImportSuggestionV2 } from './adminImportDraft';
 import { applyAdministratorChanges, boundDraftChanges, boundedJson, convertLegacyImportProject, draftValueAt, draftWithinSizeLimit, importAutomationMarkers, markAdministratorValues, originOf, parseDraftChanges, parseDraftValue, setDraftValue, storedDraftV2, type ImportDraftPath } from './adminImportValueState';
 import { importTagsV2View } from './adminImportTags';
@@ -55,7 +55,16 @@ type Analysis = { state: ImportAnalysisState; generation: number; operationId: s
 type StoredSuggestion = (ImportSuggestion | ImportSuggestionV2) & { lookupContext?: LunaContextRecord };
 export type AdminImportDocument = {
     purpose?: 'import' | 'catalogReview' | null; catalogSource?: CatalogReviewSource; catalogEvidence?: Record<string, string>; catalogApplied?: CatalogReviewApplied;
-    /** Absent, null or 1 is a v1 draft; 2 is Draft v2 (imports and catalog reviews); any other value is read-only here. */
+    /**
+     * What a catalog review captured from the catalog when metadata lookup was first admitted for it (adminCatalogReviewCapture.ts):
+     * member durations, ordered Credits with their records' revisions, attribution states and the expected tracklist. Server-only,
+     * never projected.
+     */
+    catalogCapture?: CatalogReviewCapture;
+    /**
+     * Absent, null or 1 is a v1 draft; 2 is Draft v2 (imports and catalog reviews); 3 is a catalog review captured for metadata
+     * lookup (Draft v2 plus review-only values); any other value is read-only here.
+     */
     draftVersion?: number | null; draftOrigins?: ImportDraftOrigins;
     /** Automatic writes from file tags (adminImportAutomation.ts); absent means 0. They never change `revision`. */
     valueRevision?: number;
@@ -75,8 +84,11 @@ export type AdminImportDocument = {
     localizedNames?: ImportLocalizedNames;
     _id: ObjectId; actorId: string; revision: number; createdAt: Date; updatedAt: Date; manifest: ImportManifest; draft: ImportDraft | ImportDraftV2; analysis: Analysis; analysisHistory: Analysis[]; attemptsUsed: number;
     suggestions: StoredSuggestion[]; decisions: (ImportDuplicateDecision | ImportDecisionV2)[]; receipts: Receipt[]; recoveryReceipts?: Receipt[]; automaticReceipts?: Receipt[]; media?: ImportMedia };
-/** A Draft v2 document: an import project or catalog review written by this release, or converted at its first admitted change. */
-export const isDraftV2Document = (doc: AdminImportDocument) => doc.draftVersion === DRAFT_V2;
+/**
+ * A Draft v2 document: an import project or catalog review written by this release or converted at its first admitted change, or
+ * a catalog review captured for metadata lookup (format 3).
+ */
+export const isDraftV2Document = (doc: AdminImportDocument) => isWritableDraftV2(doc);
 export const importCollection = () => getDb()!.collection<AdminImportDocument>('adminAlbumImports');
 const collection = importCollection;
 /** Legacy documents have no purpose; explicit review projects never enter old import surfaces. */
@@ -85,14 +97,17 @@ export const isImportProject = (doc: AdminImportDocument) => doc.purpose == null
 /** What differs between the two project protocols that share mutateAdminProject and adoption. */
 export type AdminProjectPolicy<T> = {
     purpose: 'import' | 'catalogReview'; response: (doc: AdminImportDocument, actor: string, receipt: ProjectReceipt | null, session: ClientSession) => T | Promise<T>;
-    /** A body only an editor predating this release sends; it is refused with a reload request right after receipt lookup. */
-    reloadRequired?: (kind: ProjectReceipt['kind'], body: Record<string, unknown>) => boolean;
+    /**
+     * A body only an editor predating this release sends, or one the stored format no longer admits; it is refused with a reload
+     * request right after receipt lookup.
+     */
+    reloadRequired?: (kind: ProjectReceipt['kind'], body: Record<string, unknown>, doc: AdminImportDocument) => boolean;
     /** Stores a format-1 project in this release's format before an admitted change (never on a replay or read-only kind). */
     convert?: (doc: AdminImportDocument) => void;
     /** Draft paths no suggestion may write: adopting a suggestion for one is invalid input (rejecting it stays allowed). */
     readOnlyPaths?: ReadonlySet<ImportDraftPath>;
     /** The part of a draft the 48 KB cap measures (the whole draft when absent); read-only context that is never edited is left out. */
-    cappedDraft?: (draft: ImportDraftV2) => ImportDraftV2;
+    cappedDraft?: (draft: ImportDraftV2) => unknown;
 };
 
 export const importDigest = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -274,7 +289,7 @@ export async function mutateAdminProject<T>(actor: string, id: string, body: Rec
         if (prior) { if (prior.hash !== hash || (prior.actorId !== actor && kind !== 'cleanup')) throw conflict('ADMIN_IMPORT_OPERATION_CONFLICT'); return policy.response(doc, actor, prior, session); }
         // A project saved in a newer draft format is read-only here; only recovery and stopping work are admitted. A body only an
         // editor predating this release sends is refused before any other check, so it always asks for a reload.
-        if ((!importDraftWritable(doc) && !readOnlyProjectKinds.has(kind)) || policy.reloadRequired?.(kind, body)) throw conflict('ADMIN_IMPORT_RELOAD_REQUIRED');
+        if ((!importDraftWritable(doc) && !readOnlyProjectKinds.has(kind)) || policy.reloadRequired?.(kind, body, doc)) throw conflict('ADMIN_IMPORT_RELOAD_REQUIRED');
         // Worker ticks, Luna checkpoints and automation advance the revision without a receipt, so they never make an administrator's
         // change stale, while a revision seen before another administrator's change of what it binds, or one the project never
         // had, conflicts (revisionFloor).
@@ -400,25 +415,25 @@ export function suggestionPath(suggestion: ImportSuggestion | ImportSuggestionV2
     return typeof suggestion.slotId === 'string' && ['title', 'discNumber', 'trackNumber'].includes(suggestion.field) ? `tracks.${suggestion.slotId}.${suggestion.field as 'title' | 'discNumber' | 'trackNumber'}` : null;
 }
 /**
- * Accepts one suggestion into a Draft v2 project: its baseline must still be the current value, unless the import's current value
- * is automatic (written from file tags after that baseline), which acceptance replaces as a field save would. Artist entries are
- * the exception: an Artist suggestion never replaces entries that changed since its baseline, automatic ones included (the
- * legacy-project rule). A label is a scalar path like the title, so an automatic label written after the baseline is replaced too;
- * a label suggestion naming the current label already is that value and writes nothing, so the label keeps its MusicBrainz ID.
- * In an import the value becomes the administrator's own either way, so later automation never replaces the accepted label; a
- * catalog review records no value origins (automation never writes its draft).
+ * Accepts one suggestion into a Draft v2 project: its baseline must still be the current value, unless the current value is
+ * automatic (written from file tags or metadata lookup after that baseline), which acceptance replaces as a field save would.
+ * Artist entries are the exception: an Artist suggestion never replaces entries that changed since its baseline, automatic ones
+ * included (the legacy-project rule). A label is a scalar path like the title, so an automatic label written after the baseline is
+ * replaced too; a label suggestion naming the current label already is that value and writes nothing, so the label keeps its
+ * MusicBrainz ID. The value becomes the administrator's own either way, in an import and a catalog review alike, so later
+ * automation never replaces an accepted value.
  */
 export function acceptDraftV2Suggestion(doc: AdminImportDocument, draft: ImportDraftV2, suggestion: ImportSuggestion | ImportSuggestionV2) {
     const path = suggestionPath(suggestion); if (!path) throw conflict('ADMIN_IMPORT_SUGGESTION_STALE');
     const suggested = suggestion.value as { name?: unknown } | null;
     if (path === 'album.label' && draft.album.label && suggested && typeof suggested === 'object' && suggested.name === draft.album.label.name) {
-        if (isImportProject(doc)) markAdministratorValues(doc.draftOrigins ??= {}, [path]);
+        markAdministratorValues(doc.draftOrigins ??= {}, [path]);
         return;
     }
-    const automatic = isImportProject(doc) && path !== 'album.artists' && originOf(doc.draftOrigins, path) === 'automatic';
+    const automatic = path !== 'album.artists' && originOf(doc.draftOrigins, path) === 'automatic';
     if (!sameDraftValue(draftValueAt(draft, path), suggestion.baseline) && !automatic) throw conflict('ADMIN_IMPORT_FIELD_CONFLICT');
     let value: unknown; try { value = parseDraftValue(path, suggestion.value, draft); } catch { throw conflict('ADMIN_IMPORT_SUGGESTION_STALE'); }
-    setDraftValue(draft, path, value); if (isImportProject(doc)) markAdministratorValues(doc.draftOrigins ??= {}, [path]);
+    setDraftValue(draft, path, value); markAdministratorValues(doc.draftOrigins ??= {}, [path]);
 }
 export const adoptAdminImportSuggestions = (actor: string, id: string, raw: unknown) => adoptAdminProjectSuggestions(actor, id, raw, importPolicy);
 export function adoptAdminProjectSuggestions<T>(actor: string, id: string, raw: unknown, policy: AdminProjectPolicy<T>) {

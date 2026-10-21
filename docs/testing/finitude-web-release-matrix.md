@@ -125,7 +125,8 @@ the chooser marks the candidate the same way with an axe scan, the summary
 reflows at 320, 768 and 1440 px, and one confirmation publishes it.
 
 The catalog reviews spec checks that an existing-Album review shows the Album's
-Artist Credits and label read-only and applies a Disc Number change, that its
+Artist Credits and label read-only, saves a Disc Number change as one per-value
+change (never sending Credits, the label or visibility) and applies it, that its
 Luna button reads Use Luna AI (paid) and opens a confirmation titled as a paid
 AI service, and that a Luna label suggestion shows only as an identity hint that
 Keep current rejects.

@@ -23,7 +23,7 @@ import { importCollection, importDigest, importPurposeFilter } from './adminImpo
 import { defaultImportObjectStorage, deleteReservedImportAsset, type ImportObjectStorage } from './adminImportStorage';
 import { automaticCoverCleanupCandidates, automaticCoverCleanupOperationId, isAutomaticCoverSlot } from './adminImportCoverAutomation';
 import { importPrivateStorageReady, importPublicationSupported } from './adminImportMediaTypes';
-import { writableDraftFilter } from './adminImportDraftCompat';
+import { writableImportDraftFilter } from './adminImportDraftCompat';
 
 const LEASE_MS = 300_000, UNSUPPORTED_RETRY_MS = 24 * 3600_000;
 
@@ -40,7 +40,7 @@ export async function runAutomaticImportCoverCleanupOnce(storage: ImportObjectSt
         const worker = randomUUID(), started = Date.now(), at = () => new Date(now.getTime() + Date.now() - started), leased = { 'media.coverCleanup.leaseOwner': worker };
         const renewal = () => ({ $set: { 'media.coverCleanup.leaseUntil': new Date(at().getTime() + LEASE_MS) } });
         // A project saved in a newer draft format is read-only here, and its own release cleans it.
-        const claim = await importCollection().findOneAndUpdate({ ...importPurposeFilter, ...writableDraftFilter, ...(onlyId ? { _id: new ObjectId(onlyId) } : {}),
+        const claim = await importCollection().findOneAndUpdate({ ...importPurposeFilter, ...writableImportDraftFilter, ...(onlyId ? { _id: new ObjectId(onlyId) } : {}),
             'media.publication.state': 'complete', 'media.coverCleanup.state': { $ne: 'done' },
             $or: [{ 'media.coverCleanup.leaseUntil': null }, { 'media.coverCleanup.leaseUntil': { $lte: now } }] },
         { $set: { 'media.coverCleanup.state': 'pending', 'media.coverCleanup.leaseOwner': worker, 'media.coverCleanup.leaseUntil': new Date(now.getTime() + LEASE_MS) } },

@@ -46,6 +46,19 @@ export function legacyCatalogReview(): CatalogReview {
   return { ...item, source: { ...item.source, tracks: item.source.tracks.map(({ discNumber: _disc, ...track }) => track) } };
 }
 
+export const memberEntryKey = '50000000-0000-4000-8000-000000000002';
+/**
+ * A review captured for metadata lookup (format 3): an expected tracklist whose second row has no file, the first Track's own
+ * Artist entry and none for the second.
+ */
+export function capturedCatalogReview(): CatalogReview {
+  const item = catalogReview();
+  return { ...item, draft: {
+    album: { ...item.draft.album, expectedTracklist: [{ discNumber: 1, trackNumber: 1, title: 'Synthetic first track', durationMs: 185_000 }, { discNumber: 1, trackNumber: 2, title: 'Synthetic missing track', durationMs: null }] },
+    tracks: [{ ...item.draft.tracks[0], artists: [{ key: memberEntryKey, name: 'Synthetic track Artist', role: 'primary', joinPhrase: null, musicBrainzId: null }] }, { ...item.draft.tracks[1], artists: [] }]
+  } };
+}
+
 export const catalogAlbum = (): Extract<CatalogItem, { kind: 'album' }> => ({
   kind: 'album', id: albumId, revision: albumRevision, visibility: 'public', effectiveVisibility: 'public',
   coverUrl: null, mediaUrl: null, capabilities: { editing: true, visibility: true },

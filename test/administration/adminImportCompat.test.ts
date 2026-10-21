@@ -11,7 +11,9 @@
  *   - a v1 artist decision binds to the legacy entry and its name; other decisions carry no entry
  *   - publication snapshots map into the view while the stored v1 snapshot stays unchanged
  *   - the v1 draft projection is a deep copy of every v1 draft and keeps stored track order
- *   - draft and publication format versions accept only absent, null or a positive safe integer; formats 1 and 2 are writable for imports and reviews
+ *   - draft and publication format versions accept only absent, null or a positive safe integer; formats 1 and 2 are writable for imports and reviews, format 3 for reviews only
+ *   - a format-3 review is a writable Draft v2 document that keeps its stored origins and requires its review-only keys; a format-3 import stays read-only
+ *   - a review draft view shows the review-only values of a format-3 review alone, leniently
  *   - an approval is format 1 only with a v1 snapshot, so a newer snapshot without a recorded format fails closed
  *   - a Draft v2 project projects onto only v1 DTO fields and offers no analysis, upload or publication
  *   - unknown publication and analysis states degrade to needs attention without inventing recovery or identities
@@ -39,11 +41,14 @@ import { after, before, test } from 'node:test';
 import '../../src/infrastructure/database';
 import { uuid } from '../../src/administration/import/adminImportContract';
 import { importPublicationSupported, importPublicationVersion } from '../../src/administration/import/adminImportMediaTypes';
-import { adminImportDetail, adminImportDto, importDigest, type AdminImportDocument } from '../../src/administration/import/adminImportService';
+import { adminImportDetail, adminImportDto, importDigest, isDraftV2Document, type AdminImportDocument } from '../../src/administration/import/adminImportService';
 import {
     catalogReviewAppliedView, catalogReviewSourceDisc, catalogReviewSourceView, importDecisionsV2View, importDraftV2FromV1, importDraftV2View, importDraftVersion, importDraftWritable, importProjectV2View,
-    importPublishedV2View, importSuggestionsV2View, legacyArtistEntryKey, legacyAssetsView, legacyAssetVisible, legacyDecisionsView, legacyDraftView, legacyPublicationView, legacySuggestionsView, writableDraftFilter, type ImportProjectV2View
+    importPublishedV2View, importSuggestionsV2View, isWritableDraftV2, legacyArtistEntryKey, legacyAssetsView, legacyAssetVisible, legacyDecisionsView, legacyDraftView, legacyPublicationView, legacySuggestionsView,
+    catalogReviewDraftView, writableDraftFilter, writableImportDraftFilter, type ImportProjectV2View
 } from '../../src/administration/import/adminImportDraftCompat';
+import { storedDraftV2 } from '../../src/administration/import/adminImportValueState';
+import type { ImportDraftV2 } from '../../src/administration/import/adminImportDraft';
 import { importTagsV2View } from '../../src/administration/import/adminImportTags';
 import type { CatalogReviewApplied, CatalogReviewSource } from '../../src/administration/catalog/adminCatalogReviewContract';
 import { loadImportFixture } from '../support/adminImportFixtures';
@@ -182,20 +187,82 @@ test('the v1 draft projection is a deep copy of every v1 draft and keeps stored 
     assert.deepEqual([artists([{ name: 'Guest', role: 'featured' }, { name: 'Primary', role: 'primary' }]), artists([{ name: 'Guest', role: 'featured' }]), artists([])], ['Primary', 'Guest', '']);
 });
 
-test('draft and publication format versions accept only absent, null or a positive safe integer; formats 1 and 2 are writable for imports and reviews', () => {
-    const cases: [unknown, number | null][] = [[undefined, 1], [null, 1], [1, 1], [2, 2], [3, 3], ['1', null], [0, null], [-1, null], [1.5, null], [Number.NaN, null]];
+test('draft and publication format versions accept only absent, null or a positive safe integer; formats 1 and 2 are writable for imports and reviews, format 3 for reviews only', () => {
+    const cases: [unknown, number | null][] = [[undefined, 1], [null, 1], [1, 1], [2, 2], [3, 3], [4, 4], ['1', null], ['3', null], [0, null], [-1, null], [1.5, null], [3.5, null], [Number.NaN, null]];
     const { snapshot } = load('v1-publication-preparing.json').media!.publication!;
     for (const [value, expected] of cases) {
         const doc = value === undefined ? {} : { draftVersion: value }, publication = value === undefined ? { snapshot } : { schemaVersion: value, snapshot };
         assert.equal(importDraftVersion(doc), expected, String(value)); assert.equal(importDraftWritable(doc), expected === 1 || expected === 2, String(value));
-        // This release writes Draft v2 catalog reviews too, so format 2 is writable whatever the purpose.
-        for (const purpose of ['import', null, 'catalogReview']) assert.equal(importDraftWritable({ ...doc, purpose }), expected === 1 || expected === 2, `${String(value)} ${purpose}`);
+        // Format 2 is writable whatever the purpose; format 3 is a catalog review captured for metadata lookup, newer for an import.
+        for (const purpose of ['import', null, undefined, 'catalogReview', 'other']) {
+            const writable = expected === 1 || expected === 2 || (expected === 3 && purpose === 'catalogReview');
+            assert.equal(importDraftWritable({ ...doc, purpose }), writable, `${String(value)} ${purpose}`);
+            assert.equal(isWritableDraftV2({ ...doc, purpose }), writable && expected !== 1, `Draft v2 ${String(value)} ${purpose}`);
+            const view = importProjectV2View({ ...load('v1-draft.json'), ...doc, purpose } as AdminImportDocument);
+            assert.equal(view === null, !writable, `view ${String(value)} ${purpose}`);
+        }
         // A v1 snapshot is format 1 only: a format-2 or format-3 approval must freeze a Draft v2 snapshot.
         assert.equal(importPublicationVersion(publication), expected, String(value)); assert.equal(importPublicationSupported(publication), expected === 1, String(value));
-        const view = importProjectV2View({ ...load('v1-draft.json'), ...doc } as AdminImportDocument);
-        assert.equal(view === null, expected === null || expected > 2, String(value));
     }
-    assert.deepEqual(writableDraftFilter, { draftVersion: { $in: [null, 1, 2] } });
+    // The stored value itself decides: a format-3 review stored as a string or a float is not format 3.
+    assert.equal(isWritableDraftV2({ draftVersion: '3', purpose: 'catalogReview' }), false);
+    assert.deepEqual(writableDraftFilter, { $or: [{ draftVersion: { $in: [null, 1, 2] } }, { purpose: 'catalogReview', draftVersion: 3 }] });
+    assert.deepEqual(writableImportDraftFilter, { draftVersion: { $in: [null, 1, 2] } });
+});
+
+test('a format-3 review is a writable Draft v2 document that keeps its stored origins and requires its review-only keys; a format-3 import stays read-only', () => {
+    const doc = loadV2(), origins = { 'album:title': 'automatic' as const }, v2 = doc.draft as ImportDraftV2;
+    const reviewDraft = { ...v2, album: { ...v2.album, expectedTracklist: null }, tracks: v2.tracks.map(track => ({ ...track, artists: [] })) };
+    const review = { ...doc, purpose: 'catalogReview' as const, draftVersion: 3, draft: reviewDraft, draftOrigins: origins } as AdminImportDocument;
+    const importDoc = { ...doc, purpose: 'import' as const, draftVersion: 3, draft: reviewDraft, draftOrigins: origins } as AdminImportDocument;
+    // The Luna worker stores Draft v2 suggestions for a Draft v2 document; changes are admitted on a writable draft it reads.
+    assert.equal(isDraftV2Document(review), true); assert.equal(importDraftWritable(review), true);
+    assert.equal(storedDraftV2(review), review.draft);
+    assert.deepEqual(importProjectV2View(review)?.draftOrigins, origins, 'stored origins, not legacy administrator origins');
+    assert.deepEqual(importProjectV2View(review)?.draft, reviewDraft);
+    // The same document as an import is a newer format: no Draft v2 view, no change, and v1 suggestions are never stored for it.
+    assert.equal(isDraftV2Document(importDoc), false); assert.equal(importDraftWritable(importDoc), false); assert.equal(importProjectV2View(importDoc), null);
+    assert.throws(() => storedDraftV2(importDoc), { status: 409, code: 'ADMIN_IMPORT_RELOAD_REQUIRED' });
+    assert.equal(isDraftV2Document({ ...review, draftVersion: 4 }), false); assert.equal(importDraftWritable({ ...review, draftVersion: 4 }), false);
+    // A format-3 review must hold its review-only keys; one without them asks for a reload rather than being edited partially.
+    const missingRows = { ...review, draft: { ...reviewDraft, album: v2.album } } as AdminImportDocument;
+    const missingEntries = { ...review, draft: { ...reviewDraft, tracks: [reviewDraft.tracks[0], v2.tracks[1]] } } as AdminImportDocument;
+    const malformedEntries = { ...review, draft: { ...reviewDraft, tracks: [reviewDraft.tracks[0], { ...v2.tracks[1], artists: {} }] } } as unknown as AdminImportDocument;
+    for (const [label, value] of [['no expected tracklist', missingRows], ['a track without entries', missingEntries], ['entries not a list', malformedEntries]] as const) {
+        assert.throws(() => storedDraftV2(value), { status: 409, code: 'ADMIN_IMPORT_RELOAD_REQUIRED' }, label);
+    }
+    // A format-2 review needs no review-only keys.
+    assert.equal(storedDraftV2({ ...review, draftVersion: 2, draft: v2 } as AdminImportDocument), v2);
+});
+
+test('a review draft view shows the review-only values of a format-3 review alone, leniently', () => {
+    const doc = loadV2(), [slot1, slot2] = doc.manifest.files.map(file => file.slotId), v2 = doc.draft as ImportDraftV2;
+    const rows = [{ discNumber: 1, trackNumber: 2, title: 'Two', durationMs: null }, { discNumber: 1, trackNumber: 1, title: 'One', durationMs: 1_000 }];
+    const member = { key: '00000009-0000-4000-8000-0000000000c1', name: 'Synthetic Member', role: 'primary', joinPhrase: null, musicBrainzId: null };
+    const stored = { ...v2, album: { ...v2.album, expectedTracklist: rows }, tracks: v2.tracks.map(track => ({ ...track, artists: track.slotId === slot1 ? [member, { ...member, key: 'not-a-uuid' }, null] : [] })) };
+    const review = (draftVersion: unknown, draft: unknown = stored) => ({ ...doc, purpose: 'catalogReview', draftVersion, draft }) as unknown as AdminImportDocument;
+    const plain = importDraftV2View(stored, doc.manifest, doc._id.toHexString());
+    // Formats 2 and 4 (and an import) carry neither key: the view equals the Draft v2 view.
+    for (const value of [review(2), review(4), { ...review(3), purpose: 'import' } as AdminImportDocument]) {
+        const view = catalogReviewDraftView(value);
+        assert.deepEqual(view, plain); assert.equal('expectedTracklist' in view.album, false); assert.ok(view.tracks.every(track => !('artists' in track)));
+    }
+    // Format 3: sorted parser rows, readable entries only, every track with a list, in fixed key order.
+    const view = catalogReviewDraftView(review(3));
+    assert.deepEqual(view.album.expectedTracklist, [rows[1], rows[0]]);
+    assert.deepEqual(view.tracks.map(track => [track.slotId, track.artists]), [[slot1, [member]], [slot2, []]]);
+    assert.deepEqual(Object.keys(view.album), ['title', 'artists', 'label', 'releaseDate', 'visibility', 'expectedTracklist']);
+    assert.deepEqual(Object.keys(view.tracks[0]), ['slotId', 'title', 'discNumber', 'trackNumber', 'artists']);
+    // Malformed review-only values degrade: an unreadable tracklist reads as none and unreadable entries as no entries; it never throws.
+    const malformed = { ...stored, album: { ...stored.album, expectedTracklist: [{ discNumber: 1, trackNumber: 1, title: 'One', durationMs: 0 }] }, tracks: stored.tracks.map(track => ({ ...track, artists: 'x' })) };
+    const degraded = catalogReviewDraftView(review(3, malformed));
+    assert.equal(degraded.album.expectedTracklist, null); assert.ok(degraded.tracks.every(track => Array.isArray(track.artists) && track.artists.length === 0));
+    for (const garbage of [null, 'x', { album: 'x', tracks: 'y' }]) assert.doesNotThrow(() => catalogReviewDraftView(review(3, garbage)));
+    assert.equal(catalogReviewDraftView(review(3, { ...stored, album: { ...stored.album, expectedTracklist: null } })).album.expectedTracklist, null);
+    // Entry keys are compared exactly, as the Web review schema compares them: keys differing only in letter case stay two entries.
+    const cased = { ...stored, tracks: stored.tracks.map(track => ({ ...track, artists: track.slotId === slot1 ? [{ ...member, key: member.key.toUpperCase() }, { ...member, name: 'Synthetic Other' }] : [] })) };
+    assert.notEqual(member.key.toUpperCase(), member.key);
+    assert.deepEqual(catalogReviewDraftView(review(3, cased)).tracks[0].artists?.map(entry => [entry.key, entry.name]), [[member.key.toUpperCase(), 'Synthetic Member'], [member.key, 'Synthetic Other']]);
 });
 
 test('an approval is format 1 only with a v1 snapshot, so a newer snapshot without a recorded format fails closed', () => {

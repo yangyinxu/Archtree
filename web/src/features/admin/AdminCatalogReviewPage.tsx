@@ -14,16 +14,16 @@ import { Link, useParams } from 'react-router';
 import { AdminGate, useAdminAccess, useAdminText } from './AdminAccess';
 import { AdminNav } from './AdminNav';
 import { adminEndpointRequest } from './adminTransport';
-import type { ImportDraftV2 } from './adminNamingSchema';
 import { adminWorkspace } from './adminWorkspace';
 import { CatalogReviewDraftEditor } from './CatalogReviewDraftEditor';
-import { reviewChanges, reviewFieldKey, reviewResponseSchema, type CatalogReview } from './catalogReviewApi';
+import { reviewChanges, reviewDraftChanges, reviewFieldKey, reviewResponseSchema, type CatalogReview, type ReviewDraft } from './catalogReviewApi';
 import type { Confirmation } from './CatalogReviewConfirmation';
 import { useCatalogReviewCommand } from './useCatalogReviewCommand';
 import { useOnline } from './useAdminOnline';
 import styles from './adminStyles';
 
-interface ReviewBuffer { draft: ImportDraftV2; revision: number; dirty: boolean; suggestions: string[]; fields: string[] }
+/** `base` is the saved draft the edit started from: a save sends only the values that differ from it, each with its base value. */
+interface ReviewBuffer { draft: ReviewDraft; base: ReviewDraft; revision: number; dirty: boolean; suggestions: string[]; fields: string[] }
 /** Artist-entries and label suggestions are identity hints (CatalogReviewHints), never Review checklist items. */
 const hint = (field: string) => field === 'artists' || field === 'label';
 type Stage = 'draft' | 'review' | 'apply';
@@ -56,7 +56,7 @@ function ReviewProject({ id }: { id: string }) {
     latestRevision.current = item.revision;
     setConfirmed(item);
     setEditor(previous => previous && (previous.dirty || previous.revision > item.revision) ? previous
-      : { draft: item.draft, revision: item.revision, dirty: false,
+      : { draft: item.draft, base: item.draft, revision: item.revision, dirty: false,
         suggestions: previous?.revision === item.revision ? previous.suggestions : [], fields: previous?.revision === item.revision ? previous.fields : [] });
   }, [query.data]);
   useEffect(() => {
@@ -67,11 +67,13 @@ function ReviewProject({ id }: { id: string }) {
       latestRevision.current = item.revision;
       setConfirmed(item);
       setEditor(previous => previous && (previous.revision > item.revision || previous.dirty && receipt.kind === 'cancel-analysis') ? previous
-        : { draft: item.draft, revision: item.revision, dirty: false, suggestions: [], fields: [] });
+        : { draft: item.draft, base: item.draft, revision: item.revision, dirty: false, suggestions: [], fields: [] });
     }
     mutation.command.acknowledge();
     void query.refetch();
   }, [mutation.result]);
+  // A refused save (another administrator changed a saved value) loads the newer saved draft, so the conflict panel offers it.
+  useEffect(() => { if (mutation.error === 'conflict') void query.refetch(); }, [mutation.error]);
   useEffect(() => { if (editor) adminWorkspace.retain(bufferKey, editor, access); }, [editor]);
   useEffect(() => { adminWorkspace.retain(`catalog-review-stage:${id}`, stage, access); }, [stage]);
   const item = confirmed;
@@ -93,7 +95,7 @@ function ReviewProject({ id }: { id: string }) {
   const mutate = (action: string, payload: object) => {
     if (item) mutation.command.run(`${path}/${action}`, { expectedRevision: item.revision, ...payload }, 'POST');
   };
-  const setCurrent = (next: CatalogReview) => setEditor({ draft: next.draft, revision: next.revision, dirty: false, suggestions: [], fields: [] });
+  const setCurrent = (next: CatalogReview) => setEditor({ draft: next.draft, base: next.draft, revision: next.revision, dirty: false, suggestions: [], fields: [] });
   const selectStage = (next: Stage) => { setStage(next); document.getElementById(`catalog-review-tab-${next}`)?.focus(); };
   const originalHref = item ? `/admin/catalog/album/${item.source.album.id}` : '';
   return <section className={styles.page}><AdminNav />
@@ -141,10 +143,10 @@ function ReviewProject({ id }: { id: string }) {
         <button className={styles.button} type="button" onClick={() => setCurrent(item)}>{t('review.load_saved')}</button></section>}
       {editor.dirty && <p role="status" className={styles.muted}>{t('catalog_review.save_draft_first')}</p>}
       <div hidden={stage !== 'draft'} role="tabpanel" id="catalog-review-panel-draft" aria-labelledby="catalog-review-tab-draft">
-        <form className={styles.panel} onSubmit={event => { event.preventDefault(); if (!locked && !conflict) mutation.command.run(path, { expectedRevision: editor.revision, draft: editor.draft }); }}>
+        <form className={styles.panel} onSubmit={event => { event.preventDefault(); if (!locked && !conflict) mutation.command.run(path, { expectedRevision: editor.revision, changes: reviewDraftChanges(editor.base, editor.draft) }); }}>
           <header className={styles.sectionHeader}><h2>{t('layout.metadata')}</h2><button className={`${styles.button} ${styles.primary}`} type="submit" disabled={locked || !editor.dirty || conflict}>{t('catalog_review.save_draft')}</button></header>
           <p role="status" className={styles.meta}>{t(editor.dirty ? 'common.unsaved' : 'catalog_review.draft_saved')}</p>
-          <CatalogReviewDraftEditor draft={editor.draft} source={item.source} filenames={filenames} disabled={locked} manageAlbumHref={originalHref} onChange={draft => setEditor({ ...editor, draft, dirty: true })} />
+          <CatalogReviewDraftEditor draft={editor.draft} source={item.source} filenames={filenames} disabled={locked} manageAlbumHref={originalHref} onChange={draft => setEditor({ ...editor, draft, dirty: reviewDraftChanges(editor.base, draft).length > 0 })} />
         </form>
       </div>
       <div hidden={stage !== 'review'} role="tabpanel" id="catalog-review-panel-review" aria-labelledby="catalog-review-tab-review">

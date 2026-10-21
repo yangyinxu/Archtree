@@ -501,8 +501,9 @@ review's Disc Numbers and Album order committing with its receipt.
 An Album may keep one expected tracklist (`expectedTracklist`): the audio
 tracklist of the release that an applied existing-Album review used. It is
 administrator information. `src/services/catalog/albumExpectedTracklist.ts`
-validates it and derives its rows; no route reads, writes or clears it yet, and
-no product rule describes it until the Web shows one.
+validates it and derives its rows; no route writes or clears it yet (an
+existing-Album review admitted to metadata lookup captures a private copy of its
+rows), and no product rule describes it until the Web shows one.
 
 ### Expected tracklist storage
 
@@ -542,6 +543,11 @@ does not read it, so import duplicate decisions and appends are unaffected.
 - No writer exists yet. A later applied existing-Album review sets or replaces
   it, and an explicit catalog edit clears it by removing the key; both compare
   full Album revisions, so they are stale-safe.
+- An existing-Album review stored as format 3 for metadata lookup copies the
+  rows `storedExpectedTracklist` reads into its private draft
+  (`album.expectedTracklist`, `null` without a valid one) and its server-only
+  capture, and never writes the Album; no route stores one yet (see the catalog
+  review routes in [admin-workbench.md](../features/admin-workbench.md)).
 - Import publication, appends, Credit edits and catalog edits `$set` only
   named keys. `Album.updateById` and `Album.updateCoverArtById` refuse the key
   and any dotted path under it, including their member-replacement branch,
@@ -549,7 +555,11 @@ does not read it, so import duplicate decisions and appends are unaffected.
   anything. The legacy and Content Manager Album routes build their updates
   from named body fields and never forward it, so they cannot set or clear it
   either.
-- Deleting the Album deletes it; no other copy exists.
+- Deleting the Album deletes it. An existing-Album review stored as format 3
+  keeps its private copies (its draft's `album.expectedTracklist` and its
+  server-only capture), visible only to administrators, after the Album is
+  deleted; nothing reads them back into an Album, and the review then reads as
+  unavailable.
 - Listener v1 and legacy public DTOs are allowlisted. The listener reads that
   load whole Album documents also exclude it: the expanded Page's placed and
   linked Albums (`getExpandedPageBySlug` in
@@ -645,7 +655,10 @@ The admin catalog revision counts a stored ID (malformed ones included, which
 the editor shows as an empty, repairable field) only when one is stored, so
 records without an ID keep their earlier revisions byte for byte. The import
 candidate projection reads `musicBrainzId` too; MongoDB returns it only when it
-is stored, so candidate revisions of records without one are unchanged.
+is stored, so candidate revisions of records without one are unchanged. An
+existing-Album review stored as format 3 for metadata lookup records, privately
+for administrators, the ID that each Artist and Organization its captured
+Credits name keeps, and never writes one.
 
 ### Verification
 

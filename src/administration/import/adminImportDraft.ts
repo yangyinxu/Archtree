@@ -6,7 +6,7 @@
  *              draftBytes, hasOwn, parseImportName, parseArtistEntries, parseLabelEntry, parseDraftTitle,
  *              parseDraftVisibility, parseDraftV2, derivedEntryKey, retainBoundDecisions, boundArtistDecision,
  *              boundLabelDecision
- *   Constants: DRAFT_V2, DRAFT_V2_LIMITS, parseDiscNumber, parseTrackNumber
+ *   Constants: DRAFT_V2, CATALOG_REVIEW_DRAFT_V3, DRAFT_V2_LIMITS, parseDiscNumber, parseTrackNumber
  * Internal
  *   Types: Bindable
  *   Functions: canonical, exactly, normalizedText, parseJoinPhrase, parseKeptMusicBrainzId, position, boundId,
@@ -59,6 +59,11 @@ export type ImportDecisionV2 = Omit<ImportDuplicateDecision, 'scope' | 'action'>
 export type ImportDraftParseContext = { names?: ReadonlyMap<string, readonly string[]>; introduce?: ReadonlySet<string> };
 
 export const DRAFT_V2 = 2;
+/**
+ * A catalog review's draft once metadata lookup captured its source: Draft v2 plus the review-only values (the Album's expected
+ * tracklist and each member's track Artist entries). Only catalog reviews are ever stored in this format.
+ */
+export const CATALOG_REVIEW_DRAFT_V3 = 3;
 /** `decisions` is one per entry, the label, the Album and each of at most 100 tracks. */
 export const DRAFT_V2_LIMITS = Object.freeze({ artists: 20, name: 200, title: 300, disc: 999, track: 9999, bytes: 48_000, decisions: 122 });
 

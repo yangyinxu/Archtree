@@ -30,7 +30,7 @@ import AxeBuilder from '@axe-core/playwright';
 import sharp from 'sharp';
 import { capabilities, session, viewer } from '../src/features/admin/adminFixtures.testSupport';
 import { albumId, catalogAlbum, catalogAlbumTracks, catalogReview, reviewId, slotId, slotTwo, titleSuggestionId } from '../src/features/admin/catalogReviewFixtures.testSupport';
-import type { CatalogReview, ReviewField } from '../src/features/admin/catalogReviewApi';
+import type { CatalogReview, ReviewDraftChange, ReviewField } from '../src/features/admin/catalogReviewApi';
 import type { CatalogItem, CatalogKind } from '../src/features/admin/catalogApi';
 
 const shots = process.env.FINITUDE_CATALOG_E2E_SCREENSHOTS_DIR ?? '/tmp/finitude-first-use-fixed-20261014';
@@ -184,7 +184,15 @@ async function setup(page: Page, administrator = true, initialReleaseDate: { yea
       expect(method).toBe('PATCH');
       const body = request.postDataJSON(); writes.push({ path, method, body });
       expect(body.expectedRevision).toBe(review.revision);
-      review = { ...review, revision: review.revision + 1, draft: body.draft };
+      // A review save sends only changed values, each with its base; the server writes each value at its path.
+      expect(body).not.toHaveProperty('draft');
+      const draft = structuredClone(review.draft);
+      for (const { path: valuePath, value } of body.changes as ReviewDraftChange[]) {
+        const [scope, first, second] = valuePath.split('.');
+        if (scope === 'album') (draft.album as Record<string, unknown>)[first] = value;
+        else (draft.tracks.find(track => track.slotId === first) as Record<string, unknown>)[second] = value;
+      }
+      review = { ...review, revision: review.revision + 1, draft };
       return route.fulfill({ json: receipt(body, 'edit'), headers });
     }
     if (path.startsWith(`/api/admin/v1/catalog-reviews/${reviewId}/`) && method === 'POST') {
@@ -764,11 +772,13 @@ for (const width of [320, 768, 1440]) {
     await page.getByRole('spinbutton', { name: `1 · ${label('admin.field.disc_number')}`, exact: true }).fill('2');
     await page.getByRole('button', { name: label('admin.catalog_review.save_draft'), exact: true }).click();
     await expect(page.getByText(label('admin.catalog_review.draft_saved'), { exact: true })).toBeVisible();
-    // The save is the whole Draft v2 with the read-only context unchanged.
-    const saved = api.writes.filter(value => value.method === 'PATCH').map(value => value.body.draft as CatalogReview['draft']);
+    // The save sends only the changed Disc Number with its base: no Credits, label or visibility, which stay as saved.
+    const saved = api.writes.filter(value => value.method === 'PATCH').map(value => value.body);
     expect(saved).toHaveLength(1);
-    expect({ artists: saved[0].album.artists, label: saved[0].album.label, visibility: saved[0].album.visibility }).toEqual({ artists: context.artists, label: context.label, visibility: context.visibility });
-    expect(saved[0].tracks.map(track => track.discNumber)).toEqual([2, null]);
+    expect(saved[0].changes).toEqual([{ path: `tracks.${slotId}.discNumber`, base: null, value: 2 }]);
+    for (const key of ['draft', 'artists', 'label', 'visibility']) expect(JSON.stringify(saved[0]).includes(key)).toBe(false);
+    expect({ artists: api.review().draft.album.artists, label: api.review().draft.album.label, visibility: api.review().draft.album.visibility }).toEqual({ artists: context.artists, label: context.label, visibility: context.visibility });
+    expect(api.review().draft.tracks.map(track => track.discNumber)).toEqual([2, null]);
     await capture(page, '25-review-credits-context', width); await reflow(page);
     await page.getByRole('tab', { name: label('admin.catalog_review.apply_tab') }).click();
     const discChange = label('admin.catalog_review.select_field', { type: label('admin.catalog_review.target_track'), target: 'Synthetic first track', field: label('admin.field.disc_number') });

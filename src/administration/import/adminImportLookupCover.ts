@@ -36,7 +36,7 @@ import { pinnedHttpsTransport } from '../adminPinnedHttps';
 import { checkAdminWorker } from '../adminWorkerLifecycle';
 import { ADMIN_IMPORT_LIMITS, AdminImportError, importEnabled, isLookupCoverSlot, lookupCoverSlotId, objectId } from './adminImportContract';
 import { automaticCoverCleanupOperationId, lookupCoverCleanupCandidates } from './adminImportCoverAutomation';
-import { writableDraftFilter } from './adminImportDraftCompat';
+import { writableImportDraftFilter } from './adminImportDraftCompat';
 import { importPrivateStorageReady, importSourcesLocked, type ImportAsset, type ImportLookupCover } from './adminImportMediaTypes';
 import { importCollection, importDigest, importPurposeFilter, withImportAdmin, type AdminImportDocument } from './adminImportService';
 import { defaultImportObjectStorage, deleteReservedImportAsset, transferImportAsset, type ImportObjectStorage } from './adminImportStorage';
@@ -243,7 +243,7 @@ export async function runLookupCoverPassOnce(storage: ImportObjectStorage = defa
         if (signal?.aborted || (onlyId !== undefined && !objectId(onlyId))) return false;
         if (!onlyId && (!importEnabled() || !importPrivateStorageReady())) return false;
         const worker = randomUUID(), start = options.now ?? new Date(), started = Date.now(), at = () => new Date(start.getTime() + Date.now() - started);
-        const claim = await importCollection().findOneAndUpdate({ ...importPurposeFilter, ...writableDraftFilter, ...(onlyId ? { _id: new ObjectId(onlyId) } : {}),
+        const claim = await importCollection().findOneAndUpdate({ ...importPurposeFilter, ...writableImportDraftFilter, ...(onlyId ? { _id: new ObjectId(onlyId) } : {}),
             'media.lookupCover.due': true, $or: [{ 'media.lookupCover.leaseUntil': null }, { 'media.lookupCover.leaseUntil': { $lte: start } }] },
         { $set: { 'media.lookupCover.leaseOwner': worker, 'media.lookupCover.leaseUntil': new Date(start.getTime() + LEASE_MS) } },
         { sort: { 'media.lookupCover.updatedAt': 1 }, returnDocument: 'after' });

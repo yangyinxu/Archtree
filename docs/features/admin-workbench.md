@@ -1228,7 +1228,9 @@ and creation of an existing-Album review. The separate **Existing Album reviews*
 queue retains saved projects when the browser closes. **Unfinished** includes all
 unapplied reviews; **Album updated** confirms that this project's selected fields
 were applied. Luna progress and the original-Album update status are shown
-separately. **Save review draft** changes only the private draft; **Update
+separately. **Save review draft** changes only the private draft and sends only
+the values edited since the saved draft was loaded (an edit changed back is no
+change), so it never overwrites another value saved meanwhile; **Update
 original Album** requires selecting saved changes and confirming their frozen
 old/new values. **Use Luna AI (paid)** (**Use Luna AI again (paid)** after a
 run) is available above the track editor, is never styled as the primary
@@ -1306,12 +1308,15 @@ Catalog review routes (relative to `/api/admin/v1`):
   changed and unavailable sources. Old `/imports` routes exclude these projects;
   strict native import DTOs are unchanged. The detail's `draft` and
   `suggestions` are Draft v2, as for imports, and each `source.tracks` entry
-  carries its captured `discNumber`. A review saved in format 1 reads as Draft
-  v2: its Artist name as one primary entry, no label, unknown Disc Numbers and
-  no `discNumber` key on its source tracks. Its first admitted change other
-  than `/cancel-analysis` stores that view and captures nothing new. The Web
-  editor shows that converted name alone, never as a Credits list, because it
-  may not be any Credit of the Album.
+  carries its captured `discNumber`. A review captured for metadata lookup
+  (format 3, below) also carries `draft.album.expectedTracklist` (its rows, or
+  `null`) and an `artists` entry list on each draft track; other reviews and
+  imports carry neither key, and what the review captured stays server-only. A
+  review saved in format 1 reads as Draft v2: its Artist name as one primary
+  entry, no label, unknown Disc Numbers and no `discNumber` key on its source
+  tracks. Its first admitted change other than `/cancel-analysis` stores that
+  view and captures nothing new. The Web editor shows that converted name alone,
+  never as a Credits list, because it may not be any Credit of the Album.
 - `PATCH /catalog-reviews/:id` and `POST` to `/analyze`, `/adopt` or
   `/cancel-analysis`: save/review privately with the original UUID and numeric
   revision. Analysis uses the existing import flag, provider and shared budgets;
@@ -1321,13 +1326,32 @@ Catalog review routes (relative to `/api/admin/v1`):
   analysis progress, which adds no receipt, never makes a save or stop stale,
   while a revision from before another administrator's change returns
   `409 ADMIN_IMPORT_REVISION_CONFLICT`. A PATCH body is
-  `{operationId, expectedRevision, draft}` with the whole Draft
-  v2. Its `artists`, `label` and `visibility` must equal what the review shows,
-  and so must the `discNumber` of a track whose source captured none, or the
-  save returns `400 ADMIN_IMPORT_INVALID_INPUT`. The 48 KB cap binds only a
-  save or adoption that grows the editable values. A v1 draft body (an Album
-  `artistName`) returns `409 ADMIN_IMPORT_RELOAD_REQUIRED` right after receipt
-  lookup, before the revision, applied and limit checks. `/adopt` refuses
+  `{operationId, expectedRevision, changes: [{path, base, value}]}` (at most
+  160 KB of JSON; every other review body stays at 96 KB): each changed
+  editable value with the value the editor started from (`base`), on the paths
+  `album.title`, `album.releaseDate` and
+  `tracks.<slotId>.title|discNumber|trackNumber`, each at most once. A save
+  naming `album.artists`, `album.label`, `album.visibility`,
+  `album.expectedTracklist` or any `tracks.<slotId>.artists` returns
+  `400 ADMIN_IMPORT_INVALID_INPUT` before any value is parsed, and so does a
+  `discNumber` other than the shown one for a track whose source captured none.
+  Staleness is per path, as for an import field save: a change whose saved
+  value differs from both its base and its value returns
+  `409 ADMIN_IMPORT_FIELD_CONFLICT` while that value is the administrator's
+  own, an automatic value is replaced only on a path the save sends, and one
+  refused change writes nothing and stores no receipt. Every path a save sends,
+  and every value an `/adopt` accepts, becomes the administrator's own
+  (`draftOrigins`). The legacy body `{operationId, expectedRevision, draft}`
+  with the whole Draft v2 is admitted only for a format-2 review: its
+  `artists`, `label` and `visibility` must equal what the review shows, and so
+  must the `discNumber` of a track whose source captured none, or the save
+  returns `400 ADMIN_IMPORT_INVALID_INPUT`; it records no value origins. A whole
+  draft for a format-3 review, or a v1 draft body (an Album `artistName`),
+  returns `409 ADMIN_IMPORT_RELOAD_REQUIRED` right after receipt lookup, before
+  the revision, applied and limit checks, so a lost response still replays. The
+  48 KB cap binds only a save or adoption that grows the editable values: the
+  Album's and members' Artist entries, the label and the expected tracklist are
+  not counted. `/adopt` refuses
   selecting an Artist-entries or label suggestion with
   `400 ADMIN_IMPORT_INVALID_INPUT`; rejecting one is allowed, and the Web shows
   both as identity hints that can only be kept. Disc suggestions need filename
@@ -1336,6 +1360,31 @@ Catalog review routes (relative to `/api/admin/v1`):
   review saved in a newer format offers neither analysis nor apply, and refuses
   edit, analyze, adopt and apply with `409 ADMIN_IMPORT_RELOAD_REQUIRED`, while
   `/cancel-analysis` stays admitted.
+- Metadata lookup admission (server only; no route or Web control offers
+  metadata lookup for reviews yet): the first lookup admitted for a review
+  stores it as format 3, only while its source is current, otherwise
+  `409 ADMIN_CATALOG_REVIEW_SOURCE_CHANGED` and nothing is stored. An applied
+  review is `409 ADMIN_CATALOG_REVIEW_APPLIED`, and a newer format or a
+  format-3 review whose capture this release cannot read is
+  `409 ADMIN_IMPORT_RELOAD_REQUIRED`. The capture, kept server-only at
+  `catalogCapture`, holds each member's duration (its exact media duration, or
+  else its whole-second text) and attribution state (an explicit `unknown`
+  kept apart from none); the Album's and each member's ordered Credits as the
+  canonical Credit lifecycle reads them (an unmigrated member's legacy Artist
+  links as legacy unspecified Credits, an unreadable list as unreadable), each
+  with the credited Artist's or Organization's name, MusicBrainz ID and
+  identity revision (none for a record that is not ready, so such a primary or
+  featured Artist Credit leaves its list incomplete); whether the shown label is
+  the Album's first label Credit; whether every primary and featured Artist
+  Credit is shown, for the Album and each member; and the Album's expected
+  tracklist rows. The draft gains those rows and each member's shown primary and
+  featured Artist Credits as entries (keyed per member); the Album's entries and
+  label are rebuilt from the Credits read then, keeping the keys of unchanged
+  Credits, and carry the records' MusicBrainz IDs; and each source track that
+  captured no Disc Number takes the Track's current one, which the draft shows
+  where it showed none. Admission adds no receipt and advances the revision
+  once, when it converts, and a format-3 review is only checked again, never
+  captured again.
 - `POST /catalog-reviews/:id/apply`: `{operationId, expectedRevision, fields}`
   selects saved Album `title`/`releaseDate` or Track
   `title`/`discNumber`/`trackNumber` paths. A Track `discNumber` is accepted
@@ -1429,12 +1478,13 @@ the confirmation rather than replacing its approved target.
 An Album may store an expected tracklist (`expectedTracklist`; format, writers
 and privacy in
 [catalog.md](../architecture/catalog.md#album-expected-tracklists)). No route
-reads, writes or clears it yet, and the Web does not show it. Catalog item,
-list, PATCH and cover snapshots and `GET /catalog/album/:id/tracks` never
-include it, and a PATCH that names it, as a field or at the top level, is
-`400 ADMIN_CATALOG_INVALID_INPUT` like any other unknown key. It enters the
-Album revision only when one is stored, so Albums without one keep their
-revisions. Rollback floor: none.
+writes or clears it yet, and the Web does not show it; an existing-Album review
+admitted to metadata lookup captures a copy of its rows (see the catalog review
+routes). Catalog item, list, PATCH and cover snapshots and
+`GET /catalog/album/:id/tracks` never include it, and a PATCH that names it, as
+a field or at the top level, is `400 ADMIN_CATALOG_INVALID_INPUT` like any other
+unknown key. It enters the Album revision only when one is stored, so Albums
+without one keep their revisions. Rollback floor: none.
 
 `POST /catalog/:kind/:id/cover` takes
 `{operationId, expectedRevision, importId, slotId, expectedSourceRevision}`;
@@ -1541,20 +1591,24 @@ reads live in `src/administration/import/adminImportDraftCompat.ts`.
 - **Format numbers.** A project's `draftVersion` and a publication approval's
   `schemaVersion` are absent, `null` or `1` for the original format. This
   release writes `draftVersion` 2 for import projects and `schemaVersion` 3 for
-  their approvals. It reads draft formats 1 and 2 and approval formats 1 to 3,
-  and treats a higher number, or any value that is not a positive whole
-  number, as newer. Catalog reviews are written as format 2 too: a format-1
-  review is shown converted and stored as format 2 at its first admitted change
-  other than stopping analysis, and 3 or higher is newer. An approval is format
-  1 only with a v1 snapshot (a string `artistName`, no artist entries and no
-  Disc Numbers), format 2 only with a Draft v2 snapshot of one primary Artist
-  entry, no label and a `discNumber` field (a Disc Number or null) on every
-  track, and format 3 only with a Draft v2 snapshot whose entries each have a
-  key, a name and a primary or featured role, a label that is null or named, a
-  `discNumber` field on every track, 1 to 50 frozen `artists` and a frozen
-  `label` that is null or a record; anything else is treated as newer, and
-  deeper inconsistencies are a catalog conflict at commit. A later release must
-  write a higher number for any other shape.
+  their approvals. It reads draft formats 1 and 2, draft format 3 for catalog
+  reviews only, and approval formats 1 to 3, and treats a higher number, or any
+  value that is not a positive whole number, as newer. Catalog reviews are
+  created as format 2 too: a format-1 review is shown converted and stored as
+  format 2 at its first admitted change other than stopping analysis. Format 3
+  is written only for a catalog review, when metadata lookup is first admitted
+  for it (Draft v2 plus its expected tracklist and member Artist entries, with a
+  server-only capture); for reviews 4 or higher is newer, and for import
+  projects 3 or higher is. An approval is format 1 only with a v1 snapshot (a
+  string `artistName`, no artist entries and no Disc Numbers), format 2 only
+  with a Draft v2 snapshot of one primary Artist entry, no label and a
+  `discNumber` field (a Disc Number or null) on every track, and format 3 only
+  with a Draft v2 snapshot whose entries each have a key, a name and a primary
+  or featured role, a label that is null or named, a `discNumber` field on every
+  track, 1 to 50 frozen `artists` and a frozen `label` that is null or a record;
+  anything else is treated as newer, and deeper inconsistencies are a catalog
+  conflict at commit. A later release must write a higher number for any other
+  shape.
 - **Read-only newer drafts.** A project saved in a newer draft format admits
   only staged cleanup and upload reconciliation, publication recovery and
   cancellation, and analysis cancellation, plus replays of stored receipts.
@@ -1584,14 +1638,16 @@ reads live in `src/administration/import/adminImportDraftCompat.ts`.
   receipts; the lookup view is its own allowlist (see
   [Lookup routes](#lookup-routes)). A decision whose scope this release does not
   know is dropped. Review responses copy the Draft v2 fields of the draft and
-  suggestions, the source with a Disc Number only on a track that captured one,
-  and applied Track `discNumber` fields. The import workbench inventory copies
-  only v1 fields, so a Draft v2 project's row shows its first primary Artist as
-  `artistName`. Fields and values a later release adds are dropped; an unknown
-  state reads as needs attention; and a newer format offers no `capabilities`.
-  An open tab of this release therefore keeps parsing a newer format instead of
-  asking for a reload, while a tab opened before this release fails its strict
-  schema on a Draft v2 response and shows the reload-required state.
+  suggestions (plus, for a format-3 review only, the expected tracklist rows
+  and each track's Artist entries; never its capture), the source with a Disc
+  Number only on a track that captured one, and applied Track `discNumber`
+  fields. The import workbench inventory copies only v1 fields, so a Draft v2
+  project's row shows its first primary Artist as `artistName`. Fields and
+  values a later release adds are dropped; an unknown state reads as needs
+  attention; and a newer format offers no `capabilities`. An open tab of this
+  release therefore keeps parsing a newer format instead of asking for a reload,
+  while a tab opened before this release fails its strict schema on a Draft v2
+  response and shows the reload-required state.
 - **Draft v2 view.** The same module presents a v1 project as Draft v2:
   `artistName` becomes one primary entry with a deterministic per-project key,
   label and Disc Numbers are unknown, and every value counts as the
@@ -1622,6 +1678,15 @@ roll back to:
   admitted), and it omits applied Disc Number fields from the applied list.
   Reviews this release neither created nor changed stay format 1 and editable
   there.
+- Per-path catalog review saves and format-3 reviews raise no floor. A release
+  before them treats a format-3 review as newer: read-only, with stopping its
+  analysis admitted and its analysis never dispatched. It answers a per-path
+  review save with `400 ADMIN_IMPORT_INVALID_INPUT` (`413` above its 96 KB
+  review body limit) and never replays one, and a Web tab opened before them
+  sends whole-draft saves, which a format-3 review refuses with
+  `409 ADMIN_IMPORT_RELOAD_REQUIRED`; reload open admin Web tabs after deploying
+  or rolling back across them. No format-3 review exists until metadata lookup
+  is offered for reviews.
 - Version-2 tag evidence, `valueRevision`, the once-only `automation` marker
   and per-asset automation markers do not raise the first floor above, the
   release that allowlists Draft v2 DTOs. Older releases show only the five

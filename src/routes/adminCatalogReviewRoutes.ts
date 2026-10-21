@@ -9,7 +9,11 @@ import { createCatalogReview, listCatalogReviews, getCatalogReview, editCatalogR
 export function createAdminCatalogReviewRouter() {
     const router = express.Router();
     router.use('/catalog-reviews', (_req, res, next) => { res.setHeader('Cache-Control', 'private, no-store'); next(); });
-    router.use('/catalog-reviews', requireAuth, requireAdmin, requireCurrentAccountViewer, express.json({ limit: '96kb', strict: true }));
+    router.use('/catalog-reviews', requireAuth, requireAdmin, requireCurrentAccountViewer);
+    // A save carries each changed value and its base, so up to two copies of a 48 KB draft (as an import field save); every other
+    // body stays at 96 KB.
+    const json = express.json({ limit: '96kb', strict: true }), fieldSaveJson = express.json({ limit: '160kb', strict: true });
+    router.use('/catalog-reviews', (req, res, next) => (req.method === 'PATCH' && /^\/[^/]+\/?$/.test(req.path) ? fieldSaveJson : json)(req, res, next));
     const run = (handler: (actor: string, req: express.Request) => Promise<unknown>, status = 200): express.RequestHandler => async (req, res) => {
         try {
             const value = await runRequestWork(req, () => handler((req as AuthenticatedRequest).auth!.userId, req));

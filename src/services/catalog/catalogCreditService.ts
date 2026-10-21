@@ -2,13 +2,13 @@
  * Exports
  *   Types: CatalogCreditOwnerType, CatalogCreditMutationResult
  *   Classes: CatalogCreditConflictError, CatalogCreditOutcomeUnknownError
- *   Functions: replaceCatalogCreditsWithinTransaction, replaceCatalogCredits, addCatalogCredit,
- *              addSoundtrackCredit, ensureAlbumPrimaryArtistCredit, removeAlbumPrimaryArtistCredit,
- *              replaceArtistPrimaryAlbumCredits, removeCatalogCredit, reorderCatalogCredits
+ *   Functions: legacyCreditsForUnmigratedOwner, replaceCatalogCreditsWithinTransaction, replaceCatalogCredits,
+ *              addCatalogCredit, addSoundtrackCredit, ensureAlbumPrimaryArtistCredit,
+ *              removeAlbumPrimaryArtistCredit, replaceArtistPrimaryAlbumCredits, removeCatalogCredit,
+ *              reorderCatalogCredits
  * Internal
- *   Functions: canonicalOwnerId, albumReferenceValues, legacyCreditsForUnmigratedOwner,
- *              synchronizeAlbumArtistProjection, writeMayHaveCommitted, confirmCatalogCreditMutation,
- *              executeCatalogCreditTransaction
+ *   Functions: canonicalOwnerId, albumReferenceValues, synchronizeAlbumArtistProjection, writeMayHaveCommitted,
+ *              confirmCatalogCreditMutation, executeCatalogCreditTransaction
  *   Constants: ownerConfig
  * @end-catalog */
 
@@ -93,9 +93,10 @@ const albumReferenceValues = (albumId: string) => [
  * Reads an owner's current Credits for a rebuild. Stored lists are read tolerantly, so an
  * invalid stored join phrase is dropped (and repaired by the strict write) instead of blocking
  * the edit; valid phrases stay on their Credits until a rebuild changes the Credit after them
- * (see keepJoinPhrasesWithSuccessors).
+ * (see keepJoinPhrasesWithSuccessors). Existing-Album reviews capture Credits through it too,
+ * so a review reads exactly what a later rebuild replaces.
  */
-const legacyCreditsForUnmigratedOwner = async (
+export const legacyCreditsForUnmigratedOwner = async (
     session: ClientSession,
     ownerType: CatalogCreditOwnerType,
     ownerId: string,

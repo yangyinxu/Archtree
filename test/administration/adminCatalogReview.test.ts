@@ -11,13 +11,18 @@
  *   - only a draft with an own Album artistName is a v1 review draft
  *   - a review save keeps the stored Credits context, label, visibility and uncaptured Disc Numbers and parses only titles, date and numbers
  *   - a v1 review converts to Draft v2 with the legacy entry, its baseline and suggestions, and no value origins; anything else is unchanged
+ *   - a per-path review save takes only titles, the date and numbers, and never a path the review keeps read-only
+ *   - review context entries carry MusicBrainz IDs only from the given map, and member keys are seeded per slot and never collide
+ *   - the review size cap leaves out the Album and member Artist entries, the label and the expected tracklist, by omitting their keys
+ *   - the review size cap measures a stored track that is not an object as it is, and never throws
  * @end-catalog */
 
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
 import { ObjectId } from 'mongodb';
-import { catalogReviewCredits, catalogReviewOriginalFilename, convertLegacyCatalogReview, isLegacyCatalogReviewDraft, parseCatalogReviewDraft, parseCatalogReviewFields } from '../../src/administration/catalog/adminCatalogReviewService';
+import { catalogReviewCappedDraft, catalogReviewCredits, catalogReviewEntryKey, catalogReviewOriginalFilename, convertLegacyCatalogReview, isLegacyCatalogReviewDraft, parseCatalogReviewChanges, parseCatalogReviewDraft, parseCatalogReviewFields } from '../../src/administration/catalog/adminCatalogReviewService';
+import { derivedEntryKey, draftBytes } from '../../src/administration/import/adminImportDraft';
 import { validateLunaSuggestions, type AnalysisInput } from '../../src/administration/import/adminImportProvider';
 import { uuid } from '../../src/administration/import/adminImportContract';
 import { legacyArtistEntryKey } from '../../src/administration/import/adminImportDraftCompat';
@@ -194,4 +199,72 @@ test('a v1 review converts to Draft v2 with the legacy entry, its baseline and s
     for (const doc of [reviewDoc().doc, { ...reviewDoc().doc, draftVersion: 3 }, { ...legacyDoc(), purpose: 'import' }, { ...legacyDoc(), purpose: null }]) {
         const copy = JSON.stringify(doc); convertLegacyCatalogReview(doc as AdminImportDocument); assert.equal(JSON.stringify(doc), copy);
     }
+});
+
+test('a per-path review save takes only titles, the date and numbers, and never a path the review keeps read-only', () => {
+    const { doc, stored } = reviewDoc();
+    // Titles are normalized as a field save normalizes them; the base is kept raw for the staleness check.
+    assert.deepEqual(parseCatalogReviewChanges([{ path: 'album.title', base: 'Synthetic Album', value: ' Cafe\u0301 ' }, { path: `tracks.${slotA}.title`, base: 'One', value: ' Edited ' }], doc, stored),
+        [{ path: 'album.title', base: 'Synthetic Album', value: 'Caf\u00e9' }, { path: `tracks.${slotA}.title`, base: 'One', value: 'Edited' }]);
+    assert.deepEqual(parseCatalogReviewChanges([{ path: 'album.releaseDate', base: null, value: { year: 2021, month: 2, day: null } }, { path: `tracks.${slotA}.trackNumber`, base: 1, value: 9999 }], doc, stored).map(change => change.value),
+        [{ year: 2021, month: 2, day: null }, 9999]);
+    // A track whose source captured its Disc Number takes any valid one, or none.
+    for (const value of [2, 999, null]) assert.deepEqual(parseCatalogReviewChanges([{ path: `tracks.${slotA}.discNumber`, base: 1, value }], doc, stored)[0].value, value);
+    // A track whose source captured none may only send the Disc Number the review shows.
+    assert.deepEqual(parseCatalogReviewChanges([{ path: `tracks.${slotB}.discNumber`, base: null, value: null }], doc, stored)[0].value, null);
+    assert.throws(() => parseCatalogReviewChanges([{ path: `tracks.${slotB}.discNumber`, base: null, value: 2 }], doc, stored), { code: 'ADMIN_IMPORT_INVALID_INPUT' });
+    const shownThree = { ...stored, tracks: stored.tracks.map(track => track.slotId === slotB ? { ...track, discNumber: 3 } : track) };
+    assert.equal(parseCatalogReviewChanges([{ path: `tracks.${slotB}.discNumber`, base: 3, value: 3 }], doc, shownThree)[0].value, 3);
+    assert.throws(() => parseCatalogReviewChanges([{ path: `tracks.${slotB}.discNumber`, base: 3, value: null }], doc, shownThree), { code: 'ADMIN_IMPORT_INVALID_INPUT' });
+    // Read-only paths are refused before any value is parsed, whatever their value, also beside an admitted change.
+    const title = { path: 'album.title', base: 'Synthetic Album', value: 'Edited' };
+    for (const [path, value] of [['album.artists', stored.album.artists], ['album.label', stored.album.label], ['album.visibility', 'hidden'], ['album.expectedTracklist', null],
+        [`tracks.${slotA}.artists`, []], [`tracks.${slotB}.artists`, 'not even entries']] as const) {
+        assert.throws(() => parseCatalogReviewChanges([title, { path, base: value, value }], doc, stored), { code: 'ADMIN_IMPORT_INVALID_INPUT' }, path);
+    }
+    // Everything else follows the field save rules.
+    for (const changes of [[], [title, title], [{ ...title, extra: 1 }], [{ path: 'album.artistName', base: '', value: '' }], [{ path: `tracks.${randomUUID()}.title`, base: '', value: '' }],
+        [{ path: `tracks.${slotA}.discNumber`, base: 1, value: 0 }], [{ path: `tracks.${slotA}.title`, base: '', value: 'x'.repeat(301) }], 'album.title']) {
+        assert.throws(() => parseCatalogReviewChanges(changes, doc, stored), { code: 'ADMIN_IMPORT_INVALID_INPUT' }, JSON.stringify(changes).slice(0, 60));
+    }
+});
+
+test('review context entries carry MusicBrainz IDs only from the given map, and member keys are seeded per slot and never collide', () => {
+    const names = new Map([[subject(10), 'Synthetic A'], [subject(11), 'Synthetic B']]), organizations = new Map([[subject(30), 'Synthetic Label']]);
+    const credits = [credit('c1', 'artist', 10, 'primary', 0, ' & '), credit('c2', 'artist', 11, 'featured', 1), credit('o1', 'organization', 30, 'label', 2)];
+    const mbid = '00000009-0000-4000-9000-0000000000a1', labelId = '00000009-0000-4000-9000-0000000000a2';
+    const plain = catalogReviewCredits(reviewId, credits, names, organizations);
+    const withIds = catalogReviewCredits(reviewId, credits, names, organizations, { musicBrainzIds: new Map([[`artist:${subject(10)}`, mbid], [`organization:${subject(30)}`, labelId], [`artist:${subject(30)}`, 'wrong kind']]) });
+    assert.deepEqual(withIds.artists.map(entry => entry.musicBrainzId), [mbid, null]); assert.deepEqual(withIds.label, { name: 'Synthetic Label', musicBrainzId: labelId });
+    assert.deepEqual(plain.artists.map(entry => entry.musicBrainzId), [null, null]); assert.equal(plain.label?.musicBrainzId, null);
+    // Album keys are unchanged by IDs or the map, and stay what earlier releases derived.
+    assert.deepEqual(withIds.artists.map(entry => entry.key), plain.artists.map(entry => entry.key));
+    assert.deepEqual(plain.artists.map(entry => entry.key), ['c1', 'c2'].map(creditId => derivedEntryKey({ catalogReview: reviewId, creditId })));
+    assert.deepEqual(plain.artists.map(entry => entry.key), ['c1', 'c2'].map(creditId => catalogReviewEntryKey(reviewId, creditId)));
+    // A member's entries are keyed per slot: the same Credit IDs on two members and the Album never share a key.
+    const first = catalogReviewCredits(reviewId, credits, names, organizations, { slotId: slotA }), second = catalogReviewCredits(reviewId, credits, names, organizations, { slotId: slotB });
+    const keys = [...plain.artists, ...first.artists, ...second.artists].map(entry => entry.key);
+    assert.equal(new Set(keys).size, 6); assert.ok(keys.every(key => uuid(key)));
+    assert.deepEqual(first.artists.map(entry => entry.key), ['c1', 'c2'].map(creditId => derivedEntryKey({ catalogReview: reviewId, slotId: slotA, creditId })));
+    assert.deepEqual(catalogReviewCredits(reviewId, credits, names, organizations, { slotId: slotA }), first, 'deterministic');
+});
+
+test('the review size cap leaves out the Album and member Artist entries, the label and the expected tracklist, by omitting their keys', () => {
+    const { stored } = reviewDoc();
+    const review = { ...stored, album: { ...stored.album, expectedTracklist: [{ discNumber: 1, trackNumber: 1, title: 'x'.repeat(300), durationMs: null }] },
+        tracks: stored.tracks.map(track => ({ ...track, artists: [entry(randomUUID(), 'Synthetic Member', 'primary', null)] })) };
+    const capped = catalogReviewCappedDraft(review as ImportDraftV2) as { album: Record<string, unknown>; tracks: Record<string, unknown>[] };
+    assert.deepEqual(Object.keys(capped.album), ['title', 'releaseDate', 'visibility']);
+    assert.deepEqual(capped.tracks.map(track => Object.keys(track)), [['slotId', 'title', 'discNumber', 'trackNumber'], ['slotId', 'title', 'discNumber', 'trackNumber']]);
+    assert.deepEqual(catalogReviewCappedDraft(stored), capped, 'a format-2 draft measures the same');
+    assert.ok(draftBytes(capped) < draftBytes(stored));
+    // The input is never changed.
+    assert.equal(review.album.expectedTracklist.length, 1); assert.equal(review.tracks[0].artists.length, 1); assert.equal(stored.album.artists.length, 2);
+});
+
+test('the review size cap measures a stored track that is not an object as it is, and never throws', () => {
+    const { stored } = reviewDoc();
+    const malformed = { ...stored, tracks: [null, 'x', { ...stored.tracks[0], artists: [] }] } as unknown as ImportDraftV2;
+    const capped = catalogReviewCappedDraft(malformed) as { tracks: unknown[] };
+    assert.deepEqual(capped.tracks, [null, 'x', stored.tracks[0]]);
 });

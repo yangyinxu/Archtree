@@ -8,13 +8,17 @@
  *   - the review contract is Draft v2 with captured source discs, and an applied Disc Number is a Track field only
  *   - a 100-track review shows every applied field: both Album fields and title, Disc Number and Track Number per Track
  *   - User presentation refuses review reads, and account epoch changes discard an in-flight private review
+ *   - a review captured for metadata lookup carries its expected tracklist and member Artist entries; import drafts never do
+ *   - a malformed expected tracklist or member entry list fails the strict review parse
+ *   - a review save lists only the changed editable values with their bases, in a fixed order, never Credits, label, visibility or review-only values
  * @end-catalog */
 
 import { advanceAccountEpoch, captureAccountOperation } from '../../api/accountEpoch';
 import { adminEndpointRequest } from './adminApi';
 import { adminWorkspace } from './adminWorkspace';
-import { reviewChanges, reviewDetailSchema, reviewResponseSchema } from './catalogReviewApi';
-import { artistEntryKey, catalogReview, deferred, legacyCatalogReview, reviewJson, slotId, slotTwo, viewer } from './catalogReviewFixtures.testSupport';
+import { importDraftV2Schema } from './adminNamingSchema';
+import { reviewChanges, reviewDetailSchema, reviewDraftChanges, reviewResponseSchema } from './catalogReviewApi';
+import { artistEntryKey, capturedCatalogReview, catalogReview, deferred, legacyCatalogReview, reviewJson, slotId, slotTwo, viewer } from './catalogReviewFixtures.testSupport';
 import { reviewValueText } from './ImportReview';
 
 beforeEach(() => {
@@ -153,4 +157,54 @@ test('User presentation refuses review reads, and account epoch changes discard 
   adminWorkspace.select('admin'); pending.resolve(reviewJson({ item: catalogReview(), receipt: null }));
   await expect(read).rejects.toMatchObject({ status: 409, code: 'account_viewer_mismatch' });
   expect(fetch).toHaveBeenCalledTimes(1);
+});
+
+test('a review captured for metadata lookup carries its expected tracklist and member Artist entries; import drafts never do', () => {
+  const item = capturedCatalogReview();
+  expect(reviewDetailSchema.safeParse(item).success).toBe(true);
+  expect(reviewDetailSchema.safeParse({ ...item, draft: { ...item.draft, album: { ...item.draft.album, expectedTracklist: null } } }).success).toBe(true);
+  // A review not captured carries neither key.
+  expect(reviewDetailSchema.safeParse(catalogReview()).success).toBe(true);
+  expect(importDraftV2Schema.safeParse(item.draft).success).toBe(false);
+  expect(importDraftV2Schema.safeParse({ ...item.draft, album: { ...item.draft.album, expectedTracklist: undefined }, tracks: catalogReview().draft.tracks }).success).toBe(false);
+  expect(importDraftV2Schema.safeParse(catalogReview().draft).success).toBe(true);
+});
+
+test('a malformed expected tracklist or member entry list fails the strict review parse', () => {
+  const item = capturedCatalogReview(), [row] = item.draft.album.expectedTracklist!;
+  const withRows = (rows: unknown) => ({ ...item, draft: { ...item.draft, album: { ...item.draft.album, expectedTracklist: rows } } });
+  const withEntries = (artists: unknown) => ({ ...item, draft: { ...item.draft, tracks: [{ ...item.draft.tracks[0], artists }, item.draft.tracks[1]] } });
+  const entry = (index: number) => ({ key: `50000000-0000-4000-8000-${String(index + 10).padStart(12, '0')}`, name: `Synthetic Artist ${index}`, role: 'primary', joinPhrase: null, musicBrainzId: null });
+  for (const value of [
+    withRows([row, { ...row }]), withRows([]), withRows(Array.from({ length: 101 }, (_, index) => ({ ...row, trackNumber: index + 1 }))),
+    withRows([{ ...row, durationMs: 0 }]), withRows([{ ...row, durationMs: 1.5 }]), withRows([{ ...row, title: '' }]), withRows([{ ...row, discNumber: 1000 }]),
+    withRows([{ ...row, recordingId: 'synthetic' }]), withRows('rows'),
+    withEntries(Array.from({ length: 21 }, (_, index) => entry(index))), withEntries([entry(1), { ...entry(2), key: entry(1).key }]),
+    withEntries([{ ...entry(1), credit: 'extra' }]), withEntries(null),
+    { ...item, draft: { ...item.draft, tracks: [{ ...item.draft.tracks[0], credits: [] }, item.draft.tracks[1]] } },
+    { ...item, draft: { ...item.draft, album: { ...item.draft.album, missingRows: 1 } } }
+  ]) expect(reviewDetailSchema.safeParse(value).success).toBe(false);
+  expect(reviewDetailSchema.safeParse(withRows(Array.from({ length: 100 }, (_, index) => ({ ...row, trackNumber: index + 1 })))).success).toBe(true);
+  expect(reviewDetailSchema.safeParse(withEntries(Array.from({ length: 20 }, (_, index) => entry(index)))).success).toBe(true);
+  // Keys are compared exactly, as the server's entry view keeps them: two keys differing only in letter case are two entries.
+  const cased = '50000000-0000-4000-8000-0000000000ab';
+  expect(reviewDetailSchema.safeParse(withEntries([{ ...entry(1), key: cased.toUpperCase() }, { ...entry(2), key: cased }])).success).toBe(true);
+});
+
+test('a review save lists only the changed editable values with their bases, in a fixed order, never Credits, label, visibility or review-only values', () => {
+  const base = capturedCatalogReview().draft, draft = structuredClone(base);
+  expect(reviewDraftChanges(base, draft)).toEqual([]);
+  draft.tracks[1].trackNumber = 4; draft.tracks[0].discNumber = 2; draft.album.releaseDate = { year: 2024, month: 2, day: null }; draft.tracks[0].title = 'Edited first';
+  draft.album.artists = []; draft.album.label = { name: 'Synthetic Label', musicBrainzId: null }; draft.album.visibility = 'hidden';
+  draft.album.expectedTracklist = null; draft.tracks[0].artists = []; draft.tracks[1].artists = undefined;
+  expect(reviewDraftChanges(base, draft)).toEqual([
+    { path: 'album.releaseDate', base: null, value: { year: 2024, month: 2, day: null } },
+    { path: `tracks.${slotId}.title`, base: 'Synthetic first track', value: 'Edited first' },
+    { path: `tracks.${slotId}.discNumber`, base: null, value: 2 },
+    { path: `tracks.${slotTwo}.trackNumber`, base: null, value: 4 }
+  ]);
+  // A value edited back to its base is no change.
+  draft.tracks[0].title = base.tracks[0].title; draft.album.title = 'Edited Album';
+  expect(reviewDraftChanges(base, draft).map(change => change.path)).toEqual(['album.title', 'album.releaseDate', `tracks.${slotId}.discNumber`, `tracks.${slotTwo}.trackNumber`]);
+  expect(reviewDraftChanges(base, structuredClone(base))).toEqual([]);
 });

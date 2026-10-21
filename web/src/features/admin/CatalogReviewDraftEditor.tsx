@@ -2,27 +2,27 @@ import { Link } from 'react-router';
 import { useLocalization } from '../../localization/LocalizationProvider';
 import type { MessageKey } from '../../localization/contract';
 import { useAdminText } from './AdminAccess';
-import type { ImportDraftV2 } from './adminNamingSchema';
-import type { CatalogReview } from './catalogReviewApi';
+import type { CatalogReview, ReviewDraft } from './catalogReviewApi';
 import { entriesByline } from './artistEntriesByline';
 import styles from './adminStyles';
 
-type Track = ImportDraftV2['tracks'][number];
+type Track = ReviewDraft['tracks'][number];
 
 /**
  * The private review draft editor. The Album title and date and each Track's title, Disc Number (only on a track whose source
  * captured one) and Track Number are editable; Album order stays derived from Disc and Track Numbers. The ordered Artist entries
- * with their join phrases, the label and visibility are read-only context managed in the original Album, so every change
- * returns the whole draft with that context untouched. A review created before Credits were captured (no source track captured
+ * with their join phrases, the label, visibility and the review-only values (expected tracklist, each Track's Artist entries) are
+ * read-only context: every change returns the whole draft with them untouched, and the page saves only the changed editable
+ * values (reviewDraftChanges). A review created before Credits were captured (no source track captured
  * a Disc Number) holds only its earlier Artist name, which may not be any Credit of the Album: it shows that name alone, never
  * as a Credits list.
  */
 export function CatalogReviewDraftEditor({ draft, source, filenames, disabled, manageAlbumHref, onChange }: {
-  draft: ImportDraftV2; source: CatalogReview['source']; filenames: ReadonlyArray<{ slotId: string; relativePath: string }>;
-  disabled: boolean; manageAlbumHref: string; onChange: (draft: ImportDraftV2) => void;
+  draft: ReviewDraft; source: CatalogReview['source']; filenames: ReadonlyArray<{ slotId: string; relativePath: string }>;
+  disabled: boolean; manageAlbumHref: string; onChange: (draft: ReviewDraft) => void;
 }) {
   const t = useAdminText(), { t: sharedText } = useLocalization();
-  const album = (patch: Partial<Pick<ImportDraftV2['album'], 'title' | 'releaseDate'>>) => onChange({ ...draft, album: { ...draft.album, ...patch } });
+  const album = (patch: Partial<Pick<ReviewDraft['album'], 'title' | 'releaseDate'>>) => onChange({ ...draft, album: { ...draft.album, ...patch } });
   const track = (slotId: string, patch: Partial<Omit<Track, 'slotId'>>) => onChange({ ...draft, tracks: draft.tracks.map(item => item.slotId === slotId ? { ...item, ...patch } : item) });
   const number = (value: string) => value === '' ? null : Number(value);
   const captured = new Set(source.tracks.filter(item => item.discNumber !== undefined).map(item => item.slotId));
