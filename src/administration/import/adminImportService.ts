@@ -46,8 +46,8 @@ import { keepableMusicBrainzId } from '../../utils/musicBrainzId';
 export type ProjectReceipt = Omit<ImportReceipt, 'kind'> & { kind: ImportReceipt['kind'] | 'apply' } & { actorId: string; hash: string; at: Date; selection?: { generation: number; acceptedIds: string[]; rejectedIds: string[] } };
 type Receipt = ProjectReceipt;
 /**
- * One analysis generation. `lookupContext` is the applied MusicBrainz release captured at admission (adminImportLuna.ts); absent
- * when none was applied, for a catalog review and for an analysis admitted by an earlier release. It is never projected.
+ * One analysis generation. `lookupContext` is the MusicBrainz release applied to the import or review, captured at admission
+ * (adminImportLuna.ts); absent when none was applied and for an analysis admitted by an earlier release. It is never projected.
  */
 type Analysis = { state: ImportAnalysisState; generation: number; operationId: string | null; actorId: string | null; grantExpiresAt: Date | null; baseline: ImportDraft | ImportDraftV2 | null; tags?: { slotId: string; tags: ImportEmbeddedTags }[]; chunks: AnalysisChunk[]; issue: ImportIssue; leaseOwner: string | null; leaseUntil: Date | null;
     lookupContext?: StoredLunaLookupContext };
@@ -149,8 +149,9 @@ const withAdmin = withImportAdmin;
 export const importLookupRecord = (id: ObjectId, session: ClientSession, projection?: Record<string, unknown>) =>
     getDb()!.collection<MetadataLookupRecord>(ADMIN_IMPORT_LOOKUP_COLLECTION).findOne({ _id: id }, projection ? { session, projection } : { session }) as Promise<MetadataLookupRecord | null>;
 /**
- * The MusicBrainz release applied to the import and its stored candidate, read in the caller's transaction (the application,
- * then only that candidate): null unless a candidate other than none is applied and still holds fetched details of that release.
+ * The MusicBrainz release applied to the import or review and its stored candidate, read in the caller's transaction (the
+ * application, then only that candidate): null unless a candidate other than none is applied and still holds fetched details of
+ * that release.
  */
 export async function importAppliedLookupRelease(id: ObjectId, session: ClientSession): Promise<{ applied: LookupApplication; candidate: StoredLookupCandidate } | null> {
     const applied = (await importLookupRecord(id, session, { applied: 1 }))?.applied;
@@ -399,8 +400,9 @@ export function analyzeAdminProject<T>(actor: string, id: string, raw: unknown, 
         const tags = (doc.media?.assets ?? []).filter(asset => asset.state === 'ready' && asset.tags && doc.manifest.files.some(file => file.slotId === asset.slotId)).map(asset => ({ slotId: asset.slotId, tags: legacyTagsView(asset.tags)! }));
         const chunks = lunaAnalysisChunks(generation, doc.manifest, doc.draft, tags);
         if (doc.attemptsUsed + chunks.length > LIMITS.attempts) throw conflict('ADMIN_IMPORT_BUDGET_EXHAUSTED');
-        // The applied release is captured once for the whole generation, read in this transaction; a read failure admits nothing.
-        const context = policy.purpose === 'import' ? lunaLookupContextFor(await importAppliedLookupRelease(doc._id, session)) : null;
+        // The release applied to the import or review is captured once for the whole generation, read in this transaction; a read
+        // failure admits nothing.
+        const context = lunaLookupContextFor(await importAppliedLookupRelease(doc._id, session));
         if (doc.analysis.generation) doc.analysisHistory.push(structuredClone(doc.analysis));
         doc.analysis = { state: 'queued', generation, operationId: body.operationId, actorId: actor, grantExpiresAt: new Date(Date.now() + LIMITS.grantMs), baseline: structuredClone(doc.draft), tags, chunks, issue: null, leaseOwner: null, leaseUntil: null,
             ...(context ? { lookupContext: context } : {}) };
@@ -436,11 +438,16 @@ export function acceptDraftV2Suggestion(doc: AdminImportDocument, draft: ImportD
     setDraftValue(draft, path, value); markAdministratorValues(doc.draftOrigins ??= {}, [path]);
 }
 export const adoptAdminImportSuggestions = (actor: string, id: string, raw: unknown) => adoptAdminProjectSuggestions(actor, id, raw, importPolicy);
-export function adoptAdminProjectSuggestions<T>(actor: string, id: string, raw: unknown, policy: AdminProjectPolicy<T>) {
+/**
+ * Accepts and rejects suggestions of the current generation, all or nothing. `hooks.afterChanges` runs in the same transaction after
+ * the accepted values and the size check (a review's lookup requests re-rank its run there); its refusal aborts the whole adoption.
+ */
+export function adoptAdminProjectSuggestions<T>(actor: string, id: string, raw: unknown, policy: AdminProjectPolicy<T>,
+    hooks: { afterChanges?: (doc: AdminImportDocument, session: ClientSession) => Promise<void> } = {}) {
     const body = mutation(raw, ['generation', 'selectedIds', 'rejectIds']);
     if (!Number.isInteger(body.generation) || !Array.isArray(body.selectedIds) || !Array.isArray(body.rejectIds) || body.selectedIds.length + body.rejectIds.length < 1 || body.selectedIds.length + body.rejectIds.length > LUNA_SUGGESTION_LIMIT || [...body.selectedIds, ...body.rejectIds].some(value => typeof value !== 'string' || !/^[a-f0-9]{24}$/.test(value)) || new Set([...body.selectedIds, ...body.rejectIds]).size !== body.selectedIds.length + body.rejectIds.length) return invalidImport();
     const selected = body.selectedIds as string[], rejected = body.rejectIds as string[];
-    return mutateAdminProject(actor, id, body, 'adopt', async doc => {
+    return mutateAdminProject(actor, id, body, 'adopt', async (doc, session) => {
         if (doc.analysis.generation !== body.generation) throw conflict('ADMIN_IMPORT_SUGGESTION_STALE');
         const targets = [...selected, ...rejected].map(id => doc.suggestions.find(s => s.id === id && s.generation === body.generation && s.decision === 'pending'));
         if (targets.some(s => !s)) throw conflict('ADMIN_IMPORT_SUGGESTION_STALE');
@@ -461,6 +468,7 @@ export function adoptAdminProjectSuggestions<T>(actor: string, id: string, raw: 
         const capped = policy.cappedDraft ?? ((value: ImportDraftV2) => value);
         if (!draftWithinSizeLimit(capped(before), capped(draft))) invalidImport();
         doc.decisions = retainBoundDecisions(doc.decisions, draft);
+        await hooks.afterChanges?.(doc, session);
     }, policy);
 }
 

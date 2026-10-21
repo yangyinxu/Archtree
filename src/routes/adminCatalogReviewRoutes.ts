@@ -5,8 +5,10 @@ import { observeMediaDeliveryFor } from '../middleware/mediaDeliveryMiddleware';
 import { runRequestWork } from '../services/platform/serverLifecycleService';
 import { createMediaAbortContext } from '../services/media/mediaDeliveryService';
 import { AdminImportError, objectId } from '../administration/import/adminImportContract';
-import { createCatalogReview, listCatalogReviews, getCatalogReview, editCatalogReview, analyzeCatalogReview, adoptCatalogReview, cancelCatalogReviewAnalysis, applyCatalogReview } from '../administration/catalog/adminCatalogReviewService';
-import { getCatalogReviewLookup, retryCatalogReviewLookup, submitCatalogReviewLookup } from '../administration/lookup/catalogReviewLookupRequests';
+import { createCatalogReview, listCatalogReviews, getCatalogReview, analyzeCatalogReview, cancelCatalogReviewAnalysis, applyCatalogReview } from '../administration/catalog/adminCatalogReviewService';
+import {
+    adoptCatalogReviewSuggestions, chooseCatalogReviewLookup, getCatalogReviewLookup, resolveCatalogReviewLookup, retryCatalogReviewLookup, saveCatalogReview, submitCatalogReviewLookup
+} from '../administration/lookup/catalogReviewLookupRequests';
 import { defaultItunesArtworkClient, defaultLookupArtworkClient, previewLookupCandidateArtwork } from '../administration/import/adminImportLookupCover';
 import type { CoverArtClient } from '../administration/lookup/coverArtClient';
 import type { ItunesArtworkClient } from '../administration/lookup/itunesArtworkClient';
@@ -29,11 +31,13 @@ export function createAdminCatalogReviewRouter(artwork: () => CoverArtClient = d
         return requireCurrentAccountViewer(req, res, next);
     });
     // A save carries each changed value and its base, so up to two copies of a 48 KB draft (as an import field save); a lookup
-    // submission or retry is a few fields (8 KB; Express routes ignore case, so the selector does too); every other body stays at
-    // 96 KB.
+    // submission, retry or choice is a few fields (8 KB; Express routes ignore case, so the selectors do too); conflict answers
+    // carry up to 406 bases, member Artist entries and an expected tracklist among them (512 KB); every other body stays at 96 KB.
     const json = express.json({ limit: '96kb', strict: true }), fieldSaveJson = express.json({ limit: '160kb', strict: true }), lookupJson = express.json({ limit: '8kb', strict: true });
+    const answersJson = express.json({ limit: '512kb', strict: true });
     router.use('/catalog-reviews', (req, res, next) => (req.method === 'PATCH' && /^\/[^/]+\/?$/.test(req.path) ? fieldSaveJson
-        : req.method === 'POST' && /^\/[^/]+\/lookup(?:\/retry)?\/?$/i.test(req.path) ? lookupJson : json)(req, res, next));
+        : req.method === 'POST' && /^\/[^/]+\/lookup(?:\/(?:retry|choose))?\/?$/i.test(req.path) ? lookupJson
+            : req.method === 'POST' && /^\/[^/]+\/lookup\/resolve\/?$/i.test(req.path) ? answersJson : json)(req, res, next));
     const run = (handler: (actor: string, req: express.Request) => Promise<unknown>, status = 200): express.RequestHandler => async (req, res) => {
         try {
             const value = await runRequestWork(req, () => handler((req as AuthenticatedRequest).auth!.userId, req));
@@ -46,14 +50,18 @@ export function createAdminCatalogReviewRouter(artwork: () => CoverArtClient = d
     router.get('/catalog-reviews', asyncHandler(run((actor, req) => listCatalogReviews(actor, req.query))));
     router.post('/catalog-reviews', asyncHandler(run((actor, req) => createCatalogReview(actor, req.body), 201)));
     router.get('/catalog-reviews/:id', asyncHandler(run((actor, req) => getCatalogReview(actor, req.params.id))));
-    router.patch('/catalog-reviews/:id', asyncHandler(run((actor, req) => editCatalogReview(actor, req.params.id, req.body))));
+    // A save, and accepting Luna suggestions, re-rank the review's completed lookup run when they change a member's own Disc or Track
+    // Number.
+    router.patch('/catalog-reviews/:id', asyncHandler(run((actor, req) => saveCatalogReview(actor, req.params.id, req.body))));
     router.post('/catalog-reviews/:id/analyze', asyncHandler(run((actor, req) => analyzeCatalogReview(actor, req.params.id, req.body), 202)));
-    router.post('/catalog-reviews/:id/adopt', asyncHandler(run((actor, req) => adoptCatalogReview(actor, req.params.id, req.body))));
+    router.post('/catalog-reviews/:id/adopt', asyncHandler(run((actor, req) => adoptCatalogReviewSuggestions(actor, req.params.id, req.body))));
     router.post('/catalog-reviews/:id/cancel-analysis', asyncHandler(run((actor, req) => cancelCatalogReviewAnalysis(actor, req.params.id, req.body))));
     router.post('/catalog-reviews/:id/apply', asyncHandler(run((actor, req) => applyCatalogReview(actor, req.params.id, req.body))));
     router.get('/catalog-reviews/:id/lookup', asyncHandler(run((actor, req) => getCatalogReviewLookup(actor, req.params.id))));
     router.post('/catalog-reviews/:id/lookup', asyncHandler(run((actor, req) => submitCatalogReviewLookup(actor, req.params.id, req.body), 202)));
     router.post('/catalog-reviews/:id/lookup/retry', asyncHandler(run((actor, req) => retryCatalogReviewLookup(actor, req.params.id, req.body), 202)));
+    router.post('/catalog-reviews/:id/lookup/choose', asyncHandler(run((actor, req) => chooseCatalogReviewLookup(actor, req.params.id, req.body))));
+    router.post('/catalog-reviews/:id/lookup/resolve', asyncHandler(run((actor, req) => resolveCatalogReviewLookup(actor, req.params.id, req.body))));
     // A transient WebP preview of a review lookup candidate's front artwork, bounded and observed as the import preview is; no bytes
     // are stored, and an error has no body.
     router.get('/catalog-reviews/:id/lookup/candidates/:key/artwork', observeMediaDeliveryFor('artwork'), asyncHandler(async (req, res) => {

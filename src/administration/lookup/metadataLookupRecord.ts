@@ -40,7 +40,7 @@ import type { LookupItunesStage } from './lookupItunesStage';
 import { planMetadataLookup, type LookupPlan, type LookupPlanInput, type PlannedLookupQuery } from './lookupQueryPlanner';
 import { lookupTrackCountPlausible, rankLookupCandidates, type LocalFileEvidence, type LookupComparisonMode, type LookupPreselection, type RankedLookup } from './lookupRanking';
 import { catalogReviewFileEvidence, catalogReviewLookupFileSet, isCatalogReviewLookup } from './lookupReviewEvidence';
-import { lookupAudioTrackCount, lookupSubsetTrackCountPlausible, lookupSurplusRank } from './lookupSubset';
+import { lookupAudioTrackCount, lookupSubsetTrackCountPlausible, lookupSurplusRank, type LookupSubsetPair } from './lookupSubset';
 
 export type MetadataLookupState = 'queued' | 'running' | 'retrying' | 'complete' | 'unavailable' | 'stopped' | 'superseded';
 export type MetadataLookupIssue = 'permissionLost' | 'grantExpired' | 'notConfigured' | 'sourceUnavailable' | 'sourceBusy' | 'fileSetChanged' | 'projectClosed';
@@ -69,30 +69,45 @@ export type StoredLookupCandidate = {
     itunes?: { storefront: ItunesStorefront; artworkUrl: string | null; check: 'noRelease' | 'unavailable' | 'notRun' };
 };
 export type StoredLookupRanking = RankedLookup & { rankedAt: Date; files: LocalFileEvidence[] };
-/** A candidate value left out: control or invisible characters, over a length bound, a failed format, the draft cap, or only placeholder credits. */
-export type LookupValueFlag = { path: ImportDraftPath; reason: 'characters' | 'length' | 'format' | 'size' | 'placeholder' };
-/** A value resting on the applied candidate, in the draft's stored form; a track value names its local file (manifest slot). */
-export type LookupAppliedValue = { path: ImportDraftPath; value: unknown; slotId: string | null };
+/**
+ * A candidate value left out: control or invisible characters, over a length bound, a failed format, the draft cap, or only
+ * placeholder credits. Reviews only: `notApplicable`, a list or label the review's capture does not let change (not every primary
+ * and featured Artist Credit shown, or a read-only label), and `noTrackCredit`, a paired member whose release track has no usable
+ * stored credit.
+ */
+export type LookupValueFlag = { path: ImportDraftPath; reason: 'characters' | 'length' | 'format' | 'size' | 'placeholder' | 'notApplicable' | 'noTrackCredit' };
+/**
+ * A value resting on the applied candidate, in the draft's stored form; a track value names its local file (manifest slot). Reviews
+ * only: `kept` marks the Album's Artist entries extended by entries the candidate appended after the saved ones, which it holds; the
+ * next application, or none, restores it while the list is still as written (or as a `lookup` answer to its ID conflict wrote it).
+ */
+export type LookupAppliedValue = { path: ImportDraftPath; value: unknown; slotId: string | null; kept?: unknown };
 /**
  * A candidate value that differs from the administrator's own: nothing is preselected until the administrator keeps one.
  * `musicBrainzId` marks a difference only in the MusicBrainz IDs of entries or the label whose names, roles and phrases agree.
+ * Reviews only: `precision` marks a date that only adds precision to the saved one.
  */
-export type LookupConflict = { path: ImportDraftPath; lookup: unknown; slotId: string | null; answer: 'mine' | 'lookup' | null; musicBrainzId?: true };
+export type LookupConflict = { path: ImportDraftPath; lookup: unknown; slotId: string | null; answer: 'mine' | 'lookup' | null; musicBrainzId?: true; precision?: true };
 /**
- * The candidate (or none) applied to the import's draft and its evidence: who applied it and how (a preselection, an explicit choice
- * or none), the paths this application wrote, the values that rest on it, its unanswered or answered conflicts and the flagged values.
- * `musicBrainzIds` are the IDs this application supplied that the draft carries after it (an entry by key, the label with entryKey
- * null), which choosing another candidate or none removes again; absent on an application stored before MusicBrainz IDs. For an
- * iTunes-only candidate `source` is `itunes`, `releaseId` holds its iTunes collection ID (the source evidence) and `notChecked` marks
- * one that was not checked against MusicBrainz; both are absent for a MusicBrainz candidate.
+ * The candidate (or none) applied to the project's draft and its evidence: who applied it and how (a preselection, an explicit
+ * choice or none), the paths this application wrote, the values that rest on it, its unanswered or answered conflicts and the
+ * flagged values. `musicBrainzIds` are the IDs this application supplied that the draft carries after it (an Album entry by key, the
+ * label with entryKey null, and in a review a member's entry by key; a review's items each name their `path`: `album.artists`,
+ * `album.label` or `tracks.<slotId>.artists`), which choosing another candidate or none removes again; absent on an application
+ * stored before MusicBrainz IDs. For an iTunes-only candidate `source` is `itunes`,
+ * `releaseId` holds its iTunes collection ID (the source evidence) and `notChecked` marks one that was not checked against
+ * MusicBrainz; both are absent for a MusicBrainz candidate. A review's application also records `pairs`, the single pairing of its
+ * members with the release's tracks that its member values and expected tracklist rest on (null without one, `[]` for an Album
+ * without members); an import's never carries the key.
  */
 export type LookupApplication = {
     run: number; candidateKey: string | null; releaseId: string | null;
     choice: 'preselected' | 'chosen' | 'none'; basis: LookupPreselection['basis'] | 'chosen' | null;
     actorId: string; operationId: string | null; at: Date;
     paths: ImportDraftPath[]; values: LookupAppliedValue[]; conflicts: LookupConflict[]; flagged: LookupValueFlag[];
-    musicBrainzIds?: { entryKey: string | null; musicBrainzId: string }[];
+    musicBrainzIds?: { entryKey: string | null; musicBrainzId: string; path?: ImportDraftPath }[];
     source?: 'itunes'; notChecked?: true;
+    pairs?: LookupSubsetPair[] | null;
 };
 export type MetadataLookupRecord = {
     _id: ObjectId; run: number; state: MetadataLookupState; issue: MetadataLookupIssue | null;

@@ -137,7 +137,7 @@ const storedBaseline = (doc: Pick<AdminImportDocument, '_id' | 'analysis' | 'dra
 };
 /**
  * One chunk's provider input: the manifest (all files for the Album chunk, else the chunk's), the stored baseline as Luna reads it,
- * the bounded tags and, for an import, the generation's applied-release context fitted so the whole input stays within
+ * the bounded tags and the generation's applied-release context (an import's or a review's) fitted so the whole input stays within
  * ADMIN_IMPORT_LIMITS.inputBytes (it replaces the `null` the size is measured with).
  */
 export function lunaAnalysisInput(doc: Pick<AdminImportDocument, '_id' | 'purpose' | 'manifest' | 'analysis' | 'draft'>, chunk: AnalysisChunk): AnalysisInput {
@@ -146,7 +146,7 @@ export function lunaAnalysisInput(doc: Pick<AdminImportDocument, '_id' | 'purpos
         manifest: { rootLabel: manifest.rootLabel, files: chunk.album ? manifest.files : manifest.files.filter(file => chunk.slots.includes(file.slotId)) },
         baseline: lunaBaseline(storedBaseline(doc), chunk.slots, chunk.album), slots: chunk.slots, album: chunk.album,
         tags: boundedLunaTags(analysis.tags ?? [], chunk.album ? manifest.files.slice(0, ADMIN_IMPORT_LIMITS.tracksPerChunk).map(file => file.slotId) : chunk.slots), lookupContext: null };
-    const stored = doc.purpose === 'catalogReview' ? undefined : analysis.lookupContext?.context;
+    const stored = analysis.lookupContext?.context;
     if (!stored) return input;
     return { ...input, lookupContext: fitLunaLookupContext(stored, ADMIN_IMPORT_LIMITS.inputBytes - bytes(analysisContext(input)) + bytes(null)) };
 }

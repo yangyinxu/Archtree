@@ -192,18 +192,22 @@ export type ImportAutomaticSkip = { path: ImportDraftPath; reason: 'administrato
  * automation saw, and it becomes automatic. A value equal to the current one is skipped and keeps its origin, and a write that
  * would grow the draft past the 48 KB cap is reverted alone. Callers (adminImportAutomation.ts) bump `valueRevision`, never
  * receipts or `revision`. `context.introduce` names the MusicBrainz IDs a lookup application takes from its response.
+ * `options.cappedDraft` is the part of the draft the cap measures (a review's leaves out its Artist entries, label and expected
+ * tracklist); without it the whole draft is measured.
  */
-export function applyAutomaticValues(target: Target, values: readonly ImportAutomaticValue[], context: ImportDraftParseContext = {}) {
+export function applyAutomaticValues(target: Target, values: readonly ImportAutomaticValue[], context: ImportDraftParseContext = {},
+    options: { cappedDraft?: (draft: ImportDraftV2) => unknown } = {}) {
     const written: ImportDraftPath[] = [], skipped: ImportAutomaticSkip[] = [];
+    const measured = () => draftBytes(options.cappedDraft ? options.cappedDraft(target.draft) : target.draft);
     for (const { path, seen, value } of values) {
         const current = draftValueAt(target.draft, path);
         if (!emptyValue(current) && originOf(target.draftOrigins, path) === 'administrator') { skipped.push({ path, reason: 'administrator' }); continue; }
         if (!sameDraftValue(current, seen)) { skipped.push({ path, reason: 'changed' }); continue; }
         let parsed: unknown; try { parsed = parseDraftValue(path, value, target.draft, context); } catch { skipped.push({ path, reason: 'invalid' }); continue; }
         if (sameDraftValue(parsed, current)) { skipped.push({ path, reason: 'unchanged' }); continue; }
-        const before = draftBytes(target.draft);
+        const before = measured();
         setDraftValue(target.draft, path, parsed);
-        const after = draftBytes(target.draft);
+        const after = measured();
         if (after > DRAFT_V2_LIMITS.bytes && after > before) { setDraftValue(target.draft, path, current); skipped.push({ path, reason: 'size' }); continue; }
         target.draftOrigins[originKey(path)] = 'automatic'; written.push(path);
     }

@@ -266,12 +266,13 @@ transaction as every lookup run started, every lookup state change and every
 re-rank of stored candidates, which never changes the project's `revision`. It
 conflicts only with transactions that also write the import document, so the
 publish gate, which reads it with the lookup record, also writes it. The step
-that completes a run, a re-rank of stored candidates and a choice or conflict
-answer write applied values to the import document in the same transaction as
-the record (and, for the worker and a re-rank, the gate). Automatic writes
-bump only `valueRevision`; a choice or an answer also takes its receipt's
-`revision`. File-tag automation reads the record's applied values in its own
-transaction, so it never replaces them; no index is added.
+that completes a run, a re-rank of stored candidates (for a review, in a save
+or Luna acceptance that changes a member's Disc or Track Number) and a choice
+or conflict answer write applied values to the import or review document in
+the same transaction as the record (and, for the worker and a re-rank, the
+gate). Automatic writes bump only `valueRevision`; a choice or an answer also
+takes its receipt's `revision`. File-tag automation reads the record's applied
+values in its own transaction, so it never replaces them; no index is added.
 
 An application whose release reports front artwork, or whose iTunes-only
 candidate has an allowlisted iTunes artwork address, also records the import's

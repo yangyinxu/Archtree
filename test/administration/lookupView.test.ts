@@ -15,6 +15,7 @@
  *   - the iTunes status: not queried without a stage or once a run ended before it answered, running or retrying while an iTunes request waits, else as the stage ended
  *   - a review view shows the catalog trigger, the exact-count basis, subset differences and each candidate's subset comparison within bounds; foreign slots are dropped
  *   - the import view refuses a catalog input (no view) and keeps every import case unchanged
+ *   - a review view shows its applied pairing, review-only value paths, conflict precision and flag reasons within 406 values; the import view keeps them all out
  * @end-catalog */
 
 /**
@@ -340,4 +341,36 @@ test('the import view refuses a catalog input (no view) and keeps every import c
     const applied = { ...imported, applied: { run: 2, candidateKey: `musicbrainz:${mbid(1)}`, releaseId: mbid(1), choice: 'preselected' as const, basis: 'exactTrackCount' as const, actorId: actor,
         operationId: null, at: now, paths: [], values: [], conflicts: [], flagged: [] } };
     assert.deepEqual([importLookupView(applied, doc)!.applied?.basis, catalogReviewLookupView(applied, doc)!.applied?.basis], [null, 'exactTrackCount']);
+});
+
+test('a review view shows its applied pairing, review-only value paths, conflict precision and flag reasons within 406 values; the import view keeps them all out', () => {
+    const doc = reviewLookupDocument({ primaryNames: ['Synthetic Lead'], members: numberedMembers([210_000, 220_000]) });
+    const ranked = reviewRecord(doc, [stored(release(1))]), member = `tracks.${reviewSlot(0)}.artists` as const, other = `tracks.${reviewSlot(1)}.artists` as const;
+    const pairs = [{ slotId: reviewSlot(0), discNumber: 1, trackNumber: 1 }, { slotId: reviewSlot(1), discNumber: 1, trackNumber: 2 }];
+    const entries = [{ key: '0000000c-0000-4000-8000-0000000000aa', name: 'Synthetic Singer', role: 'primary', joinPhrase: null, musicBrainzId: mbid(5) }];
+    const rows = [{ discNumber: 1, trackNumber: 1, title: 'First Song', durationMs: 210_000 }];
+    const applied = { run: 2, candidateKey: `musicbrainz:${mbid(1)}`, releaseId: mbid(1), choice: 'chosen' as const, basis: 'chosen' as const, actorId: actor, operationId: null, at: now, paths: [],
+        values: [{ path: 'album.expectedTracklist' as const, value: rows, slotId: null }, { path: member, value: entries, slotId: reviewSlot(0) }],
+        conflicts: [{ path: 'album.releaseDate' as const, lookup: { year: 2020, month: 5, day: 1 }, slotId: null, answer: null, precision: true as const },
+            { path: 'album.expectedTracklist' as const, lookup: rows, slotId: null, answer: null }, { path: other, lookup: entries, slotId: reviewSlot(1), answer: 'mine' as const }],
+        flagged: [{ path: other, reason: 'noTrackCredit' as const }, { path: member, reason: 'notApplicable' as const }, { path: 'album.label' as const, reason: 'notApplicable' as const }], pairs };
+    const view = catalogReviewLookupView({ ...ranked, applied }, doc)!.applied!;
+    assert.deepEqual([view.pairs, view.values], [pairs, [{ path: 'album.expectedTracklist', slotId: null }, { path: member, slotId: reviewSlot(0) }]]);
+    assert.deepEqual(view.conflicts.map(item => [item.path, item.lookup, item.precision, item.answer]),
+        [['album.releaseDate', { year: 2020, month: 5, day: 1 }, true, null], ['album.expectedTracklist', rows, false, null], [other, entries, false, 'mine']]);
+    assert.deepEqual(view.flagged, applied.flagged);
+    // Another slot's pair, a repeated slot or a position out of bounds reads as no pairing, as does a malformed or absent one.
+    for (const tampered of [[...pairs, { slotId: 'foreign-slot', discNumber: 1, trackNumber: 3 }], [pairs[0], pairs[0]], [{ ...pairs[0], trackNumber: 0 }],
+        Array.from({ length: 101 }, () => pairs[0]), 'pairs', undefined]) {
+        assert.equal(catalogReviewLookupView({ ...ranked, applied: { ...applied, pairs: tampered } } as unknown as MetadataLookupRecord, doc)!.applied!.pairs, null, JSON.stringify(tampered)?.slice(0, 60));
+    }
+    assert.deepEqual(catalogReviewLookupView({ ...ranked, applied: { ...applied, pairs: [] } }, doc)!.applied!.pairs, []);
+    // A review shows up to 406 values (one per review value path), an import 305.
+    const many = { ...applied, values: Array.from({ length: 410 }, () => ({ path: 'album.title' as const, value: 'Synthetic Album', slotId: null })) };
+    const submitted = { ...ranked, input: { trigger: 'submitted' as const, submitted: { kind: 'album' as const, text: 'Synthetic Album' } } };
+    assert.deepEqual([catalogReviewLookupView({ ...ranked, applied: many }, doc)!.applied!.values.length, importLookupView({ ...submitted, applied: many }, doc)!.applied!.values.length], [406, 305]);
+    // The import view of the same application leaves out the review-only paths, reasons, precision and pairing.
+    const imported = importLookupView({ ...submitted, applied }, doc)!.applied!;
+    assert.deepEqual([imported.values, imported.conflicts.map(item => item.path), imported.flagged, 'pairs' in imported, imported.conflicts.some(item => 'precision' in item)],
+        [[], ['album.releaseDate'], [], false, false]);
 });

@@ -9,7 +9,7 @@
  *   - no context without an applied MusicBrainz release that still holds fetched details of that release
  *   - no iTunes data reaches Luna: an applied iTunes-only candidate sends no context, and the draft values it wrote carry no collection ID, storefront, artwork or localized name
  *   - the context fit is deterministic, keeps the longest track prefix in medium order and keeps every chunk input within 48 KB
- *   - each chunk input reads Draft v2 values without keys, IDs or visibility, five tag fields and only an import's context
+ *   - each chunk input reads Draft v2 values without keys, IDs or visibility, five tag fields and the context stored on its analysis, a review's included
  *   - chunks keep the importDigest hash of their generation, manifest, baseline, tags and slots
  *   - Luna values become Draft v2 suggestions: entries whose name folds to a baseline entry's keep its key and ID, labels carry none, placeholders drop
  *   - a format-1 project keeps v1 suggestions: one plain primary entry becomes artistName, anything else v2-only is dropped
@@ -146,7 +146,7 @@ test('the context fit is deterministic, keeps the longest track prefix in medium
     assert.equal(lunaAnalysisInput(crowded, crowded.analysis.chunks[0]).lookupContext, null);
 });
 
-test('each chunk input reads Draft v2 values without keys, IDs or visibility, five tag fields and only an import\'s context', () => {
+test('each chunk input reads Draft v2 values without keys, IDs or visibility, five tag fields and the context stored on its analysis, a review\'s included', () => {
     const doc = projectDoc(), [albumChunk, trackChunk] = doc.analysis.chunks as AnalysisChunk[];
     const albumInput = lunaAnalysisInput(doc, albumChunk), trackInput = lunaAnalysisInput(doc, trackChunk);
     assert.deepEqual(albumInput.baseline, { album: { title: 'Ipsum', artists: [{ name: 'Lorem Ensemble', role: 'primary', joinPhrase: ' & ' }, { name: 'Dolor Trio', role: 'featured', joinPhrase: null }], label: 'Amet Records', releaseDate: { year: 2020, month: null, day: null } }, tracks: [] });
@@ -159,9 +159,10 @@ test('each chunk input reads Draft v2 values without keys, IDs or visibility, fi
         assert.deepEqual(input.lookupContext, doc.analysis.lookupContext!.context);
     }
     assert.deepEqual([albumInput.manifest.files.length, trackInput.manifest.files.length, albumInput.slots, trackInput.slots, albumInput.album, trackInput.album], [2, 2, [], [slotA, slotB], true, false]);
-    // A catalog review never sends lookup context, even one stored on its analysis.
-    assert.equal(lunaAnalysisInput(projectDoc({ purpose: 'catalogReview' }), albumChunk).lookupContext, null);
-    assert.equal(lunaAnalysisInput(projectDoc({ purpose: 'catalogReview' }), albumChunk).purpose, 'catalogReview');
+    // A catalog review sends the context its analysis captured (the release applied to the review), labelled with its purpose.
+    const review = lunaAnalysisInput(projectDoc({ purpose: 'catalogReview' }), albumChunk);
+    assert.deepEqual([review.lookupContext, review.purpose], [doc.analysis.lookupContext!.context, 'catalogReview']);
+    assert.equal(lunaAnalysisInput(projectDoc({ purpose: 'catalogReview' }, null), albumChunk).lookupContext, null);
     assert.equal(lunaAnalysisInput(projectDoc({}, null), albumChunk).lookupContext, null);
     // A folderless import keeps the manifest it stored, and the provider context drops the empty folder name.
     const folderless = projectDoc({ manifest: { rootLabel: '', files: manifest.files.map(file => ({ ...file, relativePath: file.filename })) } });

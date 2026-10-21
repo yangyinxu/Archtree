@@ -357,6 +357,15 @@ test('automation writes only empty or automatic values it still sees, never admi
     // Over the cap (a converted draft), a write that shrinks the draft is still admitted.
     const over = { draft: draft(), draftOrigins: { 'album:title': 'automatic' } as ImportDraftOrigins }; over.draft.album.title = 'x'.repeat(49_000);
     assert.deepEqual(applyAutomaticValues(over, [{ path: 'album.title', seen: over.draft.album.title, value: 'Short' }]), { written: ['album.title'], skipped: [] });
+    // With a capped measure (a review leaves its read-only context out), only the measured part binds: the same write that the
+    // whole draft refuses is written, and one that grows the measured part past the cap is still skipped.
+    const capped = (value: ImportDraftV2) => ({ ...value, album: { ...value.album, title: '' } });
+    const measured = { draft: draft(), draftOrigins: {} as ImportDraftOrigins }; measured.draft.album.title = full.draft.album.title;
+    assert.deepEqual(applyAutomaticValues(measured, [{ path: `tracks.${slotB}.title`, seen: '', value: 't'.repeat(300) }], {}, { cappedDraft: capped }),
+        { written: [`tracks.${slotB}.title`], skipped: [] });
+    const grown = { draft: draft(), draftOrigins: {} as ImportDraftOrigins }; grown.draft.tracks[0].title = 'x'.repeat(47_950 - JSON.stringify(capped(grown.draft)).length);
+    assert.deepEqual(applyAutomaticValues(grown, [{ path: `tracks.${slotB}.title`, seen: '', value: 't'.repeat(300) }], {}, { cappedDraft: capped }),
+        { written: [], skipped: [{ path: `tracks.${slotB}.title`, reason: 'size' }] });
 });
 
 test('an Artist decision stays bound while its entry keeps its key and name; reordering, roles and phrases keep it', () => {

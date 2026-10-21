@@ -16,8 +16,13 @@ export type CatalogReviewSource = {
     tracks: CatalogReviewSourceTrack[];
 };
 export type CatalogReviewApplied = { operationId: string; at: string; fields: CatalogReviewField[] };
-/** `lookup` and `lookup-retry` receipts are stored and replayed, but the detail never lists them (LEGACY_REVIEW_RECEIPT_KINDS). */
-export type CatalogReviewReceipt = Omit<ImportReceipt, 'kind'> & { kind: 'create' | 'edit' | 'analyze' | 'adopt' | 'cancel-analysis' | 'apply' | 'lookup' | 'lookup-retry' };
+/**
+ * `lookup`, `lookup-retry`, `lookup-choose` and `lookup-resolve` receipts are stored and replayed, but the detail never lists them
+ * (LEGACY_REVIEW_RECEIPT_KINDS).
+ */
+export type CatalogReviewReceipt = Omit<ImportReceipt, 'kind'> & {
+    kind: 'create' | 'edit' | 'analyze' | 'adopt' | 'cancel-analysis' | 'apply' | 'lookup' | 'lookup-retry' | 'lookup-choose' | 'lookup-resolve';
+};
 /**
  * A review's draft: Draft v2, plus the review-only values a review captured for metadata lookup holds (format 3): the Album's
  * expected tracklist rows (null without one) and each member's track Artist entries. Formats 1 and 2 carry neither key.
@@ -82,5 +87,9 @@ export type CatalogReviewCapture = {
 // GET detail, POST analyze, adopt and cancel-analysis mirror import operation/revision requests.
 // GET /:id/lookup reads the review's lookup view and summary; POST /:id/lookup ({operationId, expectedRevision, kind, text}) and
 // POST /:id/lookup/retry ({operationId, expectedRevision}) queue a run with a `lookup` or `lookup-retry` receipt (8 KB bodies);
+// POST /:id/lookup/choose ({operationId, expectedRevision, run, candidateKey}, 8 KB) applies a candidate or none to the review's
+// draft with a `lookup-choose` receipt, and POST /:id/lookup/resolve ({operationId, expectedRevision, run, candidateKey, answers},
+// 512 KB, 1 to 406 answers) answers its conflicts with a `lookup-resolve` receipt; the Web does not call either yet. PATCH /:id
+// re-ranks a completed run when a save changes a member's own Disc or Track Number.
 // GET /:id/lookup/candidates/:key/artwork is a transient WebP preview (catalogReviewLookupRequests.ts, adminImportLookupCover.ts).
 // Every endpoint returns private no-store data; no asset, duplicate-decision or publication endpoint exists.

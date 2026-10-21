@@ -556,8 +556,12 @@ revision are unaffected; an append's summary reads it apart from candidates.
 - An existing-Album review stored as format 3 for metadata lookup copies the
   rows `storedExpectedTracklist` reads into its private draft
   (`album.expectedTracklist`, `null` without a valid one) and its server-only
-  capture, and never writes the Album; no review route stores one yet (see the
-  catalog review routes in [admin-workbench.md](../features/admin-workbench.md)).
+  capture, and never writes the Album. Metadata lookup may fill that draft
+  value (when it is `null`) or propose another as a conflict, only in the
+  review's private draft, through a single pairing of the members with the
+  applied release; no review writes it to the Album yet (see the catalog review
+  routes and Value application in
+  [admin-workbench.md](../features/admin-workbench.md)).
 - Import publication, appends, Credit edits and catalog edits `$set` only
   named keys. `Album.updateById` and `Album.updateCoverArtById` refuse the key
   and any dotted path under it, including their member-replacement branch,
@@ -709,7 +713,10 @@ candidate projection reads `musicBrainzId` too; MongoDB returns it only when it
 is stored, so candidate revisions of records without one are unchanged. An
 existing-Album review stored as format 3 for metadata lookup records, privately
 for administrators, the ID that each Artist and Organization its captured
-Credits name keeps, and never writes one.
+Credits name keeps, and never writes one. Metadata lookup may add a release's
+IDs to that review's Artist entries and label, or propose other ones as
+conflicts, only in the review's private draft; no review writes an ID to an
+Artist or Organization yet.
 
 ### Verification
 

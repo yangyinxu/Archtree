@@ -3,8 +3,8 @@
  *   Types: MetadataLookupTriggerOutcome, MetadataLookupRequest, MetadataLookupWorkerDependencies
  *   Functions: adminImportLookupCollection, metadataLookupAccepted, admitMetadataLookup,
  *              metadataLookupAdmitted, readLookupApplicationContext, requestAutomaticMetadataLookup,
- *              queueCatalogReviewLookup, noteMetadataLookupFiles, queueMetadataLookup, runMetadataLookupOnce,
- *              startMetadataLookupWorker
+ *              queueCatalogReviewLookup, rerankCatalogReviewLookup, noteMetadataLookupFiles,
+ *              queueMetadataLookup, runMetadataLookupOnce, startMetadataLookupWorker
  *   Constants: lookupProjectFilter
  * Internal
  *   Functions: lookupConfiguration, writeLookupGate, reconcileLookupFiles, triggerOutcome, rerankLookup,
@@ -18,11 +18,12 @@
  * trigger), stale marking when a bound file is removed, admission of submitted and retried runs (a review is admitted through its
  * capture, adminCatalogReviewCapture.ts), and the persisted worker that advances one run one request per stored step (MusicBrainz,
  * or iTunes for the fallback stage; the request and the pure step decision live in lookupRunStep.ts) and applies a completed
- * import run's preselection (lookupValueApplication.ts) in the step that completes it; a review run stores and ranks candidates
- * only. Starting a run, every state change and a re-rank write the project document's `lookupGate` in the same transaction, and an
- * application writes the document itself (its values, and the lookup cover staging it queues under the run's grant); neither ever
- * changes its `revision`. A trigger that starts nothing, stale marking of a finished run and progress steps do not write it. Owner
- * rules: the confirmed Administrator Metadata Lookup rules (they land with the summary).
+ * run's preselection (lookupValueApplication.ts) in the step that completes it, to an import's or a review's draft; a review's
+ * per-path save or Luna acceptance re-ranks its completed run (rerankCatalogReviewLookup). Starting a run, every state change and a
+ * re-rank write the project document's `lookupGate` in the same transaction, and an application writes the document itself (its
+ * values, and for an import the lookup cover staging it queues under the run's grant); neither ever changes its `revision`. A
+ * trigger that starts nothing, stale marking of a finished run and progress steps do not write it. Owner rules: the confirmed
+ * Administrator Metadata Lookup rules (they land with the summary).
  */
 import { randomUUID } from 'node:crypto';
 import { ObjectId, type ClientSession } from 'mongodb';
@@ -212,6 +213,27 @@ export async function queueCatalogReviewLookup(doc: AdminImportDocument, actorId
     return triggerOutcome(run.state === 'queued' ? 'queued' : 'noQuery', run.run);
 }
 
+/**
+ * Re-ranks a format-3 review's completed run inside the caller's save or Luna acceptance transaction when its ranking evidence
+ * changed (a member's own Disc or Track Number), without any request, as `actorId`: while the run has applied nothing, a sole
+ * preselection is applied to `doc` (rerankStoredLookup). It sets `doc.lookupGate` (the caller persists `doc`, which it never writes
+ * itself) and replaces the record for the run it read, else 409 ADMIN_IMPORT_REVISION_CONFLICT. An import, an older format, a review
+ * without a run or one whose evidence is unchanged (a title save) changes nothing, and so does a review that lookup no longer admits
+ * (unavailable lookup, or admitMetadataLookup's refusal: its Album deleted, not ready or changed); the change itself proceeds.
+ */
+export async function rerankCatalogReviewLookup(doc: AdminImportDocument, actorId: string, session: ClientSession, now = new Date()): Promise<void> {
+    if (!isCatalogReviewLookup(doc) || importDraftVersion(doc) !== CATALOG_REVIEW_DRAFT_V3 || !lookupConfiguration().available) return;
+    const record = await lookups().findOne({ _id: doc._id }, { session });
+    // The holder queries and the source check run only when a re-rank will happen, so a save that changes no evidence stays short.
+    if (!record || !lookupRerankNeeded(doc, record) || !(await metadataLookupAdmitted(doc, session))) return;
+    // The caller persists `doc` whole; a refused application restores it (applyPreselectedLookup), so nothing of it is written.
+    const reranked = rerankStoredLookup(doc, record, now, actorId, await readLookupApplicationContext(doc, record, session));
+    if (!reranked) return;
+    doc.lookupGate = lookupGateFor(reranked.record, doc.lookupGate);
+    const written = await lookups().replaceOne({ _id: doc._id, run: record.run }, reranked.record, { session });
+    if (written.matchedCount !== 1) throw refuse(409, 'ADMIN_IMPORT_REVISION_CONFLICT');
+}
+
 /** Inside a transaction that will replace `doc`: stale marking and supersession after a file was removed (cleanup admission). */
 export async function noteMetadataLookupFiles(doc: AdminImportDocument, session: ClientSession, now = new Date()): Promise<void> {
     if (!isImportProject(doc) || !isDraftV2Document(doc)) return;
@@ -271,8 +293,8 @@ export async function queueMetadataLookup(doc: AdminImportDocument, request: Met
 /**
  * One stored step in one transaction: the lease, the grant, the actor's current role, the project (an import still accepted, or
  * a format-3 review not applied whose source is current) and the bound file set are checked before anything is stored. A lost
- * lease writes nothing; a stop keeps earlier candidates but never this step's result. The step that completes an import run
- * applies its preselection: values, gate and record commit together or not at all.
+ * lease writes nothing; a stop keeps earlier candidates but never this step's result. The step that completes a run applies its
+ * preselection to the import's or review's draft: values, gate and record commit together or not at all.
  */
 async function advanceLookup(id: ObjectId, run: number, worker: string, now: Date, result: LookupStepResult | null,
     configuration: () => MetadataLookupConfiguration): Promise<LookupStep> {
@@ -301,8 +323,8 @@ async function advanceLookup(id: ObjectId, run: number, worker: string, now: Dat
             else if (!configuration().available) next = endLookupRun(record, 'unavailable', 'notConfigured', now);
             else {
                 ({ next, step } = proceedLookupRun(record, doc, result, now));
-                // A review run stores and ranks candidates only; nothing is applied to a review's draft.
-                if (next.state === 'complete' && next.phase === 'done' && !isCatalogReviewLookup(doc)) {
+                // The completing step applies the preselection, to a review's draft as to an import's.
+                if (next.state === 'complete' && next.phase === 'done') {
                     ({ record: next, changed: applied } = applyPreselectedLookup(doc, next, now, next.actorId, await readLookupApplicationContext(doc, next, session)));
                 }
             }

@@ -5,9 +5,9 @@
  * Internal
  *   Types: ViewComparison, ViewReviewComparison, ViewCandidate, LookupRecordView, ViewMode
  *   Functions: isRecord, oneOf, list, text, count, date, key, releaseIdFor, proposalView, position, subsetView,
- *              comparisonView, candidateView, appliedView, lookupRecordView
+ *              comparisonView, candidateView, appliedPairsView, appliedView, lookupRecordView
  *   Constants: states, issues, statuses, differences, reviewDifferences, bases, reviewBases, triggers,
- *              reviewTriggers, flagReasons, LIMITS, releaseIdPattern, monthDays
+ *              reviewTriggers, flagReasons, reviewFlagReasons, LIMITS, releaseIdPattern, monthDays
  * @end-catalog */
 
 /**
@@ -16,7 +16,9 @@
  * whether it was not checked against MusicBrainz), groups, the preselection, the applied values with their conflicts and flags, the
  * iTunes stage's status and what Publish waits for; never a URL, ISRC, recording ID, storefront, localized name, account, grant,
  * lease, fence, file-set digest or query. A review's view also admits the catalog trigger, the exact-count basis, the subset
- * differences and each candidate's subset comparison; an import's view never carries them. Pure.
+ * differences, each candidate's subset comparison, the review-only value paths (expected tracklist, member Artist entries), the
+ * review-only flag reasons, each conflict's `precision` and the applied pairing (`pairs`); an import's view never carries them.
+ * Pure.
  */
 import type { ImportDate } from '../import/adminImportContract';
 import { importDraftV2View } from '../import/adminImportDraftCompat';
@@ -24,6 +26,7 @@ import type { AdminImportDocument } from '../import/adminImportService';
 import { parseDraftValue, type ImportDraftPath } from '../import/adminImportValueState';
 import type { MusicBrainzRelease, MusicBrainzReleaseSummary } from './lookupContract';
 import type { LookupDifference, LookupMatchStatus, LookupPreselection, LookupProposal, LookupSubsetDifference } from './lookupRanking';
+import { REVIEW_LOOKUP_LIMITS } from './lookupReviewValues';
 import { LOOKUP_EXPECTED_TRACKLIST_BOUNDS } from './lookupSubset';
 import { isLookupValuePath, lookupAnswersNeeded, lookupValueIds } from './lookupValueApplication';
 import { lookupCandidateSource } from './lookupContract';
@@ -68,9 +71,11 @@ type LookupRecordView<Trigger extends string, Comparison> = {
         /** The applied candidate's source and whether it was not checked against MusicBrainz (an iTunes-only candidate's values stay flagged). */
         source: 'musicbrainz' | 'itunes'; notChecked: boolean;
         values: { path: string; slotId: string | null }[];
-        /** `musicBrainzId`: the values differ only in MusicBrainz IDs. */
-        conflicts: { path: string; slotId: string | null; lookup: unknown; answer: 'mine' | 'lookup' | null; musicBrainzId: boolean }[];
+        /** `musicBrainzId`: the values differ only in MusicBrainz IDs. `precision` (a review's only): a date that only adds precision. */
+        conflicts: { path: string; slotId: string | null; lookup: unknown; answer: 'mine' | 'lookup' | null; musicBrainzId: boolean; precision?: boolean }[];
         flagged: { path: string; reason: LookupApplication['flagged'][number]['reason'] }[];
+        /** A review's only: the single pairing the applied values rest on, `null` without one. */
+        pairs?: { slotId: string; discNumber: number; trackNumber: number }[] | null;
     } | null;
     staleFiles: string[]; needsAnswer: { tie: boolean; conflicts: string[] }; blocking: boolean; itunes: ImportLookupItunesStatus;
 };
@@ -88,7 +93,9 @@ const bases: readonly string[] = ['releaseId', 'barcode', 'catalogNumber', 'only
 const reviewBases: readonly string[] = [...bases, 'exactTrackCount'];
 const triggers = ['tags', 'folder', 'submitted'] as const, reviewTriggers = [...triggers, 'catalog'] as const;
 const flagReasons: readonly string[] = ['characters', 'length', 'format', 'size', 'placeholder'];
-const LIMITS = Object.freeze({ candidates: 25, groups: 25, text: 1000, formats: 20, format: 100, artists: 50, phrase: 200, tracks: 100, values: 305, pairs: 100 });
+const reviewFlagReasons: readonly string[] = [...flagReasons, 'notApplicable', 'noTrackCredit'];
+/** `values` bounds applied values, conflicts and flags: one per value path (an import's 305, a review's 406, REVIEW_LOOKUP_LIMITS.answers). */
+const LIMITS = Object.freeze({ candidates: 25, groups: 25, text: 1000, formats: 20, format: 100, artists: 50, phrase: 200, tracks: 100, values: 305, reviewValues: REVIEW_LOOKUP_LIMITS.answers, pairs: 100 });
 const releaseIdPattern = /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[1-9]\d{0,11})$/;
 
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -199,29 +206,51 @@ function candidateView(stored: Record<string, unknown>, ranked: Record<string, u
     };
 }
 
-/** Applied values, conflicts and flags of the shown project; a conflict's lookup value is re-read through the draft rules or dropped. */
+/**
+ * A review's applied pairing within bounds: null, or at most 100 pairs of this review's slots, each once, with Disc and Track
+ * Numbers within the expected tracklist's bounds; any other value reads as null.
+ */
+function appliedPairsView(raw: unknown, slots: ReadonlySet<string>): NonNullable<ImportLookupView['applied']>['pairs'] {
+    if (!Array.isArray(raw) || raw.length > LIMITS.pairs) return null;
+    const pairs: { slotId: string; discNumber: number; trackNumber: number }[] = [], seen = new Set<string>();
+    for (const pair of raw) {
+        const discNumber = isRecord(pair) ? position(pair.discNumber, LOOKUP_EXPECTED_TRACKLIST_BOUNDS.disc) : null;
+        const trackNumber = isRecord(pair) ? position(pair.trackNumber, LOOKUP_EXPECTED_TRACKLIST_BOUNDS.track) : null;
+        if (!isRecord(pair) || typeof pair.slotId !== 'string' || !slots.has(pair.slotId) || seen.has(pair.slotId) || discNumber === null || trackNumber === null) return null;
+        seen.add(pair.slotId); pairs.push({ slotId: pair.slotId, discNumber, trackNumber });
+    }
+    return pairs;
+}
+
+/**
+ * Applied values, conflicts and flags of the shown project; a conflict's lookup value is re-read through the draft rules or dropped.
+ * A review's also admits its review-only paths and flag reasons, marks each conflict's `precision` and carries its `pairs`.
+ */
 function appliedView(raw: unknown, doc: AdminImportDocument, slots: ReadonlySet<string>, mode: ViewMode): ImportLookupView['applied'] {
     if (!isRecord(raw) || !Number.isSafeInteger(raw.run) || (raw.run as number) < 1 || !oneOf(raw.choice, ['preselected', 'chosen', 'none'] as const)) return null;
+    const review = mode === 'review', bound = review ? LIMITS.reviewValues : LIMITS.values, reasons = review ? reviewFlagReasons : flagReasons;
     const draft = importDraftV2View(doc.draft, doc.manifest, doc._id.toHexString());
-    const path = (value: unknown): value is ImportDraftPath => isLookupValuePath(value) && (!value.startsWith('tracks.') || slots.has(value.split('.')[1]));
+    const path = (value: unknown): value is ImportDraftPath => isLookupValuePath(value, { review }) && (!value.startsWith('tracks.') || slots.has(value.split('.')[1]));
     const slot = (value: string) => value.startsWith('tracks.') ? value.split('.')[1] : null;
     const conflicts: NonNullable<ImportLookupView['applied']>['conflicts'] = [];
-    for (const item of list(raw.conflicts).slice(0, LIMITS.values)) {
+    for (const item of list(raw.conflicts).slice(0, bound)) {
         if (!isRecord(item) || !path(item.path) || !(item.answer === null || item.answer === 'mine' || item.answer === 'lookup')) continue;
         // A lookup value is never empty, so an empty stored one is as unreadable as an invalid one. Its MusicBrainz IDs came from the
         // release, so they are read as introduced.
         let lookup: unknown; try { lookup = parseDraftValue(item.path, item.lookup, draft, { introduce: lookupValueIds(item.lookup) }); } catch { continue; }
-        if (lookup !== null && lookup !== '') conflicts.push({ path: item.path, slotId: slot(item.path), lookup, answer: item.answer, musicBrainzId: item.musicBrainzId === true });
+        if (lookup !== null && lookup !== '') conflicts.push({ path: item.path, slotId: slot(item.path), lookup, answer: item.answer, musicBrainzId: item.musicBrainzId === true,
+            ...(review ? { precision: item.precision === true } : {}) });
     }
     const candidateKey = key(raw.candidateKey), itunes = lookupCandidateSource(candidateKey) === 'itunes' && raw.source === 'itunes';
     return {
         run: raw.run as number, candidateKey, releaseId: releaseIdFor(candidateKey, raw.releaseId),
-        choice: raw.choice, basis: oneOf(raw.basis, [...(mode === 'review' ? reviewBases : bases), 'chosen']) ? raw.basis as LookupApplication['basis'] : null,
+        choice: raw.choice, basis: oneOf(raw.basis, [...(review ? reviewBases : bases), 'chosen']) ? raw.basis as LookupApplication['basis'] : null,
         source: itunes ? 'itunes' : 'musicbrainz', notChecked: itunes && raw.notChecked === true,
-        values: list(raw.values).slice(0, LIMITS.values).filter((item): item is Record<string, unknown> & { path: string } => isRecord(item) && path(item.path)).map(item => ({ path: item.path, slotId: slot(item.path) })),
+        values: list(raw.values).slice(0, bound).filter((item): item is Record<string, unknown> & { path: string } => isRecord(item) && path(item.path)).map(item => ({ path: item.path, slotId: slot(item.path) })),
         conflicts,
-        flagged: list(raw.flagged).slice(0, LIMITS.values).filter((item): item is Record<string, unknown> & { path: string } => isRecord(item) && path(item.path) && oneOf(item.reason, flagReasons))
-            .map(item => ({ path: item.path, reason: item.reason as LookupApplication['flagged'][number]['reason'] }))
+        flagged: list(raw.flagged).slice(0, bound).filter((item): item is Record<string, unknown> & { path: string } => isRecord(item) && path(item.path) && oneOf(item.reason, reasons))
+            .map(item => ({ path: item.path, reason: item.reason as LookupApplication['flagged'][number]['reason'] })),
+        ...(review ? { pairs: appliedPairsView(raw.pairs, slots) } : {})
     };
 }
 

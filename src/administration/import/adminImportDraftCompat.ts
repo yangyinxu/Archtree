@@ -9,7 +9,7 @@
  *              legacySelectedCover, legacyAnalysisState, legacyAnalysisIssue, legacyAnalysisView,
  *              legacyPublicationState, legacyPublishedView, importPublishedV2View, legacyPublicationView,
  *              legacyReceiptsView, catalogReviewSourceDisc, catalogReviewSourceView, catalogReviewDraftView,
- *              catalogReviewAppliedView
+ *              catalogReviewCappedDraft, catalogReviewAppliedView
  *   Constants: writableDraftFilter, writableImportDraftFilter, LEGACY_IMPORT_RECEIPT_KINDS,
  *              LEGACY_REVIEW_RECEIPT_KINDS
  *   Re-exports: ImportArtistEntry, ImportLabelEntry, ImportDraftV2, ImportValueOrigin, ImportDraftOrigins,
@@ -398,6 +398,20 @@ export function catalogReviewDraftView(doc: Pick<AdminImportDocument, '_id' | 'd
     const rows = parseExpectedTracklistRows(album.expectedTracklist);
     return { album: { ...view.album, expectedTracklist: rows.ok ? rows.rows : null },
         tracks: view.tracks.map(track => ({ ...track, artists: entriesView(entries.get(track.slotId), false) ?? [] })) };
+}
+/**
+ * The part of a review draft the 48 KB cap measures: the Album's and members' Artist entries, the label and the expected tracklist
+ * are left out (their keys omitted). They are never typed into the review, and each has its own bound (20 entries per list, the
+ * expected tracklist parser's 32 KB), so a review whose catalog Credits or tracklist are large stays editable. It lives here, beside
+ * the review views, so the review service and metadata lookup value application share it without importing each other.
+ */
+export function catalogReviewCappedDraft(draft: ImportDraftV2): Record<string, unknown> {
+    const { artists: _artists, label: _label, expectedTracklist: _rows, ...album } = draft.album as ImportDraftV2['album'] & { expectedTracklist?: unknown };
+    // A stored track that is not an object is measured as it is; a format-2 draft only guarantees a track list.
+    return { ...draft, album, tracks: draft.tracks.map(track => {
+        if (!track || typeof track !== 'object') return track;
+        const { artists: _entries, ...rest } = track as typeof track & { artists?: unknown }; return rest;
+    }) };
 }
 const reviewField = (value: unknown, slots?: ReadonlySet<string>): value is CatalogReviewField => isRecord(value) && (value.scope === 'album'
     ? value.slotId === null && oneOf(value.field, ['title', 'releaseDate'] as const)
