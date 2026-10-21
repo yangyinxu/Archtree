@@ -29,7 +29,7 @@ import chinese from '../../localization/locales/zh-Hans.json' with { type: 'json
 import AxeBuilder from '@axe-core/playwright';
 import sharp from 'sharp';
 import { capabilities, session, viewer } from '../src/features/admin/adminFixtures.testSupport';
-import { albumId, catalogAlbum, catalogReview, reviewId, slotId, slotTwo, titleSuggestionId } from '../src/features/admin/catalogReviewFixtures.testSupport';
+import { albumId, catalogAlbum, catalogAlbumTracks, catalogReview, reviewId, slotId, slotTwo, titleSuggestionId } from '../src/features/admin/catalogReviewFixtures.testSupport';
 import type { CatalogReview, ReviewField } from '../src/features/admin/catalogReviewApi';
 import type { CatalogItem, CatalogKind } from '../src/features/admin/catalogApi';
 
@@ -96,6 +96,10 @@ async function setup(page: Page, administrator = true, initialReleaseDate: { yea
         releaseDate: { year: 2023 + index, month: null, day: null } } };
   });
   const otherItems = remainingCatalogKinds.flatMap(kind => remainingCatalogItems(kind));
+  // The Album's read-only members; its first ready member also opens as its own catalog page.
+  const albumTracks = catalogAlbumTracks(), [firstMember] = albumTracks.tracks;
+  const memberItem: CatalogItem = { ...catalogAlbum(), kind: 'audioTrack', id: firstMember.id,
+    fields: { ...catalogAlbum().fields, title: 'title' in firstMember ? firstMember.title : '', discNumber: 1, trackNumber: 1 } };
   const reads: string[] = [], writes: Write[] = [];
   const headers = { 'X-Finitude-Account-Viewer': viewer, 'Cache-Control': 'no-store' };
   await page.route('**/*', route => new URL(route.request().url()).hostname === '127.0.0.1' ? route.continue() : route.abort('blockedbyclient'));
@@ -136,6 +140,11 @@ async function setup(page: Page, administrator = true, initialReleaseDate: { yea
       return route.fulfill({ json: path.endsWith('/cover-operations') ? { items: [] } : { item: otherItem }, headers });
     }
     if (path === `/api/admin/v1/catalog/album/${albumId}/cover-operations`) return route.fulfill({ json: { items: [] }, headers });
+    if (path === `/api/admin/v1/catalog/album/${albumId}/tracks`) { expect(method).toBe('GET'); return route.fulfill({ json: albumTracks, headers }); }
+    if (path === `/api/admin/v1/catalog/audioTrack/${memberItem.id}` || path === `/api/admin/v1/catalog/audioTrack/${memberItem.id}/cover-operations`) {
+      expect(method).toBe('GET');
+      return route.fulfill({ json: path.endsWith('/cover-operations') ? { items: [] } : { item: memberItem }, headers });
+    }
     if (path === `/api/admin/v1/catalog/album/${albumId}`) {
       if (method === 'GET') return route.fulfill({ json: { item: album }, headers });
       expect(method).toBe('PATCH');
@@ -452,6 +461,38 @@ for (const condition of ['missing', 'failed'] as const) {
     await expect(page.getByRole('group', { name: label('admin.catalog.edit'), exact: true }).getByRole('button', { name: label('admin.catalog_review.create'), exact: true })).toBeEnabled();
     await capture(page, `22-cover-${condition}-fallback`, 390); await reflow(page); expect(api.writes).toEqual([]);
     if (condition === 'missing') expect(api.reads.filter(path => path === privateCoverPath)).toEqual([]);
+  });
+}
+
+for (const variant of [{ width: 320, locale: 'zh-Hans' }, { width: 768, locale: 'en-US' }, { width: 1440, locale: 'en-US' }] as const) {
+  test(`read-only Album tracks keep Album order, member states and keyboard-reachable track links at ${variant.width}px ${variant.locale}`, async ({ page }) => {
+    locale = variant.locale;
+    await page.setViewportSize({ width: variant.width, height: 900 });
+    const api = await setup(page);
+    await enter(page, `/finitude/admin/catalog/album/${albumId}`);
+    const tracks = page.getByRole('region', { name: label('admin.catalog.album_tracks'), exact: true });
+    await expect(tracks.getByRole('heading', { level: 2, name: label('admin.catalog.album_tracks'), exact: true })).toBeVisible();
+    const rows = tracks.getByRole('list').getByRole('listitem');
+    await expect(rows).toHaveCount(4);
+    for (const [index, row] of (await rows.all()).entries()) await expect(row.locator('span').first()).toHaveText(String(index + 1));
+    await expect(rows.nth(0)).toContainText(`${label('admin.field.disc_number')} 1 · ${label('admin.field.track_number')} 1 · 03:05 · ${label('common.label.audio')}`);
+    await expect(rows.nth(1)).toContainText(`1:02:03 · ${label('common.label.video')}`); await expect(rows.nth(1)).toContainText(label('admin.field.hidden'));
+    await expect(rows.nth(2)).toContainText(label('admin.catalog.album_track_state_pending')); await expect(rows.nth(2).getByRole('link')).toHaveCount(0);
+    await expect(rows.nth(3)).toContainText(label('admin.catalog.album_track_missing')); await expect(rows.nth(3).getByRole('link')).toHaveCount(0);
+    const first = tracks.getByRole('link', { name: 'Synthetic first track', exact: true });
+    await expect(first).toHaveAttribute('href', `/finitude/admin/catalog/audioTrack/${'3'.repeat(24)}`);
+    await expect(tracks.getByRole('link', { name: 'Synthetic second track', exact: true })).toHaveAttribute('href', `/finitude/admin/catalog/audioTrack/${'4'.repeat(24)}`);
+    // Read-only: no control in the section edits or reorders a member.
+    await expect(tracks.getByRole('button')).toHaveCount(0); await expect(tracks.getByRole('textbox')).toHaveCount(0); await expect(tracks.getByRole('combobox')).toHaveCount(0);
+    await capture(page, '27-album-tracks', variant.width); await reflow(page);
+    for (let step = 0; step < 150 && !(await first.evaluate(node => node === document.activeElement)); step++) await page.keyboard.press('Tab');
+    await expect(first).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(page).toHaveURL(new RegExp(`/finitude/admin/catalog/audioTrack/${'3'.repeat(24)}$`));
+    await expect(page.getByRole('heading', { name: 'Synthetic first track', level: 1, exact: true })).toBeVisible();
+    await expect(page.getByRole('region', { name: label('admin.catalog.album_tracks'), exact: true })).toHaveCount(0);
+    expect([...new Set(api.reads.filter(path => path.endsWith('/tracks')))]).toEqual([`/api/admin/v1/catalog/album/${albumId}/tracks`]);
+    expect(api.writes).toEqual([]);
   });
 }
 

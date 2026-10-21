@@ -3,6 +3,7 @@ import { requireAdmin, requireAuth, requireCurrentAccountViewer, type Authentica
 import { adminCatalogKind, editAdminCatalogItem, editAdminPageItem, getAdminCatalogItem, getAdminPage, listAdminCatalog } from '../administration/catalog/adminCatalogService';
 import { runRequestWork } from '../services/platform/serverLifecycleService';
 import { adminCatalogArtwork, adminCatalogMedia } from '../administration/catalog/adminCatalogPreview';
+import { getAdminCatalogAlbumTracks } from '../administration/catalog/adminCatalogAlbumTracks';
 import { AdminImportError } from '../administration/import/adminImportContract';
 import { asyncHandler } from '../middleware/requestProtectionMiddleware';
 import { limitMediaConcurrencyFor } from '../middleware/mediaDeliveryMiddleware';
@@ -36,6 +37,7 @@ export const createAdminCatalogRouter = () => {
     };
     router.get('/catalog/:kind', asyncHandler(run((actor, req) => listAdminCatalog(actor, adminCatalogKind(req.params.kind), req.query))));
     router.get('/catalog/:kind/:id', asyncHandler(run((actor, req) => getAdminCatalogItem(actor, adminCatalogKind(req.params.kind), req.params.id))));
+    router.get('/catalog/album/:id/tracks', asyncHandler(run((actor, req) => getAdminCatalogAlbumTracks(actor, req.params.id))));
     router.patch('/catalog/:kind/:id', asyncHandler(run((actor, req) => editAdminCatalogItem(actor, adminCatalogKind(req.params.kind), req.params.id, req.body))));
     router.post('/catalog/:kind/:id/cover', asyncHandler(run((actor, req) => replaceAdminCatalogCover(actor, adminCatalogKind(req.params.kind), req.params.id, req.body))));
     router.delete('/catalog/:kind/:id/cover', asyncHandler(run((actor, req) => clearAdminCatalogCover(actor, adminCatalogKind(req.params.kind), req.params.id, req.body))));

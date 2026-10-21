@@ -1,4 +1,5 @@
 import type { CatalogItem } from './catalogApi';
+import type { CatalogAlbumTracks } from './catalogAlbumTracksApi';
 import type { CatalogReview } from './catalogReviewApi';
 import { slotId, slotTwo, viewer } from './adminFixtures.testSupport';
 
@@ -49,6 +50,16 @@ export const catalogAlbum = (): Extract<CatalogItem, { kind: 'album' }> => ({
   kind: 'album', id: albumId, revision: albumRevision, visibility: 'public', effectiveVisibility: 'public',
   coverUrl: null, mediaUrl: null, capabilities: { editing: true, visibility: true },
   fields: { title: 'Synthetic catalog Album', releaseDate: null, credits: null, attributionStatus: 'unknown' }
+});
+
+/** The Album's read-only members: its two review tracks (the second a hidden Video), an unfinished upload and a missing record. */
+export const catalogAlbumTracks = (): CatalogAlbumTracks => ({
+  albumId, order: 'declared', truncated: false, skipped: 0, tracks: [
+    { position: 1, id: '333333333333333333333333', title: 'Synthetic first track', discNumber: 1, trackNumber: 1, duration: '03:05', mediaType: 'audio', visibility: 'public', state: 'ready', linkedElsewhere: false },
+    { position: 2, id: '444444444444444444444444', title: 'Synthetic second track', discNumber: null, trackNumber: null, duration: '1:02:03', mediaType: 'video', visibility: 'hidden', state: 'ready', linkedElsewhere: false },
+    { position: 3, id: 'c1c1c1c1c1c1c1c1c1c1c1c1', title: 'Synthetic unfinished upload', discNumber: 2, trackNumber: 3, duration: null, mediaType: 'audio', visibility: 'public', state: 'pending', linkedElsewhere: false },
+    { position: 4, id: 'c2c2c2c2c2c2c2c2c2c2c2c2', state: 'missing' }
+  ]
 });
 
 export const reviewJson = (value: unknown, status = 200, account = viewer) => new Response(JSON.stringify(value), {

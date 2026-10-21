@@ -3,7 +3,8 @@
  *   Functions: AdminCatalogEditor
  * Internal
  *   Types: CatalogBuffer
- *   Constants: CatalogCover, CatalogFields, CatalogReviewStart, CatalogEditConfirmation, MotionPreviewPanel
+ *   Constants: CatalogCover, CatalogFields, CatalogReviewStart, CatalogEditConfirmation, MotionPreviewPanel,
+ *              CatalogAlbumTracks
  * @end-catalog */
 
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
@@ -27,6 +28,7 @@ const CatalogFields = lazy(() => import('./CatalogFields').then(module => ({ def
 const CatalogReviewStart = lazy(() => import('./CatalogReviewStart').then(module => ({ default: module.CatalogReviewStart })));
 const CatalogEditConfirmation = lazy(() => import('./CatalogEditConfirmation').then(module => ({ default: module.CatalogEditConfirmation })));
 const MotionPreviewPanel = lazy(() => import('./MotionPreviewPanel').then(module => ({ default: module.MotionPreviewPanel })));
+const CatalogAlbumTracks = lazy(() => import('./CatalogAlbumTracks').then(module => ({ default: module.CatalogAlbumTracks })));
 
 interface CatalogBuffer { base: CatalogItem; fields: CatalogItem['fields']; visibility: 'public' | 'hidden'; dirty: boolean }
 /** Keeps a captured editing baseline separate from the latest saved artwork and presentation. */
@@ -114,5 +116,7 @@ export function AdminCatalogEditor({ kind, id }: { kind: CatalogKind; id: string
       approvalDisabled={!canEdit || conflict || Boolean(edit?.dirty) || (!item && !missing)}
       onConfirmed={next => { void client.cancelQueries({ queryKey }); client.setQueryData(queryKey, { item: next }); setEdit(previous => previous?.dirty ? previous : { base: next, fields: next.fields, visibility: next.visibility, dirty: false }); }}
       onRemoved={()=>{setEdit(previous=>previous?.dirty?previous:null);if(!edit?.dirty)adminWorkspace.retain(key,null,access);void client.resetQueries({queryKey,exact:true});}} /></Suspense>}
+    {/* Mounted apart from the edit buffer, which a cover removal clears and reloads, so the list is not reread. */}
+    {kind === 'album' && !missing && <Suspense fallback={null}><CatalogAlbumTracks id={id} refresh={artworkRefresh} /></Suspense>}
   </section>;
 }

@@ -1530,6 +1530,108 @@
       ],
       "variables": {}
     },
+    "admin.catalog.album_track_linked_elsewhere": {
+      "description": "Administrator workbench: Album catalog page, read-only Tracks section, badge for a member whose own Album link is absent or names another Album.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.album_track_missing": {
+      "description": "Administrator workbench: Album catalog page, read-only Tracks section, row for a listed track whose MediaTrack record no longer exists.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.album_track_state_deleting": {
+      "description": "Administrator workbench: Album catalog page, read-only Tracks section, state of a track that is being deleted.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.album_track_state_failed": {
+      "description": "Administrator workbench: Album catalog page, read-only Tracks section, state of a track whose media upload failed.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.album_track_state_pending": {
+      "description": "Administrator workbench: Album catalog page, read-only Tracks section, state of a track whose media upload has not finished.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.album_track_state_unavailable": {
+      "description": "Administrator workbench: Album catalog page, read-only Tracks section, state of an uploaded track whose stored media needs repair before it can play.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.album_track_state_unpublished": {
+      "description": "Administrator workbench: Album catalog page, read-only Tracks section, state of an uploaded track that is not published.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.album_tracks": {
+      "description": "Administrator workbench: Album catalog page, read-only Tracks section, heading.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.album_tracks_copy": {
+      "description": "Administrator workbench: Album catalog page, read-only Tracks section, explanation that the list cannot be edited here and follows the Album order.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.album_tracks_empty": {
+      "description": "Administrator workbench: Album catalog page, read-only Tracks section, empty state for an Album without tracks.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.album_tracks_error": {
+      "description": "Administrator workbench: Album catalog page, read-only Tracks section, failure to read the track list.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.album_tracks_legacy": {
+      "description": "Administrator workbench: Album catalog page, read-only Tracks section, explanation for an older Album that stores no track order, shown instead of the ordering explanation.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.album_tracks_skipped": {
+      "description": "Administrator workbench: Album catalog page, read-only Tracks section, count of stored member entries that are malformed or repeated and need repair.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.catalog.album_tracks_truncated": {
+      "description": "Administrator workbench: Album catalog page, read-only Tracks section, note that only the leading tracks of an oversized Album are listed.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
     "admin.catalog.artist": {
       "description": "Artists",
       "delivery": [

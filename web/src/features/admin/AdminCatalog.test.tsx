@@ -39,6 +39,8 @@ import { catalogPatch } from './catalogApi';
 import { AdminPagesPage } from './AdminPagesPage';
 import { deferred, json, session, viewer } from './adminFixtures.testSupport';
 import type { CatalogItem, CatalogKind } from './catalogApi';
+// The Album page's Tracks section reads its own endpoint and is covered by CatalogAlbumTracks.test.tsx.
+vi.mock('./CatalogAlbumTracks', () => ({ CatalogAlbumTracks: () => null }));
 const album = (): Extract<CatalogItem, { kind: 'album' }> => ({ kind: 'album', id: '111111111111111111111111', revision: `cr_${'a'.repeat(43)}`, visibility: 'public', effectiveVisibility: 'public', coverUrl: null, mediaUrl: null, capabilities: { editing: true, visibility: true }, fields: { title: 'Synthetic catalog Album', releaseDate: null, credits: null, attributionStatus: 'unknown' } });
 function catalogItem(kind: CatalogKind): CatalogItem {
   const base = album();

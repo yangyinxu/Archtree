@@ -1233,7 +1233,19 @@ loads separately from editing controls. Its optional `kind=artist`,
 `kind=audioTrack` or `kind=organization` query parameter selects a category;
 missing or unsupported values select Albums. Detail return links retain that
 category. Organizations use a name mark, matching listener details, and do not
-gain artwork upload controls. Direct catalog saves also confirm the frozen
+gain artwork upload controls. An Album's detail page ends with a read-only Tracks
+section listing its member MediaTracks in the order listeners receive: each row
+shows its position, title, Disc and Track Numbers and duration when known, Audio
+or Video, Hidden for a hidden MediaTrack and the state of a member that is not
+ready (unfinished or failed upload, being deleted, not published, media needing
+repair, or a missing record), with an empty state for an Album without members.
+A member whose own Album link is absent or names another Album is marked Not
+linked to this Album, and a note counts stored entries that are malformed or
+repeated, since either blocks a catalog review of the Album. A legacy Album's
+note says its tracks are listed by title instead of the Disc and Track Number
+explanation. Only a ready member links to its own catalog page, where it is
+edited; the section has no ordering or editing controls, loads in its own chunk
+and rereads only when the page's Refresh is used after it loaded. Direct catalog saves also confirm the frozen
 partial patch with per-field saved and proposed values, including coupled
 Credits with their join phrases and attribution, a MediaTrack's Disc Number and
 an Artist's or Organization's MusicBrainz ID. Every Artist and Organization
@@ -1370,7 +1382,22 @@ Number enters the revision only when one is stored, so records without one keep
 their earlier revisions. A Web bundle from before this release rejects
 `discNumber` and `joinPhrase`, so reload open workbench tabs after deploying.
 Disc and Track Number edits recompute the parent's automatic order in the same
-transaction as the receipt. `GET /pages/:slug` and
+transaction as the receipt. `GET /catalog/album/:id/tracks` returns that Tracks
+list as `{albumId, order, truncated, skipped, tracks}`. `order` is `declared` (the
+`Album.audioTrackIds` order, skipping malformed and repeated IDs as the listener
+read does) or `legacyAlbumLinks` (a legacy Album without declared IDs: its ready
+linked MediaTracks by title, the listener fallback). At most 500 members are read,
+the listener Album bound; `truncated` reports more, and `skipped` counts the
+malformed or repeated declared entries within that bound (always 0 for
+`legacyAlbumLinks`). Each member is `{position, id, title, discNumber,
+trackNumber, duration, mediaType, visibility, state, linkedElsewhere}`, where
+`state` is `ready`, `pending`, `failed`, `deleting`, `unpublished` or
+`unavailable` (uploaded and published, but its stored object does not belong to
+it) and `linkedElsewhere` reports that its own `albumId` is absent or names
+another Album, or `{position, id, state: 'missing'}` for an ID without a
+record. No storage key, URL, filename, MusicBrainz ID or revision is returned;
+the read writes no catalog record and changes no revision. A missing or
+non-ready Album is `404 ADMIN_CATALOG_NOT_FOUND`. `GET /pages/:slug` and
 `PATCH /pages/:slug/items/:itemId` address one Page placement, preserving
 reusable definitions and order. Each placement includes bounded `name`,
 `sourceMode` (`manual`, `dynamic` or null) and `referenceStatus`
