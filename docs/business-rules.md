@@ -1895,30 +1895,45 @@ The wire protocol and operational bounds are documented in
   editor looks up metadata for those files by name. It runs automatically once
   the upload of every selected audio file is confirmed, from the album and
   album-artist tags the files share or, for a one-file import, its title and
-  artist tags, and it runs when the administrator submits an Album or song name.
-  Without usable tags, it runs once from the selected folder's name, when there
-  is one, which the name box shows for editing. Typing, saving and navigation
-  never run metadata lookup, and reopening a project runs it only when its
-  reconciliation confirms the last selected upload. An existing-Album review
-  looks up its Album: it runs automatically once when a review is created
-  where lookup is available, from the Album's saved title and the names of its
-  primary Artist Credits, and runs when the administrator submits an Album or
-  song name or retries. iOS and Android do not offer metadata lookup.
+  artist tags, and it runs when the administrator submits an Album or song
+  name, optionally with an Artist name. Without usable tags, it runs once from
+  the selected folder's name, when there is one, which the name box shows for
+  editing. Typing, saving and navigation never run metadata lookup, and
+  reopening a project runs it only when its reconciliation confirms the last
+  selected upload. An existing-Album review looks up its Album: it runs
+  automatically once when a review is created where lookup is available, from
+  the Album's saved title and the names of its primary Artist Credits, and
+  runs when the administrator submits an Album or song name, optionally with
+  an Artist name, or retries. iOS and Android do not offer metadata lookup.
 - Metadata lookup accepts names, not links. The server queries only fixed,
   server-chosen services and never fetches an administrator-supplied URL. It
-  sends only the submitted text, cleaned tag text, a cleaned folder name or an
-  existing Album's saved title and primary Artist names, terms taken from
-  earlier results of the same lookup, and embedded identifiers; every
-  identifier or barcode used in a query must match its expected format. An
-  automatic lookup never sends file names, sends a folder name only when no
-  usable tags exist, and no lookup sends account data or audio. A review's
-  automatic lookup never sends Track titles or original filenames. Apart from
-  artwork from the fixed artwork-host allowlist, the server follows no link
-  found in a lookup response. Metadata lookup never downloads audio, audio
-  previews or streams from any service, and audio-preview and store links are
-  discarded before results are stored. The lookup box is not listener Search: it
-  keeps no search history and does not restore global music search to the
-  administration layout.
+  sends only the submitted text and any submitted Artist name, cleaned tag
+  text, a cleaned folder name or an existing Album's saved title and primary
+  Artist names, terms taken from earlier results of the same lookup, and
+  embedded identifiers; every identifier or barcode used in a query must match
+  its expected format. An automatic lookup never sends file names, sends a
+  folder name only when no usable tags exist, and no lookup sends account data
+  or audio. A review's automatic lookup never sends Track titles or original
+  filenames. Apart from artwork from the fixed artwork-host allowlist, the
+  server follows no link found in a lookup response. Metadata lookup never
+  downloads audio, audio previews or streams from any service, and
+  audio-preview and store links are discarded before results are stored. The
+  lookup box is not listener Search: it keeps no search history and does not
+  restore global music search to the administration layout.
+- The name box takes an Album or song name and an optional Artist name, in
+  imports and existing-Album reviews alike. The Album or song name is
+  required; an Artist name alone is refused. Each is a name, not a link, of
+  at most 200 characters without control or invisible formatting characters,
+  and is sent as typed, with whitespace normalized. With an Artist name, the
+  lookup searches the name credited to that Artist first and then the name
+  alone, never respelled, in place of the credited names the import's shared
+  tags or the review's primary Artists would give; without one, it searches
+  as before. The Artist name is sent only in that run's MusicBrainz release
+  or recording searches and its iTunes search term. It is kept only with the
+  run, so a retry, and an import's automatic rerun after a changed file set,
+  repeat it, and the box shows it again until another run replaces it; it
+  never becomes an Artist entry or other draft value, never counts as
+  evidence for an identity or a preselection, and is never given to Luna.
 - Metadata lookup uses these sources in order:
   - MusicBrainz is the primary source, with Cover Art Archive for artwork.
   - Unless MusicBrainz returns a matching candidate, the Apple iTunes Search API

@@ -226,8 +226,12 @@ summary only presents it:
   front artwork is being staged (`waiting.cover`) the summary says Publish waits
   for it; a staging that failed or was skipped is not shown, and the cover
   choice stays as it was.
-- **Name box.** An Album or song name; a folder-name run prefills the folder
-  name for editing, a submitted run its name. A link is refused in place
+- **Name box.** An Album or song name and an **Artist (optional)** field,
+  whose hint says that an empty field uses the files' artist tags; a
+  folder-name run prefills the folder name for editing, a submitted run its
+  name and any Artist name submitted with it. **Look up** stays disabled
+  while the name is empty, whatever the Artist field holds, and an empty
+  Artist field is not sent. A link in either field is refused in place
   (`Enter a name, not a link`), and the box has no autocomplete and stores
   nothing. It is a plain form, never the search landmark, and the
   administration layout still has no global search.
@@ -1314,10 +1318,12 @@ and deselectable, and confirms their frozen old/new values. An unapplied review 
 above its tabs and loaded as its own chunk (a chunk that cannot load, the
 summary's or one it loads, asks for a reload in its place, leaving manual
 editing usable): the lookup status with the free **Retry lookup** as its only
-primary button, the name box prefilled with the last submitted name or else the
-saved Album title, the candidate chooser (review copy about the Album's tracks,
-and per candidate the members it pairs with each pair listed, the missing-file
-rows it adds, video or data tracks left out and members no track can pair with),
+primary button, the name box prefilled with the last submitted name and
+Artist name or else the saved Album title (its **Artist (optional)**
+hint says that an empty field uses the Album's primary Artists), the
+candidate chooser (review copy about the Album's tracks, and per candidate
+the members it pairs with each pair listed, the missing-file rows it
+adds, video or data tracks left out and members no track can pair with),
 from two open conflicts **Keep all current** and **Use all MusicBrainz** (or
 iTunes), each answering every open conflict in one request, member conflicts
 included; the Album's conflicts with **Keep current** and **Use MusicBrainz**
@@ -1488,7 +1494,8 @@ running or waits on a busy source and every 10 seconds while it waits out an
 outage, and the identity rows (`GET /catalog-reviews/:id/candidates`) for each
 revision and `valueRevision`. Its name box, candidate chooser and identity rows
 load as their own chunks, the first two shared with the import page. The name
-box sends `POST /catalog-reviews/:id/lookup` and refuses a link in place,
+box sends `POST /catalog-reviews/:id/lookup`, with `artist` only when the
+Artist field is not empty, and refuses a link in either field in place,
 **Retry lookup** sends `/lookup/retry`, candidate previews load from `GET
 /catalog-reviews/:id/lookup/candidates/:key/artwork`, choosing a release or
 **Use none of these** sends `/lookup/choose`, and each answer, and each bulk
@@ -1683,8 +1690,9 @@ Catalog review routes (relative to `/api/admin/v1`):
   too; an import or a bad id is `404 ADMIN_CATALOG_REVIEW_NOT_FOUND`, and the
   import lookup routes never find a review.
 - `POST /catalog-reviews/:id/lookup` `{operationId, expectedRevision, kind,
-  text}` (`kind` `album` or `song`, text at most 1000 characters) looks up a
-  submitted name with the review's shown primary Artist names, and
+  text, artist?}` (`kind` `album` or `song`; text and an optional `artist`
+  string of at most 1000 characters each) looks up a submitted name with the
+  submitted Artist name, else the review's shown primary Artist names, and
   `POST /catalog-reviews/:id/lookup/retry` `{operationId, expectedRevision}`
   repeats the last run's input and queries (a `catalog` run's too): `202` with
   the review response and receipt `lookup` or `lookup-retry`. Bodies are at
@@ -2380,6 +2388,21 @@ roll back to:
   run that the release before them completed keeps its stored preselection and
   applied values; only a re-rank on new evidence ranks it again, as a partial
   comparison, which then offers its only matching group without unapplying it.
+- The name box's Artist field needs no floor of its own; no collection or
+  index changes. The release before it refuses a lookup body with `artist` as
+  `400 ADMIN_IMPORT_INVALID_INPUT` and leaves `artist` out of its lookup views,
+  which this Web reads as no Artist. A retry there repeats the stored queries,
+  a submitted Artist name included, while an import's automatic rerun after a
+  submitted run plans the submitted name without it. A Web tab opened before
+  it cannot parse a lookup view whose run carries an Artist name, so reload
+  open admin Web tabs after deploying or rolling back across it. Every earlier
+  key and its variables are kept, so Web, iOS and Android clients accept this
+  release's remote bundles. A Web tab opened after it keeps its active bundle
+  instead of accepting a remote bundle from a release before it, which lacks
+  the `admin.lookup.artist`, `admin.lookup.artist_hint_import` and
+  `admin.lookup.artist_hint_review` keys. After deploying it, a Web client's
+  cached bundle from before it is refused once for lacking those keys, so it
+  shows English until the new bundle loads.
 - Luna ticks need no floor of their own: an approval applies them to ordinary
   suggestion decisions and draft values. A release before them refuses the
   `suggestionTicks` this Web sends as invalid input and holds an approval
@@ -2682,9 +2705,10 @@ below). The source layer, the jobs and their routes live in
   identifiers shared by every file (release MBID, barcode, catalogue number and,
   for one file, an ISRC), then album or song text, then a cleaned folder name
   into at most six MusicBrainz queries, in that order, so the cap drops
-  trailing fallbacks first. It never accepts file names. Submitted text is only
-  normalized (NFC, collapsed whitespace), so a link, a name over 200 characters
-  or a control or format character is reported instead of planned; tag and
+  trailing fallbacks first. It never accepts file names. Submitted text and a
+  submitted Artist name are only normalized (NFC, collapsed whitespace), so a
+  link, a name over 200 characters or a control or format character in either
+  is reported instead of planned (an empty submitted Artist name too); tag and
   folder text has format characters removed and control characters turned into
   spaces.
   - Queries carry only the text and identifiers above. The number of selected
@@ -2703,6 +2727,19 @@ below). The source layer, the jobs and their routes live in
     then both respelled as fallbacks. The fallbacks are sent together, and only
     when the searches before them found no candidate, so one spelling alone
     never narrows what is compared.
+  - A submitted Artist name replaces the credited names of a submitted search,
+    which are otherwise the shared album-artist or artist tags (with any label
+    term) or a review's first usable primary Artist name: the release search, or
+    a song's recording search, is credited to it alone, with no label term, and
+    the bare search follows. It is sent as typed, never respelled, split on
+    ` / ` or dropped as a placeholder credit. Only those searches and the run's
+    iTunes term carry it; identifier searches keep the tag label (a
+    catalogue-number search still carries it). As with tag credits, a credited
+    search whose query would exceed MusicBrainz's 500-character bound is not
+    planned, so only the bare search runs, and the iTunes term keeps the Artist
+    only while name and Artist together fit its 200 characters. It never enters
+    the draft, `musicBrainzNames`, identity candidates, the ranking's artist
+    comparison or Luna's context.
   - The normalized spelling applies to tag and folder text only; submitted
     text is sent as typed. It applies NFKC (full-width forms and `～` fold),
     writes the wave dash `〜` as `~`, joins "Sound Track" (or "Sound-Track")
@@ -2955,13 +2992,13 @@ database, what the step stores and which request comes next.
   existing-Album review (its `_id` is the project's): the run number, state,
   issue and outcome, the grant, the bound file set (`fileSetDigest` and each
   manifest slot's confirmed upload intent and SHA-256), the input (`tags`,
-  `folder`, `submitted` or, for a review, `catalog`), at most six
-  planned queries with their progress and `phase` (`search`, `details`,
-  `itunes`, `bridge`, `aliases` or `done`), the failed attempts per source
-  (`attempts.musicbrainz` and `attempts.itunes`), the sources whose retries ran
-  out (`exhausted`), the iTunes stage (`itunesStage`: its requests and
-  progress, at most four results with their storefront names, bridge searches
-  and outcomes; see [iTunes fallback and MusicBrainz
+  `folder`, `submitted` with its kind, text and any submitted Artist name or,
+  for a review, `catalog`), at most six planned queries with their progress and
+  `phase` (`search`, `details`, `itunes`, `bridge`, `aliases` or `done`), the
+  failed attempts per source (`attempts.musicbrainz` and `attempts.itunes`), the
+  sources whose retries ran out (`exhausted`), the iTunes stage (`itunesStage`:
+  its requests and progress, at most four results with their storefront names,
+  bridge searches and outcomes; see [iTunes fallback and MusicBrainz
   bridge](#itunes-fallback-and-musicbrainz-bridge)), at most 25 candidates (each
   with its `source`; an iTunes-only one also keeps its storefront, artwork
   address and check under `itunes`, never projected), whether every release its
@@ -3082,9 +3119,10 @@ database, what the step stores and which request comes next.
   stale or supersedes the run; the members are bound through the review's
   source check instead. Its input is `catalog` (the Album's saved title as the
   review captured it, with its first usable shown primary Artist name) or a
-  submitted name, and it compares in subset mode (a release may have more audio
-  tracks than the Album has members). Searches and bridge searches admit
-  releases by audio track count, fewest extra tracks first, then unknown
+  submitted name, with the submitted Artist name in place of that primary Artist
+  name when one was given, and it compares in subset mode (a release may have
+  more audio tracks than the Album has members). Searches and bridge searches
+  admit releases by audio track count, fewest extra tracks first, then unknown
   counts, then those with fewer tracks than members, and pending details are
   fetched in that order. Beside `searchComplete`, which for a review means that
   no release left out could have at least as many audio tracks as members, the
@@ -3151,7 +3189,8 @@ database, what the step stores and which request comes next.
   allowance is spent when the worker hands out a folder-name query, before it
   is sent, so a folder run superseded or stopped before sending leaves it to
   the next automatic run. A manual retry of a folder run repeats its queries. A
-  rerun after a submitted run repeats the submitted text.
+  rerun after a submitted run repeats the submitted text with any submitted
+  Artist name.
 - **File set.** A run binds each manifest slot's confirmed upload. Once the set
   is complete again after a change, the next completing confirmation reruns,
   within the limit. Removing or replacing a bound file supersedes an active run
@@ -3187,11 +3226,13 @@ database, what the step stores and which request comes next.
   granting account is not a current administrator, 409
   `ADMIN_IMPORT_LOOKUP_REFUSED` for a project that does not accept lookup, 400
   `ADMIN_IMPORT_LOOKUP_INVALID_NAME` for a link or an empty, over-long or
-  invisible-character name, 409 `ADMIN_IMPORT_LOOKUP_ACTIVE` for a retry while
+  invisible-character name or submitted Artist name (an Artist name with an
+  empty name included), 409 `ADMIN_IMPORT_LOOKUP_ACTIVE` for a retry while
   a run is queued or running, and 409 `ADMIN_IMPORT_LOOKUP_NOTHING_TO_RETRY`
   without an earlier run's queries or with a stored input this release cannot
-  read. A manual retry while a run waits for an automatic retry replaces that
-  run at once, so the free retry is available while Publish waits.
+  read (a stored Artist name that is not a string included). A manual retry
+  while a run waits for an automatic retry replaces that run at once, so the
+  free retry is available while Publish waits.
 - **Independence.** A trigger never changes the confirmation's result: lookup
   not configured, a role loss, a closed project, an incomplete or unchanged
   file set, the limit or a database failure writes nothing beyond stale
@@ -3424,7 +3465,7 @@ lookup runs never make them stale.
 | Route | Body | Success | Refusals |
 | --- | --- | --- | --- |
 | `GET /lookup` | — | `200 {lookup, revision, valueRevision, summary, musicBrainzNames}`; `lookup` is `null` before any run; `musicBrainzNames` lists `{musicBrainzId, names}` for each ID the saved draft carries | `404 ADMIN_IMPORT_NOT_FOUND` for a review or a bad id |
-| `POST /lookup` | `{operationId, expectedRevision, kind, text}`, `kind` `album` or `song`, text at most 1000 characters | `202` import response, receipt `lookup` | `503 ADMIN_IMPORT_LOOKUP_UNAVAILABLE`, `400 ADMIN_IMPORT_LOOKUP_INVALID_NAME`, `409 ADMIN_IMPORT_LOOKUP_REFUSED` |
+| `POST /lookup` | `{operationId, expectedRevision, kind, text, artist?}`, `kind` `album` or `song`; text and an optional `artist` string of at most 1000 characters each | `202` import response, receipt `lookup` | `503 ADMIN_IMPORT_LOOKUP_UNAVAILABLE`, `400 ADMIN_IMPORT_LOOKUP_INVALID_NAME`, `409 ADMIN_IMPORT_LOOKUP_REFUSED` |
 | `POST /lookup/retry` | `{operationId, expectedRevision}` | `202`, receipt `lookup-retry` | `503 …UNAVAILABLE`, `409 …LOOKUP_ACTIVE`, `409 …NOTHING_TO_RETRY`, `409 …REFUSED` |
 | `POST /lookup/choose` | `{operationId, expectedRevision, run, candidateKey}`, key `musicbrainz:<mbid>`, `itunes:<collection ID>` (1 to 12 digits, no leading zero) or `null` for none | `200`, receipt `lookup-choose` | `409 ADMIN_IMPORT_LOOKUP_STALE` (another run, an active run, an unknown candidate, a candidate before completion), `409 ADMIN_IMPORT_LOOKUP_CANDIDATE_INCOMPLETE` (no fetched details, or a release or collection fetched under another ID), `409 …REFUSED` |
 | `POST /lookup/resolve` | `{operationId, expectedRevision, run, candidateKey, answers}`, 1 to 305 distinct `{path, answer, base}`, `answer` `mine` or `lookup` | `200`, receipt `lookup-resolve` | `409 …LOOKUP_STALE` (another application or a path that is no conflict), `409 ADMIN_IMPORT_FIELD_CONFLICT` (the current value is not `base`), `409 …REFUSED` (the project no longer accepts lookup or its draft cannot be read), `400 ADMIN_IMPORT_INVALID_INPUT` (an answer that grows the draft past 48 KB) |
@@ -3445,7 +3486,9 @@ staged-cover previews or listener artwork.
 A malformed body is `400 ADMIN_IMPORT_INVALID_INPUT` before its intent is
 fingerprinted. Answering `lookup` writes the lookup value as the
 administrator's own; `mine` keeps the current value. The lookup view is an
-allowlist: the run, state, issue, outcome and input; at most 25 candidates
+allowlist: the run, state, issue, outcome and input (a submitted run's
+`submitted` is `{kind, text}`, plus `artist` only when the run carries a
+submitted Artist name of at most 1000 characters); at most 25 candidates
 (ranked order, else stored order as incomplete) with key, release ID,
 `source` (`musicbrainz` or `itunes`, agreeing with the key), `notChecked`
 (an iTunes-only candidate MusicBrainz did not rule out), title, joined credit,
@@ -3559,10 +3602,11 @@ publication confirmation. The approval and the publication commit never read
 - To MusicBrainz, only the planner's URLs under `https://musicbrainz.org/ws/2/`:
   the shared album text and album-artist names, or a one-file import's title
   and artist; shared identifiers that pass their format checks; a submitted
-  name; for an existing-Album review, the Album's saved title as the review
-  captured it with its first usable shown primary Artist name (never split on
-  ` / ` or read as a label), or a submitted name with that name; the cleaned
-  folder name only when no usable tags exist, only for
+  name and any submitted Artist name; for an existing-Album review, the
+  Album's saved title as the review captured it with its first usable shown
+  primary Artist name (never split on ` / ` or read as a label), or a
+  submitted name with the submitted Artist name, else with that name; the
+  cleaned folder name only when no usable tags exist, only for
   folder-chosen imports and automatically only once per project (a manual
   retry of that run repeats it); release MBIDs from earlier results of the
   same run; artist and label MBIDs credited by releases the same run fetched
@@ -3575,8 +3619,9 @@ publication confirmation. The approval and the publication commit never read
 - To Apple's iTunes Search API, only when MusicBrainz returned no matching
   candidate, and only `https://itunes.apple.com/search` and `/lookup` (at most
   9 requests per run attempt): the run's search term (its text and credited
-  artist, never a respelling), the fixed storefront code, the digits of a
-  valid barcode every file shares (never a placeholder such as all zeros), and
+  artist, a submitted Artist name included while both fit the 200-character
+  term, never a respelling), the fixed storefront code, the digits of a valid
+  barcode every file shares (never a placeholder such as all zeros), and
   collection IDs from earlier results of the same run. To the iTunes artwork
   hosts, only the rewritten path of an iTunes-only candidate's stored artwork
   address.

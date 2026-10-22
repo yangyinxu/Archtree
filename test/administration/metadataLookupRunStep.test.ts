@@ -37,6 +37,8 @@
  *   - a review run's iTunes answer keeps collections with at least as many tracks as members or an unknown count, fewest extra first, within four; an import keeps its exact counts
  *   - a review run whose iTunes stage leaves out only a collection with more tracks than members preselects its exact-count group; one of unknown count leaves a tie
  *   - a review run's bridge search admits its releases fewest extra first and records both completeness flags
+ *   - a typed Artist is never evidence: the preselection's artist flag compares the release with the tags or primary names
+ *   - a record a later release stored with Track-title recording searches after its title searches sends them as ordinary searches while searching, never to iTunes, and once past the search phase completes without them
  * @end-catalog */
 
 /**
@@ -66,7 +68,9 @@ import { lookupAnswersNeeded } from '../../src/administration/lookup/lookupValue
 import {
     createMusicBrainzClient, musicBrainzUrls, parseMusicBrainzRelease, type MusicBrainzClient, type MusicBrainzRecordingQuery, type MusicBrainzReleaseQuery
 } from '../../src/administration/lookup/musicBrainzClient';
-import { importLookupFileSet, planImportLookup, startLookupRun, type MetadataLookupRecord, type StoredLookupCandidate } from '../../src/administration/lookup/metadataLookupRecord';
+import {
+    importLookupFileSet, planImportLookup, startLookupRun, type MetadataLookupRecord, type MetadataLookupSubmission, type StoredLookupCandidate
+} from '../../src/administration/lookup/metadataLookupRecord';
 import { catalogReviewLookupFileSet, planCatalogReviewLookup } from '../../src/administration/lookup/lookupReviewEvidence';
 import { itunesRelease, startItunesStage } from '../../src/administration/lookup/lookupItunesStage';
 import { credit, numberedMembers, reviewLookupDocument, storedCandidate, syntheticMbid, syntheticRelease } from '../support/catalogReviewLookupFixtures';
@@ -95,7 +99,7 @@ function project(count: number, evidence: (index: number) => Record<string, unkn
         revision: 3, valueRevision: 0, decisions: [], suggestions: [], receipts: [], updatedAt: new Date(0) } as unknown as AdminImportDocument;
 }
 /** The run an upload (or, with `submitted`, a submission) starts for `doc`, or one with the given queries. */
-function runOf(doc: AdminImportDocument, options: { submitted?: { kind: 'album' | 'song'; text: string }; queries?: PlannedLookupQuery[] } = {}): MetadataLookupRecord {
+function runOf(doc: AdminImportDocument, options: { submitted?: MetadataLookupSubmission; queries?: PlannedLookupQuery[] } = {}): MetadataLookupRecord {
     const planned = planImportLookup(doc, { folderAvailable: true, ...(options.submitted ? { submitted: options.submitted } : {}) });
     return startLookupRun(null, { importId: doc._id, actorId: actor, grantSource: options.submitted ? 'submit' : 'upload', operationId: mbid(600), automatic: !options.submitted,
         input: planned.input, queries: options.queries ?? planned.plan.queries, fileSet: importLookupFileSet(doc), now: start });
@@ -835,7 +839,7 @@ test('the aliases after the iTunes stage are those of the bridged releases\' cre
 });
 
 /** The run a review's creation (or, with `submitted`, a submission) starts for `doc`. */
-function reviewRunOf(doc: AdminImportDocument, options: { submitted?: { kind: 'album' | 'song'; text: string } } = {}): MetadataLookupRecord {
+function reviewRunOf(doc: AdminImportDocument, options: { submitted?: MetadataLookupSubmission } = {}): MetadataLookupRecord {
     const planned = planCatalogReviewLookup(doc, options);
     return startLookupRun(null, { importId: doc._id, actorId: actor, grantSource: options.submitted ? 'submit' : 'create', operationId: mbid(601), automatic: !options.submitted,
         input: planned.input, queries: planned.plan.queries, fileSet: catalogReviewLookupFileSet(doc), now: start, comparison: 'subset' });
@@ -994,4 +998,55 @@ test('a review run\'s bridge search admits its releases fewest extra first and r
     // An incomplete bridge answer clears both, as a search's does.
     const partial = proceedLookupRun(step.next, doc, { kind: 'found', action: bridge as never, complete: false, found: [counted(2, 2)] }, start).next;
     assert.deepEqual([partial.searchComplete, partial.exactSearchComplete], [false, false]);
+});
+
+test('a typed Artist is never evidence: the preselection\'s artist flag compares the release with the tags or primary names', async () => {
+    const submitted = { kind: 'album' as const, text: 'Synthetic Album', artist: 'Synthetic Typed' };
+    const credited = { release: 'Synthetic Album', artist: 'Synthetic Typed' }, bare = { release: 'Synthetic Album' };
+    const imported = project(2, one), review = reviewLookupDocument({ members: numberedMembers([200_000, 210_000]) });
+    // A release credited to the typed Artist is flagged against the tags (or primary names); one credited to them is not.
+    for (const [name, id, mismatch] of [['Synthetic Typed', mbid(40), true], ['Synthetic Ensemble', mbid(30), false]] as const) {
+        const exchanges = () => [searchAnswer(credited, [[mbid(1), 2]]), searchAnswer(bare, [[mbid(1), 2]]), creditedAnswer(mbid(1), [[name, id]]), aliasAnswer('artist', id, [name])];
+        const importRun = runOf(imported, { submitted });
+        assert.deepEqual(importRun.queries.map(query => (query as { query: unknown }).query), [credited, bare]);
+        const fromImport = await drive(importRun, imported, clientOf(exchanges()));
+        assert.deepEqual([fromImport.ranking!.preselection?.basis, fromImport.ranking!.preselection?.artistMismatch], ['onlyMatchingGroup', mismatch], name);
+        const reviewRun = reviewRunOf(review, { submitted });
+        assert.deepEqual(reviewRun.queries.map(query => (query as { query: unknown }).query), [credited, bare]);
+        const fromReview = await drive(reviewRun, review, clientOf(exchanges()));
+        assert.deepEqual([fromReview.ranking!.preselection?.basis, fromReview.ranking!.preselection?.artistMismatch], ['exactTrackCount', mismatch], name);
+    }
+    // Without a match, the iTunes term is the name with the typed Artist, in imports and reviews alike.
+    for (const [run, doc] of [[runOf(imported, { submitted }), imported], [reviewRunOf(review, { submitted }), review]] as const) {
+        const client = clientOf([searchAnswer(credited, []), searchAnswer(bare, [])]);
+        assert.equal((await drive(run, doc, client)).outcome, 'noRelease');
+        assert.deepEqual(client.itunesCalls, ['album us Synthetic Album Synthetic Typed', 'album jp Synthetic Album Synthetic Typed']);
+    }
+});
+
+test('a record a later release stored with Track-title recording searches after its title searches sends them as ordinary searches while searching, never to iTunes, and once past the search phase completes without them', async () => {
+    const doc = reviewLookupDocument({ members: numberedMembers([200_000, 210_000]) }), base = reviewRunOf(doc);
+    const credited = { release: 'Synthetic Album', artist: 'Synthetic Ensemble' }, bare = { release: 'Synthetic Album' };
+    const titles = [{ recording: 'Synthetic Distinct Title', artist: 'Synthetic Ensemble' }, { recording: 'Another Distinct Title' }];
+    // The later release's shape: two recording searches of its own basis and timing after the title searches, and two record fields.
+    const record = { ...base, queries: [...base.queries, ...titles.map(query => ({ kind: 'musicBrainzRecordingSearch', query, basis: 'trackTitle', when: 'noMatchOrPartial' }))],
+        trackTitleSearch: 'skipped', creditFound: true } as unknown as MetadataLookupRecord;
+    const recordingUrls = titles.map(query => musicBrainzUrls.recordingSearch(query).href);
+    // While searching, both are sent as ordinary searches, and a release one of them finds pairs and is stored with its basis.
+    const found = clientOf([searchAnswer(credited, []), searchAnswer(bare, []), recordingAnswer(titles[0], [[mbid(7), 2]]), recordingAnswer(titles[1]), releaseAnswer(mbid(7), [200_000, 210_000])]);
+    const done = await drive(record, doc, found);
+    assert.deepEqual(recordingUrls.map(url => found.requests.some(request => request.url === url)), [true, true]);
+    assert.deepEqual([done.state, done.candidates.map(candidate => [candidate.releaseId, candidate.basis, candidate.details]), done.itunesStage, found.itunesCalls],
+        ['complete', [[mbid(7), 'trackTitle', 'fetched']], null, []]);
+    // Nothing found: the iTunes stage searches the title search's text and credit, never a Track title.
+    const empty = clientOf([searchAnswer(credited, []), searchAnswer(bare, []), recordingAnswer(titles[0]), recordingAnswer(titles[1])]);
+    const ended = await drive(record, doc, empty);
+    assert.deepEqual([ended.state, ended.outcome, empty.itunesCalls], ['complete', 'noRelease', ['album us Synthetic Album Synthetic Ensemble', 'album jp Synthetic Album Synthetic Ensemble']]);
+    // Stored past its title searches, in the details phase: only the pending release is fetched, no recording search is sent.
+    const pending: StoredLookupCandidate = { key: `musicbrainz:${mbid(7)}`, source: 'musicbrainz', releaseId: mbid(7), basis: 'albumText', summary: null, release: null, details: 'pending' };
+    const details = clientOf([releaseAnswer(mbid(7), [200_000, 210_000])]);
+    const completed = await drive({ ...record, state: 'running', phase: 'details', queryIndex: 2, candidates: [pending] }, doc, details);
+    assert.deepEqual(details.requests.map(request => request.url), [musicBrainzUrls.release(mbid(7)).href]);
+    assert.equal(details.requests.some(request => request.url.includes('/recording?')), false);
+    assert.deepEqual([completed.state, completed.outcome, completed.candidates.map(candidate => candidate.details)], ['complete', 'candidates', ['fetched']]);
 });

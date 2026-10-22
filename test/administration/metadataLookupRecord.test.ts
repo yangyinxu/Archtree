@@ -8,6 +8,7 @@
  *   - shared album and album-artist tags plan release searches, and only without usable tags the cleaned folder name, once
  *   - a shared barcode alone is a usable tag that suppresses the folder, and one file is looked up as a song
  *   - submitted text is planned with the shared credits, and a link, an over-long or an invisible-character name is refused
+ *   - a submitted Artist name is kept as typed with the run and credits its searches in place of the shared tags, and a run and its retry copy it
  *   - file names and folder segments other than a chosen root never reach a planned query
  *   - file evidence keeps manifest order, exact or legacy durations, draft Disc and Track Numbers, artist tags and identifiers
  *   - shared release IDs and catalogue numbers are usable tags of several files, while an ISRC counts only for one file
@@ -164,6 +165,35 @@ test('submitted text is planned with the shared credits, and a link, an over-lon
         const plan = planImportLookup(doc, { folderAvailable: true, submitted: { kind: 'album', text } }).plan;
         assert.deepEqual([plan.queries, plan.rejected], [[], rejected], text);
     }
+});
+
+test('a submitted Artist name is kept as typed with the run and credits its searches in place of the shared tags, and a run and its retry copy it', () => {
+    const doc = project([asset(slotA, tags(shared)), asset(slotB, tags(shared))]);
+    const typed = planImportLookup(doc, { folderAvailable: true, submitted: { kind: 'album', text: 'Typed Album', artist: '  Typed  Artist ' } });
+    assert.deepEqual(typed.input, { trigger: 'submitted', submitted: { kind: 'album', text: 'Typed Album', artist: '  Typed  Artist ' } });
+    assert.deepEqual(typed.plan.queries.map(query => query.kind === 'musicBrainzReleaseSearch' ? query.query : null), [{ release: 'Typed Album', artist: 'Typed Artist' }, { release: 'Typed Album' }]);
+    assert.equal(JSON.stringify(typed.plan).includes('Synthetic Ensemble'), false, 'the shared tag credit is not sent');
+    // Another shape or one that cannot be sent (a later release's, or a corrupted record's) is dropped from the input and the plan,
+    // which still searches the name and takes the tag credit again.
+    for (const artist of [7, 'https://example.invalid/a', '   ', 'x'.repeat(201)]) {
+        const malformed = planImportLookup(doc, { folderAvailable: true, submitted: { kind: 'album', text: 'Typed Album', artist: artist as never } });
+        assert.deepEqual(malformed.input, { trigger: 'submitted', submitted: { kind: 'album', text: 'Typed Album' } }, String(artist));
+        assert.deepEqual(malformed.plan.queries.map(query => query.kind === 'musicBrainzReleaseSearch' ? query.query : null),
+            [{ release: 'Typed Album', artist: 'Synthetic Ensemble' }, { release: 'Typed Album' }], String(artist));
+    }
+    // A run without an Artist name stores no `artist` key at all, so nothing is ever stored as null.
+    const plain = planImportLookup(doc, { folderAvailable: true, submitted: { kind: 'album', text: 'Typed Album' } });
+    assert.equal('artist' in plain.input.submitted!, false);
+    const now = new Date('2026-10-21T00:00:00Z'), fileSet = importLookupFileSet(doc);
+    const init = { importId: doc._id, actorId: '0000000000000000000000e1', grantSource: 'submit' as const, operationId: '0000000a-0000-4000-8000-0000000000f1', automatic: false,
+        input: typed.input, queries: typed.plan.queries, fileSet, now };
+    const run = startLookupRun(null, init);
+    assert.deepEqual(run.input, typed.input);
+    assert.notEqual(run.input.submitted, typed.input.submitted, 'the run keeps its own copy');
+    // A retry repeats the stored input and queries, the Artist name included.
+    const retried = startLookupRun(run, { ...init, grantSource: 'retry', input: run.input, queries: run.queries });
+    assert.deepEqual([retried.run, retried.input, retried.queries], [2, typed.input, typed.plan.queries]);
+    assert.equal('artist' in startLookupRun(null, { ...init, input: plain.input, queries: plain.plan.queries }).input.submitted!, false);
 });
 
 test('file names and folder segments other than a chosen root never reach a planned query', () => {

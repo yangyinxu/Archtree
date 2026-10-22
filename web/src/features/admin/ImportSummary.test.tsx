@@ -17,7 +17,7 @@
  *   - while lookup is queued or running the paid Luna AI button stays enabled and starts Luna AI only through its confirmation, without touching the lookup
  *   - the paid Luna AI button is absent until the summary read succeeds, and where this server cannot run lookup no run offers the retry
  *   - Luna suggestions arrive with the server's ticks: unticking is kept for the confirmation, a conflict cannot be ticked, and applying now accepts ticked and rejects unticked ones
- *   - the name box accepts names only, keeps no history and is not listener Search, and a folder-name run shows that name for editing
+ *   - the name box accepts names and an optional Artist only, keeps no history and is not listener Search, and a folder-name run shows that name for editing
  *   - visibility defaults to public and changes in place as one field save
  *   - the summary polls while a lookup is queued, running or retrying, and a newer read refreshes the page's project
  *   - a lookup refusal shows its own message and reads the project and its summary again
@@ -407,7 +407,7 @@ test('Luna suggestions arrive with the server\'s ticks: unticking is kept for th
   expect(run).toHaveBeenLastCalledWith(`/${item.id}/adopt`, 'POST', { expectedRevision: 1, generation: 1, selectedIds: ['c'.repeat(24)], rejectIds: ['d'.repeat(24)] });
 });
 
-test('the name box accepts names only, keeps no history and is not listener Search, and a folder-name run shows that name for editing', async () => {
+test('the name box accepts names and an optional Artist only, keeps no history and is not listener Search, and a folder-name run shows that name for editing', async () => {
   const item = detail();
   const { run, section } = mount(item, lookupResponse({ lookup: view({ input: { trigger: 'folder', submitted: null }, outcome: 'noRelease' }) }));
   const box = await within(section()).findByRole('group', { name: 'Look up by name' });
@@ -421,8 +421,24 @@ test('the name box accepts names only, keeps no history and is not listener Sear
   fireEvent.click(within(box).getByRole('radio', { name: 'Song name' }));
   fireEvent.change(name, { target: { value: '  Synthetic Song  ' } });
   fireEvent.click(within(box).getByRole('button', { name: 'Look up' }));
-  expect(run).toHaveBeenCalledWith(`/${item.id}/lookup`, 'POST', { expectedRevision: 1, kind: 'song', text: 'Synthetic Song' });
+  // Without an Artist name the body has no `artist` key.
+  expect(run).toHaveBeenLastCalledWith(`/${item.id}/lookup`, 'POST', { expectedRevision: 1, kind: 'song', text: 'Synthetic Song' });
+  const artist = within(box).getByRole('textbox', { name: 'Artist (optional)' });
+  expect(within(box).getByText("Leave empty to use the files' artist tags.")).toBeVisible(); expect(artist).toHaveValue('');
+  fireEvent.change(artist, { target: { value: '  Synthetic Singer  ' } });
+  fireEvent.click(within(box).getByRole('button', { name: 'Look up' }));
+  expect(run).toHaveBeenLastCalledWith(`/${item.id}/lookup`, 'POST', { expectedRevision: 1, kind: 'song', text: 'Synthetic Song', artist: 'Synthetic Singer' });
+  // A blank Artist field is sent as none.
+  fireEvent.change(artist, { target: { value: '   ' } });
+  fireEvent.click(within(box).getByRole('button', { name: 'Look up' }));
+  expect(run).toHaveBeenLastCalledWith(`/${item.id}/lookup`, 'POST', { expectedRevision: 1, kind: 'song', text: 'Synthetic Song' });
   expect([localStorage.length, sessionStorage.length]).toEqual([0, 0]);
+  // A submitted run with an Artist name shows both again.
+  cleanup();
+  const typed = mount(detail(), lookupResponse({ lookup: view({ input: { trigger: 'submitted', submitted: { kind: 'album', text: 'Typed Album', artist: 'Typed Artist' } } }) }));
+  const shown = await within(typed.section()).findByRole('group', { name: 'Look up by name' });
+  expect([within(shown).getByRole('textbox', { name: 'Name' }), within(shown).getByRole('textbox', { name: 'Artist (optional)' })].map(field => (field as HTMLInputElement).value))
+    .toEqual(['Typed Album', 'Typed Artist']);
 });
 
 test('visibility defaults to public and changes in place as one field save', async () => {
@@ -490,7 +506,7 @@ test('Publish is not offered before the summary read settles or after it fails, 
   expect(await screen.findByRole('combobox', { name: 'Visibility' })).toBeDisabled();
   for (const name of ['Retry lookup', 'Use Luna AI (paid)', 'Keep mine', 'Use lookup value', 'Apply ticked suggestions now']) expect(screen.getByRole('button', { name })).toBeDisabled();
   expect(screen.getByRole('checkbox', { name: /^Title/ })).toBeDisabled();
-  expect(within(screen.getByRole('group', { name: 'Look up by name' })).getByRole('textbox')).toBeDisabled();
+  for (const name of ['Name', 'Artist (optional)']) expect(within(screen.getByRole('group', { name: 'Look up by name' })).getByRole('textbox', { name })).toBeDisabled();
   // Publish includes unsaved edits, so only its own gate holds it.
   cleanup(); mount(detail(), lookupResponse(), { disabled: true });
   expect(await ready()).toBeEnabled();

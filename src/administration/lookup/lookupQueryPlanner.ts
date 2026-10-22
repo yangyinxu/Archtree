@@ -2,7 +2,7 @@
  * Exports
  *   Types: LookupPlanInput, PlannedLookupQuery, LookupPlan
  *   Functions: isFallbackLookupQuery, normalizedLookupTitle, isCompanyLikeName, splitCreditedNames,
- *              cleanFolderName, planMetadataLookup
+ *              cleanFolderName, plannableSubmittedArtist, planMetadataLookup
  * Internal
  *   Functions: term, tagTerm, buildable, canonical
  *   Constants: waveDash, soundTrack, remasterNote, companySuffix, japaneseCompany, formatToken
@@ -18,8 +18,10 @@ import { musicBrainzLuceneQuery, type MusicBrainzRecordingQuery, type MusicBrain
  * song text, then a cleaned folder name. It accepts names, never links or file names; an identifier
  * that fails its format check is dropped and never sent. Submitted text is only normalized (NFC,
  * collapsed whitespace), so a link, an over-long name or a control or format character rejects the
- * plan; tag, folder and saved-title text is cleaned instead. Queries carry only that text, its credited
- * names and the identifiers; the file count is never sent (the run uses it locally, lookupRunStep.ts).
+ * plan; tag, folder and saved-title text is cleaned instead. A submitted Artist name is checked and
+ * normalized the same way and credits the submitted text's searches in place of the tag or primary
+ * names. Queries carry only that text, its credited names and the identifiers; the file count is never
+ * sent (the run uses it locally, lookupRunStep.ts).
  * Fallback queries follow the text searches, sent only when those found nothing: tag, folder or saved
  * title text in its normalized spelling (NFKC, the wave dash as `~`, "Sound Track" as one word, a
  * trailing remaster note dropped), the credited search first.
@@ -27,7 +29,11 @@ import { musicBrainzLuceneQuery, type MusicBrainzRecordingQuery, type MusicBrain
 export type LookupPlanInput = {
     /** `catalog`: an existing Album, looked up by its saved title (`tags.album`) and `credited` names only. */
     trigger: 'submitted' | 'tags' | 'folder' | 'catalog';
-    submitted?: { kind: 'album' | 'song'; text: string };
+    /**
+     * `artist`: a submitted Artist name, sent as typed (only normalized) in place of the credited names of the text searches.
+     * The type stays inline: the record module imports this planner.
+     */
+    submitted?: { kind: 'album' | 'song'; text: string; artist?: string };
     /** Credited Artist names given as a list (catalog reviews): never split on ` / `, never read as labels. */
     credited?: readonly string[];
     tags?: { album: string | null; albumArtist: string | null; title: string | null; artist: string | null };
@@ -102,6 +108,13 @@ export const cleanFolderName = (name: string | null | undefined): string | null 
     return tagTerm(stripped);
 };
 
+/**
+ * Whether a stored submitted Artist name can be planned again (a string the submitted-text checks accept): a rerun or retry
+ * keeps only such a name, so a corrupted one is dropped and the name is still searched instead of the whole plan being refused.
+ */
+export const plannableSubmittedArtist = (value: unknown): value is string =>
+    typeof value === 'string' && lookupTermProblem(value, METADATA_LOOKUP_LIMITS.termLength) === null;
+
 /** A combined query longer than the MusicBrainz query bound is dropped rather than sent truncated. */
 const buildable = (query: PlannedLookupQuery) => {
     if (query.kind !== 'musicBrainzReleaseSearch' && query.kind !== 'musicBrainzRecordingSearch') return true;
@@ -118,6 +131,9 @@ export const planMetadataLookup = (input: LookupPlanInput): LookupPlan => {
     if (input.trigger === 'submitted' && input.submitted) {
         const problem = lookupTermProblem(input.submitted.text, METADATA_LOOKUP_LIMITS.termLength);
         if (problem === 'url' || problem === 'tooLong' || problem === 'invalidText') return { queries: [], rejected: problem };
+        // A submitted Artist name is refused like the text, an empty one included (the box sends none when it is left empty).
+        const artistProblem = input.submitted.artist === undefined ? null : lookupTermProblem(input.submitted.artist, METADATA_LOOKUP_LIMITS.termLength);
+        if (artistProblem) return { queries: [], rejected: artistProblem };
     }
     const queries: PlannedLookupQuery[] = [];
     const tags = input.tags;
@@ -125,7 +141,13 @@ export const planMetadataLookup = (input: LookupPlanInput): LookupPlan => {
     const credited = input.credited
         ? { artists: input.credited.map(tagTerm).filter((name): name is string => !!name && !isPlaceholderCredit(name)), labels: [] as string[] }
         : splitCreditedNames(tags?.albumArtist ?? tags?.artist ?? null);
-    const songArtist = input.credited ? credited.artists[0] : splitCreditedNames(tags?.artist ?? tags?.albumArtist ?? null).artists[0];
+    /**
+     * The credit of the name searches: a submitted Artist name as typed (only normalized; never split, dropped as a placeholder or
+     * a label term) in place of the tag or primary names. Identifier searches keep the tag label.
+     */
+    const typedArtist = input.trigger === 'submitted' && input.submitted?.artist !== undefined ? term(input.submitted.artist) : null;
+    const textCredit = typedArtist ? { artists: [typedArtist], labels: [] as string[] } : credited;
+    const songArtist = typedArtist ?? (input.credited ? credited.artists[0] : splitCreditedNames(tags?.artist ?? tags?.albumArtist ?? null).artists[0]);
     /**
      * Credited then bare release text, then with `normalize` the fallbacks in the normalized spelling: the credited search
      * respelled, then the bare text respelled, except a folder's whole "Artist - Album" name, which names no release.
@@ -142,7 +164,7 @@ export const planMetadataLookup = (input: LookupPlanInput): LookupPlan => {
         if (bareVariant) search({ release: bareVariant }, true);
     };
     const albumQueries = (release: string, normalize: boolean) => {
-        const [artist, label] = [credited.artists[0], credited.labels[0]];
+        const [artist, label] = [textCredit.artists[0], textCredit.labels[0]];
         releaseQueries(release, 'albumText', artist || label ? { release, ...(artist ? { artist } : {}), ...(label ? { label } : {}) } : null, normalize);
     };
     /** Credited then bare recording text, then with `normalize` both again in the normalized spelling as fallbacks. */

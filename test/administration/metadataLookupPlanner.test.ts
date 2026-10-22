@@ -21,12 +21,15 @@
  *   - an existing Album is looked up by its saved title with its first primary Artist name and normalized fallbacks, never a Track title, label or split name
  *   - a review's submitted name is sent as typed with its primary names, as an album or a song
  *   - an unusable Album title plans nothing
+ *   - a submitted Artist name credits the name's searches in place of tag or primary names, as typed: never split, dropped as a placeholder, given a label term or respelled; identifier searches keep the tag label
+ *   - a submitted Artist name that cannot be sent rejects the plan like the name
  * @end-catalog */
 
 import assert from 'node:assert/strict';
 import { after, test } from 'node:test';
 import {
-    cleanFolderName, isCompanyLikeName, isFallbackLookupQuery, normalizedLookupTitle, planMetadataLookup, splitCreditedNames, type LookupPlanInput
+    cleanFolderName, isCompanyLikeName, isFallbackLookupQuery, normalizedLookupTitle, planMetadataLookup, plannableSubmittedArtist, splitCreditedNames,
+    type LookupPlanInput
 } from '../../src/administration/lookup/lookupQueryPlanner';
 import { installNetworkGuard } from '../support/networkGuard';
 
@@ -284,4 +287,39 @@ test('an unusable Album title plans nothing', () => {
         assert.deepEqual(planMetadataLookup({ trigger: 'catalog', fileCount: 3, tags: { ...noTags, album }, credited: ['Eagles'] }), { queries: [], rejected: 'empty' }, JSON.stringify(album));
     }
     assert.deepEqual(planMetadataLookup({ trigger: 'catalog', fileCount: 3, credited: ['Eagles'] }), { queries: [], rejected: 'empty' });
+});
+
+test('a submitted Artist name credits the name\'s searches in place of tag or primary names, as typed: never split, dropped as a placeholder, given a label term or respelled; identifier searches keep the tag label', () => {
+    const typed = (input: Partial<LookupPlanInput> & { submitted: NonNullable<LookupPlanInput['submitted']> }) => planMetadataLookup({ trigger: 'submitted', fileCount: 9, ...input });
+    // An import's album: the typed Artist replaces the album-artist tag and its label term; the catalogue-number search keeps the tag label.
+    assert.deepEqual(typed({ submitted: { kind: 'album', text: 'Hotel California', artist: ' Eagles  / Asylum Records ' },
+        tags: { ...noTags, albumArtist: 'Glenn Frey / Asylum Records' }, identifiers: { catalogNumber: '7559-60509-2' } }), { rejected: null, queries: [
+        { kind: 'musicBrainzReleaseSearch', query: { catno: '7559-60509-2', label: 'Asylum Records' }, basis: 'catalogNumber' },
+        release({ release: 'Hotel California', artist: 'Eagles / Asylum Records' }), release({ release: 'Hotel California' })
+    ] });
+    // A one-file import's song: a placeholder-like typed Artist is sent as typed, in place of the artist tag.
+    assert.deepEqual(typed({ fileCount: 1, submitted: { kind: 'song', text: 'Typed Song', artist: 'Various Artists' }, tags: { ...noTags, title: 'Tag Title', artist: 'Tag Artist' } }).queries,
+        [recording({ recording: 'Typed Song', artist: 'Various Artists' }), recording({ recording: 'Typed Song' })]);
+    // A review: the typed Artist replaces the primary names, as an album or a song.
+    assert.deepEqual(typed({ submitted: { kind: 'album', text: 'Hotel California', artist: 'Don Henley' }, credited: ['Eagles'] }).queries,
+        [release({ release: 'Hotel California', artist: 'Don Henley' }), release({ release: 'Hotel California' })]);
+    assert.deepEqual(typed({ submitted: { kind: 'song', text: 'Take It Easy', artist: 'Don Henley' }, credited: ['Eagles'] }).queries,
+        [recording({ recording: 'Take It Easy', artist: 'Don Henley' }), recording({ recording: 'Take It Easy' })]);
+    // Never respelled: a remaster note stays and no fallback is planned.
+    assert.deepEqual(typed({ submitted: { kind: 'album', text: 'Hotel California (2013 Remaster)', artist: 'Eagles' }, tags: { ...noTags, albumArtist: 'Eagles' } }).queries,
+        [release({ release: 'Hotel California (2013 Remaster)', artist: 'Eagles' }), release({ release: 'Hotel California (2013 Remaster)' })]);
+    // A credited search over the query bound is dropped, and the bare search stays.
+    assert.deepEqual(typed({ submitted: { kind: 'album', text: 'a-'.repeat(100), artist: 'b-'.repeat(100) } }).queries, [release({ release: 'a-'.repeat(100) })]);
+});
+
+test('a submitted Artist name that cannot be sent rejects the plan like the name', () => {
+    const typed = (artist: unknown) => planMetadataLookup({ trigger: 'submitted', fileCount: 9, submitted: { kind: 'album', text: 'Hotel California', artist: artist as string },
+        tags: { ...noTags, albumArtist: 'Eagles' }, identifiers: { releaseId: '24ae881f-7cb3-4c43-b80e-70332cd7c50d' } });
+    for (const [artist, rejected] of [['https://example.test/a', 'url'], ['www.example.test', 'url'], ['   ', 'empty'], ['', 'empty'], ['x'.repeat(201), 'tooLong'],
+        ['Eagles\u200b', 'invalidText'], ['Eagles\u0000', 'invalidText'], [7, 'invalidText']] as const) {
+        assert.deepEqual(typed(artist), { queries: [], rejected }, JSON.stringify(artist));
+        // A stored Artist name that would reject the plan is never kept for a rerun.
+        assert.equal(plannableSubmittedArtist(artist), false, JSON.stringify(artist));
+    }
+    assert.equal(plannableSubmittedArtist('  Eagles '), true);
 });

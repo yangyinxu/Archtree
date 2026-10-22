@@ -73,6 +73,8 @@
  *   - a review saved in a newer format admits no lookup request and its queued run ends superseded without a request, while its lookup still reads
  *   - a failed write of a review run's completing step stores no value, gate or record, and the run completes and applies its preselection once after its lease
  *   - a role loss, an expired grant or a changed source at a review run's completing step ends the run and applies nothing to the review
+ *   - a submitted name with an Artist is planned credited to it then bare, without the tag credits or a label, and its retry and the automatic rerun after a changed file set repeat it; every refusal stores nothing
+ *   - a review's submitted name with an Artist is credited to it in place of the primary Artist; the draft, identity rows and the preselection's artist flag never take it
  * @end-catalog */
 
 /**
@@ -116,7 +118,7 @@ import {
 } from '../../src/administration/lookup/metadataLookupService';
 import { getCatalogReviewLookup, retryCatalogReviewLookup, submitCatalogReviewLookup } from '../../src/administration/lookup/catalogReviewLookupRequests';
 import { createCatalogReview, getCatalogReview } from '../../src/administration/catalog/adminCatalogReviewService';
-import { applyCatalogReview } from '../../src/administration/catalog/adminCatalogReviewApply';
+import { applyCatalogReview, getCatalogReviewCandidates } from '../../src/administration/catalog/adminCatalogReviewApply';
 import { adminCatalogItemRevision } from '../../src/administration/catalog/adminCatalogService';
 import { loadImportFixture } from '../support/adminImportFixtures';
 import {
@@ -1787,4 +1789,84 @@ test('a role loss, an expired grant or a changed source at a review run\'s compl
             [state, issue, null, queued.draft, queued.draftOrigins, queued.valueRevision, queued.revision], label);
         await getDb()!.collection('users').updateOne({ _id: actor }, { $set: { role: 'admin' } });
     }
+});
+
+test('a submitted name with an Artist is planned credited to it then bare, without the tag credits or a label, and its retry and the automatic rerun after a changed file set repeat it; every refusal stores nothing', async () => {
+    const typed = (text: string, artist: unknown, kind: 'album' | 'song' = 'album') => (): MetadataLookupRequest =>
+        ({ kind: 'submit', actorId: byOther, operationId: randomUUID(), submitted: { kind, text, artist: artist as string } });
+    const id = await seeded(2, () => v2({ album: 'Synthetic Album', albumArtists: ['Synthetic Ensemble / Synthetic Records'] }));
+    // An Artist name that cannot be sent, or one without a name, is refused before anything is written.
+    for (const [text, artist] of [['Typed Album', 'https://example.invalid/a'], ['Typed Album', '   '], ['Typed Album', 'x'.repeat(201)], ['Typed Album', 'Synthetic\u200bArtist'],
+        ['Typed Album', 7], ['', 'Synthetic Ensemble']] as const) {
+        await assert.rejects(queue(byOther, id, typed(text, artist)), code('ADMIN_IMPORT_LOOKUP_INVALID_NAME'), JSON.stringify([text, artist]));
+    }
+    assert.deepEqual([await lookup(id), (await stored(id)).lookupGate], [null, undefined]);
+    // A placeholder-like Artist name is sent as typed, in place of the shared credit and its label term.
+    const queued = await queue(byOther, id, typed('Typed Album', 'Various Artists'));
+    assert.deepEqual(queued.input, { trigger: 'submitted', submitted: { kind: 'album', text: 'Typed Album', artist: 'Various Artists' } });
+    assert.deepEqual(queued.queries.map(query => (query as { query: unknown }).query), [{ release: 'Typed Album', artist: 'Various Artists' }, { release: 'Typed Album' }]);
+    const answers = () => [searchAnswer({ release: 'Typed Album', artist: 'Various Artists' }, [mbid(2)]), searchAnswer({ release: 'Typed Album' }, []), releaseAnswer(mbid(2), [1000, 1000])];
+    const client = fixtureClient(answers());
+    await drain({ musicBrainz: client.musicBrainz });
+    const text = sentText(client.requests);
+    assert.deepEqual([(await lookup(id))!.state, text.split('Various Artists').length - 1, text.includes('Synthetic Ensemble'), text.includes('Synthetic Records')], ['complete', 1, false, false]);
+    // The Artist name lives only in the run's input and queries: never in the import's draft or names.
+    assert.equal(JSON.stringify(await stored(id)).includes('Various Artists'), false);
+    // A retry repeats the input and queries, the Artist name included.
+    const retried = await queue(by, id, () => ({ kind: 'retry', actorId: by, operationId: randomUUID() }));
+    assert.deepEqual([retried.run, retried.input, retried.queries], [2, queued.input, queued.queries]);
+    // A stored Artist name this release cannot read is not retried.
+    await adminImportLookupCollection().updateOne({ _id: new ObjectId(id) }, { $set: { 'input.submitted.artist': { name: 'x' } as never, state: 'complete' } });
+    await assert.rejects(queue(by, id, () => ({ kind: 'retry', actorId: by, operationId: randomUUID() })), code('ADMIN_IMPORT_LOOKUP_NOTHING_TO_RETRY'));
+
+    // The automatic rerun after the file set changed repeats the submitted name and Artist, never the shared tag credit.
+    const storage = new Storage(), item = await project(['Disc 1/01 Secret One.wav', 'Disc 1/02 Secret Two.wav']);
+    const first = await upload(item, 0, sharedFrames, storage);
+    await queue(byOther, item.id, typed('Typed Song', 'Synthetic Singer', 'song'));
+    await upload(first.item, 1, sharedFrames, storage);
+    const rerun = (await lookup(item.id))!;
+    assert.deepEqual([rerun.run, rerun.automatic, rerun.grantSource, rerun.input], [2, true, 'upload', { trigger: 'submitted', submitted: { kind: 'song', text: 'Typed Song', artist: 'Synthetic Singer' } }]);
+    assert.deepEqual(rerun.queries.map(query => (query as { query: unknown }).query), [{ recording: 'Typed Song', artist: 'Synthetic Singer' }, { recording: 'Typed Song' }]);
+    // A stored Artist name this release cannot read or could not send is dropped by the automatic rerun, which still searches the
+    // submitted name, crediting the shared tags again.
+    for (const stale of [{ name: 'x' }, 'https://example.invalid/a']) {
+        const corrupted = await project(['Disc 1/01 Secret One.wav', 'Disc 1/02 Secret Two.wav']);
+        const one = await upload(corrupted, 0, sharedFrames, storage);
+        await queue(byOther, corrupted.id, typed('Typed Album', 'Synthetic Singer'));
+        await adminImportLookupCollection().updateOne({ _id: new ObjectId(corrupted.id) }, { $set: { 'input.submitted.artist': stale as never } });
+        await upload(one.item, 1, sharedFrames, storage);
+        const dropped = (await lookup(corrupted.id))!;
+        assert.deepEqual([dropped.run, dropped.automatic, dropped.input], [2, true, { trigger: 'submitted', submitted: { kind: 'album', text: 'Typed Album' } }], JSON.stringify(stale));
+        assert.deepEqual(dropped.queries.map(query => (query as { query: unknown }).query), [{ release: 'Typed Album', artist: 'Synthetic Ensemble' }, { release: 'Typed Album' }]);
+    }
+});
+
+test('a review\'s submitted name with an Artist is credited to it in place of the primary Artist; the draft, identity rows and the preselection\'s artist flag never take it', async () => {
+    const { id } = await seededReview([200_000, 210_000]), sentinel = 'Synthetic Typed Artist';
+    const body = { ...mutation((await stored(id)).revision), kind: 'album', text: 'Synthetic Album', artist: sentinel };
+    const submitted = await submitCatalogReviewLookup(by, id, body);
+    // A lost response replays without another run; another Artist under the same operation is another intent.
+    assert.deepEqual(await submitCatalogReviewLookup(by, id, body), submitted);
+    await assert.rejects(submitCatalogReviewLookup(by, id, { ...body, artist: 'Synthetic Other Artist' }), code('ADMIN_IMPORT_OPERATION_CONFLICT'));
+    const queued = (await lookup(id))!;
+    assert.deepEqual([submitted.receipt?.kind, queued.input, queued.queries.map(query => (query as { query: unknown }).query)], ['lookup',
+        { trigger: 'submitted', submitted: { kind: 'album', text: 'Synthetic Album', artist: sentinel } }, [{ release: 'Synthetic Album', artist: sentinel }, { release: 'Synthetic Album' }]]);
+    const client = fixtureClient([countedSearch({ release: 'Synthetic Album', artist: sentinel }, [[mbid(1), 2]]), countedSearch({ release: 'Synthetic Album' }, [[mbid(1), 2]]),
+        creditedRelease(mbid(1), [200_000, 210_000]), aliasAnswer(mbid(30), 'Synthetic Ensemble')]);
+    await drain({ musicBrainz: client.musicBrainz });
+    const record = (await lookup(id))!, doc = await stored(id);
+    // The release credits the primary Artist, so the preselection is not flagged although the typed Artist differs.
+    assert.deepEqual([record.state, record.ranking!.preselection?.basis, record.ranking!.preselection?.artistMismatch, record.applied?.choice], ['complete', 'exactTrackCount', false, 'preselected']);
+    const draft = doc.draft as unknown as { album: { artists: { name: string; musicBrainzId: string | null }[] } };
+    assert.deepEqual(draft.album.artists.map(entry => [entry.name, entry.musicBrainzId]), [['Synthetic Ensemble', mbid(30)]]);
+    // The Artist name lives only in the run's input and queries: never in the review, its identity rows or its detail.
+    assert.equal(JSON.stringify(doc).includes(sentinel), false);
+    assert.equal(JSON.stringify(await getCatalogReviewCandidates(by, id)).includes(sentinel), false);
+    assert.equal(JSON.stringify(await getCatalogReview(by, id)).includes(sentinel), false);
+    assert.equal(sentText(client.requests).split(sentinel).length - 1, 1);
+    // The view shows it again with its run, and a retry repeats it.
+    assert.equal((await getCatalogReviewLookup(by, id)).lookup?.input.submitted?.artist, sentinel);
+    const retried = await retryCatalogReviewLookup(by, id, mutation(doc.revision));
+    const again = (await lookup(id))!;
+    assert.deepEqual([retried.receipt?.kind, again.input, again.queries], ['lookup-retry', queued.input, queued.queries]);
 });

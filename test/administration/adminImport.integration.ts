@@ -608,14 +608,17 @@ test('Luna on a Draft v2 project receives the Draft v2 baseline without keys or 
     assert.deepEqual(adopted.item.draft.album.artists, entries);
 });
 
-/** A metadata lookup record with three candidates: the applied MusicBrainz release, another release and an iTunes-only candidate. */
+/**
+ * A metadata lookup record with three candidates: the applied MusicBrainz release, another release and an iTunes-only candidate,
+ * from a run submitted with an Artist name that Luna never receives.
+ */
 const appliedLookup = (id: string, choice: 'chosen' | 'none' | 'itunes' = 'chosen') => {
     const releaseId = '0383dadf-2a4e-4d10-a46a-e9e041da8eb3', other = '11111111-2222-4333-8444-555555555555';
     const release = (rid: string, title: string) => ({ releaseId: rid, releaseGroupId: '22222222-3333-4444-8555-666666666666', title, status: 'Official', barcode: '4006381333931', barcodeText: '4006381333931', country: 'JP', primaryType: 'Album', secondaryTypes: [], trackCount: 1, frontArtwork: true,
         artistCredit: [{ name: 'Lorem Ensemble', joinPhrase: '', artistId: '33333333-4444-4555-8666-777777777777', artistName: 'Lorem Ensemble' }], labels: [{ name: 'Amet Records', labelId: '55555555-6666-4777-8888-999999999999', catalogNumber: 'AMET-001' }],
         date: { year: 2020, month: null, day: null }, groupFirstReleaseDate: null, media: [{ position: 2, format: 'CD', tracks: [{ position: 1, number: '1', title: `${title} Song`, lengthMs: 1000, recordingId: '66666666-7777-4888-8999-aaaaaaaaaaaa', isrcs: ['JPAB01234567'] }] }] });
     const candidate = (rid: string, title: string) => ({ key: `musicbrainz:${rid}`, source: 'musicbrainz', releaseId: rid, basis: 'title', summary: null, release: release(rid, title), details: 'fetched' });
-    return { releaseId, record: { _id: new ObjectId(id), run: 2, state: 'complete', issue: null, outcome: 'candidates', input: { trigger: 'submitted', submitted: { kind: 'album', text: 'Ipsum' } }, ranking: null, staleSlotIds: [],
+    return { releaseId, record: { _id: new ObjectId(id), run: 2, state: 'complete', issue: null, outcome: 'candidates', input: { trigger: 'submitted', submitted: { kind: 'album', text: 'Ipsum', artist: 'Synthetic Typed Artist Sentinel' } }, ranking: null, staleSlotIds: [],
         candidates: [candidate(other, 'Other Release'), candidate(releaseId, 'Ipsum'), { key: 'itunes:12345', source: 'itunes', releaseId: '12345', basis: 'itunes', summary: null, details: 'fetched',
             release: { ...release('12345', 'iTunes Title'), artistCredit: [{ name: 'Lorem Ensemble', joinPhrase: '', artistId: '', artistName: 'Lorem Ensemble' }], labels: [] },
             itunes: { storefront: 'jp', artworkUrl: 'https://is1-ssl.mzstatic.com/image/thumb/Music/v4/a/b/c/x.jpg/100x100bb.jpg', check: 'unavailable' } }],
@@ -637,7 +640,7 @@ test('Luna receives only the applied MusicBrainz release as labelled untrusted c
     for (const input of inputs) {
         const json = JSON.stringify(input.lookupContext);
         assert.deepEqual([input.lookupContext!.source, input.lookupContext!.kind, input.lookupContext!.trust, input.lookupContext!.release.title], ['musicbrainz', 'appliedRelease', 'untrusted', 'Ipsum']);
-        for (const text of ['Other Release', 'iTunes', 'itunes', '4006381333931', 'AMET-001', 'JPAB01234567', releaseId, '33333333-4444']) assert.ok(!JSON.stringify(input).includes(text), text);
+        for (const text of ['Other Release', 'iTunes', 'itunes', '4006381333931', 'AMET-001', 'JPAB01234567', releaseId, '33333333-4444', 'Synthetic Typed Artist Sentinel']) assert.ok(!JSON.stringify(input).includes(text), text);
         assert.ok(json.includes('Amet Records') && json.includes('Ipsum Song'));
     }
     const digest = (index: number) => createHash('sha256').update(JSON.stringify(inputs[index].lookupContext)).digest('hex');
@@ -667,7 +670,7 @@ test('an applied iTunes-only candidate sends Luna no context, and no collection 
     assert.ok(inputs.length >= 1);
     for (const input of inputs) {
         assert.equal(input.lookupContext, null);
-        for (const text of ['12345', 'itunes', 'iTunes', 'mzstatic', '"jp"', 'storefront', 'ロレム合奏団', 'localized', 'notChecked']) assert.ok(!JSON.stringify(input).includes(text), text);
+        for (const text of ['12345', 'itunes', 'iTunes', 'mzstatic', '"jp"', 'storefront', 'ロレム合奏団', 'localized', 'notChecked', 'Synthetic Typed Artist Sentinel']) assert.ok(!JSON.stringify(input).includes(text), text);
     }
 });
 
@@ -832,6 +835,8 @@ test('through the Luna transport, each suggestion records the digest of the cont
         await analyzeAdminImport(by, id, mutation(1), luna); await settle(luna);
         const doc = await stored(id), recorded = (input: Record<string, any>) => ({ source: 'musicbrainz', releaseId, digest: createHash('sha256').update(JSON.stringify(input.lookupContext)).digest('hex'), truncated: false });
         assert.deepEqual(sent.map(input => [input.lookupContext.source, input.lookupContext.kind, input.lookupContext.trust, input.lookupContext.release.title]), [['musicbrainz', 'appliedRelease', 'untrusted', 'Ipsum'], ['musicbrainz', 'appliedRelease', 'untrusted', 'Ipsum']]);
+        // The run's submitted Artist name never reaches the provider's request.
+        assert.equal(JSON.stringify(sent).includes('Synthetic Typed Artist Sentinel'), false);
         assert.deepEqual(doc!.suggestions.map(value => [value.field, value.value, value.lookupContext]), [['label', { name: 'Amet Records', musicBrainzId: null }, recorded(sent[0])], ['discNumber', 2, recorded(sent[1])]]);
         // An Artist entry carrying a MusicBrainz ID makes the whole response invalid: its chunk fails, the paid call counts, nothing is stored.
         const second = await create(), other = second.item.id; let calls = 0;

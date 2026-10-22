@@ -2896,7 +2896,7 @@
       "variables": {}
     },
     "admin.common.lookup_invalid_name": {
-      "description": "Administrator workbench: refusal: the submitted lookup name was a link, empty, too long or had invisible characters.",
+      "description": "Administrator workbench: refusal: the submitted lookup name or Artist name was a link, empty, too long or had invisible characters.",
       "delivery": [
         "runtime"
       ],
@@ -4271,6 +4271,27 @@
     },
     "admin.lookup.applied_none": {
       "description": "Administrator workbench: import summary, no release is applied; values from file tags stay.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.lookup.artist": {
+      "description": "Administrator workbench: import and Album completion summaries, name box, the optional Artist name field beside the Album or song name.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.lookup.artist_hint_import": {
+      "description": "Administrator workbench: import summary name box, hint under Look up: an empty Artist field uses the files' artist tags.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.lookup.artist_hint_review": {
+      "description": "Administrator workbench: Album completion summary name box, hint under Look up: an empty Artist field uses the Album's primary Artists.",
       "delivery": [
         "runtime"
       ],

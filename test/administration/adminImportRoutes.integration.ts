@@ -280,7 +280,9 @@ test('metadata lookup routes guard authentication and the current admin before p
     const invalid = async (route: string, value: unknown) => { const response = await request(route, 'POST', value); assert.equal(response.status, 400, JSON.stringify(value).slice(0, 80)); assert.deepEqual(await response.json(), { code: 'ADMIN_IMPORT_INVALID_INPUT' }); };
     const key = `musicbrainz:0000000b-0000-4000-8000-000000000001`;
     for (const value of [{ ...intent(), kind: 'artist', text: 'Name' }, { ...intent(), kind: 'album', text: 7 }, { ...intent(), kind: 'album', text: 'x'.repeat(1001) }, { ...intent(), kind: 'album' },
-        { ...intent(), kind: 'album', text: 'Name', extra: true }, { operationId: 'not-a-uuid', expectedRevision: 1, kind: 'album', text: 'Name' }]) await invalid(path, value);
+        { ...intent(), kind: 'album', text: 'Name', extra: true }, { operationId: 'not-a-uuid', expectedRevision: 1, kind: 'album', text: 'Name' },
+        { ...intent(), kind: 'album', text: 'Name', artist: 7 }, { ...intent(), kind: 'album', text: 'Name', artist: null }, { ...intent(), kind: 'album', text: 'Name', artist: 'x'.repeat(1001) },
+        { ...intent(), kind: 'album', artist: 'Name' }]) await invalid(path, value);
     await invalid(`${path}/retry`, { ...intent(), kind: 'album' });
     for (const value of [{ ...intent(), run: 0, candidateKey: null }, { ...intent(), run: 1.5, candidateKey: null }, { ...intent(), run: 1 }, { ...intent(), run: 1, candidateKey: 'itunes:0' },
         { ...intent(), run: 1, candidateKey: 'itunes:01' }, { ...intent(), run: 1, candidateKey: 'itunes:1234567890123' }, { ...intent(), run: 1, candidateKey: 'itunes:1/x' },
@@ -315,6 +317,7 @@ test('configured lookup routes answer a submission and a retry with 202 receipts
         };
         await refused(`${path}/retry`, { operationId: randomUUID(), expectedRevision: 1 }, 409, 'ADMIN_IMPORT_LOOKUP_NOTHING_TO_RETRY');
         await refused(path, { operationId: randomUUID(), expectedRevision: 1, kind: 'album', text: 'https://example.invalid/album' }, 400, 'ADMIN_IMPORT_LOOKUP_INVALID_NAME');
+        await refused(path, { operationId: randomUUID(), expectedRevision: 1, kind: 'album', text: 'Synthetic Album', artist: 'https://example.invalid/a' }, 400, 'ADMIN_IMPORT_LOOKUP_INVALID_NAME');
         assert.equal(await lookups.countDocuments({}), 0);
         const submission = { operationId: randomUUID(), expectedRevision: 1, kind: 'album', text: 'Synthetic Album' };
         const submitted = await request(path, 'POST', submission); assert.equal(submitted.status, 202); assert.equal(submitted.headers.get('cache-control'), 'no-store');
@@ -350,6 +353,20 @@ test('configured lookup routes answer a submission and a retry with 202 receipts
             [`${reviewPath}/resolve`, { run: 1, candidateKey: key, answers: [{ path: 'album.label', answer: 'mine', base: null }] }]] as const)
             await refused(route, { operationId: randomUUID(), expectedRevision: 1, ...value }, 404, 'ADMIN_IMPORT_NOT_FOUND');
         assert.equal(await lookups.countDocuments({ _id: new ObjectId(review.item.id) }), 0);
+        // An Artist name is kept with the submitted run and shown in its view. It is part of the intent: the same body replays its
+        // receipt, while another Artist name, or none, under the same operation is a conflict.
+        const typed = await (await request('/api/admin/v1/imports', 'POST', body())).json(), typedPath = `/api/admin/v1/imports/${typed.item.id}/lookup`;
+        const sentinel = 'Synthetic Typed Artist Sentinel';
+        const typedBody = { operationId: randomUUID(), expectedRevision: 1, kind: 'album', text: 'Synthetic Album', artist: sentinel };
+        const credited = await request(typedPath, 'POST', typedBody);
+        assert.equal(credited.status, 202);
+        const creditedResponse = await credited.json(), again = await request(typedPath, 'POST', typedBody);
+        assert.deepEqual([again.status, await again.json()], [202, creditedResponse]);
+        // The import's stored document (draft, names and receipts) never takes the Artist name; only the run keeps it.
+        assert.equal(JSON.stringify(await getDb()!.collection('adminAlbumImports').findOne({ _id: new ObjectId(typed.item.id) })).includes(sentinel), false);
+        for (const changed of [{ ...typedBody, artist: 'Synthetic Other Ensemble' }, (({ artist: _artist, ...rest }) => rest)(typedBody)])
+            await refused(typedPath, changed, 409, 'ADMIN_IMPORT_OPERATION_CONFLICT');
+        assert.deepEqual((await (await request(typedPath)).json()).lookup.input, { trigger: 'submitted', submitted: { kind: 'album', text: 'Synthetic Album', artist: sentinel } });
     } finally { delete process.env.FINITUDE_ADMIN_METADATA_LOOKUP_CONTACT; }
 });
 

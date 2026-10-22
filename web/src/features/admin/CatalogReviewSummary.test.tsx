@@ -82,9 +82,25 @@ test('before any run the summary says so and prefills the name box with the save
   await waitFor(() => expect(within(box).getByRole('textbox', { name: 'Name' })).toHaveValue('Synthetic catalog Album'));
   fireEvent.click(within(box).getByRole('radio', { name: 'Song name' }));
   fireEvent.click(within(box).getByRole('button', { name: 'Look up' }));
-  expect(onRun).toHaveBeenCalledWith('lookup', { kind: 'song', text: 'Synthetic catalog Album' });
+  // Without an Artist name the body has no `artist` key; the hint says an empty one uses the primary Artists.
+  expect(onRun).toHaveBeenLastCalledWith('lookup', { kind: 'song', text: 'Synthetic catalog Album' });
+  const artist = within(box).getByRole('textbox', { name: 'Artist (optional)' });
+  expect(artist).toHaveValue(''); expect(within(box).getByText("Leave empty to use the Album's primary Artists.")).toBeVisible();
+  fireEvent.change(artist, { target: { value: ' Synthetic Typed Artist ' } });
+  fireEvent.click(within(box).getByRole('button', { name: 'Look up' }));
+  expect(onRun).toHaveBeenLastCalledWith('lookup', { kind: 'song', text: 'Synthetic catalog Album', artist: 'Synthetic Typed Artist' });
+  // A blank Artist field is sent as none.
+  fireEvent.change(artist, { target: { value: '   ' } });
+  fireEvent.click(within(box).getByRole('button', { name: 'Look up' }));
+  expect(onRun).toHaveBeenLastCalledWith('lookup', { kind: 'song', text: 'Synthetic catalog Album' });
   // A review not captured for lookup has no identity rows to read.
   expect(screen.queryByRole('region', { name: 'Artists and label' })).not.toBeInTheDocument();
+  // A submitted run with an Artist name shows both again, the box being keyed by its run.
+  cleanup();
+  const typed = mount(item, withLookup(lookup => { lookup.input = { trigger: 'submitted', submitted: { kind: 'album', text: 'Synthetic Typed Name', artist: 'Synthetic Typed Artist' } }; }));
+  const shown = await within(typed.section()).findByRole('group', { name: 'Look up by name' });
+  expect(within(shown).getByRole('textbox', { name: 'Name' })).toHaveValue('Synthetic Typed Name');
+  expect(within(shown).getByRole('textbox', { name: 'Artist (optional)' })).toHaveValue('Synthetic Typed Artist');
 });
 
 test('where lookup is not configured there is no name box and no retry', async () => {

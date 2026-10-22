@@ -16,6 +16,7 @@
  *   - a review view shows the catalog trigger, the exact-count basis, subset differences and each candidate's subset comparison within bounds; foreign slots are dropped
  *   - the import view refuses a catalog input (no view) and keeps every import case unchanged
  *   - a review view shows its applied pairing, review-only value paths, conflict precision and flag reasons within 406 values; the import view keeps them all out
+ *   - a submitted run's Artist name is projected in import and review views only when it is a bounded string, otherwise the key is absent
  * @end-catalog */
 
 /**
@@ -373,4 +374,22 @@ test('a review view shows its applied pairing, review-only value paths, conflict
     const imported = importLookupView({ ...submitted, applied }, doc)!.applied!;
     assert.deepEqual([imported.values, imported.conflicts.map(item => item.path), imported.flagged, 'pairs' in imported, imported.conflicts.some(item => 'precision' in item)],
         [[], ['album.releaseDate'], [], false, false]);
+});
+
+test('a submitted run\'s Artist name is projected in import and review views only when it is a bounded string, otherwise the key is absent', () => {
+    const doc = project(), review = reviewLookupDocument({ members: numberedMembers([210_000, 220_000]) });
+    const plain = record(doc, [stored(release(1))]);
+    const submitted = (artist: unknown) => ({ ...plain, input: { trigger: 'submitted' as const, submitted: { kind: 'album' as const, text: 'Synthetic Album', artist: artist as string } } });
+    for (const [view, target] of [[importLookupView, doc], [catalogReviewLookupView, review]] as const) {
+        assert.deepEqual(view(submitted('Synthetic Typed Artist'), target)!.input, { trigger: 'submitted', submitted: { kind: 'album', text: 'Synthetic Album', artist: 'Synthetic Typed Artist' } });
+        // A run without an Artist name, or with one this release cannot show, is still a view, without the key.
+        for (const artist of [undefined, 7, null, {}, 'x'.repeat(1001)]) {
+            const shown = view(submitted(artist), target);
+            assert.notEqual(shown, null, JSON.stringify(artist));
+            assert.equal('artist' in shown!.input.submitted!, false, JSON.stringify(artist));
+        }
+        // Without an Artist name the view is the one a run without the field always gave.
+        assert.deepEqual(view(submitted(undefined), target), view(plain, target));
+    }
+    assert.deepEqual(importLookupView(plain, doc)!.input, { trigger: 'submitted', submitted: { kind: 'album', text: 'Synthetic Album' } });
 });

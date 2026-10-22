@@ -11,6 +11,7 @@
  *   Variables: locale
  * Tests
  *   - private Album covers disappear on User view or role loss and make no later private image reads
+ *   - an existing-Album review looks up a typed name with an optional Artist and shows both again with its run, while Look up stays in the first screen
  *   - without metadata lookup the Album page creates a completion for manual editing, then opens it, and another one is an explicit choice
  *   - an Album that cannot have a completion shows the action disabled with its reason
  *   - an iTunes-only lookup result names iTunes on its answers and flags every value it wrote
@@ -289,8 +290,10 @@ async function setup(page: Page, administrator = true, initialReleaseDate: { yea
         return route.fulfill({ json: receipt(body, 'adopt'), headers });
       }
       if (path.endsWith('/lookup')) {
-        expect(Object.keys(body).sort()).toEqual(['expectedRevision', 'kind', 'operationId', 'text']);
-        queue({ trigger: 'submitted', submitted: { kind: body.kind as 'album' | 'song', text: String(body.text) } });
+        // `artist` is sent only when the Artist field is not empty, and then trimmed.
+        expect(Object.keys(body).sort()).toEqual(['expectedRevision', 'kind', 'operationId', 'text', ...('artist' in body ? ['artist'] : [])].sort());
+        if ('artist' in body) expect(typeof body.artist === 'string' && body.artist.length > 0 && body.artist === body.artist.trim()).toBe(true);
+        queue({ trigger: 'submitted', submitted: { kind: body.kind as 'album' | 'song', text: String(body.text), ...(typeof body.artist === 'string' ? { artist: body.artist } : {}) } });
         return route.fulfill({ status: 202, json: lookupReceipt(body, 'lookup'), headers });
       }
       if (path.endsWith('/lookup/retry')) { queue(lookup!.input); return route.fulfill({ status: 202, json: lookupReceipt(body, 'lookup-retry'), headers }); }
@@ -1134,6 +1137,31 @@ for (const variant of localizedViewports) {
     expect(api.member('3'.repeat(24))?.fields).toMatchObject({ credits: null, attributionStatus: 'unknown' });
   });
 }
+
+test('an existing-Album review looks up a typed name with an optional Artist and shows both again with its run, while Look up stays in the first screen', async ({ page }) => {
+  locale = 'en-US';
+  await page.setViewportSize({ width: 1280, height: 720 });
+  const api = await setup(page); api.ready();
+  const item = api.review();
+  item.analysis = { ...item.analysis, state: 'idle', generation: 0, operationId: null, completedChunks: 0, totalChunks: 0, attemptsUsed: 0 }; item.suggestions = [];
+  await enter(page, `/finitude/admin/catalog-reviews/${reviewId}`);
+  const summary = page.getByRole('region', { name: label('admin.catalog_review.lookup_title'), exact: true });
+  await expect(summary.getByText(label('admin.catalog_review.lookup_not_started'), { exact: true })).toBeVisible();
+  // The Artist field shares the name's row and its hint follows Look up, so Look up stays in the first main screen.
+  await expectLookupFirst(page);
+  const box = summary.getByRole('group', { name: label('admin.lookup.box'), exact: true });
+  const name = box.getByRole('textbox', { name: label('admin.lookup.name'), exact: true }), artist = box.getByRole('textbox', { name: label('admin.lookup.artist'), exact: true });
+  await expect(box.getByText(label('admin.lookup.artist_hint_review'), { exact: true })).toBeVisible();
+  await expect(artist).toHaveValue(''); await expect(artist).toHaveAttribute('autocomplete', 'off');
+  await name.fill('Synthetic Typed Name'); await artist.fill('Synthetic Typed Artist');
+  await box.getByRole('button', { name: label('admin.lookup.submit'), exact: true }).click();
+  await expect(summary.getByText(label('admin.lookup.active'), { exact: true })).toBeVisible();
+  expect(api.writes.filter(write => write.path.endsWith('/lookup')).map(write => write.body)).toEqual([
+    { expectedRevision: 1, kind: 'album', text: 'Synthetic Typed Name', artist: 'Synthetic Typed Artist', operationId: expect.any(String) }]);
+  // The queued run's view carries both, and the box, keyed by its run, shows them again.
+  await expect(name).toHaveValue('Synthetic Typed Name'); await expect(artist).toHaveValue('Synthetic Typed Artist');
+  await reflow(page);
+});
 
 test('without metadata lookup the Album page creates a completion for manual editing, then opens it, and another one is an explicit choice', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });

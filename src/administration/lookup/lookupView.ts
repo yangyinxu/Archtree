@@ -14,11 +14,11 @@
  * The administrator's allowlisted view of a metadata lookup record: an import's (GET /imports/:id/lookup) or an existing-Album
  * review's (GET /catalog-reviews/:id/lookup). It carries bounded candidate evidence (an iTunes-only candidate marked as such, and
  * whether it was not checked against MusicBrainz), groups, the preselection, the applied values with their conflicts and flags, the
- * iTunes stage's status and what Publish waits for; never a URL, ISRC, recording ID, storefront, localized name, account, grant,
- * lease, fence, file-set digest or query. A review's view also admits the catalog trigger, the exact-count basis, the subset
- * differences, each candidate's subset comparison, the review-only value paths (expected tracklist, member Artist entries), the
- * review-only flag reasons, each conflict's `precision` and the applied pairing (`pairs`); an import's view never carries them.
- * Pure.
+ * iTunes stage's status, what Publish waits for and a submitted run's name with any submitted Artist name; never a URL, ISRC,
+ * recording ID, storefront, localized name, account, grant, lease, fence, file-set digest or query. A review's view also admits
+ * the catalog trigger, the exact-count basis, the subset differences, each candidate's subset comparison, the review-only value
+ * paths (expected tracklist, member Artist entries), the review-only flag reasons, each conflict's `precision` and the applied
+ * pairing (`pairs`); an import's view never carries them. Pure.
  */
 import type { ImportDate } from '../import/adminImportContract';
 import { importDraftV2View } from '../import/adminImportDraftCompat';
@@ -60,7 +60,8 @@ type ViewCandidate<Comparison = ViewComparison> = {
 export type ImportLookupItunesStatus = 'notQueried' | 'running' | 'retrying' | 'answered' | 'unavailable';
 type LookupRecordView<Trigger extends string, Comparison> = {
     run: number; state: MetadataLookupState; issue: MetadataLookupIssue | null; outcome: 'candidates' | 'noRelease' | 'noQuery' | null;
-    input: { trigger: Trigger; submitted: { kind: 'album' | 'song'; text: string } | null };
+    /** `artist`: present only when the run was submitted with an Artist name (a bounded string). */
+    input: { trigger: Trigger; submitted: { kind: 'album' | 'song'; text: string; artist?: string } | null };
     candidates: ViewCandidate<Comparison>[];
     groups: { groupKey: string; representativeKey: string; memberKeys: string[]; proposal: LookupProposal }[];
     preselection: Pick<LookupPreselection, 'candidateKey' | 'basis' | 'artistMismatch'> & { notChecked: boolean } | null;
@@ -264,8 +265,10 @@ function lookupRecordView(record: MetadataLookupRecord, doc: AdminImportDocument
     if (!isRecord(raw) || !oneOf(raw.state, states) || !Number.isSafeInteger(raw.run) || (raw.run as number) < 1) return null;
     const input = isRecord(raw.input) ? raw.input : null;
     if (!input || !oneOf(input.trigger, mode === 'review' ? reviewTriggers : triggers)) return null;
+    // A submitted Artist name is projected only when it is a bounded string, so a run without one gives the same view as before.
     const submitted = isRecord(input.submitted) && oneOf(input.submitted.kind, ['album', 'song'] as const) && text(input.submitted.text) !== null
-        ? { kind: input.submitted.kind, text: input.submitted.text as string } : null;
+        ? { kind: input.submitted.kind, text: input.submitted.text as string,
+            ...(text(input.submitted.artist) !== null ? { artist: input.submitted.artist as string } : {}) } : null;
     const stored = list(raw.candidates).filter(isRecord), ranking = isRecord(raw.ranking) ? raw.ranking : null;
     const ranked = ranking ? list(ranking.candidates).filter(isRecord) : [];
     const ordered: [Record<string, unknown>, Record<string, unknown> | null][] = ranking

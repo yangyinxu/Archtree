@@ -7,6 +7,7 @@
  *   - member evidence keeps manifest order, exact and legacy durations, own numbers but never automatic ones, the primary names as artist tags and no identifiers
  *   - member evidence is total on malformed stored captures, drafts and origins
  *   - a review run is planned from the captured Album title and first usable primary name, or the submitted text with those names
+ *   - a review's submitted Artist name is kept with the run and credits its searches in place of the primary names, never the members' artist evidence
  *   - only a review compares in subset mode
  * @end-catalog */
 
@@ -122,6 +123,27 @@ test('a review run is planned from the captured Album title and first usable pri
     assert.deepEqual(planCatalogReviewLookup({ ...doc, catalogSource: undefined } as AdminImportDocument).plan, { queries: [], rejected: 'empty' });
     assert.deepEqual(planCatalogReviewLookup({ ...doc, catalogCapture: undefined } as AdminImportDocument).plan.queries.map(query => (query as { query: unknown }).query),
         [{ release: 'Synthetic Album (2013 Remaster)' }, { release: 'Synthetic Album' }]);
+});
+
+test('a review\'s submitted Artist name is kept with the run and credits its searches in place of the primary names, never the members\' artist evidence', () => {
+    const doc = reviewLookupDocument({ primaryNames: ['Synthetic Ensemble'], members: numberedMembers([200_000, 210_000]) });
+    for (const kind of ['album', 'song'] as const) {
+        const typed = planCatalogReviewLookup(doc, { submitted: { kind, text: 'Synthetic Typed Name', artist: 'Synthetic Typed' } });
+        assert.deepEqual(typed.input, { trigger: 'submitted', submitted: { kind, text: 'Synthetic Typed Name', artist: 'Synthetic Typed' } });
+        const field = kind === 'album' ? 'release' : 'recording';
+        assert.deepEqual(typed.plan.queries.map(query => (query as { query: unknown }).query),
+            [{ [field]: 'Synthetic Typed Name', artist: 'Synthetic Typed' }, { [field]: 'Synthetic Typed Name' }], kind);
+        assert.equal(JSON.stringify(typed.plan).includes('Synthetic Ensemble'), false, kind);
+    }
+    // Another shape or one that cannot be sent is dropped, so the name is still searched and the primary names credit it again.
+    for (const artist of [7, 'https://example.invalid/a']) {
+        const malformed = planCatalogReviewLookup(doc, { submitted: { kind: 'album', text: 'Synthetic Typed Name', artist: artist as never } });
+        assert.deepEqual(malformed.input, { trigger: 'submitted', submitted: { kind: 'album', text: 'Synthetic Typed Name' } }, String(artist));
+        assert.deepEqual(malformed.plan.queries.map(query => (query as { query: unknown }).query),
+            [{ release: 'Synthetic Typed Name', artist: 'Synthetic Ensemble' }, { release: 'Synthetic Typed Name' }], String(artist));
+    }
+    // The ranking's artist evidence stays the primary names: a typed Artist name is never evidence.
+    assert.deepEqual(catalogReviewFileEvidence(doc).map(file => file.artistTags), [['Synthetic Ensemble'], ['Synthetic Ensemble']]);
 });
 
 test('only a review compares in subset mode', () => {

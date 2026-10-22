@@ -78,8 +78,9 @@ export const createCatalogReviewWithLookup = (actor: string, raw: unknown): Prom
     createCatalogReview(actor, raw, { beforeInsert: async (doc, session) => { await queueCatalogReviewLookup(doc, actor, session); } });
 
 /**
- * `{operationId, expectedRevision, kind, text}`: looks up a submitted Album or song name with the review's primary Artist names,
- * replacing the previous run. A malformed body rejects like every other refusal.
+ * `{operationId, expectedRevision, kind, text, artist?}`: looks up a submitted Album or song name with the review's primary Artist
+ * names, or with the submitted Artist name in their place, replacing the previous run. A malformed body rejects like every other
+ * refusal.
  */
 export async function submitCatalogReviewLookup(actor: string, id: string, raw: unknown): Promise<CatalogReviewResponse> {
     const { body, submitted } = parseLookupSubmission(raw);

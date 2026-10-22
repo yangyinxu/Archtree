@@ -28,6 +28,7 @@
  *   - a lookup value that differs from the administrator's own is answered from the keyboard, and the summary reflows at 320, 768 and 1440 px
  *   - an unavailable lookup offers a free retry first and the paid Luna AI button after the lookup controls, a retry that stays unavailable keeps both, and Luna AI runs only after its confirmation shows the budget
  *   - without a folder or usable tags the summary offers an empty name box, which looks up a typed name from the keyboard, and the paid Luna AI button after it
+ *   - the name box's optional Artist: an Artist alone cannot look up, a link in it is refused in place, and a typed Artist is sent with the name and shown again with its run
  *   - after a lookup finds no release the paid Luna AI button is offered after the name box, and its ticked entries, label and Disc Number are preselected and approved in one confirmation
  *   - an image every file shares is chosen automatically until the administrator chooses, and the summary and confirmation show the choice
  *   - a release with front artwork shows a protected preview, Publish waits while its cover is staged, and the staged lookup cover is then chosen automatically and published
@@ -996,7 +997,7 @@ test('without a folder or usable tags the summary offers an empty name box, whic
   const item = uploadedProject(); item.manifest = { rootLabel: '', files: item.manifest.files.map(file => ({ ...file, relativePath: file.filename })) };
   Object.assign(item.draft.album, { title: '', artists: [] }); item.decisions = [];
   const server = await summaryProject(page, item, (state, action, body) => {
-    expect([action, body.kind, body.text]).toEqual(['lookup', 'album', 'Synthetic Album']);
+    expect([action, body.kind, body.text, 'artist' in body]).toEqual(['lookup', 'album', 'Synthetic Album', false]);
     state.lookup = lookupView({ run: 2, state: 'complete', outcome: 'noRelease', input: { trigger: 'submitted', submitted: { kind: 'album', text: 'Synthetic Album' } } });
     return 'lookup';
   });
@@ -1017,6 +1018,48 @@ test('without a folder or usable tags the summary offers an empty name box, whic
   // The name box keeps no history: nothing is stored by the lookup.
   expect(await storage()).toEqual(before);
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+});
+
+test('the name box\'s optional Artist: an Artist alone cannot look up, a link in it is refused in place, and a typed Artist is sent with the name and shown again with its run', async ({ page }) => {
+  await setup(page);
+  const item = uploadedProject(); item.manifest = { rootLabel: '', files: item.manifest.files.map(file => ({ ...file, relativePath: file.filename })) };
+  Object.assign(item.draft.album, { title: '', artists: [] }); item.decisions = [];
+  let run = 1;
+  const server = await summaryProject(page, item, (state, action, body) => {
+    expect(action).toBe('lookup');
+    run += 1;
+    state.lookup = lookupView({ run, state: 'complete', outcome: 'noRelease',
+      input: { trigger: 'submitted', submitted: { kind: body.kind, text: body.text, ...(typeof body.artist === 'string' ? { artist: body.artist } : {}) } } });
+    return 'lookup';
+  });
+  server.lookup = lookupView({ outcome: 'noQuery' });
+  await page.goto(`/finitude/admin/imports/${projectId}`); await page.getByRole('button', { name: 'Switch to Admin view' }).click();
+  const box = summaryRegion(page).getByRole('group', { name: 'Look up by name', exact: true });
+  const name = box.getByRole('textbox', { name: 'Name', exact: true }), artist = box.getByRole('textbox', { name: 'Artist (optional)', exact: true });
+  const submit = box.getByRole('button', { name: 'Look up', exact: true });
+  await expect(box.getByText("Leave empty to use the files' artist tags.", { exact: true })).toBeVisible();
+  await expect(artist).toHaveValue(''); await expect(artist).toHaveAttribute('autocomplete', 'off');
+  // An Artist name alone never looks up, from the button or the keyboard.
+  await artist.fill('Synthetic Ensemble'); await expect(submit).toBeDisabled(); await artist.press('Enter');
+  // A link in the Artist field is refused in place, with the name's message, and nothing is written.
+  await name.fill('Synthetic Album'); await artist.fill('https://example.test/artist'); await artist.press('Enter');
+  await expect(box.getByRole('alert')).toHaveText('Enter a name, not a link.');
+  await expect(artist).toHaveAttribute('aria-invalid', 'true'); await expect(name).toHaveAttribute('aria-invalid', 'false');
+  expect(server.writes).toEqual([]);
+  // A typed Artist name is sent beside the name, and the box shows it again with its run.
+  await artist.fill('Synthetic Ensemble'); await expect(box.getByRole('alert')).toHaveCount(0);
+  await artist.press('Enter');
+  await expect(summaryRegion(page).getByText('No release was found. Try another name, or use Luna AI (paid).', { exact: true })).toBeVisible();
+  expect(server.writes.map(({ action, body: { operationId: _operation, expectedRevision: _revision, ...sent } }) => [action, sent]))
+    .toEqual([['lookup', { kind: 'album', text: 'Synthetic Album', artist: 'Synthetic Ensemble' }]]);
+  await expect(name).toHaveValue('Synthetic Album'); await expect(artist).toHaveValue('Synthetic Ensemble');
+  // An emptied Artist field sends no Artist name.
+  await artist.fill(''); await name.press('Enter');
+  await expect.poll(() => server.writes.length).toBe(2);
+  expect('artist' in server.writes[1].body).toBe(false);
+  await expect(artist).toHaveValue('');
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+  await page.setViewportSize({ width: 320, height: 900 }); expect(await noOverflow(page)).toBe(true);
 });
 
 test('after a lookup finds no release the paid Luna AI button is offered after the name box, and its ticked entries, label and Disc Number are preselected and approved in one confirmation', async ({ page }) => {

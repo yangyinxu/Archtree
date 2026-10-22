@@ -11,9 +11,10 @@
  *   - an iTunes-only candidate parses with its collection ID, source and not-checked mark agreeing with its key, and the iTunes status defaults to not queried
  *   - an append target's expected rows parse strictly within their bounds, and a server that sends none reads as null
  *   - an import view refuses everything only a review view carries: the catalog trigger, the exact-count basis, review paths, precision, pairs and subset comparisons
+ *   - a submitted run's Artist name parses in import and review views within 1000 characters; a view without it reads as none
  * @end-catalog */
 
-import { lookupResponseSchema, lookupViewSchema } from './importLookupApi';
+import { lookupResponseSchema, lookupViewSchema, reviewLookupViewSchema } from './importLookupApi';
 
 const slot = '10000000-0000-4000-8000-000000000001', slotTwo = '10000000-0000-4000-8000-000000000002';
 const release = '0000000b-0000-4000-8000-000000000001', key = `musicbrainz:${release}`, groupKey = 'a'.repeat(64);
@@ -180,4 +181,21 @@ test('an import view refuses everything only a review view carries: the catalog 
   refused({ ...item, applied: { ...item.applied, pairs: null } });
   refused({ ...item, candidates: [{ ...item.candidates[0], comparison: { ...item.candidates[0].comparison, subset: null } }] });
   refused({ ...item, candidates: [{ ...item.candidates[0], comparison: { ...item.candidates[0].comparison, differences: ['pairing'] } }] });
+});
+
+test('a submitted run\'s Artist name parses in import and review views within 1000 characters; a view without it reads as none', () => {
+  // A review view with no candidate or application yet: the parts the two modes share.
+  const reviewView = () => ({ ...view(), candidates: [], groups: [], preselection: null, disclosure: null, applied: null, needsAnswer: { tie: false, conflicts: [] } });
+  const submitted = (artist?: unknown) => ({ kind: 'album', text: 'Synthetic Album', ...(artist === undefined ? {} : { artist }) });
+  for (const [schema, base] of [[lookupViewSchema, view], [reviewLookupViewSchema, reviewView]] as const) {
+    const typed = schema.safeParse({ ...base(), input: { trigger: 'submitted', submitted: submitted('Synthetic Ensemble') } });
+    expect(typed.success && typed.data.input.submitted?.artist).toBe('Synthetic Ensemble');
+    expect(schema.safeParse({ ...base(), input: { trigger: 'submitted', submitted: submitted('x'.repeat(1000)) } }).success).toBe(true);
+    const plain = schema.safeParse({ ...base(), input: { trigger: 'submitted', submitted: submitted() } });
+    expect(plain.success && (plain.data.input.submitted?.artist ?? null)).toBeNull();
+    for (const artist of ['x'.repeat(1001), 7, null]) {
+      expect(schema.safeParse({ ...base(), input: { trigger: 'submitted', submitted: submitted(artist) } }).success).toBe(false);
+    }
+    expect(schema.safeParse({ ...base(), input: { trigger: 'submitted', submitted: { ...submitted('Synthetic Ensemble'), label: 'Synthetic Label' } } }).success).toBe(false);
+  }
 });

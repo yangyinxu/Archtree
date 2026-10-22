@@ -33,7 +33,7 @@ import { REVIEW_LOOKUP_LIMITS } from './lookupReviewValues';
 import { chooseLookupCandidate, isLookupValuePath, resolveLookupConflicts } from './lookupValueApplication';
 import { adminImportLookupCollection, metadataLookupAdmitted, queueMetadataLookup, readLookupApplicationContext } from './metadataLookupService';
 import { importMusicBrainzNameMap } from '../import/adminImportMusicBrainzIds';
-import type { MetadataLookupRecord } from './metadataLookupRecord';
+import type { MetadataLookupRecord, MetadataLookupSubmission } from './metadataLookupRecord';
 import { getDb } from '../../infrastructure/database';
 import { readyAlbumLifecycleFilter } from '../../services/catalog/albumReferenceFenceService';
 import { hasStoredExpectedTracklist } from '../../services/catalog/albumExpectedTracklist';
@@ -101,16 +101,23 @@ export async function getAdminImportLookup(actor: string, id: string, configurat
 }
 
 /**
- * A submission body `{operationId, expectedRevision, kind, text}` (an import's or a review's): `kind` album or song and `text` a
- * string within the text bound, else 400 ADMIN_IMPORT_INVALID_INPUT; the name itself is checked when the run is planned.
+ * A submission body `{operationId, expectedRevision, kind, text, artist?}` (an import's or a review's): `kind` album or song, `text`
+ * a string within the text bound and `artist`, when present, a string within the same bound, else 400 ADMIN_IMPORT_INVALID_INPUT.
+ * The name and Artist name themselves are checked when the run is planned; the intent's fingerprint is the whole body.
  */
 export function parseLookupSubmission(raw: unknown) {
-    const body = parseAdminProjectMutation(raw, ['kind', 'text']);
-    if ((body.kind !== 'album' && body.kind !== 'song') || typeof body.text !== 'string' || body.text.length > METADATA_LOOKUP_LIMITS.textLength) return invalidImport();
-    return { body, submitted: { kind: body.kind as 'album' | 'song', text: body.text } };
+    const body = parseAdminProjectMutation(raw, ['kind', 'text', 'artist']);
+    if ((body.kind !== 'album' && body.kind !== 'song') || typeof body.text !== 'string' || body.text.length > METADATA_LOOKUP_LIMITS.textLength
+        || (hasOwn(body, 'artist') && (typeof body.artist !== 'string' || body.artist.length > METADATA_LOOKUP_LIMITS.textLength))) return invalidImport();
+    const submitted: MetadataLookupSubmission = { kind: body.kind as 'album' | 'song', text: body.text,
+        ...(hasOwn(body, 'artist') ? { artist: body.artist as string } : {}) };
+    return { body, submitted };
 }
 
-/** `{operationId, expectedRevision, kind, text}`: looks up a submitted Album or song name, replacing the previous run. */
+/**
+ * `{operationId, expectedRevision, kind, text, artist?}`: looks up a submitted Album or song name, optionally with an Artist name in
+ * place of the shared tag credits, replacing the previous run.
+ */
 export function submitAdminImportLookup(actor: string, id: string, raw: unknown) {
     const { body, submitted } = parseLookupSubmission(raw);
     return mutateAdminImport(actor, id, body, 'lookup', async (doc, session) => {

@@ -111,7 +111,8 @@ export function ImportSummary({ item, operation, uploads, disabled, publishDisab
       <p role="status">{t(status, { title: release })}</p>
       {lookup && lookup.staleFiles.length > 0 && <p>{t('lookup.stale_files', { count: lookup.staleFiles.length })}</p>}
       {retryOffered && <div className={styles.actions}><button type="button" className={`${styles.button} ${styles.primary}`} disabled={disabled} onClick={() => run('lookup/retry')}>{t('lookup.retry')}</button></div>}
-      {available && <Suspense fallback={null}><LookupBox key={lookup?.run ?? 0} lookup={lookup} rootLabel={item.manifest.rootLabel} disabled={disabled} onSubmit={(kind, text) => run('lookup', { kind, text })} /></Suspense>}
+      {available && <Suspense fallback={null}><LookupBox key={lookup?.run ?? 0} lookup={lookup} rootLabel={item.manifest.rootLabel} mode="import" disabled={disabled}
+        onSubmit={(kind, text, artist) => run('lookup', { kind, text, ...(artist ? { artist } : {}) })} /></Suspense>}
       {lookup?.state === 'complete' && lookup.candidates.length > 0 && <Suspense fallback={null}><CandidateChooser projectId={item.id} viewerId={access.viewerId} lookup={lookup} disabled={disabled} onChoose={key => run('lookup/choose', { run: lookup.run, candidateKey: key })} /></Suspense>}
       {open.length > 0 && <section aria-labelledby={`${id}-conflicts`}><h3 id={`${id}-conflicts`}>{t('summary.conflicts')}</h3><ul className={styles.cards}>{open.map(conflict =>
         <li key={conflict.path} className={styles.card}><strong id={`${id}-${conflict.path}`}>{conflict.musicBrainzId ? t('summary.musicbrainz_id_conflict', { field: label(conflict.path) }) : label(conflict.path)}</strong>

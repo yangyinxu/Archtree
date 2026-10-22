@@ -18,7 +18,7 @@ import { createHash } from 'node:crypto';
 import { hasOwn, originKey } from '../import/adminImportDraft';
 import { importDraftV2View } from '../import/adminImportDraftCompat';
 import type { AdminImportDocument } from '../import/adminImportService';
-import { planMetadataLookup, type LookupPlan } from './lookupQueryPlanner';
+import { planMetadataLookup, plannableSubmittedArtist, type LookupPlan } from './lookupQueryPlanner';
 import type { LocalFileEvidence, LookupComparisonMode } from './lookupRanking';
 import type { LookupFileIdentity, MetadataLookupInput, MetadataLookupSubmission } from './metadataLookupRecord';
 
@@ -103,13 +103,14 @@ export function catalogReviewFileEvidence(doc: ReviewSource): LocalFileEvidence[
 
 /**
  * A review run's input and plan: the Album's saved title as the review captured it, with its shown primary Artist names as the
- * credited artists (`catalog`), or with `submitted` the submitted text planned with those names. Track titles, file names,
- * folders, labels and identifiers are never inputs.
+ * credited artists (`catalog`), or with `submitted` the submitted text planned with those names, or with its Artist name in their
+ * place (kept only when it can be sent). Track titles, file names, folders, labels and identifiers are never inputs.
  */
 export function planCatalogReviewLookup(doc: ReviewSource, options: { submitted?: MetadataLookupSubmission } = {}): { input: MetadataLookupInput; plan: LookupPlan } {
     const credited = catalogReviewPrimaryNames(doc), fileCount = manifestSlots(doc).length;
     if (options.submitted) {
-        const submitted = { kind: options.submitted.kind, text: options.submitted.text };
+        const submitted: MetadataLookupSubmission = { kind: options.submitted.kind, text: options.submitted.text,
+            ...(plannableSubmittedArtist(options.submitted.artist) ? { artist: options.submitted.artist } : {}) };
         return { input: { trigger: 'submitted', submitted }, plan: planMetadataLookup({ trigger: 'submitted', submitted, credited, fileCount }) };
     }
     const album = isRecord(doc.catalogSource) && isRecord(doc.catalogSource.album) && typeof doc.catalogSource.album.title === 'string' ? doc.catalogSource.album.title : null;

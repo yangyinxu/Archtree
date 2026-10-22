@@ -121,7 +121,8 @@ const lookupViewFor = <Trigger extends z.ZodType, Candidate extends z.ZodType, B
   run, state: z.enum(['queued', 'running', 'retrying', 'complete', 'unavailable', 'stopped', 'superseded']),
   issue: z.enum(['permissionLost', 'grantExpired', 'notConfigured', 'sourceUnavailable', 'sourceBusy', 'fileSetChanged', 'projectClosed']).nullable(),
   outcome: z.enum(['candidates', 'noRelease', 'noQuery']).nullable(),
-  input: z.object({ trigger: mode.trigger, submitted: z.object({ kind: z.enum(['album', 'song']), text }).strict().nullable() }).strict(),
+  // A submitted run's name, with its Artist name only when one was typed (a view without the key reads as none).
+  input: z.object({ trigger: mode.trigger, submitted: z.object({ kind: z.enum(['album', 'song']), text, artist: text.optional() }).strict().nullable() }).strict(),
   candidates: z.array(mode.candidate).max(25), groups: z.array(groupSchema).max(25),
   preselection: z.object({ candidateKey, basis: mode.basis, artistMismatch: z.boolean(), notChecked: z.boolean().default(false) }).strict().nullable(),
   disclosure: z.object({ unknownLocalDurations: integer, unknownLocalDiscNumbers: integer, partialComparison: z.boolean() }).strict().nullable(),

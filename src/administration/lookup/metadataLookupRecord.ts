@@ -20,8 +20,9 @@
 /**
  * Pure model of a metadata lookup record (`adminImportLookups`, one per import project or existing-Album review): the file set a
  * run binds (an import's uploaded files, a review's members), the queries it plans from shared tags, a folder name, submitted
- * text or a review's saved Album title, the bounded candidates it stores (a review's admitted in subset order), its ranking, its
- * automatic retry schedule and the fence it writes on the project document. No database, no network.
+ * text (with any submitted Artist name) or a review's saved Album title, the bounded candidates it stores (a review's admitted
+ * in subset order), its ranking, its automatic retry schedule and the fence it writes on the project document. No database, no
+ * network.
  */
 import { createHash } from 'node:crypto';
 import type { ObjectId } from 'mongodb';
@@ -37,7 +38,7 @@ import {
 } from './lookupContract';
 import { normalizeMusicBrainzId } from './lookupIdentifiers';
 import type { LookupItunesStage } from './lookupItunesStage';
-import { planMetadataLookup, type LookupPlan, type LookupPlanInput, type PlannedLookupQuery } from './lookupQueryPlanner';
+import { planMetadataLookup, plannableSubmittedArtist, type LookupPlan, type LookupPlanInput, type PlannedLookupQuery } from './lookupQueryPlanner';
 import { lookupTrackCountPlausible, rankLookupCandidates, type LocalFileEvidence, type LookupComparisonMode, type LookupPreselection, type RankedLookup } from './lookupRanking';
 import { catalogReviewFileEvidence, catalogReviewLookupFileSet, isCatalogReviewLookup } from './lookupReviewEvidence';
 import { lookupAudioTrackCount, lookupSubsetTrackCountPlausible, lookupSurplusRank, type LookupSubsetPair } from './lookupSubset';
@@ -49,7 +50,11 @@ export type MetadataLookupIssue = 'permissionLost' | 'grantExpired' | 'notConfig
  * of an existing-Album review (`create`).
  */
 export type MetadataLookupGrantSource = 'upload' | 'reopen' | 'submit' | 'retry' | 'choose' | 'create';
-export type MetadataLookupSubmission = { kind: 'album' | 'song'; text: string };
+/**
+ * A submitted name and kind, with the optional Artist name typed beside it: kept only with the run (and repeated by its retry or
+ * an import's automatic rerun), never a draft value or evidence for an identity or a preselection.
+ */
+export type MetadataLookupSubmission = { kind: 'album' | 'song'; text: string; artist?: string };
 /** `catalog`: an existing-Album review's run from its saved Album title and shown primary Artist names. */
 export type MetadataLookupInput = { trigger: 'tags' | 'folder' | 'submitted' | 'catalog'; submitted: MetadataLookupSubmission | null };
 /** One manifest slot as a run saw it: the ready upload's intent and bytes, or nulls while the slot has no confirmed file. */
@@ -233,7 +238,8 @@ function tagEvidence(doc: LookupSource): Pick<LookupPlanInput, 'tags' | 'identif
 }
 
 /**
- * The queries of one run. Submitted text is planned with the shared tag credits and identifiers. Otherwise the shared tags
+ * The queries of one run. Submitted text is planned with the shared tag credits and identifiers, or, with a submitted Artist name,
+ * credited to that name instead of the tag credits. Otherwise the shared tags
  * (a shared album, the title of a one-file import, or a valid shared identifier) are used; only without usable tags, and only
  * once per project, the cleaned name of a chosen folder (some relative path names a folder; files chosen without one have none).
  */
@@ -241,7 +247,9 @@ export function planImportLookup(doc: LookupSource, options: { folderAvailable: 
     { input: MetadataLookupInput; plan: LookupPlan } {
     const known = tagEvidence(doc);
     if (options.submitted) {
-        const submitted = { kind: options.submitted.kind, text: options.submitted.text };
+        // Only a string Artist name that can be sent is kept; another (a later release's, or a corrupted record's) is planned without it.
+        const submitted: MetadataLookupSubmission = { kind: options.submitted.kind, text: options.submitted.text,
+            ...(plannableSubmittedArtist(options.submitted.artist) ? { artist: options.submitted.artist } : {}) };
         return { input: { trigger: 'submitted', submitted }, plan: planMetadataLookup({ ...known, trigger: 'submitted', submitted }) };
     }
     const tags = planMetadataLookup({ ...known, trigger: 'tags', folderName: null });
