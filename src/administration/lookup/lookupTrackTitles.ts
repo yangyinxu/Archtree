@@ -93,8 +93,9 @@ const audioExtension = /\.(?:mp3|flac|m4a|aac|wav|ogg|opus|aiff)$/i;
 const trackNumberPrefix = /^\d{1,3}\s*[-._)]\s*/;
 /**
  * Whether a cleaned title looks like a file name: equal, ignoring case, to the member's retained original filename with or without
- * its extension, ending in an audio file extension, starting with a track number and separator, or without whitespace and either
- * holding an underscore or made only of printable ASCII with a run of three digits (`REC0001`; `東京2020` is kept).
+ * its extension, ending in an audio file extension, starting with a track number and separator, or holding underscores instead of
+ * spaces (no whitespace and an underscore between two other characters, so `_Synthetic` is kept); digits alone never make it one
+ * (`REC0001`, `Blink182` and `東京2020` are kept).
  */
 function fileNameShaped(cleaned: string, originalFileName: unknown): boolean {
     const title = cleaned.toLowerCase();
@@ -103,7 +104,7 @@ function fileNameShaped(cleaned: string, originalFileName: unknown): boolean {
         if (name && (title === name || title === name.replace(/\.[^.\s]{1,8}$/u, ''))) return true;
     }
     if (audioExtension.test(cleaned) || trackNumberPrefix.test(cleaned)) return true;
-    return !/\s/u.test(cleaned) && (cleaned.includes('_') || (/^[\x21-\x7e]+$/.test(cleaned) && /\d{3,}/.test(cleaned)));
+    return !/\s/u.test(cleaned) && /[^_]_+[^_]/u.test(cleaned);
 }
 
 /** A title's text as it is compared and searched: cleaned and without its trailing notes; null when it does not clean. */

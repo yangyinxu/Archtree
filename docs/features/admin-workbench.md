@@ -2300,6 +2300,11 @@ touches it. The server side lives in
   confirmation are disabled; offline the upload button is disabled like Choose.
   Success opens the existing confirmation with the item's name and a preview of
   the image; its Cancel sends nothing, and choosing the same file again is a new
+  upload. While another dialog is open (this panel's or the page's), it opens
+  none: the panel offers Use this image, which opens it and returns focus to the
+  upload button when it closes, until a new upload, an accepted cover command (a
+  change or removal, or resuming, recovering or cancelling an operation), an
+  account or administrator role change or leaving Admin view drops that waiting
   upload. An unknown outcome offers Retry, with the same key and bytes, and
   Cancel; the kept upload is dropped when the account or the administrator role
   changes or Admin view is left, and a definite refusal shows its reason and
@@ -2537,7 +2542,13 @@ roll back to:
   needs an `analysis`, and refuses a replayed creation of a discarded review
   without writing anything (at the latest with a duplicate-key `503`). Reload
   admin Web tabs across deploy or rollback, because the list item gains
-  `albumTitle`.
+  `albumTitle`. Every earlier key and its variables are kept, so Web, iOS and
+  Android clients accept this release's remote bundles. A Web tab opened after
+  it keeps its active bundle instead of accepting a remote bundle from a release
+  before it, which lacks the `admin.catalog_review.discard*` and
+  `admin.common.discarded` keys. After deploying it, a Web client's cached
+  bundle from before it is refused once for lacking those keys, so it shows
+  English until the new bundle loads.
 - Offering review lookup on the Web raises no floor: every route its summary
   calls, and the `expectedValueRevision` its apply sends, exists in the release
   before it. Looking up from the Web converts an older review to format 3,
@@ -2733,7 +2744,13 @@ roll back to:
   it verifies only its own, and never reads the upload records, whose staged
   objects wait in the private bucket until rolling forward lets the cleanup pass
   delete them. No response the Web parses gains a key; reload admin Web tabs
-  across deploy or rollback as usual.
+  across deploy or rollback as usual. Every earlier key and its variables are
+  kept, so Web, iOS and Android clients accept this release's remote bundles. A
+  Web tab opened after them keeps its active bundle instead of accepting a
+  remote bundle from a release before them, which lacks the
+  `admin.cover.upload`, `admin.cover.upload_*` and `admin.cover.uploading` keys.
+  After deploying them, a Web client's cached bundle from before them is refused
+  once for lacking those keys, so it shows English until the new bundle loads.
 - The iTunes fallback needs no floor of its own; no collection or index
   changes. The release before it ignores a record's `itunesStage`,
   `exhausted` and `attempts.itunes` and resumes a run stored mid-stage through
@@ -2998,18 +3015,17 @@ below). The source layer, the jobs and their routes live in
     and any other stops the peeling. A title is also skipped when it looks like
     a file name (equal to the member's retained original filename with or
     without its extension, ending in `.mp3`, `.flac`, `.m4a`, `.aac`, `.wav`,
-    `.ogg`, `.opus` or `.aiff`, starting with a track number and a separator,
-    or without whitespace and either holding an underscore or made only of
-    ASCII with a run of three digits), is only digits and punctuation or a
-    generic title of the list under [What lookup sends](#what-lookup-sends),
-    equals the Album title or the submitted name (each without its notes),
-    occurs more than once in the Album (compared folded: NFKC, lower case, no
-    punctuation, symbol or whitespace), or weighs less than 4: each Han,
-    Hiragana, Katakana or Hangul character, or a letter those scripts share
-    (the prolonged sound mark `ー`, also half-width, and the iteration marks),
-    counts 2, any other letter or digit 1 and anything else 0. The rest rank
-    heaviest first, then in Album order, and a title equal to one ranked
-    earlier once folded is dropped. The planner keeps at most two
+    `.ogg`, `.opus` or `.aiff`, starting with a track number and a separator, or
+    without whitespace and holding an underscore between two other characters),
+    is only digits and punctuation or a generic title of the list under
+    [What lookup sends](#what-lookup-sends), equals the Album title or the
+    submitted name (each without its notes), occurs more than once in the Album
+    (compared folded: NFKC, lower case, no punctuation, symbol or whitespace),
+    or weighs less than 4: each Han, Hiragana, Katakana or Hangul character, or
+    a letter those scripts share (the prolonged sound mark `ー`, also half-width,
+    and the iteration marks), counts 2, any other letter or digit 1 and anything
+    else 0. The rest rank heaviest first, then in Album order, and a title equal
+    to one ranked earlier once folded is dropped. The planner keeps at most two
     (`METADATA_LOOKUP_JOB_LIMITS.trackTitleSearches`) after every title search
     and its fallbacks, and only when it planned a title search, so an unusable
     Album title still plans nothing; each is a recording search of basis

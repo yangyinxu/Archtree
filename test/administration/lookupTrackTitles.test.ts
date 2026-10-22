@@ -120,8 +120,7 @@ test('a title equal to the Album title or the submitted text is skipped, also wi
 });
 
 test('file-name-shaped titles are skipped, while a title with digits that reads as a name is kept', () => {
-    for (const title of ['01 - Synthetic Song', '1. Synthetic Song', '03_synthetic_song', '03_song', 'REC_0001', 'REC0001', 'song.mp3', 'Synthetic Song.FLAC', '12) Synthetic Song',
-        'synthetic.track.0042']) {
+    for (const title of ['01 - Synthetic Song', '1. Synthetic Song', '03_synthetic_song', '03_song', 'REC_0001', 'song.mp3', 'Synthetic Song.FLAC', '12) Synthetic Song']) {
         assert.equal(skipped(title), true, title);
     }
     // The member's retained original filename, with or without its extension, ignoring case.
@@ -129,7 +128,11 @@ test('file-name-shaped titles are skipped, while a title with digits that reads 
     assert.equal(skipped('Synthetic Take Seven.wav', 'Synthetic Take Seven.wav'), true);
     assert.equal(skipped('Synthetic Take Seven', 'Synthetic Take Eight.wav'), false);
     assert.equal(skipped('Synthetic Take Seven', 7), false);
-    for (const title of ['東京2020', '99 Problems', 'Synthetic 1999 Party', '1000 Synthetic Nights']) assert.equal(skipped(title), false, title);
+    // Digits alone never make a title file-name-shaped, even a one-word ASCII title with a run of them, nor does an underscore at an end.
+    for (const title of ['東京2020', '99 Problems', 'Synthetic 1999 Party', '1000 Synthetic Nights', 'REC0001', 'Room404', 'Blink182', 'B612', 'synthetic.track.0042',
+        '_Synthetic', 'Synthetic1_', '__Synthetic__']) {
+        assert.equal(skipped(title), false, title);
+    }
 });
 
 test('weights count Han, kana and Hangul twice and other letters and digits once, a title below four is skipped, and heavier titles rank first', () => {

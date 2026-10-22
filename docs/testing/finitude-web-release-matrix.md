@@ -136,7 +136,13 @@ shows the type message without a request; a PNG built in the test is sent once
 as multipart with an `Idempotency-Key`, the confirmation names the Album and
 shows the image, and Cancel sends nothing; a second upload and Replace catalog
 cover send one cover request with `uploadId` and `expectedRevision`, after which
-the panel says the catalog cover change is confirmed, with an axe scan.
+the panel says the catalog cover change is confirmed, with an axe scan. Another
+checks the import summary name box's optional Artist field: an Artist name alone
+never looks up, from the button or Enter; a link in it is refused in place with
+the name's message, marking only that field invalid and sending nothing; a typed
+Artist is sent beside the name in one lookup request and shown again with the
+run, and an emptied field sends no Artist, with an axe scan and no overflow at
+320 px.
 
 The catalog reviews spec checks that an existing-Album review shows the Album's
 Artist Credits and label read-only, saves a Disc Number change as one per-value
@@ -180,7 +186,13 @@ and the title still while the eligibility read is pending, with an axe scan. An 
 result says Use iTunes and flags every value it wrote. Discard completion on a
 review page names the catalog Album in its confirmation (Cancel focused, axe
 scan) and returns to the Album page, whose action then creates a new
-completion; on the workbench it removes the card.
+completion; on the workbench it removes the card. An existing-Album review at
+1280 px looks up a typed name with a typed Artist in one request carrying both,
+shows both again in the box of the queued run, keeps Look up in the first
+screen and shows the Artist hint; and at 1280 px in English and 390 px in
+Chinese its tie chooser marks only the release a track-title search found first
+as Found through a track title, as does the opened folded list of every release
+found, without sending anything; each with an axe scan and no overflow.
 
 The historical 2026-08-19 MediaTrack amendment passed
 304/304 server tests, 214/214 Web unit/component tests, 148/148 integration
