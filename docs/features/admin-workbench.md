@@ -1263,7 +1263,8 @@ button on the refused action only.
 The analysis worker admits two active projects globally and one per initiating
 admin, uses 24-hour grants and 120-second leases, and checkpoints every provider
 attempt before dispatch. A stopped analysis still occupies its actor/global slot
-until its in-flight provider outcome is checkpointed. Each project permits two
+until its in-flight provider outcome is checkpointed, or until its
+existing-Album review is discarded. Each project permits two
 generations and at most 22 calls and the deployment reserves at most 220
 attempts per UTC day across all projects, ten tracks per chunk, 4,000 output
 tokens/call, 48 KB context and 256 KB responses. `store:false` is sent to the
@@ -1352,7 +1353,29 @@ follows that summary, above the track editor, is never styled as the primary
 action and always has its own confirmation, titled "Use Luna AI? This is a paid
 AI service", whose confirm button keeps the primary style and repeats **Use Luna
 AI (paid)**; its suggestions arrive unticked in **Review Luna AI suggestions**
-and change the draft only when adopted. All `/finitude/admin/*` pages use a
+and change the draft only when adopted.
+**Discard completion** (never primary) follows the Luna AI controls on an
+unapplied review page, whatever its source status, and ends each unfinished card
+of the **Album completions** queue; an applied completion offers none. It is
+disabled offline, while Luna AI is queued or running (its description then says
+"Stop Luna AI before discarding this completion.") and while the review page's
+own change is unconfirmed; unsaved edits do not block it. Its confirmation names
+the catalog Album, with the draft title as secondary text when it differs, says
+what is lost and that the catalog does not change, puts initial focus on Cancel
+and sends the revision it showed. On success, or when another tab already
+discarded the review, it forgets the review's editor, stage and command buffers,
+removes the review's reads and navigates to the Album page (to the queue when
+the source is unavailable), whose action then opens another open completion or
+creates a new one; the queue reads itself again, so the card disappears. A
+review page whose read (its detail, lookup summary or identity rows) or change
+is answered as discarded shows only the discarded notice with Back, and no poll
+or window focus reads that review again. A refusal reads the review again and
+says why: Luna AI active and applied each have their own message, and a stale
+confirmation shows the conflict message; an unknown outcome is retried only with
+its original intent. The action loads as its own chunk; one that cannot load (a
+deploy replaced it) is left out, while the page, with the summary's reload
+request, and the queue cards stay usable.
+All `/finitude/admin/*` pages use a
 dedicated
 administration layout with management navigation, language/account controls and
 the Admin/User view switch. Listener navigation, global music search and
@@ -1527,7 +1550,10 @@ Catalog review routes (relative to `/api/admin/v1`):
   `true`; `another` is optional, part of the fingerprinted body, and anything
   but a boolean is `400 ADMIN_IMPORT_INVALID_INPUT`. A replay answers before
   that check, and a stale revision or unavailable membership keeps its own
-  refusal. Concurrent creations are serialized (each increments
+  refusal. A creation whose review was discarded inserts nothing: its
+  original intent is `404 ADMIN_CATALOG_REVIEW_DISCARDED`, and another body
+  under the same `operationId` is `409 ADMIN_IMPORT_OPERATION_CONFLICT`.
+  Concurrent creations are serialized (each increments
   `adminImportAnalysisSlots` `catalog-review-creation`, seeded at startup), so
   only one succeeds without `another`: the other runs again and is refused as
   open. Empty Albums are supported; malformed, missing, Video or inconsistent
@@ -1559,7 +1585,8 @@ Catalog review routes (relative to `/api/admin/v1`):
   read share one check). `openReviewId` is the newest unapplied review of the
   Album at its current revision whose source is current (of at most 25 matching
   reviews, newest first; changed, unavailable, applied and newer-format reviews
-  are not open), whatever the reason. `lookupAvailable` is whether metadata lookup runs on this server. A
+  are not open, and a discarded review is never found), whatever the reason.
+  `lookupAvailable` is whether metadata lookup runs on this server. A
   missing, repeated, malformed or extra query key is `400
   ADMIN_IMPORT_INVALID_INPUT`; the route has the guards of every review route.
 - `GET /catalog-reviews` and `GET /catalog-reviews/:id`: independent bounded
@@ -1586,6 +1613,11 @@ Catalog review routes (relative to `/api/admin/v1`):
   changing `revision` (0 for a review lookup never wrote); the Web sends it back
   with each apply as `expectedValueRevision`. The Web's strict detail schema
   requires it, so reload admin Web tabs across deploy or rollback.
+  Each list item carries `albumTitle`, the catalog Album's title as the review
+  captured it, beside `title`, the draft's (which lookup, Luna or the
+  administrator may have changed); a discard confirmation names it. The Web's
+  strict workbench schema requires it, so reload admin Web tabs across deploy or
+  rollback.
 - `PATCH /catalog-reviews/:id` and `POST` to `/analyze`, `/adopt` or
   `/cancel-analysis`: save/review privately with the original UUID and numeric
   revision. Analysis uses the existing import flag, provider and shared budgets;
@@ -1886,7 +1918,7 @@ Catalog review routes (relative to `/api/admin/v1`):
   as before and writes no Credits, records, IDs, tracklist or identity fence;
   the Web sends every key, empty lists for a review not captured for lookup. A review
   keeps its last receipt for applying: every other
-  change of a review holding 255 receipts is
+  change of a review holding 255 receipts, except a discard, is
   `409 ADMIN_IMPORT_OPERATION_LIMIT`, so answers and edits never leave it
   unappliable. Checks, each refusing before any write: analysis active
   (`409 ADMIN_IMPORT_ANALYSIS_ACTIVE`); a metadata lookup run that can still
@@ -1966,6 +1998,42 @@ Catalog review routes (relative to `/api/admin/v1`):
   become read-only; no upload, S3 or publication endpoint exists for them.
   Reload open admin Web tabs across a deploy or rollback of this API (the Web
   accepts the new applied fields and the `decisions` receipt).
+- `POST /catalog-reviews/:id/discard`: exactly `{operationId, expectedRevision}`
+  (the default 96 KB JSON limit; anything else is
+  `400 ADMIN_IMPORT_INVALID_INPUT` before any database read), with the guards of
+  every review route; the transaction rechecks the administrator. A tombstone at
+  the ID answers the discard's original intent (operation ID, body fingerprint
+  and administrator) with its original `200` and anything else with
+  `404 ADMIN_CATALOG_REVIEW_DISCARDED`; a malformed or unknown ID, an import's
+  included, is `404 ADMIN_CATALOG_REVIEW_NOT_FOUND`. Then, in order: an applied
+  review is `409 ADMIN_CATALOG_REVIEW_APPLIED` whatever `expectedRevision` says;
+  an operation ID any receipt of the review used (ordinary, recovery or
+  automatic) is `409 ADMIN_IMPORT_OPERATION_CONFLICT`; a newer draft format is
+  `409 ADMIN_IMPORT_RELOAD_REQUIRED`; an `expectedRevision` before the last
+  receipt's revision or above the current one is
+  `409 ADMIN_IMPORT_REVISION_CONFLICT` (Luna ticks and lookup writes add no
+  receipt, so they never refuse it); a Luna analysis queued or running is
+  `409 ADMIN_IMPORT_ANALYSIS_ACTIVE` (a stopped call still settling is
+  admitted). Any source status is admitted, and a discard is never counted
+  against the receipt limit. One transaction then replaces the review, guarded
+  by the revision it read, with a tombstone at the same ID
+  (`purpose: 'catalogReviewDiscarded'`, `actorId`, `createdAt`, `updatedAt`,
+  `revision` one past the review's, `albumId`, `discardedAt`, `discardedBy` and
+  `receipts` holding only the creation receipt, without its selection, and the
+  `discard` receipt) and deletes the review's `adminImportLookups` record; a
+  failure aborts both (`503 ADMIN_CATALOG_REVIEW_UNAVAILABLE`), and a write
+  conflict is retried, so two requests of one intent sent together both answer
+  its original result. It answers `200` with `discarded` (`{id, albumId}`) and
+  `receipt` (`{operationId, kind: 'discard', revision}`). Every other `/:id`
+  route answers a 404 for a tombstone as `404 ADMIN_CATALOG_REVIEW_DISCARDED`, a
+  retried earlier change included, while the candidate artwork preview stays a
+  bodiless `404`; the list, the eligibility read, the import routes and the
+  lookup worker filter `purpose`, and the Luna worker's claim needs an
+  `analysis` a tombstone does not have, so none of them reads a tombstone. A
+  replayed creation of a discarded review is
+  `404 ADMIN_CATALOG_REVIEW_DISCARDED` (another intent with its operation ID
+  `409 ADMIN_IMPORT_OPERATION_CONFLICT`) and inserts nothing. Tombstones stay, a
+  few hundred bytes each, with no cleanup job.
 
 The publisher reserves immutable approvals and catalog IDs before copying
 objects. It uses version-bound GET and conditional checksum PUT to canonical
@@ -2328,6 +2396,13 @@ roll back to:
   eligibility route as not found and refuses a creation body with `another` as
   invalid input; its strict Web schema refuses the identity read's `selection`
   and `keptTracklist`. Reload open admin Web tabs across deploy or rollback.
+- Discarding Album completions raises no floor. The release before it has no
+  discard route (its Web shows a generic error), never reads tombstones, because
+  its review, import and lookup queries filter `purpose` and its Luna claim
+  needs an `analysis`, and refuses a replayed creation of a discarded review
+  without writing anything (at the latest with a duplicate-key `503`). Reload
+  admin Web tabs across deploy or rollback, because the list item gains
+  `albumTitle`.
 - Offering review lookup on the Web raises no floor: every route its summary
   calls, and the `expectedValueRevision` its apply sends, exists in the release
   before it. Looking up from the Web converts an older review to format 3,
@@ -3150,6 +3225,9 @@ database, what the step stores and which request comes next.
   catalog. A review runs at most one
   automatic lookup (the catalog trigger, a `noQuery` run included); submitted
   names and manual retries do not count.
+  Discarding a review deletes its run's record in the discard transaction: a
+  stored step then finds no record and stores nothing, the answer of a request
+  in flight is dropped, and a queued or retrying run is never claimed again.
 - **Fence.** Starting a run (including one that completes at once as
   `noQuery`) and every state change write `lookupGate`
   `{ fence, run, state, blocking }` on the project document in the same
@@ -3217,7 +3295,9 @@ database, what the step stores and which request comes next.
   candidates stay as evidence and are never ranked or applied. A project that no
   longer accepts lookup (a publication lock, completion, a newer format or a
   malformed draft), or a review that is applied, not format 3 or whose source
-  is not current, ends it as `superseded` (`projectClosed`).
+  is not current, ends it as `superseded` (`projectClosed`). Discarding a review
+  instead deletes its run's record, so its next step stores nothing and the run
+  is never claimed again.
 - **Refusals.** Submitted and retried runs are admitted inside the caller's
   administrator transaction, which the [routes](#lookup-routes) provide. They
   are refused with 503 `ADMIN_IMPORT_LOOKUP_UNAVAILABLE` while lookup is not

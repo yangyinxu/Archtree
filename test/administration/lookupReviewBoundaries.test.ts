@@ -45,9 +45,10 @@ const reviewApply = 'src/administration/catalog/adminCatalogReviewApply.ts';
 const reviewIdentity = 'src/administration/catalog/adminCatalogReviewIdentity.ts';
 const reviewCredits = 'src/administration/catalog/adminCatalogReviewCredits.ts';
 const newRecords = 'src/administration/catalog/adminNewCatalogRecords.ts';
+const discard = 'src/administration/catalog/adminCatalogReviewDiscard.ts';
 
-test('the review service, its capture, apply, identities and Credits never load the lookup service or the review lookup requests, which load them', () => {
-    for (const start of [reviewService, 'src/administration/catalog/adminCatalogReviewCapture.ts', reviewApply, reviewIdentity, reviewCredits]) {
+test('the review service, its capture, apply, discard, identities and Credits never load the lookup service or the review lookup requests, which load them', () => {
+    for (const start of [reviewService, 'src/administration/catalog/adminCatalogReviewCapture.ts', reviewApply, discard, reviewIdentity, reviewCredits]) {
         const loaded = reachable(start);
         assert.deepEqual([loaded.has(lookupService), loaded.has(reviewLookupRequests)], [false, false], start);
     }
@@ -60,6 +61,12 @@ test('the review service, its capture, apply, identities and Credits never load 
     assert.ok(runtimeImports(reviewApply).includes(valueApplication));
     assert.equal(runtimeImports(reviewService).includes(valueApplication), false);
     assert.deepEqual([reachable(valueApplication).has(reviewService), reachable(valueApplication).has(reviewApply)], [false, false]);
+    // Discarding deletes the lookup record through the pure lookup contract and never loads the review service, which reads its
+    // tombstones for creation replays; the route loads it for the discard route and its discarded answers.
+    assert.equal(reachable(discard).has(reviewService), false);
+    assert.ok(runtimeImports(reviewService).includes(discard));
+    assert.ok(runtimeImports('src/routes/adminCatalogReviewRoutes.ts').includes(discard));
+    assert.ok(runtimeImports(discard).includes('src/administration/lookup/lookupContract.ts'));
     // The identity model never loads the review service or its capture.
     assert.deepEqual([reachable(reviewIdentity).has(reviewService), reachable(reviewIdentity).has('src/administration/catalog/adminCatalogReviewCapture.ts')], [false, false]);
 });

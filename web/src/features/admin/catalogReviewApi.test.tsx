@@ -13,13 +13,14 @@
  *   - a review captured for metadata lookup carries its expected tracklist and member Artist entries; import drafts never do
  *   - a malformed expected tracklist or member entry list fails the strict review parse
  *   - a review save lists only the changed editable values with their bases, in a fixed order, never Credits, label, visibility or review-only values
+ *   - a workbench item requires the catalog Album title beside the draft title
  * @end-catalog */
 
 import { advanceAccountEpoch, captureAccountOperation } from '../../api/accountEpoch';
 import { adminEndpointRequest } from './adminApi';
 import { adminWorkspace } from './adminWorkspace';
 import { expectedTracklistRowSchema, importDraftV2Schema } from './adminNamingSchema';
-import { reviewChanges, reviewDetailSchema, reviewDraftChanges, reviewMutationSchema, reviewResponseSchema } from './catalogReviewApi';
+import { reviewChanges, reviewDetailSchema, reviewDraftChanges, reviewMutationSchema, reviewResponseSchema, reviewWorkbenchSchema } from './catalogReviewApi';
 import { artistEntryKey, capturedCatalogReview, catalogReview, deferred, legacyCatalogReview, reviewJson, slotId, slotTwo, viewer } from './catalogReviewFixtures.testSupport';
 import { reviewValueText } from './ImportReview';
 
@@ -228,4 +229,15 @@ test('a review save lists only the changed editable values with their bases, in 
   draft.tracks[0].title = base.tracks[0].title; draft.album.title = 'Edited Album';
   expect(reviewDraftChanges(base, draft).map(change => change.path)).toEqual(['album.title', 'album.releaseDate', `tracks.${slotId}.discNumber`, `tracks.${slotTwo}.trackNumber`]);
   expect(reviewDraftChanges(base, structuredClone(base))).toEqual([]);
+});
+
+test('a workbench item requires the catalog Album title beside the draft title', () => {
+  const item = { id: 'e'.repeat(24), revision: 2, createdAt: '2026-10-01T00:00:00.000Z', updatedAt: '2026-10-01T00:00:00.000Z', startedByMe: true, state: 'reviewing',
+    analysis: catalogReview().analysis, albumId: '1'.repeat(24), title: 'Draft Album title', albumTitle: 'Synthetic catalog Album', pendingSuggestions: 0 };
+  const page = (value: Record<string, unknown>) => ({ items: [value], counts: { all: 1, analyzing: 0, awaitingReview: 1, needsAttention: 0, completed: 0 }, nextCursor: null });
+  expect(reviewWorkbenchSchema.parse(page(item)).items[0]).toMatchObject({ title: 'Draft Album title', albumTitle: 'Synthetic catalog Album' });
+  expect(reviewWorkbenchSchema.safeParse(page({ ...item, albumTitle: '' })).success).toBe(true);
+  const { albumTitle: _missing, ...withoutAlbumTitle } = item;
+  for (const value of [withoutAlbumTitle, { ...item, albumTitle: 'x'.repeat(301) }, { ...item, albumTitle: null }, { ...item, albumName: 'Synthetic catalog Album' }])
+    expect(reviewWorkbenchSchema.safeParse(page(value)).success).toBe(false);
 });

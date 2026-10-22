@@ -24,6 +24,8 @@
  *   - returning to the catalog review source reads that queue without querying imports or starting analysis
  *   - catalog review Unfinished filtering preserves the private queue contract without suggesting creation on no matches
  *   - completed catalog reviews describe applied changes rather than an import publication
+ *   - an unfinished Album completion card offers Discard completion naming its catalog Album; confirming reads the queue again without the card, a running Luna AI disables it, and an applied card offers none
+ *   - a card whose review page left a change with an unknown outcome keeps Discard completion disabled until that change is confirmed
  *   - the project edit action opens Draft even after a prior Review visit and sends no mutation
  *   - Add Artist and a typed name save one primary entry as the only change, and a rename keeps its key
  *   - several Artist entries are editable in order, and the header shows their byline
@@ -57,11 +59,14 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Link, MemoryRouter, Route, Routes } from 'react-router';
+import { z } from 'zod';
 import { advanceAccountEpoch, captureAccountOperation } from '../../api/accountEpoch';
 import { adminWorkspace } from './adminWorkspace';
+import { AdminCommand } from './useAdminCommand';
 import { AdminWorkbenchPage } from './AdminWorkbenchPage';
 import { AdminImportPage } from './AdminImportPage';
 import { AdminCreateImportPage } from './AdminCreateImportPage';
+import styles from './adminStyles';
 import { capabilities, deferred, detail, json, lookupResponse, projectId, session, slotId, slotTwo, viewer, applyDraftChanges, artistEntry, entryKey, fieldSaveEndpoint, labelEntry, withLookup } from './adminFixtures.testSupport';
 
 /** The fixture's two pending Luna suggestions, sent unticked when the summary read gives no tick state. */
@@ -355,7 +360,7 @@ test('workbench refresh stays in its header while personal filtering remains wit
 test('catalog reviews are a separate read-only workbench source with search, owner filtering and cursor paging', async () => {
   const reads: string[] = [], writes: string[] = [];
   const counts = { all: 2, analyzing: 0, awaitingReview: 2, needsAttention: 0, completed: 0 };
-  const review = { id: 'eeeeeeeeeeeeeeeeeeeeeeee', albumId: '111111111111111111111111', revision: 1, title: 'Published Album review', pendingSuggestions: 1, createdAt: '2026-10-01T00:00:00.000Z', updatedAt: '2026-10-01T00:00:00.000Z', startedByMe: true, state: 'reviewing', analysis: detail().analysis };
+  const review = { id: 'eeeeeeeeeeeeeeeeeeeeeeee', albumId: '111111111111111111111111', albumTitle: 'Published Album', revision: 1, title: 'Published Album review', pendingSuggestions: 1, createdAt: '2026-10-01T00:00:00.000Z', updatedAt: '2026-10-01T00:00:00.000Z', startedByMe: true, state: 'reviewing', analysis: detail().analysis };
   stubFetch(vi.fn(async (path: string, init: RequestInit) => {
     if (init.method && init.method !== 'GET') writes.push(path);
     reads.push(path);
@@ -445,7 +450,7 @@ test.each([
   { analysisState: 'complete', pendingSuggestions: 1, applied: true, label: 'Closed' }
 ])('catalog review status separates $analysisState analysis with $pendingSuggestions pending suggestions from applied=$applied', async ({ analysisState, pendingSuggestions, applied, label }) => {
   const writes: string[] = [];
-  const review = { id: 'eeeeeeeeeeeeeeeeeeeeeeee', albumId: '111111111111111111111111', revision: 1, title: 'Existing Album task', pendingSuggestions,
+  const review = { id: 'eeeeeeeeeeeeeeeeeeeeeeee', albumId: '111111111111111111111111', albumTitle: 'Existing Album', revision: 1, title: 'Existing Album task', pendingSuggestions,
     createdAt: '2026-10-01T00:00:00.000Z', updatedAt: '2026-10-01T00:00:00.000Z', startedByMe: true,
     state: applied ? 'applied' : 'reviewing', analysis: { ...detail().analysis, state: analysisState } };
   stubFetch(vi.fn(async (path: string, init: RequestInit) => {
@@ -463,7 +468,7 @@ test.each([
 });
 
 test('completed catalog reviews describe applied changes rather than an import publication', async () => {
-  const review = { id: 'eeeeeeeeeeeeeeeeeeeeeeee', albumId: '111111111111111111111111', revision: 2, title: 'Corrected existing Album', pendingSuggestions: 1, createdAt: '2026-10-01T00:00:00.000Z', updatedAt: '2026-10-01T00:00:00.000Z', startedByMe: true, state: 'applied', analysis: detail().analysis };
+  const review = { id: 'eeeeeeeeeeeeeeeeeeeeeeee', albumId: '111111111111111111111111', albumTitle: 'Existing Album', revision: 2, title: 'Corrected existing Album', pendingSuggestions: 1, createdAt: '2026-10-01T00:00:00.000Z', updatedAt: '2026-10-01T00:00:00.000Z', startedByMe: true, state: 'applied', analysis: detail().analysis };
   stubFetch(vi.fn(async () => json({ items: [review], counts: { all: 1, analyzing: 0, awaitingReview: 0, needsAttention: 0, completed: 1 }, nextCursor: null })));
   mount('/admin/imports?source=catalogReviews');
   await screen.findByRole('heading', { name: 'Corrected existing Album' });
@@ -474,6 +479,66 @@ test('completed catalog reviews describe applied changes rather than an import p
   expect(screen.queryByText('Suggestions awaiting review · 1')).not.toBeInTheDocument();
   expect(screen.queryByText('Publication')).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Publish Album' })).not.toBeInTheDocument();
+});
+
+test('an unfinished Album completion card offers Discard completion naming its catalog Album; confirming reads the queue again without the card, a running Luna AI disables it, and an applied card offers none', async () => {
+  const base = { albumId: '111111111111111111111111', albumTitle: 'Catalog Album title', pendingSuggestions: 0, createdAt: '2026-10-01T00:00:00.000Z', updatedAt: '2026-10-01T00:00:00.000Z', startedByMe: true };
+  const open = { ...base, id: 'eeeeeeeeeeeeeeeeeeeeeeee', revision: 3, title: 'Draft Album title', state: 'reviewing', analysis: { ...detail().analysis, state: 'complete' } };
+  const luna = { ...base, id: 'ffffffffffffffffffffffff', revision: 1, title: 'Album completion with Luna AI', state: 'reviewing', analysis: { ...detail().analysis, state: 'running' } };
+  const closed = { ...base, id: 'dddddddddddddddddddddddd', revision: 2, title: 'Applied Album completion', state: 'applied', analysis: detail().analysis };
+  let discarded = false; const writes: Array<{ path: string; body: Record<string, unknown> }> = [];
+  stubFetch(vi.fn(async (path: string, init: RequestInit) => {
+    if (init.method === 'POST') {
+      const body = JSON.parse(String(init.body)); writes.push({ path, body }); discarded = true;
+      return json({ discarded: { id: open.id, albumId: open.albumId }, receipt: { operationId: body.operationId, kind: 'discard', revision: 4 } });
+    }
+    const items = discarded ? [luna, closed] : [open, luna, closed];
+    return json({ items, counts: { all: items.length, analyzing: 1, awaitingReview: items.length - 1, needsAttention: 0, completed: 1 }, nextCursor: null });
+  }));
+  mount('/admin/imports?source=catalogReviews');
+  const card = (title: string) => within(screen.getByRole('heading', { name: title }).closest('li')!);
+  const action = await waitFor(() => card('Draft Album title').getByRole('button', { name: 'Discard completion' }));
+  expect(action).not.toHaveClass(styles.primary);
+  // A running Luna AI disables the action with its reason as its description; an applied completion offers none.
+  const busy = await waitFor(() => card('Album completion with Luna AI').getByRole('button', { name: 'Discard completion' }));
+  expect(busy).toBeDisabled(); expect(busy).toHaveAccessibleDescription('Stop Luna AI before discarding this completion.');
+  expect(card('Applied Album completion').queryByRole('button', { name: 'Discard completion' })).not.toBeInTheDocument();
+  fireEvent.click(action);
+  const dialog = within(screen.getByRole('dialog', { name: 'Discard this Album completion?' }));
+  expect(dialog.getByText('Catalog Album title')).toBeVisible();
+  expect(dialog.getByText('Draft Album title')).toBeVisible();
+  expect(writes).toEqual([]);
+  fireEvent.click(dialog.getByRole('button', { name: 'Discard completion' }));
+  await waitFor(() => expect(screen.queryByRole('heading', { name: 'Draft Album title' })).not.toBeInTheDocument());
+  expect(writes).toEqual([{ path: `/api/admin/v1/catalog-reviews/${open.id}/discard`, body: { expectedRevision: 3, operationId: expect.any(String) } }]);
+  expect(screen.getByRole('heading', { name: 'Album completion with Luna AI' })).toBeVisible();
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+});
+
+test('a card whose review page left a change with an unknown outcome keeps Discard completion disabled until that change is confirmed', async () => {
+  const open = { albumId: '111111111111111111111111', albumTitle: 'Catalog Album title', pendingSuggestions: 0, createdAt: '2026-10-01T00:00:00.000Z', updatedAt: '2026-10-01T00:00:00.000Z',
+    startedByMe: true, id: 'eeeeeeeeeeeeeeeeeeeeeeee', revision: 3, title: 'Draft Album title', state: 'reviewing', analysis: { ...detail().analysis, state: 'complete' } };
+  let lost = true; const writes: string[] = [];
+  stubFetch(vi.fn(async (path: string, init: RequestInit) => {
+    if (init.method === 'PATCH') {
+      writes.push(path);
+      if (lost) { lost = false; throw new TypeError('Synthetic transport loss'); }
+      return json({ receipt: { operationId: JSON.parse(String(init.body)).operationId } });
+    }
+    return json({ items: [open], counts: { all: 1, analyzing: 0, awaitingReview: 1, needsAttention: 0, completed: 0 }, nextCursor: null });
+  }));
+  // The review page's buffered save, whose response was lost before the administrator returned to the queue.
+  const save = new AdminCommand(z.object({ receipt: z.object({ operationId: z.string() }) }));
+  adminWorkspace.retain(`catalog-review-command:${open.id}`, save, adminWorkspace.capture());
+  save.run(`/catalog-reviews/${open.id}`, { expectedRevision: 3 });
+  await waitFor(() => expect(save.getSnapshot().error).toBe('unknown'));
+  mount('/admin/imports?source=catalogReviews');
+  const action = await waitFor(() => within(screen.getByRole('heading', { name: 'Draft Album title' }).closest('li')!).getByRole('button', { name: 'Discard completion' }));
+  expect(action).toBeDisabled();
+  // Confirming the original intent (on its page, or here) enables the action without another queue read.
+  act(() => save.retry());
+  await waitFor(() => expect(action).toBeEnabled());
+  expect(writes).toEqual([`/api/admin/v1/catalog-reviews/${open.id}`, `/api/admin/v1/catalog-reviews/${open.id}`]);
 });
 
 test('the project edit action opens Draft even after a prior Review visit and sends no mutation', async () => {

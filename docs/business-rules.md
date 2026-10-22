@@ -765,7 +765,10 @@ The wire protocol and operational bounds are documented in
   manual editing. The action is shown disabled, with its reason, for an Album
   that cannot have a review.
   While an unapplied review of the Album exists whose source is current, the
-  action opens that review; creating another needs an explicit choice.
+  action opens the newest such review; creating another needs an explicit
+  choice. A discarded review is never opened again: once it is discarded, the
+  action opens another such review if one exists, and otherwise creates a new
+  one.
 - Existing-Album reviews share the durable analysis, grant, concurrency and
   provider-call limits of imports, and use metadata lookup as described in
   Administrator Metadata Lookup. Opening a review or editing its private draft
@@ -821,8 +824,31 @@ The wire protocol and operational bounds are documented in
   Applying never adds, removes or replaces members or their media and changes
   member order only through Disc and Track Numbers; artwork and visibility are
   unchanged, and MediaTrack Credits change only as described below. Applied
-  reviews remain read-only; further corrections use the current Web catalog
-  editor or a new Web review.
+  reviews remain read-only and cannot be discarded; further corrections use
+  the current Web catalog editor or a new Web review.
+- An administrator can discard an unapplied existing-Album review, whatever
+  its source status, from its review page or from the workbench's review
+  queue, through a separate confirmation that names the Album and says that
+  the catalog does not change. Discarding removes the review's private draft,
+  conflict answers, Luna suggestions, identity decisions and metadata lookup
+  run with its results. It never changes the Album, its members, Credits,
+  Artists, Organizations or expected tracklist, and a review stages no media
+  or artwork, so nothing else needs cleanup. A queued, running or retrying
+  lookup run ends with the review: nothing it still receives is stored,
+  although a request already sent is not recalled. Discarding is refused
+  while the review's Luna analysis is queued or running; stopping Luna AI
+  first permits it. A Luna call already sent still counts against the daily
+  allowance; its answer, like any ambiguous outcome, is dropped with the
+  review and never replayed. An applied review cannot be discarded, and when
+  an apply and a discard of one review meet, exactly one takes effect.
+  Discarding binds the last administrator change its confirmation showed: a
+  later administrator change refuses it, while lookup and Luna progress do
+  not. A retry of the discard with its original intent returns the original
+  result; any other request for a discarded review, including a retry of an
+  earlier change or of its creation, reports it as discarded and changes
+  nothing. Only the Album's ID, who created and discarded the review and
+  when, and its creation and discard receipts remain, so retries can be
+  answered; a discarded review is never listed or opened again.
 - Applying a review's Artist entries replaces the Album's primary and featured
   Artist Credits with them, with their roles and join phrases, through the
   canonical Credit lifecycle. The new Credits take the positions of the
@@ -2101,9 +2127,10 @@ The wire protocol and operational bounds are documented in
   the members the review captured. A review runs at most one automatic lookup,
   including that run's automatic source retries. Applying is refused while a
   run is queued, running or retrying automatically. The Album's deletion or
-  loss of readiness, or the review's captured source no longer being current,
-  ends an active run. Its results, conflicts and answers stay in the review
-  and reach the catalog only when the review is applied.
+  loss of readiness, the review's captured source no longer being current, or
+  discarding the review ends an active run. Its results, conflicts and answers
+  stay in the review unless it is discarded, and reach the catalog only when
+  the review is applied.
 - Applied Artist entries keep the release's credited names, name order and join
   phrases. The entry after a featuring phrase such as `feat.`, and every later
   entry, is featured and the others are primary; the summary and the publication

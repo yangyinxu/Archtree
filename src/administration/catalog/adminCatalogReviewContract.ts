@@ -2,15 +2,18 @@
  * Exports
  *   Types: CatalogReviewField, CatalogReviewSourceTrack, CatalogReviewSource, CatalogReviewApplied,
  *          CatalogReviewAppliedRecord, CatalogReviewReceipt, CatalogReviewDraft, CatalogReviewDetail,
- *          CatalogReviewResponse, CatalogReviewWorkbench, CreateCatalogReview, CatalogReviewIneligibility,
- *          CatalogReviewEligibility, EditCatalogReview, ApplyCatalogReview, CatalogReviewShownPreselection,
- *          CatalogReviewShownIdWrite, CatalogReviewIdentityDecision, DecideCatalogReviewIdentities,
- *          CatalogReviewCreditView, CatalogReviewBoundRecord, CatalogReviewIdentityResponse,
- *          CatalogReviewCapturedSubject, CatalogReviewCapturedCredit, CatalogReviewCapturedCredits,
- *          CatalogReviewMemberDuration, CatalogReviewMemberCapture, CatalogReviewCapture
+ *          CatalogReviewResponse, CatalogReviewWorkbench, DiscardCatalogReview, CatalogReviewTombstoneReceipt,
+ *          CatalogReviewTombstone, CatalogReviewDiscardResponse, CreateCatalogReview,
+ *          CatalogReviewIneligibility, CatalogReviewEligibility, EditCatalogReview, ApplyCatalogReview,
+ *          CatalogReviewShownPreselection, CatalogReviewShownIdWrite, CatalogReviewIdentityDecision,
+ *          DecideCatalogReviewIdentities, CatalogReviewCreditView, CatalogReviewBoundRecord,
+ *          CatalogReviewIdentityResponse, CatalogReviewCapturedSubject, CatalogReviewCapturedCredit,
+ *          CatalogReviewCapturedCredits, CatalogReviewMemberDuration, CatalogReviewMemberCapture,
+ *          CatalogReviewCapture
  *   Constants: CATALOG_REVIEW_MAX_FIELDS, CATALOG_REVIEW_MAX_MEMBER_CREDITS, CATALOG_REVIEW_MAX_DECISIONS
  * @end-catalog */
 
+import type { ObjectId } from 'mongodb';
 import { ADMIN_IMPORT_LIMITS, type ImportDate, type ImportDuplicateCandidate, type ImportReceipt, type AdminImportDetail, type ImportWorkbenchFilter } from '../import/adminImportContract';
 import type { ImportArtistEntry, ImportDraftV2, ImportSuggestionV2 } from '../import/adminImportDraft';
 import type { ExpectedTracklistRow } from '../../services/catalog/albumExpectedTracklist';
@@ -42,10 +45,11 @@ export type CatalogReviewApplied = { operationId: string; at: string; fields: Ca
 export type CatalogReviewAppliedRecord = CatalogReviewApplied & { memberCredits?: string[] };
 /**
  * `lookup`, `lookup-retry`, `lookup-choose`, `lookup-resolve` and `decisions` receipts are stored and replayed, but the detail never
- * lists them (LEGACY_REVIEW_RECEIPT_KINDS).
+ * lists them (LEGACY_REVIEW_RECEIPT_KINDS). `discard` answers only POST /:id/discard; no detail lists it, since a discarded review
+ * has none.
  */
 export type CatalogReviewReceipt = Omit<ImportReceipt, 'kind'> & {
-    kind: 'create' | 'edit' | 'analyze' | 'adopt' | 'cancel-analysis' | 'apply' | 'lookup' | 'lookup-retry' | 'lookup-choose' | 'lookup-resolve' | 'decisions';
+    kind: 'create' | 'edit' | 'analyze' | 'adopt' | 'cancel-analysis' | 'apply' | 'lookup' | 'lookup-retry' | 'lookup-choose' | 'lookup-resolve' | 'decisions' | 'discard';
 };
 /**
  * A review's draft: Draft v2, plus the review-only values a review captured for metadata lookup holds (format 3): the Album's
@@ -67,11 +71,27 @@ export type CatalogReviewDetail = {
     receipts: CatalogReviewReceipt[];
 };
 export type CatalogReviewResponse = { item: CatalogReviewDetail; receipt: CatalogReviewReceipt | null };
+/** `albumTitle` is the catalog Album's title as the review captured it; `title` is the draft's. */
 export type CatalogReviewWorkbench = {
     items: Array<Pick<CatalogReviewDetail, 'id' | 'revision' | 'createdAt' | 'updatedAt' | 'startedByMe' | 'state' | 'analysis'> &
-        { albumId: string; title: string; pendingSuggestions: number }>;
+        { albumId: string; albumTitle: string; title: string; pendingSuggestions: number }>;
     counts: Record<ImportWorkbenchFilter, number>; nextCursor: string | null;
 };
+/** POST /catalog-reviews/:id/discard. */
+export type DiscardCatalogReview = { operationId: string; expectedRevision: number };
+/** A receipt a discarded review keeps: its creation's (as stored) and its discard's. */
+export type CatalogReviewTombstoneReceipt = { operationId: string; kind: 'create' | 'discard'; revision: number; actorId: string; hash: string; at: Date };
+/**
+ * What remains of a discarded review at its ID in `adminAlbumImports` (server-only, never listed, opened or projected): the Album's
+ * ID, who created (`actorId`, `createdAt`) and discarded it (`discardedBy`, `discardedAt`) and its creation and discard receipts,
+ * so retries stay answerable. Its purpose keeps it out of every review, import, lookup and Luna query.
+ */
+export type CatalogReviewTombstone = {
+    _id: ObjectId; purpose: 'catalogReviewDiscarded'; actorId: string; createdAt: Date; updatedAt: Date; revision: number;
+    albumId: string; discardedAt: Date; discardedBy: string; receipts: CatalogReviewTombstoneReceipt[];
+};
+/** The discard's answer, replayed for its original intent. */
+export type CatalogReviewDiscardResponse = { discarded: { id: string; albumId: string }; receipt: CatalogReviewReceipt };
 
 /**
  * POST /catalog-reviews; source data, Credits context and naming evidence are read from the server. `another: true` creates a
@@ -183,7 +203,7 @@ export type CatalogReviewCapture = {
 // POST creates a review and, where metadata lookup is available, queues its one automatic run in the same transaction
 // (catalogReviewLookupRequests.ts); GET /eligibility?albumId= reads what the Web Album page's action shows (CatalogReviewEligibility).
 // GET detail, POST analyze, adopt and cancel-analysis mirror import operation/revision requests.
-// GET /:id/lookup reads the review's lookup view and summary; POST /:id/lookup ({operationId, expectedRevision, kind, text}) and
+// GET /:id/lookup reads the review's lookup view and summary; POST /:id/lookup ({operationId, expectedRevision, kind, text, artist?}) and
 // POST /:id/lookup/retry ({operationId, expectedRevision}) queue a run with a `lookup` or `lookup-retry` receipt (8 KB bodies);
 // POST /:id/lookup/choose ({operationId, expectedRevision, run, candidateKey}, 8 KB) applies a candidate or none to the review's
 // draft with a `lookup-choose` receipt, and POST /:id/lookup/resolve ({operationId, expectedRevision, run, candidateKey, answers},
@@ -197,4 +217,7 @@ export type CatalogReviewCapture = {
 // selected `fields` and `memberCredits` with the preselections and ID writes it showed and the detail's `valueRevision` as
 // `expectedValueRevision`.
 // GET /:id/lookup/candidates/:key/artwork is a transient WebP preview (catalogReviewLookupRequests.ts, adminImportLookupCover.ts).
+// POST /:id/discard ({operationId, expectedRevision}, 96 KB) replaces an unapplied review with a tombstone and deletes its lookup
+// record (adminCatalogReviewDiscard.ts); every other /:id route answers a discarded review with 404 ADMIN_CATALOG_REVIEW_DISCARDED
+// (the artwork preview stays a bodiless 404). List items carry `albumTitle`.
 // Every endpoint returns private no-store data; no asset or publication endpoint exists.

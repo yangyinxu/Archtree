@@ -44,8 +44,9 @@ export function CatalogReviewStart({ item, disabled = false, note }: { item: Cat
     mutation.command.acknowledge();
     navigate(`/admin/catalog-reviews/${id}`);
   }, [mutation.result, navigate]);
-  // A creation refused because a review opened meanwhile (or anything else changed) shows what the Album offers now.
-  useEffect(() => { if (mutation.error === 'conflict') void query.refetch(); }, [mutation.error]);
+  // A creation refused because a review opened meanwhile (or anything else changed), or because a retried creation's review was
+  // discarded meanwhile, shows what the Album offers now.
+  useEffect(() => { if (mutation.error === 'conflict' || mutation.error === 'discarded') void query.refetch(); }, [mutation.error]);
   if (item.kind !== 'album') return null;
   const state = query.data, lookup = state?.lookupAvailable ?? true;
   // Every reason shown under the buttons describes them, so a disabled button is announced with why.

@@ -8,8 +8,9 @@ import { ADMIN_RELOAD_REQUIRED, adminWorkspace } from './adminWorkspace';
 interface Intent { path: string; body: string; operationId: string; method: string }
 /**
  * `error` names its message (`common.<error>`): an outcome kind (`unknown`, `conflict`, `error`, `reload`), `musicbrainz_id_in_use`
- * (another Artist, or another Organization, already keeps the MusicBrainz ID an edit sets), or an existing-Album review's metadata
- * lookup refusal (`lookup_<code>`).
+ * (another Artist, or another Organization, already keeps the MusicBrainz ID an edit sets), an existing-Album review's metadata
+ * lookup refusal (`lookup_<code>`), or `discarded` (the Album completion was discarded meanwhile). A name from the command's own
+ * refusal map is resolved by its caller instead.
  */
 interface CommandState<T> { running: boolean; intent: Intent | null; result: T | null; error: string | null }
 /** Clears catalog projections after a confirmed global edit, while retaining identity and Save membership facts. */
@@ -24,7 +25,8 @@ export class AdminCommand<T extends { receipt: { operationId: string } }> {
   private state: CommandState<T> = { running: false, intent: null, result: null, error: null };
   private listeners = new Set<() => void>();
   private owner = adminWorkspace.capture();
-  constructor(private schema: z.ZodType<T>, private confirmed: () => void = () => {}) {}
+  /** `refusals` maps a definite refusal's error code to this command's own message name, checked before the generic conflict. */
+  constructor(private schema: z.ZodType<T>, private confirmed: () => void = () => {}, private refusals: Readonly<Record<string, string>> = {}) {}
   getSnapshot = () => this.state;
   subscribe = (fn: () => void) => { this.listeners.add(fn); return () => { this.listeners.delete(fn); }; };
   private update(next: CommandState<T>) { this.state = next; for (const fn of this.listeners) fn(); }
@@ -54,9 +56,13 @@ export class AdminCommand<T extends { receipt: { operationId: string } }> {
       // A source import or review saved by a newer release refuses this change before admission.
       if (error instanceof ApiError && error.kind === 'http' && error.status === 409 && error.code === ADMIN_IMPORT_RELOAD_REQUIRED) { this.update({ running: false, intent: null, result: null, error: 'reload' }); return; }
       if (error instanceof ApiError && error.kind === 'http' && error.status === 409 && error.code === 'ADMIN_CATALOG_MUSICBRAINZ_ID_IN_USE') { this.update({ running: false, intent: null, result: null, error: 'musicbrainz_id_in_use' }); return; }
+      const code = error instanceof ApiError && error.kind === 'http' ? error.code ?? '' : '';
+      // An Album completion discarded meanwhile, and a command's own refusals, are definite and have their own messages.
+      const named = code === 'ADMIN_CATALOG_REVIEW_DISCARDED' && (error as ApiError).status === 404 ? 'discarded' : Object.hasOwn(this.refusals, code) ? this.refusals[code] : null;
+      if (named) { this.update({ running: false, intent: null, result: null, error: named }); return; }
       // A metadata lookup refusal (ADMIN_IMPORT_LOOKUP_*, at any status, a 503 unavailable included) has its own message and is
       // definite: nothing is retried, as useAdminMutation.ts treats it.
-      const own = /^ADMIN_IMPORT_(LOOKUP_\w+)$/.exec(error instanceof ApiError && error.kind === 'http' ? error.code ?? '' : '')?.[1];
+      const own = /^ADMIN_IMPORT_(LOOKUP_\w+)$/.exec(code)?.[1];
       if (own) { this.update({ running: false, intent: null, result: null, error: own.toLowerCase() }); return; }
       const definite = error instanceof ApiError && error.kind === 'http' && [400, 401, 403, 404, 409, 422].includes(error.status ?? 0);
       this.update({ running: false, intent: definite ? null : intent, result: null, error: definite ? (error instanceof ApiError && error.status === 409 ? 'conflict' : 'error') : 'unknown' });

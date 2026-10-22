@@ -32,6 +32,7 @@ import { adminImportDetail, adoptAdminProjectSuggestions, analyzeAdminProject, C
 import { importCandidateProjection, importCandidateRevision, readyImportCandidate } from '../import/adminImportIdentity';
 import { OpenAiImportAnalysisProvider, type ImportAnalysisProvider } from '../import/adminImportProvider';
 import { catalogReviewAppliedView, catalogReviewCappedDraft, catalogReviewDraftView, catalogReviewSourceView, importDraftV2View, importDraftVersion, importDraftWritable, importProjectV2View, LEGACY_REVIEW_RECEIPT_KINDS, legacyManifestView, legacyReceiptsView } from '../import/adminImportDraftCompat';
+import { readCatalogReviewTombstone } from './adminCatalogReviewDiscard';
 import {
     CATALOG_REVIEW_MAX_FIELDS, type CatalogReviewCapturedSubject, type CatalogReviewDetail, type CatalogReviewEligibility, type CatalogReviewField, type CatalogReviewIneligibility,
     type CatalogReviewReceipt, type CatalogReviewResponse, type CatalogReviewSource, type CatalogReviewWorkbench
@@ -298,7 +299,8 @@ function catalogReviewValues(album: any, revision: string, tracks: any[]): { sou
  * check: while an unapplied review of the Album whose source is current exists, creation is 409 ADMIN_CATALOG_REVIEW_OPEN unless
  * the body says `another: true` (any other `another` is invalid input); a replay returns its stored response first, a stale
  * revision or an unavailable membership keeps its own refusal, and an Album with values a review cannot hold (catalogReviewValues)
- * is invalid input. `hooks.beforeInsert` runs in the creation transaction right before the insert: it
+ * is invalid input. A replay of a discarded review's creation is 404 ADMIN_CATALOG_REVIEW_DISCARDED (another intent at its ID an
+ * operation conflict) and stores nothing. `hooks.beforeInsert` runs in the creation transaction right before the insert: it
  * may convert `doc` (advancing its revision without a receipt) and store records keyed by its ID (the review's metadata lookup
  * requests queue its automatic run there, which this module never imports); its refusal stores nothing. The create receipt stays
  * at revision 1 and the response shows `doc` as the hook left it.
@@ -312,6 +314,12 @@ export async function createCatalogReview(actor: string, raw: unknown,
     return withImportAdmin(actor, async session => {
         const prior = await importCollection().findOne({ _id, ...reviewFilter }, { session });
         if (prior) { const receipt = prior.receipts[0]; if (receipt.hash !== hash || receipt.actorId !== actor) return fail(409, 'ADMIN_IMPORT_OPERATION_CONFLICT'); return response(prior, actor, receipt, session); }
+        // A creation whose review was discarded never inserts it again: the tombstone keeps its ID.
+        const discarded = await readCatalogReviewTombstone(_id, session);
+        if (discarded) {
+            const created = discarded.receipts.find(receipt => receipt.kind === 'create');
+            return created && created.hash === hash && created.actorId === actor ? fail(404, 'ADMIN_CATALOG_REVIEW_DISCARDED') : fail(409, 'ADMIN_IMPORT_OPERATION_CONFLICT');
+        }
         // A concurrent creation conflicts here and runs again, when the open check sees the review this one stored.
         await getDb()!.collection<{ _id: string; revision: number }>('adminImportAnalysisSlots').updateOne({ _id: CATALOG_REVIEW_CREATION_FENCE_ID }, { $inc: { revision: 1 } }, { session, upsert: true });
         const album = await readAdminCatalogRecord('album', input.albumId as string, session); if (!album) return missing();
@@ -469,6 +477,7 @@ export async function listCatalogReviews(actor: string, query: Record<string, un
         const docs = await importCollection().find({ $and: [base, filters[filter as ImportWorkbenchFilter], page] }, { session, projection: { catalogCapture: 0 } }).sort({ createdAt: -1, _id: -1 }).limit(limit + 1).maxTimeMS(3_000).toArray();
         const more = docs.length > limit; docs.splice(limit); const last = docs[docs.length - 1];
         // Rows read the same Draft v2 allowlist as the detail, so a pending Artist suggestion counts too.
-        return { counts, items: docs.map(doc => { const item = adminImportDetail(doc, actor); return { id: item.id, revision: item.revision, createdAt: item.createdAt, updatedAt: item.updatedAt, startedByMe: item.startedByMe, state: doc.catalogApplied ? 'applied' as const : 'reviewing' as const, analysis: item.analysis, albumId: catalogReviewSourceView(doc.catalogSource).album.id, title: item.draft.album.title, pendingSuggestions: item.suggestions.filter(value => value.decision === 'pending').length }; }), nextCursor: more && last ? Buffer.from(JSON.stringify({ id: String(last._id), at: last.createdAt.toISOString(), scope })).toString('base64url') : null };
+        // `albumTitle` is the catalog Album's title as the review captured it, which the discard confirmation names; `title` is the draft's.
+        return { counts, items: docs.map(doc => { const item = adminImportDetail(doc, actor), source = catalogReviewSourceView(doc.catalogSource); return { id: item.id, revision: item.revision, createdAt: item.createdAt, updatedAt: item.updatedAt, startedByMe: item.startedByMe, state: doc.catalogApplied ? 'applied' as const : 'reviewing' as const, analysis: item.analysis, albumId: source.album.id, albumTitle: source.album.title, title: item.draft.album.title, pendingSuggestions: item.suggestions.filter(value => value.decision === 'pending').length }; }), nextCursor: more && last ? Buffer.from(JSON.stringify({ id: String(last._id), at: last.createdAt.toISOString(), scope })).toString('base64url') : null };
     });
 }

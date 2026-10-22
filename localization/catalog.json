@@ -1466,6 +1466,55 @@
       ],
       "variables": {}
     },
+    "admin.catalog_review.discard": {
+      "description": "Album completion page and workbench review queue: secondary action that opens the confirmation to discard an unapplied completion.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.discard_applied": {
+      "description": "Album completion discard: refusal shown when the completion was already applied to the Album.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.discard_confirm": {
+      "description": "Album completion discard confirmation: button that discards the completion.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.discard_copy": {
+      "description": "Album completion discard confirmation: what discarding removes, and that the catalog Album does not change.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.discard_luna": {
+      "description": "Album completion discard: reason the action is unavailable while Luna AI is queued or running.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.discard_title": {
+      "description": "Album completion discard confirmation: dialog title.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.discarded": {
+      "description": "Album completion page: notice shown once the completion was discarded.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.catalog_review.draft_saved": {
       "description": "Album completion editor: status after the private completion draft is saved.",
       "delivery": [
@@ -2853,6 +2902,13 @@
     },
     "admin.common.conflict": {
       "description": "Administrator workbench: common conflict.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.common.discarded": {
+      "description": "Administrator workbench: an Album completion change or retry refused because the completion was already discarded.",
       "delivery": [
         "runtime"
       ],

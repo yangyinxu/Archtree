@@ -24,6 +24,7 @@
  *   - multiple manual changes open confirmation at its first difference without applying the Album
  *   - changed metadata remains reviewable but cannot be applied and 640px reflow stays accessible
  *   - User view and revoked role remove private reviews and stop their requests
+ *   - discarding an Album completion from the workbench removes its card
  *   - an ordinary account never requests private catalog reviews
  * @end-catalog */
 
@@ -102,6 +103,8 @@ function remainingCatalogItems(kind: RemainingCatalogKind): CatalogItem[] {
 /** Only fabricated catalog data and route responses are used; no provider, storage or account is contacted. */
 async function setup(page: Page, administrator = true, initialReleaseDate: { year: number; month: number | null; day: number | null } | null = null, presentation: CatalogPresentation = {}) {
   let album = catalogAlbum(), review = catalogReview(), created = false, denied = false, finishAnalysis = false;
+  // A discarded review leaves a tombstone: every read of it is then refused as discarded until a creation stores another.
+  let discarded = false;
   let artworkFailed = presentation.cover === 'failed';
   album.fields.releaseDate = initialReleaseDate;
   album.fields.title = presentation.title ?? album.fields.title;
@@ -212,7 +215,7 @@ async function setup(page: Page, administrator = true, initialReleaseDate: { yea
         const counts = { all: created ? 1 : 0, analyzing: created && ['queued', 'running'].includes(review.analysis.state) ? 1 : 0,
           awaitingReview: created && review.state === 'reviewing' ? 1 : 0, needsAttention: 0, completed: created && review.state === 'applied' ? 1 : 0 };
         return route.fulfill({ json: { items: created ? [{ id: review.id, revision: review.revision, createdAt: review.createdAt, updatedAt: review.updatedAt, startedByMe: review.startedByMe,
-          state: review.state, analysis: review.analysis, albumId, title: review.source.album.title, pendingSuggestions: review.suggestions.filter(value => value.decision === 'pending').length }] : [], counts, nextCursor: null }, headers });
+          state: review.state, analysis: review.analysis, albumId, albumTitle: review.source.album.title, title: review.source.album.title, pendingSuggestions: review.suggestions.filter(value => value.decision === 'pending').length }] : [], counts, nextCursor: null }, headers });
       }
       expect(method).toBe('POST');
       const body = request.postDataJSON(); writes.push({ path, method, body });
@@ -223,12 +226,13 @@ async function setup(page: Page, administrator = true, initialReleaseDate: { yea
       review = { ...fixture, revision: lookupAvailable ? 2 : 1, source: { ...fixture.source, album: { ...fixture.source.album, title: album.fields.title, revision: album.revision } },
         draft: { ...fixture.draft, album: { ...fixture.draft.album, title: album.fields.title, ...(lookupAvailable ? { expectedTracklist: null } : {}) } },
         analysis: { ...fixture.analysis, state: 'idle', generation: 0, operationId: null, completedChunks: 0, totalChunks: 0, attemptsUsed: 0 }, suggestions: [] };
-      created = true;
+      created = true; discarded = false;
       if (lookupAvailable) queue({ trigger: 'catalog', submitted: null });
       const value = { operationId: String(body.operationId), kind: 'create' as const, revision: 1 };
       review.receipts = [value];
       return route.fulfill({ status: 201, json: { item: review, receipt: value }, headers });
     }
+    if (discarded && path.startsWith(`/api/admin/v1/catalog-reviews/${reviewId}`)) return route.fulfill({ status: 404, json: { code: 'ADMIN_CATALOG_REVIEW_DISCARDED' }, headers });
     if (path === `/api/admin/v1/catalog-reviews/${reviewId}`) {
       if (method === 'GET') {
         if (finishAnalysis && review.analysis.state === 'queued') {
@@ -273,6 +277,12 @@ async function setup(page: Page, administrator = true, initialReleaseDate: { yea
     if (path.startsWith(`/api/admin/v1/catalog-reviews/${reviewId}/`) && method === 'POST') {
       const body = request.postDataJSON(); writes.push({ path, method, body });
       expect(body.expectedRevision).toBe(review.revision);
+      if (path.endsWith('/discard')) {
+        // The server keeps only a tombstone: the review leaves the queue and the Album page, and its lookup run ends.
+        expect(Object.keys(body).sort()).toEqual(['expectedRevision', 'operationId']);
+        created = false; discarded = true; lookup = null;
+        return route.fulfill({ json: { discarded: { id: reviewId, albumId }, receipt: { operationId: String(body.operationId), kind: 'discard', revision: review.revision + 1 } }, headers });
+      }
       if (path.endsWith('/analyze')) {
         review = { ...review, revision: review.revision + 1, analysis: { ...review.analysis, state: 'queued', generation: 1, operationId: body.operationId } };
         return route.fulfill({ status: 202, json: receipt(body, 'analyze'), headers });
@@ -1699,6 +1709,53 @@ test('User view and revoked role remove private reviews and stop their requests'
   await expect(page.getByText(label('admin.view.required'))).toBeVisible();
   expect(api.reads.filter(path => path.includes('/catalog-reviews'))).toHaveLength(afterLoss);
   expect(api.writes).toEqual([]);
+});
+
+for (const variant of localizedViewports) {
+  const { width } = variant;
+  test(`discarding an Album completion names the Album, returns to the Album page and a new completion can start at ${width}px ${variant.locale}`, async ({ page }) => {
+    locale = variant.locale;
+    await page.setViewportSize({ width, height: width === 1280 ? 720 : 844 });
+    const api = await setup(page); api.ready();
+    await enter(page, `/finitude/admin/catalog-reviews/${reviewId}`);
+    const discard = page.getByRole('button', { name: label('admin.catalog_review.discard'), exact: true });
+    await expect(discard).toBeEnabled(); await discard.click();
+    const dialog = page.getByRole('dialog', { name: label('admin.catalog_review.discard_title'), exact: true });
+    await expect(dialog.getByText(api.review().source.album.title, { exact: true })).toBeVisible();
+    await expect(dialog.getByText(label('admin.catalog_review.discard_copy'), { exact: true })).toBeVisible();
+    await expect(dialog.getByRole('button', { name: label('admin.common.cancel'), exact: true })).toBeFocused();
+    await reflow(page);
+    await capture(page, '40-completion-discard', width, false, false);
+    expect(api.writes).toEqual([]);
+    await dialog.getByRole('button', { name: label('admin.catalog_review.discard_confirm'), exact: true }).click();
+    await expect(page).toHaveURL(new RegExp(`/finitude/admin/catalog/album/${albumId}$`));
+    expect(api.writes.map(write => [write.path, write.body])).toEqual([[`/api/admin/v1/catalog-reviews/${reviewId}/discard`, { expectedRevision: 1, operationId: expect.any(String) }]]);
+    // The Album page offers a new completion, never the discarded one.
+    const actions = page.getByRole('group', { name: label('admin.catalog.edit'), exact: true });
+    const start = actions.getByRole('button', { name: label('admin.catalog_review.create'), exact: true });
+    await expect(start).toBeEnabled();
+    await expect(page.getByRole('link', { name: label('admin.workbench.open_review'), exact: true })).toHaveCount(0);
+    await start.click();
+    await page.getByRole('dialog', { name: label('admin.catalog_review.create') }).getByRole('button', { name: label('admin.catalog_review.create'), exact: true }).click();
+    await expect(page).toHaveURL(new RegExp(`/finitude/admin/catalog-reviews/${reviewId}$`));
+    const creation = api.writes.at(-1)!;
+    expect([creation.path, Object.keys(creation.body).sort()]).toEqual(['/api/admin/v1/catalog-reviews', ['albumId', 'expectedRevision', 'operationId']]);
+    await expect(page.getByRole('button', { name: label('admin.catalog_review.discard'), exact: true })).toBeVisible();
+  });
+}
+
+test('discarding an Album completion from the workbench removes its card', async ({ page }) => {
+  const api = await setup(page); api.ready();
+  await enter(page, '/finitude/admin/imports?source=catalogReviews');
+  const cards = page.getByRole('listitem').filter({ has: page.getByRole('link', { name: label('admin.workbench.open_review'), exact: true }) });
+  await expect(cards).toHaveCount(1);
+  await cards.getByRole('button', { name: label('admin.catalog_review.discard'), exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: label('admin.catalog_review.discard_title'), exact: true });
+  await expect(dialog.getByText(api.review().source.album.title, { exact: true })).toBeVisible();
+  await dialog.getByRole('button', { name: label('admin.catalog_review.discard_confirm'), exact: true }).click();
+  await expect(cards).toHaveCount(0);
+  await expect(page.getByText(label('admin.workbench.review_empty'), { exact: true })).toBeVisible();
+  expect(api.writes.map(write => write.path)).toEqual([`/api/admin/v1/catalog-reviews/${reviewId}/discard`]);
 });
 
 test('an ordinary account never requests private catalog reviews', async ({ page }) => {

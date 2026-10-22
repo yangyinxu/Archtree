@@ -171,7 +171,10 @@ completion and Start another completion, a reason under the disabled button),
 puts Convert to MP3 and Refresh status on a quieter row below in the same
 keyboard order, offers no separate manual-editing entry, and keeps that row
 and the title still while the eligibility read is pending, with an axe scan. An iTunes-only
-result says Use iTunes and flags every value it wrote.
+result says Use iTunes and flags every value it wrote. Discard completion on a
+review page names the catalog Album in its confirmation (Cancel focused, axe
+scan) and returns to the Album page, whose action then creates a new
+completion; on the workbench it removes the card.
 
 The historical 2026-08-19 MediaTrack amendment passed
 304/304 server tests, 214/214 Web unit/component tests, 148/148 integration
@@ -618,6 +621,14 @@ player control still works.
   confirm the buttons read Use iTunes and the values are flagged iTunes only.
   Repeat in Simplified Chinese (从 MusicBrainz 补全（免费）, 打开专辑补全, 保留当前,
   使用 MusicBrainz) and with a screen reader at 320 CSS px.
+- As an administrator, open an unfinished Album completion and choose Discard
+  completion. Confirm its confirmation names the Album and says the catalog
+  does not change; Cancel keeps the completion; confirming returns to the Album
+  page, where Complete from MusicBrainz (free) is offered again. While Luna AI
+  is queued or running, confirm the action is disabled with "Stop Luna AI
+  before discarding this completion."; an applied completion offers no
+  discard. Repeat from the workbench's Album completions queue, in Simplified
+  Chinese (放弃补全), and with a screen reader at 320 CSS px.
 - As an administrator, in English and then in Simplified Chinese, open an
   import's Draft section and Review and publish summary and an existing-Album
   review. Confirm every control that starts Luna reads "Use Luna AI (paid)" or

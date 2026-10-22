@@ -370,6 +370,26 @@ unapplied reviews of that captured Album ID and revision, and returns at most
 25, each then source-checked, within the usual 3-second bound: its cost grows
 with the number of stored reviews, applied ones included. No index changes.
 
+Discarding an unapplied review (`discardCatalogReview` in
+`src/administration/catalog/adminCatalogReviewDiscard.ts`) replaces its
+document, guarded by the revision it read, with a tombstone at the same `_id`
+(`purpose` `catalogReviewDiscarded`) that keeps only `actorId`, `createdAt`,
+`updatedAt`, `revision` (one past the review's), `albumId`, `discardedAt`,
+`discardedBy` and `receipts` (the create and discard receipts), and deletes
+the review's `adminImportLookups` record in the same transaction. Review reads
+and writes filter `purpose` `catalogReview`, imports `importPurposeFilter`,
+the lookup worker `lookupProjectFilter`, and the Luna worker's claim and
+capacity counts need an `analysis`, so nothing lists, counts, claims or
+finishes work on a tombstone, and the open-review scan never reaches one; its
+unique `_id` keeps a replayed creation from inserting the review again. A
+lookup step or Luna finish that runs after the discard finds no record or
+analysis and writes nothing; one that commits first makes the discard
+transaction retry. Tombstones, a few hundred bytes each, are kept so retries
+stay answerable; nothing deletes them. No collection, index or
+`requiredIndexRevision` changes. The discard is the first writer that
+deletes from `adminImportLookups`, so an account with collection-specific
+permissions needs delete access there besides insert/update before deploying.
+
 Playback Audio/Video GETs that briefly overlap an older stream may wait up to two
 seconds for an existing admission slot. The pending pool is bounded to 32 per
 process and eight per client; active limits and playback reserves do not increase.

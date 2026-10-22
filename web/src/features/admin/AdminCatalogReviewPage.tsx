@@ -3,14 +3,15 @@
  *   Functions: AdminCatalogReviewPage
  * Internal
  *   Types: ReviewBuffer, Stage
- *   Functions: hint, SummaryUnavailable, ReviewProject
+ *   Functions: hint, SummaryUnavailable, discardedError, ReviewProject
  *   Constants: ImportReview, CatalogReviewHints, CatalogReviewEmptyState, CatalogReviewApply,
- *              CatalogReviewConfirmation, CatalogReviewSummary
+ *              CatalogReviewConfirmation, CatalogReviewDiscard, CatalogReviewSummary
  * @end-catalog */
 
 import { lazy, Suspense, useEffect, useRef, useState, type ComponentProps, type ComponentType } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { Link, useParams } from 'react-router';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { Link, useNavigate, useParams } from 'react-router';
+import { ApiError } from '../../api/client';
 import { AdminGate, useAdminAccess, useAdminText } from './AdminAccess';
 import { AdminNav } from './AdminNav';
 import { adminEndpointRequest } from './adminTransport';
@@ -19,6 +20,7 @@ import { CatalogReviewDraftEditor } from './CatalogReviewDraftEditor';
 import { reviewChanges, reviewDraftChanges, reviewResponseSchema, type CatalogReview, type ReviewDraft } from './catalogReviewApi';
 import type { ApplyChoice } from './catalogReviewApplyModel';
 import type { Confirmation } from './CatalogReviewConfirmation';
+import type { CatalogReviewDiscard as Discard } from './CatalogReviewDiscard';
 import type { CatalogReviewSummary as Summary } from './CatalogReviewSummary';
 import { useCatalogReviewCommand } from './useCatalogReviewCommand';
 import { useOnline } from './useAdminOnline';
@@ -39,12 +41,21 @@ const CatalogReviewHints = lazy(() => import('./CatalogReviewHints').then(module
 const CatalogReviewEmptyState = lazy(() => import('./CatalogReviewEmptyState').then(module => ({ default: module.CatalogReviewEmptyState })));
 const CatalogReviewApply = lazy(() => import('./CatalogReviewApply').then(module => ({ default: module.CatalogReviewApply })));
 const CatalogReviewConfirmation = lazy(() => import('./CatalogReviewConfirmation').then(module => ({ default: module.CatalogReviewConfirmation })));
+/** A discard action whose chunk cannot load (a deploy replaced it) is left out; the summary's fallback already asks for a reload. */
+const CatalogReviewDiscard = lazy<ComponentType<ComponentProps<typeof Discard>>>(() => import('./CatalogReviewDiscard')
+  .then(module => ({ default: module.CatalogReviewDiscard }), () => ({ default: () => null })));
 /** Stands in for a lookup summary whose chunk cannot load (a deploy replaced it); manual editing stays usable. */
 function SummaryUnavailable() { const t = useAdminText(); return <p role="alert">{t('common.reload')}</p>; }
 const CatalogReviewSummary = lazy<ComponentType<ComponentProps<typeof Summary>>>(() => import('./CatalogReviewSummary')
   .then(module => ({ default: module.CatalogReviewSummary }), () => ({ default: SummaryUnavailable })));
 
-/** Existing-catalog suggestions stay private until a separately frozen field selection is approved. */
+/** A read or change of a review answered as discarded (another tab, or this one, discarded it). */
+const discardedError = (error: unknown) => error instanceof ApiError && error.kind === 'http' && error.status === 404 && error.code === 'ADMIN_CATALOG_REVIEW_DISCARDED';
+
+/**
+ * Existing-catalog suggestions stay private until a separately frozen field selection is approved. An unapplied review offers
+ * Discard completion after its Luna AI controls; a review discarded meanwhile shows only the discarded notice with Back.
+ */
 function ReviewProject({ id }: { id: string }) {
   const t = useAdminText(), access = useAdminAccess(), online = useOnline();
   const path = `/catalog-reviews/${id}`, bufferKey = `catalog-review-editor:${id}`;
@@ -57,8 +68,10 @@ function ReviewProject({ id }: { id: string }) {
   const query = useQuery({
     queryKey: ['admin-catalog-reviews', access.viewerId, access.epoch, access.generation, id],
     queryFn: ({ signal }) => adminEndpointRequest(path, reviewResponseSchema.refine(value => value.item.id === id), { signal }),
-    retry: false, gcTime: 0, refetchOnWindowFocus: 'always',
-    refetchInterval: query => online && ['queued', 'running'].includes(query.state.data?.item.analysis.state ?? '') ? 3000 : false
+    retry: false, gcTime: 0,
+    // A discarded review is never read again: no focus refetch or Luna poll after its 404.
+    refetchOnWindowFocus: query => discardedError(query.state.error) ? false : 'always',
+    refetchInterval: query => online && !discardedError(query.state.error) && ['queued', 'running'].includes(query.state.data?.item.analysis.state ?? '') ? 3000 : false
   });
   useEffect(() => {
     const item = query.data?.item;
@@ -86,6 +99,21 @@ function ReviewProject({ id }: { id: string }) {
   useEffect(() => { if (mutation.error === 'conflict') void query.refetch(); }, [mutation.error]);
   useEffect(() => { if (editor) adminWorkspace.retain(bufferKey, editor, access); }, [editor]);
   useEffect(() => { adminWorkspace.retain(`catalog-review-stage:${id}`, stage, access); }, [stage]);
+  const client = useQueryClient(), navigate = useNavigate();
+  const [gone, setGone] = useState(false);
+  // Any read of this review (its detail, lookup summary or identity rows) answered as discarded ends the page.
+  useEffect(() => client.getQueryCache().subscribe(({ query }) => {
+    if (query.queryKey[0] === 'admin-catalog-reviews' && query.queryKey[4] === id && discardedError(query.state.error)) setGone(true);
+  }), [client, id]);
+  const discarded = gone || mutation.error === 'discarded' || discardedError(query.error);
+  // Declared after the effects that retain the editor and stage, so it runs last and nothing of the review stays buffered.
+  useEffect(() => {
+    if (discarded) for (const name of ['catalog-review-editor', 'catalog-review-stage', 'catalog-review-command', 'catalog-review-discard']) adminWorkspace.forget(`${name}:${id}`);
+  }, [discarded]);
+  if (discarded) return <section className={styles.page}><AdminNav />
+    <Link className={styles.back} to="/admin/imports?source=catalogReviews">{t('common.back')}</Link>
+    <header className={styles.header}><div><h1 className={styles.title}>{t('catalog_review.title')}</h1></div></header>
+    <section className={styles.notice} role="status"><p>{t('catalog_review.discarded')}</p></section></section>;
   const item = confirmed;
   const active = Boolean(item && ['queued', 'running'].includes(item.analysis.state));
   const locked = mutation.running || Boolean(mutation.intent) || !online || item?.state === 'applied';
@@ -139,6 +167,10 @@ function ReviewProject({ id }: { id: string }) {
         {!item.capabilities.analysis && <p>{t('analysis.unavailable')}</p>}
         {item.analysis.generation >= 2 && <p>{t('catalog_review.analysis_limit')}</p>}
         {item.analysis.issue && <p role="status">{t(`issue.${item.analysis.issue}`)}</p>}
+        {/* Never primary, whatever the source status; unsaved edits do not block it, since its confirmation says they are removed. */}
+        <Suspense fallback={null}><CatalogReviewDiscard id={id} albumId={item.source.album.id} albumTitle={item.source.album.title} draftTitle={item.draft.album.title}
+          expectedRevision={item.revision} disabled={mutation.running || Boolean(mutation.intent) || active} reason={active ? 'catalog_review.discard_luna' : null}
+          onDiscarded={() => navigate(item.sourceStatus === 'unavailable' ? '/admin/imports?source=catalogReviews' : `/admin/catalog/album/${item.source.album.id}`)} /></Suspense>
       </>}
       <details className={styles.details}><summary>{t('catalog_review.context_title')}</summary><p>{t('catalog_review.context_copy')}</p><p>{t('catalog_review.manage_copy')}</p></details>
       <div className={styles.actions}><Link className={styles.link} to={originalHref}>{t('catalog_review.manage_original')}</Link></div>
