@@ -3542,7 +3542,7 @@
       "variables": {}
     },
     "admin.cover.editor_copy": {
-      "description": "Choose a ready image from an import project. Replacing or removing the cover requires its own confirmation.",
+      "description": "Choose a ready image from an import project or upload one from this computer. Replacing or removing the cover requires its own confirmation.",
       "delivery": [
         "runtime"
       ],
@@ -3599,6 +3599,76 @@
     },
     "admin.cover.title": {
       "description": "Catalog cover",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.cover.upload": {
+      "description": "Administrator catalog cover panel: button that uploads an image from this computer.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.cover.upload_busy": {
+      "description": "Administrator catalog cover panel: the server is busy with another upload.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.cover.upload_invalid": {
+      "description": "Administrator catalog cover panel: the image could not be read, decoded or used as a still cover.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.cover.upload_limit": {
+      "description": "Administrator catalog cover panel: the administrator holds too many unused uploaded images.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.cover.upload_preview": {
+      "description": "Administrator catalog cover confirmation: alternative text of the preview of the image to upload.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.cover.upload_too_large": {
+      "description": "Administrator catalog cover panel: the image is over the cover upload size limit, as chosen or once re-saved without its metadata.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.cover.upload_type": {
+      "description": "Administrator catalog cover panel: the chosen file is not a JPG, PNG or WebP image.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.cover.upload_unavailable": {
+      "description": "Administrator catalog cover panel: this server has no private storage for uploaded covers.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.cover.upload_unknown": {
+      "description": "Administrator catalog cover panel: the upload outcome is unknown; Retry resends the same image.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.cover.uploading": {
+      "description": "Administrator catalog cover panel: status while a chosen image is uploading.",
       "delivery": [
         "runtime"
       ],

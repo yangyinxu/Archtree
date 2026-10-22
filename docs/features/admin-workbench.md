@@ -7,7 +7,7 @@ admission independently of the normal listener DTOs; `metadataLookup.available`
 says only whether metadata lookup is configured, never the contact or why not.
 Existing catalog edits, visibility changes, clearing a cover, existing-Album
 reviews and local MP3 conversion need only that role and have no deployment
-flag. Choosing a new cover also requires
+flag. Choosing or uploading a new cover also requires
 `FINITUDE_ADMIN_IMPORT_PRIVATE_STORAGE_READY` and its distinct
 `ADMIN_IMPORT_S3_BUCKET_NAME` staging bucket. The remaining settings
 below default closed; the flags among them accept only the literal `true`:
@@ -42,6 +42,11 @@ shell flag. This command does not assert private staging storage or hidden deliv
 
 A private ACL alone does not override a public bucket policy. Verify denied
 unauthenticated access to the staging prefix before enabling that assertion.
+Covers uploaded from a catalog detail page are staged under
+`imports/catalog-covers/` in that bucket: before deploying them, confirm that
+the instance role may put, read and delete objects and object versions there
+(`s3:PutObject`, `s3:GetObject`, `s3:GetObjectVersion`, `s3:DeleteObject` and
+`s3:DeleteObjectVersion`), as it may under `imports/`.
 Hiding relies on the catalog bucket denying anonymous reads (verified for
 production on 2026-10-17): media and artwork reach clients only through
 visibility-checked application routes. Old external artwork without
@@ -2163,9 +2168,14 @@ response with `expected`, and a current tab reads a response without the key as
 no tracklist.
 
 `POST /catalog/:kind/:id/cover` takes
-`{operationId, expectedRevision, importId, slotId, expectedSourceRevision}`;
-`DELETE` takes `{operationId, expectedRevision}`. The owner digest and numeric
-source-import revision both bind the approved preview. Organization cover edits
+`{operationId, expectedRevision, importId, slotId, expectedSourceRevision}`
+for an import project's image, or exactly
+`{operationId, expectedRevision, uploadId}` for a cover uploaded from this
+computer (see Cover uploads from this computer below); a mix of the two shapes
+or any other body is `400 ADMIN_CATALOG_INVALID_INPUT`. `DELETE` takes
+`{operationId, expectedRevision}`. The owner digest binds the approved preview
+together with the numeric source-import revision, or with the upload, which
+serves one approval and never changes. Organization cover edits
 are unsupported because that kind has no owned-image lifecycle. Replacement
 copies into a reserved canonical asset, attaches it atomically, then cleans the
 old asset. `GET /catalog/:kind/:id/cover-operations` prioritizes unresolved work
@@ -2178,6 +2188,124 @@ receipt. A null revision is accepted only when the owner is absent or non-ready.
 Attached changes and active worker leases cannot be cancelled. Unused target
 cleanup retains its source pin and storage evidence until confirmed; cancelled
 cleanup can be reconciled by any current administrator without reattaching it.
+
+**Cover uploads from this computer.** The Catalog cover panel of an Album,
+Artist or MediaTrack detail page offers Upload from this computer beside Choose
+from import projects; Organizations have no cover. The upload is staged
+privately and changes nothing until the administrator confirms Replace catalog
+cover, which sends the ordinary `POST /cover` with `uploadId`, so the change is
+copied, attached, cancelled and recovered exactly like an import project's
+image. An upload is never part of an import: it has no project, no workbench row
+or count and is never an import cover candidate, and import cleanup never
+touches it. The server side lives in
+`src/administration/catalog/adminCatalogCoverUpload.ts`.
+
+- **Route.** `POST /catalog/:kind/:id/cover-uploads`, where `kind` is `album`,
+  `artist` or `audioTrack` (`organization` is
+  `400 ADMIN_CATALOG_COVER_UNSUPPORTED`), needs the account viewer, an
+  `Idempotency-Key` UUID and private staging storage (otherwise
+  `503 ADMIN_IMPORT_STORAGE_UNAVAILABLE`), but not
+  `FINITUDE_ADMIN_IMPORTS_ENABLED`. Only then does it take an upload
+  concurrency slot (429 without a code when busy; there is no hourly quota) and
+  check a `Content-Length` of at most `MAX_IMAGE_UPLOAD_MB` plus 1 MiB
+  (otherwise 411 or 413 without a code, before any parsing). It reads one
+  multipart part `file` with `filename*=UTF-8''...` and a declared
+  `image/jpeg`, `image/png` or `image/webp`, of at most `MAX_IMAGE_UPLOAD_MB`
+  (`413 ADMIN_CATALOG_COVER_TOO_LARGE`). A malformed item ID or key, a missing
+  file, another part or field, and a filename that is empty, over 255
+  characters or holds control characters are `400 ADMIN_CATALOG_INVALID_INPUT`.
+  It answers `{upload: {id}, receipt: {operationId}}` only once the staged
+  object is confirmed.
+- **Validation and normalization.** Before anything is written, the file passes
+  the validator every cover uses (a declared JPEG, PNG or WebP type that matches
+  the file signature, at most 16 megapixels, a complete decode) and must have
+  one frame: an animated WebP, or a PNG with an `acTL` chunk before its first
+  `IDAT`, is refused, since that validator decodes only the first frame. It is
+  then normalized like an uploaded avatar, without cropping or resizing: the
+  EXIF orientation is applied (width and height swap for orientations 5 to 8),
+  and the image is written again in its declared format with no EXIF (GPS
+  location, camera serial, thumbnail), XMP, IPTC, PNG text chunk or ICC profile,
+  its colour converted to sRGB. A JPEG is written at quality 92 with mozjpeg,
+  keeping 4:4:4 chroma subsampling when the input has it and 4:2:0 otherwise; a
+  PNG losslessly with adaptive filtering at compression level 9 (a palette or
+  greyscale PNG becomes full colour, a 16-bit PNG 8-bit); a WebP losslessly,
+  keeping the colour of fully transparent pixels, when its first image chunk is
+  `VP8L`, and otherwise at quality 92. One input normalizes to the same bytes on
+  one build. A refusal by the validator, the frame check or the encoder is
+  `400 ADMIN_CATALOG_COVER_INVALID_IMAGE`, except an input or a normalized image
+  over `MAX_IMAGE_UPLOAD_MB`, which is `413 ADMIN_CATALOG_COVER_TOO_LARGE`. The
+  filename is checked only after that, so a refused image answers its own code
+  whatever its name. Only the normalized bytes are staged, and the record keeps
+  their SHA-256, length and declared type.
+- **Staging and replay.** The record (`adminCatalogCoverUploads`, see
+  [Runtime](../architecture/runtime.md#single-process-capacity-contract)) is
+  inserted `pending` in an administrator transaction before the transfer: the
+  item must be ready (otherwise `404 ADMIN_CATALOG_NOT_FOUND`), and each
+  administrator may hold at most 16 unused uploads, counting every one whose
+  object may still exist, `deleting` and `cleanupFailed` included
+  (`429 ADMIN_CATALOG_COVER_UPLOAD_LIMIT`). The catalog item and its revision
+  never change. The normalized bytes go to `imports/catalog-covers/<id>` in
+  `ADMIN_IMPORT_S3_BUCKET_NAME` through the shared HEAD/PUT/HEAD transfer. An
+  outcome it cannot confirm is recorded `unknown` and answers
+  `503 ADMIN_CATALOG_COVER_UNKNOWN`, and a transfer still in progress answers
+  `409 ADMIN_CATALOG_COVER_UPLOAD_BUSY`; only a retry with the same key and
+  bytes makes such an upload usable. A replay returns the same `id` and stages
+  nothing twice. There is no reconcile route, and choosing the image again is a
+  new upload. The same key with other bytes, or with bytes that a server update
+  normalizes differently, is `409 ADMIN_CATALOG_IDEMPOTENCY_CONFLICT`, and a key
+  whose upload is being or has been deleted is
+  `409 ADMIN_CATALOG_COVER_SOURCE_CHANGED`. A transfer that outlives its
+  five-minute lease records nothing: when its upload was meanwhile deleted it
+  deletes the object it staged by that object's exact identity (a failure logs
+  the `admin_catalog_cover_upload_cleanup_failed` line below) and answers
+  `409 ADMIN_CATALOG_COVER_SOURCE_CHANGED`, and when a retry took the upload
+  over it answers `503 ADMIN_CATALOG_COVER_UNKNOWN`.
+- **Approval.** `{operationId, expectedRevision, uploadId}` admits the ordinary
+  cover operation after every existing check (revision, active change, receipt
+  limit, previous-image evidence, storage), each keeping its code and order. The
+  upload must be the approving administrator's, for this item, `ready` and
+  unused, otherwise `409 ADMIN_CATALOG_COVER_SOURCE_CHANGED`; one larger than
+  the current `MAX_IMAGE_UPLOAD_MB` is `409 ADMIN_IMPORT_ASSET_CONFLICT`. The
+  same transaction marks it used by the operation, which records
+  `sourceUploadId` instead of `sourceImportId`, so an upload serves at most one
+  approval. Copy, attachment, previous-image cleanup, listing, reconciliation
+  and cancellation are unchanged. An uploaded MediaTrack cover is an explicitly
+  assigned one; clearing it returns a linked MediaTrack to its Album's cover.
+- **Deletion.** With no administrator check, the existing-catalog cover worker
+  runs one cleanup pass on each tick that claims no operation. The pass deletes
+  an unused upload a day after its upload, and a used one once its operation is
+  complete or cancelled with confirmed cleanup, in both cases only after its
+  transfer has settled. A used upload whose approval needs attention therefore
+  stays until that approval is resolved or cancelled, and deleting the catalog
+  item leaves an unused upload to the one-day deletion. It deletes the object a
+  HEAD finds by that object's exact identity and confirms its absence with a
+  final HEAD; the record stays as `deleted` evidence that answers a late replay.
+  A failed deletion is recorded `cleanupFailed` (it still counts toward the 16),
+  logs one `admin_catalog_cover_upload_cleanup_failed` line naming only the
+  upload ID and is retried an hour later.
+- **Web.** The panel reads the chosen file once into memory and declares its
+  type from its first bytes (the JPEG, PNG and WebP signatures; the extension
+  and the browser's type are ignored). It refuses another format, an empty or
+  unreadable file and one over 25 MiB without sending anything, and builds the
+  request, every Retry and the preview from that one copy. While an upload runs
+  or an unknown one is kept, the upload button, Choose from import projects, the
+  import images, Remove catalog cover and the confirm button of an open
+  confirmation are disabled; offline the upload button is disabled like Choose.
+  Success opens the existing confirmation with the item's name and a preview of
+  the image; its Cancel sends nothing, and choosing the same file again is a new
+  upload. An unknown outcome offers Retry, with the same key and bytes, and
+  Cancel; the kept upload is dropped when the account or the administrator role
+  changes or Admin view is left, and a definite refusal shows its reason and
+  drops it. A confirmation refused because its upload was meanwhile used or
+  deleted shows the generic conflict message; upload again. The request code is
+  a separate chunk loaded on the first file choice.
+- **Other covers keep their bytes.** Only uploads from this computer are
+  normalized and checked for a single frame. Covers chosen from import projects
+  (manual, embedded or lookup images) and Content Manager covers are still
+  copied and published byte for byte, embedded metadata included, and an
+  animated WebP or PNG among them is validated on its first frame only and
+  published animated. Normalizing them is a separate future change, and files
+  already delivered cannot be recalled.
 
 ## Tag evidence and automatic values
 
@@ -2568,6 +2696,20 @@ roll back to:
   explicitly. A Web tab opened before them cannot parse a detail with a
   `lookup-*` asset, a candidate's `artwork` or the summary's `waiting.cover`,
   so reload open workbench tabs after deploying or rolling back across them.
+- Cover uploads from this computer need no floor of their own. The release
+  before them answers the upload route as not found, which a current tab shows
+  as an error, and its Web shows no upload button. It refuses a cover body with
+  `uploadId` as invalid input before reading its receipt, so a lost response to
+  an approval admitted from an upload cannot be replayed there: the tab shows an
+  error while the change continues, and refreshing the panel's operation list
+  offers Resume operation and Cancel approval as usual. It completes,
+  reconciles and cancels such an operation, because its copy reads only the
+  operation's source and target and it releases no import pin without
+  `sourceImportId`. It keeps the two `adminCatalogCoverUploads` indexes, since
+  it verifies only its own, and never reads the upload records, whose staged
+  objects wait in the private bucket until rolling forward lets the cleanup pass
+  delete them. No response the Web parses gains a key; reload admin Web tabs
+  across deploy or rollback as usual.
 - The iTunes fallback needs no floor of its own; no collection or index
   changes. The release before it ignores a record's `itunesStage`,
   `exhausted` and `attempts.itunes` and resumes a run stored mid-stage through

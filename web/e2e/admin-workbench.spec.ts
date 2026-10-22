@@ -14,6 +14,7 @@
  *   - mobile administrator control and workbench remain accessible without horizontal overflow
  *   - private upload retries the same multipart operation and publication waits for confirmed completion
  *   - existing catalog edits and Page placement visibility require separate explicit approvals
+ *   - a cover uploaded from this computer on an Album page is staged once, confirmed in the existing dialog and replaces the cover, while a GIF is refused locally
  *   - administrator placement layout reflows at 390px and a 200 percent equivalent viewport
  *   - one approval uploads files sequentially and leaving Admin view stops after the current file
  *   - files chosen without a folder need no folder name
@@ -42,6 +43,8 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { applyDraftChanges, artistEntry, capabilities, detail, entryKey, labelEntry, lookupResponse, projectId, session, slotId, slotTwo, viewer } from '../src/features/admin/adminFixtures.testSupport';
+import { albumId, albumRevision, catalogAlbum, catalogAlbumTracks, reviewEligibility } from '../src/features/admin/catalogReviewFixtures.testSupport';
+import sharp from 'sharp';
 
 /** The file part of one queued multipart upload, so mocked assets carry the real length and SHA-256. */
 function uploadedFile(request: Request) {
@@ -455,6 +458,53 @@ test('existing catalog edits and Page placement visibility require separate expl
   await expect(page.getByRole('dialog').getByText('Public → Hidden')).toBeVisible();
   await page.getByRole('dialog').getByRole('button', {name:'Hide this placement'}).click(); await expect(page.getByRole('button', {name:'Make this placement public'})).toBeVisible(); expect(writes[2].path).toBe('/api/admin/v1/pages/home/items/222222222222222222222222');
   expect((await new AxeBuilder({page}).analyze()).violations).toEqual([]);
+});
+
+test('a cover uploaded from this computer on an Album page is staged once, confirmed in the existing dialog and replaces the cover, while a GIF is refused locally', async ({ page }) => {
+  await setup(page);
+  const headers = { 'X-Finitude-Account-Viewer': viewer }, uploads: Array<{ headers: Record<string, string>; body: Buffer; id: string }> = [], covers: Array<Record<string, unknown>> = [];
+  // Synthetic images built here; nothing comes from a camera or a person.
+  const cover = await sharp({ create: { width: 64, height: 32, channels: 3, background: '#3a7' } }).png().toBuffer(), gif = Buffer.from('R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==', 'base64');
+  let album = catalogAlbum();
+  await page.route('**/api/admin/v1/**', async route => {
+    const request = route.request(), path = new URL(request.url()).pathname, method = request.method();
+    if (path === `/api/admin/v1/catalog/album/${albumId}` && method === 'GET') return route.fulfill({ json: { item: album }, headers });
+    if (path === `/api/admin/v1/catalog/album/${albumId}/tracks`) return route.fulfill({ json: catalogAlbumTracks(), headers });
+    if (path === '/api/admin/v1/catalog-reviews/eligibility') return route.fulfill({ json: reviewEligibility(), headers });
+    if (path === `/api/admin/v1/catalog/album/${albumId}/cover-operations`) return route.fulfill({ json: { items: [] }, headers });
+    if (path === `/api/admin/v1/catalog/album/${albumId}/artwork`) return route.fulfill({ body: cover, contentType: 'image/png', headers });
+    if (path === `/api/admin/v1/catalog/album/${albumId}/cover-uploads` && method === 'POST') {
+      const id = String(uploads.length + 1).padStart(24, 'e'); uploads.push({ headers: request.headers(), body: request.postDataBuffer() ?? Buffer.alloc(0), id });
+      return route.fulfill({ json: { upload: { id }, receipt: { operationId: request.headers()['idempotency-key'] } }, headers });
+    }
+    if (path === `/api/admin/v1/catalog/album/${albumId}/cover` && method === 'POST') {
+      const body = request.postDataJSON(); covers.push(body);
+      album = { ...album, revision: `cr_${'b'.repeat(43)}`, coverUrl: `/api/admin/v1/catalog/album/${albumId}/artwork` };
+      return route.fulfill({ json: { item: album, receipt: { operationId: body.operationId }, coverOperation: { state: 'complete', cleanupPending: false } }, headers });
+    }
+    return route.fallback();
+  });
+  const choose = async (file: { name: string; mimeType: string; buffer: Buffer }) => {
+    const chooser = page.waitForEvent('filechooser'); await page.getByRole('button', { name: 'Upload from this computer' }).click(); await (await chooser).setFiles(file);
+  };
+  await page.goto(`/finitude/admin/catalog/album/${albumId}`); await page.getByRole('button', { name: 'Switch to Admin view' }).click();
+  await expect(page.getByRole('button', { name: 'Upload from this computer' })).toBeEnabled();
+  await choose({ name: 'cover.png', mimeType: 'image/png', buffer: gif });
+  await expect(page.getByText('Choose a JPG, PNG or WebP image.')).toBeVisible(); expect(uploads).toHaveLength(0);
+  await choose({ name: 'cover.png', mimeType: 'image/png', buffer: cover });
+  const dialog = page.getByRole('dialog');
+  await expect(dialog.getByText('Synthetic catalog Album')).toBeVisible(); await expect(dialog.getByRole('img', { name: 'Image to upload' })).toBeVisible();
+  expect(uploads).toHaveLength(1); expect(uploads[0].headers['content-type']).toMatch(/^multipart\/form-data; boundary=/);
+  expect(uploads[0].headers['idempotency-key']).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/); expect(uploads[0].body.includes(cover)).toBe(true);
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+  await dialog.getByRole('button', { name: 'Cancel' }).click(); await expect(dialog).toHaveCount(0); expect(covers).toHaveLength(0);
+  await choose({ name: 'cover.png', mimeType: 'image/png', buffer: cover });
+  await expect(dialog.getByRole('img', { name: 'Image to upload' })).toBeVisible();
+  expect(uploads).toHaveLength(2); expect(uploads[1].headers['idempotency-key']).not.toBe(uploads[0].headers['idempotency-key']);
+  await dialog.getByRole('button', { name: 'Replace catalog cover' }).click();
+  await expect(page.getByText('The catalog cover change is confirmed.')).toBeVisible();
+  expect(covers).toEqual([{ expectedRevision: albumRevision, uploadId: uploads[1].id, operationId: expect.any(String) }]); expect(uploads).toHaveLength(2);
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
 });
 
 

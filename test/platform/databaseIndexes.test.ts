@@ -12,6 +12,7 @@
  *   - report deduplication and deletion cleanup indexes are mandatory, while the triage sort index is optional
  *   - nonunique, sparse, partial, and incompatible collation constraints fail verification
  *   - the cover cancellation receipt index requires both declared string predicates
+ *   - the cover upload bound and cleanup claim indexes are required
  *   - the MusicBrainz ID indexes are required, unique and partial on stored strings only
  *   - a dropped required index makes a previously initialized database unready
  *   - optional performance-index failure preserves required constraints and emits bounded diagnostics
@@ -196,6 +197,20 @@ test('the cover cancellation receipt index requires both declared string predica
   await assert.rejects(verifyRequiredDatabaseIndexes(fake.db), /cancellation.actor,cancellation.operationId/);
 });
 
+test('the cover upload bound and cleanup claim indexes are required', async () => {
+  const declared = databaseIndexes.filter(index => index.collection === 'adminCatalogCoverUploads');
+  assert.deepEqual(declared.map(index => [index.keys, index.required, index.options]),
+    [[{ actorId: 1, usedBy: 1, 'asset.state': 1 }, true, undefined], [{ 'asset.state': 1, leaseUntil: 1 }, true, undefined]]);
+  for (const [key, indexId] of [['actorId', 'adminCatalogCoverUploads:actorId,usedBy,asset.state'], ['leaseUntil', 'adminCatalogCoverUploads:asset.state,leaseUntil']] as const) {
+    const fake = databaseDouble(); await initializeDatabaseIndexes(fake.db);
+    const indexes = fake.metadata.get('adminCatalogCoverUploads')!;
+    assert.equal(indexes.length, 2);
+    await verifyRequiredDatabaseIndexes(fake.db);
+    fake.metadata.set('adminCatalogCoverUploads', indexes.filter(index => !(key in index.key)));
+    await assert.rejects(verifyRequiredDatabaseIndexes(fake.db), (error: unknown) => error instanceof DatabaseIndexInitializationError && error.indexId === indexId);
+  }
+});
+
 test('the MusicBrainz ID indexes are required, unique and partial on stored strings only', async () => {
   for (const collection of ['artists', 'organizations']) {
     const fake = databaseDouble(); await initializeDatabaseIndexes(fake.db);
@@ -218,7 +233,7 @@ test('the MusicBrainz ID indexes are required, unique and partial on stored stri
     await assert.rejects(initializeDatabaseIndexes(failing.db), DatabaseIndexInitializationError);
     assert.deepEqual(failing.receipts, []);
   }
-  assert.equal(requiredIndexRevision, 'required-indexes-v11-musicbrainz-ids');
+  assert.equal(requiredIndexRevision, 'required-indexes-v12-catalog-cover-uploads');
 });
 
 test('a dropped required index makes a previously initialized database unready', async () => {
@@ -245,7 +260,7 @@ test('the lookup cover worker index is optional: its failure is a bounded diagno
   const declared = databaseIndexes.filter(index => index.options?.name === 'admin_import_lookup_cover_worker');
   assert.deepEqual(declared.map(index => [index.collection, index.keys, Boolean(index.required || index.options?.unique)]),
     [['adminAlbumImports', { 'media.lookupCover.due': 1, 'media.lookupCover.leaseUntil': 1 }, false]]);
-  assert.equal(requiredIndexRevision, 'required-indexes-v11-musicbrainz-ids');
+  assert.equal(requiredIndexRevision, 'required-indexes-v12-catalog-cover-uploads');
   const fake = databaseDouble(), collection = fake.db.collection.bind(fake.db);
   (fake.db as unknown as { collection: unknown }).collection = (name: string) => {
     const target = collection(name);

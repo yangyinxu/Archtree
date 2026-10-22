@@ -40,6 +40,9 @@ export const databaseIndexes: Array<{
     { collection: 'adminCatalogCoverOperations', keys: { state: 1, leaseUntil: 1 }, required: true },
     { collection: 'adminCatalogCoverOperations', keys: { actor: 1, state: 1, cleanupPending: 1 }, required: true },
     { collection: 'adminCatalogCoverOperations', keys: { kind: 1, ownerId: 1, cleanupPending: 1, createdAt: -1, _id: -1 }, required: true },
+    // Required: the per-administrator bound and the cleanup claim; creating them also provisions the collection outside any transaction.
+    { collection: 'adminCatalogCoverUploads', keys: { actorId: 1, usedBy: 1, 'asset.state': 1 }, required: true },
+    { collection: 'adminCatalogCoverUploads', keys: { 'asset.state': 1, leaseUntil: 1 }, required: true },
     { collection: 'audioTracks', keys: { 'mediaByteHash.value': 1 }, options: { sparse: true } },
     { collection: 'adminCatalogMutations', keys: { actor: 1, operationId: 1 }, options: { unique: true } },
     { collection: 'adminCatalogMutations', keys: { actor: 1, expiresAt: 1 }, required: true },
@@ -167,7 +170,7 @@ export const databaseIndexes: Array<{
       catalogSearchIndexKeys.map(keys => ({ collection, keys })))
   ];
 
-export const requiredIndexRevision = 'required-indexes-v11-musicbrainz-ids';
+export const requiredIndexRevision = 'required-indexes-v12-catalog-cover-uploads';
 const requiredIndexes = databaseIndexes.filter(index => index.options?.unique === true || index.required);
 
 /** Reports a static schema identifier without retaining database errors or user values. */

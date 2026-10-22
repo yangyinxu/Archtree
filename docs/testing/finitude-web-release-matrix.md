@@ -131,6 +131,12 @@ sends one field save of the proposed Disc and Track Numbers and row title,
 after which each file names the row it fills and the button is gone; and the
 confirmation names the row each new track fills without the numbering button,
 with an axe scan and reflow at 320 px, before one approval publishes it.
+Another uploads a cover from this computer on an Album page in Admin view: a GIF
+shows the type message without a request; a PNG built in the test is sent once
+as multipart with an `Idempotency-Key`, the confirmation names the Album and
+shows the image, and Cancel sends nothing; a second upload and Replace catalog
+cover send one cover request with `uploadId` and `expectedRevision`, after which
+the panel says the catalog cover change is confirmed, with an axe scan.
 
 The catalog reviews spec checks that an existing-Album review shows the Album's
 Artist Credits and label read-only, saves a Disc Number change as one per-value

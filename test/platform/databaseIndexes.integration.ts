@@ -26,6 +26,10 @@ test('startup provisions deletion receipts and repeated initialization preserves
   assert.equal((await db.listCollections({ name: 'adminImportLookups' }).toArray()).length, 1);
   const lookupWorker = (await db.collection('adminImportLookups').listIndexes().toArray()).find(index => index.name === 'admin_import_lookup_worker');
   assert.deepEqual([lookupWorker?.key, lookupWorker?.unique], [{ state: 1, leaseUntil: 1, retryAt: 1 }, undefined]);
+  // The cover upload bound and cleanup claim indexes provision their collection, whose first insert runs in a transaction.
+  assert.equal((await db.listCollections({ name: 'adminCatalogCoverUploads' }).toArray()).length, 1);
+  const coverUploadKeys = (await db.collection('adminCatalogCoverUploads').listIndexes().toArray()).map(index => JSON.stringify(index.key));
+  for (const key of [{ actorId: 1, usedBy: 1, 'asset.state': 1 }, { 'asset.state': 1, leaseUntil: 1 }]) assert.ok(coverUploadKeys.includes(JSON.stringify(key)), JSON.stringify(key));
 });
 
 test('real Mongo indexes are verified, missing uniqueness fails closed, and duplicates are never deleted', async () => {
@@ -34,7 +38,7 @@ test('real Mongo indexes are verified, missing uniqueness fails closed, and dupl
   const receipt = await db.collection<{ _id: string }>('schemaMigrations')
     .findOne({ _id: requiredIndexRevision });
   assert.ok(receipt);
-  assert.equal(requiredIndexRevision, 'required-indexes-v11-musicbrainz-ids');
+  assert.equal(requiredIndexRevision, 'required-indexes-v12-catalog-cover-uploads');
   const linkIndexes = await db.collection('emailLinkTokens').listIndexes().toArray();
   const byKey = (key: Record<string, number>) => linkIndexes.find(index => JSON.stringify(index.key) === JSON.stringify(key));
   assert.ok(byKey({ email: 1, purpose: 1 }), 'link cleanup within registration transactions is indexed');

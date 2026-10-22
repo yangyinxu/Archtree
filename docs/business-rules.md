@@ -1904,6 +1904,30 @@ The wire protocol and operational bounds are documented in
   such pairing places at the same row takes that row's Disc and Track Number
   and, when its title is empty or automatic, the row's title, as the
   administrator's own values; other files keep their values.
+- An existing-catalog cover approval copies a ready private image: one chosen
+  from an import project or, on the Web detail page of an Album, Artist or
+  MediaTrack, one the administrator uploads from their computer; Organizations
+  have no cover. An uploaded file must be a single-frame JPG, PNG or WebP image
+  within the cover upload size and pixel limits, and it must decode completely.
+  It is validated like other covers before anything is stored, then normalized
+  like uploaded avatars: its orientation is applied and embedded metadata such
+  as EXIF location is removed; its format and pixel dimensions are kept, and a
+  normalized image over the size limit is refused. Only the normalized image is
+  staged, privately; staging changes nothing in the catalog, and a staged upload
+  is never public. The cover changes only through a separate approval of that
+  staged image, which copies, attaches, cancels and recovers it exactly as it
+  does an import project's image. A staged upload serves only the item it was
+  uploaded for, only an approval by the administrator who uploaded it, and at
+  most one approval; it is never part of an import. An upload whose outcome is
+  unknown becomes usable only through a retry with its original intent and
+  bytes; choosing the image again is a new upload. Each administrator may hold
+  only a bounded number of unused uploads, counting those whose deletion is not
+  yet confirmed; a further upload is refused until one is used or deleted. With
+  no administrator check, a staged upload is deleted automatically by its exact
+  storage identity once the approval that used it is complete or its cancelled
+  cleanup is confirmed, or a day after its upload when no approval used it. This
+  deletion touches only a private object that no catalog record references; a
+  failed deletion keeps its record and is retried automatically.
 - An unconfirmed existing-catalog cover approval may be explicitly cancelled by
   a current administrator after its active worker lease ends. Cancellation leaves
   the saved cover unchanged and retains the unused object's identity and source
