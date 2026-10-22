@@ -131,6 +131,18 @@ sends one field save of the proposed Disc and Track Numbers and row title,
 after which each file names the row it fills and the button is gone; and the
 confirmation names the row each new track fills without the numbering button,
 with an axe scan and reflow at 320 px, before one approval publishes it.
+Another uploads a cover from this computer on an Album page in Admin view: a GIF
+shows the type message without a request; a PNG built in the test is sent once
+as multipart with an `Idempotency-Key`, the confirmation names the Album and
+shows the image, and Cancel sends nothing; a second upload and Replace catalog
+cover send one cover request with `uploadId` and `expectedRevision`, after which
+the panel says the catalog cover change is confirmed, with an axe scan. Another
+checks the import summary name box's optional Artist field: an Artist name alone
+never looks up, from the button or Enter; a link in it is refused in place with
+the name's message, marking only that field invalid and sending nothing; a typed
+Artist is sent beside the name in one lookup request and shown again with the
+run, and an emptied field sends no Artist, with an axe scan and no overflow at
+320 px.
 
 The catalog reviews spec checks that an existing-Album review shows the Album's
 Artist Credits and label read-only, saves a Disc Number change as one per-value
@@ -165,8 +177,22 @@ page shows the new Credits and the expected tracklist and the member page its
 Artist and documented attribution. The Album page also reads the manual wording
 where lookup is not configured, shows the action disabled with its reason, and
 offers Open Album completion for an open review and Start another completion,
-which sends `another: true`. An iTunes-only result says Use iTunes and flags
-every value it wrote.
+which sends `another: true`. At 390, 768 and 1440 px the Album hero leads with
+the completion (an open review's note on its own line above Open Album
+completion and Start another completion, a reason under the disabled button),
+puts Convert to MP3 and Refresh status on a quieter row below in the same
+keyboard order, offers no separate manual-editing entry, and keeps that row
+and the title still while the eligibility read is pending, with an axe scan. An iTunes-only
+result says Use iTunes and flags every value it wrote. Discard completion on a
+review page names the catalog Album in its confirmation (Cancel focused, axe
+scan) and returns to the Album page, whose action then creates a new
+completion; on the workbench it removes the card. An existing-Album review at
+1280 px looks up a typed name with a typed Artist in one request carrying both,
+shows both again in the box of the queued run, keeps Look up in the first
+screen and shows the Artist hint; and at 1280 px in English and 390 px in
+Chinese its tie chooser marks only the release a track-title search found first
+as Found through a track title, as does the opened folded list of every release
+found, without sending anything; each with an axe scan and no overflow.
 
 The historical 2026-08-19 MediaTrack amendment passed
 304/304 server tests, 214/214 Web unit/component tests, 148/148 integration
@@ -613,6 +639,14 @@ player control still works.
   confirm the buttons read Use iTunes and the values are flagged iTunes only.
   Repeat in Simplified Chinese (从 MusicBrainz 补全（免费）, 打开专辑补全, 保留当前,
   使用 MusicBrainz) and with a screen reader at 320 CSS px.
+- As an administrator, open an unfinished Album completion and choose Discard
+  completion. Confirm its confirmation names the Album and says the catalog
+  does not change; Cancel keeps the completion; confirming returns to the Album
+  page, where Complete from MusicBrainz (free) is offered again. While Luna AI
+  is queued or running, confirm the action is disabled with "Stop Luna AI
+  before discarding this completion."; an applied completion offers no
+  discard. Repeat from the workbench's Album completions queue, in Simplified
+  Chinese (放弃补全), and with a screen reader at 320 CSS px.
 - As an administrator, in English and then in Simplified Chinese, open an
   import's Draft section and Review and publish summary and an existing-Album
   review. Confirm every control that starts Luna reads "Use Luna AI (paid)" or

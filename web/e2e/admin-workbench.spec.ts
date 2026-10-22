@@ -14,6 +14,7 @@
  *   - mobile administrator control and workbench remain accessible without horizontal overflow
  *   - private upload retries the same multipart operation and publication waits for confirmed completion
  *   - existing catalog edits and Page placement visibility require separate explicit approvals
+ *   - a cover uploaded from this computer on an Album page is staged once, confirmed in the existing dialog and replaces the cover, while a GIF is refused locally
  *   - administrator placement layout reflows at 390px and a 200 percent equivalent viewport
  *   - one approval uploads files sequentially and leaving Admin view stops after the current file
  *   - files chosen without a folder need no folder name
@@ -28,6 +29,7 @@
  *   - a lookup value that differs from the administrator's own is answered from the keyboard, and the summary reflows at 320, 768 and 1440 px
  *   - an unavailable lookup offers a free retry first and the paid Luna AI button after the lookup controls, a retry that stays unavailable keeps both, and Luna AI runs only after its confirmation shows the budget
  *   - without a folder or usable tags the summary offers an empty name box, which looks up a typed name from the keyboard, and the paid Luna AI button after it
+ *   - the name box's optional Artist: an Artist alone cannot look up, a link in it is refused in place, and a typed Artist is sent with the name and shown again with its run
  *   - after a lookup finds no release the paid Luna AI button is offered after the name box, and its ticked entries, label and Disc Number are preselected and approved in one confirmation
  *   - an image every file shares is chosen automatically until the administrator chooses, and the summary and confirmation show the choice
  *   - a release with front artwork shows a protected preview, Publish waits while its cover is staged, and the staged lookup cover is then chosen automatically and published
@@ -41,6 +43,8 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { applyDraftChanges, artistEntry, capabilities, detail, entryKey, labelEntry, lookupResponse, projectId, session, slotId, slotTwo, viewer } from '../src/features/admin/adminFixtures.testSupport';
+import { albumId, albumRevision, catalogAlbum, catalogAlbumTracks, reviewEligibility } from '../src/features/admin/catalogReviewFixtures.testSupport';
+import sharp from 'sharp';
 
 /** The file part of one queued multipart upload, so mocked assets carry the real length and SHA-256. */
 function uploadedFile(request: Request) {
@@ -454,6 +458,53 @@ test('existing catalog edits and Page placement visibility require separate expl
   await expect(page.getByRole('dialog').getByText('Public → Hidden')).toBeVisible();
   await page.getByRole('dialog').getByRole('button', {name:'Hide this placement'}).click(); await expect(page.getByRole('button', {name:'Make this placement public'})).toBeVisible(); expect(writes[2].path).toBe('/api/admin/v1/pages/home/items/222222222222222222222222');
   expect((await new AxeBuilder({page}).analyze()).violations).toEqual([]);
+});
+
+test('a cover uploaded from this computer on an Album page is staged once, confirmed in the existing dialog and replaces the cover, while a GIF is refused locally', async ({ page }) => {
+  await setup(page);
+  const headers = { 'X-Finitude-Account-Viewer': viewer }, uploads: Array<{ headers: Record<string, string>; body: Buffer; id: string }> = [], covers: Array<Record<string, unknown>> = [];
+  // Synthetic images built here; nothing comes from a camera or a person.
+  const cover = await sharp({ create: { width: 64, height: 32, channels: 3, background: '#3a7' } }).png().toBuffer(), gif = Buffer.from('R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==', 'base64');
+  let album = catalogAlbum();
+  await page.route('**/api/admin/v1/**', async route => {
+    const request = route.request(), path = new URL(request.url()).pathname, method = request.method();
+    if (path === `/api/admin/v1/catalog/album/${albumId}` && method === 'GET') return route.fulfill({ json: { item: album }, headers });
+    if (path === `/api/admin/v1/catalog/album/${albumId}/tracks`) return route.fulfill({ json: catalogAlbumTracks(), headers });
+    if (path === '/api/admin/v1/catalog-reviews/eligibility') return route.fulfill({ json: reviewEligibility(), headers });
+    if (path === `/api/admin/v1/catalog/album/${albumId}/cover-operations`) return route.fulfill({ json: { items: [] }, headers });
+    if (path === `/api/admin/v1/catalog/album/${albumId}/artwork`) return route.fulfill({ body: cover, contentType: 'image/png', headers });
+    if (path === `/api/admin/v1/catalog/album/${albumId}/cover-uploads` && method === 'POST') {
+      const id = String(uploads.length + 1).padStart(24, 'e'); uploads.push({ headers: request.headers(), body: request.postDataBuffer() ?? Buffer.alloc(0), id });
+      return route.fulfill({ json: { upload: { id }, receipt: { operationId: request.headers()['idempotency-key'] } }, headers });
+    }
+    if (path === `/api/admin/v1/catalog/album/${albumId}/cover` && method === 'POST') {
+      const body = request.postDataJSON(); covers.push(body);
+      album = { ...album, revision: `cr_${'b'.repeat(43)}`, coverUrl: `/api/admin/v1/catalog/album/${albumId}/artwork` };
+      return route.fulfill({ json: { item: album, receipt: { operationId: body.operationId }, coverOperation: { state: 'complete', cleanupPending: false } }, headers });
+    }
+    return route.fallback();
+  });
+  const choose = async (file: { name: string; mimeType: string; buffer: Buffer }) => {
+    const chooser = page.waitForEvent('filechooser'); await page.getByRole('button', { name: 'Upload from this computer' }).click(); await (await chooser).setFiles(file);
+  };
+  await page.goto(`/finitude/admin/catalog/album/${albumId}`); await page.getByRole('button', { name: 'Switch to Admin view' }).click();
+  await expect(page.getByRole('button', { name: 'Upload from this computer' })).toBeEnabled();
+  await choose({ name: 'cover.png', mimeType: 'image/png', buffer: gif });
+  await expect(page.getByText('Choose a JPG, PNG or WebP image.')).toBeVisible(); expect(uploads).toHaveLength(0);
+  await choose({ name: 'cover.png', mimeType: 'image/png', buffer: cover });
+  const dialog = page.getByRole('dialog');
+  await expect(dialog.getByText('Synthetic catalog Album')).toBeVisible(); await expect(dialog.getByRole('img', { name: 'Image to upload' })).toBeVisible();
+  expect(uploads).toHaveLength(1); expect(uploads[0].headers['content-type']).toMatch(/^multipart\/form-data; boundary=/);
+  expect(uploads[0].headers['idempotency-key']).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/); expect(uploads[0].body.includes(cover)).toBe(true);
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+  await dialog.getByRole('button', { name: 'Cancel' }).click(); await expect(dialog).toHaveCount(0); expect(covers).toHaveLength(0);
+  await choose({ name: 'cover.png', mimeType: 'image/png', buffer: cover });
+  await expect(dialog.getByRole('img', { name: 'Image to upload' })).toBeVisible();
+  expect(uploads).toHaveLength(2); expect(uploads[1].headers['idempotency-key']).not.toBe(uploads[0].headers['idempotency-key']);
+  await dialog.getByRole('button', { name: 'Replace catalog cover' }).click();
+  await expect(page.getByText('The catalog cover change is confirmed.')).toBeVisible();
+  expect(covers).toEqual([{ expectedRevision: albumRevision, uploadId: uploads[1].id, operationId: expect.any(String) }]); expect(uploads).toHaveLength(2);
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
 });
 
 
@@ -996,7 +1047,7 @@ test('without a folder or usable tags the summary offers an empty name box, whic
   const item = uploadedProject(); item.manifest = { rootLabel: '', files: item.manifest.files.map(file => ({ ...file, relativePath: file.filename })) };
   Object.assign(item.draft.album, { title: '', artists: [] }); item.decisions = [];
   const server = await summaryProject(page, item, (state, action, body) => {
-    expect([action, body.kind, body.text]).toEqual(['lookup', 'album', 'Synthetic Album']);
+    expect([action, body.kind, body.text, 'artist' in body]).toEqual(['lookup', 'album', 'Synthetic Album', false]);
     state.lookup = lookupView({ run: 2, state: 'complete', outcome: 'noRelease', input: { trigger: 'submitted', submitted: { kind: 'album', text: 'Synthetic Album' } } });
     return 'lookup';
   });
@@ -1017,6 +1068,48 @@ test('without a folder or usable tags the summary offers an empty name box, whic
   // The name box keeps no history: nothing is stored by the lookup.
   expect(await storage()).toEqual(before);
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+});
+
+test('the name box\'s optional Artist: an Artist alone cannot look up, a link in it is refused in place, and a typed Artist is sent with the name and shown again with its run', async ({ page }) => {
+  await setup(page);
+  const item = uploadedProject(); item.manifest = { rootLabel: '', files: item.manifest.files.map(file => ({ ...file, relativePath: file.filename })) };
+  Object.assign(item.draft.album, { title: '', artists: [] }); item.decisions = [];
+  let run = 1;
+  const server = await summaryProject(page, item, (state, action, body) => {
+    expect(action).toBe('lookup');
+    run += 1;
+    state.lookup = lookupView({ run, state: 'complete', outcome: 'noRelease',
+      input: { trigger: 'submitted', submitted: { kind: body.kind, text: body.text, ...(typeof body.artist === 'string' ? { artist: body.artist } : {}) } } });
+    return 'lookup';
+  });
+  server.lookup = lookupView({ outcome: 'noQuery' });
+  await page.goto(`/finitude/admin/imports/${projectId}`); await page.getByRole('button', { name: 'Switch to Admin view' }).click();
+  const box = summaryRegion(page).getByRole('group', { name: 'Look up by name', exact: true });
+  const name = box.getByRole('textbox', { name: 'Name', exact: true }), artist = box.getByRole('textbox', { name: 'Artist (optional)', exact: true });
+  const submit = box.getByRole('button', { name: 'Look up', exact: true });
+  await expect(box.getByText("Leave empty to use the files' artist tags.", { exact: true })).toBeVisible();
+  await expect(artist).toHaveValue(''); await expect(artist).toHaveAttribute('autocomplete', 'off');
+  // An Artist name alone never looks up, from the button or the keyboard.
+  await artist.fill('Synthetic Ensemble'); await expect(submit).toBeDisabled(); await artist.press('Enter');
+  // A link in the Artist field is refused in place, with the name's message, and nothing is written.
+  await name.fill('Synthetic Album'); await artist.fill('https://example.test/artist'); await artist.press('Enter');
+  await expect(box.getByRole('alert')).toHaveText('Enter a name, not a link.');
+  await expect(artist).toHaveAttribute('aria-invalid', 'true'); await expect(name).toHaveAttribute('aria-invalid', 'false');
+  expect(server.writes).toEqual([]);
+  // A typed Artist name is sent beside the name, and the box shows it again with its run.
+  await artist.fill('Synthetic Ensemble'); await expect(box.getByRole('alert')).toHaveCount(0);
+  await artist.press('Enter');
+  await expect(summaryRegion(page).getByText('No release was found. Try another name, or use Luna AI (paid).', { exact: true })).toBeVisible();
+  expect(server.writes.map(({ action, body: { operationId: _operation, expectedRevision: _revision, ...sent } }) => [action, sent]))
+    .toEqual([['lookup', { kind: 'album', text: 'Synthetic Album', artist: 'Synthetic Ensemble' }]]);
+  await expect(name).toHaveValue('Synthetic Album'); await expect(artist).toHaveValue('Synthetic Ensemble');
+  // An emptied Artist field sends no Artist name.
+  await artist.fill(''); await name.press('Enter');
+  await expect.poll(() => server.writes.length).toBe(2);
+  expect('artist' in server.writes[1].body).toBe(false);
+  await expect(artist).toHaveValue('');
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+  await page.setViewportSize({ width: 320, height: 900 }); expect(await noOverflow(page)).toBe(true);
 });
 
 test('after a lookup finds no release the paid Luna AI button is offered after the name box, and its ticked entries, label and Disc Number are preselected and approved in one confirmation', async ({ page }) => {

@@ -54,6 +54,7 @@
  *   - a per-path save replays after the review became format 3, and is refused on a newer format, a format-3 draft missing its review-only values and an applied review
  *   - on a format-3 review an accepted suggestion replaces an automatic value written after its baseline, while an administrator value written since conflicts
  *   - review lookup routes guard authentication, the current admin and the viewer before parsing, stay private and within 8 KB, and answer with 202 receipts that replay and a view with its summary
+ *   - a review lookup body takes an optional Artist name: a malformed one is invalid input, one that cannot be sent an invalid name, both writing nothing; a valid one is part of the intent and shown with its run
  *   - apply is refused with ADMIN_IMPORT_LOOKUP_ACTIVE while a review run is queued, running or retrying, and admitted after it completes; a gate left blocking with a finished record does not hold apply
  *   - a review run that can no longer send a request never holds apply: imports turned off or a grant past its end admit apply, and the worker later ends the run without a request
  *   - metadata lookup for a review never writes the catalog collections: a run that applies its preselection to the review draft, a retry and the view leave Albums, Tracks, Artists and Organizations unchanged
@@ -542,7 +543,9 @@ test('a review\'s Luna analysis sends the MusicBrainz release applied to the rev
     /** One analysis of a new review with `applied` stored on its lookup record; the inputs Luna received and the stored review. */
     const analyze = async (applied: Record<string, unknown>) => {
         const review = await create(), _id = new ObjectId(review.item.id), inputs: AnalysisInput[] = [];
-        await db().collection('adminImportLookups').insertOne({ _id, run: 1, state: 'complete', candidates: [candidate, itunes], applied } as never);
+        // The run was submitted with an Artist name, which is never part of Luna's input.
+        await db().collection('adminImportLookups').insertOne({ _id, run: 1, state: 'complete', candidates: [candidate, itunes], applied,
+            input: { trigger: 'submitted', submitted: { kind: 'album', text: 'Synthetic Typed Name', artist: 'Synthetic Typed Artist Sentinel' } } } as never);
         const luna: ImportAnalysisProvider = { configured: () => true, analyze: async input => { inputs.push(input); return input.album ? [{ scope: 'album', slotId: null, field: 'title', value: 'Proposed Album', source: 'context', evidence: 'Existing title' }] : []; } };
         await analyzeCatalogReview(String(actor), review.item.id, mutation(review.item.revision), luna);
         for (let tick = 0; tick < 4 && (await importCollection().findOne({ _id }))!.analysis.state !== 'complete'; tick++) await runAdminImportWorkerOnce(luna);
@@ -554,12 +557,14 @@ test('a review\'s Luna analysis sends the MusicBrainz release applied to the rev
         ['complete', releaseId, [['catalogReview', 'Synthetic Applied Release', 'musicbrainz'], ['catalogReview', 'Synthetic Applied Release', 'musicbrainz']]]);
     assert.deepEqual(sent.stored.suggestions.map(value => [value.field, value.lookupContext?.source, value.lookupContext?.releaseId]), [['title', 'musicbrainz', releaseId]]);
     assert.equal(JSON.stringify(sent.read).includes('lookupContext'), false);
+    assert.equal(JSON.stringify(sent.inputs).includes('Synthetic Typed Artist Sentinel'), false);
     // An applied iTunes-only candidate and none send nothing and record nothing.
     for (const applied of [chosen(itunes.key, itunes.releaseId), chosen(null, null, 'none')]) {
         const { stored, inputs } = await analyze(applied);
         assert.deepEqual([stored.analysis.state, 'lookupContext' in stored.analysis, inputs.map(input => input.lookupContext)], ['complete', false, [null, null]], String(applied.candidateKey));
         assert.deepEqual(stored.suggestions.map(value => [value.field, 'lookupContext' in value]), [['title', false]]);
         assert.ok(!JSON.stringify(inputs).includes('Synthetic Applied Release') && !JSON.stringify(inputs).includes('Synthetic iTunes Collection'));
+        assert.equal(JSON.stringify(inputs).includes('Synthetic Typed Artist Sentinel'), false);
     }
 });
 
@@ -1286,6 +1291,33 @@ test('review lookup routes guard authentication, the current admin and the viewe
     // A demoted administrator is refused before anything is read.
     await db().collection('users').updateOne({ _id: actor }, { $set: { role: 'user' } });
     assert.equal((await request(path)).status, 403);
+}));
+
+test('a review lookup body takes an optional Artist name: a malformed one is invalid input, one that cannot be sent an invalid name, both writing nothing; a valid one is part of the intent and shown with its run', () => withLookup(async () => {
+    const review = await create(), id = review.item.id, _id = new ObjectId(id), path = `/catalog-reviews/${id}/lookup`;
+    const before = await importCollection().findOne({ _id });
+    const refused = async (value: Record<string, unknown>, expected: string) => {
+        const response = await request(path, 'POST', value);
+        assert.deepEqual([response.status, await response.json()], [400, { code: expected }], JSON.stringify(value).slice(0, 80));
+    };
+    for (const artist of [7, null, 'x'.repeat(1001)]) await refused({ ...mutation(1), kind: 'album', text: 'Existing Album', artist }, 'ADMIN_IMPORT_INVALID_INPUT');
+    await refused({ ...mutation(1), kind: 'album', artist: 'Synthetic Artist' }, 'ADMIN_IMPORT_INVALID_INPUT');
+    for (const artist of ['https://example.invalid/a', '  ', 'x'.repeat(201), 'Synthetic\u200bArtist']) {
+        await refused({ ...mutation(1), kind: 'album', text: 'Existing Album', artist }, 'ADMIN_IMPORT_LOOKUP_INVALID_NAME');
+    }
+    // An Artist name alone never looks up, and two names of 1000 CJK characters (about 6 KB) fit the body limit but not the name bound.
+    await refused({ ...mutation(1), kind: 'album', text: '', artist: 'Synthetic Artist' }, 'ADMIN_IMPORT_LOOKUP_INVALID_NAME');
+    await refused({ ...mutation(1), kind: 'album', text: '\u540d'.repeat(1000), artist: '\u540d'.repeat(1000) }, 'ADMIN_IMPORT_LOOKUP_INVALID_NAME');
+    assert.deepEqual([await importCollection().findOne({ _id }), await db().collection('adminImportLookups').findOne({ _id })], [before, null], 'no refusal wrote anything');
+    const body = { ...mutation(1), kind: 'album', text: 'Existing Album', artist: 'Synthetic Typed Artist' };
+    const submitted = await request(path, 'POST', body), value = await submitted.json();
+    assert.deepEqual([submitted.status, value.receipt.kind], [202, 'lookup']);
+    const replay = await request(path, 'POST', body);
+    assert.deepEqual([replay.status, await replay.json()], [202, value]);
+    const changed = await request(path, 'POST', { ...body, artist: 'Synthetic Other Artist' });
+    assert.deepEqual([changed.status, await changed.json()], [409, { code: 'ADMIN_IMPORT_OPERATION_CONFLICT' }]);
+    const queued = await (await request(path)).json();
+    assert.deepEqual([queued.lookup.run, queued.lookup.input], [1, { trigger: 'submitted', submitted: { kind: 'album', text: 'Existing Album', artist: 'Synthetic Typed Artist' } }]);
 }));
 
 test('apply is refused with ADMIN_IMPORT_LOOKUP_ACTIVE while a review run is queued, running or retrying, and admitted after it completes; a gate left blocking with a finished record does not hold apply', () => withLookup(async () => {

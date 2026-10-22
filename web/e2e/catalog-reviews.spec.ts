@@ -11,6 +11,7 @@
  *   Variables: locale
  * Tests
  *   - private Album covers disappear on User view or role loss and make no later private image reads
+ *   - an existing-Album review looks up a typed name with an optional Artist and shows both again with its run, while Look up stays in the first screen
  *   - without metadata lookup the Album page creates a completion for manual editing, then opens it, and another one is an explicit choice
  *   - an Album that cannot have a completion shows the action disabled with its reason
  *   - an iTunes-only lookup result names iTunes on its answers and flags every value it wrote
@@ -23,6 +24,7 @@
  *   - multiple manual changes open confirmation at its first difference without applying the Album
  *   - changed metadata remains reviewable but cannot be applied and 640px reflow stays accessible
  *   - User view and revoked role remove private reviews and stop their requests
+ *   - discarding an Album completion from the workbench removes its card
  *   - an ordinary account never requests private catalog reviews
  * @end-catalog */
 
@@ -34,7 +36,9 @@ import AxeBuilder from '@axe-core/playwright';
 import sharp from 'sharp';
 import { capabilities, session, viewer } from '../src/features/admin/adminFixtures.testSupport';
 import { albumId, capturedCatalogReview, catalogAlbum, catalogAlbumTracks, catalogAlbumTracksWithExpected, catalogReview, reviewId, slotId, slotTwo, titleSuggestionId } from '../src/features/admin/catalogReviewFixtures.testSupport';
-import { guestHandle, reviewAfterLookup, reviewIdentityResponse, reviewItunesLookupResponse, reviewLookupResponse } from '../src/features/admin/catalogReviewLookupFixtures.testSupport';
+import {
+  guestHandle, reviewAfterLookup, reviewIdentityResponse, reviewItunesLookupResponse, reviewLookupResponse, reviewTieLookupResponse
+} from '../src/features/admin/catalogReviewLookupFixtures.testSupport';
 import type { CatalogAlbumTracks } from '../src/features/admin/catalogAlbumTracksApi';
 import type { CatalogReview, ReviewDraftChange, ReviewField } from '../src/features/admin/catalogReviewApi';
 import type { ReviewDecisionItem, ReviewIdentityResponse, ReviewLookupResponse } from '../src/features/admin/catalogReviewLookupApi';
@@ -101,6 +105,8 @@ function remainingCatalogItems(kind: RemainingCatalogKind): CatalogItem[] {
 /** Only fabricated catalog data and route responses are used; no provider, storage or account is contacted. */
 async function setup(page: Page, administrator = true, initialReleaseDate: { year: number; month: number | null; day: number | null } | null = null, presentation: CatalogPresentation = {}) {
   let album = catalogAlbum(), review = catalogReview(), created = false, denied = false, finishAnalysis = false;
+  // A discarded review leaves a tombstone: every read of it is then refused as discarded until a creation stores another.
+  let discarded = false;
   let artworkFailed = presentation.cover === 'failed';
   album.fields.releaseDate = initialReleaseDate;
   album.fields.title = presentation.title ?? album.fields.title;
@@ -211,7 +217,7 @@ async function setup(page: Page, administrator = true, initialReleaseDate: { yea
         const counts = { all: created ? 1 : 0, analyzing: created && ['queued', 'running'].includes(review.analysis.state) ? 1 : 0,
           awaitingReview: created && review.state === 'reviewing' ? 1 : 0, needsAttention: 0, completed: created && review.state === 'applied' ? 1 : 0 };
         return route.fulfill({ json: { items: created ? [{ id: review.id, revision: review.revision, createdAt: review.createdAt, updatedAt: review.updatedAt, startedByMe: review.startedByMe,
-          state: review.state, analysis: review.analysis, albumId, title: review.source.album.title, pendingSuggestions: review.suggestions.filter(value => value.decision === 'pending').length }] : [], counts, nextCursor: null }, headers });
+          state: review.state, analysis: review.analysis, albumId, albumTitle: review.source.album.title, title: review.source.album.title, pendingSuggestions: review.suggestions.filter(value => value.decision === 'pending').length }] : [], counts, nextCursor: null }, headers });
       }
       expect(method).toBe('POST');
       const body = request.postDataJSON(); writes.push({ path, method, body });
@@ -222,12 +228,13 @@ async function setup(page: Page, administrator = true, initialReleaseDate: { yea
       review = { ...fixture, revision: lookupAvailable ? 2 : 1, source: { ...fixture.source, album: { ...fixture.source.album, title: album.fields.title, revision: album.revision } },
         draft: { ...fixture.draft, album: { ...fixture.draft.album, title: album.fields.title, ...(lookupAvailable ? { expectedTracklist: null } : {}) } },
         analysis: { ...fixture.analysis, state: 'idle', generation: 0, operationId: null, completedChunks: 0, totalChunks: 0, attemptsUsed: 0 }, suggestions: [] };
-      created = true;
+      created = true; discarded = false;
       if (lookupAvailable) queue({ trigger: 'catalog', submitted: null });
       const value = { operationId: String(body.operationId), kind: 'create' as const, revision: 1 };
       review.receipts = [value];
       return route.fulfill({ status: 201, json: { item: review, receipt: value }, headers });
     }
+    if (discarded && path.startsWith(`/api/admin/v1/catalog-reviews/${reviewId}`)) return route.fulfill({ status: 404, json: { code: 'ADMIN_CATALOG_REVIEW_DISCARDED' }, headers });
     if (path === `/api/admin/v1/catalog-reviews/${reviewId}`) {
       if (method === 'GET') {
         if (finishAnalysis && review.analysis.state === 'queued') {
@@ -272,6 +279,12 @@ async function setup(page: Page, administrator = true, initialReleaseDate: { yea
     if (path.startsWith(`/api/admin/v1/catalog-reviews/${reviewId}/`) && method === 'POST') {
       const body = request.postDataJSON(); writes.push({ path, method, body });
       expect(body.expectedRevision).toBe(review.revision);
+      if (path.endsWith('/discard')) {
+        // The server keeps only a tombstone: the review leaves the queue and the Album page, and its lookup run ends.
+        expect(Object.keys(body).sort()).toEqual(['expectedRevision', 'operationId']);
+        created = false; discarded = true; lookup = null;
+        return route.fulfill({ json: { discarded: { id: reviewId, albumId }, receipt: { operationId: String(body.operationId), kind: 'discard', revision: review.revision + 1 } }, headers });
+      }
       if (path.endsWith('/analyze')) {
         review = { ...review, revision: review.revision + 1, analysis: { ...review.analysis, state: 'queued', generation: 1, operationId: body.operationId } };
         return route.fulfill({ status: 202, json: receipt(body, 'analyze'), headers });
@@ -289,8 +302,10 @@ async function setup(page: Page, administrator = true, initialReleaseDate: { yea
         return route.fulfill({ json: receipt(body, 'adopt'), headers });
       }
       if (path.endsWith('/lookup')) {
-        expect(Object.keys(body).sort()).toEqual(['expectedRevision', 'kind', 'operationId', 'text']);
-        queue({ trigger: 'submitted', submitted: { kind: body.kind as 'album' | 'song', text: String(body.text) } });
+        // `artist` is sent only when the Artist field is not empty, and then trimmed.
+        expect(Object.keys(body).sort()).toEqual(['expectedRevision', 'kind', 'operationId', 'text', ...('artist' in body ? ['artist'] : [])].sort());
+        if ('artist' in body) expect(typeof body.artist === 'string' && body.artist.length > 0 && body.artist === body.artist.trim()).toBe(true);
+        queue({ trigger: 'submitted', submitted: { kind: body.kind as 'album' | 'song', text: String(body.text), ...(typeof body.artist === 'string' ? { artist: body.artist } : {}) } });
         return route.fulfill({ status: 202, json: lookupReceipt(body, 'lookup'), headers });
       }
       if (path.endsWith('/lookup/retry')) { queue(lookup!.input); return route.fulfill({ status: 202, json: lookupReceipt(body, 'lookup-retry'), headers }); }
@@ -585,16 +600,13 @@ for (const variant of localizedViewports) {
     expect(hero.width).toBeLessThanOrEqual(variant.width === 1280 ? 245 : 195);
     const actions = page.getByRole('group', { name: label('admin.catalog.edit'), exact: true });
     await expect(actions).toBeVisible();
-    const manual = actions.getByRole('link', { name: label('admin.catalog_review.manual_edit'), exact: true });
-    await expect(manual).toHaveAttribute('href', /#catalog-details$/);
+    // Manual editing is the details form directly below the hero, which offers no separate entry to it.
+    await expect(page.getByText(label('admin.catalog_review.manual_edit'), { exact: true })).toHaveCount(0);
     await expect(actions.getByRole('button', { name: label('admin.catalog_review.create'), exact: true })).toBeVisible();
     await expect(actions.getByRole('link', { name: label('admin.conversion.existing'), exact: true })).toHaveAttribute('href', `/finitude/admin/conversions?album=${albumId}`);
     await expect(page.locator('#catalog-details')).toBeVisible();
     await expect(page.getByRole('textbox', { name: label('admin.field.title'), exact: true })).toHaveValue(title);
     await capture(page, '21-cover-led-detail', variant.width); await reflow(page);
-    await manual.click();
-    await expect(page.getByRole('heading', { name: label('admin.layout.catalog_details'), exact: true })).toBeInViewport();
-    await expect(page).toHaveURL(/#catalog-details$/);
     await page.getByRole('link', { name: label('admin.catalog.back'), exact: true }).click();
     await expect(page).toHaveURL(/\/finitude\/admin\/catalog$/); await expect(entry).toBeVisible();
     expect(api.writes).toEqual([]);
@@ -746,8 +758,8 @@ for (const kind of remainingCatalogKinds) for (const variant of localizedViewpor
     expect(hero.width).toBeGreaterThanOrEqual(variant.width === 1280 ? 235 : 185);
     expect(hero.width).toBeLessThanOrEqual(variant.width === 1280 ? 245 : 195);
     const actions = page.getByRole('group', { name: label('admin.catalog.edit'), exact: true }); await expect(actions).toBeVisible();
-    const manual = actions.getByRole('link', { name: label('admin.catalog_review.manual_edit'), exact: true });
-    await expect(manual).toHaveAttribute('href', /#catalog-details$/);
+    await expect(page.getByText(label('admin.catalog_review.manual_edit'), { exact: true })).toHaveCount(0);
+    await expect(actions.getByRole('button', { name: label('admin.common.refresh'), exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: label('admin.catalog_review.create'), exact: true })).toHaveCount(0);
     const conversion = actions.getByRole('link', { name: label('admin.conversion.existing'), exact: true });
     if (kind === 'audioTrack') await expect(conversion).toHaveAttribute('href', `/finitude/admin/conversions?track=${item.id}`);
@@ -758,8 +770,6 @@ for (const kind of remainingCatalogKinds) for (const variant of localizedViewpor
     if ('bio' in item.fields) await expect(page.getByRole('textbox', { name: label('admin.field.bio'), exact: true })).toHaveValue(item.fields.bio);
     if ('description' in item.fields) await expect(page.getByRole('textbox', { name: label('admin.field.description'), exact: true })).toHaveValue(item.fields.description);
     await capture(page, `24-${kind}-detail`, variant.width); await reflow(page);
-    await manual.click(); await expect(page.getByRole('heading', { name: label('admin.layout.catalog_details'), exact: true })).toBeInViewport();
-    await expect(page).toHaveURL(/#catalog-details$/);
     await page.getByRole('link', { name: label('admin.catalog.back'), exact: true }).click();
     await expect(page).toHaveURL(new RegExp(`/finitude/admin/catalog\\?kind=${kind}$`));
     await expect(page.getByRole('button', { name: catalogCategoryLabel(kind), exact: true })).toHaveAttribute('aria-pressed', 'true');
@@ -815,7 +825,7 @@ for (const variant of localizedViewports) {
     expect(api.writes).toEqual([]);
     await capture(page, '02-catalog-entry', width); await reflow(page);
     await page.getByRole('link', { name: 'Synthetic catalog Album', exact: true }).click();
-    await page.getByRole('group', { name: label('admin.catalog.edit'), exact: true }).getByRole('link', { name: label('admin.catalog_review.manual_edit'), exact: true }).click();
+    // Manual editing happens in the details form directly below the hero.
     await page.getByRole('textbox', { name: label('admin.field.title'), exact: true }).fill('Manually corrected synthetic Album');
     await expect(page.getByRole('heading', { name: label('admin.layout.catalog_details'), exact: true })).toBeVisible();
     await capture(page, '02b-manual-editor', width);
@@ -1140,6 +1150,31 @@ for (const variant of localizedViewports) {
   });
 }
 
+test('an existing-Album review looks up a typed name with an optional Artist and shows both again with its run, while Look up stays in the first screen', async ({ page }) => {
+  locale = 'en-US';
+  await page.setViewportSize({ width: 1280, height: 720 });
+  const api = await setup(page); api.ready();
+  const item = api.review();
+  item.analysis = { ...item.analysis, state: 'idle', generation: 0, operationId: null, completedChunks: 0, totalChunks: 0, attemptsUsed: 0 }; item.suggestions = [];
+  await enter(page, `/finitude/admin/catalog-reviews/${reviewId}`);
+  const summary = page.getByRole('region', { name: label('admin.catalog_review.lookup_title'), exact: true });
+  await expect(summary.getByText(label('admin.catalog_review.lookup_not_started'), { exact: true })).toBeVisible();
+  // The Artist field shares the name's row and its hint follows Look up, so Look up stays in the first main screen.
+  await expectLookupFirst(page);
+  const box = summary.getByRole('group', { name: label('admin.lookup.box'), exact: true });
+  const name = box.getByRole('textbox', { name: label('admin.lookup.name'), exact: true }), artist = box.getByRole('textbox', { name: label('admin.lookup.artist'), exact: true });
+  await expect(box.getByText(label('admin.lookup.artist_hint_review'), { exact: true })).toBeVisible();
+  await expect(artist).toHaveValue(''); await expect(artist).toHaveAttribute('autocomplete', 'off');
+  await name.fill('Synthetic Typed Name'); await artist.fill('Synthetic Typed Artist');
+  await box.getByRole('button', { name: label('admin.lookup.submit'), exact: true }).click();
+  await expect(summary.getByText(label('admin.lookup.active'), { exact: true })).toBeVisible();
+  expect(api.writes.filter(write => write.path.endsWith('/lookup')).map(write => write.body)).toEqual([
+    { expectedRevision: 1, kind: 'album', text: 'Synthetic Typed Name', artist: 'Synthetic Typed Artist', operationId: expect.any(String) }]);
+  // The queued run's view carries both, and the box, keyed by its run, shows them again.
+  await expect(name).toHaveValue('Synthetic Typed Name'); await expect(artist).toHaveValue('Synthetic Typed Artist');
+  await reflow(page);
+});
+
 test('without metadata lookup the Album page creates a completion for manual editing, then opens it, and another one is an explicit choice', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   const api = await setup(page, true, null, { lookupAvailable: false });
@@ -1172,12 +1207,78 @@ test('an Album that cannot have a completion shows the action disabled with its 
   await page.setViewportSize({ width: 390, height: 844 });
   const api = await setup(page, true, null, { ineligible: 'videoTracks' });
   await enter(page, `/finitude/admin/catalog/album/${albumId}`);
-  const action = page.getByRole('group', { name: label('admin.catalog.edit'), exact: true }).getByRole('button', { name: label('admin.catalog_review.create'), exact: true });
+  const actions = page.getByRole('group', { name: label('admin.catalog.edit'), exact: true });
+  const action = actions.getByRole('button', { name: label('admin.catalog_review.create'), exact: true });
   await expect(action).toHaveAccessibleDescription(label('admin.catalog_review.ineligible_video_tracks'));
   await expect(action).toBeDisabled();
+  // The reason sits under the disabled button, above the quieter row.
+  const [button, reason, refresh] = await Promise.all([action, actions.getByText(label('admin.catalog_review.ineligible_video_tracks'), { exact: true }),
+    actions.getByRole('button', { name: label('admin.common.refresh'), exact: true })].map(control => control.boundingBox()));
+  expect(reason!.y).toBeGreaterThanOrEqual(button!.y + button!.height); expect(Math.abs(reason!.x - button!.x)).toBeLessThan(1);
+  expect(refresh!.y).toBeGreaterThanOrEqual(reason!.y + reason!.height);
   await reflow(page);
   expect(api.writes).toEqual([]);
 });
+
+for (const width of [390, 768, 1440] as const) {
+  test(`the Album hero leads with its completion, keeps the quieter actions on their own row and holds still while eligibility loads at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 });
+    const api = await setup(page);
+    // Holds the eligibility read so the hero is measured before and after it answers; `open` answers with an open completion.
+    let release = () => {}, open = false;
+    let held = new Promise<void>(resolve => { release = resolve; });
+    await page.route(url => url.pathname === '/api/admin/v1/catalog-reviews/eligibility', async route => {
+      await held;
+      if (!open) return route.fallback();
+      return route.fulfill({ json: { eligible: true, reason: null, openReviewId: reviewId, lookupAvailable: true }, headers: { 'X-Finitude-Account-Viewer': viewer, 'Cache-Control': 'no-store' } });
+    });
+    await enter(page, `/finitude/admin/catalog/album/${albumId}`);
+    const actions = page.getByRole('group', { name: label('admin.catalog.edit'), exact: true });
+    const start = actions.getByRole('button', { name: label('admin.catalog_review.create'), exact: true });
+    const conversion = actions.getByRole('link', { name: label('admin.conversion.existing'), exact: true });
+    const refresh = actions.getByRole('button', { name: label('admin.common.refresh'), exact: true });
+    await expect(refresh).toBeVisible();
+    const early = await refresh.boundingBox();
+    await expect(start).toBeDisabled();
+    const pending = await refresh.boundingBox();
+    release(); await expect(start).toBeEnabled();
+    expect([pending, await refresh.boundingBox()]).toEqual([early, early]);
+    const boxes = async (...controls: Locator[]) => Promise.all(controls.map(async control => (await control.boundingBox())!));
+    const [startBox, conversionBox, refreshBox] = await boxes(start, conversion, refresh);
+    // The quieter row starts under the completion at the same left edge, keeps one line and lighter buttons.
+    expect(conversionBox.y).toBeGreaterThanOrEqual(startBox.y + startBox.height); expect(Math.abs(conversionBox.x - startBox.x)).toBeLessThan(1);
+    expect(Math.abs(refreshBox.y - conversionBox.y)).toBeLessThan(1); expect(refreshBox.height).toBeLessThan(startBox.height);
+    for (const box of [startBox, conversionBox, refreshBox]) expect(box.x + box.width).toBeLessThanOrEqual(width);
+    await capture(page, '38-album-hero', width); await reflow(page);
+    // Keyboard order follows the visual order.
+    await start.focus(); await page.keyboard.press('Tab'); await expect(conversion).toBeFocused();
+    await page.keyboard.press('Tab'); await expect(refresh).toBeFocused();
+    // An open completion: its note on its own line, then Open Album completion first and Start another completion after it. The
+    // rows it adds grow the hero downward, so the title stays where it was while the read was pending.
+    open = true; held = new Promise<void>(resolve => { release = resolve; });
+    await page.getByRole('link', { name: label('admin.catalog.back'), exact: true }).click();
+    await page.getByRole('link', { name: 'Synthetic catalog Album', exact: true }).click();
+    const title = page.getByRole('heading', { name: 'Synthetic catalog Album', level: 1, exact: true });
+    await expect(start).toBeDisabled();
+    const pendingTitle = await title.boundingBox();
+    release();
+    const opener = actions.getByRole('link', { name: label('admin.workbench.open_review'), exact: true });
+    const another = actions.getByRole('button', { name: label('admin.catalog_review.create_another'), exact: true });
+    await expect(opener).toHaveAttribute('href', `/finitude/admin/catalog-reviews/${reviewId}`); await expect(another).toBeEnabled();
+    expect(await title.boundingBox()).toEqual(pendingTitle);
+    const [noteBox, openerBox, anotherBox, belowBox] = await boxes(actions.getByText(label('admin.catalog_review.open_copy'), { exact: true }), opener, another, conversion);
+    expect(openerBox.y).toBeGreaterThanOrEqual(noteBox.y + noteBox.height); expect(Math.abs(openerBox.x - noteBox.x)).toBeLessThan(1);
+    // The two buttons share a row or wrap to the start of the next one.
+    if (Math.abs(anotherBox.y - openerBox.y) < 1) expect(anotherBox.x).toBeGreaterThan(openerBox.x + openerBox.width);
+    else { expect(anotherBox.y).toBeGreaterThanOrEqual(openerBox.y + openerBox.height); expect(Math.abs(anotherBox.x - openerBox.x)).toBeLessThan(1); }
+    expect(belowBox.y).toBeGreaterThanOrEqual(anotherBox.y + anotherBox.height);
+    for (const box of [noteBox, openerBox, anotherBox]) expect(box.x + box.width).toBeLessThanOrEqual(width);
+    await capture(page, '39-album-hero-open', width); await reflow(page);
+    await opener.focus();
+    for (const next of [another, conversion, refresh]) { await page.keyboard.press('Tab'); await expect(next).toBeFocused(); }
+    expect(api.writes).toEqual([]);
+  });
+}
 
 test('an iTunes-only lookup result names iTunes on its answers and flags every value it wrote', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
@@ -1197,6 +1298,34 @@ test('an iTunes-only lookup result names iTunes on its answers and flags every v
   await capture(page, '33-review-lookup-itunes', 390); await reflow(page);
   expect(api.writes).toEqual([]);
 });
+
+for (const variant of localizedViewports) {
+  const { width } = variant;
+  test(`an existing-Album review marks a release first found through a track title in its candidate chooser at ${width}px ${variant.locale}`, async ({ page }) => {
+    locale = variant.locale;
+    await page.setViewportSize({ width, height: width === 1280 ? 720 : 844 });
+    const api = await setup(page); api.ready();
+    // A tie whose second release a track-title search found first.
+    const tie = reviewTieLookupResponse(), lookup = tie.lookup!;
+    api.looked({ ...tie, lookup: { ...lookup, candidates: lookup.candidates.map((candidate, index) => ({ ...candidate, byTrackTitle: index === 1 })) } });
+    await enter(page, `/finitude/admin/catalog-reviews/${reviewId}`);
+    const summary = page.getByRole('region', { name: label('admin.catalog_review.lookup_title'), exact: true });
+    const chooser = summary.getByRole('region', { name: label('admin.catalog_review.lookup_tie'), exact: true });
+    const marked = label('admin.lookup.found_by_track_title');
+    const cards = chooser.getByRole('listitem').filter({ has: page.locator('strong') });
+    await expect(cards).toHaveCount(2);
+    await expect(cards.nth(0).getByText(marked, { exact: true })).toHaveCount(0);
+    await expect(cards.nth(1).getByText(marked, { exact: true })).toBeVisible();
+    // The folded list marks the same release, and only it, once it is opened.
+    const found = label('admin.lookup.candidates', { count: 2 });
+    const folded = summary.locator('details', { has: page.getByText(found, { exact: true }) });
+    await folded.getByText(found, { exact: true }).click();
+    await expect(folded.getByText(marked, { exact: true })).toHaveCount(1);
+    await expect(folded.getByText(marked, { exact: true })).toBeVisible();
+    await reflow(page);
+    expect(api.writes).toEqual([]);
+  });
+}
 
 for (const width of [320, 768, 1440]) {
   test(`read-only Credits and label context stay readable while a captured Disc Number is edited and applied at ${width}px`, async ({ page }) => {
@@ -1610,6 +1739,53 @@ test('User view and revoked role remove private reviews and stop their requests'
   await expect(page.getByText(label('admin.view.required'))).toBeVisible();
   expect(api.reads.filter(path => path.includes('/catalog-reviews'))).toHaveLength(afterLoss);
   expect(api.writes).toEqual([]);
+});
+
+for (const variant of localizedViewports) {
+  const { width } = variant;
+  test(`discarding an Album completion names the Album, returns to the Album page and a new completion can start at ${width}px ${variant.locale}`, async ({ page }) => {
+    locale = variant.locale;
+    await page.setViewportSize({ width, height: width === 1280 ? 720 : 844 });
+    const api = await setup(page); api.ready();
+    await enter(page, `/finitude/admin/catalog-reviews/${reviewId}`);
+    const discard = page.getByRole('button', { name: label('admin.catalog_review.discard'), exact: true });
+    await expect(discard).toBeEnabled(); await discard.click();
+    const dialog = page.getByRole('dialog', { name: label('admin.catalog_review.discard_title'), exact: true });
+    await expect(dialog.getByText(api.review().source.album.title, { exact: true })).toBeVisible();
+    await expect(dialog.getByText(label('admin.catalog_review.discard_copy'), { exact: true })).toBeVisible();
+    await expect(dialog.getByRole('button', { name: label('admin.common.cancel'), exact: true })).toBeFocused();
+    await reflow(page);
+    await capture(page, '40-completion-discard', width, false, false);
+    expect(api.writes).toEqual([]);
+    await dialog.getByRole('button', { name: label('admin.catalog_review.discard_confirm'), exact: true }).click();
+    await expect(page).toHaveURL(new RegExp(`/finitude/admin/catalog/album/${albumId}$`));
+    expect(api.writes.map(write => [write.path, write.body])).toEqual([[`/api/admin/v1/catalog-reviews/${reviewId}/discard`, { expectedRevision: 1, operationId: expect.any(String) }]]);
+    // The Album page offers a new completion, never the discarded one.
+    const actions = page.getByRole('group', { name: label('admin.catalog.edit'), exact: true });
+    const start = actions.getByRole('button', { name: label('admin.catalog_review.create'), exact: true });
+    await expect(start).toBeEnabled();
+    await expect(page.getByRole('link', { name: label('admin.workbench.open_review'), exact: true })).toHaveCount(0);
+    await start.click();
+    await page.getByRole('dialog', { name: label('admin.catalog_review.create') }).getByRole('button', { name: label('admin.catalog_review.create'), exact: true }).click();
+    await expect(page).toHaveURL(new RegExp(`/finitude/admin/catalog-reviews/${reviewId}$`));
+    const creation = api.writes.at(-1)!;
+    expect([creation.path, Object.keys(creation.body).sort()]).toEqual(['/api/admin/v1/catalog-reviews', ['albumId', 'expectedRevision', 'operationId']]);
+    await expect(page.getByRole('button', { name: label('admin.catalog_review.discard'), exact: true })).toBeVisible();
+  });
+}
+
+test('discarding an Album completion from the workbench removes its card', async ({ page }) => {
+  const api = await setup(page); api.ready();
+  await enter(page, '/finitude/admin/imports?source=catalogReviews');
+  const cards = page.getByRole('listitem').filter({ has: page.getByRole('link', { name: label('admin.workbench.open_review'), exact: true }) });
+  await expect(cards).toHaveCount(1);
+  await cards.getByRole('button', { name: label('admin.catalog_review.discard'), exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: label('admin.catalog_review.discard_title'), exact: true });
+  await expect(dialog.getByText(api.review().source.album.title, { exact: true })).toBeVisible();
+  await dialog.getByRole('button', { name: label('admin.catalog_review.discard_confirm'), exact: true }).click();
+  await expect(cards).toHaveCount(0);
+  await expect(page.getByText(label('admin.workbench.review_empty'), { exact: true })).toBeVisible();
+  expect(api.writes.map(write => write.path)).toEqual([`/api/admin/v1/catalog-reviews/${reviewId}/discard`]);
 });
 
 test('an ordinary account never requests private catalog reviews', async ({ page }) => {

@@ -170,7 +170,8 @@ export async function requestAutomaticMetadataLookup(actor: string, id: string, 
             if (!fileSet.complete) { await rerankLookup(doc, record, actor, session, now); return outcome('incomplete'); }
             if (record?.fileSetDigest === fileSet.digest) return outcome('current');
             if ((record?.automaticRuns ?? 0) >= JOB.automaticRuns) { await rerankLookup(doc, record, actor, session, now); return outcome('limit'); }
-            // A rerun after a submitted run repeats the submitted text; otherwise it plans from the current tags and folder.
+            // A rerun after a submitted run repeats the submitted text and any Artist name; otherwise it plans from the current tags
+            // and folder.
             const submitted = record?.input?.trigger === 'submitted' && record.input.submitted ? record.input.submitted : undefined;
             const planned = planImportLookup(doc, { folderAvailable: record?.folderUsed !== true, submitted });
             const run = startLookupRun(record, {
@@ -251,16 +252,18 @@ const retryableInput = (input: unknown): input is MetadataLookupInput => {
     if (!value || typeof value !== 'object') return false;
     if (value.trigger === 'tags' || value.trigger === 'folder' || value.trigger === 'catalog') return true;
     const submitted = value.submitted;
-    return value.trigger === 'submitted' && !!submitted && typeof submitted === 'object' && (submitted.kind === 'album' || submitted.kind === 'song') && typeof submitted.text === 'string';
+    return value.trigger === 'submitted' && !!submitted && typeof submitted === 'object' && (submitted.kind === 'album' || submitted.kind === 'song') && typeof submitted.text === 'string'
+        && (submitted.artist === undefined || typeof submitted.artist === 'string');
 };
 /**
  * Admits a submitted or manually retried run inside the caller's administrator transaction, replacing the previous run; the
  * granting administrator is rechecked in that transaction. An import must be accepted (409 ADMIN_IMPORT_LOOKUP_REFUSED); an
  * existing-Album review is admitted through its capture (admitMetadataLookup, converting it), and its run compares in subset mode.
  * A submission binds the current file set (complete or not; a review's members) and refuses a link, an empty, over-long or
- * invisible-character name, a review's planned with its shown primary Artist names; a retry repeats the last run's input and
- * queries and is refused while a run is queued or running (one waiting for an automatic retry is replaced). The caller records its
- * own receipt and persists `doc`.
+ * invisible-character name or Artist name (an Artist name without a name included), throwing before anything is written; it is
+ * planned with the shared tag credits (a review's with its shown primary Artist names), or with a submitted Artist name in their
+ * place. A retry repeats the last run's input and queries, a submitted Artist name included, and is refused while a run is queued
+ * or running (one waiting for an automatic retry is replaced). The caller records its own receipt and persists `doc`.
  */
 export async function queueMetadataLookup(doc: AdminImportDocument, request: MetadataLookupRequest, session: ClientSession,
     options: { now?: Date; configuration?: () => MetadataLookupConfiguration } = {}): Promise<MetadataLookupRecord> {
@@ -275,7 +278,9 @@ export async function queueMetadataLookup(doc: AdminImportDocument, request: Met
     let run: MetadataLookupRecord;
     if (request.kind === 'submit') {
         const submitted = request.submitted;
-        if (!submitted || (submitted.kind !== 'album' && submitted.kind !== 'song') || lookupTermProblem(submitted.text) !== null) throw refuse(400, 'ADMIN_IMPORT_LOOKUP_INVALID_NAME');
+        // The name stays required: an Artist name alone never plans a run.
+        if (!submitted || (submitted.kind !== 'album' && submitted.kind !== 'song') || lookupTermProblem(submitted.text) !== null
+            || (submitted.artist !== undefined && lookupTermProblem(submitted.artist) !== null)) throw refuse(400, 'ADMIN_IMPORT_LOOKUP_INVALID_NAME');
         const planned = review ? planCatalogReviewLookup(doc, { submitted }) : planImportLookup(doc, { folderAvailable: false, submitted });
         if (planned.plan.rejected || !planned.plan.queries.length) throw refuse(400, 'ADMIN_IMPORT_LOOKUP_INVALID_NAME');
         run = startLookupRun(record, { ...base, grantSource: 'submit', input: planned.input, queries: planned.plan.queries });

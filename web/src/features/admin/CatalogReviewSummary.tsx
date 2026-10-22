@@ -34,13 +34,13 @@ const memberPath = (path: string) => /^tracks\.[^.]+\.artists$/.test(path);
 /**
  * The lookup-first summary of an existing-Album review (owner rules: docs/business-rules.md, Catalog Visibility and
  * Administration, existing-Album reviews; Administrator Metadata Lookup). It presents what the server decides and never starts
- * Luna: the lookup status with the free retry as its only primary button, the name box prefilled with the saved Album title, the
- * candidate chooser with each candidate's subset facts, conflicts answered one by one or all at once by buttons that name the
- * applied candidate's source (MusicBrainz or iTunes), the values to check, each member's track Artist row with its reason, the
- * expected tracklist with its missing-file rows, the identity rows and the values that need no answer. Answers wait while a run
- * is active. A read showing a newer revision or value revision (lookup applications change only the latter) reads the review
- * detail again; a refused answer reads this summary and the identity rows again. A chunk it loads that cannot load asks for a
- * reload in its place.
+ * Luna: the lookup status with the free retry as its only primary button, the name box prefilled with the saved Album title and
+ * its optional Artist field, the candidate chooser with each candidate's subset facts, conflicts answered one by one or all at
+ * once by buttons that name the applied candidate's source (MusicBrainz or iTunes), the values to check, each member's track
+ * Artist row with its reason, the expected tracklist with its missing-file rows, the identity rows and the values that need no
+ * answer. Answers wait while a run is active. A read showing a newer revision or value revision (lookup applications change only
+ * the latter) reads the review detail again; a refused answer reads this summary and the identity rows again. A chunk it loads
+ * that cannot load asks for a reload in its place.
  */
 export function CatalogReviewSummary({ item, disabled, error, onRun }: {
   item: CatalogReview; disabled: boolean; error: string | null; onRun: (action: string, payload: object) => void;
@@ -109,8 +109,8 @@ export function CatalogReviewSummary({ item, disabled, error, onRun }: {
     <h2 id={`${id}-title`}>{t('catalog_review.lookup_title')}</h2>
     <p role="status">{t(reviewLookupKey(status), { title: release })}</p>
     {retry && <div className={styles.actions}><button type="button" className={`${styles.button} ${styles.primary}`} disabled={busy} onClick={() => onRun('lookup/retry', {})}>{t('lookup.retry')}</button></div>}
-    {summary.lookupAvailable && <Suspense fallback={null}><LookupBox key={box} lookup={lookup} rootLabel="" defaultText={item.draft.album.title} disabled={busy}
-      onSubmit={(kind, text) => onRun('lookup', { kind, text })} /></Suspense>}
+    {summary.lookupAvailable && <Suspense fallback={null}><LookupBox key={box} lookup={lookup} rootLabel="" defaultText={item.draft.album.title} mode="review" disabled={busy}
+      onSubmit={(kind, text, artist) => onRun('lookup', { kind, text, ...(artist ? { artist } : {}) })} /></Suspense>}
     {lookup?.state === 'complete' && lookup.candidates.length > 0 && <Suspense fallback={null}><CandidateChooser projectId={item.id} viewerId={access.viewerId} lookup={lookup}
       review={{ tracks: item.draft.tracks }} disabled={busy} onChoose={candidateKey => onRun('lookup/choose', { run: lookup.run, candidateKey })} /></Suspense>}
     {/* The bulk answers cover every open conflict, the members' included, so they also serve member conflicts alone. */}

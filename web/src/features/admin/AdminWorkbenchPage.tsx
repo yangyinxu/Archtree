@@ -3,9 +3,10 @@
  *   Functions: AdminWorkbenchPage
  * Internal
  *   Functions: Workbench
+ *   Constants: CatalogReviewDiscard
  * @end-catalog */
 
-import { useState } from 'react';
+import { lazy, Suspense, useState, type ComponentProps, type ComponentType } from 'react';
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { Link, useSearchParams } from 'react-router';
 import { AdminGate, useAdminAccess, useAdminText } from './AdminAccess';
@@ -14,9 +15,18 @@ import { reviewWorkbenchSchema } from './catalogReviewApi';
 import { ImportStages, useOnline } from './AdminShared';
 import { AdminNav } from './AdminNav';
 import { adminWorkspace } from './adminWorkspace';
+import type { CatalogReviewDiscard as Discard } from './CatalogReviewDiscard';
 import styles from './adminStyles';
 
-/** Separate private queues share filters; source navigation never admits analysis or catalog writes. */
+/** A discard action whose chunk cannot load (a deploy replaced it) is left out; the card's links stay, and a reload restores it. */
+const CatalogReviewDiscard = lazy<ComponentType<ComponentProps<typeof Discard>>>(() => import('./CatalogReviewDiscard')
+  .then(module => ({ default: module.CatalogReviewDiscard }), () => ({ default: () => null })));
+
+/**
+ * Separate private queues share filters; source navigation never admits analysis or catalog writes. An unfinished Album
+ * completion's card offers Discard completion, naming its catalog Album; a discard reads the queue again, which drops the card.
+ * The action itself stays disabled while the review page's own change runs or is unconfirmed.
+ */
 function Workbench() {
   const t = useAdminText();
   const access = useAdminAccess();
@@ -105,6 +115,7 @@ function Workbench() {
         : item.pendingSuggestions > 0 ? 'workbench.review_pending'
         : item.analysis.state === 'complete' ? 'workbench.review_handled'
         : item.analysis.state === 'cancelled' ? 'state.cancelled' : 'workbench.review_not_started';
+      const luna = ['queued', 'running'].includes(item.analysis.state);
       return <li className={styles.card} key={item.id}>
         <h2><Link className={styles.itemLink} to={`/admin/catalog-reviews/${item.id}`}>{item.title || t('common.untitled')}</Link></h2>
         {item.state === 'applied' && <span className={styles.badge}>{t('catalog_review.applied')}</span>}
@@ -117,6 +128,8 @@ function Workbench() {
           <Link className={styles.link} to={`/admin/catalog-reviews/${item.id}`}>{t('workbench.open_review')}</Link>
           <Link className={styles.link} to={`/admin/catalog/album/${item.albumId}`}>{t('published.edit_album')}</Link>
         </div>
+        {item.state !== 'applied' && <Suspense fallback={null}><CatalogReviewDiscard id={item.id} albumId={item.albumId} albumTitle={item.albumTitle} draftTitle={item.title}
+          expectedRevision={item.revision} disabled={luna} reason={luna ? 'catalog_review.discard_luna' : null} /></Suspense>}
       </li>;
     })}</ul>
     {query.hasNextPage && <button className={styles.button} disabled={query.isFetchingNextPage || !online} onClick={() => void query.fetchNextPage()}>{t('workbench.more')}</button>}

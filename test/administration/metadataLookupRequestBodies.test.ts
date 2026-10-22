@@ -1,7 +1,8 @@
 /**
- * The lookup request bodies imports and existing-Album reviews share: a choice is a run and a candidate key (or none); answers are
- * 1 to 305 on an import's lookup value paths, or 1 to 406 on a review's, which also include its expected tracklist and member
- * Artist entries. Anything else is invalid input before any project is read. All identifiers are synthetic.
+ * The lookup request bodies imports and existing-Album reviews share: a submission is a kind, a name and an optional Artist name;
+ * a choice is a run and a candidate key (or none); answers are 1 to 305 on an import's lookup value paths, or 1 to 406 on a
+ * review's, which also include its expected tracklist and member Artist entries. Anything else is invalid input before any project
+ * is read. All identifiers are synthetic.
  */
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -9,13 +10,30 @@ import { test } from 'node:test';
 // The database module loads first; importing the request module before it trips the index import cycle.
 import '../../src/infrastructure/database';
 import { AdminImportError } from '../../src/administration/import/adminImportContract';
-import { parseLookupAnswers, parseLookupChoice } from '../../src/administration/lookup/metadataLookupRequests';
+import { parseLookupAnswers, parseLookupChoice, parseLookupSubmission } from '../../src/administration/lookup/metadataLookupRequests';
 
 const slot = '0000000b-0000-4000-a000-000000000001';
 const candidateKey = 'musicbrainz:0000000f-0000-4000-8000-000000000001';
 const body = (extra: Record<string, unknown> = {}) => ({ operationId: randomUUID(), expectedRevision: 3, run: 1, candidateKey, ...extra });
 const invalid = (error: unknown) => error instanceof AdminImportError && error.status === 400 && error.code === 'ADMIN_IMPORT_INVALID_INPUT';
 const answer = (path: string, base: unknown = null) => ({ path, answer: 'mine', base });
+const submission = (extra: Record<string, unknown> = {}) => ({ operationId: randomUUID(), expectedRevision: 3, kind: 'album', text: 'Synthetic Album', ...extra });
+
+test('a submission body is a kind, a name and an optional Artist name, each a string within 1000 characters, and the Artist is part of the intent', () => {
+    const plain = parseLookupSubmission(submission());
+    assert.deepEqual(plain.submitted, { kind: 'album', text: 'Synthetic Album' });
+    assert.equal('artist' in plain.submitted, false);
+    const credited = submission({ kind: 'song', artist: 'Synthetic Ensemble' }), parsed = parseLookupSubmission(credited);
+    assert.deepEqual(parsed.submitted, { kind: 'song', text: 'Synthetic Album', artist: 'Synthetic Ensemble' });
+    // The body is the fingerprinted intent, so a changed Artist under the same operation is another intent.
+    assert.equal(parsed.body.artist, 'Synthetic Ensemble');
+    // Bounds only: the Artist name itself (empty, a link, over 200 characters) is checked when the run is planned.
+    for (const artist of ['x'.repeat(1000), '']) assert.equal(parseLookupSubmission(submission({ artist })).submitted.artist, artist);
+    for (const raw of [submission({ artist: 7 }), submission({ artist: null }), submission({ artist: {} }), submission({ artist: 'x'.repeat(1001) }),
+        (({ text: _text, ...rest }) => rest)(submission({ artist: 'Synthetic Ensemble' })), submission({ artist: 'Synthetic Ensemble', label: 'Synthetic Label' })]) {
+        assert.throws(() => parseLookupSubmission(raw), invalid, JSON.stringify(raw).slice(0, 80));
+    }
+});
 
 test('a choice body is exactly a run and a candidate key, or none', () => {
     for (const choice of [body(), body({ candidateKey: null })]) {

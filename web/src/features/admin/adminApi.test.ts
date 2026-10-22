@@ -17,6 +17,7 @@
  *   - a newer saved state is a later revision, or the same revision with later automatic writes
  *   - a saved replace decision parses, and a catalog edit refused for an ID another record keeps shows that, with no retryable intent
  *   - AdminCommand shows each metadata lookup refusal of an existing-Album review with its own message, at any status, with no retryable intent
+ *   - AdminCommand shows a discarded Album completion with its own message and a command's own refusals before the generic conflict, with no retryable intent
  * @end-catalog */
 
 import { z } from 'zod';
@@ -315,4 +316,29 @@ test('AdminCommand shows each metadata lookup refusal of an existing-Album revie
   const unknown = new AdminCommand(z.object({ receipt: z.object({ operationId: z.string() }).strict() }).strict()); unknown.run('/catalog-reviews/item/lookup/resolve', { answers: [] }, 'POST');
   await vi.waitFor(() => expect(unknown.getSnapshot().error).toBe('unknown'));
   expect(unknown.getSnapshot().intent).not.toBeNull();
+});
+
+test('AdminCommand shows a discarded Album completion with its own message and a command\'s own refusals before the generic conflict, with no retryable intent', async () => {
+  const messages = (await import('../../../../localization/locales/en-US.json')).default as Record<string, string>;
+  const schema = z.object({ receipt: z.object({ operationId: z.string() }).strict() }).strict(), refusals = { ADMIN_IMPORT_ANALYSIS_ACTIVE: 'discard_luna' };
+  const outcome = async (code: string, status: number, own: Readonly<Record<string, string>> = {}) => {
+    const fetch = vi.fn(async () => json({ code }, status)); vi.stubGlobal('fetch', fetch);
+    const command = new AdminCommand(schema, undefined, own); command.run('/catalog-reviews/item/discard', { expectedRevision: 1 }, 'POST');
+    await vi.waitFor(() => expect(command.getSnapshot().running).toBe(false));
+    command.retry(); expect(fetch).toHaveBeenCalledOnce();
+    return command.getSnapshot();
+  };
+  // A review discarded meanwhile is definite whatever the command, with the shared `common.discarded` message.
+  expect(await outcome('ADMIN_CATALOG_REVIEW_DISCARDED', 404)).toEqual({ running: false, intent: null, result: null, error: 'discarded' });
+  expect(await outcome('ADMIN_CATALOG_REVIEW_DISCARDED', 404, refusals)).toMatchObject({ intent: null, error: 'discarded' });
+  expect(messages['admin.common.discarded']).toEqual(expect.any(String));
+  // Only a 404 says discarded; any other 404 stays a generic definite error.
+  expect(await outcome('ADMIN_CATALOG_REVIEW_NOT_FOUND', 404)).toMatchObject({ intent: null, error: 'error' });
+  expect(await outcome('ADMIN_CATALOG_REVIEW_DISCARDED', 409)).toMatchObject({ intent: null, error: 'conflict' });
+  // A command's own refusal comes before the generic conflict; without the map it is one.
+  expect(await outcome('ADMIN_IMPORT_ANALYSIS_ACTIVE', 409, refusals)).toEqual({ running: false, intent: null, result: null, error: 'discard_luna' });
+  expect(await outcome('ADMIN_IMPORT_ANALYSIS_ACTIVE', 409)).toMatchObject({ intent: null, error: 'conflict' });
+  // An inherited property is never a refusal name, and the lookup refusal mapping is unchanged.
+  expect(await outcome('toString', 409, refusals)).toMatchObject({ intent: null, error: 'conflict' });
+  expect(await outcome('ADMIN_IMPORT_LOOKUP_ACTIVE', 409, refusals)).toMatchObject({ intent: null, error: 'lookup_active' });
 });

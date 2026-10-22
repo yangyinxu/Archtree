@@ -20,8 +20,9 @@
 /**
  * Pure model of a metadata lookup record (`adminImportLookups`, one per import project or existing-Album review): the file set a
  * run binds (an import's uploaded files, a review's members), the queries it plans from shared tags, a folder name, submitted
- * text or a review's saved Album title, the bounded candidates it stores (a review's admitted in subset order), its ranking, its
- * automatic retry schedule and the fence it writes on the project document. No database, no network.
+ * text (with any submitted Artist name) or a review's saved Album title, the bounded candidates it stores (a review's admitted
+ * in subset order), its ranking, its automatic retry schedule and the fence it writes on the project document. No database, no
+ * network.
  */
 import { createHash } from 'node:crypto';
 import type { ObjectId } from 'mongodb';
@@ -37,7 +38,7 @@ import {
 } from './lookupContract';
 import { normalizeMusicBrainzId } from './lookupIdentifiers';
 import type { LookupItunesStage } from './lookupItunesStage';
-import { planMetadataLookup, type LookupPlan, type LookupPlanInput, type PlannedLookupQuery } from './lookupQueryPlanner';
+import { planMetadataLookup, plannableSubmittedArtist, type LookupPlan, type LookupPlanInput, type PlannedLookupQuery } from './lookupQueryPlanner';
 import { lookupTrackCountPlausible, rankLookupCandidates, type LocalFileEvidence, type LookupComparisonMode, type LookupPreselection, type RankedLookup } from './lookupRanking';
 import { catalogReviewFileEvidence, catalogReviewLookupFileSet, isCatalogReviewLookup } from './lookupReviewEvidence';
 import { lookupAudioTrackCount, lookupSubsetTrackCountPlausible, lookupSurplusRank, type LookupSubsetPair } from './lookupSubset';
@@ -49,7 +50,11 @@ export type MetadataLookupIssue = 'permissionLost' | 'grantExpired' | 'notConfig
  * of an existing-Album review (`create`).
  */
 export type MetadataLookupGrantSource = 'upload' | 'reopen' | 'submit' | 'retry' | 'choose' | 'create';
-export type MetadataLookupSubmission = { kind: 'album' | 'song'; text: string };
+/**
+ * A submitted name and kind, with the optional Artist name typed beside it: kept only with the run (and repeated by its retry or
+ * an import's automatic rerun), never a draft value or evidence for an identity or a preselection.
+ */
+export type MetadataLookupSubmission = { kind: 'album' | 'song'; text: string; artist?: string };
 /** `catalog`: an existing-Album review's run from its saved Album title and shown primary Artist names. */
 export type MetadataLookupInput = { trigger: 'tags' | 'folder' | 'submitted' | 'catalog'; submitted: MetadataLookupSubmission | null };
 /** One manifest slot as a run saw it: the ready upload's intent and bytes, or nulls while the slot has no confirmed file. */
@@ -141,9 +146,9 @@ export type MetadataLookupRecord = {
      * Whether every release this run's searches offered that could match was compared: false once a search reported more hits
      * than it returned, the candidate bound left out a release it offered whose reported track count can equal the number of files
      * (or is unknown; in a review, can be at least the number of members) or ended the search before a planned non-fallback query,
-     * or a planned search was refused (an incomplete candidate that could match makes the ranking partial too). A record without
-     * it, from an earlier release, counts as partial when it is re-ranked or resumed. A partial comparison never preselects its
-     * only matching group; it offers it.
+     * or a planned search was refused (an incomplete candidate that could match makes the ranking partial too), or a Track-title
+     * search the source did not answer. A record without it, from an earlier release, counts as partial when it is re-ranked or
+     * resumed. A partial comparison never preselects its only matching group; it offers it.
      */
     searchComplete: boolean;
     /**
@@ -151,6 +156,14 @@ export type MetadataLookupRecord = {
      * tracks as the review has members was compared. Absent on import runs; a review record without it counts as false.
      */
     exactSearchComplete?: boolean;
+    /**
+     * Existing-Album reviews whose plan has Track-title searches: `sent` once the run decided to send them, `skipped` once it decided
+     * not to (or MusicBrainz was exhausted first); absent while undecided, on runs without them, on records from an earlier release and
+     * on every new run (startLookupRun never copies it, so a manual retry decides again).
+     */
+    trackTitleSearch?: 'sent' | 'skipped';
+    /** True once a title search that named an Artist returned a release; Track-title searches then keep their planned credit. */
+    creditFound?: true;
     /** Written by value application (lookupValueApplication.ts) only; carried over to every later run. */
     applied: LookupApplication | null;
     /**
@@ -233,7 +246,8 @@ function tagEvidence(doc: LookupSource): Pick<LookupPlanInput, 'tags' | 'identif
 }
 
 /**
- * The queries of one run. Submitted text is planned with the shared tag credits and identifiers. Otherwise the shared tags
+ * The queries of one run. Submitted text is planned with the shared tag credits and identifiers, or, with a submitted Artist name,
+ * credited to that name instead of the tag credits. Otherwise the shared tags
  * (a shared album, the title of a one-file import, or a valid shared identifier) are used; only without usable tags, and only
  * once per project, the cleaned name of a chosen folder (some relative path names a folder; files chosen without one have none).
  */
@@ -241,7 +255,9 @@ export function planImportLookup(doc: LookupSource, options: { folderAvailable: 
     { input: MetadataLookupInput; plan: LookupPlan } {
     const known = tagEvidence(doc);
     if (options.submitted) {
-        const submitted = { kind: options.submitted.kind, text: options.submitted.text };
+        // Only a string Artist name that can be sent is kept; another (a later release's, or a corrupted record's) is planned without it.
+        const submitted: MetadataLookupSubmission = { kind: options.submitted.kind, text: options.submitted.text,
+            ...(plannableSubmittedArtist(options.submitted.artist) ? { artist: options.submitted.artist } : {}) };
         return { input: { trigger: 'submitted', submitted }, plan: planMetadataLookup({ ...known, trigger: 'submitted', submitted }) };
     }
     const tags = planMetadataLookup({ ...known, trigger: 'tags', folderName: null });
@@ -318,15 +334,17 @@ export const lookupReportedTrackCount = (item: { summary?: MusicBrainzReleaseSum
     reportedCount(item.release?.trackCount) ?? reportedCount(item.summary?.trackCount) ?? reportedCount(item.trackCount) ?? reportedCount(item.reportedTrackCount);
 
 /**
- * Adds newly found releases in order, once each by normalized MBID, up to the candidate bound; a release found by ID is fetched.
+ * Adds newly found releases in order, once each by normalized MBID, while fewer than `bound` candidates (at most the candidate
+ * bound) are stored; a release found by ID is fetched. A release already stored keeps its first `basis`.
  * With `fileCount`, releases whose reported track count can match the files are admitted first (a stable partition), so the bound
  * is spent on plausible editions; in `subset` mode (a review, `fileCount` its members) they are admitted by audio track count,
  * fewest extra first, then unknown counts, then fewer than the members (a stable sort, lookupSurplusRank). A recording hit's
  * reported track count is kept, since its release has no summary.
  */
 export function mergeLookupCandidates(candidates: readonly StoredLookupCandidate[], found: readonly FoundLookupRelease[],
-    basis: PlannedLookupQuery['basis'], fileCount?: number, comparison: LookupComparisonMode = 'exact'): StoredLookupCandidate[] {
+    basis: PlannedLookupQuery['basis'], fileCount?: number, comparison: LookupComparisonMode = 'exact', bound: number = METADATA_LOOKUP_JOB_LIMITS.candidates): StoredLookupCandidate[] {
     let next = [...candidates];
+    const limit = Math.min(Number.isFinite(bound) ? bound : METADATA_LOOKUP_JOB_LIMITS.candidates, METADATA_LOOKUP_JOB_LIMITS.candidates);
     const seen = new Set(next.map(candidate => normalizeMusicBrainzId(candidate.releaseId)));
     const plausible = (item: FoundLookupRelease) => fileCount === undefined || lookupTrackCountPlausible(lookupReportedTrackCount(item), fileCount);
     const surplus = (item: FoundLookupRelease) => lookupSurplusRank(lookupAudioTrackCount(item), fileCount!);
@@ -334,7 +352,7 @@ export function mergeLookupCandidates(candidates: readonly StoredLookupCandidate
         : comparison === 'subset' ? found.map((item, at) => ({ item, at })).sort((left, right) => surplus(left.item) - surplus(right.item) || left.at - right.at).map(({ item }) => item)
             : [...found.filter(plausible), ...found.filter(item => !plausible(item))];
     for (const item of ordered) {
-        if (next.length >= METADATA_LOOKUP_JOB_LIMITS.candidates) break;
+        if (next.length >= limit) break;
         const releaseId = normalizeMusicBrainzId(item.releaseId);
         if (!releaseId || seen.has(releaseId)) continue;
         seen.add(releaseId);

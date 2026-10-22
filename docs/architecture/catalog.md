@@ -593,7 +593,8 @@ revision are unaffected; an append's summary reads it apart from candidates.
   keeps its private copies (its draft's `album.expectedTracklist` and its
   server-only capture), visible only to administrators, after the Album is
   deleted; nothing reads them back into an Album, and the review then reads as
-  unavailable.
+  unavailable. Discarding the review removes both copies; its tombstone keeps
+  only the Album's ID.
 - Listener v1 and legacy public DTOs are allowlisted. The listener reads that
   load whole Album documents also exclude it: the expanded Page's placed and
   linked Albums (`getExpandedPageBySlug` in

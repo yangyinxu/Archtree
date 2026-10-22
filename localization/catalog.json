@@ -1430,7 +1430,7 @@
       "variables": {}
     },
     "admin.catalog_review.create_copy": {
-      "description": "Album completion creation dialog where metadata lookup is available: what the free MusicBrainz lookup completes, that it does not complete the cover, that the catalog changes only after confirmation and that paid Luna AI never starts.",
+      "description": "Album completion creation dialog where metadata lookup is available: what the free MusicBrainz lookup completes from the saved title and primary Artists and, when needed, up to two saved track titles, that it does not complete the cover, that the catalog changes only after confirmation and that paid Luna AI never starts.",
       "delivery": [
         "runtime"
       ],
@@ -1461,6 +1461,55 @@
     },
     "admin.catalog_review.current_value": {
       "description": "Administrator workbench: existing-Album review summary, label of a conflict's current saved value.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.discard": {
+      "description": "Album completion page and workbench review queue: secondary action that opens the confirmation to discard an unapplied completion.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.discard_applied": {
+      "description": "Album completion discard: refusal shown when the completion was already applied to the Album.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.discard_confirm": {
+      "description": "Album completion discard confirmation: button that discards the completion.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.discard_copy": {
+      "description": "Album completion discard confirmation: what discarding removes, and that the catalog Album does not change.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.discard_luna": {
+      "description": "Album completion discard: reason the action is unavailable while Luna AI is queued or running.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.discard_title": {
+      "description": "Album completion discard confirmation: dialog title.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.discarded": {
+      "description": "Album completion page: notice shown once the completion was discarded.",
       "delivery": [
         "runtime"
       ],
@@ -2858,6 +2907,13 @@
       ],
       "variables": {}
     },
+    "admin.common.discarded": {
+      "description": "Administrator workbench: an Album completion change or retry refused because the completion was already discarded.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.common.error": {
       "description": "Administrator workbench: common error.",
       "delivery": [
@@ -2896,7 +2952,7 @@
       "variables": {}
     },
     "admin.common.lookup_invalid_name": {
-      "description": "Administrator workbench: refusal: the submitted lookup name was a link, empty, too long or had invisible characters.",
+      "description": "Administrator workbench: refusal: the submitted lookup name or Artist name was a link, empty, too long or had invisible characters.",
       "delivery": [
         "runtime"
       ],
@@ -3486,7 +3542,7 @@
       "variables": {}
     },
     "admin.cover.editor_copy": {
-      "description": "Choose a ready image from an import project. Replacing or removing the cover requires its own confirmation.",
+      "description": "Choose a ready image from an import project or upload one from this computer. Replacing or removing the cover requires its own confirmation.",
       "delivery": [
         "runtime"
       ],
@@ -3543,6 +3599,76 @@
     },
     "admin.cover.title": {
       "description": "Catalog cover",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.cover.upload": {
+      "description": "Administrator catalog cover panel: button that uploads an image from this computer.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.cover.upload_busy": {
+      "description": "Administrator catalog cover panel: the server is busy with another upload.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.cover.upload_invalid": {
+      "description": "Administrator catalog cover panel: the image could not be read, decoded or used as a still cover.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.cover.upload_limit": {
+      "description": "Administrator catalog cover panel: the administrator holds too many unused uploaded images.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.cover.upload_preview": {
+      "description": "Administrator catalog cover confirmation: alternative text of the preview of the image to upload.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.cover.upload_too_large": {
+      "description": "Administrator catalog cover panel: the image is over the cover upload size limit, as chosen or once re-saved without its metadata.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.cover.upload_type": {
+      "description": "Administrator catalog cover panel: the chosen file is not a JPG, PNG or WebP image.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.cover.upload_unavailable": {
+      "description": "Administrator catalog cover panel: this server has no private storage for uploaded covers.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.cover.upload_unknown": {
+      "description": "Administrator catalog cover panel: the upload outcome is unknown; Retry resends the same image.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.cover.uploading": {
+      "description": "Administrator catalog cover panel: status while a chosen image is uploading.",
       "delivery": [
         "runtime"
       ],
@@ -4276,6 +4402,27 @@
       ],
       "variables": {}
     },
+    "admin.lookup.artist": {
+      "description": "Administrator workbench: import and Album completion summaries, name box, the optional Artist name field beside the Album or song name.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.lookup.artist_hint_import": {
+      "description": "Administrator workbench: import summary name box, hint under Look up: an empty Artist field uses the files' artist tags.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.lookup.artist_hint_review": {
+      "description": "Administrator workbench: Album completion summary name box, hint under Look up: an empty Artist field uses the Album's primary Artists.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.lookup.artwork_preview": {
       "description": "Administrator workbench: metadata lookup candidate list, alternative text of a release's front artwork preview.",
       "delivery": [
@@ -4367,6 +4514,13 @@
         "candidate": "string",
         "local": "string"
       }
+    },
+    "admin.lookup.found_by_track_title": {
+      "description": "Administrator workbench: Album completion candidate chooser, a release that a MusicBrainz search by one of the Album's saved track titles found first.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
     },
     "admin.lookup.incomplete": {
       "description": "Administrator workbench: import summary, releases were found but none of their details could be fetched.",

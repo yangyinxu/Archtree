@@ -765,7 +765,10 @@ The wire protocol and operational bounds are documented in
   manual editing. The action is shown disabled, with its reason, for an Album
   that cannot have a review.
   While an unapplied review of the Album exists whose source is current, the
-  action opens that review; creating another needs an explicit choice.
+  action opens the newest such review; creating another needs an explicit
+  choice. A discarded review is never opened again: once it is discarded, the
+  action opens another such review if one exists, and otherwise creates a new
+  one.
 - Existing-Album reviews share the durable analysis, grant, concurrency and
   provider-call limits of imports, and use metadata lookup as described in
   Administrator Metadata Lookup. Opening a review or editing its private draft
@@ -821,8 +824,31 @@ The wire protocol and operational bounds are documented in
   Applying never adds, removes or replaces members or their media and changes
   member order only through Disc and Track Numbers; artwork and visibility are
   unchanged, and MediaTrack Credits change only as described below. Applied
-  reviews remain read-only; further corrections use the current Web catalog
-  editor or a new Web review.
+  reviews remain read-only and cannot be discarded; further corrections use
+  the current Web catalog editor or a new Web review.
+- An administrator can discard an unapplied existing-Album review, whatever
+  its source status, from its review page or from the workbench's review
+  queue, through a separate confirmation that names the Album and says that
+  the catalog does not change. Discarding removes the review's private draft,
+  conflict answers, Luna suggestions, identity decisions and metadata lookup
+  run with its results. It never changes the Album, its members, Credits,
+  Artists, Organizations or expected tracklist, and a review stages no media
+  or artwork, so nothing else needs cleanup. A queued, running or retrying
+  lookup run ends with the review: nothing it still receives is stored,
+  although a request already sent is not recalled. Discarding is refused
+  while the review's Luna analysis is queued or running; stopping Luna AI
+  first permits it. A Luna call already sent still counts against the daily
+  allowance; its answer, like any ambiguous outcome, is dropped with the
+  review and never replayed. An applied review cannot be discarded, and when
+  an apply and a discard of one review meet, exactly one takes effect.
+  Discarding binds the last administrator change its confirmation showed: a
+  later administrator change refuses it, while lookup and Luna progress do
+  not. A retry of the discard with its original intent returns the original
+  result; any other request for a discarded review, including a retry of an
+  earlier change or of its creation, reports it as discarded and changes
+  nothing. Only the Album's ID, who created and discarded the review and
+  when, and its creation and discard receipts remain, so retries can be
+  answered; a discarded review is never listed or opened again.
 - Applying a review's Artist entries replaces the Album's primary and featured
   Artist Credits with them, with their roles and join phrases, through the
   canonical Credit lifecycle. The new Credits take the positions of the
@@ -1878,6 +1904,30 @@ The wire protocol and operational bounds are documented in
   such pairing places at the same row takes that row's Disc and Track Number
   and, when its title is empty or automatic, the row's title, as the
   administrator's own values; other files keep their values.
+- An existing-catalog cover approval copies a ready private image: one chosen
+  from an import project or, on the Web detail page of an Album, Artist or
+  MediaTrack, one the administrator uploads from their computer; Organizations
+  have no cover. An uploaded file must be a single-frame JPG, PNG or WebP image
+  within the cover upload size and pixel limits, and it must decode completely.
+  It is validated like other covers before anything is stored, then normalized
+  like uploaded avatars: its orientation is applied and embedded metadata such
+  as EXIF location is removed; its format and pixel dimensions are kept, and a
+  normalized image over the size limit is refused. Only the normalized image is
+  staged, privately; staging changes nothing in the catalog, and a staged upload
+  is never public. The cover changes only through a separate approval of that
+  staged image, which copies, attaches, cancels and recovers it exactly as it
+  does an import project's image. A staged upload serves only the item it was
+  uploaded for, only an approval by the administrator who uploaded it, and at
+  most one approval; it is never part of an import. An upload whose outcome is
+  unknown becomes usable only through a retry with its original intent and
+  bytes; choosing the image again is a new upload. Each administrator may hold
+  only a bounded number of unused uploads, counting those whose deletion is not
+  yet confirmed; a further upload is refused until one is used or deleted. With
+  no administrator check, a staged upload is deleted automatically by its exact
+  storage identity once the approval that used it is complete or its cancelled
+  cleanup is confirmed, or a day after its upload when no approval used it. This
+  deletion touches only a private object that no catalog record references; a
+  failed deletion keeps its record and is retried automatically.
 - An unconfirmed existing-catalog cover approval may be explicitly cancelled by
   a current administrator after its active worker lease ends. Cancellation leaves
   the saved cover unchanged and retains the unused object's identity and source
@@ -1895,30 +1945,48 @@ The wire protocol and operational bounds are documented in
   editor looks up metadata for those files by name. It runs automatically once
   the upload of every selected audio file is confirmed, from the album and
   album-artist tags the files share or, for a one-file import, its title and
-  artist tags, and it runs when the administrator submits an Album or song name.
-  Without usable tags, it runs once from the selected folder's name, when there
-  is one, which the name box shows for editing. Typing, saving and navigation
-  never run metadata lookup, and reopening a project runs it only when its
-  reconciliation confirms the last selected upload. An existing-Album review
-  looks up its Album: it runs automatically once when a review is created
-  where lookup is available, from the Album's saved title and the names of its
-  primary Artist Credits, and runs when the administrator submits an Album or
-  song name or retries. iOS and Android do not offer metadata lookup.
+  artist tags, and it runs when the administrator submits an Album or song
+  name, optionally with an Artist name. Without usable tags, it runs once from
+  the selected folder's name, when there is one, which the name box shows for
+  editing. Typing, saving and navigation never run metadata lookup, and
+  reopening a project runs it only when its reconciliation confirms the last
+  selected upload. An existing-Album review looks up its Album: it runs
+  automatically once when a review is created where lookup is available, from
+  the Album's saved title and the names of its primary Artist Credits and,
+  when needed, its saved Track titles as described below, and runs when the
+  administrator submits an Album or song name, optionally with an Artist name,
+  or retries. iOS and Android do not offer metadata lookup.
 - Metadata lookup accepts names, not links. The server queries only fixed,
   server-chosen services and never fetches an administrator-supplied URL. It
-  sends only the submitted text, cleaned tag text, a cleaned folder name or an
-  existing Album's saved title and primary Artist names, terms taken from
-  earlier results of the same lookup, and embedded identifiers; every
-  identifier or barcode used in a query must match its expected format. An
-  automatic lookup never sends file names, sends a folder name only when no
-  usable tags exist, and no lookup sends account data or audio. A review's
-  automatic lookup never sends Track titles or original filenames. Apart from
-  artwork from the fixed artwork-host allowlist, the server follows no link
-  found in a lookup response. Metadata lookup never downloads audio, audio
-  previews or streams from any service, and audio-preview and store links are
-  discarded before results are stored. The lookup box is not listener Search: it
-  keeps no search history and does not restore global music search to the
-  administration layout.
+  sends only the submitted text and any submitted Artist name, cleaned tag
+  text, a cleaned folder name or an existing Album's saved title, primary
+  Artist names and at most two of its saved Track titles with the primary
+  Artist names of those Tracks, terms taken from earlier results of the same
+  lookup, and embedded identifiers; every identifier or barcode used in a
+  query must match its expected format. An automatic lookup never sends file
+  names, sends a folder name only when no usable tags exist, and no lookup
+  sends account data or audio. A review's lookup never sends original
+  filenames, and sends saved Track titles only to MusicBrainz, as described
+  below. Apart from artwork from the fixed artwork-host allowlist, the server
+  follows no link found in a lookup response. Metadata lookup never downloads
+  audio, audio previews or streams from any service, and audio-preview and
+  store links are discarded before results are stored. The lookup box is not
+  listener Search: it keeps no search history and does not restore global
+  music search to the administration layout.
+- The name box takes an Album or song name and an optional Artist name, in
+  imports and existing-Album reviews alike. The Album or song name is
+  required; an Artist name alone is refused. Each is a name, not a link, of
+  at most 200 characters without control or invisible formatting characters,
+  and is sent as typed, with whitespace normalized. With an Artist name, the
+  lookup searches the name credited to that Artist first and then the name
+  alone, never respelled, in place of the credited names the import's shared
+  tags or the review's primary Artists would give; without one, it searches
+  as before. The Artist name is sent only in that run's MusicBrainz release
+  or recording searches and its iTunes search term. It is kept only with the
+  run, so a retry, and an import's automatic rerun after a changed file set,
+  repeat it, and the box shows it again until another run replaces it; it
+  never becomes an Artist entry or other draft value, never counts as
+  evidence for an identity or a preselection, and is never given to Luna.
 - Metadata lookup uses these sources in order:
   - MusicBrainz is the primary source, with Cover Art Archive for artwork.
   - Unless MusicBrainz returns a matching candidate, the Apple iTunes Search API
@@ -2017,6 +2085,49 @@ The wire protocol and operational bounds are documented in
   of a complete comparison is preselected, and two or more matching groups are
   a tie. The view of differences also shows each candidate's track count, the
   members it pairs and how many missing-file rows it would add.
+- An existing-Album review's lookup, automatic or submitted, can also search
+  MusicBrainz recordings by at most two of the Album's Track titles, as the
+  review captured them from the catalog. It does so only when its searches
+  for the Album title or submitted name, once their releases are compared,
+  preselect nothing: for any reason, a tie included, when those searches name
+  no Artist because the Album shows no primary Artist name usable for search
+  and none was submitted; otherwise only because no candidate matches or the
+  comparison is partial. Track titles are compared and searched without a
+  trailing version or featuring note. The most distinctive titles are
+  picked: a title must occur once in the Album and differ from the Album
+  title, the submitted name and a title already picked. Generic titles of the
+  fixed list in docs/features/admin-workbench.md, an instrumental, off-vocal
+  or karaoke version, a title of only digits and punctuation, and a title
+  equal to the member's retained original filename with or without its
+  extension, ending in an audio file extension, or shaped like a file name (a
+  leading track number and separator, or underscores instead of spaces) are
+  skipped. On the cleaned title, each Han, kana or Hangul character counts
+  two and every other letter or digit one, while whitespace and punctuation
+  count zero; a title below four is skipped, and heavier titles come first,
+  then Album order. Each title is searched once, credited to the submitted
+  Artist name when one was given, else to the member's own first primary
+  Artist name that is not a placeholder credit, as the review captured it,
+  else to the Album's first such name, else alone. When the title searches
+  credited to an Artist returned no release, each title is searched alone
+  instead. A title searched alone must weigh at least eight.
+  These searches count among the run's planned searches, follow its title
+  searches, wait for MusicBrainz's request-rate bound even in a submitted
+  lookup, and precede the iTunes fallback, which never receives a Track
+  title. Until they are sent or skipped, the title searches leave 10 of the
+  run's bounded release lookups for them, and each Track-title search admits
+  at most 5 releases its recordings appear on, fewest extra tracks first; a
+  release it found that is already a candidate counts as found by it. These
+  releases match only through the subset pairing, so the members' durations
+  and own numbers decide; no value comes from a recording a title found. A
+  Track-title search that reports more recordings than it returns leaves the
+  comparison partial, so a release found that way is usually offered, not
+  applied. Track-title searches that are not sent never make the comparison
+  partial; one the source does not answer ends them without an automatic
+  retry, the comparison counts as partial, and the run completes with the
+  candidates it has. A matching group whose releases were all first found
+  through a Track title does not stop the iTunes fallback. The candidate
+  chooser marks a release first found through a Track title. A re-rank never
+  sends these searches, and imports never search by Track title.
 - Applying a candidate, automatically when it is preselected or when the
   administrator chooses it, writes all its supported values in one step: the
   Album title, Artist entries, label and date, and each matched file's track
@@ -2086,9 +2197,10 @@ The wire protocol and operational bounds are documented in
   the members the review captured. A review runs at most one automatic lookup,
   including that run's automatic source retries. Applying is refused while a
   run is queued, running or retrying automatically. The Album's deletion or
-  loss of readiness, or the review's captured source no longer being current,
-  ends an active run. Its results, conflicts and answers stay in the review
-  and reach the catalog only when the review is applied.
+  loss of readiness, the review's captured source no longer being current, or
+  discarding the review ends an active run. Its results, conflicts and answers
+  stay in the review unless it is discarded, and reach the catalog only when
+  the review is applied.
 - Applied Artist entries keep the release's credited names, name order and join
   phrases. The entry after a featuring phrase such as `feat.`, and every later
   entry, is featured and the others are primary; the summary and the publication

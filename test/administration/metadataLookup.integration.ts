@@ -7,7 +7,8 @@
  *              recordingGate, runMetadataLookupOnce, startMetadataLookupWorker, drain, onNextProjectRead,
  *              queue, submit, preparingPublication, syntheticAlbum, png, image, holdFirstSearch,
  *              albumSearchUrl, collectionUrl, syntheticCollection, seededReview, queueReview, countedSearch,
- *              creditedRelease, aliasAnswer, unconfigured, sentText, reviewRunExchanges
+ *              recordingSearchAnswer, trackTitleQueries, emptyTrackTitles, creditedRelease, aliasAnswer,
+ *              unconfigured, sentText, reviewRunExchanges
  *   Constants: guard, actor, other, by, byOther, contact, sharedFrames, albumQuery, albumDecision, hotelBase,
  *              hotelLengths, albumTerm, mzstatic
  *   Variables: harness
@@ -73,6 +74,14 @@
  *   - a review saved in a newer format admits no lookup request and its queued run ends superseded without a request, while its lookup still reads
  *   - a failed write of a review run's completing step stores no value, gate or record, and the run completes and applies its preselection once after its lease
  *   - a role loss, an expired grant or a changed source at a review run's completing step ends the run and applies nothing to the review
+ *   - a submitted name with an Artist is planned credited to it then bare, without the tag credits or a label, and its retry and the automatic rerun after a changed file set repeat it; every refusal stores nothing
+ *   - a review's submitted name with an Artist is credited to it in place of the primary Artist; the draft, identity rows and the preselection's artist flag never take it
+ *   - a review whose title searches find no match searches its saved Track titles alone at MusicBrainz only: the release they find pairs and is offered, or preselected when the search returns every hit, and a retry decides again
+ *   - a Various Artists compilation searches its title bare and each saved Track title credited to that Track's own primary Artist
+ *   - an import with the same Album tags, track titles and durations never searches by Track title
+ *   - a Track-title search MusicBrainz does not answer ends them in the same tick without an attempt or an automatic retry: the run completes and offers its title search's release
+ *   - a review run stopped during its second Track-title search resumes at that search with its decision stored, sending no earlier search again
+ *   - a submitted review run sends its Track-title searches waiting for the deployment gate, so a gate held elsewhere never refuses them
  * @end-catalog */
 
 /**
@@ -102,7 +111,7 @@ import {
 import type { ImportAnalysisProvider } from '../../src/administration/import/adminImportProvider';
 import type { ImportDraftV2 } from '../../src/administration/import/adminImportDraft';
 import { importIdentityPreselections } from '../../src/administration/import/adminImportIdentity';
-import { MetadataLookupInputError, MetadataLookupSourceError, type MusicBrainzReleaseSummary } from '../../src/administration/lookup/lookupContract';
+import { METADATA_LOOKUP_RETRY, MetadataLookupInputError, MetadataLookupSourceError, type MusicBrainzReleaseSummary } from '../../src/administration/lookup/lookupContract';
 import { createMongoLookupRateGate, type MetadataLookupRateGate } from '../../src/administration/lookup/lookupRateGate';
 import {
     createMusicBrainzClient, musicBrainzUrls, type MusicBrainzClient, type MusicBrainzRecordingQuery, type MusicBrainzReleaseQuery
@@ -116,7 +125,7 @@ import {
 } from '../../src/administration/lookup/metadataLookupService';
 import { getCatalogReviewLookup, retryCatalogReviewLookup, submitCatalogReviewLookup } from '../../src/administration/lookup/catalogReviewLookupRequests';
 import { createCatalogReview, getCatalogReview } from '../../src/administration/catalog/adminCatalogReviewService';
-import { applyCatalogReview } from '../../src/administration/catalog/adminCatalogReviewApply';
+import { applyCatalogReview, getCatalogReviewCandidates } from '../../src/administration/catalog/adminCatalogReviewApply';
 import { adminCatalogItemRevision } from '../../src/administration/catalog/adminCatalogService';
 import { loadImportFixture } from '../support/adminImportFixtures';
 import {
@@ -1336,6 +1345,15 @@ const queueReview = (id: string, actorId = by, options: Parameters<typeof queueC
 /** A release search answer whose releases report their track counts. */
 const countedSearch = (query: MusicBrainzReleaseQuery, releases: [string, number][]) => json(searchUrl(query), { count: releases.length, offset: 0,
     releases: releases.map(([id, trackCount], index) => ({ id, title: `Synthetic Release ${index}`, score: 100 - index, 'track-count': trackCount })) });
+/** A recording search answer: one recording on each release [ID, track count], reporting `count` recordings (that one, or none, by default). */
+const recordingSearchAnswer = (query: MusicBrainzRecordingQuery, releases: [string, number][] = [], count = releases.length ? 1 : 0) =>
+    json(musicBrainzUrls.recordingSearch(query).href, { count, offset: 0, recordings: releases.length ? [{ id: mbid(950), title: query.recording, length: 200_000, 'artist-credit': [],
+        releases: releases.map(([id, trackCount]) => ({ id, title: 'Synthetic Release', 'track-count': trackCount, media: [] })) }] : [] });
+/** A seeded review's Track-title searches, credited to its primary Artist or, with `alone`, sent alone; `titles` is the member count. */
+const trackTitleQueries = (titles: number, alone = false) => Array.from({ length: Math.min(titles, 2) }, (_unused, index) =>
+    ({ recording: `Secret Track Title ${index + 1}`, ...(alone ? {} : { artist: 'Synthetic Ensemble' }) }));
+/** Empty answers to a seeded review's Track-title searches. */
+const emptyTrackTitles = (titles: number, alone = true) => trackTitleQueries(titles, alone).map(query => recordingSearchAnswer(query));
 /** A release credited to Synthetic Ensemble (`mbid(30)`), whose second track (when `trackArtist` is given) credits that artist. */
 const creditedRelease = (id: string, lengths: number[], trackArtist?: [string, string]) => json(releaseUrl(id), { id, title: 'Synthetic Album',
     'artist-credit': [{ name: 'Synthetic Ensemble', joinphrase: '', artist: { id: mbid(30), name: 'Synthetic Ensemble' } }],
@@ -1357,7 +1375,10 @@ test('the catalog trigger converts a review and queues one subset run under a cr
     assert.deepEqual([record.state, record.grantSource, record.actorId, record.automatic, record.automaticRuns, record.input, record.searchComplete, record.exactSearchComplete],
         ['queued', 'create', by, true, 1, { trigger: 'catalog', submitted: null }, true, true]);
     assert.deepEqual(record.files, doc.manifest.files.map(file => ({ slotId: file.slotId, operationId: null, sha256: null })));
-    assert.deepEqual(record.queries.map(query => (query as { query: unknown }).query), [{ release: 'Synthetic Album', artist: 'Synthetic Ensemble' }, { release: 'Synthetic Album' }]);
+    // The title searches, then the saved Track titles credited to the same primary Artist.
+    assert.deepEqual(record.queries.map(query => [(query as { query: unknown }).query, query.basis, (query as { when?: string }).when ?? null]), [
+        [{ release: 'Synthetic Album', artist: 'Synthetic Ensemble' }, 'albumText', null], [{ release: 'Synthetic Album' }, 'albumText', null],
+        ...trackTitleQueries(2).map(query => [query, 'trackTitle', 'noMatchOrPartial'])]);
     // One automatic run per review: a second trigger, by anyone, queues nothing and changes nothing.
     assert.deepEqual(await queueReview(id, byOther), { queued: false, run: null, reason: 'limit' });
     assert.deepEqual([(await lookup(id))!.run, (await stored(id)).revision, (await stored(id)).lookupGate!.fence], [1, before.revision + 1, 1]);
@@ -1413,7 +1434,9 @@ test('a review run end to end on fixtures: only the saved title and primary Arti
     // The review detail shows that count at an unchanged revision, so a confirmation read before the run is refused on apply.
     const after = (await getCatalogReview(by, id)).item;
     assert.deepEqual([before.revision, before.valueRevision, after.revision, after.valueRevision], [queued.revision, 0, queued.revision, 1]);
-    // No request carries a Track title, an original filename or a catalog ID.
+    // The title search preselects, so the Track-title searches are skipped: no request carries a Track title, an original
+    // filename or a catalog ID.
+    assert.equal(record.trackTitleSearch, 'skipped');
     const text = sentText(client.requests);
     for (const sentinel of ['Secret Track Title', 'Secret Filename', String(queued.catalogSource!.album.id)]) assert.equal(text.includes(sentinel), false, sentinel);
     // The review's view shows the catalog run, the exact-count preselection and each candidate's subset comparison.
@@ -1451,7 +1474,8 @@ test('a submitted name and a manual retry of a catalog run replay their receipts
     const submitted = await submitCatalogReviewLookup(by, id, { ...mutation(retried.item.revision), kind: 'song', text: 'Synthetic Song' });
     const song = (await lookup(id))!;
     assert.deepEqual([submitted.receipt?.kind, song.run, song.grantSource, song.input, song.queries.map(query => (query as { query: unknown }).query)],
-        ['lookup', 3, 'submit', { trigger: 'submitted', submitted: { kind: 'song', text: 'Synthetic Song' } }, [{ recording: 'Synthetic Song', artist: 'Synthetic Ensemble' }, { recording: 'Synthetic Song' }]]);
+        ['lookup', 3, 'submit', { trigger: 'submitted', submitted: { kind: 'song', text: 'Synthetic Song' } }, [{ recording: 'Synthetic Song', artist: 'Synthetic Ensemble' }, { recording: 'Synthetic Song' },
+            ...trackTitleQueries(2)]]);
     // Refusals: a link, a stale revision, unconfigured lookup and a malformed body each store nothing.
     const settled = { revision: (await stored(id)).revision, receipts: (await stored(id)).receipts.length, run: song.run };
     await assert.rejects(submitCatalogReviewLookup(by, id, { ...mutation(settled.revision), kind: 'album', text: 'https://example.test/album' }), code('ADMIN_IMPORT_LOOKUP_INVALID_NAME'));
@@ -1518,7 +1542,7 @@ test('an applied review and one whose source is not current admit no lookup; not
     // A format-3 review that lost its source is refused in the same way, and an unknown review is not found.
     const converted = await seededReview([200_000]);
     await queueReview(converted.id);
-    await drain({ musicBrainz: fixtureClient([countedSearch(albumQuery, []), countedSearch({ release: 'Synthetic Album' }, [])]).musicBrainz });
+    await drain({ musicBrainz: fixtureClient([countedSearch(albumQuery, []), countedSearch({ release: 'Synthetic Album' }, []), ...emptyTrackTitles(1)]).musicBrainz });
     await getDb()!.collection('albums').updateOne({ _id: converted.albumId }, { $set: { lifecycleStatus: 'deleting' } });
     const convertedBefore = await stored(converted.id), record = await lookup(converted.id);
     await assert.rejects(retryCatalogReviewLookup(by, converted.id, mutation(convertedBefore.revision)), code('ADMIN_CATALOG_REVIEW_SOURCE_CHANGED'));
@@ -1533,7 +1557,8 @@ test('a review run is never superseded by a file-set check, and its iTunes fallb
     await queueReview(id);
     // File cleanup admission is import-only: it marks nothing on a review's run.
     await withImportAdmin(by, async session => noteMetadataLookupFiles((await projects().findOne({ _id: new ObjectId(id) }, { session }))!, session));
-    const musicBrainz = fixtureClient([countedSearch(albumQuery, []), countedSearch({ release: 'Synthetic Album' }, []),
+    // The title searches find nothing, so the saved Track titles are searched alone, and find nothing either.
+    const musicBrainz = fixtureClient([countedSearch(albumQuery, []), countedSearch({ release: 'Synthetic Album' }, []), ...emptyTrackTitles(2),
         searchAnswer({ release: 'Synthetic Two', artist: 'Synthetic Ensemble' }, []), searchAnswer({ release: 'Synthetic Three', artist: 'Synthetic Ensemble' }, [])]);
     // One collection has fewer tracks than the members and is never kept; the exact-count one is kept before the longer one.
     const itunes = itunesFixtureClient([
@@ -1548,8 +1573,12 @@ test('a review run is never superseded by a file-set check, and its iTunes fallb
         ['complete', null, [], [['9102', 'noRelease', 'fetched'], ['9103', 'noRelease', 'fetched']], true]);
     assert.deepEqual([record.candidates.map(candidate => candidate.key), record.ranking!.preselection?.candidateKey, record.ranking!.preselection?.basis, record.applied?.candidateKey,
         record.applied?.source], [['itunes:9102', 'itunes:9103'], 'itunes:9102', 'exactTrackCount', 'itunes:9102', 'itunes']);
-    const text = sentText([...musicBrainz.requests, ...itunes.requests]);
-    for (const sentinel of ['Secret Track Title', 'Secret Filename']) assert.equal(text.includes(sentinel), false, sentinel);
+    assert.deepEqual([record.trackTitleSearch, record.searchComplete, record.exactSearchComplete], ['sent', true, true]);
+    // Saved Track titles reach only MusicBrainz recording searches; no filename is ever sent.
+    assert.equal(sentText([...musicBrainz.requests, ...itunes.requests]).includes('Secret Filename'), false);
+    assert.deepEqual(musicBrainz.requests.filter(request => sentText([request]).includes('Secret Track Title')).map(request => request.url),
+        trackTitleQueries(2, true).map(query => musicBrainzUrls.recordingSearch(query).href));
+    assert.equal(sentText(itunes.requests).includes('Secret Track Title'), false);
 });
 
 test('a role loss or an expired grant stops a review run as for imports', async () => {
@@ -1628,7 +1657,7 @@ test('a review run waiting for an automatic retry keeps its one automatic run an
     const replaced = (await lookup(id))!;
     assert.deepEqual([retried.receipt?.kind, replaced.run, replaced.state, replaced.grantSource, replaced.automatic, replaced.automaticRuns, replaced.attempts, replaced.input, replaced.queries,
         replaced.exactSearchComplete, (await stored(id)).lookupGate!.run], ['lookup-retry', 2, 'queued', 'retry', false, 1, { musicbrainz: 0, itunes: 0 }, retrying.input, retrying.queries, true, 2]);
-    await drain({ musicBrainz: fixtureClient([countedSearch(albumQuery, []), countedSearch({ release: 'Synthetic Album' }, [])]).musicBrainz });
+    await drain({ musicBrainz: fixtureClient([countedSearch(albumQuery, []), countedSearch({ release: 'Synthetic Album' }, []), ...emptyTrackTitles(1)]).musicBrainz });
     assert.deepEqual([(await lookup(id))!.state, await queueReview(id)], ['complete', { queued: false, run: null, reason: 'limit' }]);
     // Lookup unconfigured after a review run was queued ends it unavailable, sending nothing and releasing the review.
     const unconfiguredReview = await seededReview([200_000]);
@@ -1655,7 +1684,7 @@ test('a run queued while an apply is in flight conflicts with that apply, whose 
     const review = await seededReview([200_000]);
     // A submitted run converts the review and completes; its one automatic run is still unspent.
     await submitCatalogReviewLookup(by, review.id, { ...mutation(1), kind: 'album', text: 'Synthetic Album' });
-    await drain({ musicBrainz: fixtureClient([countedSearch(albumQuery, []), countedSearch({ release: 'Synthetic Album' }, [])]).musicBrainz });
+    await drain({ musicBrainz: fixtureClient([countedSearch(albumQuery, []), countedSearch({ release: 'Synthetic Album' }, []), ...emptyTrackTitles(1)]).musicBrainz });
     assert.equal((await lookup(review.id))!.state, 'complete');
     // Right before apply reads the run's state (after its snapshot began), another administrator's catalog trigger commits a run.
     const observed: (string | null)[] = [], original = Collection.prototype.findOne;
@@ -1787,4 +1816,254 @@ test('a role loss, an expired grant or a changed source at a review run\'s compl
             [state, issue, null, queued.draft, queued.draftOrigins, queued.valueRevision, queued.revision], label);
         await getDb()!.collection('users').updateOne({ _id: actor }, { $set: { role: 'admin' } });
     }
+});
+
+test('a submitted name with an Artist is planned credited to it then bare, without the tag credits or a label, and its retry and the automatic rerun after a changed file set repeat it; every refusal stores nothing', async () => {
+    const typed = (text: string, artist: unknown, kind: 'album' | 'song' = 'album') => (): MetadataLookupRequest =>
+        ({ kind: 'submit', actorId: byOther, operationId: randomUUID(), submitted: { kind, text, artist: artist as string } });
+    const id = await seeded(2, () => v2({ album: 'Synthetic Album', albumArtists: ['Synthetic Ensemble / Synthetic Records'] }));
+    // An Artist name that cannot be sent, or one without a name, is refused before anything is written.
+    for (const [text, artist] of [['Typed Album', 'https://example.invalid/a'], ['Typed Album', '   '], ['Typed Album', 'x'.repeat(201)], ['Typed Album', 'Synthetic\u200bArtist'],
+        ['Typed Album', 7], ['', 'Synthetic Ensemble']] as const) {
+        await assert.rejects(queue(byOther, id, typed(text, artist)), code('ADMIN_IMPORT_LOOKUP_INVALID_NAME'), JSON.stringify([text, artist]));
+    }
+    assert.deepEqual([await lookup(id), (await stored(id)).lookupGate], [null, undefined]);
+    // A placeholder-like Artist name is sent as typed, in place of the shared credit and its label term.
+    const queued = await queue(byOther, id, typed('Typed Album', 'Various Artists'));
+    assert.deepEqual(queued.input, { trigger: 'submitted', submitted: { kind: 'album', text: 'Typed Album', artist: 'Various Artists' } });
+    assert.deepEqual(queued.queries.map(query => (query as { query: unknown }).query), [{ release: 'Typed Album', artist: 'Various Artists' }, { release: 'Typed Album' }]);
+    const answers = () => [searchAnswer({ release: 'Typed Album', artist: 'Various Artists' }, [mbid(2)]), searchAnswer({ release: 'Typed Album' }, []), releaseAnswer(mbid(2), [1000, 1000])];
+    const client = fixtureClient(answers());
+    await drain({ musicBrainz: client.musicBrainz });
+    const text = sentText(client.requests);
+    assert.deepEqual([(await lookup(id))!.state, text.split('Various Artists').length - 1, text.includes('Synthetic Ensemble'), text.includes('Synthetic Records')], ['complete', 1, false, false]);
+    // The Artist name lives only in the run's input and queries: never in the import's draft or names.
+    assert.equal(JSON.stringify(await stored(id)).includes('Various Artists'), false);
+    // A retry repeats the input and queries, the Artist name included.
+    const retried = await queue(by, id, () => ({ kind: 'retry', actorId: by, operationId: randomUUID() }));
+    assert.deepEqual([retried.run, retried.input, retried.queries], [2, queued.input, queued.queries]);
+    // A stored Artist name this release cannot read is not retried.
+    await adminImportLookupCollection().updateOne({ _id: new ObjectId(id) }, { $set: { 'input.submitted.artist': { name: 'x' } as never, state: 'complete' } });
+    await assert.rejects(queue(by, id, () => ({ kind: 'retry', actorId: by, operationId: randomUUID() })), code('ADMIN_IMPORT_LOOKUP_NOTHING_TO_RETRY'));
+
+    // The automatic rerun after the file set changed repeats the submitted name and Artist, never the shared tag credit.
+    const storage = new Storage(), item = await project(['Disc 1/01 Secret One.wav', 'Disc 1/02 Secret Two.wav']);
+    const first = await upload(item, 0, sharedFrames, storage);
+    await queue(byOther, item.id, typed('Typed Song', 'Synthetic Singer', 'song'));
+    await upload(first.item, 1, sharedFrames, storage);
+    const rerun = (await lookup(item.id))!;
+    assert.deepEqual([rerun.run, rerun.automatic, rerun.grantSource, rerun.input], [2, true, 'upload', { trigger: 'submitted', submitted: { kind: 'song', text: 'Typed Song', artist: 'Synthetic Singer' } }]);
+    assert.deepEqual(rerun.queries.map(query => (query as { query: unknown }).query), [{ recording: 'Typed Song', artist: 'Synthetic Singer' }, { recording: 'Typed Song' }]);
+    // A stored Artist name this release cannot read or could not send is dropped by the automatic rerun, which still searches the
+    // submitted name, crediting the shared tags again.
+    for (const stale of [{ name: 'x' }, 'https://example.invalid/a']) {
+        const corrupted = await project(['Disc 1/01 Secret One.wav', 'Disc 1/02 Secret Two.wav']);
+        const one = await upload(corrupted, 0, sharedFrames, storage);
+        await queue(byOther, corrupted.id, typed('Typed Album', 'Synthetic Singer'));
+        await adminImportLookupCollection().updateOne({ _id: new ObjectId(corrupted.id) }, { $set: { 'input.submitted.artist': stale as never } });
+        await upload(one.item, 1, sharedFrames, storage);
+        const dropped = (await lookup(corrupted.id))!;
+        assert.deepEqual([dropped.run, dropped.automatic, dropped.input], [2, true, { trigger: 'submitted', submitted: { kind: 'album', text: 'Typed Album' } }], JSON.stringify(stale));
+        assert.deepEqual(dropped.queries.map(query => (query as { query: unknown }).query), [{ release: 'Typed Album', artist: 'Synthetic Ensemble' }, { release: 'Typed Album' }]);
+    }
+});
+
+test('a review\'s submitted name with an Artist is credited to it in place of the primary Artist; the draft, identity rows and the preselection\'s artist flag never take it', async () => {
+    const { id } = await seededReview([200_000, 210_000]), sentinel = 'Synthetic Typed Artist';
+    const body = { ...mutation((await stored(id)).revision), kind: 'album', text: 'Synthetic Album', artist: sentinel };
+    const submitted = await submitCatalogReviewLookup(by, id, body);
+    // A lost response replays without another run; another Artist under the same operation is another intent.
+    assert.deepEqual(await submitCatalogReviewLookup(by, id, body), submitted);
+    await assert.rejects(submitCatalogReviewLookup(by, id, { ...body, artist: 'Synthetic Other Artist' }), code('ADMIN_IMPORT_OPERATION_CONFLICT'));
+    const queued = (await lookup(id))!;
+    assert.deepEqual([submitted.receipt?.kind, queued.input, queued.queries.map(query => (query as { query: unknown }).query)], ['lookup',
+        { trigger: 'submitted', submitted: { kind: 'album', text: 'Synthetic Album', artist: sentinel } }, [{ release: 'Synthetic Album', artist: sentinel }, { release: 'Synthetic Album' },
+            ...trackTitleQueries(2).map(query => ({ ...query, artist: sentinel }))]]);
+    const client = fixtureClient([countedSearch({ release: 'Synthetic Album', artist: sentinel }, [[mbid(1), 2]]), countedSearch({ release: 'Synthetic Album' }, [[mbid(1), 2]]),
+        creditedRelease(mbid(1), [200_000, 210_000]), aliasAnswer(mbid(30), 'Synthetic Ensemble')]);
+    await drain({ musicBrainz: client.musicBrainz });
+    const record = (await lookup(id))!, doc = await stored(id);
+    // The release credits the primary Artist, so the preselection is not flagged although the typed Artist differs.
+    assert.deepEqual([record.state, record.ranking!.preselection?.basis, record.ranking!.preselection?.artistMismatch, record.applied?.choice], ['complete', 'exactTrackCount', false, 'preselected']);
+    const draft = doc.draft as unknown as { album: { artists: { name: string; musicBrainzId: string | null }[] } };
+    assert.deepEqual(draft.album.artists.map(entry => [entry.name, entry.musicBrainzId]), [['Synthetic Ensemble', mbid(30)]]);
+    // The Artist name lives only in the run's input and queries: never in the review, its identity rows or its detail.
+    assert.equal(JSON.stringify(doc).includes(sentinel), false);
+    assert.equal(JSON.stringify(await getCatalogReviewCandidates(by, id)).includes(sentinel), false);
+    assert.equal(JSON.stringify(await getCatalogReview(by, id)).includes(sentinel), false);
+    // The credited search preselects, so the Track-title searches it also credits are skipped and never sent.
+    assert.deepEqual([record.trackTitleSearch, sentText(client.requests).split(sentinel).length - 1], ['skipped', 1]);
+    // The view shows it again with its run, and a retry repeats it.
+    assert.equal((await getCatalogReviewLookup(by, id)).lookup?.input.submitted?.artist, sentinel);
+    const retried = await retryCatalogReviewLookup(by, id, mutation(doc.revision));
+    const again = (await lookup(id))!;
+    assert.deepEqual([retried.receipt?.kind, again.input, again.queries], ['lookup-retry', queued.input, queued.queries]);
+});
+
+test('a review whose title searches find no match searches its saved Track titles alone at MusicBrainz only: the release they find pairs and is offered, or preselected when the search returns every hit, and a retry decides again', async () => {
+    const { id } = await seededReview([200_000, 210_000]);
+    await queueReview(id);
+    const [first, second] = trackTitleQueries(2, true);
+    // The credited title search finds nothing, the bare one a same-titled release whose durations differ, and the first saved title,
+    // sent alone, the release that pairs; `count` is how many recordings its search reports.
+    const exchanges = (count: number) => [countedSearch(albumQuery, []), countedSearch({ release: 'Synthetic Album' }, [[mbid(5), 2]]), releaseAnswer(mbid(5), [100_000, 110_000]),
+        recordingSearchAnswer(first, [[mbid(6), 2]], count), recordingSearchAnswer(second), creditedRelease(mbid(6), [200_000, 210_000]), aliasAnswer(mbid(30), 'Synthetic Ensemble')];
+    const offeredClient = fixtureClient(exchanges(30)), offeredCalls: string[] = [];
+    await drain({ musicBrainz: offeredClient.musicBrainz, itunes: emptyItunesClient(offeredCalls) });
+    const offered = (await lookup(id))!;
+    assert.deepEqual([offered.state, offered.issue, offered.trackTitleSearch, offered.creditFound, offered.candidates.map(candidate => [candidate.releaseId, candidate.basis]), offered.searchComplete],
+        ['complete', null, 'sent', undefined, [[mbid(5), 'albumText'], [mbid(6), 'trackTitle']], false]);
+    // Its search reported more recordings than it returned, so the only matching group is offered, never applied.
+    assert.deepEqual([offered.ranking!.groups.length, offered.ranking!.preselection, offered.ranking!.disclosure.partialComparison, offered.applied], [1, null, true, null]);
+    const view = (await getCatalogReviewLookup(by, id)).lookup!;
+    assert.deepEqual(view.candidates.map(candidate => [candidate.releaseId, candidate.byTrackTitle]).sort(), [[mbid(5), undefined], [mbid(6), true]]);
+    // A match found only through a Track title leaves the iTunes fallback to run, and its term never holds one.
+    assert.deepEqual(offeredCalls, ['album us Synthetic Album Synthetic Ensemble', 'album jp Synthetic Album Synthetic Ensemble']);
+    // A manual retry repeats the queries and decides again; this time the recording search returns every hit it reports, so the
+    // release's exact count is preselected and applied to the review.
+    const retried = await retryCatalogReviewLookup(by, id, mutation((await stored(id)).revision));
+    const queued = (await lookup(id))!;
+    assert.deepEqual([retried.receipt?.kind, queued.queries, 'trackTitleSearch' in queued, 'creditFound' in queued], ['lookup-retry', offered.queries, false, false]);
+    const preselectingClient = fixtureClient(exchanges(1)), preselectingCalls: string[] = [];
+    await drain({ musicBrainz: preselectingClient.musicBrainz, itunes: emptyItunesClient(preselectingCalls) });
+    const preselected = (await lookup(id))!;
+    assert.deepEqual([preselected.trackTitleSearch, preselected.searchComplete, preselected.exactSearchComplete, preselected.ranking!.preselection?.basis,
+        preselected.ranking!.preselection?.candidateKey, preselected.applied?.choice, preselected.applied?.candidateKey],
+        ['sent', true, true, 'exactTrackCount', `musicbrainz:${mbid(6)}`, 'preselected', `musicbrainz:${mbid(6)}`]);
+    assert.equal(preselectingCalls.length, 2);
+    // Saved Track titles reach only MusicBrainz recording searches; no filename is sent, and iTunes never gets a Track title.
+    for (const client of [offeredClient, preselectingClient]) {
+        assert.equal(sentText(client.requests).includes('Secret Filename'), false);
+        assert.deepEqual(client.requests.filter(request => sentText([request]).includes('Secret Track Title')).map(request => request.url),
+            [first, second].map(query => musicBrainzUrls.recordingSearch(query).href));
+    }
+    for (const calls of [offeredCalls, preselectingCalls]) assert.equal(calls.some(call => call.includes('Secret')), false);
+});
+
+test('a Various Artists compilation searches its title bare and each saved Track title credited to that Track\'s own primary Artist', async () => {
+    const albumId = new ObjectId(), various = new ObjectId(), soloists = [new ObjectId(), new ObjectId()], trackIds = [new ObjectId(), new ObjectId()];
+    // The placeholder is known by its name and by the Various Artists MusicBrainz ID.
+    await getDb()!.collection('artists').insertMany([{ _id: various, name: 'Various Artists', musicBrainzId: '89ad4ac3-39f7-470e-963a-56509c546377', lifecycleStatus: 'ready', visibility: 'hidden' },
+        ...soloists.map((_id, index) => ({ _id, name: `Synthetic Soloist ${index + 1}`, lifecycleStatus: 'ready', visibility: 'hidden' }))]);
+    await getDb()!.collection('albums').insertOne({ _id: albumId, title: 'Synthetic Compilation', releaseDate: { year: 2020 }, visibility: 'hidden', lifecycleStatus: 'ready',
+        audioTrackIds: trackIds.map(String), credits: [{ creditId: 'primary_artist', subjectType: 'artist', subjectId: String(various), role: 'primary', order: 0 }], attributionStatus: 'documented' });
+    await getDb()!.collection('audioTracks').insertMany(trackIds.map((_id, index) => ({ _id, title: `Secret Track Title ${index + 1}`, originalFileName: `0${index + 1} Secret Filename.flac`,
+        trackNumber: index + 1, uploadStatus: 'ready', publicationStatus: 'ready', s3Key: String(_id), albumId: String(albumId), visibility: 'public', mediaType: 'audio',
+        mediaRepresentation: { durationMs: 200_000 + index * 10_000 }, attributionStatus: 'documented',
+        credits: [{ creditId: `track_artist_${index + 1}`, subjectType: 'artist', subjectId: String(soloists[index]), role: 'primary', order: 0 }] })));
+    const album = await getDb()!.collection('albums').findOne({ _id: albumId });
+    const { item } = await createCatalogReview(by, { operationId: randomUUID(), albumId: String(albumId), expectedRevision: adminCatalogItemRevision('album', album) });
+    await queueReview(item.id);
+    const credited = trackTitleQueries(2, true).map((query, index) => ({ ...query, artist: `Synthetic Soloist ${index + 1}` }));
+    // The title search names no Artist, so the Track titles are sent for any lack of a preselection, each credited to its own Artist.
+    assert.deepEqual((await lookup(item.id))!.queries.map(query => [(query as { query: unknown }).query, (query as { when?: string }).when ?? null]),
+        [[{ release: 'Synthetic Compilation' }, null], ...credited.map(query => [query, 'noPreselection'])]);
+    const client = fixtureClient([countedSearch({ release: 'Synthetic Compilation' }, []), ...credited.map(query => recordingSearchAnswer(query))]);
+    await drain({ musicBrainz: client.musicBrainz });
+    const done = (await lookup(item.id))!;
+    assert.deepEqual([done.state, done.trackTitleSearch, done.outcome], ['complete', 'sent', 'noRelease']);
+    const recordings = client.requests.filter(request => request.url.includes('/ws/2/recording?'));
+    assert.deepEqual(recordings.map(request => request.url), credited.map(query => musicBrainzUrls.recordingSearch(query).href));
+    assert.ok(sentText(recordings).includes('recording:"Secret Track Title 1" AND artist:"Synthetic Soloist 1"'));
+    assert.equal(sentText(client.requests).includes('Various Artists'), false);
+});
+
+test('an import with the same Album tags, track titles and durations never searches by Track title', async () => {
+    const id = await seeded(2, index => v2({ album: 'Synthetic Album', albumArtists: ['Synthetic Ensemble'], title: `Secret Track Title ${index + 1}`, durationMs: [200_000, 210_000][index] }));
+    await requestAutomaticMetadataLookup(by, id, 'upload');
+    assert.equal((await lookup(id))!.queries.some(query => query.basis === 'trackTitle'), false);
+    const client = fixtureClient([searchAnswer(albumQuery, []), searchAnswer({ release: 'Synthetic Album' }, [])]);
+    await drain({ musicBrainz: client.musicBrainz });
+    const done = (await lookup(id))!;
+    assert.deepEqual([done.state, done.outcome, 'trackTitleSearch' in done], ['complete', 'noRelease', false]);
+    assert.equal(client.requests.some(request => request.url.includes('/ws/2/recording?')), false);
+    assert.equal(sentText(client.requests).includes('Secret Track Title'), false);
+});
+
+test('a Track-title search MusicBrainz does not answer ends them in the same tick without an attempt or an automatic retry: the run completes and offers its title search\'s release', async () => {
+    const { id } = await seededReview([200_000, 210_000]);
+    await queueReview(id);
+    const [first, second] = trackTitleQueries(2);
+    // The credited title search returns the release that pairs but reports more releases than it returned, so the comparison is
+    // partial and the Track titles are sent with their planned credit; the first is answered 503 until the client gives up.
+    const client = fixtureClient([json(searchUrl(albumQuery), { count: 30, offset: 0, releases: [{ id: mbid(1), title: 'Synthetic Release 0', score: 100, 'track-count': 2 }] }),
+        countedSearch({ release: 'Synthetic Album' }, [[mbid(1), 2]]), creditedRelease(mbid(1), [200_000, 210_000]), ...unavailable(musicBrainzUrls.recordingSearch(first).href, 12),
+        aliasAnswer(mbid(30), 'Synthetic Ensemble')]);
+    const calls: string[] = [];
+    assert.equal(await runMetadataLookupOnce({ musicBrainz: client.musicBrainz, itunes: emptyItunesClient(calls) }), true);
+    const done = (await lookup(id))!;
+    assert.deepEqual([done.state, done.issue, done.outcome, done.attempts, done.retryAt, done.exhausted, done.leaseOwner, done.trackTitleSearch, done.creditFound, done.queryIndex],
+        ['complete', null, 'candidates', { musicbrainz: 0, itunes: 0 }, null, {}, null, 'sent', true, 4]);
+    // The comparison stays partial: the only matching group is offered, never applied, and the review no longer waits on lookup.
+    assert.deepEqual([done.searchComplete, done.exactSearchComplete, done.candidates.map(candidate => [candidate.releaseId, candidate.basis]), done.ranking!.groups.length,
+        done.ranking!.preselection, done.ranking!.disclosure.partialComparison, done.applied], [false, false, [[mbid(1), 'albumText']], 1, null, true, null]);
+    const read = await getCatalogReviewLookup(by, id);
+    assert.deepEqual([read.lookup!.state, read.lookup!.candidates.map(candidate => [candidate.releaseId, candidate.byTrackTitle]), read.summary.waiting.lookup,
+        (await stored(id)).lookupGate!.blocking], ['complete', [[mbid(1), undefined]], false, false]);
+    // One call's attempts (in wait mode, all of them) reached the first title, which was never sent again, and the second was never
+    // sent; the title search's group stopped the iTunes fallback.
+    const recordings = client.requests.filter(request => request.url.includes('/ws/2/recording?')).map(request => request.url);
+    assert.equal(recordings.length, METADATA_LOOKUP_RETRY.attempts);
+    assert.deepEqual([...new Set(recordings)], [musicBrainzUrls.recordingSearch(first).href]);
+    assert.equal(sentText(client.requests).includes(second.recording), false);
+    assert.deepEqual(calls, []);
+    // Nothing is due later: no automatic retry was scheduled.
+    assert.equal(await runMetadataLookupOnce({ musicBrainz: client.musicBrainz, now: () => later(10 * 60_000) }), false);
+});
+
+test('a review run stopped during its second Track-title search resumes at that search with its decision stored, sending no earlier search again', async () => {
+    const { id } = await seededReview([200_000, 210_000]);
+    await queueReview(id);
+    const [first, second] = trackTitleQueries(2, true);
+    const initial = fixtureClient([countedSearch(albumQuery, []), countedSearch({ release: 'Synthetic Album' }, []), recordingSearchAnswer(first, [[mbid(6), 2]])]);
+    let entered!: () => void; const inFlight = new Promise<void>(resolve => { entered = resolve; });
+    let aborted = false;
+    const holding: MusicBrainzClient = { ...initial.musicBrainz, async searchRecordings(query, options) {
+        if (query.recording === second.recording) {
+            entered();
+            return new Promise((_resolve, reject) => options.signal.addEventListener('abort', () => { aborted = true; reject(new MetadataLookupSourceError('musicbrainz', 'cancelled')); }, { once: true }));
+        }
+        return initial.musicBrainz.searchRecordings(query, options);
+    } };
+    const stop = startMetadataLookupWorker({ musicBrainz: holding }, 5);
+    await inFlight;
+    await stop();
+    const paused = (await lookup(id))!;
+    assert.deepEqual([aborted, paused.state, paused.phase, paused.leaseOwner, paused.queryIndex, paused.trackTitleSearch, paused.candidates.map(candidate => [candidate.releaseId, candidate.basis, candidate.details])],
+        [true, 'running', 'search', null, 3, 'sent', [[mbid(6), 'trackTitle', 'pending']]]);
+    // Resumed: the second title is sent again, then the release the first found is fetched; it pairs, and its exact count is applied.
+    const resumed = fixtureClient([recordingSearchAnswer(second), creditedRelease(mbid(6), [200_000, 210_000]), aliasAnswer(mbid(30), 'Synthetic Ensemble')]);
+    await drain({ musicBrainz: resumed.musicBrainz });
+    const done = (await lookup(id))!;
+    assert.deepEqual(resumed.requests.map(request => request.url), [musicBrainzUrls.recordingSearch(second).href, releaseUrl(mbid(6)), musicBrainzUrls.artistAliases(mbid(30)).href]);
+    assert.deepEqual([done.state, done.trackTitleSearch, done.ranking!.preselection?.basis, done.applied?.choice, done.applied?.candidateKey],
+        ['complete', 'sent', 'exactTrackCount', 'preselected', `musicbrainz:${mbid(6)}`]);
+});
+
+test('a submitted review run sends its Track-title searches waiting for the deployment gate, so a gate held elsewhere never refuses them', async () => {
+    const { id } = await seededReview([200_000, 210_000]);
+    await submitCatalogReviewLookup(by, id, { ...mutation(1), kind: 'album', text: 'Synthetic Album' });
+    const [first, second] = trackTitleQueries(2, true);
+    // After the two title searches, another holder takes the gate: busy-mode requests are refused from then on.
+    const modes: string[] = [], base = immediateGate();
+    const gate: MetadataLookupRateGate = { async acquire(source, mode, signal) {
+        modes.push(mode);
+        if (modes.length > 2 && mode === 'busy') throw new MetadataLookupSourceError(source, 'busy', 1000);
+        return base.acquire(source, mode, signal);
+    } };
+    const client = fixtureClient([countedSearch(albumQuery, []), countedSearch({ release: 'Synthetic Album' }, []), recordingSearchAnswer(first, [[mbid(6), 2]]),
+        recordingSearchAnswer(second), creditedRelease(mbid(6), [200_000, 210_000]), aliasAnswer(mbid(30), 'Synthetic Ensemble')], gate);
+    const now = new Date();
+    await runMetadataLookupOnce({ musicBrainz: client.musicBrainz, now: () => now });
+    // Both Track titles were sent in wait mode; the release lookup that followed in busy mode was refused and waits for a retry.
+    const waiting = (await lookup(id))!;
+    assert.deepEqual([waiting.state, waiting.issue, waiting.grantSource, waiting.trackTitleSearch, waiting.candidates.map(candidate => [candidate.releaseId, candidate.basis, candidate.details])],
+        ['retrying', 'sourceBusy', 'submit', 'sent', [[mbid(6), 'trackTitle', 'pending']]]);
+    assert.deepEqual([modes, client.requests.filter(request => request.url.includes('/ws/2/recording?')).map(request => request.url)],
+        [['busy', 'busy', 'wait', 'wait', 'busy'], [first, second].map(query => musicBrainzUrls.recordingSearch(query).href)]);
+    // The retry waits for the gate, fetches the release and completes without sending a Track title again.
+    await runMetadataLookupOnce({ musicBrainz: client.musicBrainz, now: () => waiting.retryAt! });
+    const done = (await lookup(id))!;
+    assert.deepEqual([done.state, done.ranking!.preselection?.basis, modes.slice(5), client.requests.filter(request => request.url.includes('/ws/2/recording?')).length],
+        ['complete', 'exactTrackCount', ['wait', 'wait'], 2]);
 });

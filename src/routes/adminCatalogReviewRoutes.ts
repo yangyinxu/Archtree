@@ -7,6 +7,7 @@ import { createMediaAbortContext } from '../services/media/mediaDeliveryService'
 import { AdminImportError, objectId } from '../administration/import/adminImportContract';
 import { listCatalogReviews, getCatalogReview, getCatalogReviewEligibility, analyzeCatalogReview, cancelCatalogReviewAnalysis } from '../administration/catalog/adminCatalogReviewService';
 import { applyCatalogReview, decideCatalogReviewIdentities, getCatalogReviewCandidates } from '../administration/catalog/adminCatalogReviewApply';
+import { catalogReviewDiscarded, discardCatalogReview } from '../administration/catalog/adminCatalogReviewDiscard';
 import {
     adoptCatalogReviewSuggestions, chooseCatalogReviewLookup, createCatalogReviewWithLookup, getCatalogReviewLookup, resolveCatalogReviewLookup, retryCatalogReviewLookup, saveCatalogReview,
     submitCatalogReviewLookup
@@ -17,10 +18,11 @@ import type { ItunesArtworkClient } from '../administration/lookup/itunesArtwork
 
 /**
  * Existing-Album reviews have an independent private protocol; old import routes never accept their project IDs. Creating a review
- * queues its automatic metadata lookup where lookup is available (catalogReviewLookupRequests.ts), and the eligibility read tells
- * the Web Album page whether one can be created and which open review it opens. Applying a review and its identity rows and
- * decisions live in adminCatalogReviewApply.ts. `artwork` and `itunesArtwork` supply the Cover Art Archive and iTunes artwork
- * clients of lookup candidate previews (tests inject them).
+ * queues its automatic metadata lookup where available (catalogReviewLookupRequests.ts), and the eligibility read tells the Web
+ * Album page whether one can be created and which open review it opens. Applying a review and its identity rows and decisions live
+ * in adminCatalogReviewApply.ts. Discarding an unapplied review leaves a tombstone (adminCatalogReviewDiscard.ts): a 404 on any
+ * /:id JSON route (the artwork preview keeps its bodiless 404), a retried change or read included, then says the review was
+ * discarded. `artwork` and `itunesArtwork` are the candidate previews' Cover Art Archive and iTunes clients (tests inject them).
  */
 export function createAdminCatalogReviewRouter(artwork: () => CoverArtClient = defaultLookupArtworkClient, itunesArtwork: () => ItunesArtworkClient = defaultItunesArtworkClient) {
     const router = express.Router();
@@ -51,8 +53,8 @@ export function createAdminCatalogReviewRouter(artwork: () => CoverArtClient = d
             const value = await runRequestWork(req, () => handler((req as AuthenticatedRequest).auth!.userId, req));
             if (!res.destroyed) res.status(status).json(value);
         } catch (error) {
-            const known = error instanceof AdminImportError;
-            res.status(known ? error.status : 503).json({ code: known ? error.code : 'ADMIN_CATALOG_REVIEW_UNAVAILABLE' });
+            const known = error instanceof AdminImportError, discarded = known && error.status === 404 && typeof req.params.id === 'string' && await catalogReviewDiscarded(req.params.id);
+            res.status(known ? error.status : 503).json({ code: discarded ? 'ADMIN_CATALOG_REVIEW_DISCARDED' : known ? error.code : 'ADMIN_CATALOG_REVIEW_UNAVAILABLE' });
         }
     };
     router.get('/catalog-reviews', asyncHandler(run((actor, req) => listCatalogReviews(actor, req.query))));
@@ -70,6 +72,7 @@ export function createAdminCatalogReviewRouter(artwork: () => CoverArtClient = d
     // (adminCatalogReviewApply.ts); the Web review summary reads the candidates and saves decisions, and its apply confirmation sends
     // the selected fields and members with the identity items it showed.
     router.post('/catalog-reviews/:id/apply', asyncHandler(run((actor, req) => applyCatalogReview(actor, req.params.id, req.body))));
+    router.post('/catalog-reviews/:id/discard', asyncHandler(run((actor, req) => discardCatalogReview(actor, req.params.id, req.body))));
     router.get('/catalog-reviews/:id/candidates', asyncHandler(run((actor, req) => getCatalogReviewCandidates(actor, req.params.id))));
     router.post('/catalog-reviews/:id/decisions', asyncHandler(run((actor, req) => decideCatalogReviewIdentities(actor, req.params.id, req.body))));
     router.get('/catalog-reviews/:id/lookup', asyncHandler(run((actor, req) => getCatalogReviewLookup(actor, req.params.id))));

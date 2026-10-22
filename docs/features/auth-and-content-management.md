@@ -541,14 +541,15 @@ sign-in attempts.
   Each contextual Home item may carry
   `{ "reason": { "code": "followedArtist", "artist": { "id": "...", "name": "..." } } }`;
   public content summaries and expanded `included` objects never gain this field.
-- Startup revision `required-indexes-v11-musicbrainz-ids` requires the unique
-  `artistFollows(userId, artistId)` index, owner/follow-date and Artist/owner
-  cleanup indexes, and the Album/MediaTrack descending calendar-date indexes.
-  The resolver uses those date indexes, bounded equality joins and a 3-second
-  database deadline per content class; it does not load an unlimited Follow ID
-  list or add an arbitrary account Follow cap. Missing required indexes prevent
-  readiness. Keep the feature disabled until the additive index rollout and
-  both Home compatibility projections have been verified.
+- Startup revision `required-indexes-v12-catalog-cover-uploads` requires the
+  unique `artistFollows(userId, artistId)` index, owner/follow-date and
+  Artist/owner cleanup indexes, and the Album/MediaTrack descending
+  calendar-date indexes. The resolver uses those date indexes, bounded equality
+  joins and a 3-second database deadline per content class; it does not load an
+  unlimited Follow ID list or add an arbitrary account Follow cap. Missing
+  required indexes prevent readiness. Keep the feature disabled until the
+  additive index rollout and both Home compatibility projections have been
+  verified.
 - Shared synthetic contract fixtures live in `test/fixtures/personalization/v1`.
   After updating the canonical files and their SHA-256 manifest, run
   `node scripts/sync-personalization-fixtures.mjs` to copy the exact corpus to

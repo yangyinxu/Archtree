@@ -44,7 +44,7 @@ An existing correct index is reused. Indexes and duplicate records are never
 automatically dropped or rewritten.
 
 After verification, startup upserts the static receipt named by
-`requiredIndexRevision` (now `required-indexes-v11-musicbrainz-ids`) in
+`requiredIndexRevision` (now `required-indexes-v12-catalog-cover-uploads`) in
 `schemaMigrations`. It records only the revision and application time. A new
 required constraint must receive a new reviewed revision. A partially failed
 attempt is retried using the same additive definitions; a prior receipt is never
@@ -163,12 +163,12 @@ normal error handling; already-admitted business work remains tracked until it s
 After the listener opens, startup starts the administrator background workers:
 Luna analysis, import publication (which also cleans up automatic cover
 candidates of completed imports and stages and cleans up lookup covers),
-existing-catalog covers and metadata lookup. Each polls every two seconds and
-runs at most one pass at a time through the lifecycle tracker, so that pass
-counts as admitted business work. Draining aborts each worker's signal, which
-cancels an in-flight metadata lookup request, stops new passes, and waits for
-the admitted pass before MongoDB closes. Tests replace each worker through the
-`startServer` dependencies.
+existing-catalog covers (which also deletes staged cover uploads) and metadata
+lookup. Each polls every two seconds and runs at most one pass at a time through
+the lifecycle tracker, so that pass counts as admitted business work. Draining
+aborts each worker's signal, which cancels an in-flight metadata lookup request,
+stops new passes, and waits for the admitted pass before MongoDB closes. Tests
+replace each worker through the `startServer` dependencies.
 
 - `SERVER_SHUTDOWN_GRACE_MS`: default 30000, maximum 120000.
 - `SERVER_SHUTDOWN_CLEANUP_MS`: default 5000, maximum 30000.
@@ -313,8 +313,8 @@ on `artists` and `organization_musicbrainz_id` on `organizations`, each
 `{ musicBrainzId: 1 }` with the partial filter
 `{ musicBrainzId: { $type: 'string' } }`, so any number of records without an ID
 coexist and an Artist and an Organization may share one ID.
-`requiredIndexRevision` is now `required-indexes-v11-musicbrainz-ids`. Existing
-duplicate string IDs fail startup closed
+`requiredIndexRevision` was then `required-indexes-v11-musicbrainz-ids`.
+Existing duplicate string IDs fail startup closed
 (`DatabaseIndexInitializationError('artists:musicBrainzId')` or the
 `organizations` equivalent); nothing is dropped. Before deploying, list
 duplicates with an aggregate such as `[{ $match: { musicBrainzId: { $type:
@@ -369,6 +369,64 @@ through `admin_project_purpose_inventory` (its `purpose` prefix only), keeping
 unapplied reviews of that captured Album ID and revision, and returns at most
 25, each then source-checked, within the usual 3-second bound: its cost grows
 with the number of stored reviews, applied ones included. No index changes.
+
+Discarding an unapplied review (`discardCatalogReview` in
+`src/administration/catalog/adminCatalogReviewDiscard.ts`) replaces its
+document, guarded by the revision it read, with a tombstone at the same `_id`
+(`purpose` `catalogReviewDiscarded`) that keeps only `actorId`, `createdAt`,
+`updatedAt`, `revision` (one past the review's), `albumId`, `discardedAt`,
+`discardedBy` and `receipts` (the create and discard receipts), and deletes
+the review's `adminImportLookups` record in the same transaction. Review reads
+and writes filter `purpose` `catalogReview`, imports `importPurposeFilter`,
+the lookup worker `lookupProjectFilter`, and the Luna worker's claim and
+capacity counts need an `analysis`, so nothing lists, counts, claims or
+finishes work on a tombstone, and the open-review scan never reaches one; its
+unique `_id` keeps a replayed creation from inserting the review again. A
+lookup step or Luna finish that runs after the discard finds no record or
+analysis and writes nothing; one that commits first makes the discard
+transaction retry. Tombstones, a few hundred bytes each, are kept so retries
+stay answerable; nothing deletes them. No collection, index or
+`requiredIndexRevision` changes. The discard is the first writer that
+deletes from `adminImportLookups`, so an account with collection-specific
+permissions needs delete access there besides insert/update before deploying.
+
+Covers uploaded from this computer (see Cover uploads from this computer in the
+[administrator workbench](../features/admin-workbench.md)) are recorded in
+`adminCatalogCoverUploads`, one document per upload intent: its `_id` is the
+first 24 hex digits of a digest of the administrator and the `Idempotency-Key`,
+so a replay finds its record and a concurrent duplicate fails on `_id`. A record
+holds the item kind and ID, the uploading administrator, the intent's
+fingerprint, the staged object as an ordinary import asset
+(`imports/catalog-covers/<_id>` in `ADMIN_IMPORT_S3_BUCKET_NAME`, with the
+normalized bytes' SHA-256, length and type, the filename, the transfer's own
+lease and, once confirmed, the etag and version), `usedBy` (the cover operation
+that used it, or `null`) and a cleanup lease. It is inserted `pending` before
+the PUT, and the catalog item is never written. Two required indexes,
+`{ actorId: 1, usedBy: 1, 'asset.state': 1 }` for the bound of 16 unused uploads
+per administrator and `{ 'asset.state': 1, leaseUntil: 1 }` for the cleanup
+claim, also create the collection at startup, since its first write is an insert
+inside an administrator transaction, where the MongoDB 4.2 floor cannot create a
+collection; `requiredIndexRevision` is now
+`required-indexes-v12-catalog-cover-uploads`. A cover operation admitted from an
+upload stores `sourceUploadId` and a null `sourceImportId`; its copy,
+attachment, cancellation and reconciliation are unchanged. The existing-catalog
+cover worker runs one upload cleanup pass on each tick that claims no operation,
+so startup and shutdown tracking are unchanged. The pass is skipped unless
+private storage is ready; it claims the record not `deleted` whose cleanup
+lease ended first (an upload's lease first ends a day after its upload, or when
+an approval uses it), under a five-minute lease that a stopped pass leaves to
+expire, and moves a record that is not yet deletable an hour ahead. A failed
+deletion becomes `cleanupFailed`, is logged once as
+`admin_catalog_cover_upload_cleanup_failed` with the upload ID and is retried an
+hour later. Records in `deleted` stay as small evidence that answers a late
+replay, and the indexes keep the bound count and the idle-tick claim from
+scanning them. The application account needs insert/update on
+`adminCatalogCoverUploads`. No document is migrated. The release before uploads
+verifies only the indexes it declares, completes, reconciles and cancels
+operations admitted from uploads (its copy reads only the operation's source and
+target) and never reads the upload records, whose objects wait in the private
+bucket until rolling forward lets the cleanup pass delete them (see
+[Rollback floors](../features/admin-workbench.md#rollback-floors)).
 
 Playback Audio/Video GETs that briefly overlap an older stream may wait up to two
 seconds for an existing admission slot. The pending pool is bounded to 32 per

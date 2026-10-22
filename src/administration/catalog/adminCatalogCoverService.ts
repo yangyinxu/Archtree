@@ -3,7 +3,7 @@
  *   Types: AdminCatalogCoverDependencies
  *   Functions: replaceAdminCatalogCover, clearAdminCatalogCover, listAdminCatalogCoverOperations,
  *              cancelAdminCatalogCover, runAdminCatalogCoverOnce, reconcileAdminCatalogCover,
- *              startAdminCatalogCoverWorker
+ *              runAdminCatalogCoverTick, startAdminCatalogCoverWorker
  * Internal
  *   Types: CoverKind, CoverState, CoverOperation
  *   Functions: operations, fail, cleanupDefault, requireKind, coverResult, currentApproval, effectiveActor,
@@ -22,6 +22,7 @@ import { importCollection, importPurposeFilter, importDigest } from '../import/a
 import { importPrivateStorageReady, type ImportAsset } from '../import/adminImportMediaTypes';
 import { importDraftWritable } from '../import/adminImportDraftCompat';
 import { defaultImportObjectStorage, importAssetTarget, type ImportObjectIdentity, type ImportObjectStorage, type ImportObjectTarget } from '../import/adminImportStorage';
+import { catalogCoverUploadSource, runCatalogCoverUploadCleanupOnce } from './adminCatalogCoverUpload';
 
 type CoverKind = Exclude<AdminCatalogKind, 'organization'>;
 type CoverState = 'copying' | 'needsAttention' | 'complete' | 'cancelled';
@@ -32,6 +33,8 @@ type CoverOperation = {
     stage: 'reserved' | 'sent' | 'stored' | 'attached'; state: CoverState; cleanupPending: boolean;
     createdAt: Date; updatedAt: Date; grantExpiresAt: Date; leaseOwner: string | null; leaseUntil: Date | null;
     cancellation?: { actor: string; operationId: string; fingerprint: string; expectedRevision: string | null };
+    /** The staged upload (adminCatalogCoverUpload.ts) this approval copies; absent for import sources and clears. */
+    sourceUploadId?: string | null;
 };
 export interface AdminCatalogCoverDependencies { storage?: ImportObjectStorage; cleanup?: (imageId: string, kind: CoverKind, ownerId: string) => Promise<void> }
 const operations = () => getDb()!.collection<CoverOperation>('adminCatalogCoverOperations');
@@ -60,8 +63,10 @@ async function releaseSourcePin(op: CoverOperation, session: ClientSession) {
 
 /** Exact approval and both old/new storage identities survive browser aborts and ambiguous S3/Mongo outcomes. */
 async function mutateCover(actor: string, rawKind: AdminCatalogKind, ownerId: string, raw: unknown, clear: boolean, dependencies: AdminCatalogCoverDependencies) {
-    const kind = requireKind(rawKind), body = record(raw); exact(body, ['operationId', 'expectedRevision', ...(clear ? [] : ['importId', 'slotId', 'expectedSourceRevision'])]);
-    if (!objectId(ownerId) || !uuid(body.operationId) || typeof body.expectedRevision !== 'string' || !/^cr_[A-Za-z0-9_-]{43}$/.test(body.expectedRevision) || (!clear && (!Number.isSafeInteger(body.expectedSourceRevision) || Number(body.expectedSourceRevision) < 1 || !objectId(body.importId) || typeof body.slotId !== 'string' || body.slotId.length > 60))) fail(400, 'ADMIN_CATALOG_INVALID_INPUT');
+    // A replacement names either an import project's staged image or a staged upload from this computer, never both.
+    const kind = requireKind(rawKind), body = record(raw), uploaded = !clear && Object.prototype.hasOwnProperty.call(body, 'uploadId');
+    exact(body, ['operationId', 'expectedRevision', ...(clear ? [] : uploaded ? ['uploadId'] : ['importId', 'slotId', 'expectedSourceRevision'])]);
+    if (!objectId(ownerId) || !uuid(body.operationId) || typeof body.expectedRevision !== 'string' || !/^cr_[A-Za-z0-9_-]{43}$/.test(body.expectedRevision) || (!clear && (uploaded ? !objectId(body.uploadId) : (!Number.isSafeInteger(body.expectedSourceRevision) || Number(body.expectedSourceRevision) < 1 || !objectId(body.importId) || typeof body.slotId !== 'string' || body.slotId.length > 60)))) fail(400, 'ADMIN_CATALOG_INVALID_INPUT');
     const operationId = body.operationId as string, fingerprint = importDigest({ kind, ownerId, clear, body });
     const operation = await withCurrentAdministrator(actor, async session => {
         const prior = await operations().findOne({ actor, operationId }, { session });
@@ -76,8 +81,9 @@ async function mutateCover(actor: string, rawKind: AdminCatalogKind, ownerId: st
         if (await operations().countDocuments({ actor, ...unresolvedOperations }, { session, limit: 256 }) >= 256) fail(429, 'ADMIN_CATALOG_RECEIPT_LIMIT');
         const previousImageId = owner.coverArtId ? String(owner.coverArtId) : null;
         if (previousImageId) { const previous = objectId(previousImageId) && await getDb()!.collection('imageAssets').findOne({ _id: new ObjectId(previousImageId), ownerType: kind, ownerId, s3Key: `images/${previousImageId}` }, { session }); if (!previous || previous.uploadStatus !== 'ready') fail(409, 'ADMIN_CATALOG_COVER_EVIDENCE_REQUIRED'); }
-        const _id = new ObjectId(), now = new Date(); let source: ImportAsset | null = null, sourceImportId: string | null = null;
-        if (!clear) {
+        const _id = new ObjectId(), now = new Date(); let source: ImportAsset | null = null, sourceImportId: string | null = null, sourceUploadId: string | null = null;
+        if (!clear && uploaded) { source = await catalogCoverUploadSource(session, actor, kind, ownerId, body.uploadId as string, _id.toHexString(), now); sourceUploadId = body.uploadId as string; }
+        else if (!clear) {
             const project = await importCollection().findOne({ ...importPurposeFilter, _id: new ObjectId(body.importId as string) }, { session });
             if (!project || project.revision !== body.expectedSourceRevision) fail(409, 'ADMIN_CATALOG_COVER_SOURCE_CHANGED');
             // A newer-format project is read-only here, so no new source pin is added; releasing an existing pin stays admitted.
@@ -88,7 +94,7 @@ async function mutateCover(actor: string, rawKind: AdminCatalogKind, ownerId: st
             await importCollection().replaceOne({ _id: project!._id, revision: project!.revision }, { ...project!, revision: project!.revision + 1, updatedAt: now }, { session });
         }
         const imageId = clear ? null : new ObjectId().toHexString();
-        const op: CoverOperation = { _id, actor, operationId, fingerprint, kind, ownerId, expectedRevision: body.expectedRevision as string, previousImageId, sourceImportId, source: source ? structuredClone(source) : null, imageId, target: source ? { ...importAssetTarget(sourceImportId!, source), bucket: process.env.S3_BUCKET_NAME!.trim(), key: `images/${imageId}`, operationId } : null, identity: null, stage: clear ? 'stored' : 'reserved', state: 'copying', cleanupPending: false, createdAt: now, updatedAt: now, grantExpiresAt: new Date(Date.now() + 86_400_000), leaseOwner: null, leaseUntil: null };
+        const op: CoverOperation = { _id, actor, operationId, fingerprint, kind, ownerId, expectedRevision: body.expectedRevision as string, previousImageId, sourceImportId, source: source ? structuredClone(source) : null, imageId, target: source ? { ...importAssetTarget((sourceImportId ?? sourceUploadId)!, source), bucket: process.env.S3_BUCKET_NAME!.trim(), key: `images/${imageId}`, operationId } : null, identity: null, stage: clear ? 'stored' : 'reserved', state: 'copying', cleanupPending: false, createdAt: now, updatedAt: now, grantExpiresAt: new Date(Date.now() + 86_400_000), leaseOwner: null, leaseUntil: null, ...(sourceUploadId ? { sourceUploadId } : {}) };
         await operations().insertOne(op, { session }); return op;
     });
     await runAdminCatalogCoverOnce(dependencies, operation._id.toHexString());
@@ -217,7 +223,7 @@ export async function runAdminCatalogCoverOnce(dependencies: AdminCatalogCoverDe
                         await operations().updateOne({ _id: current._id, leaseOwner: worker }, { $set: { stage: 'sent', updatedAt: new Date() } }, { session });
                     });
                     checkAdminWorker(signal);
-                    try { identity = await storage.copy({ ...importAssetTarget(op.sourceImportId!, op.source!), etag: op.source!.etag!, versionId: op.source!.versionId }, op.target, signal); } catch { identity = await storage.head(op.target, signal); }
+                    try { identity = await storage.copy({ ...importAssetTarget((op.sourceImportId ?? op.sourceUploadId)!, op.source!), etag: op.source!.etag!, versionId: op.source!.versionId }, op.target, signal); } catch { identity = await storage.head(op.target, signal); }
                 }
                 if (!identity) fail(503, 'ADMIN_CATALOG_COVER_UNKNOWN');
                 const stored = await operations().findOneAndUpdate({ _id: op._id, leaseOwner: worker, state: { $ne: 'cancelled' } }, { $set: { stage: 'stored', identity, updatedAt: new Date() } }, { returnDocument: 'after' }); if (!stored.value) fail(409, 'ADMIN_CATALOG_COVER_ACTIVE'); op = stored.value!;
@@ -264,4 +270,10 @@ export async function reconcileAdminCatalogCover(actor: string, kind: AdminCatal
     }); if (!op) return fail(404, 'ADMIN_CATALOG_COVER_NOT_FOUND');
     await runAdminCatalogCoverOnce(dependencies, op._id.toHexString(), undefined, actor); return coverResult(actor, (await operations().findOne({ _id: op._id }))!);
 }
-export function startAdminCatalogCoverWorker(intervalMs = 2000, track?: AdminWorkTracker) { return startAdminWorker(signal => runAdminCatalogCoverOnce({}, undefined, signal), intervalMs, track); }
+/** One worker tick: an operation step, or else one staged-upload cleanup pass. */
+export async function runAdminCatalogCoverTick(dependencies: AdminCatalogCoverDependencies = {}, signal?: AbortSignal) {
+    return await runAdminCatalogCoverOnce(dependencies, undefined, signal) || runCatalogCoverUploadCleanupOnce(dependencies.storage ?? defaultImportObjectStorage, signal);
+}
+export function startAdminCatalogCoverWorker(intervalMs = 2000, track?: AdminWorkTracker, dependencies: AdminCatalogCoverDependencies = {}) {
+    return startAdminWorker(signal => runAdminCatalogCoverTick(dependencies, signal), intervalMs, track);
+}

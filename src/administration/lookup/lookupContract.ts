@@ -182,11 +182,15 @@ export const ADMIN_IMPORT_LOOKUP_COLLECTION = 'adminImportLookups';
  * `aliasLookups` artist or label alias lookups, keeping at most `aliasNames` names per entity. Its iTunes stage, alongside those,
  * sends at most `itunesUpcLookups` UPC lookups, `itunesSearches` iTunes searches and `itunesCollectionLookups` collection lookups,
  * keeps at most `itunesItems` iTunes results, and bridges them with at most `bridgeSearches` more MusicBrainz searches: at most 60
- * requests. It keeps at most `localizedGroups` groups of `localizedNames` localized artist names.
+ * requests. It keeps at most `localizedGroups` groups of `localizedNames` localized artist names. Of the `plannedQueries` searches,
+ * an existing-Album review sends at most `trackTitleSearches` recording searches by saved Track titles, planned after its title
+ * searches: until they are sent or skipped, the planned searches admit at most `candidates - trackTitleCandidates` releases, and
+ * each Track-title search admits at most `trackTitleCandidates / trackTitleSearches` more, so the per-attempt total stays at 60.
  */
 export const METADATA_LOOKUP_JOB_LIMITS = Object.freeze({
     grantMs: 60 * 60 * 1000, leaseMs: 180_000, stepDeadlineMs: 120_000, workerIntervalMs: 2_000,
     candidates: 25, aliasLookups: 16, aliasNames: 32, candidateBytes: 4 * 1024 * 1024, recordBytes: 12 * 1024 * 1024, automaticRuns: 3, reviewAutomaticRuns: 1,
+    trackTitleSearches: 2, trackTitleCandidates: 10,
     retryDelaysMs: Object.freeze([30_000, 120_000, 300_000]), retryAfterMaximumMs: 60_000,
     rateLimitedRetryMs: Object.freeze({ minimum: 2_000, maximum: 10_000 }),
     itunesUpcLookups: 2, itunesSearches: 3, itunesItems: 4, itunesCollectionLookups: 4, bridgeSearches: 4, localizedGroups: 4, localizedNames: 4

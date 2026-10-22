@@ -48,7 +48,8 @@ const proposalText = (field: typeof fields[number], proposal: Proposal, withId?:
  * order shown, and a preview that fails is tried once more after two seconds, then hidden. For an existing-Album review (`review`,
  * its draft tracks) the copy speaks of the Album's tracks, previews come from the review, and each candidate with a subset
  * comparison also shows how many members it pairs (listing each pair), the missing-file rows it would add, the video or data
- * tracks it leaves out and the members no track of it can pair with.
+ * tracks it leaves out and the members no track of it can pair with; a release first found through one of the Album's saved track
+ * titles is marked as such.
  */
 export function CandidateChooser({ projectId, viewerId, lookup, review, disabled, onChoose }: {
   projectId: string; viewerId: string; lookup: ImportLookupView | ReviewLookupView; review?: { tracks: readonly { slotId: string; title: string }[] }; disabled: boolean;
@@ -109,6 +110,7 @@ export function CandidateChooser({ projectId, viewerId, lookup, review, disabled
       {artwork(candidate, prefix === 'a')}
       <strong id={`${id}-${prefix}${index}`}>{[candidate.title ?? '—', candidate.artist].filter(Boolean).join(' · ')}</strong>
       {candidate.source === 'itunes' && <p className={styles.muted}>{[t('lookup.itunes_only'), candidate.notChecked && t('lookup.not_checked')].filter(Boolean).join(' · ')}</p>}
+      {'byTrackTitle' in candidate && candidate.byTrackTitle && review && <p className={styles.muted}>{t('lookup.found_by_track_title')}</p>}
       {!proposal && <p className={styles.muted}>{[t(`lookup.status_${candidate.status}`), candidate.label, reviewValueText(candidate.date), candidate.trackCount === null ? null : t('lookup.track_count', { count: candidate.trackCount })].filter(Boolean).join(' · ')}</p>}
       <dl>
         {proposal && differing.map(field => fact(fieldKeys[field], proposalText(field, proposal, byId(field) ? withId : undefined)))}

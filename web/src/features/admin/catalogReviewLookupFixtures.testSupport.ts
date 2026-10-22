@@ -54,7 +54,7 @@ export function reviewLookupResponse(overrides: Overrides = {}): ReviewLookupRes
       artist: 'Synthetic catalog Artist feat. Synthetic guest', label: 'Synthetic Label', catalogNumber: 'SYN-1', barcode: null, country: 'XW', date: { year: 2020, month: 5, day: 1 },
       formats: ['CD', 'DVD-Video'], trackCount: 4, comparison: { trackCount: { local: 2, candidate: 3 }, discCount: { local: null, candidate: 1 }, differences: [],
         unknownLocalDurations: 0, unknownCandidateDurations: 0, subset: { leftOutTracks: 1, pairing: 'unique', pairs: [{ slotId, discNumber: 1, trackNumber: 1 }, { slotId: slotTwo, discNumber: 1, trackNumber: 3 }],
-          missingTrackCount: 1, unpairableSlotIds: [] } }, groupKey, artistMismatch: false, artwork: false }],
+          missingTrackCount: 1, unpairableSlotIds: [] } }, groupKey, artistMismatch: false, artwork: false, byTrackTitle: false }],
     groups: [{ groupKey, representativeKey: reviewCandidateKey, memberKeys: [reviewCandidateKey], proposal: { albumTitle: 'Synthetic catalog Album (Complete)',
       artists: [{ name: 'Synthetic catalog Artist', role: 'primary', joinPhrase: ' feat. ', musicBrainzId: null }, { name: 'Synthetic guest', role: 'featured', joinPhrase: null, musicBrainzId: null }],
       label: 'Synthetic Label', labelMusicBrainzId: null, releaseDate: { year: 2020, month: 5, day: 1 },
