@@ -3,7 +3,8 @@
  *   Functions: AdminCatalogEditor
  * Internal
  *   Types: CatalogBuffer
- *   Constants: CatalogCover, CatalogFields, CatalogReviewStart, CatalogEditConfirmation, MotionPreviewPanel
+ *   Constants: CatalogCover, CatalogFields, CatalogReviewStart, CatalogEditConfirmation, MotionPreviewPanel,
+ *              CatalogAlbumTracks
  * @end-catalog */
 
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
@@ -14,7 +15,8 @@ import { useAdminAccess, useAdminText } from './AdminAccess';
 import { AdminNav } from './AdminNav';
 import { adminEndpointRequest } from './adminTransport';
 import { adminWorkspace } from './adminWorkspace';
-import { catalogResponse, catalogMutationResponse, catalogPatch, type CatalogItem, type CatalogKind } from './catalogApi';
+import { catalogResponse, catalogMutationResponse, catalogPatch, type CatalogEditPatch, type CatalogItem, type CatalogKind } from './catalogApi';
+import type { CatalogAlbumExpectedSummary } from './catalogAlbumExpectedSummary';
 import { useAdminCommand } from './useAdminCommand';
 import { useOnline } from './useAdminOnline';
 import { useLocalization } from '../../localization/LocalizationProvider';
@@ -27,6 +29,7 @@ const CatalogFields = lazy(() => import('./CatalogFields').then(module => ({ def
 const CatalogReviewStart = lazy(() => import('./CatalogReviewStart').then(module => ({ default: module.CatalogReviewStart })));
 const CatalogEditConfirmation = lazy(() => import('./CatalogEditConfirmation').then(module => ({ default: module.CatalogEditConfirmation })));
 const MotionPreviewPanel = lazy(() => import('./MotionPreviewPanel').then(module => ({ default: module.MotionPreviewPanel })));
+const CatalogAlbumTracks = lazy(() => import('./CatalogAlbumTracks').then(module => ({ default: module.CatalogAlbumTracks })));
 
 interface CatalogBuffer { base: CatalogItem; fields: CatalogItem['fields']; visibility: 'public' | 'hidden'; dirty: boolean }
 /** Keeps a captured editing baseline separate from the latest saved artwork and presentation. */
@@ -36,6 +39,13 @@ export function AdminCatalogEditor({ kind, id }: { kind: CatalogKind; id: string
   const [edit, setEdit] = useState<CatalogBuffer | null>(() => adminWorkspace.buffer(key) ?? null);
   const [confirm, setConfirm] = useState<CatalogEditSnapshot | null>(null);
   const [artworkRefresh, setArtworkRefresh] = useState(0);
+  // Rereads the Album's Tracks section, whose rows a newer Album revision or a refused clear may have changed or cleared.
+  const [tracksRefresh, setTracksRefresh] = useState(0);
+  // The Album revision the Tracks section was last read after: the section mounts once the first one is known, so a clear's
+  // confirmation never names rows read before the revision the clear is sent at.
+  const [tracksRevision, setTracksRevision] = useState<string | null>(null);
+  // Whether the latest command sent was a clear, whose refusal means the rows it named may be gone or replaced.
+  const clearSent = useRef(false);
   const media = useRef<HTMLAudioElement>(null);
   const client = useQueryClient();
   const queryKey = ['admin-imports', access.viewerId, access.epoch, access.generation, 'catalog', kind, id];
@@ -50,12 +60,20 @@ export function AdminCatalogEditor({ kind, id }: { kind: CatalogKind; id: string
     if (missing) { setEdit(null); setConfirm(null); adminWorkspace.forget(key); }
   }, [missing, key]);
   useEffect(() => { if (mutation.result) { const item = mutation.result.item; void client.cancelQueries({ queryKey }); client.setQueryData(queryKey, { item }); setEdit({ base: item, fields: item.fields, visibility: item.visibility, dirty: false }); mutation.command.acknowledge(); void query.refetch(); } }, [mutation.result]);
+  // Every newer Album revision the page adopts (an edit, a cover change, Load saved or a later read) rereads the Tracks section.
+  useEffect(() => {
+    const revision = query.data?.item.revision;
+    if (kind !== 'album' || !revision || revision === tracksRevision) return;
+    if (tracksRevision !== null) setTracksRefresh(value => value + 1);
+    setTracksRevision(revision);
+  }, [query.data?.item.revision]);
+  useEffect(() => { if (mutation.error === 'conflict' && clearSent.current) setTracksRefresh(value => value + 1); }, [mutation.error]);
   useEffect(() => { const element = media.current; return () => { if (element) { element.pause(); element.removeAttribute('src'); element.load(); } }; }, [edit?.base.mediaUrl]);
   const locked = mutation.running || Boolean(mutation.intent) || !online;
   // Draft values retain their captured revision; live admission capabilities never come from that old snapshot.
   const canEdit = Boolean(query.data?.item.capabilities.editing && access.catalogEditing);
   const canChangeVisibility = Boolean(query.data?.item.capabilities.visibility && access.catalogVisibility);
-  const allowsPatch = (patch: ReturnType<typeof catalogPatch>) => (!patch.fields || canEdit) && (!patch.visibility || canChangeVisibility);
+  const allowsPatch = (patch: CatalogEditPatch) => 'clearExpectedTracklist' in patch ? canEdit : (!patch.fields || canEdit) && (!patch.visibility || canChangeVisibility);
   const draftPatch = edit ? catalogPatch(edit.base, edit.fields, edit.visibility) : null;
   // Reverting local values must not hide a newer revision that was already observed.
   const conflict = Boolean(edit && query.data && edit.base.revision !== query.data.item.revision);
@@ -71,7 +89,20 @@ export function AdminCatalogEditor({ kind, id }: { kind: CatalogKind; id: string
   const coverItem = missing ? null : query.data?.item ? { ...query.data.item, capabilities: { editing: canEdit, visibility: canChangeVisibility } } : item ?? null;
   const saved = item ? coverItem : null;
   const title = saved ? catalogName(saved) || sharedText(catalogFallbacks[saved.kind]) : t('catalog.edit');
-  const refresh = <button className={styles.button} disabled={query.isFetching || mutation.running || !online} onClick={() => { setArtworkRefresh(value => value + 1); void query.refetch(); }}>{t('common.refresh')}</button>;
+  // The same test as the append refusal: an Album without a primary Artist Credit cannot be appended to.
+  const primaryArtistCredit = saved?.kind === 'album' ? Boolean(saved.fields.credits?.some(credit => credit.subjectType === 'artist' && credit.role === 'primary')) : undefined;
+  // A clear is its own confirmed command at the captured revision, offered only while nothing else is unsaved or running.
+  const clearExpected = kind === 'album' && canEdit ? (expected: CatalogAlbumExpectedSummary | undefined) => {
+    if (!edit || locked || conflict || edit.dirty) return;
+    setConfirm(structuredClone({ item: edit.base, patch: { expectedRevision: edit.base.revision, clearExpectedTracklist: true as const }, expected }));
+  } : undefined;
+  const refreshPage = () => {
+    setArtworkRefresh(value => value + 1);
+    // Tracks are reread after the Album answers: a newer revision rereads them by itself, and an unchanged one rereads them here.
+    const seen = query.data?.item.revision;
+    void query.refetch().then(result => { if (result.data?.item.revision === seen) setTracksRefresh(value => value + 1); });
+  };
+  const refresh = <button className={styles.button} disabled={query.isFetching || mutation.running || !online} onClick={refreshPage}>{t('common.refresh')}</button>;
   return <section className={styles.page}><AdminNav /><Link className={styles.back} to={inventoryPath(kind)}>{t('catalog.back')}</Link>
     {saved ? <header className={catalogStyles.hero} style={{ alignItems: 'center' }}>
       <CatalogArtwork item={saved} viewerId={access.viewerId} refresh={artworkRefresh} detail alt={saved.kind === 'artist' ? sharedText('content.artist.portrait_alt', { name: title }) : sharedText('content.album.cover_alt', { title })} />
@@ -107,12 +138,15 @@ export function AdminCatalogEditor({ kind, id }: { kind: CatalogKind; id: string
         stale={confirmationStale} disabled={locked || conflict || confirm.item.revision !== query.data?.item.revision || !allowsPatch(confirm.patch)}
         onClose={() => setConfirm(null)} onConfirm={() => {
           if (locked || conflict || confirm.item.revision !== query.data?.item.revision || !allowsPatch(confirm.patch)) return;
-          setConfirm(null); void client.cancelQueries({ queryKey }); mutation.command.run(path, confirm.patch);
+          setConfirm(null); void client.cancelQueries({ queryKey }); clearSent.current = 'clearExpectedTracklist' in confirm.patch; mutation.command.run(path, confirm.patch);
         }} /></Suspense>}
     </>}
     {kind !== 'organization' && <Suspense fallback={<p role="status">{t('common.loading')}</p>}><CatalogCover item={coverItem} kind={kind} id={id} disabled={locked}
       approvalDisabled={!canEdit || conflict || Boolean(edit?.dirty) || (!item && !missing)}
       onConfirmed={next => { void client.cancelQueries({ queryKey }); client.setQueryData(queryKey, { item: next }); setEdit(previous => previous?.dirty ? previous : { base: next, fields: next.fields, visibility: next.visibility, dirty: false }); }}
       onRemoved={()=>{setEdit(previous=>previous?.dirty?previous:null);if(!edit?.dirty)adminWorkspace.retain(key,null,access);void client.resetQueries({queryKey,exact:true});}} /></Suspense>}
+    {/* Mounted apart from the edit buffer, which a cover removal clears and reloads, so the list is not remounted. */}
+    {kind === 'album' && !missing && tracksRevision !== null && <Suspense fallback={null}><CatalogAlbumTracks id={id} refresh={tracksRefresh} primaryArtistCredit={primaryArtistCredit}
+      onClearExpected={clearExpected} clearDisabled={locked || conflict || Boolean(edit?.dirty) || !item} /></Suspense>}
   </section>;
 }

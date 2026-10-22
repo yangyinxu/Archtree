@@ -1,0 +1,568 @@
+{
+  "source": "musicbrainz",
+  "synthetic": true,
+  "description": "A release whose tracks carry their own artist credits: one equal to the release credit, a featuring credit, Various Artists, none, one with an invalid artist ID and one with 51 entries",
+  "exchanges": [
+    {
+      "url": "https://musicbrainz.org/ws/2/release/00000000-0000-4000-8000-000000000020?inc=artist-credits+labels+recordings+release-groups+isrcs&fmt=json",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json"
+      },
+      "body": {
+        "id": "00000000-0000-4000-8000-000000000020",
+        "title": "Synthetic Track Credits",
+        "status": "Official",
+        "artist-credit": [
+          {
+            "name": "Synthetic Lead",
+            "joinphrase": "",
+            "artist": {
+              "id": "00000000-0000-4000-8000-000000000a01",
+              "name": "Synthetic Lead"
+            }
+          }
+        ],
+        "release-group": {
+          "id": "00000000-0000-4000-8000-000000000021",
+          "primary-type": "Album",
+          "secondary-types": [],
+          "first-release-date": "2020-01-02"
+        },
+        "date": "2020-01-02",
+        "country": "XW",
+        "barcode": "",
+        "label-info": [],
+        "cover-art-archive": {
+          "front": false
+        },
+        "media": [
+          {
+            "position": 1,
+            "format": "CD",
+            "tracks": [
+              {
+                "position": 1,
+                "number": "1",
+                "title": "Same As Release",
+                "length": 200000,
+                "recording": {
+                  "id": "00000000-0000-4000-8000-000000000b01",
+                  "length": 200000
+                },
+                "artist-credit": [
+                  {
+                    "name": "Synthetic Lead",
+                    "joinphrase": "",
+                    "artist": {
+                      "id": "00000000-0000-4000-8000-000000000a01",
+                      "name": "Synthetic Lead"
+                    }
+                  }
+                ]
+              },
+              {
+                "position": 2,
+                "number": "2",
+                "title": "Featuring",
+                "length": 210000,
+                "recording": {
+                  "id": "00000000-0000-4000-8000-000000000b02",
+                  "length": 210000
+                },
+                "artist-credit": [
+                  {
+                    "name": "Synthetic A",
+                    "joinphrase": " feat. ",
+                    "artist": {
+                      "id": "00000000-0000-4000-8000-000000000a02",
+                      "name": "Synthetic A"
+                    }
+                  },
+                  {
+                    "name": "Synthetic B",
+                    "joinphrase": "",
+                    "artist": {
+                      "id": "00000000-0000-4000-8000-000000000a03",
+                      "name": "Synthetic B"
+                    }
+                  }
+                ]
+              },
+              {
+                "position": 3,
+                "number": "3",
+                "title": "Various",
+                "length": 220000,
+                "recording": {
+                  "id": "00000000-0000-4000-8000-000000000b03",
+                  "length": 220000
+                },
+                "artist-credit": [
+                  {
+                    "name": "Various Artists",
+                    "joinphrase": "",
+                    "artist": {
+                      "id": "89ad4ac3-39f7-470e-963a-56509c546377",
+                      "name": "Various Artists"
+                    }
+                  }
+                ]
+              },
+              {
+                "position": 4,
+                "number": "4",
+                "title": "Uncredited",
+                "length": 230000,
+                "recording": {
+                  "id": "00000000-0000-4000-8000-000000000b04",
+                  "length": 230000
+                }
+              },
+              {
+                "position": 5,
+                "number": "5",
+                "title": "Invalid Artist ID",
+                "length": 240000,
+                "recording": {
+                  "id": "00000000-0000-4000-8000-000000000b05",
+                  "length": 240000
+                },
+                "artist-credit": [
+                  {
+                    "name": "Synthetic Broken",
+                    "joinphrase": "",
+                    "artist": {
+                      "id": "not-a-musicbrainz-id",
+                      "name": "Synthetic Broken"
+                    }
+                  }
+                ]
+              },
+              {
+                "position": 6,
+                "number": "6",
+                "title": "Over Bound",
+                "length": 250000,
+                "recording": {
+                  "id": "00000000-0000-4000-8000-000000000b06",
+                  "length": 250000
+                },
+                "artist-credit": [
+                  {
+                    "name": "Synthetic Member 1",
+                    "joinphrase": ", ",
+                    "artist": {
+                      "id": "00000000-0000-4000-8000-000000000c01",
+                      "name": "Synthetic Member 1"
+                    }
+                  },
+                  {
+                    "name": "Synthetic Member 2",
+                    "joinphrase": ", ",
+                    "artist": {
+                      "id": "00000000-0000-4000-8000-000000000c02",
+                      "name": "Synthetic Member 2"
+                    }
+                  },
+                  {
+                    "name": "Synthetic Member 3",
+                    "joinphrase": ", ",
+                    "artist": {
+                      "id": "00000000-0000-4000-8000-000000000c03",
+                      "name": "Synthetic Member 3"
+                    }
+                  },
+                  {
+                    "name": "Synthetic Member 4",
+                    "joinphrase": ", ",
+                    "artist": {
+                      "id": "00000000-0000-4000-8000-000000000c04",
+                      "name": "Synthetic Member 4"
+                    }
+                  },
+                  {
+                    "name": "Synthetic Member 5",
+                    "joinphrase": ", ",
+                    "artist": {
+                      "id": "00000000-0000-4000-8000-000000000c05",
+                      "name": "Synthetic Member 5"
+                    }
+                  },
+                  {
+                    "name": "Synthetic Member 6",
+                    "joinphrase": ", ",
+                    "artist": {
+                      "id": "00000000-0000-4000-8000-000000000c06",
+                      "name": "Synthetic Member 6"
+                    }
+                  },
+                  {
+                    "name": "Synthetic Member 7",
+                    "joinphrase": ", ",
+                    "artist": {
+                      "id": "00000000-0000-4000-8000-000000000c07",
+                      "name": "Synthetic Member 7"
+                    }
+                  },
+                  {
+                    "name": "Synthetic Member 8",
+                    "joinphrase": ", ",
+                    "artist": {
+                      "id": "00000000-0000-4000-8000-000000000c08",
+                      "name": "Synthetic Member 8"
+                    }
+                  },
+                  {
+                    "name": "Synthetic Member 9",
+                    "joinphrase": ", ",
+                    "artist": {
+                      "id": "00000000-0000-4000-8000-000000000c09",
+                      "name": "Synthetic Member 9"
+                    }
+                  },
+                  {
+                    "name": "Synthetic Member 10",
+                    "joinphrase": ", ",
+                    "artist": {
+                      "id": "00000000-0000-4000-8000-000000000c0a",
+                      "name": "Synthetic Member 10"
+                    }
+                  },
+                  {
+                    "name": "Synthetic Member 11",
+                    "joinphrase": ", ",
+                    "artist": {
+                      "id": "00000000-0000-4000-8000-000000000c0b",
+                      "name": "Synthetic Member 11"
+                    }
+                  },
+                  {
+                    "name": "Synthetic Member 12",
+                    "joinphrase": ", ",
+                    "artist": {
+                      "id": "00000000-0000-4000-8000-000000000c0c",
+                      "name": "Synthetic Member 12"
+                    }
+                  },
+                  {
+                    "name": "Synthetic Member 13",
+                    "joinphrase": ", ",
+                    "artist": {
+                      "id": "00000000-0000-4000-8000-000000000c0d",
+                      "name": "Synthetic Member 13"
+                    }
+                  },
+                  {
+                    "name": "Synthetic Member 14",
+                    "joinphrase": ", ",
+                    "artist": {
+                      "id": "00000000-0000-4000-8000-000000000c0e",
+                      "name": "Synthetic Member 14"
+                    }
+                  },
+                  {
+                    "name": "Synthetic Member 15",
+                    "joinphrase": ", ",
+                    "artist": {
+                      "id": "00000000-0000-4000-8000-000000000c0f",
+                      "name": "Synthetic Member 15"
+                    }
+                  },
+                  {
+                    "name": "Synthetic Member 16",
+                    "joinphrase": ", ",
+                    "artist": {
+                      "id": "00000000-0000-4000-8000-000000000c10",
+                      "name": "Synthetic Member 16"
+                    }
+                  },
+                  {
+                    "name": "Synthetic Member 17",
+                    "joinphrase": ", ",
+                    "artist": {
+                      "id": "00000000-0000-4000-8000-000000000c11",
+                      "name": "Synthetic Member 17"
+                    }
+                  },
+                  {
+                    "name": "Synthetic Member 18",
+                    "joinphrase": ", ",
+                    "artist": {
+                      "id": "00000000-0000-4000-8000-000000000c12",
+                      "name": "Synthetic Member 18"
+                    }
+                  },
+                  {
+                    "name": "Synthetic Member 19",
+                    "joinphrase": ", ",
+                    "artist": {
+                      "id": "00000000-0000-4000-8000-000000000c13",
+                      "name": "Synthetic Member 19"
+                    }
+                  },
+                  {
+                    "name": "Synthetic Member 20",
+                    "joinphrase": ", ",
+                    "artist": {
+                      "id": "00000000-0000-4000-8000-000000000c14",
+                      "name": "Synthetic Member 20"
+                    }
+                  },
+                  {
+                    "name": "Synthetic Member 21",
+                    "joinphrase": ", ",
+                    "artist": {
+                      "id": "00000000-0000-4000-8000-000000000c15",
+                      "name": "Synthetic Member 21"
+                    }
+                  },
+                  {
+                    "name": "Synthetic Member 22",
+                    "joinphrase": ", ",
+                    "artist": {
+                      "id": "00000000-0000-4000-8000-000000000c16",
+                      "name": "Synthetic Member 22"
+                    }
+                  },
+                  {
+                    "name": "Synthetic Member 23",
+                    "joinphrase": ", ",
+                    "artist": {
+                      "id": "00000000-0000-4000-8000-000000000c17",
+                      "name": "Synthetic Member 23"
+                    }
+                  },
+                  {
+                    "name": "Synthetic Member 24",
+                    "joinphrase": ", ",
+                    "artist": {
+                      "id": "00000000-0000-4000-8000-000000000c18",
+                      "name": "Synthetic Member 24"
+                    }
+                  },
+                  {
+                    "name": "Synthetic Member 25",
+                    "joinphrase": ", ",
+                    "artist": {
+                      "id": "00000000-0000-4000-8000-000000000c19",
+                      "name": "Synthetic Member 25"
+                    }
+                  },
+                  {
+                    "name": "Synthetic Member 26",
+                    "joinphrase": ", ",
+                    "artist": {
+                      "id": "00000000-0000-4000-8000-000000000c1a",
+                      "name": "Synthetic Member 26"
+                    }
+                  },
+                  {
+                    "name": "Synthetic Member 27",
+                    "joinphrase": ", ",
+                    "artist": {
+                      "id": "00000000-0000-4000-8000-000000000c1b",
+                      "name": "Synthetic Member 27"
+                    }
+                  },
+                  {
+                    "name": "Synthetic Member 28",
+                    "joinphrase": ", ",
+                    "artist": {
+                      "id": "00000000-0000-4000-8000-000000000c1c",
+                      "name": "Synthetic Member 28"
+                    }
+                  },
+                  {
+                    "name": "Synthetic Member 29",
+                    "joinphrase": ", ",
+                    "artist": {
+                      "id": "00000000-0000-4000-8000-000000000c1d",
+                      "name": "Synthetic Member 29"
+                    }
+                  },
+                  {
+                    "name": "Synthetic Member 30",
+                    "joinphrase": ", ",
+                    "artist": {
+                      "id": "00000000-0000-4000-8000-000000000c1e",
+                      "name": "Synthetic Member 30"
+                    }
+                  },
+                  {
+                    "name": "Synthetic Member 31",
+                    "joinphrase": ", ",
+                    "artist": {
+                      "id": "00000000-0000-4000-8000-000000000c1f",
+                      "name": "Synthetic Member 31"
+                    }
+                  },
+                  {
+                    "name": "Synthetic Member 32",
+                    "joinphrase": ", ",
+                    "artist": {
+                      "id": "00000000-0000-4000-8000-000000000c20",
+                      "name": "Synthetic Member 32"
+                    }
+                  },
+                  {
+                    "name": "Synthetic Member 33",
+                    "joinphrase": ", ",
+                    "artist": {
+                      "id": "00000000-0000-4000-8000-000000000c21",
+                      "name": "Synthetic Member 33"
+                    }
+                  },
+                  {
+                    "name": "Synthetic Member 34",
+                    "joinphrase": ", ",
+                    "artist": {
+                      "id": "00000000-0000-4000-8000-000000000c22",
+                      "name": "Synthetic Member 34"
+                    }
+                  },
+                  {
+                    "name": "Synthetic Member 35",
+                    "joinphrase": ", ",
+                    "artist": {
+                      "id": "00000000-0000-4000-8000-000000000c23",
+                      "name": "Synthetic Member 35"
+                    }
+                  },
+                  {
+                    "name": "Synthetic Member 36",
+                    "joinphrase": ", ",
+                    "artist": {
+                      "id": "00000000-0000-4000-8000-000000000c24",
+                      "name": "Synthetic Member 36"
+                    }
+                  },
+                  {
+                    "name": "Synthetic Member 37",
+                    "joinphrase": ", ",
+                    "artist": {
+                      "id": "00000000-0000-4000-8000-000000000c25",
+                      "name": "Synthetic Member 37"
+                    }
+                  },
+                  {
+                    "name": "Synthetic Member 38",
+                    "joinphrase": ", ",
+                    "artist": {
+                      "id": "00000000-0000-4000-8000-000000000c26",
+                      "name": "Synthetic Member 38"
+                    }
+                  },
+                  {
+                    "name": "Synthetic Member 39",
+                    "joinphrase": ", ",
+                    "artist": {
+                      "id": "00000000-0000-4000-8000-000000000c27",
+                      "name": "Synthetic Member 39"
+                    }
+                  },
+                  {
+                    "name": "Synthetic Member 40",
+                    "joinphrase": ", ",
+                    "artist": {
+                      "id": "00000000-0000-4000-8000-000000000c28",
+                      "name": "Synthetic Member 40"
+                    }
+                  },
+                  {
+                    "name": "Synthetic Member 41",
+                    "joinphrase": ", ",
+                    "artist": {
+                      "id": "00000000-0000-4000-8000-000000000c29",
+                      "name": "Synthetic Member 41"
+                    }
+                  },
+                  {
+                    "name": "Synthetic Member 42",
+                    "joinphrase": ", ",
+                    "artist": {
+                      "id": "00000000-0000-4000-8000-000000000c2a",
+                      "name": "Synthetic Member 42"
+                    }
+                  },
+                  {
+                    "name": "Synthetic Member 43",
+                    "joinphrase": ", ",
+                    "artist": {
+                      "id": "00000000-0000-4000-8000-000000000c2b",
+                      "name": "Synthetic Member 43"
+                    }
+                  },
+                  {
+                    "name": "Synthetic Member 44",
+                    "joinphrase": ", ",
+                    "artist": {
+                      "id": "00000000-0000-4000-8000-000000000c2c",
+                      "name": "Synthetic Member 44"
+                    }
+                  },
+                  {
+                    "name": "Synthetic Member 45",
+                    "joinphrase": ", ",
+                    "artist": {
+                      "id": "00000000-0000-4000-8000-000000000c2d",
+                      "name": "Synthetic Member 45"
+                    }
+                  },
+                  {
+                    "name": "Synthetic Member 46",
+                    "joinphrase": ", ",
+                    "artist": {
+                      "id": "00000000-0000-4000-8000-000000000c2e",
+                      "name": "Synthetic Member 46"
+                    }
+                  },
+                  {
+                    "name": "Synthetic Member 47",
+                    "joinphrase": ", ",
+                    "artist": {
+                      "id": "00000000-0000-4000-8000-000000000c2f",
+                      "name": "Synthetic Member 47"
+                    }
+                  },
+                  {
+                    "name": "Synthetic Member 48",
+                    "joinphrase": ", ",
+                    "artist": {
+                      "id": "00000000-0000-4000-8000-000000000c30",
+                      "name": "Synthetic Member 48"
+                    }
+                  },
+                  {
+                    "name": "Synthetic Member 49",
+                    "joinphrase": ", ",
+                    "artist": {
+                      "id": "00000000-0000-4000-8000-000000000c31",
+                      "name": "Synthetic Member 49"
+                    }
+                  },
+                  {
+                    "name": "Synthetic Member 50",
+                    "joinphrase": "",
+                    "artist": {
+                      "id": "00000000-0000-4000-8000-000000000c32",
+                      "name": "Synthetic Member 50"
+                    }
+                  },
+                  {
+                    "name": "Synthetic Member 51",
+                    "joinphrase": "",
+                    "artist": {
+                      "id": "00000000-0000-4000-8000-000000000c33",
+                      "name": "Synthetic Member 51"
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

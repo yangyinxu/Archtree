@@ -16,6 +16,7 @@
  *   - the detail parses Luna label and Disc Number suggestions, and refuses a label on a track, a Disc Number on the Album, Disc Number 1000 or an extra label key
  *   - a newer saved state is a later revision, or the same revision with later automatic writes
  *   - a saved replace decision parses, and a catalog edit refused for an ID another record keeps shows that, with no retryable intent
+ *   - AdminCommand shows each metadata lookup refusal of an existing-Album review with its own message, at any status, with no retryable intent
  * @end-catalog */
 
 import { z } from 'zod';
@@ -292,4 +293,26 @@ test('a saved replace decision parses, and a catalog edit refused for an ID anot
   const command = new AdminCommand(z.object({ receipt: z.object({ operationId: z.string() }).strict() }).strict()); command.run('/catalog/artist/item', { fields: { musicBrainzId: '00000000-0000-4000-8000-0000000000a1' } });
   await vi.waitFor(() => expect(command.getSnapshot().error).toBe('musicbrainz_id_in_use'));
   expect(command.getSnapshot().intent).toBeNull(); expect(command.getSnapshot().running).toBe(false);
+});
+
+test('AdminCommand shows each metadata lookup refusal of an existing-Album review with its own message, at any status, with no retryable intent', async () => {
+  const messages = (await import('../../../../localization/locales/en-US.json')).default as Record<string, string>;
+  for (const [code, status] of [['ADMIN_IMPORT_LOOKUP_ACTIVE', 409], ['ADMIN_IMPORT_LOOKUP_STALE', 409], ['ADMIN_IMPORT_LOOKUP_REFUSED', 409], ['ADMIN_IMPORT_LOOKUP_NOTHING_TO_RETRY', 409],
+    ['ADMIN_IMPORT_LOOKUP_CANDIDATE_INCOMPLETE', 409], ['ADMIN_IMPORT_LOOKUP_INVALID_NAME', 400], ['ADMIN_IMPORT_LOOKUP_UNAVAILABLE', 503]] as const) {
+    const fetch = vi.fn(async () => json({ code }, status)); vi.stubGlobal('fetch', fetch);
+    const command = new AdminCommand(z.object({ receipt: z.object({ operationId: z.string() }).strict() }).strict()); command.run('/catalog-reviews/item/lookup/retry', {}, 'POST');
+    const error = code.slice('ADMIN_IMPORT_'.length).toLowerCase();
+    await vi.waitFor(() => expect(command.getSnapshot().error).toBe(error));
+    expect(command.getSnapshot()).toEqual({ running: false, intent: null, result: null, error });
+    command.retry(); expect(fetch).toHaveBeenCalledOnce();
+    expect(messages[`admin.common.${error}`], code).toEqual(expect.any(String));
+  }
+  // Any other refusal keeps its outcome kind: an edit conflict, and an unrelated 503 as an unknown outcome to retry.
+  vi.stubGlobal('fetch', vi.fn(async () => json({ code: 'ADMIN_IMPORT_DECISION_STALE' }, 409)));
+  const conflict = new AdminCommand(z.object({ receipt: z.object({ operationId: z.string() }).strict() }).strict()); conflict.run('/catalog-reviews/item/decisions', { decisions: [] }, 'POST');
+  await vi.waitFor(() => expect(conflict.getSnapshot().error).toBe('conflict'));
+  vi.stubGlobal('fetch', vi.fn(async () => json({ code: 'SERVICE_UNAVAILABLE' }, 503)));
+  const unknown = new AdminCommand(z.object({ receipt: z.object({ operationId: z.string() }).strict() }).strict()); unknown.run('/catalog-reviews/item/lookup/resolve', { answers: [] }, 'POST');
+  await vi.waitFor(() => expect(unknown.getSnapshot().error).toBe('unknown'));
+  expect(unknown.getSnapshot().intent).not.toBeNull();
 });

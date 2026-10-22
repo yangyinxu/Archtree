@@ -14,7 +14,9 @@
 
 /** Allowlisted admin-only naming, review, asset and publication contract. */
 import type { ImportDraftV2, ImportSuggestionV2 } from './adminImportDraft';
-export const ADMIN_IMPORT_LIMITS = Object.freeze({ files: 100, page: 25, receipts: 256, publications: 16, generations: 2, tracksPerChunk: 10, attempts: 22, dailyAttempts: 220, outputTokens: 4000, inputBytes: 48_000, responseBytes: 256_000, grantMs: 24 * 60 * 60 * 1000, leaseMs: 120_000, embeddedCovers: 16, lookupCovers: 4, uploadSettleMs: 180_000 });
+export const ADMIN_IMPORT_LIMITS = Object.freeze({ files: 100, page: 25, receipts: 256, publications: 16, generations: 2, tracksPerChunk: 10, attempts: 22, dailyAttempts: 220, outputTokens: 4000, inputBytes: 48_000, responseBytes: 256_000, grantMs: 24 * 60 * 60 * 1000, leaseMs: 120_000, embeddedCovers: 16, lookupCovers: 4, uploadSettleMs: 180_000,
+    /** Declared members an append target may hold: publishing refuses more (ADMIN_IMPORT_TARGET_TOO_LARGE) and the summary then lists no rows. */
+    appendTargetMembers: 5000 });
 export type ImportDate = { year: number; month: number | null; day: number | null };
 export type ImportManifest = { rootLabel: string; files: { slotId: string; filename: string; relativePath: string; byteLength: number | null }[] };
 export type ImportDraft = { album: { title: string; artistName: string; releaseDate: ImportDate | null; visibility: 'public' | 'hidden' }; tracks: { slotId: string; title: string; trackNumber: number | null }[] };

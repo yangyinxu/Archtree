@@ -3,7 +3,7 @@
  *   Types: Client
  *   Functions: slot, mbid, tags, project, runOf, json, searchUrl, searchAnswer, releaseAnswer, clientOf, drive,
  *              sent, aliasLookups, one, fixture, creditedAnswer, aliasAnswer, recordedReleases,
- *              recordingAnswer, songSearch, albumSearch, collectionAnswer, itunesPaths
+ *              recordingAnswer, songSearch, albumSearch, collectionAnswer, itunesPaths, reviewRunOf
  *   Constants: guard, importId, actor, start, recorded, blueArchiveTag
  * Tests
  *   - fallback queries are sent together only when the searches before them found nothing; a skipped folder fallback spends no folder allowance
@@ -20,6 +20,7 @@
  *   - after the details, a run looks up the aliases of its credited artists and first label once each, never a placeholder, and ranks with them
  *   - alias lookups are bounded to 16 per run, a source failure fails every remaining target and ranks at once without an attempt, and a record without aliases completes
  *   - alias targets follow the ranking with the preselection first, each release's credits then its first label, each ID once, never a placeholder or an unfetched release, at most 16
+ *   - an import run fetches a release whose tracks carry credits, an invalid one included, stores them compactly, never looks up a track-only artist and ranks as without them
  *   - Pandora Call romanized: MusicBrainz finds nothing, iTunes gives the Japanese title, and the bridge finds the singles in MusicBrainz
  *   - a barcode is looked up in iTunes when MusicBrainz finds nothing for it, and the collection it names is searched again in MusicBrainz
  *   - a MusicBrainz matching group never starts the iTunes stage, and a run planned from identifiers iTunes cannot search has none
@@ -30,6 +31,12 @@
  *   - per attempt the iTunes stage sends at most five iTunes searches or UPC lookups, four bridge searches and four collection lookups, sharing the 25-candidate bound
  *   - busy mode lasts only until the first failed attempt of either source, and a record from an earlier release without the iTunes fields completes
  *   - the aliases after the iTunes stage are those of the bridged releases' credits, within the bound of 16 the whole run shares, and an iTunes-only candidate adds none
+ *   - review alias targets add each fetched release's audio-track artists after its credit and first label, once each, never a placeholder or an iTunes credit, within 16; import targets unchanged
+ *   - a review run admits and fetches the fewest extra tracks first and records both completeness flags: a left-out larger release blocks only the only-matching-group preselection, one that could have exactly as many members blocks the exact-count one too
+ *   - a review run with a matching group never starts iTunes, while an empty Album's run, whose candidates pair trivially but never match, starts the iTunes stage
+ *   - a review run's iTunes answer keeps collections with at least as many tracks as members or an unknown count, fewest extra first, within four; an import keeps its exact counts
+ *   - a review run whose iTunes stage leaves out only a collection with more tracks than members preselects its exact-count group; one of unknown count leaves a tie
+ *   - a review run's bridge search admits its releases fewest extra first and records both completeness flags
  * @end-catalog */
 
 /**
@@ -60,6 +67,9 @@ import {
     createMusicBrainzClient, musicBrainzUrls, parseMusicBrainzRelease, type MusicBrainzClient, type MusicBrainzRecordingQuery, type MusicBrainzReleaseQuery
 } from '../../src/administration/lookup/musicBrainzClient';
 import { importLookupFileSet, planImportLookup, startLookupRun, type MetadataLookupRecord, type StoredLookupCandidate } from '../../src/administration/lookup/metadataLookupRecord';
+import { catalogReviewLookupFileSet, planCatalogReviewLookup } from '../../src/administration/lookup/lookupReviewEvidence';
+import { itunesRelease, startItunesStage } from '../../src/administration/lookup/lookupItunesStage';
+import { credit, numberedMembers, reviewLookupDocument, storedCandidate, syntheticMbid, syntheticRelease } from '../support/catalogReviewLookupFixtures';
 import {
     availableLookupConfiguration, emptyItunesClient, fixtureTransport, hotelCaliforniaExchanges, immediateGate, itunesAnswer, itunesCollectionResult, itunesFixtureClient, itunesSongResult,
     loadLookupFixture, loadLookupFixtures, type LookupExchange
@@ -542,6 +552,35 @@ test('alias targets follow the ranking with the preselection first, each release
     assert.deepEqual(lookupAliasTargets([unfetched], null), []);
 });
 
+test('an import run fetches a release whose tracks carry credits, an invalid one included, stores them compactly, never looks up a track-only artist and ranks as without them', async () => {
+    const doc = project(3, index => tags({ album: 'Synthetic Album', albumArtists: ['Synthetic Ensemble'], durationMs: [200_000, 210_000, 220_000][index] }));
+    const record = runOf(doc), queries = record.queries as { query: MusicBrainzReleaseQuery }[];
+    const lead = { name: 'Synthetic Ensemble', joinphrase: '', artist: { id: mbid(30), name: 'Synthetic Ensemble' } };
+    const featuring = [{ ...lead, joinphrase: ' feat. ' }, { name: 'Synthetic Guest', joinphrase: '', artist: { id: mbid(31), name: 'Synthetic Guest' } }];
+    const invalid = [{ name: 'Synthetic Broken', joinphrase: '', artist: { id: 'not-a-musicbrainz-id', name: 'Synthetic Broken' } }];
+    const answer = (trackCredits: unknown[] | null) => json(musicBrainzUrls.release(mbid(1)).href, { id: mbid(1), title: 'Synthetic Album', 'artist-credit': [lead],
+        media: [{ position: 1, format: 'CD', tracks: [200_000, 210_000, 220_000].map((length, index) => ({ position: index + 1, number: String(index + 1), title: `Synthetic Track ${index + 1}`,
+            length, recording: { id: mbid(900 + index), length }, ...(trackCredits ? { 'artist-credit': trackCredits[index] } : {}) })) }] });
+    const run = async (trackCredits: unknown[] | null) => {
+        const client = clientOf([...queries.map(query => searchAnswer(query.query, [[mbid(1), 3]])), answer(trackCredits), aliasAnswer('artist', mbid(30), ['Synthetic Ensemble'])]);
+        return { done: await drive(record, doc, client), client };
+    };
+    const credited = await run([[lead], featuring, invalid]), plain = await run(null);
+    const [stored] = credited.done.candidates;
+    assert.deepEqual([credited.done.state, credited.done.outcome, stored.details], ['complete', 'candidates', 'fetched']);
+    assert.deepEqual(stored.release!.media[0].tracks.map(track => track.artistCredit), ['release', [
+        { name: 'Synthetic Ensemble', joinPhrase: ' feat. ', artistId: mbid(30), artistName: 'Synthetic Ensemble' },
+        { name: 'Synthetic Guest', joinPhrase: '', artistId: mbid(31), artistName: 'Synthetic Guest' }], undefined]);
+    // Only the release's credited artist is looked up, and the stored candidate is otherwise the one without track credits.
+    assert.deepEqual(aliasLookups(credited.client), [musicBrainzUrls.artistAliases(mbid(30)).href]);
+    assert.deepEqual(aliasLookups(credited.client), aliasLookups(plain.client));
+    const withoutCredits = structuredClone(stored);
+    for (const track of withoutCredits.release!.media[0].tracks) delete track.artistCredit;
+    assert.deepEqual(withoutCredits, plain.done.candidates[0]);
+    assert.deepEqual(credited.done.ranking, plain.done.ranking);
+    assert.equal(credited.done.ranking!.preselection?.basis, 'onlyMatchingGroup');
+});
+
 /** The recorded release lookups of every fixture release, for runs that fetch the Pandora Call and Hotel California editions. */
 const recordedReleases = () => [...loadLookupFixtures('musicbrainz').entries()].filter(([name]) => /^release-[0-9a-f-]{36}\.json$/.test(name)).flatMap(([, file]) => file.exchanges);
 const recordingAnswer = (query: MusicBrainzRecordingQuery, releases: [string, number][] = []) => json(musicBrainzUrls.recordingSearch(query).href, { count: releases.length ? 1 : 0, offset: 0,
@@ -793,4 +832,166 @@ test('the aliases after the iTunes stage are those of the bridged releases\' cre
     assert.deepEqual(aliasLookups(client), credits.slice(0, METADATA_LOOKUP_JOB_LIMITS.aliasLookups).map(([, id]) => musicBrainzUrls.artistAliases(id).href));
     assert.deepEqual([next.aliases!.length, next.aliases!.every(entry => entry.kind === 'artist' && entry.state === 'fetched')], [16, true]);
     assert.deepEqual([next.state, next.ranking!.preselection?.candidateKey, next.ranking!.preselection?.basis, next.ranking!.preselection?.notChecked], ['complete', 'itunes:202', 'onlyMatchingGroup', undefined]);
+});
+
+/** The run a review's creation (or, with `submitted`, a submission) starts for `doc`. */
+function reviewRunOf(doc: AdminImportDocument, options: { submitted?: { kind: 'album' | 'song'; text: string } } = {}): MetadataLookupRecord {
+    const planned = planCatalogReviewLookup(doc, options);
+    return startLookupRun(null, { importId: doc._id, actorId: actor, grantSource: options.submitted ? 'submit' : 'create', operationId: mbid(601), automatic: !options.submitted,
+        input: planned.input, queries: planned.plan.queries, fileSet: catalogReviewLookupFileSet(doc), now: start, comparison: 'subset' });
+}
+
+test('review alias targets add each fetched release\'s audio-track artists after its credit and first label, once each, never a placeholder or an iTunes credit, within 16; import targets unchanged', () => {
+    const variousArtists = '89ad4ac3-39f7-470e-963a-56509c546377';
+    const lead = credit('Synthetic Lead', syntheticMbid(41));
+    const first = storedCandidate(syntheticRelease(syntheticMbid(1), [
+        { tracks: [{ lengthMs: 1000, credit: 'release' }, { lengthMs: 1000, credit: credit('Synthetic Lead', syntheticMbid(41), ['Synthetic Guest', syntheticMbid(42)]) },
+            { lengthMs: 1000, credit: credit('Various Artists', variousArtists) }, { lengthMs: 1000 }] },
+        // A video medium's tracks are no audio tracks, so their artists are never looked up.
+        { format: 'DVD-Video', tracks: [{ lengthMs: 1000, credit: credit('Synthetic Video Guest', syntheticMbid(43)) }] }
+    ], { releaseCredit: lead, label: { name: 'Synthetic Label', labelId: syntheticMbid(51) } }));
+    const second = storedCandidate(syntheticRelease(syntheticMbid(2), [{ tracks: [{ lengthMs: 1000, credit: credit('Synthetic Guest', syntheticMbid(42)) },
+        { lengthMs: 1000, credit: credit('Synthetic Other', syntheticMbid(45)) }] }], { releaseCredit: credit('Synthetic Second', syntheticMbid(44)) }));
+    // An iTunes-only candidate's track credits name no MusicBrainz ID.
+    const itunes: StoredLookupCandidate = { key: 'itunes:1234', source: 'itunes', releaseId: '1234', basis: 'itunes', summary: null, details: 'fetched',
+        release: itunesRelease({ collectionId: '1234', collectionName: 'Synthetic Album', artistName: 'Synthetic iTunes Artist', trackCount: 1, releaseDate: null, country: null, artworkUrl: null },
+            [{ trackId: '5678', collectionId: '1234', collectionName: 'Synthetic Album', trackName: 'Synthetic Song', artistName: 'Synthetic Song Artist', discNumber: 1, discCount: 1, trackNumber: 1, trackTimeMillis: 1000 }], null) };
+    const candidates = [itunes, first, second];
+    const ids = (targets: { kind: string; id: string }[]) => targets.map(target => `${target.kind}:${target.id}`);
+    assert.deepEqual(ids(lookupAliasTargets(candidates, null, { trackArtists: true })), [`artist:${syntheticMbid(41)}`, `label:${syntheticMbid(51)}`, `artist:${syntheticMbid(42)}`,
+        `artist:${syntheticMbid(44)}`, `artist:${syntheticMbid(45)}`]);
+    // In ranked order: the second release (preselected) adds its track artists before the first release's.
+    const ranking = { candidates: [first, second].map(candidate => ({ key: candidate.key })), preselection: { candidateKey: second.key } } as never;
+    assert.deepEqual(ids(lookupAliasTargets(candidates, ranking, { trackArtists: true })), [`artist:${syntheticMbid(44)}`, `artist:${syntheticMbid(42)}`, `artist:${syntheticMbid(45)}`,
+        `artist:${syntheticMbid(41)}`, `label:${syntheticMbid(51)}`]);
+    // An import run looks up the release credits and labels only, as before.
+    const imported = ids(lookupAliasTargets(candidates, null));
+    assert.deepEqual(imported, [`artist:${syntheticMbid(41)}`, `label:${syntheticMbid(51)}`, `artist:${syntheticMbid(44)}`]);
+    assert.deepEqual(ids(lookupAliasTargets(candidates, null, {})), imported);
+    assert.deepEqual(ids(lookupAliasTargets(candidates, null, { trackArtists: false })), imported);
+    // Track artists share the bound of 16 with the release credits.
+    const crowded = storedCandidate(syntheticRelease(syntheticMbid(3), [{ tracks: Array.from({ length: 20 }, (_unused, index) => ({ lengthMs: 1000,
+        credit: credit(`Synthetic ${index}`, syntheticMbid(100 + index)) })) }], { releaseCredit: credit('Synthetic Lead', syntheticMbid(41)) }));
+    assert.deepEqual(lookupAliasTargets([crowded], null, { trackArtists: true }).map(target => target.id),
+        [syntheticMbid(41), ...Array.from({ length: METADATA_LOOKUP_JOB_LIMITS.aliasLookups - 1 }, (_unused, index) => syntheticMbid(100 + index))]);
+});
+
+test('a review run admits and fetches the fewest extra tracks first and records both completeness flags: a left-out larger release blocks only the only-matching-group preselection, one that could have exactly as many members blocks the exact-count one too', async () => {
+    const doc = reviewLookupDocument({ members: numberedMembers([200_000, 210_000]) }), record = reviewRunOf(doc);
+    assert.deepEqual(record.queries.map(query => (query as { query: unknown }).query), [{ release: 'Synthetic Album', artist: 'Synthetic Ensemble' }, { release: 'Synthetic Album' }]);
+    const credited = { release: 'Synthetic Album', artist: 'Synthetic Ensemble' }, bare = { release: 'Synthetic Album' };
+    const fiveTracks = (from: number, count: number): [string, number][] => Array.from({ length: count }, (_unused, index) => [mbid(from + index), 5]);
+    const details = [releaseAnswer(mbid(1), [200_000, 210_000]), releaseAnswer(mbid(2), [200_000, 210_000, 230_000]),
+        ...Array.from({ length: 23 }, (_unused, index) => releaseAnswer(mbid(100 + index), [1000, 1000, 1000, 1000, 1000]))];
+    const run = async (extra: [string, number?][]) => {
+        // The credited search offers 22 five-track releases and a three-track one; the bare one four more five-track releases (and
+        // `extra`) and the two-track release last.
+        const client = clientOf([searchAnswer(credited, [...fiveTracks(100, 22), [mbid(2), 3]]), searchAnswer(bare, [...fiveTracks(122, 4), ...extra, [mbid(1), 2]]), ...details]);
+        return { done: await drive(record, doc, client), client };
+    };
+    const { done, client } = await run([]);
+    const fetched = client.requests.map(request => /release\/([0-9a-f-]{36})\?/.exec(request.url)?.[1]).filter(Boolean);
+    // Admission: the three-track release before the five-track ones, then the two-track one first of the second search, which the
+    // bound leaves room for beside one five-track release only.
+    assert.deepEqual(done.candidates.map(candidate => candidate.releaseId).sort(), [mbid(1), mbid(2), ...Array.from({ length: 23 }, (_unused, index) => mbid(100 + index))].sort());
+    assert.deepEqual(fetched, [mbid(1), mbid(2), ...Array.from({ length: 23 }, (_unused, index) => mbid(100 + index))]);
+    // The three five-track releases left out could pair every member but never exactly: only the subset comparison is partial.
+    assert.deepEqual([done.state, done.searchComplete, done.exactSearchComplete, done.ranking!.completeness, done.ranking!.disclosure.partialComparison, done.ranking!.groups.length],
+        ['complete', false, true, { exact: true, subset: false }, true, 2]);
+    assert.deepEqual([done.ranking!.preselection?.candidateKey, done.ranking!.preselection?.basis, done.itunesStage, client.itunesCalls], [`musicbrainz:${mbid(1)}`, 'exactTrackCount', null, []]);
+    // A run stores and ranks; it never changes the review it read.
+    assert.deepEqual(done.applied, null);
+    // A left-out release of unknown track count could have exactly two tracks: nothing is preselected.
+    const unknown = await run([[mbid(126)]]);
+    assert.deepEqual([unknown.done.searchComplete, unknown.done.exactSearchComplete, unknown.done.ranking!.completeness, unknown.done.ranking!.preselection],
+        [false, false, { exact: false, subset: false }, null]);
+    // A refused search and a bound that stops a planned search clear both flags.
+    const first = proceedLookupRun(record, doc, null, start);
+    const refused = proceedLookupRun(first.next, doc, { kind: 'refused', action: first.step.action! }, start);
+    assert.deepEqual([refused.next.queryIndex, refused.next.searchComplete, refused.next.exactSearchComplete], [1, false, false]);
+    const filled = proceedLookupRun(first.next, doc, { kind: 'found', action: first.step.action as never, complete: true,
+        found: Array.from({ length: 25 }, (_unused, index) => ({ releaseId: mbid(300 + index), summary: { trackCount: 4 } as never })) }, start);
+    assert.deepEqual([filled.next.candidates.length, filled.next.searchComplete, filled.next.exactSearchComplete, filled.step.action?.kind], [25, false, false, 'details']);
+});
+
+test('a review run with a matching group never starts iTunes, while an empty Album\'s run, whose candidates pair trivially but never match, starts the iTunes stage', async () => {
+    const credited = { release: 'Synthetic Album', artist: 'Synthetic Ensemble' }, bare = { release: 'Synthetic Album' };
+    const exchanges = () => [searchAnswer(credited, [[mbid(1), 2]]), searchAnswer(bare, [[mbid(1), 2]]), releaseAnswer(mbid(1), [200_000, 210_000])];
+    const doc = reviewLookupDocument({ members: numberedMembers([200_000, 210_000]) }), client = clientOf(exchanges());
+    const done = await drive(reviewRunOf(doc), doc, client);
+    assert.deepEqual([done.ranking!.groups.length, done.ranking!.preselection?.basis, done.itunesStage, client.itunesCalls], [1, 'exactTrackCount', null, []]);
+    const empty = reviewLookupDocument(), emptyClient = clientOf(exchanges());
+    const ended = await drive(reviewRunOf(empty), empty, emptyClient);
+    assert.deepEqual([ended.state, ended.files, ended.ranking!.candidates.map(candidate => [candidate.status, candidate.comparison?.subset?.pairing, candidate.comparison?.subset?.missingTrackCount]),
+        ended.ranking!.groups, ended.ranking!.preselection], ['complete', [], [['unverified', 'unique', 2]], [], null]);
+    assert.equal(ended.itunesStage?.reason, 'noMatch');
+    assert.deepEqual(emptyClient.itunesCalls, ['album us Synthetic Album Synthetic Ensemble', 'album jp Synthetic Album Synthetic Ensemble']);
+});
+
+test('a review run\'s iTunes answer keeps collections with at least as many tracks as members or an unknown count, fewest extra first, within four; an import keeps its exact counts', () => {
+    const collection = (id: number, trackCount: number | null) => ({ collectionId: String(id), collectionName: 'Synthetic Album', artistName: 'Synthetic Ensemble', trackCount,
+        releaseDate: null, country: null, artworkUrl: null });
+    const answer = { collections: [collection(11, 1), collection(12, 5), collection(13, 3), collection(14, null), collection(15, 2), collection(16, 4), collection(17, 0)], tracks: [] };
+    const atStage = (doc: AdminImportDocument, record: MetadataLookupRecord) => {
+        const stage = startItunesStage(record.queries, 'noMatch')!;
+        const running: MetadataLookupRecord = { ...record, state: 'running', phase: 'itunes', queryIndex: record.queries.length, itunesStage: stage };
+        return proceedLookupRun(running, doc, { kind: 'itunes', action: { kind: 'itunes', index: 0, request: stage.requests[0] }, result: answer }, start).next.itunesStage!;
+    };
+    const review = reviewLookupDocument({ members: numberedMembers([200_000, 210_000]) });
+    const kept = atStage(review, reviewRunOf(review));
+    // Two members: two, three, four and five tracks in that order; the unknown count is left out by the bound, so the stage is
+    // incomplete and, since that collection could have exactly two tracks, so is its exact-count comparison; a known count of none
+    // or fewer than the members is never kept.
+    assert.deepEqual([kept.items.map(item => item.collectionId), kept.complete, kept.exactComplete], [['15', '13', '16', '12'], false, false]);
+    // An import of two files keeps, in answer order, the collections whose count can equal two (none counts as unknown there), and
+    // its stage has no exact-count flag or stored counts.
+    const imported = project(2, one), exact = atStage(imported, runOf(imported));
+    assert.deepEqual([exact.items.map(item => item.collectionId), exact.complete, 'exactComplete' in exact, exact.items.some(item => 'trackCount' in item)],
+        [['14', '15', '17'], true, false, false]);
+});
+
+test('a review run whose iTunes stage leaves out only a collection with more tracks than members preselects its exact-count group; one of unknown count leaves a tie', async () => {
+    const doc = reviewLookupDocument({ members: numberedMembers([200_000, 210_000]) }), term = 'Synthetic Album Synthetic Ensemble';
+    const name = (count: number) => `Synthetic Album ${count}`, lengths = [200_000, 210_000, 230_000, 240_000, 250_000, 260_000];
+    /** MusicBrainz finds nothing, not even by a bridge search; iTunes (us) offers a collection per count (null: unknown), each matching the members. */
+    const run = async (counts: (number | null)[]) => {
+        const collections = counts.map((count, index) => count === null ? { ...itunesCollectionResult(9001 + index, name(index + 2), 'Synthetic Ensemble', 0), trackCount: undefined }
+            : itunesCollectionResult(9001 + index, name(index + 2), 'Synthetic Ensemble', count));
+        const client = clientOf([searchAnswer({ release: 'Synthetic Album', artist: 'Synthetic Ensemble' }, []), searchAnswer({ release: 'Synthetic Album' }, []),
+            ...counts.map((_count, index) => searchAnswer({ release: name(index + 2), artist: 'Synthetic Ensemble' }, []))],
+        [albumSearch(term, 'us', collections), albumSearch(term, 'jp', []), ...counts.map((count, index) => collectionAnswer(9001 + index, name(index + 2), 'Synthetic Ensemble',
+            lengths.slice(0, count ?? 2).map((length, at): [string, number] => [`Synthetic Track ${at + 1}`, length])))]);
+        return drive(reviewRunOf(doc), doc, client);
+    };
+    const summary = (done: MetadataLookupRecord) => [done.itunesStage!.items.map(item => item.collectionId), done.itunesStage!.complete, done.itunesStage!.exactComplete,
+        done.ranking!.completeness, done.ranking!.groups.length, done.ranking!.preselection?.candidateKey ?? null, done.ranking!.preselection?.basis ?? null];
+    // Collections of two to six tracks: the six-track one is left out by the bound of four, and could never have exactly two tracks.
+    assert.deepEqual(summary(await run([2, 3, 4, 5, 6])), [['9001', '9002', '9003', '9004'], false, true, { exact: true, subset: false }, 4, 'itunes:9001', 'exactTrackCount']);
+    // Without it the comparison is complete, and the exact-count group is still the one preselected.
+    assert.deepEqual(summary(await run([2, 3, 4, 5])), [['9001', '9002', '9003', '9004'], true, true, { exact: true, subset: true }, 4, 'itunes:9001', 'exactTrackCount']);
+    // A collection of unknown count left out could have exactly two tracks: four matching groups are a tie.
+    assert.deepEqual(summary(await run([2, 3, 4, 5, null])), [['9001', '9002', '9003', '9004'], false, false, { exact: false, subset: false }, 4, null, null]);
+});
+
+test('a review run\'s bridge search admits its releases fewest extra first and records both completeness flags', async () => {
+    const doc = reviewLookupDocument({ members: numberedMembers([200_000, 210_000]) }), term = 'Synthetic Album Synthetic Ensemble';
+    const client = clientOf([searchAnswer({ release: 'Synthetic Album', artist: 'Synthetic Ensemble' }, []), searchAnswer({ release: 'Synthetic Album' }, [])],
+        [albumSearch(term, 'us', [itunesCollectionResult(9001, 'Synthetic Deluxe', 'Synthetic Ensemble', 3)]), albumSearch(term, 'jp', [])]);
+    let step = proceedLookupRun(reviewRunOf(doc), doc, null, start);
+    while (step.step.action && step.step.action.kind !== 'bridge') step = proceedLookupRun(step.next, doc, await performLookupStep(client, step.step.action, step.step.mode), start);
+    const bridge = step.step.action!;
+    assert.deepEqual([bridge.kind, step.next.searchComplete, step.next.exactSearchComplete], ['bridge', true, true]);
+    const counted = (index: number, trackCount: number) => ({ releaseId: mbid(index), summary: { trackCount } as never });
+    const answer = (found: ReturnType<typeof counted>[]) => proceedLookupRun(step.next, doc, { kind: 'found', action: bridge as never, complete: true, found }, start).next;
+    // Every release admitted: exactly as many tracks as members first, then more, then fewer; both flags hold.
+    const all = answer([counted(1, 5), counted(2, 2), counted(3, 3), counted(4, 1)]);
+    assert.deepEqual([all.candidates.map(candidate => candidate.releaseId), all.searchComplete, all.exactSearchComplete], [[mbid(2), mbid(3), mbid(1), mbid(4)], true, true]);
+    // At the bound, a left-out larger release blocks only the subset flag; a left-out release of the member count blocks both.
+    const larger = answer([...Array.from({ length: 25 }, (_unused, index) => counted(100 + index, 3)), counted(1, 5)]);
+    assert.deepEqual([larger.candidates.length, larger.searchComplete, larger.exactSearchComplete], [25, false, true]);
+    const exact = answer([...Array.from({ length: 25 }, (_unused, index) => counted(100 + index, 2)), counted(1, 2)]);
+    assert.deepEqual([exact.candidates.length, exact.searchComplete, exact.exactSearchComplete], [25, false, false]);
+    // An incomplete bridge answer clears both, as a search's does.
+    const partial = proceedLookupRun(step.next, doc, { kind: 'found', action: bridge as never, complete: false, found: [counted(2, 2)] }, start).next;
+    assert.deepEqual([partial.searchComplete, partial.exactSearchComplete], [false, false]);
 });

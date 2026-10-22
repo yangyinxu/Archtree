@@ -19,7 +19,10 @@
  * an iTunes-only candidate. Last, it looks up the aliases of at most 16 credited artists and labels (in ranked order, each once,
  * never a placeholder; a source failure ends the alias phase, recording every remaining target as failed and never retrying, so
  * value application never waits for an outage), then ranks with them and the iTunes localized names. It records whether its
- * searches were complete, so a lone matching group of a partial comparison is never preselected. Per attempt a run sends at most
+ * searches were complete, so a lone matching group of a partial comparison is never preselected. An existing-Album review's run
+ * compares in subset mode: releases are admitted and fetched fewest extra tracks first, its searches record a second completeness
+ * flag for the exact-count preselection, its iTunes stage keeps collections with at least as many tracks as members with that
+ * flag of its own, and its alias targets add each fetched release's track artists. Per attempt a run sends at most
  * `METADATA_LOOKUP_LIMITS.plannedQueries` searches, `METADATA_LOOKUP_JOB_LIMITS.candidates` release lookups and `aliasLookups`
  * alias lookups to MusicBrainz, and alongside them at most `bridgeSearches` bridge searches and, to iTunes, `itunesUpcLookups` UPC
  * lookups, `itunesSearches` searches and `itunesCollectionLookups` collection lookups: at most 60 requests, each through its
@@ -38,11 +41,13 @@ import {
     recordItunesCollection, skipItunesRequest, startItunesStage, storedItunesStage, type LookupItunesAction, type LookupItunesStage
 } from './lookupItunesStage';
 import { isFallbackLookupQuery, type PlannedLookupQuery } from './lookupQueryPlanner';
-import { lookupTrackCountPlausible } from './lookupRanking';
+import { lookupTrackCountPlausible, lookupTrackCredit } from './lookupRanking';
+import { lookupComparisonFor } from './lookupReviewEvidence';
+import { lookupAudioTrackCount, lookupSurplusRank, releaseAudioTracks } from './lookupSubset';
 import type { MusicBrainzClient } from './musicBrainzClient';
 import {
-    admitItunesCandidate, lookupFetchedAliases, lookupFileEvidence, lookupHitsAdmitted, lookupReportedTrackCount, lookupRetryAt, mergeLookupCandidates, rankLookupWithinBudget,
-    recordLookupDetails, type MetadataLookupIssue, type MetadataLookupRecord, type MetadataLookupState, type StoredLookupCandidate, type StoredLookupRanking
+    admitItunesCandidate, lookupEvidenceFor, lookupFetchedAliases, lookupHitsAdmitted, lookupReportedTrackCount, lookupRetryAt, lookupSubsetHitsAdmitted, mergeLookupCandidates,
+    rankLookupWithinBudget, recordLookupDetails, type MetadataLookupIssue, type MetadataLookupRecord, type MetadataLookupState, type StoredLookupCandidate, type StoredLookupRanking
 } from './metadataLookupRecord';
 
 export type LookupAction = { kind: 'search'; index: number; query: PlannedLookupQuery } | { kind: 'details'; releaseId: string }
@@ -126,10 +131,13 @@ export async function performLookupStep(clients: LookupStepClients, action: Look
 
 /**
  * The credited artists and the first label whose aliases a run looks up: candidates in ranked order (the preselected one first,
- * then the ranking's order), each fetched release's credited artist IDs in credit order and then its first label's ID, each
- * once, never a placeholder, at most `JOB.aliasLookups`. An iTunes-only candidate credits no MusicBrainz ID, so it adds none.
+ * then the ranking's order), each fetched release's credited artist IDs in credit order and then its first label's ID, and with
+ * `trackArtists` (a review run, whose member credits compare with track credits) then the artist IDs its audio tracks credit, in
+ * track order, before the next release; each once, never a placeholder, at most `JOB.aliasLookups`. An iTunes-only candidate
+ * credits no MusicBrainz ID, so it adds none.
  */
-export function lookupAliasTargets(candidates: readonly StoredLookupCandidate[], ranking: Pick<StoredLookupRanking, 'candidates' | 'preselection'> | null): LookupEntityAliases[] {
+export function lookupAliasTargets(candidates: readonly StoredLookupCandidate[], ranking: Pick<StoredLookupRanking, 'candidates' | 'preselection'> | null,
+    options: { trackArtists?: boolean } = {}): LookupEntityAliases[] {
     const order = [ranking?.preselection?.candidateKey, ...(ranking?.candidates ?? []).map(candidate => candidate.key), ...candidates.map(candidate => candidate.key)];
     const targets: LookupEntityAliases[] = [], seen = new Set<string>();
     const add = (kind: 'artist' | 'label', raw: unknown, name: unknown) => {
@@ -143,6 +151,7 @@ export function lookupAliasTargets(candidates: readonly StoredLookupCandidate[],
         for (const credit of release.artistCredit) add('artist', credit.artistId, credit.name);
         const label = release.labels.find(item => item.name !== null || item.labelId !== null);
         if (label) add('label', label.labelId, label.name);
+        if (options.trackArtists) for (const { track } of releaseAudioTracks(release).tracks) for (const credit of lookupTrackCredit(release, track) ?? []) add('artist', credit.artistId, credit.name);
     }
     return targets;
 }
@@ -184,13 +193,26 @@ const storedExhausted = (raw: unknown): Exhausted => {
  */
 export function proceedLookupRun(record: MetadataLookupRecord, doc: AdminImportDocument, result: LookupStepResult | null, now: Date): { next: MetadataLookupRecord; step: LookupStep } {
     let next: MetadataLookupRecord = { ...record, updatedAt: now };
-    const fileCount = Array.isArray(record.files) ? record.files.length : 0;
+    // A review's run binds its members, so the file count is its member count, and it compares in subset mode.
+    const fileCount = Array.isArray(record.files) ? record.files.length : 0, comparison = lookupComparisonFor(doc), subset = comparison === 'subset';
     const aliases = Array.isArray(record.aliases) ? record.aliases : [];
     const queries = Array.isArray(record.queries) ? record.queries : [];
     const exhausted = storedExhausted(record.exhausted);
     let stage: LookupItunesStage | null = storedItunesStage(record.itunesStage);
     const rank = () => rankLookupWithinBudget(next.candidates, doc, now, { searchComplete: next.searchComplete === true && stage?.complete !== false,
+        // A review's iTunes stage keeps its own exact-count flag, so leaving out larger collections never blocks that preselection.
+        ...(subset ? { exactSearchComplete: next.exactSearchComplete === true && (stage?.exactComplete ?? stage?.complete) !== false } : {}),
         aliases: lookupFetchedAliases(next), localized: lookupLocalizedGroups({ itunesStage: stage }) });
+    /** Merges a search's releases and records whether it left out one that could match (and, in subset mode, one of exactly the member count). */
+    const admit = (found: readonly FoundRelease[], basis: Parameters<typeof mergeLookupCandidates>[2], complete: boolean): Partial<MetadataLookupRecord> => {
+        // A record from a release before these fields stays partial.
+        if (!subset) {
+            const candidates = mergeLookupCandidates(next.candidates, found, basis, fileCount);
+            return { candidates, searchComplete: next.searchComplete === true && complete && lookupHitsAdmitted(candidates, found, fileCount) };
+        }
+        const candidates = mergeLookupCandidates(next.candidates, found, basis, fileCount, 'subset'), admitted = lookupSubsetHitsAdmitted(candidates, found, fileCount);
+        return { candidates, searchComplete: next.searchComplete === true && complete && admitted.subset, exactSearchComplete: next.exactSearchComplete === true && complete && admitted.exact };
+    };
     if (result?.kind === 'notConfigured') return { next: endLookupRun(record, 'unavailable', 'notConfigured', now), step: idleLookupStep };
     if (result?.kind === 'failed' && next.phase === 'aliases') next.aliases = failPendingAliases(aliases);
     else if (result?.kind === 'aliases') next.aliases = recordAliases(aliases, result.action, { state: result.names ? 'fetched' : 'missing', names: result.names ?? [] });
@@ -207,44 +229,42 @@ export function proceedLookupRun(record: MetadataLookupRecord, doc: AdminImportD
         if (retryAt && retryAt < record.grantExpiresAt) return { next: { ...next, state: 'retrying', issue: failed, retryAt, leaseOwner: null, leaseUntil: null }, step: idleLookupStep };
         if (source === 'itunes') {
             exhausted.itunes = failed;
-            if (stage) stage = itunesUnavailable(stage);
+            if (stage) stage = itunesUnavailable(stage, fileCount);
         } else {
             const searching = next.phase === 'search';
             // A search phase keeps the issue it ended with (as it ended the run before iTunes); details report an outage.
             exhausted.musicbrainz = searching ? failed : 'sourceUnavailable';
             next = { ...next, queryIndex: queries.length, candidates: next.candidates.map(candidate => candidate.details === 'pending' ? { ...candidate, details: 'failed' } : candidate) };
             if (!stage) {
-                stage = rank().ranking.groups.length === 0 ? startItunesStage(queries, searching ? 'searchUnavailable' : 'noMatch') : null;
+                stage = rank().ranking.groups.length === 0 ? startItunesStage(queries, searching ? 'searchUnavailable' : 'noMatch', comparison) : null;
                 if (!stage && searching) return { next: endLookupRun({ ...next, exhausted }, 'unavailable', failed, now), step: idleLookupStep };
             }
         }
     } else if (result?.kind === 'found' && result.action.kind === 'search' && next.phase === 'search' && next.queryIndex === result.action.index) {
-        const candidates = mergeLookupCandidates(next.candidates, result.found, result.action.query.basis, fileCount);
-        // A record from a release before this field stays partial.
-        const searchComplete = next.searchComplete === true && result.complete && lookupHitsAdmitted(candidates, result.found, fileCount);
-        next = { ...next, candidates, searchComplete, queryIndex: next.queryIndex + 1 };
+        next = { ...next, ...admit(result.found, result.action.query.basis, result.complete), queryIndex: next.queryIndex + 1 };
     } else if (result?.kind === 'found' && result.action.kind === 'bridge' && stage?.bridge && stage.bridgeIndex === result.action.index) {
         // Bridged releases join like any search's (plausible first, the shared bound), and a bridge that left one out is partial.
-        const basis = result.action.query.basis, candidates = mergeLookupCandidates(next.candidates, result.found, basis, fileCount);
-        next = { ...next, candidates, searchComplete: next.searchComplete === true && result.complete && lookupHitsAdmitted(candidates, result.found, fileCount) };
+        next = { ...next, ...admit(result.found, result.action.query.basis, result.complete) };
         stage = recordBridgeAnswer(stage, result.action.index, result.found.some(item => normalizeMusicBrainzId(item.releaseId) !== null) ? 'found' : 'none');
     } else if (result?.kind === 'itunes' && stage) {
-        stage = recordItunesAnswer(stage, result.action.index, result.result, lookupFileEvidence(doc));
+        stage = recordItunesAnswer(stage, result.action.index, result.result, lookupEvidenceFor(doc), comparison);
     } else if (result?.kind === 'itunesCollection' && stage) {
         const item = stage.items.find(entry => entry.key === result.action.itemKey && entry.collection === 'pending');
         const candidate = item ? itunesCandidate(item, result.result) : null;
         const admitted = candidate ? admitItunesCandidate(next.candidates, candidate) : null;
         if (admitted) next = { ...next, candidates: admitted };
-        if (item) stage = recordItunesCollection(stage, item.key, !candidate ? 'missing' : admitted ? 'fetched' : 'skipped');
+        if (item) stage = recordItunesCollection(stage, item.key, !candidate ? 'missing' : admitted ? 'fetched' : 'skipped', fileCount);
     } else if (result?.kind === 'details') {
         next.candidates = recordLookupDetails(next.candidates, result.action.releaseId, result.release);
     } else if (result?.kind === 'refused') {
         const action = result.action;
-        if (action.kind === 'search' && next.phase === 'search' && next.queryIndex === action.index) next = { ...next, queryIndex: next.queryIndex + 1, searchComplete: false };
+        if (action.kind === 'search' && next.phase === 'search' && next.queryIndex === action.index) {
+            next = { ...next, queryIndex: next.queryIndex + 1, searchComplete: false, ...(subset ? { exactSearchComplete: false } : {}) };
+        }
         else if (action.kind === 'details') next.candidates = recordLookupDetails(next.candidates, action.releaseId, 'failed');
         else if (action.kind === 'itunes' && stage) stage = skipItunesRequest(stage, action.index);
         else if (action.kind === 'bridge' && stage) stage = recordBridgeAnswer(stage, action.index, 'refused');
-        else if (action.kind === 'itunesCollection' && stage) stage = recordItunesCollection(stage, action.itemKey, 'missing');
+        else if (action.kind === 'itunesCollection' && stage) stage = recordItunesCollection(stage, action.itemKey, 'missing', fileCount);
     }
     const musicBrainzExhausted = exhausted.musicbrainz !== undefined;
     // A submitted run uses busy mode until its first failed attempt of either source; automatic runs (also reruns of submitted text)
@@ -266,6 +286,7 @@ export function proceedLookupRun(record: MetadataLookupRecord, doc: AdminImportD
             if (next.candidates.length < JOB.candidates) return running({ kind: 'search', index, query: queries[index] }, 'search');
             // The bound ended the search before a planned query ran.
             next.searchComplete = false;
+            if (subset) next.exactSearchComplete = false;
         }
     }
     if (next.phase !== 'aliases') {
@@ -275,23 +296,27 @@ export function proceedLookupRun(record: MetadataLookupRecord, doc: AdminImportD
             stage = searched.stage;
             if (searched.action) return running(searched.action, searched.action.kind === 'bridge' ? 'bridge' : 'itunes');
         }
-        const pending = next.candidates.find(candidate => candidate.details === 'pending' && lookupTrackCountPlausible(lookupReportedTrackCount(candidate), fileCount))
-            ?? next.candidates.find(candidate => candidate.details === 'pending');
+        // Subset mode fetches the fewest extra tracks first (the first stored on a tie); otherwise plausible counts first.
+        const pending = subset
+            ? next.candidates.filter(candidate => candidate.details === 'pending').reduce<StoredLookupCandidate | undefined>((best, candidate) =>
+                !best || lookupSurplusRank(lookupAudioTrackCount(candidate), fileCount) < lookupSurplusRank(lookupAudioTrackCount(best), fileCount) ? candidate : best, undefined)
+            : next.candidates.find(candidate => candidate.details === 'pending' && lookupTrackCountPlausible(lookupReportedTrackCount(candidate), fileCount))
+                ?? next.candidates.find(candidate => candidate.details === 'pending');
         if (pending) return running({ kind: 'details', releaseId: pending.releaseId }, 'details');
         // MusicBrainz answered without a matching candidate: the stage starts once, when the run's queries give an iTunes request.
         if (!stage && rank().ranking.groups.length === 0) {
-            stage = startItunesStage(queries, 'noMatch');
+            stage = startItunesStage(queries, 'noMatch', comparison);
             const searched = stage ? nextItunesSearchAction(stage, musicBrainzExhausted) : null;
             if (searched) stage = searched.stage;
             if (searched?.action) return running(searched.action, searched.action.kind === 'bridge' ? 'bridge' : 'itunes');
         }
         if (stage) {
-            const collected = nextItunesCollectionAction(stage, next.candidates.length, musicBrainzExhausted);
+            const collected = nextItunesCollectionAction(stage, next.candidates.length, musicBrainzExhausted, fileCount);
             stage = collected.stage;
             if (collected.action) return running(collected.action, 'itunes');
         }
         // Aliases follow in ranked order; an exhausted source is not asked again for them.
-        const targets = musicBrainzExhausted ? [] : lookupAliasTargets(next.candidates, rank().ranking);
+        const targets = musicBrainzExhausted ? [] : lookupAliasTargets(next.candidates, rank().ranking, { trackArtists: subset });
         if (targets.length) next = { ...next, aliases: targets };
     }
     const target = (Array.isArray(next.aliases) ? next.aliases : []).find(entry => entry.state === 'pending');

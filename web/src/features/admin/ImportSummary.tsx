@@ -2,19 +2,21 @@
  * Exports
  *   Functions: ImportSummary
  * Internal
- *   Types: Step
- *   Functions: valueAt, valueText, idText
- *   Constants: LookupBox, CandidateChooser, ImportAnalysisConfirmation
+ *   Functions: RowsUnavailable
+ *   Constants: LookupBox, ImportExpectedRows, CandidateChooser, ImportAnalysisConfirmation
  * @end-catalog */
 
-import { lazy, Suspense, useEffect, useId, useState, useSyncExternalStore } from 'react';
+import { lazy, Suspense, useEffect, useId, useState, useSyncExternalStore, type ComponentProps, type ComponentType } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useLocalization } from '../../localization/LocalizationProvider';
 import type { MessageKey } from '../../localization/contract';
 import { useAdminAccess, useAdminText } from './AdminAccess';
+import type { ImportExpectedRows as ExpectedRows } from './ImportExpectedRows';
 import { importPath, lookupCoverName, type ImportDetail, type ImportDraftV2 } from './adminApi';
 import { adminWorkspace } from './adminWorkspace';
 import { entriesByline } from './artistEntriesByline';
+import { lookupNextStep } from './lookupNextStep';
+import { lookupIdText as idText, lookupValueAt as valueAt, lookupValueText as valueText } from './lookupValueText';
 import { approvalTrackOrder } from './importTrackOrder';
 import type { ImportDraftChange } from './importDraftPatch';
 import { lunaTicksKey, suggestionPath, ticked } from './importLunaTicks';
@@ -25,33 +27,31 @@ import type { AdminMutation } from './useAdminMutation';
 import type { ImportUploadQueueView } from './useImportUploadQueue';
 import styles from './adminStyles';
 
-// The name box, the candidate chooser and the Analyze confirmation load only when this summary shows them.
+// The name box, the candidate chooser, an append target's expected rows and the Luna AI confirmation load only when this summary shows them.
 const LookupBox = lazy(() => import('./LookupBox').then(module => ({ default: module.LookupBox })));
+/** Stands in for expected rows whose chunk cannot load. */
+function RowsUnavailable() { const t = useAdminText(); return <p role="alert">{t('common.reload')}</p>; }
+// An expected-rows chunk that cannot load (a deploy replaced it) asks for a reload in its place, keeping the page and its edits.
+const ImportExpectedRows = lazy<ComponentType<ComponentProps<typeof ExpectedRows>>>(() => import('./ImportExpectedRows')
+  .then(module => ({ default: module.ImportExpectedRows }), () => ({ default: RowsUnavailable })));
 const CandidateChooser = lazy(() => import('./CandidateChooser').then(module => ({ default: module.CandidateChooser })));
 const ImportAnalysisConfirmation = lazy(() => import('./ImportAnalysisConfirmation').then(module => ({ default: module.ImportAnalysisConfirmation })));
-
-type Step = 'retry' | 'luna';
-/** A lookup path's saved value, or the shown one with `draft`. */
-const valueAt = (draft: ImportDraftV2, path: string): unknown => {
-  const [scope, first, second] = path.split('.');
-  return scope === 'album' ? (draft.album as Record<string, unknown>)[first] : (draft.tracks.find(track => track.slotId === first) as Record<string, unknown> | undefined)?.[second];
-};
-/** Artist entries read as their byline, a label as its name and anything else as review text. */
-const valueText = (value: unknown) => Array.isArray(value) ? entriesByline(value) || '—' : value && typeof value === 'object' && 'name' in value ? String(value.name) : reviewValueText(value);
-/** The MusicBrainz IDs of Artist entries or a label, beside each name, for a conflict that differs only in them. */
-const idText = (value: unknown) => (Array.isArray(value) ? value : value ? [value] : []).map(entry => `${String((entry as { name?: unknown }).name ?? '')} · ${String((entry as { musicBrainzId?: unknown }).musicBrainzId ?? '—')}`).join('; ') || '—';
 
 /**
  * The Review and publish summary an import opens on, above its Draft, Review, Files and Publish sections. The server decides what
  * it shows as needing an answer or holding Publish (the lookup view's `needsAnswer` and the summary state, identity rows to answer
  * in Review included); this component only presents it, adding this browser's own upload queue and, for the placeholder-only
  * notice, a primary Artist entry the unsaved changes add, since Publish includes them. It shows the metadata lookup status with
- * its next step (a free retry or Luna, per the owner's next-step rules; no lookup step where this server cannot run lookup), the
- * name box, a tie or conflict that needs an answer, the lone matching release of a partial comparison as an optional choice, the
- * values flagged as resting on file tags or an iTunes-only candidate (and as not checked against MusicBrainz), an artist mismatch
- * and the Luna suggestions with their ticks (the administrator's toggles
- * are kept in the workspace for the confirmation; an append marks its Album ones as not applied), and folds every row that needs
- * no answer. Its Publish opens the media panel's one-step confirmation. Owner rules: docs/business-rules.md (Administrator Album
+ * the free retry as its only next-step button while lookup is busy, unavailable or stopped (none where this server cannot run
+ * lookup), the name box, a tie or conflict that needs an answer, the lone matching release of a partial comparison as an optional
+ * choice, the values flagged as resting on file tags or an iTunes-only candidate (and as not checked against MusicBrainz), an
+ * artist mismatch, for a saved append to an Album with an expected tracklist the rows the shown draft's appended files fill with
+ * their flags (never holding Publish) and the server's one-step numbering as a field save of the saved draft (disabled like other
+ * saves, while the publication is locked or while this read is of another revision), then Luna AI as a paid, secondary button in
+ * every lookup state (never a next step or the primary action, and
+ * disabled where Luna AI cannot start, a locked publication or a pending cleanup included), and the Luna AI suggestions with
+ * their ticks (the administrator's toggles are kept in the workspace for the confirmation; an append marks its Album ones as not
+ * applied), and folds every row that needs no answer. Its Publish opens the media panel's one-step confirmation. Owner rules: docs/business-rules.md (Administrator Album
  * Imports, Review and publish summary; Administrator Metadata Lookup).
  */
 export function ImportSummary({ item, operation, uploads, disabled, publishDisabled, approval, onPublish }: {
@@ -68,6 +68,7 @@ export function ImportSummary({ item, operation, uploads, disabled, publishDisab
   // A lookup refusal means the lookup changed or ended elsewhere: the project and this summary are read again.
   useEffect(() => { if (failed?.startsWith('lookup_')) void client.invalidateQueries({ queryKey: project }); }, [failed]);
   const path = importPath(item.id), draft = approval.draft, changed = new Set(approval.changes.map(change => change.path)), append = Boolean(summary?.append);
+  const tracklist = append ? summary?.appendTracklist ?? null : null;
   const run = (action: string, payload: object = {}) => operation.run(`${path}/${action}`, 'POST', { expectedRevision: item.revision, ...payload });
   const label = (target: string) => {
     const [scope, slot, field] = target.split('.');
@@ -75,36 +76,14 @@ export function ImportSummary({ item, operation, uploads, disabled, publishDisab
     return scope === 'album' ? name : t('summary.track_field', { position: item.draft.tracks.findIndex(track => track.slotId === slot) + 1, field: name });
   };
   const role = (value: string) => shared(`catalog.credit.${value}` as MessageKey);
-  // The status, the next step and the step beside it (owner rules: Administrator Metadata Lookup, next-step bullet). Without a
-  // run, lookup is not configured here, waits for uploads, or did not start (its trigger failed); a retry or a name needs it configured.
+  // The status and whether the free retry is offered (lookupNextStep); Luna AI is never a next step.
   const applied = lookup?.applied, tie = Boolean(lookup?.needsAnswer.tie), available = summary?.lookupAvailable !== false;
-  // Nothing the run found matched or was applied; a completed run keeps MusicBrainz's issue when its retries ran out.
-  const unmatched = !lookup?.groups.length && (applied?.run !== lookup?.run || applied?.choice === 'none');
-  const musicBrainzDown = lookup?.issue === 'sourceUnavailable' || lookup?.issue === 'sourceBusy';
-  const [status, next, beside]: [string, Step | null, Step | null] = !lookup ? [!available ? 'lookup.not_configured' : summary?.waiting.uploads ? 'lookup.not_run' : 'lookup.not_started', summary?.waiting.uploads && available ? null : 'luna', null]
-    : lookup.state === 'queued' || lookup.state === 'running' ? [lookup.itunes === 'running' ? 'lookup.active_itunes' : 'lookup.active', null, null]
-    : lookup.state === 'retrying' ? [lookup.itunes === 'retrying' ? 'lookup.retrying_itunes' : 'lookup.retrying', 'retry', 'luna']
-    : lookup.state === 'unavailable' ? [lookup.issue === 'notConfigured' ? 'lookup.not_configured' : 'lookup.unavailable', 'luna', 'retry']
-    : lookup.state !== 'complete' ? [`lookup.${lookup.state}`, 'retry', 'luna']
-    // MusicBrainz answered without a match and iTunes stayed unavailable: a free retry may still find it.
-    : unmatched && lookup.itunes === 'unavailable' && !musicBrainzDown ? ['lookup.itunes_unavailable', 'luna', 'retry']
-    // MusicBrainz stayed unavailable, so nothing is "no match": details it could not fetch are incomplete, anything else unavailable.
-    : unmatched && musicBrainzDown ? (lookup.candidates.some(candidate => candidate.status === 'incomplete') ? ['lookup.incomplete', 'retry', 'luna'] : ['lookup.unavailable', 'luna', 'retry'])
-    : lookup.outcome === 'noRelease' || lookup.outcome === 'noQuery' ? [lookup.outcome === 'noQuery' ? 'lookup.no_query' : 'lookup.no_release', 'luna', null]
-    : tie ? ['lookup.tie', null, null]
-    // The only matching release of a partial comparison is offered, never applied unasked; it needs no answer.
-    : lookup.groups.length === 1 && !lookup.preselection && lookup.disclosure?.partialComparison && applied?.run !== lookup.run ? ['lookup.single_choice', null, null]
-    : applied?.run === lookup.run && applied.choice !== 'none' ? (applied.source !== 'itunes' ? ['lookup.applied', null, null]
-      : applied.notChecked ? ['lookup.applied_itunes_unchecked', 'luna', 'retry'] : ['lookup.applied_itunes', null, null])
-    : lookup.groups.length ? ['lookup.applied_none', null, null]
-    // Candidates whose details could not be fetched are no proof that nothing matches.
-    : lookup.candidates.some(candidate => candidate.status === 'incomplete') ? ['lookup.incomplete', 'retry', 'luna']
-    : [applied?.run === lookup.run ? 'lookup.applied_none' : 'lookup.no_match', 'luna', null];
-  const steps = [next, beside].filter((kind): kind is Step => Boolean(kind) && (kind !== 'retry' || available));
+  const { status, retry: retryOffered } = lookupNextStep(lookup, { available, uploadsWaiting: Boolean(summary?.waiting.uploads) });
   const release = lookup?.candidates.find(candidate => candidate.key === applied?.candidateKey)?.title ?? '—';
-  const luna = access.analysis && item.capabilities.analysis && !['queued', 'running'].includes(item.analysis.state) && item.analysis.issue !== 'providerOutcomeUnknown' && Boolean(summary?.analysis.runs);
-  const step = (kind: Step, primary: boolean) => <button key={kind} type="button" className={`${styles.button} ${primary ? styles.primary : ''}`} disabled={disabled || (kind === 'luna' && !luna)}
-    onClick={() => kind === 'retry' ? run('lookup/retry') : setAnalyzing(true)}>{t(kind === 'retry' ? 'lookup.retry' : 'lookup.luna')}</button>;
+  // The server refuses Luna AI while the publication is locked or its cancelled approval still has cleanup pending.
+  const locked = ['preparing', 'needsAttention', 'complete'].includes(item.publication), cleanupPending = item.publication === 'cancelled' && Boolean(item.publicationRecovery?.cleanupPending);
+  const luna = access.analysis && item.capabilities.analysis && !['queued', 'running'].includes(item.analysis.state) && item.analysis.issue !== 'providerOutcomeUnknown' && Boolean(summary?.analysis.runs)
+    && !locked && !cleanupPending;
   const needed = new Set(lookup?.needsAnswer.conflicts ?? []), conflicts = applied?.conflicts ?? [], open = conflicts.filter(conflict => needed.has(conflict.path));
   const resolve = (target: string, answer: 'mine' | 'lookup') => run('lookup/resolve', { run: applied!.run, candidateKey: applied!.candidateKey, answers: [{ path: target, answer, base: valueAt(item.draft, target) }] });
   // Values resting only on file tags (not on the applied candidate, not changed here), or on an iTunes-only candidate, are flagged and never folded.
@@ -118,7 +97,7 @@ export function ImportSummary({ item, operation, uploads, disabled, publishDisab
   const toggle = (suggestion: string, value: boolean) => { const next = { ...toggles, [suggestion]: value }; setToggles(next); adminWorkspace.retain(lunaTicksKey(item.id), next, access); };
   // This browser's own upload queue holds Publish too, before the server has seen its transfers.
   const waiting = summary ? (['uploads', 'lookup', 'cover', 'analysis'] as const).filter(work => summary.waiting[work] || (work === 'uploads' && uploads.running)) : [];
-  const identities = summary?.identityAnswers ?? 0, answers = (tie ? 1 : 0) + open.length + identities, locked = ['preparing', 'needsAttention', 'complete'].includes(item.publication);
+  const identities = summary?.identityAnswers ?? 0, answers = (tie ? 1 : 0) + open.length + identities;
   const placeholder = summary?.placeholderOnly && !draft.album.artists.some(entry => entry.role === 'primary');
   const notApplied = (text: string) => append ? `${text} · ${t('publication.not_applied')}` : text;
   const row = (target: string, text: string) => <div key={target}><dt>{label(target)}</dt><dd>{text}</dd></div>;
@@ -131,9 +110,9 @@ export function ImportSummary({ item, operation, uploads, disabled, publishDisab
     {data && <>
       <p role="status">{t(status, { title: release })}</p>
       {lookup && lookup.staleFiles.length > 0 && <p>{t('lookup.stale_files', { count: lookup.staleFiles.length })}</p>}
-      {steps.length > 0 && <div className={styles.actions}>{steps.map((kind, index) => step(kind, !index))}</div>}
+      {retryOffered && <div className={styles.actions}><button type="button" className={`${styles.button} ${styles.primary}`} disabled={disabled} onClick={() => run('lookup/retry')}>{t('lookup.retry')}</button></div>}
       {available && <Suspense fallback={null}><LookupBox key={lookup?.run ?? 0} lookup={lookup} rootLabel={item.manifest.rootLabel} disabled={disabled} onSubmit={(kind, text) => run('lookup', { kind, text })} /></Suspense>}
-      {lookup?.state === 'complete' && lookup.candidates.length > 0 && <Suspense fallback={null}><CandidateChooser importId={item.id} viewerId={access.viewerId} lookup={lookup} disabled={disabled} onChoose={key => run('lookup/choose', { run: lookup.run, candidateKey: key })} /></Suspense>}
+      {lookup?.state === 'complete' && lookup.candidates.length > 0 && <Suspense fallback={null}><CandidateChooser projectId={item.id} viewerId={access.viewerId} lookup={lookup} disabled={disabled} onChoose={key => run('lookup/choose', { run: lookup.run, candidateKey: key })} /></Suspense>}
       {open.length > 0 && <section aria-labelledby={`${id}-conflicts`}><h3 id={`${id}-conflicts`}>{t('summary.conflicts')}</h3><ul className={styles.cards}>{open.map(conflict =>
         <li key={conflict.path} className={styles.card}><strong id={`${id}-${conflict.path}`}>{conflict.musicBrainzId ? t('summary.musicbrainz_id_conflict', { field: label(conflict.path) }) : label(conflict.path)}</strong>
           <dl className={styles.diff}><div><dt>{t('summary.yours')}</dt><dd>{(conflict.musicBrainzId ? idText : valueText)(valueAt(item.draft, conflict.path))}</dd></div><div><dt>{t('summary.lookup_value')}</dt><dd>{(conflict.musicBrainzId ? idText : valueText)(conflict.lookup)}</dd></div></dl>
@@ -142,6 +121,14 @@ export function ImportSummary({ item, operation, uploads, disabled, publishDisab
       {(flaggedPaths.length > 0 || (lookup?.preselection?.artistMismatch && applied?.choice === 'preselected' && applied.run === lookup.run)) && <ul aria-label={t('summary.flagged')}>
         {lookup?.preselection?.artistMismatch && applied?.choice === 'preselected' && applied.run === lookup.run && <li>{t('summary.artist_mismatch')}</li>}
         {flaggedPaths.map(target => <li key={target}>{`${label(target)}: ${valueText(valueAt(draft, target))} · ${fromTags.includes(target) ? t('publication.tags_only') : itunesMark}`}</li>)}</ul>}
+      {/* The rows the shown files fill are information only; the numbering saves the server's proposal for the saved draft it read. */}
+      {tracklist && <Suspense fallback={null}><ImportExpectedRows heading tracklist={tracklist} filenames={item.manifest.files}
+        tracks={draft.tracks.filter(track => tracklist.files.find(file => file.slotId === track.slotId)?.appended)}
+        numbering={{ saved: item.draft, disabled: disabled || locked || data.revision !== item.revision || data.valueRevision !== item.valueRevision,
+          onSave: changes => operation.run(path, 'PATCH', { expectedRevision: item.revision, changes }) }} /></Suspense>}
+      {/* Luna AI is a paid, secondary alternative after every lookup control (retry, name box, chooser, conflict answers), in every
+          lookup state; it is never the next step or the primary action. */}
+      <div className={styles.actions}><button type="button" className={styles.button} disabled={disabled || !luna} onClick={() => setAnalyzing(true)}>{t('lookup.luna')}</button></div>
       {suggestions.length > 0 && <fieldset className={styles.editor}><legend>{t('summary.luna')}</legend><p className={styles.muted}>{t('summary.luna_help')}</p>
         {suggestions.map(suggestion => {
           const target = suggestionPath(suggestion), blocked = ticks.get(suggestion.id) === 'conflict' || changed.has(target);

@@ -7,9 +7,9 @@ import type { ImportLookupView } from './importLookupApi';
  * history and is disabled with the summary. All names are synthetic.
  */
 const view = (input: ImportLookupView['input']) => ({ input }) as ImportLookupView;
-function mount(lookup: ImportLookupView | null, disabled = false) {
+function mount(lookup: { input: { trigger: string; submitted: ImportLookupView['input']['submitted'] } } | null, disabled = false, defaultText?: string) {
   const onSubmit = vi.fn();
-  render(<LookupBox lookup={lookup} rootLabel="Synthetic Folder" disabled={disabled} onSubmit={onSubmit} />);
+  render(<LookupBox lookup={lookup} rootLabel="Synthetic Folder" defaultText={defaultText} disabled={disabled} onSubmit={onSubmit} />);
   const box = screen.getByRole('group', { name: 'Look up by name' });
   return { onSubmit, box, name: within(box).getByRole('textbox', { name: 'Name' }), submit: within(box).getByRole('button', { name: 'Look up' }) };
 }
@@ -57,4 +57,16 @@ test('the box keeps no history, is no search landmark and is disabled with the s
   fireEvent.change(enabled.name, { target: { value: 'Synthetic Album' } }); fireEvent.click(enabled.submit);
   expect(enabled.onSubmit).toHaveBeenCalledOnce(); expect(onSubmit).not.toHaveBeenCalled();
   expect([localStorage.length, sessionStorage.length]).toEqual([0, 0]);
+});
+
+test('an existing-Album review prefills its saved Album title before a run and after a catalog run, while a submitted name or a folder run wins', () => {
+  let rendered = mount(null, false, 'Synthetic saved Album');
+  expect(rendered.name).toHaveValue('Synthetic saved Album'); expect(rendered.submit).toBeEnabled();
+  fireEvent.click(rendered.submit); expect(rendered.onSubmit).toHaveBeenCalledWith('album', 'Synthetic saved Album');
+  cleanup(); rendered = mount({ input: { trigger: 'catalog', submitted: null } }, false, 'Synthetic saved Album');
+  expect(rendered.name).toHaveValue('Synthetic saved Album');
+  cleanup(); rendered = mount(view({ trigger: 'submitted', submitted: { kind: 'song', text: 'Typed Song' } }), false, 'Synthetic saved Album');
+  expect(rendered.name).toHaveValue('Typed Song');
+  cleanup(); rendered = mount(view({ trigger: 'folder', submitted: null }), false, 'Synthetic saved Album');
+  expect(rendered.name).toHaveValue('Synthetic Folder');
 });

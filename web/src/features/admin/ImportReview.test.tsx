@@ -81,7 +81,7 @@ test('a label suggestion naming the current label already matches though the lab
   render(<ImportReview draft={item.draft} suggestions={[label, artists]} selected={[label.id]} onSelect={vi.fn()} onAdopt={onAdopt} onReject={vi.fn()} disabled={false} />);
   expect(screen.getAllByText('Already matches the current draft')).toHaveLength(2);
   expect(screen.getByRole('checkbox', { name: 'Label' })).toBeEnabled();
-  expect(screen.queryByText(/changed after analysis/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/changed after Luna AI ran/)).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'Apply selected' })); expect(onAdopt).toHaveBeenCalledExactlyOnceWith([label.id]);
 });
 

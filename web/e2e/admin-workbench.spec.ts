@@ -4,7 +4,7 @@
  *   Functions: uploadedFile, publicationControl, coverRecoveryDiagnostics, distinctDecisions, setup,
  *              expectStandaloneAdministration, createRoutes, releaseId, releaseKey, lookupCandidate,
  *              lookupGroup, lookupView, appliedRelease, uploadedProject, summaryProject, summaryRegion,
- *              publishFromSummary, noOverflow
+ *              publishFromSummary, expectLunaAfterLookup, noOverflow
  * Tests
  *   - admin explicitly opens workbench, adopts only selected suggestion, and User view hides private project
  *   - cancelled cover cleanup remains reachable when the owner disappears, without restoring private metadata
@@ -26,12 +26,13 @@
  *   - a folder import uploads, prefills from file tags, applies the one matching release lookup found and publishes after one confirmation
  *   - a tie shows only the values that differ with each release's barcode, catalogue number, country and medium, and choosing one lets Publish open
  *   - a lookup value that differs from the administrator's own is answered from the keyboard, and the summary reflows at 320, 768 and 1440 px
- *   - an unavailable lookup offers Luna first beside a free retry, a retry that stays unavailable keeps them, and Luna runs only after its confirmation shows the budget
- *   - without a folder or usable tags the summary offers Luna beside an empty name box, which looks up a typed name from the keyboard
- *   - after a lookup finds no release Luna is offered, and its ticked entries, label and Disc Number are preselected and approved in one confirmation
+ *   - an unavailable lookup offers a free retry first and the paid Luna AI button after the lookup controls, a retry that stays unavailable keeps both, and Luna AI runs only after its confirmation shows the budget
+ *   - without a folder or usable tags the summary offers an empty name box, which looks up a typed name from the keyboard, and the paid Luna AI button after it
+ *   - after a lookup finds no release the paid Luna AI button is offered after the name box, and its ticked entries, label and Disc Number are preselected and approved in one confirmation
  *   - an image every file shares is chosen automatically until the administrator chooses, and the summary and confirmation show the choice
  *   - a release with front artwork shows a protected preview, Publish waits while its cover is staged, and the staged lookup cover is then chosen automatically and published
  *   - an iTunes-only result applied after MusicBrainz stayed unavailable is marked iTunes only and not checked against MusicBrainz, its values stay flagged, and it publishes after one confirmation
+ *   - an append to an Album with an expected tracklist shows each file's row and flags, numbers the files in one field save, lists the rows in the confirmation, and reflows at 320 px
  * @end-catalog */
 
 import { expect, test, type Page, type Request } from '@playwright/test';
@@ -331,6 +332,9 @@ test('an unconfirmed publication can be cancelled and reviewed while exact clean
   await page.getByRole('button', { name: 'Switch to Admin view' }).click();
   await expect(page).toHaveTitle('Album import · Finitude');
   await expect(page.getByText('Album import page', { exact: true })).toBeAttached();
+  // The server refuses Luna AI while the publication is locked or its cleanup is pending, so the summary's button is disabled.
+  const summaryLuna = summaryRegion(page).getByRole('button', { name: 'Use Luna AI (paid)', exact: true });
+  await expect(summaryLuna).toBeDisabled();
   await page.getByRole('tab', { name: 'Publish', exact: true }).click();
   await page.getByRole('button', { name: 'Cancel approval' }).click();
   await expect(page.getByRole('dialog').getByText('Failed publication draft', { exact: true })).toBeVisible();
@@ -339,7 +343,8 @@ test('an unconfirmed publication can be cancelled and reviewed while exact clean
   await expect(page.getByText('Approval cancelled. Keep reviewing while file cleanup is pending.')).toBeVisible();
   await page.getByRole('tab', { name: 'Draft', exact: true }).click();
   await expect(page.getByRole('textbox', { name: 'Title', exact: true })).toBeEnabled();
-  await expect(page.getByRole('button', { name: 'Analyze again' })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Use Luna AI again (paid)', exact: true })).toBeDisabled();
+  await expect(summaryLuna).toBeDisabled();
   await page.getByRole('tab', { name: 'Review', exact: true }).click();
   await expect(page.getByRole('checkbox', { name: '1 · Track number', exact: true })).toBeEnabled();
   await page.getByRole('tab', { name: 'Files', exact: true }).click();
@@ -355,6 +360,7 @@ test('an unconfirmed publication can be cancelled and reviewed while exact clean
   await page.getByRole('button', { name: 'Retry cleanup' }).click();
   await expect(page.getByText('Approval cancelled. Review the draft before publishing again.')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Publish Album' })).toBeEnabled();
+  await expect(summaryLuna).toBeEnabled();
   await page.getByRole('tab', { name: 'Files', exact: true }).click();
   await expect(page.locator('input[type=file]').last()).toBeEnabled();
   await page.getByRole('tab', { name: 'Publish', exact: true }).click();
@@ -770,15 +776,16 @@ function uploadedProject(): Item {
 }
 /**
  * Serves one import project and its summary read (GET …/lookup answers `state.lookup` and `state.summary` over the defaults);
- * `write` applies each write and returns its receipt kind, and every write is recorded. Registered after setup, so it serves
- * every request for this project.
+ * `write` applies each write and returns its receipt kind, and every write is recorded. The duplicate candidates read lists
+ * `candidates` (none by default). Registered after setup, so it serves every request for this project.
  */
-async function summaryProject(page: Page, initial: Item, write: (state: { item: Item; lookup: Record<string, unknown> | null; summary: Record<string, unknown> }, action: string, body: any) => string) {
+async function summaryProject(page: Page, initial: Item, write: (state: { item: Item; lookup: Record<string, unknown> | null; summary: Record<string, unknown> }, action: string, body: any) => string,
+  candidates: unknown[] = []) {
   const headers = { 'X-Finitude-Account-Viewer': viewer, 'Cache-Control': 'no-store' };
   const state = { item: initial, lookup: null as Record<string, unknown> | null, summary: {} as Record<string, unknown>, writes: [] as { action: string; body: any }[] };
   await page.route(`**/api/admin/v1/imports/${projectId}**`, async route => {
     const request = route.request(), action = new URL(request.url()).pathname.split('/').slice(6).join('/');
-    if (action === 'duplicate-candidates') return route.fulfill({ json: { items: [], memberMatchesComplete: true }, headers });
+    if (action === 'duplicate-candidates') return route.fulfill({ json: { items: candidates, memberMatchesComplete: true }, headers });
     if (request.method() === 'GET') return route.fulfill({ json: action === 'lookup' ? { lookup: state.lookup, revision: state.item.revision, valueRevision: state.item.valueRevision,
       summary: { ...lookupResponse().summary, ...state.summary } } : { item: state.item, receipt: null }, headers });
     const body = request.postDataJSON(); state.writes.push({ action, body });
@@ -790,6 +797,21 @@ async function summaryProject(page: Page, initial: Item, write: (state: { item: 
 }
 const summaryRegion = (page: Page) => page.getByRole('region', { name: 'Review and publish', exact: true });
 const publishFromSummary = (page: Page) => summaryRegion(page).getByRole('button', { name: 'Review and approve publishing', exact: true });
+/**
+ * The summary's paid Luna AI button follows its name box, and lacks the class that styles a shown free retry as the primary
+ * action (production builds hash class names, so the two buttons' class lists are compared).
+ */
+async function expectLunaAfterLookup(page: Page) {
+  const luna = summaryRegion(page).getByRole('button', { name: 'Use Luna AI (paid)', exact: true }), retry = summaryRegion(page).getByRole('button', { name: 'Retry lookup', exact: true });
+  const box = summaryRegion(page).getByRole('group', { name: 'Look up by name', exact: true });
+  await expect(box).toBeVisible(); await expect(luna).toBeVisible();
+  expect(await box.evaluate((element, button) => Boolean(element.compareDocumentPosition(button as Node) & Node.DOCUMENT_POSITION_FOLLOWING), await luna.elementHandle())).toBe(true);
+  if (await retry.count()) {
+    const classes = async (button: typeof luna) => (await button.getAttribute('class') ?? '').split(/\s+/).filter(Boolean);
+    const lunaClasses = await classes(luna);
+    expect((await classes(retry)).filter(name => !lunaClasses.includes(name))).not.toEqual([]);
+  }
+}
 const noOverflow = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth && document.body.scrollWidth <= innerWidth);
 
 test('a folder import uploads, prefills from file tags, applies the one matching release lookup found and publishes after one confirmation', async ({ page }, info) => {
@@ -928,7 +950,7 @@ test('a lookup value that differs from the administrator\'s own is answered from
   expect(server.writes.map(write => write.action)).toEqual(['lookup/resolve']);
 });
 
-test('an unavailable lookup offers Luna first beside a free retry, a retry that stays unavailable keeps them, and Luna runs only after its confirmation shows the budget', async ({ page }) => {
+test('an unavailable lookup offers a free retry first and the paid Luna AI button after the lookup controls, a retry that stays unavailable keeps both, and Luna AI runs only after its confirmation shows the budget', async ({ page }) => {
   await setup(page);
   const item = uploadedProject(); item.draft.album.title = ''; item.analysis = { ...item.analysis, generation: 1, state: 'complete' }; item.decisions = distinctDecisions(item);
   const suggestion = { id: 'f'.repeat(24), generation: 2, scope: 'album' as const, slotId: null, field: 'title' as const, baseline: '', value: 'Luna Album', source: 'folder' as const, evidence: 'Synthetic Album', decision: 'pending' as const };
@@ -943,30 +965,33 @@ test('an unavailable lookup offers Luna first beside a free retry, a retry that 
   server.lookup = lookupView({ state: 'unavailable', outcome: null, issue: 'sourceUnavailable' });
   server.summary = { analysis: { runs: 1, attempts: 20, daily: 200 } };
   await page.goto(`/finitude/admin/imports/${projectId}`); await page.getByRole('button', { name: 'Switch to Admin view' }).click();
-  await expect(summaryRegion(page).getByText('Metadata lookup is unavailable. Analyze with Luna, or retry the lookup at no cost.', { exact: true })).toBeVisible();
-  const steps = summaryRegion(page).getByRole('button', { name: /^(Retry lookup|Analyze with Luna)$/ });
-  await expect(steps).toHaveText(['Analyze with Luna', 'Retry lookup']);
+  await expect(summaryRegion(page).getByText('Metadata lookup is unavailable. Retry the lookup at no cost, or use Luna AI (paid).', { exact: true })).toBeVisible();
+  const steps = summaryRegion(page).getByRole('button', { name: /^(Retry lookup|Use Luna AI \(paid\))$/ });
+  await expect(steps).toHaveText(['Retry lookup', 'Use Luna AI (paid)']);
+  await expectLunaAfterLookup(page);
   await summaryRegion(page).getByRole('button', { name: 'Retry lookup', exact: true }).click();
   await expect(summaryRegion(page).getByText('Looking up metadata in MusicBrainz…', { exact: true })).toBeVisible();
   // MusicBrainz stays down through the automatic retries.
   server.lookup = { ...server.lookup, state: 'unavailable', issue: 'sourceUnavailable', blocking: false };
-  await expect(steps).toHaveText(['Analyze with Luna', 'Retry lookup'], { timeout: 10_000 });
-  await summaryRegion(page).getByRole('button', { name: 'Analyze with Luna', exact: true }).click();
-  const dialog = page.getByRole('dialog', { name: 'Analyze with Luna?', exact: true });
-  await expect(dialog.getByText('Left for this import: 1 analyses and 20 AI calls.', { exact: true })).toBeVisible();
-  await expect(dialog.getByText('Left today for all imports: 200 AI calls.', { exact: true })).toBeVisible();
+  // The free retry stays the next step after the automatic retries end.
+  await expect(steps).toHaveText(['Retry lookup', 'Use Luna AI (paid)'], { timeout: 10_000 });
+  await expectLunaAfterLookup(page);
+  await summaryRegion(page).getByRole('button', { name: 'Use Luna AI (paid)', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Use Luna AI? This is a paid AI service', exact: true });
+  await expect(dialog.getByText('Left for this import: 1 Luna AI runs and 20 paid AI calls.', { exact: true })).toBeVisible();
+  await expect(dialog.getByText('Left today for all imports: 200 paid Luna AI calls.', { exact: true })).toBeVisible();
   expect(server.writes.map(write => write.action)).toEqual(['lookup/retry']);
   expect((await new AxeBuilder({ page }).include('[role=dialog]').analyze()).violations).toEqual([]);
-  await dialog.getByRole('button', { name: 'Start Luna analysis', exact: true }).click();
+  await dialog.getByRole('button', { name: 'Start paid Luna AI', exact: true }).click();
   await expect.poll(() => server.writes.map(write => write.action)).toEqual(['lookup/retry', 'analyze']);
   // The suggestion for the empty title arrives ticked, is applied with the approval and is listed by its confirmation.
-  const luna = summaryRegion(page).getByRole('group', { name: 'Luna suggestions', exact: true });
-  await expect(luna.getByRole('checkbox', { name: 'Title: — → Luna Album · Suggested by Luna', exact: true })).toBeChecked();
+  const luna = summaryRegion(page).getByRole('group', { name: 'Luna AI suggestions', exact: true });
+  await expect(luna.getByRole('checkbox', { name: 'Title: — → Luna Album · Suggested by Luna AI', exact: true })).toBeChecked();
   await publishFromSummary(page).click();
   await expect(page.getByRole('dialog').getByText('Applied: 1 · Current value kept: 0', { exact: true })).toBeVisible();
 });
 
-test('without a folder or usable tags the summary offers Luna beside an empty name box, which looks up a typed name from the keyboard', async ({ page }) => {
+test('without a folder or usable tags the summary offers an empty name box, which looks up a typed name from the keyboard, and the paid Luna AI button after it', async ({ page }) => {
   await setup(page);
   const item = uploadedProject(); item.manifest = { rootLabel: '', files: item.manifest.files.map(file => ({ ...file, relativePath: file.filename })) };
   Object.assign(item.draft.album, { title: '', artists: [] }); item.decisions = [];
@@ -977,14 +1002,16 @@ test('without a folder or usable tags the summary offers Luna beside an empty na
   });
   server.lookup = lookupView({ outcome: 'noQuery' });
   await page.goto(`/finitude/admin/imports/${projectId}`); await page.getByRole('button', { name: 'Switch to Admin view' }).click();
-  await expect(summaryRegion(page).getByText('There is nothing to look up: the files have no usable tags or folder name. Enter an Album or song name, or analyze with Luna.', { exact: true })).toBeVisible();
-  await expect(summaryRegion(page).getByRole('button', { name: /^(Retry lookup|Analyze with Luna)$/ })).toHaveText(['Analyze with Luna']);
+  await expect(summaryRegion(page).getByText('There is nothing to look up: the files have no usable tags or folder name. Enter an Album or song name, or use Luna AI (paid).', { exact: true })).toBeVisible();
+  await expect(summaryRegion(page).getByRole('button', { name: /^(Retry lookup|Use Luna AI \(paid\))$/ })).toHaveText(['Use Luna AI (paid)']);
   const box = summaryRegion(page).getByRole('group', { name: 'Look up by name', exact: true }), name = box.getByRole('textbox', { name: 'Name', exact: true });
+  // The name box is the next step; the secondary Luna AI button follows it.
+  await expectLunaAfterLookup(page);
   await expect(name).toHaveValue(''); await expect(name).toHaveAttribute('autocomplete', 'off');
   await expect(page.getByRole('search')).toHaveCount(0);
   const storage = () => page.evaluate(() => [Object.keys(localStorage).sort(), Object.keys(sessionStorage).sort()]), before = await storage();
   await name.focus(); await page.keyboard.type('Synthetic Album'); await page.keyboard.press('Enter');
-  await expect(summaryRegion(page).getByText('No release was found. Try another name, or analyze with Luna.', { exact: true })).toBeVisible();
+  await expect(summaryRegion(page).getByText('No release was found. Try another name, or use Luna AI (paid).', { exact: true })).toBeVisible();
   await expect(name).toHaveValue('Synthetic Album');
   expect(server.writes.map(write => write.action)).toEqual(['lookup']);
   // The name box keeps no history: nothing is stored by the lookup.
@@ -992,7 +1019,7 @@ test('without a folder or usable tags the summary offers Luna beside an empty na
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
 });
 
-test('after a lookup finds no release Luna is offered, and its ticked entries, label and Disc Number are preselected and approved in one confirmation', async ({ page }) => {
+test('after a lookup finds no release the paid Luna AI button is offered after the name box, and its ticked entries, label and Disc Number are preselected and approved in one confirmation', async ({ page }) => {
   await setup(page);
   const item = uploadedProject(); Object.assign(item.draft.album, { artists: [], label: null }); item.decisions = [];
   const shell = { generation: 2, source: 'folder' as const, evidence: 'Synthetic Album', decision: 'pending' as const };
@@ -1010,12 +1037,13 @@ test('after a lookup finds no release Luna is offered, and its ticked entries, l
   });
   server.lookup = lookupView({ state: 'complete', outcome: 'noRelease' });
   await page.goto(`/finitude/admin/imports/${projectId}`); await page.getByRole('button', { name: 'Switch to Admin view' }).click();
-  await expect(summaryRegion(page).getByText('No release was found. Try another name, or analyze with Luna.', { exact: true })).toBeVisible();
-  await expect(summaryRegion(page).getByRole('button', { name: /^(Retry lookup|Analyze with Luna)$/ })).toHaveText(['Analyze with Luna']);
-  await summaryRegion(page).getByRole('button', { name: 'Analyze with Luna', exact: true }).click();
-  await page.getByRole('dialog', { name: 'Analyze with Luna?', exact: true }).getByRole('button', { name: 'Start Luna analysis', exact: true }).click();
+  await expect(summaryRegion(page).getByText('No release was found. Try another name, or use Luna AI (paid).', { exact: true })).toBeVisible();
+  await expect(summaryRegion(page).getByRole('button', { name: /^(Retry lookup|Use Luna AI \(paid\))$/ })).toHaveText(['Use Luna AI (paid)']);
+  await expectLunaAfterLookup(page);
+  await summaryRegion(page).getByRole('button', { name: 'Use Luna AI (paid)', exact: true }).click();
+  await page.getByRole('dialog', { name: 'Use Luna AI? This is a paid AI service', exact: true }).getByRole('button', { name: 'Start paid Luna AI', exact: true }).click();
   await expect.poll(() => server.writes.map(write => write.action)).toEqual(['analyze']);
-  const luna = summaryRegion(page).getByRole('group', { name: 'Luna suggestions', exact: true }), boxes = luna.getByRole('checkbox');
+  const luna = summaryRegion(page).getByRole('group', { name: 'Luna AI suggestions', exact: true }), boxes = luna.getByRole('checkbox');
   await expect(boxes).toHaveCount(3);
   for (const box of await boxes.all()) await expect(box).toBeChecked();
   await publishFromSummary(page).click();
@@ -1123,8 +1151,8 @@ test('an iTunes-only result applied after MusicBrainz stayed unavailable is mark
   await page.goto(`/finitude/admin/imports/${projectId}`); await page.getByRole('button', { name: 'Switch to Admin view' }).click();
   await expect(summaryRegion(page).getByText('Applied an iTunes-only result: Synthetic Album. It was not checked against MusicBrainz, so its values are flagged.',
     { exact: true })).toBeVisible();
-  // Luna is the next step, a free retry beside it.
-  await expect(summaryRegion(page).getByRole('button', { name: /^(Retry lookup|Analyze with Luna)$/ })).toHaveText(['Analyze with Luna', 'Retry lookup']);
+  // A free retry is the next step; Luna AI follows the lookup controls.
+  await expect(summaryRegion(page).getByRole('button', { name: /^(Retry lookup|Use Luna AI \(paid\))$/ })).toHaveText(['Retry lookup', 'Use Luna AI (paid)']);
   // Its values are flagged outside the fold, never collapsed.
   const flagged = summaryRegion(page).getByRole('list', { name: 'Values to check', exact: true });
   await expect(flagged.getByRole('listitem')).toHaveText(['Title: Synthetic Album · iTunes only · Not checked against MusicBrainz',
@@ -1143,4 +1171,58 @@ test('an iTunes-only result applied after MusicBrainz stayed unavailable is mark
   await page.getByRole('dialog').getByRole('button', { name: 'Publish Album', exact: true }).click();
   await expect.poll(() => server.writes.map(write => write.action)).toEqual(['publish']);
   expect(server.writes[0].body).toEqual(expect.objectContaining({ approvalDigest: expect.any(String), decisions: item.decisions }));
+});
+
+test('an append to an Album with an expected tracklist shows each file\'s row and flags, numbers the files in one field save, lists the rows in the confirmation, and reflows at 320 px', async ({ page }) => {
+  await setup(page);
+  const item = uploadedProject(), [first, second] = item.draft.tracks, albumId = '3'.repeat(24);
+  Object.assign(first, { discNumber: null, trackNumber: null }); Object.assign(second, { title: '', discNumber: null, trackNumber: null });
+  item.decisions = [{ scope: 'album', slotId: null, entryKey: null, boundName: null, action: 'reuse', candidateId: albumId, candidateRevision: 'r-album' },
+    ...distinctDecisions(item).filter(decision => decision.scope === 'track')];
+  const target = { kind: 'album', id: albumId, label: 'Existing Album', revision: 'r-album', albumId: null, visibility: 'public', match: 'name', matchedSlotIds: [], automaticReuse: false };
+  const tracklist = { albumId, durationToleranceMs: 3000,
+    rows: [{ discNumber: 1, trackNumber: 1, title: 'Opening', durationMs: null, filled: true }, { discNumber: 1, trackNumber: 2, title: 'Second Row', durationMs: 200_000, filled: false },
+      { discNumber: 1, trackNumber: 3, title: 'Third Row', durationMs: 300_000, filled: false }],
+    files: [{ slotId: first.slotId, durationMs: 200_500, durationPrecisionMs: 0, appended: true }, { slotId: second.slotId, durationMs: 300_000, durationPrecisionMs: 0, appended: true }],
+    numbering: [{ slotId: first.slotId, discNumber: 1, trackNumber: 2, title: null }, { slotId: second.slotId, discNumber: 1, trackNumber: 3, title: 'Third Row' }] };
+  const changes = [{ path: `tracks.${first.slotId}.discNumber`, base: null, value: 1 }, { path: `tracks.${first.slotId}.trackNumber`, base: null, value: 2 },
+    { path: `tracks.${second.slotId}.discNumber`, base: null, value: 1 }, { path: `tracks.${second.slotId}.trackNumber`, base: null, value: 3 }, { path: `tracks.${second.slotId}.title`, base: '', value: 'Third Row' }];
+  const server = await summaryProject(page, item, (state, action, body) => {
+    if (action === 'publish') return 'publish';
+    // The numbering is an ordinary field save of the saved values; afterwards the numbers are the administrator's own, so none is proposed.
+    expect([action, body]).toEqual(['', { operationId: expect.any(String), expectedRevision: state.item.revision, changes }]);
+    state.item = { ...state.item, draft: applyDraftChanges(state.item.draft, body.changes) };
+    state.summary = { append: true, appendTracklist: { ...tracklist, numbering: [] } };
+    return 'edit';
+  }, [target]);
+  server.summary = { append: true, appendTracklist: tracklist };
+  await page.goto(`/finitude/admin/imports/${projectId}`); await page.getByRole('button', { name: 'Switch to Admin view' }).click();
+  const rows = summaryRegion(page).getByRole('region', { name: 'Album\'s expected tracklist', exact: true });
+  await expect(rows.getByText('These files fill 0 of the Album\'s 2 missing-file rows.', { exact: true })).toBeVisible();
+  await expect(rows.getByRole('listitem')).toHaveText(['Disc 1 · Track — · First · No row · No Track Number', 'Disc 1 · Track — · 02 Second.mp3 · No row · No Track Number']);
+  // Flags never hold Publish.
+  await expect(publishFromSummary(page)).toBeEnabled();
+  const number = rows.getByRole('button', { name: 'Number from the Album\'s expected tracklist', exact: true });
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+  for (const width of [320, 768, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    expect(await noOverflow(page)).toBe(true);
+    await expect(number).toBeVisible();
+  }
+  await number.click();
+  await expect.poll(() => server.writes.map(write => write.action)).toEqual(['']);
+  await expect(rows.getByRole('listitem')).toHaveText(['Disc 1 · Track 2 · First · Row Disc 1 · Track 2: Second Row', 'Disc 1 · Track 3 · Third Row · Row Disc 1 · Track 3: Third Row']);
+  await expect(rows.getByText('These files fill 2 of the Album\'s 2 missing-file rows.', { exact: true })).toBeVisible();
+  await expect(number).toHaveCount(0);
+  await expect(publishFromSummary(page)).toBeEnabled();
+  await publishFromSummary(page).click();
+  const dialog = page.getByRole('dialog'), checklist = dialog.getByRole('region', { name: 'What becomes catalog content', exact: true });
+  const confirmed = checklist.getByText('Album\'s expected tracklist', { exact: true }).locator('xpath=following-sibling::dd');
+  await expect(confirmed.getByRole('listitem')).toHaveText(['Disc 1 · Track 2 · First · Row Disc 1 · Track 2: Second Row', 'Disc 1 · Track 3 · Third Row · Row Disc 1 · Track 3: Third Row']);
+  await expect(confirmed.getByRole('button')).toHaveCount(0);
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+  await page.setViewportSize({ width: 320, height: 900 }); expect(await noOverflow(page)).toBe(true);
+  await dialog.getByRole('button', { name: 'Publish Album', exact: true }).click();
+  await expect.poll(() => server.writes.map(write => write.action)).toEqual(['', 'publish']);
+  expect(server.writes[1].body).toEqual(expect.objectContaining({ changes: [], decisions: item.decisions }));
 });

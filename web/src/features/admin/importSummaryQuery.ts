@@ -9,7 +9,7 @@ export const lookupActive = (state: string | undefined) => state === 'queued' ||
  * whenever the project's revision or automatic values change, and polled every 3 seconds while a lookup is queued or running, or
  * waits on a busy source (a throttled source is retried within seconds), and every 10 while it waits out an outage; also every 3
  * seconds while the applied release's cover is being staged. The summary,
- * the Analyze confirmation and the publication checklist share it; its strict schema loads with the read, so none of their chunks
+ * the Luna AI confirmation and the publication checklist share it; its strict schema loads with the read, so none of their chunks
  * carries it.
  */
 export function importSummaryQuery(access: { viewerId: string; epoch: number; generation: number }, item: Pick<ImportDetail, 'id' | 'revision' | 'valueRevision'>, online = true) {

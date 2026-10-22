@@ -8,8 +8,8 @@ import { useOnline } from './useAdminOnline';
 import styles from './adminStyles';
 
 /**
- * The one confirmation of a paid Luna analysis, opened from the Draft section's Analyze and from the summary's Luna next step. It
- * shows what is left of the project and daily budget (the summary read) and starts nothing until confirmed; Analyze stays
+ * The one confirmation of a paid Luna AI run, opened from the Draft section's and the summary's Use Luna AI (paid) button. It
+ * shows what is left of the project and daily budget (the summary read) and starts nothing until confirmed; confirming stays
  * unavailable while the budget is unknown or cannot cover one more run (one call for the Album and one per ten files).
  */
 export function ImportAnalysisConfirmation({ item, disabled, onConfirm, onClose }: { item: ImportDetail; disabled: boolean; onConfirm: () => void; onClose: () => void }) {

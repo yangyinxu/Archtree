@@ -2,10 +2,10 @@
  * Internal
  *   Classes: Storage
  *   Functions: mutation, code, wav, file, stored, taggedWav, hundredTagged, create, prepared, existingProject,
- *              appendProject, cancelPublication, later, unknownUpload, land, reconcile, distinctCovers,
- *              taggedProject, pngOf, legacyApproval, landCopy, markNewer, discProject, fresh, undecided,
- *              distinctAll, uploadedProject, changedFile, appendTo, newMember, appendDraft, trackCopy,
- *              flaggedSlots
+ *              appendProject, appliedTrackCreditLookup, expectedTracklist, cancelPublication, later,
+ *              unknownUpload, land, reconcile, distinctCovers, taggedProject, pngOf, legacyApproval, landCopy,
+ *              markNewer, discProject, fresh, undecided, distinctAll, uploadedProject, changedFile, appendTo,
+ *              newMember, appendDraft, trackCopy, flaggedSlots
  *   Constants: actor, other, analysisProvider, fixtureAdmin, catalogCollections
  *   Variables: harness
  * Tests
@@ -22,6 +22,10 @@
  *   - private artwork rechecks role after bytes arrive, withholding late response after revocation
  *   - append adds only new members, preserves existing metadata and protected old tracks, and same-album reuse is no replacement
  *   - append keeps the target Album disc order and imported tracks store no Disc Number
+ *   - an append to an Album with an expected tracklist shows the row its file fills, numbers it from the tracklist in one field save, and publishing fills that row without changing the tracklist, re-derives the order and credits only the Album's primary Artists
+ *   - the summary lists no expected tracklist for a target that is not ready, holds a malformed tracklist or none, or declares more members than an append accepts
+ *   - the summary reads each stored member ID of the target once whatever its case, padding or stored type, and a value that names no member fills nothing
+ *   - the numbering is one all-or-nothing field save: a number another administrator saved meanwhile refuses it writing nothing, and its lost response replays its receipt even after the approval locks the draft against new saves
  *   - append revalidates reviewed Album after storage copy and refuses concurrent catalog edits
  *   - verified byte candidates bind SHA to current object version and identify only matching manifest slots
  *   - a hidden draft appended to a public Album publishes public tracks: appended tracks take the target Album's visibility
@@ -109,6 +113,7 @@
  *   - an append preselection that stops holding after approval needs attention with identityConflict before any copy, while a title match on another Album changes nothing
  *   - byte matches have their own read: 25 files byte-identical to Tracks on another Album are all flagged, and no number of same-title Tracks hides one
  *   - an approval sending the preselections its confirmation showed freezes exactly them, and refuses, writing nothing, once an append file would flip between new and reuse
+ *   - the summary takes an undecided append file from its identity preselection: a file byte-identical to a target member is reused and never numbered, while a new file is appended and numbered
  * @end-catalog */
 
 import assert from 'node:assert/strict';
@@ -132,6 +137,9 @@ import { convertLegacyImportProject, draftV2Paths } from '../../src/administrati
 import { importDraftV2FromV1, legacyAdministratorOrigins, legacyArtistEntryKey, legacyDraftView } from '../../src/administration/import/adminImportDraftCompat';
 import { originKey, type ImportDecisionV2, type ImportDraftV2 } from '../../src/administration/import/adminImportDraft';
 import { importIdentityPreselections } from '../../src/administration/import/adminImportIdentity';
+import { migratedCatalogCreditId } from '../../src/models/catalogCredit';
+import { getAdminImportLookup } from '../../src/administration/lookup/metadataLookupRequests';
+import { expectedTrackRows, expectedTracklistForStorage, storedExpectedTracklist } from '../../src/services/catalog/albumExpectedTracklist';
 
 let harness: MongoReplicaSetHarness; const actor = new ObjectId(), other = new ObjectId();
 const mutation = (expectedRevision: number) => ({ operationId: randomUUID(), expectedRevision });
@@ -288,6 +296,134 @@ test('append keeps the target Album disc order and imported tracks store no Disc
     assert.deepEqual((await getDb()!.collection('albums').findOne({ _id: albumId }))!.audioTrackIds, [existing.trackIds[0], appendedId, discTwoId.toHexString()]);
     const appended = await getDb()!.collection('audioTracks').findOne({ _id: new ObjectId(appendedId) });
     assert.equal(appended!.trackNumber, 4); assert.equal('discNumber' in appended!, false); assert.equal('discNumberSource' in appended!, false);
+});
+/**
+ * An applied metadata lookup record for the import `id` whose one-medium release credits the release to a synthetic Artist and
+ * its fifth track to `guest`; it needs no answer.
+ */
+function appliedTrackCreditLookup(id: string, guest: string) {
+    const releaseId = '0383dadf-2a4e-4d10-a46a-e9e041da8eb3', credit = (name: string, artistId: string) => [{ name, joinPhrase: '', artistId, artistName: name }];
+    const release = { releaseId, releaseGroupId: '22222222-3333-4444-8555-666666666666', title: 'Synthetic Album', status: 'Official', barcode: null, barcodeText: null, country: 'JP', primaryType: 'Album', secondaryTypes: [],
+        trackCount: 1, frontArtwork: false, artistCredit: credit('Synthetic Release Artist', '33333333-4444-4555-8666-777777777777'), labels: [], date: { year: 2020, month: null, day: null }, groupFirstReleaseDate: null,
+        media: [{ position: 1, format: 'CD', tracks: [{ position: 5, number: '5', title: 'Synthetic Fifth', lengthMs: 1000, recordingId: '66666666-7777-4888-8999-aaaaaaaaaaaa', isrcs: [],
+            artistCredit: credit(guest, '44444444-5555-4666-8777-888888888888') }] }] };
+    const key = `musicbrainz:${releaseId}`;
+    return { _id: new ObjectId(id), run: 1, state: 'complete', issue: null, outcome: 'candidates', input: { trigger: 'submitted', submitted: { kind: 'album', text: 'Synthetic Album' } }, ranking: null, staleSlotIds: [],
+        candidates: [{ key, source: 'musicbrainz', releaseId, basis: 'title', summary: null, release, details: 'fetched' }],
+        applied: { run: 1, candidateKey: key, releaseId, choice: 'chosen', basis: 'chosen', values: [], flagged: [], conflicts: [] } };
+}
+/** Parser output for an Album's expected tracklist of `rows` ([Disc, Track, title, duration]), as an applied review stores it. */
+function expectedTracklist(rows: [number, number, string, number | null][]) {
+    const built = expectedTracklistForStorage('musicbrainz', new Date('2026-10-01T00:00:00.000Z'), rows.map(([discNumber, trackNumber, title, durationMs]) => ({ discNumber, trackNumber, title, durationMs })));
+    assert.ok(built.ok); return built.tracklist;
+}
+test('an append to an Album with an expected tracklist shows the row its file fills, numbers it from the tracklist in one field save, and publishing fills that row without changing the tracklist, re-derives the order and credits only the Album\'s primary Artists', async () => {
+    const storage = new Storage(), existing = await existingProject(storage), albumId = new ObjectId(existing.albumId), uploadingId = new ObjectId(), by = actor.toHexString();
+    // The target holds its published member at (1, 4) and a hidden member still uploading at (1, 1); two rows have no file.
+    await getDb()!.collection('audioTracks').insertOne({ _id: uploadingId, title: 'Synthetic Opening', artistIds: [existing.artistId], albumId: existing.albumId, uploadStatus: 'pending', s3Key: uploadingId.toHexString(), mediaType: 'audio', publicationStatus: 'ready', visibility: 'hidden', discNumber: 1, discNumberSource: 'embedded', trackNumber: 1 });
+    await getDb()!.collection('albums').updateOne({ _id: albumId }, { $push: { audioTrackIds: uploadingId.toHexString() } as any,
+        $set: { expectedTracklist: expectedTracklist([[1, 1, 'Synthetic Opening', null], [1, 4, 'Synthetic Recording', null], [1, 5, 'Synthetic Fifth', 1000], [1, 6, 'Synthetic Sixth', 600_000]]) } });
+    const project = await appendProject(storage, existing), slot = project.item.manifest.files[0].slotId, path = (field: string) => `tracks.${slot}.${field}`;
+    // Without a Track Number the file fills no row; the draft also names another Artist, which an append never applies.
+    const cleared = await editImportDraft(by, project.item.id, project.item, draft => { draft.tracks[0].trackNumber = null; draft.album.artists = artistEntries('Another Synthetic Artist'); });
+    const shown = (await getAdminImportLookup(by, project.item.id)).summary.appendTracklist!;
+    assert.deepEqual([shown.albumId, shown.rows.map(row => [row.discNumber, row.trackNumber, row.filled])], [existing.albumId, [[1, 1, true], [1, 4, true], [1, 5, false], [1, 6, false]]]);
+    assert.deepEqual(shown.files, [{ slotId: slot, durationMs: 1000, durationPrecisionMs: 0, appended: true }]);
+    // The one-second file fits only the one-second missing row; its title is the administrator's own, so it keeps it.
+    assert.deepEqual(shown.numbering, [{ slotId: slot, discNumber: 1, trackNumber: 5, title: null }]);
+    // The Web sends the numbering as an ordinary field save against the saved values; the numbers become the administrator's own.
+    const numbered = await editAdminImport(by, project.item.id, { ...mutation(cleared.item.revision), changes: shown.numbering.flatMap(entry => [
+        { path: path('discNumber'), base: cleared.item.draft.tracks[0].discNumber, value: entry.discNumber }, { path: path('trackNumber'), base: cleared.item.draft.tracks[0].trackNumber, value: entry.trackNumber }]) });
+    const after = (await getAdminImportLookup(by, project.item.id)).summary.appendTracklist!;
+    assert.deepEqual(after.numbering, []);
+    const origins = (await stored(project.item.id)).draftOrigins!;
+    assert.deepEqual([origins[originKey(path('discNumber'))], origins[originKey(path('trackNumber'))]], ['administrator', 'administrator']);
+    const tracklist = (await getDb()!.collection('albums').findOne({ _id: albumId }))!.expectedTracklist;
+    // The applied lookup release credits its fifth track to a guest Artist; an appended member never takes a release track's credit.
+    await getDb()!.collection('adminImportLookups').insertOne(appliedTrackCreditLookup(project.item.id, 'Synthetic Track Guest') as never);
+    await publishAdminImport(by, project.item.id, approvalBody(numbered.item)); await runAdminImportPublicationOnce(storage);
+    const result = (await getAdminImport(by, project.item.id)).item; assert.equal(result.publication, 'complete');
+    // Once complete, the import's own new member fills its row, so the summary lists no rows (nor the key) for it.
+    assert.equal('appendTracklist' in (await getAdminImportLookup(by, project.item.id)).summary, false);
+    const appendedId = result.published!.trackIds[0], album = (await getDb()!.collection('albums').findOne({ _id: albumId }))!;
+    const appended = (await getDb()!.collection('audioTracks').findOne({ _id: new ObjectId(appendedId) }))!;
+    assert.deepEqual([appended.discNumber, appended.trackNumber], [1, 5]);
+    // Publishing re-derives the order by position and never changes the tracklist; the appended member now fills (1, 5).
+    assert.deepEqual(album.audioTrackIds, [uploadingId.toHexString(), existing.trackIds[0], appendedId]);
+    assert.deepEqual(album.expectedTracklist, tracklist);
+    const members = await getDb()!.collection('audioTracks').find({ _id: { $in: album.audioTrackIds.map((value: string) => new ObjectId(value)) } }).toArray();
+    const rows = expectedTrackRows(storedExpectedTracklist(album)!.rows, members.map(member => ({ id: member._id.toHexString(), discNumber: member.discNumber, trackNumber: member.trackNumber }))).rows;
+    assert.deepEqual(rows.map(row => row.memberIds), [[uploadingId.toHexString()], [existing.trackIds[0]], [appendedId], []]);
+    // The appended member takes exactly the Album's primary Credit, not the draft's Artist or the applied release track's credit,
+    // and neither name becomes an Artist.
+    assert.deepEqual(appended.credits, [{ creditId: migratedCatalogCreditId('audioTrack', appendedId, 'artist', existing.artistId, 'primary'), subjectType: 'artist', subjectId: existing.artistId, role: 'primary', order: 0 }]);
+    assert.equal(await getDb()!.collection('artists').countDocuments({ name: { $in: ['Another Synthetic Artist', 'Synthetic Track Guest'] } }), 0);
+});
+test('the summary lists no expected tracklist for a target that is not ready, holds a malformed tracklist or none, or declares more members than an append accepts', async () => {
+    const storage = new Storage(), existing = await existingProject(storage), albumId = new ObjectId(existing.albumId), albums = getDb()!.collection('albums');
+    const valid = expectedTracklist([[1, 1, 'Synthetic Opening', null], [1, 4, 'Synthetic Recording', null]]);
+    await albums.updateOne({ _id: albumId }, { $set: { expectedTracklist: valid } });
+    const project = await appendProject(storage, existing), read = async () => (await getAdminImportLookup(actor.toHexString(), project.item.id)).summary.appendTracklist;
+    assert.deepEqual((await read())!.rows.map(row => row.filled), [false, true]);
+    await albums.updateOne({ _id: albumId }, { $set: { 'expectedTracklist.source': 'discogs' } }); assert.equal(await read(), undefined);
+    await albums.updateOne({ _id: albumId }, { $set: { expectedTracklist: { ...valid, rows: [] } } }); assert.equal(await read(), undefined);
+    await albums.updateOne({ _id: albumId }, { $unset: { expectedTracklist: '' } }); assert.equal(await read(), undefined);
+    await albums.updateOne({ _id: albumId }, { $set: { expectedTracklist: valid } }); assert.ok(await read());
+    // Publishing refuses a target with more than 5000 members, so the summary reads none of its rows.
+    const members = (await albums.findOne({ _id: albumId }))!.audioTrackIds as string[];
+    await albums.updateOne({ _id: albumId }, { $set: { audioTrackIds: [...members, ...Array.from({ length: 5001 - members.length }, () => new ObjectId().toHexString())] } }); assert.equal(await read(), undefined);
+    // Exactly 5000 members, most of them dangling IDs that fill nothing, still list the rows.
+    await albums.updateOne({ _id: albumId }, { $set: { audioTrackIds: [...members, ...Array.from({ length: 5000 - members.length }, () => new ObjectId().toHexString())] } });
+    assert.deepEqual((await read())!.rows.map(row => row.filled), [false, true]);
+    await albums.updateOne({ _id: albumId }, { $set: { audioTrackIds: members, lifecycleStatus: 'deleting' } }); assert.equal(await read(), undefined);
+});
+test('the summary reads each stored member ID of the target once whatever its case, padding or stored type, and a value that names no member fills nothing', async () => {
+    const storage = new Storage(), existing = await existingProject(storage), albumId = new ObjectId(existing.albumId), albums = getDb()!.collection('albums'), member = existing.trackIds[0];
+    await albums.updateOne({ _id: albumId }, { $set: { expectedTracklist: expectedTracklist([[1, 4, 'Synthetic Recording', null], [1, 5, 'Synthetic Fifth', null]]) } });
+    const project = await appendProject(storage, existing), read = async () => (await getAdminImportLookup(actor.toHexString(), project.item.id)).summary.appendTracklist!.rows.map(row => row.filled);
+    assert.deepEqual(await read(), [true, false]);
+    // The member at (1, 4) is found under an upper-case, padded ID, and listed twice it is read once.
+    await albums.updateOne({ _id: albumId }, { $set: { audioTrackIds: [` ${member.toUpperCase()} `] } }); assert.deepEqual(await read(), [true, false]);
+    await albums.updateOne({ _id: albumId }, { $set: { audioTrackIds: [member, ` ${member.toUpperCase()}`, 'not-a-member', 42, null] } }); assert.deepEqual(await read(), [true, false]);
+    // A member stored as an ObjectId fills its row, as the Album page and listener reads count it.
+    await albums.updateOne({ _id: albumId }, { $set: { audioTrackIds: [new ObjectId(member)] } }); assert.deepEqual(await read(), [true, false]);
+    // Malformed values and a dangling ID fill no row.
+    await albums.updateOne({ _id: albumId }, { $set: { audioTrackIds: ['not-a-member', 42, null, new ObjectId().toHexString()] } }); assert.deepEqual(await read(), [false, false]);
+    // A legacy Album without declared IDs has no members, though a ready track still links to it: the append keeps only declared ones.
+    await albums.updateOne({ _id: albumId }, { $set: { audioTrackIds: [] }, $unset: { lifecycleStatus: '' } }); assert.deepEqual(await read(), [false, false]);
+});
+test('the numbering is one all-or-nothing field save: a number another administrator saved meanwhile refuses it writing nothing, and its lost response replays its receipt even after the approval locks the draft against new saves', async () => {
+    const storage = new Storage(), existing = await existingProject(storage), by = actor.toHexString();
+    await getDb()!.collection('albums').updateOne({ _id: new ObjectId(existing.albumId) }, { $set: { expectedTracklist: expectedTracklist([[1, 4, 'Synthetic Recording', null], [1, 5, 'Synthetic Fifth', 1000]]) } });
+    const project = await appendProject(storage, existing), id = project.item.id, slot = project.item.manifest.files[0].slotId, path = (field: string) => `tracks.${slot}.${field}`;
+    const cleared = await editImportDraft(by, id, project.item, draft => { draft.tracks[0].trackNumber = null; });
+    const numbering = async () => (await getAdminImportLookup(by, id)).summary.appendTracklist!.numbering;
+    const proposed = await numbering();
+    assert.deepEqual(proposed, [{ slotId: slot, discNumber: 1, trackNumber: 5, title: null }]);
+    // The Web sends the proposal against the saved values it was read for.
+    const changes = [{ path: path('discNumber'), base: cleared.item.draft.tracks[0].discNumber, value: 1 }, { path: path('trackNumber'), base: null, value: 5 }];
+    // Another administrator saves a Track Number of their own first: the numbering save is refused and writes nothing at all.
+    const theirs = await editAdminImport(other.toHexString(), id, { ...mutation(cleared.item.revision), changes: [{ path: path('trackNumber'), base: null, value: 6 }] });
+    const before = await stored(id);
+    await assert.rejects(editAdminImport(by, id, { ...mutation(cleared.item.revision), changes }), code('ADMIN_IMPORT_FIELD_CONFLICT'));
+    assert.deepEqual(await stored(id), before);
+    // Read again, the file keeps that administrator's Track Number, which no missing-file row has, so nothing is proposed.
+    assert.deepEqual(await numbering(), []);
+    // Cleared again, the proposal returns and one save numbers the file.
+    const restored = await editAdminImport(other.toHexString(), id, { ...mutation(theirs.item.revision), changes: [{ path: path('trackNumber'), base: 6, value: null }] });
+    assert.deepEqual(await numbering(), proposed);
+    const intent = { ...mutation(restored.item.revision), changes }, numbered = await editAdminImport(by, id, intent);
+    assert.deepEqual([numbered.item.draft.tracks[0].discNumber, numbered.item.draft.tracks[0].trackNumber], [1, 5]);
+    // A lost response replays the same receipt without another write.
+    const receipts = (await stored(id)).receipts.length;
+    assert.equal((await editAdminImport(by, id, intent)).receipt!.revision, numbered.receipt!.revision);
+    assert.equal((await stored(id)).receipts.length, receipts);
+    // The approval locks the draft: the replay still answers, while a new save is refused and writes nothing.
+    await publishAdminImport(by, id, approvalBody(numbered.item));
+    assert.equal((await editAdminImport(by, id, intent)).receipt!.revision, numbered.receipt!.revision);
+    const locked = await stored(id);
+    await assert.rejects(editAdminImport(by, id, { ...mutation(locked.revision), changes: [{ path: path('trackNumber'), base: 5, value: 4 }] }), code('ADMIN_IMPORT_PUBLICATION_LOCKED'));
+    assert.deepEqual(await stored(id), locked);
 });
 test('append revalidates reviewed Album after storage copy and refuses concurrent catalog edits', async () => {
     const storage = new Storage(), existing = await existingProject(storage), project = await appendProject(storage, existing); await publishAdminImport(actor.toHexString(), project.item.id, approvalBody(project.item));
@@ -1750,4 +1886,15 @@ test('an approval sending the preselections its confirmation showed freezes exac
     await tracks.updateOne({ _id: new ObjectId(existing.trackIds[0]) }, { $set: { 'mediaByteHash.value': sha256 } });
     await publishAdminImport(actor.toHexString(), item.id, approvalBody(reviewed, { preselections: asReuse }));
     assert.deepEqual(((await stored(item.id)).media!.publication!.decisions as ImportDecisionV2[]).filter(value => value.scope === 'track').map(value => [value.action, value.candidateId, value.preselected]), [['reuse', existing.trackIds[0], true]]);
+});
+test('the summary takes an undecided append file from its identity preselection: a file byte-identical to a target member is reused and never numbered, while a new file is appended and numbered', async () => {
+    const storage = new Storage(), existing = await existingProject(storage);
+    await getDb()!.collection('albums').updateOne({ _id: new ObjectId(existing.albumId) }, { $set: { expectedTracklist: expectedTracklist([[1, 4, 'Synthetic Recording', null], [1, 5, 'Synthetic Fifth', 1000]]) } });
+    const { slots, item } = await uploadedProject(storage, [{ ...file(), originalname: '01 - Identical.wav' }, changedFile('02 - New.wav', 20)], appendDraft(['Identical Copy', '']));
+    // Only the Album reuse is saved; neither file has a track decision.
+    await appendTo(item, existing.albumId);
+    const shown = (await getAdminImportLookup(actor.toHexString(), item.id)).summary.appendTracklist!;
+    assert.deepEqual(shown.files, [{ slotId: slots[0], durationMs: 1000, durationPrecisionMs: 0, appended: false }, { slotId: slots[1], durationMs: 1000, durationPrecisionMs: 0, appended: true }]);
+    // The new file's empty title takes the row's.
+    assert.deepEqual(shown.numbering, [{ slotId: slots[1], discNumber: 1, trackNumber: 5, title: 'Synthetic Fifth' }]);
 });

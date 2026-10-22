@@ -1,4 +1,5 @@
 import { foldImportName, type ImportDraftV2 } from './adminImportDraft';
+import { REVIEW_LOOKUP_LIMITS } from '../lookup/lookupReviewValues';
 
 /**
  * iTunes localized names of import Artist entries (owner rule: Administrator Album Imports identity bullet): the groups of names one
@@ -8,8 +9,14 @@ import { foldImportName, type ImportDraftV2 } from './adminImportDraft';
  * on a renamed entry (that reads `musicBrainzNames` only) and never reach Luna. Pure.
  */
 export type ImportLocalizedNames = string[][];
-/** At most 21 groups (one per Artist entry, and one spare), of at most 4 names of at most 200 characters each. */
+/**
+ * At most 21 groups (one per Artist entry, and one spare), of at most 4 names of at most 200 characters each. An existing-Album
+ * review (`review`), whose members' entries name artists too, keeps one group per review identity instead (512 groups).
+ */
 export const IMPORT_LOCALIZED_NAME_LIMITS = Object.freeze({ groups: 21, names: 4, name: 200 });
+/** Whose names groups are kept for: an import's Album entries, or also a review's member entries (`review`). */
+type LocalizedOptions = { review?: boolean };
+const groupBound = (options: LocalizedOptions) => options.review ? REVIEW_LOOKUP_LIMITS.identities : IMPORT_LOCALIZED_NAME_LIMITS.groups;
 
 const invisible = /[\p{Cc}\p{Cf}\p{Cs}]/u;
 /** A localized name as stored: NFC and trimmed, 1 to 200 characters, without control, invisible formatting or lone surrogate characters. */
@@ -30,11 +37,11 @@ const cleanGroup = (raw: unknown): string[] | null => {
 };
 const groupKey = (group: readonly string[]) => JSON.stringify(group.map(foldImportName).sort());
 /** The valid groups of a stored or found value, in order, distinct, within the group bound; malformed input reads as none. */
-const validGroups = (raw: unknown): string[][] => {
-    const groups: string[][] = [], seen = new Set<string>();
-    for (const item of Array.isArray(raw) ? raw.slice(0, 4 * IMPORT_LOCALIZED_NAME_LIMITS.groups) : []) {
+const validGroups = (raw: unknown, options: LocalizedOptions = {}): string[][] => {
+    const groups: string[][] = [], seen = new Set<string>(), bound = groupBound(options);
+    for (const item of Array.isArray(raw) ? raw.slice(0, 4 * bound) : []) {
         const group = cleanGroup(item);
-        if (!group || seen.has(groupKey(group)) || groups.length >= IMPORT_LOCALIZED_NAME_LIMITS.groups) continue;
+        if (!group || seen.has(groupKey(group)) || groups.length >= bound) continue;
         seen.add(groupKey(group)); groups.push(group);
     }
     return groups;
@@ -42,11 +49,12 @@ const validGroups = (raw: unknown): string[][] => {
 
 /**
  * The other names each name has through the stored groups, by folded name (the name itself and names folding equal to it excluded):
- * every name of every valid group, or with `names` only those names. Malformed input reads as no names.
+ * every name of every valid group, or with `names` only those names; a review's (`review`) within its group bound. Malformed input
+ * reads as no names.
  */
-export function importLocalizedNameMap(stored: unknown, names?: readonly string[]): Map<string, string[]> {
+export function importLocalizedNameMap(stored: unknown, names?: readonly string[], options: LocalizedOptions = {}): Map<string, string[]> {
     const wanted = names ? new Set(names.filter((name): name is string => typeof name === 'string').map(foldImportName)) : null, map = new Map<string, string[]>();
-    for (const group of validGroups(stored)) {
+    for (const group of validGroups(stored, options)) {
         for (const name of group) {
             const folded = foldImportName(name);
             if (wanted && !wanted.has(folded)) continue;
@@ -60,10 +68,16 @@ export function importLocalizedNameMap(stored: unknown, names?: readonly string[
 
 /**
  * The stored groups merged with newly `found` ones (stored first), each distinct by its folded names, keeping only groups that hold
- * a current Artist entry's name (a label has no localized names: iTunes has no labels), within the bounds. Pure.
+ * a current Artist entry's name (a label has no localized names: iTunes has no labels), within the bounds. A review (`review`) also
+ * keeps groups holding a name its members' Artist entries carry, up to its identity bound. Pure.
  */
-export function mergeImportLocalizedNames(stored: unknown, found: readonly (readonly string[])[], draft: ImportDraftV2): ImportLocalizedNames {
-    const entries = new Set((Array.isArray(draft.album?.artists) ? draft.album.artists : []).map(entry => typeof entry?.name === 'string' ? foldImportName(entry.name) : null)
+export function mergeImportLocalizedNames(stored: unknown, found: readonly (readonly string[])[], draft: ImportDraftV2, options: LocalizedOptions = {}): ImportLocalizedNames {
+    const members = options.review ? (Array.isArray(draft.tracks) ? draft.tracks : []).flatMap(track => {
+        const entries: unknown = track && typeof track === 'object' ? (track as { artists?: unknown }).artists : null;
+        return Array.isArray(entries) ? entries : [];
+    }) : [];
+    const entries = new Set([...(Array.isArray(draft.album?.artists) ? draft.album.artists : []), ...members]
+        .map(entry => entry && typeof entry === 'object' && typeof (entry as { name?: unknown }).name === 'string' ? foldImportName((entry as { name: string }).name) : null)
         .filter((name): name is string => name !== null));
-    return validGroups([...validGroups(stored), ...validGroups(found)].filter(group => group.some(name => entries.has(foldImportName(name)))));
+    return validGroups([...validGroups(stored, options), ...validGroups(found, options)].filter(group => group.some(name => entries.has(foldImportName(name)))), options);
 }

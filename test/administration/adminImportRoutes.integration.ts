@@ -27,6 +27,8 @@
  *   - candidate previews stay out of the per-IP media pool: eight held at once and a staged-cover preview beside them all succeed
  *   - the reconcile and cleanup routes accept a lookup cover slot
  *   - a role, session or candidate gone while the artwork was fetched gets no preview body
+ *   - a review candidate's artwork preview is guarded like an import's, a transient private WebP that stores nothing, and each project kind is found only under its own route
+ *   - a review deleted, a role lost or a candidate gone while its artwork was fetched gets no preview body, and an image element's HEAD request is admitted
  * @end-catalog */
 
 import assert from 'node:assert/strict';
@@ -41,6 +43,7 @@ import jwt from 'jsonwebtoken';
 import { ObjectId } from 'mongodb';
 import { getDb } from '../../src/infrastructure/database';
 import { createAdminImportRouter } from '../../src/routes/adminImportRoutes';
+import { createAdminCatalogReviewRouter } from '../../src/routes/adminCatalogReviewRoutes';
 import { initializeAdminImportStorage } from '../../src/administration/import/adminImportService';
 import { startMongoReplicaSet, type MongoReplicaSetHarness } from '../support/mongoReplicaSet';
 import { loadImportFixture } from '../support/adminImportFixtures';
@@ -70,7 +73,8 @@ const actor = new ObjectId(), ordinary = new ObjectId(), session = new ObjectId(
 const body = () => ({ operationId: randomUUID(), manifest: { rootLabel: 'Synthetic folder', files: [{ slotId: randomUUID(), filename: 'song.mp3', relativePath: 'song.mp3', byteLength: 123 }] } });
 const request = (path: string, method = 'GET', value?: unknown, auth = token, extra: Record<string, string> = {}) => fetch(base + path, { method, headers: { ...(auth ? { Authorization: `Bearer ${auth}` } : {}), ...(value === undefined ? {} : { 'Content-Type': 'application/json' }), ...extra }, ...(value === undefined ? {} : { body: typeof value === 'string' ? value : JSON.stringify(value) }) });
 before(async () => {
-    harness = await startMongoReplicaSet('archtree-admin-import-routes-test'); const app = express(); app.use('/api/admin/v1', createAdminImportRouter(storage, () => artworkClient, () => itunesArtworkClient)); app.get('/api/admin/v1/catalog/probe', (_req, res) => res.json({ reached: true })); app.use((error: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => res.status(error.status ?? 500).json({ code: 'INVALID_REQUEST' }));
+    harness = await startMongoReplicaSet('archtree-admin-import-routes-test'); const app = express(); app.use('/api/admin/v1', createAdminImportRouter(storage, () => artworkClient, () => itunesArtworkClient));
+    app.use('/api/admin/v1', createAdminCatalogReviewRouter(() => artworkClient, () => itunesArtworkClient)); app.get('/api/admin/v1/catalog/probe', (_req, res) => res.json({ reached: true })); app.use((error: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => res.status(error.status ?? 500).json({ code: 'INVALID_REQUEST' }));
     server = await new Promise<Server>(resolve => { const active = app.listen(0, '127.0.0.1', () => resolve(active)); }); const address = server.address(); assert.ok(address && typeof address !== 'string'); base = `http://127.0.0.1:${address.port}`;
 });
 beforeEach(async () => {
@@ -556,4 +560,91 @@ test('a role, session or candidate gone while the artwork was fetched gets no pr
     await getDb()!.collection('adminImportLookups').updateOne({ _id: new ObjectId(id) }, { $set: { 'candidates.0.release.frontArtwork': true } });
     requests = during(() => getDb()!.collection('adminImportLookups').deleteOne({ _id: new ObjectId(id) }));
     await refused(404); assert.equal(requests.length, 1);
+});
+
+test('a review candidate\'s artwork preview is guarded like an import\'s, a transient private WebP that stores nothing, and each project kind is found only under its own route', async () => {
+    const review = new ObjectId(), { id: importId } = await previewProject();
+    // A review and its completed lookup, written directly as previewProject writes an import's.
+    await getDb()!.collection('adminAlbumImports').insertOne({ _id: review, purpose: 'catalogReview', draftVersion: 3 } as never);
+    const record = await getDb()!.collection('adminImportLookups').findOne({ _id: new ObjectId(importId) });
+    await getDb()!.collection('adminImportLookups').insertOne({ ...record, _id: review } as never);
+    const path = (project: string, key: string, kind = 'catalog-reviews') => `/api/admin/v1/${kind}/${project}/lookup/candidates/${encodeURIComponent(key)}/artwork`;
+    const preview = path(review.toHexString(), `musicbrainz:${mbidOf(1)}`), cookie = { Cookie: `session_token=${token}` };
+    let requests = previewClient([]);
+    const unauthenticated = await request(preview, 'GET', undefined, '');
+    assert.deepEqual([unauthenticated.status, unauthenticated.headers.get('cache-control')], [401, 'private, no-store']);
+    assert.equal((await request(preview, 'GET', undefined, userToken)).status, 403);
+    assert.equal((await request(preview, 'GET', undefined, '', cookie)).status, 409);
+    assert.equal((await request(`${preview}?viewer=${ordinary.toHexString()}`, 'GET', undefined, '', cookie)).status, 409);
+    assert.equal((await request(`${preview}?viewer=${actor.toHexString()}`, 'GET', undefined, '', { ...cookie, 'X-Finitude-Account-Viewer': ordinary.toHexString() })).status, 409);
+    assert.equal((await request(`${preview}?viewer=${actor.toHexString()}&size=1200`, 'GET', undefined, '', cookie)).status, 400);
+    assert.equal((await request(`${preview}?viewer=not-an-id`, 'GET', undefined, '', cookie)).status, 400);
+    // The viewer query is admitted only on the artwork route; the review's lookup view still needs the header.
+    assert.equal((await request(`/api/admin/v1/catalog-reviews/${review.toHexString()}/lookup?viewer=${actor.toHexString()}`, 'GET', undefined, '', cookie)).status, 409);
+    assert.equal(requests.length, 0);
+    const jpeg = await sharp({ create: { width: 500, height: 375, channels: 3, background: '#468' } }).jpeg().toBuffer();
+    requests = previewClient([{ url: previewFront(1), status: 200, headers: { 'content-type': 'image/jpeg' }, bodyBase64: jpeg.toString('base64') }]);
+    storageWrites = 0; const before = await snapshot();
+    const read = await request(`${preview}?viewer=${actor.toHexString()}`, 'GET', undefined, '', cookie);
+    assert.deepEqual([read.status, read.headers.get('content-type'), read.headers.get('cache-control'), read.headers.get('x-content-type-options')], [200, 'image/webp', 'private, no-store', 'nosniff']);
+    assert.equal((await sharp(Buffer.from(await read.arrayBuffer())).metadata()).format, 'webp');
+    assert.deepEqual(requests.map(sent => sent.url), [previewFront(1)]);
+    assert.equal(await snapshot(), before, 'no collection changed');
+    assert.equal(storageWrites, 0);
+    // A review ID under /imports and an import ID under /catalog-reviews are not found, without a body or a request; so is an
+    // unknown candidate or one without front artwork.
+    requests = previewClient([]);
+    for (const wrong of [path(review.toHexString(), `musicbrainz:${mbidOf(1)}`, 'imports'), path(importId, `musicbrainz:${mbidOf(1)}`), path(review.toHexString(), `musicbrainz:${mbidOf(2)}`),
+        path(review.toHexString(), `musicbrainz:${mbidOf(3)}`), path('not-an-id', `musicbrainz:${mbidOf(1)}`)]) {
+        const answer = await request(wrong);
+        assert.deepEqual([answer.status, (await answer.arrayBuffer()).byteLength], [404, 0], wrong);
+    }
+    assert.equal(requests.length, 0);
+    // Unconfigured lookup is unavailable, and a demoted administrator is refused.
+    requests = previewClient([], () => ({ available: false, reason: 'contactMissing' }));
+    assert.equal((await request(preview)).status, 503);
+    await getDb()!.collection('users').updateOne({ _id: actor }, { $set: { role: 'user' } });
+    assert.equal((await request(preview)).status, 403);
+    assert.equal(requests.length, 0);
+});
+
+test('a review deleted, a role lost or a candidate gone while its artwork was fetched gets no preview body, and an image element\'s HEAD request is admitted', async () => {
+    const review = new ObjectId(), { id: importId } = await previewProject(), reviews = getDb()!.collection('adminAlbumImports'), lookups = getDb()!.collection('adminImportLookups');
+    const reviewDocument = { _id: review, purpose: 'catalogReview', draftVersion: 3 }, record = { ...(await lookups.findOne({ _id: new ObjectId(importId) })), _id: review };
+    await reviews.insertOne(reviewDocument as never); await lookups.insertOne(record as never);
+    const preview = `/api/admin/v1/catalog-reviews/${review.toHexString()}/lookup/candidates/${encodeURIComponent(`musicbrainz:${mbidOf(1)}`)}/artwork`;
+    const jpeg = await sharp({ create: { width: 64, height: 48, channels: 3, background: '#468' } }).jpeg().toBuffer();
+    const front = () => [{ url: previewFront(1), status: 200, headers: { 'content-type': 'image/jpeg' }, bodyBase64: jpeg.toString('base64') }];
+    /** The preview fetches the artwork, then `change` happens before the response is written. */
+    const during = (change: () => Promise<unknown>) => {
+        const requests = previewClient(front()), inner = artworkClient;
+        artworkClient = { ...inner, async front(...args) { const result = await inner.front(...args); await change(); return result; } };
+        return requests;
+    };
+    const refused = async (status: number) => {
+        const answer = await request(preview);
+        assert.deepEqual([answer.status, answer.headers.get('cache-control'), answer.headers.get('content-type'), (await answer.arrayBuffer()).byteLength], [status, 'private, no-store', null, 0]);
+    };
+    // An image element may ask with HEAD, naming the viewer in the query: it gets the preview's headers and no body.
+    let requests = previewClient(front());
+    const head = await request(`${preview}?viewer=${actor.toHexString()}`, 'HEAD', undefined, '', { Cookie: `session_token=${token}` });
+    assert.deepEqual([head.status, head.headers.get('content-type'), head.headers.get('cache-control'), (await head.arrayBuffer()).byteLength], [200, 'image/webp', 'private, no-store', 0]);
+    assert.equal(requests.length, 1);
+    requests = during(() => getDb()!.collection('users').updateOne({ _id: actor }, { $set: { role: 'user' } }));
+    await refused(403); assert.equal(requests.length, 1);
+    await getDb()!.collection('users').updateOne({ _id: actor }, { $set: { role: 'admin' } });
+    // The re-check after the fetch reads the review again under its own purpose.
+    requests = during(() => reviews.deleteOne({ _id: review }));
+    await refused(404); assert.equal(requests.length, 1);
+    await reviews.insertOne(reviewDocument as never);
+    requests = during(() => reviews.updateOne({ _id: review }, { $set: { purpose: 'import' } }));
+    await refused(404); assert.equal(requests.length, 1);
+    await reviews.updateOne({ _id: review }, { $set: { purpose: 'catalogReview' } });
+    requests = during(() => lookups.updateOne({ _id: review }, { $set: { 'candidates.0.release.frontArtwork': false } }));
+    await refused(404); assert.equal(requests.length, 1);
+    // With everything restored the same preview is served again.
+    await lookups.updateOne({ _id: review }, { $set: { 'candidates.0.release.frontArtwork': true } });
+    requests = previewClient(front());
+    const served = await request(preview);
+    assert.deepEqual([served.status, served.headers.get('content-type'), requests.length], [200, 'image/webp', 1]);
 });

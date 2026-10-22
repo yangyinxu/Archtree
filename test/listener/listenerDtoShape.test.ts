@@ -15,10 +15,11 @@
 
 /**
  * Golden DTO shapes frozen from the pre-change code. Join phrases, Disc Numbers, Draft v2,
- * multi-artist Credits and MusicBrainz IDs all add stored fields; these baselines make any such
- * field that reaches the listener v1 Album, MediaTrack, Artist or Organization summaries, or the legacy public
- * Album, MediaTrack and Artist DTOs, fail here, so exposing one is a deliberate contract change that edits a
- * golden list below rather than an accidental leak.
+ * multi-artist Credits, MusicBrainz IDs and Album expected tracklists all add stored fields; these
+ * baselines make any such field that reaches the listener v1 Album, MediaTrack, Artist or
+ * Organization summaries, or the legacy public Album, MediaTrack and Artist DTOs, fail here, so
+ * exposing one is a deliberate contract change that edits a golden list below rather than an
+ * accidental leak.
  * Golden values were produced by running the current builders, not written by hand.
  */
 
@@ -62,7 +63,8 @@ const storedCredit = (
 ) => ({ creditId, subjectType, subjectId, role, order, ...unknownFields });
 
 // Every stored document carries fields the current DTOs omit: planned additions (joinPhrase, discNumber,
-// musicBrainzId), the already-stored trackNumber, and private fields (createdBy, originalFileName).
+// musicBrainzId), the already-stored trackNumber, and private fields (createdBy, originalFileName, and the
+// administrator-only expectedTracklist, whose rows include a missing-file row no listener may see).
 const storedAlbum = () => ({
     _id: new ObjectId(ids.album),
     title: 'Shape Album',
@@ -83,6 +85,14 @@ const storedAlbum = () => ({
         })
     ],
     musicBrainzId: musicBrainzId(3),
+    expectedTracklist: {
+        source: 'musicbrainz',
+        appliedAt: new Date('2026-05-04T00:00:00.000Z'),
+        rows: [
+            { discNumber: 2, trackNumber: 3, title: 'Documented Track', durationMs: 195_000 },
+            { discNumber: 2, trackNumber: 4, title: 'Unheard Shape Row', durationMs: null }
+        ]
+    },
     createdBy: 'synthetic-owner'
 });
 

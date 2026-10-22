@@ -38,6 +38,8 @@ import {
     toPublicFeedPost
 } from '../services/catalog/publicCatalogService';
 import { toPublicExpandedPage, toPublicPage } from '../services/content/publicPageService';
+// Listener and content reads exclude a catalog-owned administrator field.
+import { withoutExpectedTracklistProjection } from '../services/catalog/albumExpectedTracklist';
 import { boundedLimit, boundedOffset } from '../utils/pagination';
 import { deleteCarouselAndPageReferences } from '../services/content/pageReferenceLifecycleService';
 import { ManualCompositionConflictError } from '../services/catalog/manualCompositionService';
@@ -290,7 +292,7 @@ export const getExpandedPageBySlug = async (req: Request, res: Response, next: N
                 ? db.collection('albums').find({
                     _id: { $in: albumIds.map((id) => ObjectId.createFromHexString(id)) },
                     ...readyPublicAlbumFilter
-                }).maxTimeMS(3_000).toArray()
+                }).project(withoutExpectedTracklistProjection).maxTimeMS(3_000).toArray()
                 : [],
             audioTrackIds.length > 0
                 ? findPublicAudioTracks({
@@ -322,7 +324,7 @@ export const getExpandedPageBySlug = async (req: Request, res: Response, next: N
             ? await db.collection('albums').find({
                 _id: { $in: missingLinkedAlbumIds.map((id) => ObjectId.createFromHexString(id)) },
                 ...readyPublicAlbumFilter
-            }).maxTimeMS(3_000).toArray()
+            }).project(withoutExpectedTracklistProjection).maxTimeMS(3_000).toArray()
             : [];
         const includedAlbums = [...albums, ...linkedAlbums];
         const [publicAlbums, publicAudioTracks] = await Promise.all([

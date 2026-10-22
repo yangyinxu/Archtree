@@ -6,8 +6,8 @@
  *              sameMusicBrainzIdWrites, readMusicBrainzIdState
  *   Constants: IMPORT_MUSICBRAINZ_NAME_LIMITS
  * Internal
- *   Types: NamedKind
- *   Functions: carriedIds, addNames, ready
+ *   Types: CarriedOptions, NamedKind
+ *   Functions: idBound, carriedIds, addNames, ready
  *   Constants: invisible, SHOWN_WRITE_KEYS, collections
  * @end-catalog */
 
@@ -15,7 +15,8 @@
  * MusicBrainz IDs of import Artist entries and the label: the names metadata lookup found for each ID (under which a renamed entry
  * keeps it, and which list alias candidates), which ID a publication records or replaces on which record (the write matrix the
  * Web mirrors in importIdentity.ts), the comparison with the writes a confirmation showed, and the holders read in a
- * transaction. Owner rules: docs/business-rules.md (Administrator Album Imports; Administrator Metadata Lookup).
+ * transaction. An existing-Album review (`review`) also keeps names for the IDs its members' Artist entries carry. Owner rules:
+ * docs/business-rules.md (Administrator Album Imports; Administrator Metadata Lookup).
  */
 import { ObjectId, type ClientSession } from 'mongodb';
 import { getDb } from '../../infrastructure/database';
@@ -23,13 +24,20 @@ import { keepableMusicBrainzId } from '../../utils/musicBrainzId';
 import { uuid } from './adminImportContract';
 import { foldImportName, hasOwn, type ImportDraftV2 } from './adminImportDraft';
 import type { ImportApprovedIdentities } from './adminImportCatalogCommit';
+import { REVIEW_LOOKUP_LIMITS } from '../lookup/lookupReviewValues';
 import { readyArtistLifecycleFilter } from '../../services/catalog/artistReferenceFenceService';
 import { readyOrganizationLifecycleFilter } from '../../services/catalog/organizationReferenceFenceService';
 
 /** Names lookup found per MusicBrainz ID: stored on the import document and frozen into a publication. */
 export type ImportMusicBrainzNames = { musicBrainzId: string; names: string[] }[];
-/** One entry per Artist entry and the label (21 IDs) and at most 32 names per ID. */
+/**
+ * One entry per Artist entry and the label (21 IDs) and at most 32 names per ID. An existing-Album review keeps one per identity
+ * and the label instead (REVIEW_LOOKUP_LIMITS.identities + 1, 513 IDs).
+ */
 export const IMPORT_MUSICBRAINZ_NAME_LIMITS = Object.freeze({ ids: 21, names: 32, name: 200 });
+/** Whose IDs names are kept for: an import's Album entries and label, or also a review's member entries (`review`). */
+type CarriedOptions = { review?: boolean };
+const idBound = (options: CarriedOptions) => options.review ? REVIEW_LOOKUP_LIMITS.identities + 1 : IMPORT_MUSICBRAINZ_NAME_LIMITS.ids;
 
 const invisible = /[\p{Cc}\p{Cf}\p{Cs}]/u;
 /** A found name as stored: NFC and trimmed, 1 to 200 characters, without control, invisible formatting or lone surrogate characters. */
@@ -38,9 +46,17 @@ export function cleanMusicBrainzName(raw: unknown): string | null {
     const name = raw.normalize('NFC').trim();
     return name && name.length <= IMPORT_MUSICBRAINZ_NAME_LIMITS.name && !invisible.test(name) ? name : null;
 }
-/** The IDs the draft carries, in draft order (entries, then the label), once each. */
-const carriedIds = (draft: ImportDraftV2): string[] =>
-    [...new Set([...draft.album.artists.map(entry => entry.musicBrainzId), draft.album.label?.musicBrainzId ?? null].filter((id): id is string => typeof id === 'string'))];
+/**
+ * The IDs the draft carries, in draft order (Album entries, then the label, then, for a review, each track's Artist entries in
+ * track order), once each. Malformed member lists carry nothing.
+ */
+const carriedIds = (draft: ImportDraftV2, options: CarriedOptions = {}): string[] => {
+    const members = options.review ? (Array.isArray(draft.tracks) ? draft.tracks : []).flatMap(track => {
+        const entries: unknown = track && typeof track === 'object' ? (track as { artists?: unknown }).artists : null;
+        return Array.isArray(entries) ? entries.map(entry => entry && typeof entry === 'object' ? (entry as { musicBrainzId?: unknown }).musicBrainzId : null) : [];
+    }) : [];
+    return [...new Set([...draft.album.artists.map(entry => entry.musicBrainzId), draft.album.label?.musicBrainzId ?? null, ...members].filter((id): id is string => typeof id === 'string'))];
+};
 /** Appends clean names not yet present by fold, up to the per-ID bound. */
 const addNames = (names: string[], raw: readonly unknown[]) => {
     for (const value of raw) {
@@ -49,11 +65,14 @@ const addNames = (names: string[], raw: readonly unknown[]) => {
         if (name && !names.some(existing => foldImportName(existing) === foldImportName(name))) names.push(name);
     }
 };
-/** Valid stored names per ID, for IDs the draft still carries only; malformed input reads as no names. */
-export function importMusicBrainzNameMap(stored: unknown, draft: ImportDraftV2): Map<string, string[]> {
-    const carried = new Set(carriedIds(draft)), map = new Map<string, string[]>();
+/**
+ * Valid stored names per ID, for IDs the draft still carries only (with `review`, its members' entries included, within the review
+ * bound); malformed input reads as no names.
+ */
+export function importMusicBrainzNameMap(stored: unknown, draft: ImportDraftV2, options: CarriedOptions = {}): Map<string, string[]> {
+    const carried = new Set(carriedIds(draft, options)), map = new Map<string, string[]>();
     if (!Array.isArray(stored)) return map;
-    for (const item of stored.slice(0, IMPORT_MUSICBRAINZ_NAME_LIMITS.ids)) {
+    for (const item of stored.slice(0, idBound(options))) {
         if (!item || typeof item !== 'object' || !Array.isArray((item as { names?: unknown }).names)) continue;
         const id = keepableMusicBrainzId((item as { musicBrainzId?: unknown }).musicBrainzId);
         if (!id || !carried.has(id) || map.has(id)) continue;
@@ -64,11 +83,11 @@ export function importMusicBrainzNameMap(stored: unknown, draft: ImportDraftV2):
 }
 /**
  * The stored names of still-carried IDs merged with newly `found` ones (stored first), fold-deduplicated and bounded to 21 IDs in
- * draft order and 32 names each. Pure.
+ * draft order and 32 names each. A review (`review`) also keeps the IDs its members' entries carry, up to 513 IDs. Pure.
  */
-export function mergeImportMusicBrainzNames(stored: unknown, found: ReadonlyMap<string, readonly string[]>, draft: ImportDraftV2): ImportMusicBrainzNames {
-    const existing = importMusicBrainzNameMap(stored, draft), merged: ImportMusicBrainzNames = [];
-    for (const id of carriedIds(draft).slice(0, IMPORT_MUSICBRAINZ_NAME_LIMITS.ids)) {
+export function mergeImportMusicBrainzNames(stored: unknown, found: ReadonlyMap<string, readonly string[]>, draft: ImportDraftV2, options: CarriedOptions = {}): ImportMusicBrainzNames {
+    const existing = importMusicBrainzNameMap(stored, draft, options), merged: ImportMusicBrainzNames = [];
+    for (const id of carriedIds(draft, options).slice(0, idBound(options))) {
         const names = [...existing.get(id) ?? []];
         addNames(names, found.get(id) ?? []);
         if (names.length) merged.push({ musicBrainzId: id, names });

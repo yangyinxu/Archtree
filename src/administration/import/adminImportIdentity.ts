@@ -111,10 +111,12 @@ export const IMPORT_CANDIDATE_READ_BUDGET_MS = 10_000;
  * member matches exist or a member is malformed, so no append file is preselected from a partial list; `unavailable` names the
  * rows whose same-name, same-ID, alias or localized-name record is malformed, and the Artist names whose localized-name record is
  * listed for another row. All reads share IMPORT_CANDIDATE_READ_BUDGET_MS.
- * Names are never unique identity keys.
+ * Names are never unique identity keys. `artistNameLimit` raises the bound of distinct Artist names queried (40 by default, which
+ * every import keeps): an existing-Album review passes its identity bound (REVIEW_LOOKUP_LIMITS.identities), since each of its
+ * identities is one synthetic entry; the shared read budget still bounds the whole read.
  */
 export async function importIdentityCandidates(input: { manifest: ImportManifest; draft: ImportDraftV2; assets: readonly ImportAsset[]; decisions: readonly Pick<ImportDecisionV2, 'scope' | 'action' | 'candidateId'>[];
-    names?: ReadonlyMap<string, readonly string[]>; localized?: ReadonlyMap<string, readonly string[]>; proposals?: ImportIdentityProposals }, session: ClientSession): Promise<ImportCandidatesResponse> {
+    names?: ReadonlyMap<string, readonly string[]>; localized?: ReadonlyMap<string, readonly string[]>; proposals?: ImportIdentityProposals; artistNameLimit?: number }, session: ClientSession): Promise<ImportCandidatesResponse> {
     const { manifest, draft, assets } = input, db = getDb()!, items: ImportDuplicateCandidate[] = [], unavailable: ImportCandidatesResponse['unavailable'] = [];
     const deadline = Date.now() + IMPORT_CANDIDATE_READ_BUDGET_MS, maxTimeMS = () => Math.max(1, Math.min(3_000, deadline - Date.now()));
     const target = input.decisions.find(decision => decision.scope === 'album' && decision.action === 'reuse' && objectId(decision.candidateId))?.candidateId ?? null;
@@ -126,7 +128,7 @@ export async function importIdentityCandidates(input: { manifest: ImportManifest
         return out;
     };
     const groups: { kind: Exclude<Kind, 'track'>; value: string }[] = [
-        ...distinct([...draft.album.artists.map(entry => entry.name), ...proposals.artistNames], 2 * DRAFT_V2_LIMITS.artists).map(value => ({ kind: 'artist' as const, value })),
+        ...distinct([...draft.album.artists.map(entry => entry.name), ...proposals.artistNames], input.artistNameLimit ?? 2 * DRAFT_V2_LIMITS.artists).map(value => ({ kind: 'artist' as const, value })),
         ...distinct([draft.album.label?.name ?? '', ...proposals.labelNames], 2).map(value => ({ kind: 'organization' as const, value })),
         ...distinct([draft.album.title, ...proposals.albumTitles], 2).map(value => ({ kind: 'album' as const, value }))];
     const hashes = new Set(assets.filter(asset => asset.state === 'ready' && manifest.files.some(file => file.slotId === asset.slotId)).map(asset => asset.sha256));
@@ -348,10 +350,11 @@ export function sameImportPreselections(shown: readonly unknown[], computed: rea
 
 export const IMPORT_IDENTITY_FENCE_ID = 'identity';
 /**
- * Every format-3 commit writes this one fence document. Snapshot isolation alone lets two commits each insert a record the other's
- * recheck could not see; writing one shared document makes the later commit conflict and retry against fresh state, where its
- * recheck sees the first commit's records. Only format-3 import commits write it: a record that a format-1 or format-2 commit, the
- * Admin Catalog or the Content Manager creates concurrently with a commit is not rechecked (names are never identity keys).
+ * Every format-3 import commit, and every existing-Album review apply that creates, reuses or records identities, writes this one
+ * fence document. Snapshot isolation alone lets two commits each insert a record the other's recheck could not see; writing one
+ * shared document makes the later commit conflict and retry against fresh state, where its recheck sees the first commit's records.
+ * Only those writers write it: a record that a format-1 or format-2 commit, the Admin Catalog or the Content Manager creates
+ * concurrently with a commit is not rechecked (names are never identity keys).
  */
 export async function serializeImportIdentityCommits(session: ClientSession): Promise<void> {
     await getDb()!.collection<{ _id: string; revision: number }>('adminImportAnalysisSlots').updateOne({ _id: IMPORT_IDENTITY_FENCE_ID }, { $inc: { revision: 1 } }, { session, upsert: true });

@@ -28,6 +28,9 @@
  *   - an embedded barcode preselects an iTunes-only candidate a UPC lookup found only when it may be preselected, and an ineligible lone hit preselects nothing
  *   - iTunes-only and MusicBrainz candidates never share a group, MusicBrainz group keys are unchanged, and an iTunes release under another ID is incomplete
  *   - an artist tag agrees with a credited artist through an iTunes localized name group that holds the credited name
+ *   - an explicit exact comparison ranks as the default for Hotel California, Blue Archive and Pandora Call, with no subset or completeness key
+ *   - the MusicBrainz group key of the one-track single against one file of its own duration is unchanged
+ *   - track credits never change an import proposal, group or status
  * @end-catalog */
 
 import assert from 'node:assert/strict';
@@ -505,4 +508,40 @@ test('an artist tag agrees with a credited artist through an iTunes localized na
     // An iTunes-only candidate's single artist string agrees the same way; malformed groups are ignored.
     assert.equal(rankLookupCandidates([itunesCandidateOf('1689358563', [217_030], 'noRelease')], singleFile(['ISEKAIJOUCHO']), { localized: [['isekaijoucho', 'ヰ世界情緒'], 'x' as never, [7 as never]] })
         .preselection?.artistMismatch, false);
+});
+
+test('an explicit exact comparison ranks as the default for Hotel California, Blue Archive and Pandora Call, with no subset or completeness key', () => {
+    const pandora = [...releases.values()].filter(value => value.media.some(medium => medium.tracks.some(track => track.title === 'パンドラコール')));
+    const cases: [LookupCandidate[], LocalFileEvidence[]][] = [
+        [hotelCalifornia.map(value => candidate(value)), filesFrom(hotelBase, { jitter, artistTags: ['Eagles'] })],
+        [[candidate(release('85bc0ffc')), candidate(release('8f032fff')), candidate(release('8baecda4'))], filesFrom(release('8baecda4'), { discs: true })],
+        [pandora.map(value => candidate(value)), singleFile(['ヰ世界情緒'])]
+    ];
+    for (const [input, files] of cases) {
+        for (const searchComplete of [undefined, true, false]) {
+            const exact = rankLookupCandidates(input, files, { comparison: 'exact', searchComplete, exactSearchComplete: false });
+            assert.deepEqual(exact, rankLookupCandidates(input, files, { searchComplete }));
+            assert.equal('completeness' in exact, false);
+            assert.ok(exact.candidates.every(entry => entry.comparison === null || !('subset' in entry.comparison)));
+        }
+    }
+});
+
+test('the MusicBrainz group key of the one-track single against one file of its own duration is unchanged', () => {
+    const single = release('5302459e');
+    const ranked = rankLookupCandidates([candidate(single)], [{ slotId: 'only', order: 0, durationMs: single.media[0].tracks[0].lengthMs, durationPrecisionMs: 0,
+        discNumber: null, trackNumber: null, artistTags: [], identifiers: noIdentifiers }]);
+    assert.equal(ranked.groups[0].groupKey, 'df546672b3a58420e3f3e1cf61f2fc0f449f8a9ee8fb94b083031e436ac06462');
+});
+
+test('track credits never change an import proposal, group or status', () => {
+    const guest = { name: 'Synthetic Guest', joinPhrase: '', artistId: '00000000-0000-4000-8000-0000000000e1', artistName: 'Synthetic Guest' };
+    const credited = (value: MusicBrainzRelease, index: number) => ({ ...value, media: value.media.map(medium => ({ ...medium, tracks: medium.tracks.map((track, position) =>
+        ({ ...track, artistCredit: (index + position) % 3 === 0 ? 'release' as const : (index + position) % 3 === 1 ? [guest] : value.artistCredit })) })) });
+    const files = filesFrom(hotelBase, { jitter, artistTags: ['Eagles'] });
+    const plain = rankLookupCandidates(hotelCalifornia.map(value => candidate(value)), files);
+    const withCredits = rankLookupCandidates(hotelCalifornia.map((value, index) => candidate(credited(value, index))), files);
+    assert.deepEqual(withCredits, plain);
+    for (const value of hotelCalifornia) assert.deepEqual(proposalForRelease(credited(value, 1)), proposalForRelease(value));
+    assert.deepEqual(lookupTrackAssignment(credited(hotelBase, 2), files), lookupTrackAssignment(hotelBase, files));
 });

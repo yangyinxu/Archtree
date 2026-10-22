@@ -132,6 +132,9 @@ test('the transport sends the strict v2 schema, the v2 prompt and the labelled l
     assert.deepEqual([item.additionalProperties, item.properties.artists.items.additionalProperties, item.properties.artists.items.required], [false, false, ['name', 'role', 'joinPhrase']]);
     assert.match(body.instructions, /Never output identifiers of any kind \(MusicBrainz, catalog, barcode, ISRC or other IDs\) and never choose, match or describe existing catalog records/);
     assert.match(body.instructions, /Disc numbers require disc evidence such as a disc folder or filename part \(CD2, Disc 2, a 2-03 prefix\), a disc tag, or the same track's disc position in lookupContext/);
+    // A review sends its applied release too, but its validator refuses Disc and Track Numbers from anything but a filename.
+    assert.match(body.instructions, /the MusicBrainz release an administrator applied to this import or review/);
+    assert.match(body.instructions, /for purpose catalogReview, Track and Disc Numbers come only from that filename \(source filename\), never from lookupContext/);
     const sent = JSON.parse(body.input);
     assert.deepEqual([sent.lookupContext.source, sent.lookupContext.kind, sent.lookupContext.trust], ['musicbrainz', 'appliedRelease', 'untrusted']);
     assert.deepEqual(sent.lookupContext.release, context.release);

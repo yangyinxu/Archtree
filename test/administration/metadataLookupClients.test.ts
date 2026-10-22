@@ -17,6 +17,9 @@
  *   - every malformed synthetic MusicBrainz answer is invalid or unavailable, never a no-match, and is not cached
  *   - redirects are refused off host before a second lookup and after three hops
  *   - unknown fields are dropped and a placeholder barcode becomes no barcode
+ *   - a release lookup keeps each track's own artist credit, leaves out an invalid or over-bound one for its track only, and ranks and proposes as without track credits
+ *   - trimming a raw release answer with the release shape keeps its valid track credits, and trimming that projection again changes nothing
+ *   - a medium's pregap and data tracks are counted as left out, an invalid one is not counted, and the release still parses
  *   - artist and label alias lookups have fixed URLs, refuse a malformed ID before sending, and keep names in a fixed order without search hints
  *   - identifier formats are checked before use
  *   - iTunes accepts text/javascript, drops preview and store links, keeps allowlisted artwork and sends no contact
@@ -45,7 +48,13 @@ import {
 import type { LookupGateLease, MetadataLookupRateGate } from '../../src/administration/lookup/lookupRateGate';
 import { createLookupResponseCache, type LookupResponseCache } from '../../src/administration/lookup/lookupResponseCache';
 import { parseRetryAfter, type LookupClientDependencies } from '../../src/administration/lookup/lookupSourceRequest';
-import { createMusicBrainzClient, escapeLucene, musicBrainzLuceneQuery, musicBrainzUrls, parseMusicBrainzEntityAliases, parseMusicBrainzReleaseSearch } from '../../src/administration/lookup/musicBrainzClient';
+import {
+    createMusicBrainzClient, escapeLucene, musicBrainzLuceneQuery, musicBrainzShapes, musicBrainzUrls, parseMusicBrainzEntityAliases, parseMusicBrainzRelease,
+    parseMusicBrainzReleaseSearch
+} from '../../src/administration/lookup/musicBrainzClient';
+import { validateLookupShape } from '../../src/administration/lookup/lookupResponseShape';
+import { proposalForRelease, rankLookupCandidates, trackArtistProposal, type LocalFileEvidence } from '../../src/administration/lookup/lookupRanking';
+import { releaseAudioTracks } from '../../src/administration/lookup/lookupSubset';
 import { createItunesSearchClient, itunesArtworkAddress, itunesStorefrontsForBarcode, itunesStorefrontsForText, itunesUrls } from '../../src/administration/lookup/iTunesSearchClient';
 import { coverArtDestination, createCoverArtClient } from '../../src/administration/lookup/coverArtClient';
 import {
@@ -328,6 +337,72 @@ test('unknown fields are dropped and a placeholder barcode becomes no barcode', 
     assert.deepEqual(release.media[0].tracks[0].isrcs, ['USAAA2000001']);
     const placeholder = (await musicBrainz.lookupRelease(syntheticId('musicbrainz/synthetic-placeholder-barcode.json'), call()))!;
     assert.equal(placeholder.barcode, null); assert.equal(placeholder.barcodeText, '0000000000000');
+});
+
+test('a release lookup keeps each track\'s own artist credit, leaves out an invalid or over-bound one for its track only, and ranks and proposes as without track credits', async () => {
+    const file = 'musicbrainz/synthetic-release-track-credits.json';
+    const { musicBrainz } = clients(exchangesOf(file));
+    const release = (await musicBrainz.lookupRelease(syntheticId(file), call()))!;
+    const tracks = release.media[0].tracks;
+    assert.deepEqual(tracks.map(track => track.artistCredit?.map(credit => `${credit.name}${credit.joinPhrase}`).join('') ?? null),
+        ['Synthetic Lead', 'Synthetic A feat. Synthetic B', 'Various Artists', null, null, null]);
+    assert.deepEqual(tracks[0].artistCredit, release.artistCredit);
+    assert.deepEqual(tracks.map(track => trackArtistProposal(release, track)), [
+        { artists: [{ name: 'Synthetic Lead', role: 'primary', joinPhrase: null, musicBrainzId: release.artistCredit[0].artistId }] },
+        { artists: [{ name: 'Synthetic A', role: 'primary', joinPhrase: ' feat. ', musicBrainzId: tracks[1].artistCredit![0].artistId },
+            { name: 'Synthetic B', role: 'featured', joinPhrase: null, musicBrainzId: tracks[1].artistCredit![1].artistId }] },
+        { reason: 'placeholder' }, { reason: 'missing' }, { reason: 'missing' }, { reason: 'missing' }]);
+    assert.equal(release.trackCount, 6);
+    // The same body without any track credit parses to the same release apart from them, and ranks and proposes alike.
+    const body = structuredClone(loadLookupFixture(file).exchanges[0].body) as { media: { tracks: Record<string, unknown>[] }[] };
+    for (const medium of body.media) for (const track of medium.tracks) delete track['artist-credit'];
+    const plain = parseMusicBrainzRelease(body), stripped = structuredClone(release);
+    for (const medium of stripped.media) for (const track of medium.tracks) delete track.artistCredit;
+    assert.deepEqual(stripped, plain);
+    assert.deepEqual(proposalForRelease(release), proposalForRelease(plain));
+    const files: LocalFileEvidence[] = tracks.map((track, index) => ({ slotId: `slot-${index}`, order: index, durationMs: track.lengthMs, durationPrecisionMs: 0,
+        discNumber: null, trackNumber: track.position, artistTags: ['Synthetic Lead'], identifiers: { releaseId: null, barcode: null, catalogNumber: null } }));
+    const candidate = (value: typeof release) => ({ key: `musicbrainz:${value.releaseId}`, source: 'musicbrainz' as const, releaseId: value.releaseId, summary: null, release: value });
+    const ranked = rankLookupCandidates([candidate(release)], files);
+    assert.deepEqual(ranked, rankLookupCandidates([candidate(plain)], files));
+    assert.deepEqual([ranked.candidates[0].status, ranked.preselection?.basis], ['matching', 'onlyMatchingGroup']);
+});
+
+test('trimming a raw release answer with the release shape keeps its valid track credits, and trimming that projection again changes nothing', () => {
+    // Recorded fixtures are stored trimmed by this shape, so a re-recorded release keeps the track credits MusicBrainz sends.
+    const raw = loadLookupFixture('musicbrainz/synthetic-release-track-credits.json').exchanges[0].body as { media: { tracks: Record<string, unknown>[] }[] };
+    const trimmed = validateLookupShape<typeof raw>(musicBrainzShapes.release, raw);
+    assert.deepEqual(trimmed.media[0].tracks.map(track => 'artist-credit' in track), [true, true, true, false, false, false]);
+    assert.deepEqual(trimmed.media[0].tracks.slice(0, 3).map(track => track['artist-credit']), raw.media[0].tracks.slice(0, 3).map(track => track['artist-credit']));
+    assert.deepEqual(validateLookupShape(musicBrainzShapes.release, trimmed), trimmed);
+    assert.deepEqual(parseMusicBrainzRelease(trimmed), parseMusicBrainzRelease(raw));
+});
+
+test('a medium\'s pregap and data tracks are counted as left out, an invalid one is not counted, and the release still parses', () => {
+    const raw = loadLookupFixture('musicbrainz/synthetic-release-track-credits.json').exchanges[0].body as { media: Record<string, unknown>[] };
+    const hiddenTrack = (position: number) => ({ id: '00000000-0000-4000-8000-000000000b99', position, number: String(position), title: 'Synthetic Hidden Track', length: 1000,
+        recording: { id: '00000000-0000-4000-8000-000000000b98', length: 1000 } });
+    const counted = structuredClone(raw);
+    Object.assign(counted.media[0], { pregap: hiddenTrack(0), 'data-tracks': [hiddenTrack(7)] });
+    const release = parseMusicBrainzRelease(counted), plain = parseMusicBrainzRelease(raw);
+    assert.deepEqual([release.media[0].hiddenTracks, release.trackCount, releaseAudioTracks(release).tracks.length, releaseAudioTracks(release).leftOutTracks], [2, 6, 6, 2]);
+    assert.ok(!JSON.stringify(release).includes('Synthetic Hidden Track'), 'only the count is kept');
+    // A release without them keeps no count, so it parses and ranks as before they were counted.
+    assert.equal('hiddenTracks' in plain.media[0], false);
+    const { hiddenTracks: _hiddenTracks, ...medium } = release.media[0];
+    assert.deepEqual({ ...release, media: [medium] }, plain);
+    // Trimming keeps only their positions, and trimming again changes nothing.
+    const trimmed = validateLookupShape<{ media: Record<string, unknown>[] }>(musicBrainzShapes.release, counted);
+    assert.deepEqual([trimmed.media[0].pregap, trimmed.media[0]['data-tracks']], [{ position: 0 }, [{ position: 7 }]]);
+    assert.deepEqual(validateLookupShape(musicBrainzShapes.release, trimmed), trimmed);
+    // An invalid pregap or data-track list is left out alone.
+    for (const [pregap, dataTracks, count] of [[{ position: -1 }, [hiddenTrack(7)], 1], [hiddenTrack(0), 'x', 1], ['x', [{ position: 'x' }], undefined]] as const) {
+        const invalid = structuredClone(raw);
+        Object.assign(invalid.media[0], { pregap, 'data-tracks': dataTracks });
+        assert.equal(parseMusicBrainzRelease(invalid).media[0].hiddenTracks, count, JSON.stringify([pregap, dataTracks]).slice(0, 60));
+    }
+    // The recorded synthetic release with a pregap counts it too.
+    assert.equal(parseMusicBrainzRelease(loadLookupFixture('musicbrainz/synthetic-unknown-fields.json').exchanges.at(-1)!.body).media[0].hiddenTracks, 1);
 });
 
 test('artist and label alias lookups have fixed URLs, refuse a malformed ID before sending, and keep names in a fixed order without search hints', async () => {

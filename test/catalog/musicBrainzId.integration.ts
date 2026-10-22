@@ -1,7 +1,8 @@
 /**
- * Only the admin catalog editor and import publication write a MusicBrainz ID: the Artist and Organization model updates that
- * legacy content routes and the Content Manager use drop it, so neither a stored ID nor a new one changes through them. All names,
- * IDs and accounts are synthetic.
+ * Only the admin catalog editor, import publication and an applied existing-Album review (covered in
+ * test/administration/adminCatalogReviewApply.integration.ts) write a MusicBrainz ID: the Artist and Organization model updates
+ * that legacy content routes and the Content Manager use drop it, so neither a stored ID nor a new one changes through them. All
+ * names, IDs and accounts are synthetic.
  */
 import assert from 'node:assert/strict';
 import type { Server } from 'node:http';

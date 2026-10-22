@@ -742,34 +742,174 @@ The wire protocol and operational bounds are documented in
   for Albums, Artists, MediaTracks and Organizations. Artist portraits are
   circular; Organizations use their name mark, matching listener details.
   Manual editing and applicable management actions are available from each
-  administrator detail page instead of repeated inventory actions. Proofreading
-  applies to Albums; local MP3 conversion applies to Albums and audio MediaTracks.
-  Detail pages display current saved artwork, including supported legacy
-  artwork, through protected administrator delivery and retain the dedicated
-  administrator layout. Returning to the inventory retains the content category.
-- Administrators may create a private proofreading project for a ready existing
-  Album with at most 100 ready Audio members. Empty Albums are supported; missing,
+  administrator detail page instead of repeated inventory actions.
+  Existing-Album reviews apply to Albums; local MP3 conversion applies to Albums
+  and audio MediaTracks. Detail pages display current saved artwork, including
+  supported legacy artwork, through protected administrator delivery and retain
+  the dedicated administrator layout. Returning to the inventory retains the
+  content category.
+- Administrators may create a private existing-Album review for a ready Album
+  with at most 100 ready Audio members. Empty Albums are supported; missing,
   malformed, mixed Video, or inconsistent memberships require repair before
   creating a review. The server captures current catalog revisions and original
-  filenames when retained. Missing historical filenames and folder names remain
-  explicitly unknown; an Album title is not presented as a source folder.
-- Existing-Album proofreading shares the durable analysis, grant, concurrency and
-  provider-call limits of imports. Opening a project or editing its private draft
-  never starts paid analysis. Luna suggestions do not change the catalog. An
-  administrator can independently review suggestions and manually edit the
-  private Album title/date and Track titles, Disc Numbers and Track Numbers,
-  then explicitly select saved fields for a separate catalog confirmation. The
-  ordered Artist Credits with their join phrases and the label are read-only
-  review context; metadata lookup is not part of existing-Album reviews.
-- Applying an existing-Album review validates every captured catalog revision,
-  membership, readiness and filename/media identity. A replacement or external
-  edit prevents applying the stale project, rather than silently rebasing it.
-  Selected metadata changes, automatic Album order and the operation receipt
-  commit atomically; retries use the original intent. Artist identity/Credits,
-  artwork, visibility, membership and stored media are preserved. Artist-name
-  and label suggestions are identity hints for a separate explicit catalog
-  Credit edit. Applied reviews remain read-only; further corrections use the
-  current Web catalog editor or a new Web review.
+  filenames when retained and, for metadata lookup, while those revisions are
+  current: each member's duration, Disc Number, ordered Credits and
+  attribution state, the Album's ordered primary and featured Artist Credits
+  and its first label Credit, the revision and MusicBrainz ID of each Artist
+  and Organization those Credits name, and the Album's expected tracklist
+  rows. A member's legacy Artist relationships not yet migrated count as
+  legacy unspecified Credits. Missing historical filenames and folder names
+  remain explicitly unknown; an Album title is not presented as a source
+  folder. The Web Album page's Complete from MusicBrainz action creates a
+  review; where lookup is not configured, the same page creates a review for
+  manual editing. The action is shown disabled, with its reason, for an Album
+  that cannot have a review.
+  While an unapplied review of the Album exists whose source is current, the
+  action opens that review; creating another needs an explicit choice.
+- Existing-Album reviews share the durable analysis, grant, concurrency and
+  provider-call limits of imports, and use metadata lookup as described in
+  Administrator Metadata Lookup. Opening a review or editing its private draft
+  never starts paid analysis, and creating one never starts Luna. Neither
+  metadata lookup nor Luna changes the catalog. In a review, the Album's saved
+  values count as the administrator's own: lookup fills only values that are
+  empty in the catalog and still automatic in the review, and replaces them
+  when another candidate is applied or none is chosen, as in Administrator
+  Metadata Lookup; a lookup value that differs from a saved one is a conflict
+  the administrator answers by keeping the current value or using the lookup
+  value. An administrator can also edit the private Album title/date and Track
+  titles, Disc Numbers and Track Numbers, then explicitly select saved changes
+  for a separate catalog confirmation. The ordered Artist entries with their
+  roles and join phrases, each member's track Artist entries, the label and
+  the expected tracklist change only through lookup values and conflict
+  answers, never by typing or a Luna suggestion. Luna suggestions for the
+  Album title and date and for Track titles, Disc Numbers and Track Numbers
+  are labelled Luna AI, arrive unticked, and change the private draft only
+  when the administrator accepts each one; Luna's Artist and label
+  suggestions remain hints.
+- Applying an existing-Album review is a separate explicit confirmation of
+  selected saved changes, each shown with its saved and proposed value: the
+  Album title and date, the Artist entries and the label with each new or
+  reused Artist and Organization (a reused hidden one marked) and each
+  MusicBrainz ID to be recorded or replaced, the expected tracklist with the
+  number of missing-file rows it adds, each Track's title, Disc Number and
+  Track Number, and each member whose Credits change, with its current and
+  new Credits and attribution state. Every value lookup filled and every
+  conflict answered with the lookup value arrives selected, and any can be
+  deselected. An expected tracklist can be selected only when, after the
+  selected changes, every member its pairing placed sits at its row;
+  otherwise the confirmation says which member is off its row. Disc and
+  Track Numbers filled through a pairing can be applied only together with
+  that pairing's expected tracklist, or when the Album's kept tracklist
+  places each such member at a row with the same position. When the Album's
+  primary Artist Credits change, the confirmation says that Album Credits
+  are never copied to members and names each member whose Credits, after the
+  selected changes, still name a replaced Artist.
+- Applying is refused while the review's metadata lookup is queued, running or
+  retrying automatically or its Luna analysis is queued or running, and waits
+  only for the conflicts and identity rows of selected changes; a tie never
+  blocks other changes. It validates every captured catalog revision, those of
+  the Artists and Organizations the captured Credits name included,
+  membership, readiness and filename/media identity, and the reviewed revision
+  of every other reused Artist and Organization, and rechecks every
+  preselection. A changed catalog revision, membership or media identity makes
+  the review stale: applying it writes nothing, rather than silently rebasing
+  it. A new identity candidate or MusicBrainz ID holder instead shows its row
+  again for an answer in the same review. The selected changes, member
+  Credits included, new Artists and Organizations, MusicBrainz IDs, automatic
+  Album order and the operation receipt commit atomically, or nothing is
+  written; retries use the original intent and never create a record twice.
+  Applying never adds, removes or replaces members or their media and changes
+  member order only through Disc and Track Numbers; artwork and visibility are
+  unchanged, and MediaTrack Credits change only as described below. Applied
+  reviews remain read-only; further corrections use the current Web catalog
+  editor or a new Web review.
+- Applying a review's Artist entries replaces the Album's primary and featured
+  Artist Credits with them, with their roles and join phrases, through the
+  canonical Credit lifecycle. The new Credits take the positions of the
+  replaced ones in entry order, any extra entries follow the last of them, and
+  they lead the list when the Album had none. Every other Album Credit keeps
+  its subject, role and relative order; Credit orders are renumbered by list
+  position, and a join phrase stays only while its following Credit is
+  unchanged, as the canonical Credit lifecycle keeps it. An entry captured from
+  an Album Credit keeps that Credit's Artist, so moving such a Credit to
+  another Artist remains a separate catalog Credit edit. Artist entries can be
+  applied only when the review shows every primary and featured Artist Credit
+  of the Album. Applying the label replaces the subject of the Album's first
+  label Credit, or adds a label Credit right after the Artist Credits when the
+  Album has none. The label can be applied only when the review shows the
+  Album's first label Credit, or the Album has no label Credit; otherwise the
+  label is read-only and its lookup value is shown as not applicable. New
+  Artists and label Organizations take the Album's visibility, and an Album
+  that gains an Artist or label Credit has documented attribution. Applying
+  never copies the Album's Credits to its members; member Credits change only
+  as described next.
+- In an existing-Album review, a member's track Artist entries are its
+  primary and featured Artist Credits with their names, roles and join
+  phrases. Lookup proposes entries for a member only through a single
+  pairing, and only from the artist credit of the release track it pairs
+  with; never from the release's or the Album's credit. The proposal keeps
+  the credited names, name order and join phrases and follows the role,
+  placeholder, repeat and format rules of applied Artist entries, so the
+  entry after a featuring phrase, and every later one, is featured. An
+  iTunes-only candidate gives each track its one artist name as one primary
+  entry, never split. A track's credit is usable when an entry remains after
+  placeholders and repeats are dropped and the list is not left out for its
+  format or a review bound; a left-out list is shown. An entry names a
+  captured Artist when that Artist's saved name equals, case-insensitively,
+  the entry's name or a name or alias lookup found for its MusicBrainz ID, or
+  when that Artist already keeps the entry's MusicBrainz ID. A paired member
+  without any Artist Credit receives a usable proposal as automatic values,
+  whether its attribution is unknown or not stored. A member whose track
+  Artist entries agree with the proposal, as many entries, each naming the
+  Artist of the member's entry at the same position with the same role, and
+  the same join phrases between them, a missing or invalid one counting as
+  `, `, needs no change. Every other paired member with a usable proposal,
+  including one with Artist Credits of other roles only, gets one conflict on
+  its whole list, answered by keeping its current Credits or using the lookup
+  value. A member whose track's credit is not usable and an unpaired member
+  keep their Credits and get no value or conflict row; the review shows each
+  with its reason. Missing-file rows never carry Credits, and a member that a
+  later append adds takes the Album's primary Credits, as Administrator Album
+  Imports says.
+- Applying a member's selected entries replaces its primary and featured
+  Artist Credits, and its legacy unspecified Credits for Artists they name,
+  through the canonical Credit lifecycle. The new Credits take the positions
+  of the replaced ones in entry order, extra entries follow the last of them,
+  and they lead the list when there were none; other Credits keep their
+  subject, role and relative order, orders are renumbered and join phrases
+  kept as for the Album's Credits, and the member's attribution becomes
+  documented. A member's entries can be applied only when the review shows
+  all its primary and featured Artist Credits. Member Credits stay on the
+  member and never promote an Artist to the Album, and new Artists for them
+  take the Album's visibility. The confirmation lists each member whose
+  Credits change, with its current and new Credits, every Credit removed and
+  its attribution state when it changes, and each member's change is
+  selected or deselected as a whole.
+- In an existing-Album review, an Artist entry captured from an Album Credit, an
+  entry proposed for a member that names an Artist one of that member's captured
+  Credits names, whatever that Credit's role, and the label while it names the
+  Album's current label, are bound to reuse that record and need no identity
+  decision. Entries that credit one artist, by the same MusicBrainz ID or,
+  without one, the same name compared case-insensitively, share one identity
+  across the Album's entries and every member's: a bound entry binds the others
+  to its record, and otherwise one decision covers them all. One name with two
+  MusicBrainz IDs is two identities. When bound entries of one identity name
+  different Artists, each keeps its own, no ID is recorded for that identity,
+  and its other entries need an explicit choice. Every other entry and a new
+  label follow the identity rules of Administrator Album Imports: the record
+  holding the entry's MusicBrainz ID is preselected as reuse, create is
+  preselected when no candidate exists, a name, alias or localized-name
+  candidate needs an explicit choice, and two entries of one list cannot reuse
+  one Artist. When lookup supplies a MusicBrainz ID for a bound entry or the
+  current label, applying records it on that Artist or Organization while the
+  record holds none and its captured revision is current; a record holding a
+  different ID keeps it unless the administrator explicitly replaces it. An ID
+  is recorded or replaced only while no other record of the same kind holds it,
+  each preselected create is rechecked when applying, and an identity creates at
+  most one record. A created Artist takes the name of the identity's first
+  entry, the Album's entries first and then members in Album order; the other
+  credited names of that identity count as names lookup found for its
+  MusicBrainz ID.
 - Administrator confirmations bind the item and revision displayed when opened.
   A refresh that changes the draft, publication approval or staged file requires
   a fresh review; confirmation never silently rebases onto a newer target.
@@ -823,6 +963,38 @@ The wire protocol and operational bounds are documented in
   Track Numbers follow numbered tracks on the same disc, and duplicate or
   missing-number ties use canonical MediaTrack ID order so request order cannot
   change the result.
+- An Album may keep one expected tracklist: the tracklist of the release that
+  an applied existing-Album review used, as rows of Disc Number, Track Number,
+  title and, when known, duration, ordered by Disc Number then Track Number.
+  Rows come from the release's tracks on audio media; tracks on video or data
+  media (such as DVD-Video or Blu-ray) and pregap or data tracks are left out,
+  and the review says how many were left out. It keeps no release, recording
+  or iTunes identifier and no reference to a MediaTrack, only whether it came
+  from MusicBrainz or an iTunes-only candidate and when it was applied. It
+  holds at most 100 rows at distinct positions within a bounded size, each
+  title at most 300 characters; a release over these bounds offers none, and
+  the review says why. Only an applied existing-Album review sets or replaces
+  it, and only an explicit existing-catalog edit clears it; imports and
+  appends, Content Manager, Luna and metadata lookup by itself never change
+  it. Deleting the Album deletes it.
+- Each expected row shows the Album's members whose Disc Number, a missing one
+  counting as disc 1, and Track Number equal the row's, whatever their
+  lifecycle state or visibility. A row with no such member is a missing-file
+  row, and a member at no row's position is shown as outside the expected
+  tracklist. Rows are derived whenever they are read, so adding, appending,
+  renumbering, hiding, unlinking or deleting a member changes which rows have a
+  file, never the expected tracklist itself.
+- The expected tracklist and its missing-file rows are administrator
+  information, shown on the Web Album page, in existing-Album reviews, and in
+  the summary and confirmation of an append to the Album. An Album without a
+  primary Artist Credit cannot be appended to, so its Album page says that its
+  missing-file rows can be filled only by a Content Manager Audio upload. A
+  missing-file row is not a MediaTrack and has no media. Neither ever enters
+  `Album.audioTrackIds`, the Album order, playback, queues, downloads, shared
+  playback rooms (room queues, recommendations and music selection), Direct
+  Music Shares, friend listening status, Search, Library, Playlists, Carousels
+  and Page items, Follow releases, bylines, member limits or duplicate
+  candidates, or any listener, legacy public, social, iOS or Android response.
 - The guided Artist release workflow may create or reuse an Artist, create and
   link an Album through a primary Credit, and optionally create or reuse a
   dynamic Artist Album Carousel and attach it to a Page. A dynamic Artist
@@ -850,18 +1022,22 @@ The wire protocol and operational bounds are documented in
   validation is presented as `, ` and never hides the Credit list or changes
   Follow eligibility.
 - An Artist or Organization may keep one MusicBrainz ID as private provenance
-  for administrator imports. Only administrators see it; it is never part of
-  listener, legacy public, Search, Follow, Page or social responses, and no
-  listener behavior depends on it. No two Artists, and no two Organizations,
-  share one, and placeholder identities such as Various Artists, [unknown] or
-  [no label] are never kept. Administrator imports record it as described in
-  Administrator Album Imports; otherwise administrators set, replace or clear it
-  only through an explicit existing-catalog edit.
+  for administrator imports and existing-Album reviews. Only administrators see
+  it; it is never part of listener, legacy public, Search, Follow, Page or
+  social responses, and no listener behavior depends on it. No two Artists, and
+  no two Organizations, share one, and placeholder identities such as Various
+  Artists, [unknown] or [no label] are never kept. Administrator imports and
+  applied existing-Album reviews record it as described in Administrator Album
+  Imports and above; otherwise administrators set, replace or clear it only
+  through an explicit existing-catalog edit.
 - Album and MediaTrack Credits are independent. A MediaTrack participant does
   not silently become an Album primary Artist. Adding a MediaTrack primary
   Artist who is not already an Album primary Artist requires an explicit
   administrator choice to keep the Credit on the MediaTrack only or also
-  promote it to the Album; MediaTrack-only is the safe default.
+  promote it to the Album; MediaTrack-only is the safe default. An applied
+  existing-Album review adds such Credits MediaTrack-only, each member's
+  change listed and deselectable in its confirmation, and never offers
+  promotion.
 - Album promotion itself updates the Album Credit and its compatibility
   membership atomically. If promotion fails after uploaded media was safely
   published, the MediaTrack remains valid and MediaTrack-only; Content Manager
@@ -1058,7 +1234,9 @@ The wire protocol and operational bounds are documented in
 - Web, iOS and Android number Album MediaTrack rows by their position in that
   canonical order across the whole Album. Listener clients receive no Disc or
   Track Number, so a multi-disc Album plays and downloads in disc order without
-  disc headers or per-disc numbering.
+  disc headers or per-disc numbering. An Album's expected tracklist and its
+  missing-file rows never reach listener clients and never change this
+  numbering.
 - Album attribution is derived from its ordered, role-bearing Credits. During
   migration only, a client that receives no canonical Credits may display the
   server-maintained legacy Artist relationship as a compatibility fallback;
@@ -1067,7 +1245,9 @@ The wire protocol and operational bounds are documented in
   inherited Album primary Credits, with their order and join phrases,
   materialized by the server at creation time. Adding or changing a MediaTrack
   Credit later does not silently mutate Album attribution unless an
-  administrator explicitly selects promotion.
+  administrator explicitly selects promotion. An applied existing-Album review
+  never copies Album Credits to a MediaTrack and never promotes; it writes a
+  member's Credits only from that member's own paired release track.
 - Web, iOS and Android show one server-built byline for an Album or
   MediaTrack. It names the primary, featured and performer Credits in Credit
   order; without them, the Organization Credits; otherwise every remaining
@@ -1511,10 +1691,11 @@ The wire protocol and operational bounds are documented in
   Administrator Metadata Lookup. Unknown facts stay empty and partial release
   dates retain their precision. Analysis never publishes, edits existing catalog
   records, or silently overwrites manual draft changes, and metadata lookup
-  likewise never does. Administrators see baseline/current/proposed values and
-  can accept or reject individual suggestions; a suggestion that equals the
-  current value is resolved automatically. Adoption changes only the saved
-  private draft.
+  likewise never does; their values reach catalog records only through a
+  publication or an applied existing-Album review. Administrators see
+  baseline/current/proposed values and can accept or reject individual
+  suggestions; a suggestion that equals the current value is resolved
+  automatically. Adoption changes only the saved private draft.
 - Accepted analysis runs on the server after a browser closes or changes page.
   Reopening observes existing status and results; it does not start another
   paid generation. Local file transfer may require reselection of incomplete
@@ -1525,6 +1706,18 @@ The wire protocol and operational bounds are documented in
   automatic paid replay; administrators may continue manual review.
   The deployment-wide daily allowance resets at UTC midnight; budget exhaustion
   becomes needs attention without dispatching another provider request.
+- Luna is a paid AI service offered as an explicit, secondary alternative to
+  metadata lookup in every lookup state, never as the next step or the
+  emphasized action, and always visible where offered. Every control that
+  starts or confirms a Luna analysis, in imports and existing-Album reviews,
+  names Luna, says it is AI and says it is paid, in every supported language,
+  for example "Use Luna AI (paid)" and "使用 Luna AI 补全（付费）". A generic
+  label alone, such as Analyze, Review, Proofread or Complete, or 分析, 校对 or
+  补全, never starts Luna, and status text about Luna work names Luna AI.
+  Outside its own confirmation dialog, which keeps its primary confirm button,
+  a Luna control comes after the metadata lookup controls and is never styled
+  as the primary action; lookup controls name metadata lookup or MusicBrainz
+  and never mention AI.
 - Name matches, identical bytes, external identifiers and matching durations are
   candidates, not proof of Artist or Organization identity, Album edition, or
   recording identity. Candidates load automatically, matching names
@@ -1546,7 +1739,8 @@ The wire protocol and operational bounds are documented in
 - For each Artist entry and the label, an existing record with the same
   MusicBrainz ID is preselected as reuse, and create is preselected when no
   candidate exists. An entry carries a MusicBrainz ID only from a MusicBrainz
-  response, never from file tags or iTunes, and applying a candidate that
+  response or, in an existing-Album review, from the record its captured
+  Credit names, never from file tags or iTunes, and applying a candidate that
   credits one MusicBrainz artist, or one name compared case-insensitively, twice
   keeps only its first entry. A new Artist or label Organization keeps the ID
   its entry carries, and reusing a record without an ID records it while the
@@ -1668,6 +1862,22 @@ The wire protocol and operational bounds are documented in
   by their Disc and Track Numbers, as the confirmation shows. A hidden Album
   continues to hide its Tracks until its own visibility changes; a newly created
   hidden Artist or Organization is not exposed by publishing a private import.
+  Appending never changes the target Album's expected tracklist; its new
+  members fill missing-file rows by their Disc and Track Numbers.
+- When the target of an append has an expected tracklist, the Review and
+  publish summary and the publication confirmation show the row each appended
+  file fills, and flag a file without a Track Number, a file without a Disc
+  Number when the expected tracklist has more than one disc, one at a position
+  outside the expected tracklist or already filled, and one whose duration
+  differs from its row's by more than the metadata lookup tolerance; flags
+  never hold Publish. The administrator may number the files from the expected
+  tracklist in one step. It pairs the files without the administrator's own
+  Disc and Track Numbers with the missing-file rows, as members pair with a
+  release in an existing-Album review; numbers that lookup wrote automatically
+  do not constrain the pairing and are replaced. Each file that every largest
+  such pairing places at the same row takes that row's Disc and Track Number
+  and, when its title is empty or automatic, the row's title, as the
+  administrator's own values; other files keep their values.
 - An unconfirmed existing-catalog cover approval may be explicitly cancelled by
   a current administrator after its active worker lease ends. Cancellation leaves
   the saved cover unchanged and retains the unused object's identity and source
@@ -1689,15 +1899,20 @@ The wire protocol and operational bounds are documented in
   Without usable tags, it runs once from the selected folder's name, when there
   is one, which the name box shows for editing. Typing, saving and navigation
   never run metadata lookup, and reopening a project runs it only when its
-  reconciliation confirms the last selected upload. Existing-Album reviews, iOS
-  and Android do not offer it.
+  reconciliation confirms the last selected upload. An existing-Album review
+  looks up its Album: it runs automatically once when a review is created
+  where lookup is available, from the Album's saved title and the names of its
+  primary Artist Credits, and runs when the administrator submits an Album or
+  song name or retries. iOS and Android do not offer metadata lookup.
 - Metadata lookup accepts names, not links. The server queries only fixed,
   server-chosen services and never fetches an administrator-supplied URL. It
-  sends only the submitted text, cleaned tag text or a cleaned folder name,
-  terms taken from earlier results of the same lookup, and embedded identifiers;
-  every identifier or barcode used in a query must match its expected format. An
+  sends only the submitted text, cleaned tag text, a cleaned folder name or an
+  existing Album's saved title and primary Artist names, terms taken from
+  earlier results of the same lookup, and embedded identifiers; every
+  identifier or barcode used in a query must match its expected format. An
   automatic lookup never sends file names, sends a folder name only when no
-  usable tags exist, and no lookup sends account data or audio. Apart from
+  usable tags exist, and no lookup sends account data or audio. A review's
+  automatic lookup never sends Track titles or original filenames. Apart from
   artwork from the fixed artwork-host allowlist, the server follows no link
   found in a lookup response. Metadata lookup never downloads audio, audio
   previews or streams from any service, and audio-preview and store links are
@@ -1715,6 +1930,13 @@ The wire protocol and operational bounds are documented in
     or cannot run; in the latter case it is marked as not checked against
     MusicBrainz.
   - Deezer, Spotify and other services are not used.
+- An existing-Album review uses the same sources in the same order. Its iTunes
+  fallback, MusicBrainz bridge and iTunes-only candidates follow the import
+  rules with the review's comparison: an iTunes-only candidate is preselected
+  only under the same conditions, its values and expected tracklist are
+  flagged as iTunes only and never collapsed, and its single artist string,
+  like each of its tracks' artist strings, is one Artist entry that is never
+  split.
 - Metadata lookup responses are untrusted data. Each source is bounded in time
   and size, and its request-rate and concurrency bounds apply across the whole
   deployment; automatic lookups wait for them, and a submitted lookup that
@@ -1731,19 +1953,46 @@ The wire protocol and operational bounds are documented in
   uploads, Luna analysis or review, and Publish waits for it only while it is
   queued, running or retried automatically.
 - Candidates are releases; a song-name query finds releases that contain that
-  song. Metadata lookup ranks candidates by how closely their track count,
-  disc count and per-track durations agree with the import's selected audio
-  files. A candidate matches only when every selected file's duration is known
-  and the track count, every duration within a small tolerance and any known
-  disc count agree. Unknown local durations or Disc Numbers are disclosed rather
-  than counted as agreement, and newly known durations re-rank stored candidates
-  without new requests.
+  song. For an import, metadata lookup ranks candidates by how closely their
+  track count, disc count and per-track durations agree with the import's
+  selected audio files. A candidate matches only when every selected file's
+  duration is known and the track count, every duration within a small
+  tolerance and any known disc count agree. Unknown local durations or Disc
+  Numbers are disclosed rather than counted as agreement, and newly known
+  durations re-rank stored candidates without new requests.
+- For an existing-Album review, a release may have more tracks and discs than
+  the Album, since its missing tracks are what the review completes; only its
+  tracks on audio media count, as for an expected tracklist. Members pair with
+  release tracks: each member with a distinct track whose duration agrees
+  within the same tolerance where both are known, and whose Disc and Track
+  Number equal the member's own where it has them, a missing Disc Number
+  matching any disc. A member's own numbers are those captured from the
+  catalog or saved by the administrator; numbers that lookup wrote never
+  constrain pairing. A candidate matches only when exactly one such pairing
+  exists and every paired duration is known. A release with fewer tracks than
+  the Album has members never matches; more than one pairing, or a member or
+  paired track without a duration, leaves it unverified; an Album without
+  members matches no candidate, so nothing is preselected, but any candidate
+  it chooses pairs trivially. The release tracks that no member pairs with are
+  the missing-file rows the candidate would add, and the view of differences
+  names each member that no track of the release can pair with. Saving a
+  review Disc or Track Number re-ranks the stored candidates without new
+  requests; a re-rank is not a lookup run. While no candidate was chosen, a
+  re-rank that leaves exactly one preselectable group applies it as a
+  preselection would. A re-rank never removes values already applied, and the
+  expected tracklist then follows the placement check of applying the review.
+  Searches admit, and the iTunes fallback keeps, releases with at least as
+  many tracks as the Album has members, or an unknown count, fewest extra
+  first.
 - Ranking is evidence, not proof. Every matching candidate scores the same.
   Matching candidates that would write identical draft values form one group,
   represented by a deterministically chosen member that prefers front artwork;
   the others stay in evidence. Metadata lookup preselects the matching candidate
   that an embedded identifier shared by every file matches alone, and otherwise
-  the only matching group. A preselection whose credited artist agrees with no
+  the only matching group of a complete comparison. A comparison is partial
+  when not every release the search found could be compared; the only
+  matching group of a partial comparison is offered, not applied, and needs no
+  answer. A preselection whose credited artist agrees with no
   non-empty artist tag of the files, directly or through a MusicBrainz alias or
   iTunes localized name that the lookup found, is flagged and never collapsed. A
   preselection is a proposal that the publication approval confirms. An
@@ -1756,6 +2005,18 @@ The wire protocol and operational bounds are documented in
   matching candidate nothing is preselected and no choice is needed. Every
   candidate stays selectable, one that does not match shows its differences, and
   the administrator may choose none.
+- In an existing-Album review, the names of the Album's primary Artist Credits
+  stand in for artist tags and no embedded identifier exists. Matching
+  candidates form different groups when their pairings, their expected
+  tracklists, durations included, or the track Artist entries they propose
+  for paired members differ. Among matching groups, one whose release has
+  exactly as many tracks as the Album has members is preferred: when no
+  release left out of the comparison could have exactly as many tracks as the
+  Album has members and exactly one such group exists, it is preselected even
+  when groups with more tracks also match; otherwise the only matching group
+  of a complete comparison is preselected, and two or more matching groups are
+  a tie. The view of differences also shows each candidate's track count, the
+  members it pairs and how many missing-file rows it would add.
 - Applying a candidate, automatically when it is preselected or when the
   administrator chooses it, writes all its supported values in one step: the
   Album title, Artist entries, label and date, and each matched file's track
@@ -1779,6 +2040,32 @@ The wire protocol and operational bounds are documented in
   complete set of values or nothing, and retrying the same intent is idempotent.
   Placeholder credits such as Various Artists or [unknown], and a [no label]
   label, are never written.
+- In an existing-Album review, applying a candidate writes the Album title,
+  Artist entries, label and date and, only through a single pairing, each
+  paired member's title, Disc Number, Track Number and track Artist entries,
+  the last as Catalog Visibility and Administration describes, and the
+  release's expected tracklist; a candidate chosen without one writes Album
+  values only, and never member Artist entries.
+  For an Album without members, a candidate the administrator chooses writes
+  its expected tracklist, with every row a missing-file row; it is never
+  preselected. Because pairing keeps every Disc and Track Number that is the
+  member's own, lookup fills only missing ones and never contradicts them. An
+  entry agrees with a captured entry, wherever it stands, when its role is the
+  same and its name equals, case-insensitively, that entry's saved name or a
+  name or alias lookup found for its MusicBrainz ID, or the Artist that
+  captured Credit names already keeps the entry's MusicBrainz ID; an agreeing
+  entry keeps the captured Credit's Artist and saved name, gains the ID, and
+  needs no identity decision. Join phrases compare as bylines present them: a
+  missing or invalid one counts as `, `, and the last entry's phrase is
+  ignored. When every saved entry agrees, in its saved order, with the same
+  join phrases between them, and the candidate only adds entries after them,
+  the added entries and the join phrase connecting them are filled as
+  automatic values with their identity rows; any other difference makes the
+  list one conflict. A lookup date that only adds precision to the saved date
+  is a conflict, shown as adding precision, so the saved date never changes
+  without an answer. The expected tracklist is one value: lookup fills it
+  when the Album has none, and one that differs from the Album's is a
+  conflict.
 - Metadata lookup runs on the server and finishes after the browser closes or
   changes page; reopening shows its result without running it again. It runs
   under an expiring grant from the administrator's import creation, uploads,
@@ -1793,10 +2080,20 @@ The wire protocol and operational bounds are documented in
   reverting values. Metadata lookup is independent of Luna generations: starting
   or stopping Luna does not discard its results, and a lookup does not discard
   Luna's.
+- A review's metadata lookup runs on the server under an expiring grant from
+  the administrator's review creation, submission, manual retry or choice of a
+  candidate, rechecks that administrator's role at every stored step, and binds
+  the members the review captured. A review runs at most one automatic lookup,
+  including that run's automatic source retries. Applying is refused while a
+  run is queued, running or retrying automatically. The Album's deletion or
+  loss of readiness, or the review's captured source no longer being current,
+  ends an active run. Its results, conflicts and answers stay in the review
+  and reach the catalog only when the review is applied.
 - Applied Artist entries keep the release's credited names, name order and join
   phrases. The entry after a featuring phrase such as `feat.`, and every later
   entry, is featured and the others are primary; the summary and the publication
-  confirmation show each role, and the administrator can still change it. Only
+  confirmation show each role, and the administrator can still change it,
+  except in existing-Album reviews. Only
   this proposal reads a featuring phrase; a stored or edited join phrase never
   sets a role. A single iTunes artist name is one entry and is never split
   automatically. The label is the release's first listed label, and any others
@@ -1805,29 +2102,34 @@ The wire protocol and operational bounds are documented in
   the group has none, and an iTunes date is used only for an iTunes-only
   candidate. Romanized or alternate titles enter the catalog only as draft
   values and never become Search aliases. Release, recording and iTunes
-  identifiers remain private import evidence; only Artists and Organizations
-  keep a MusicBrainz ID, as described in Administrator Album Imports.
+  identifiers remain private import and review evidence, and an expected
+  tracklist carries none; only Artists and Organizations keep a MusicBrainz ID,
+  as described in Administrator Album Imports and Catalog Visibility and
+  Administration.
 - When metadata lookup finds no release or no matching release, or cannot run
   because no usable tags, folder name or submitted name exist, the summary
-  offers Luna analysis as the next step beside the name box. When lookup is
-  unavailable or busy, the next step is the free retry and Luna is a secondary
-  choice until the automatic retries are exhausted; Luna is then offered as the
-  next step beside the manual retry. Luna remains an explicitly confirmed paid
-  step that shows the remaining project and daily budget; offering it starts
-  nothing, a lookup result never starts it, and it may also run beside applied
-  lookup values. Luna suggestions return to the summary labelled as Luna and are
-  never collapsed: those for empty values or values from file tags arrive
-  ticked, the others arrive unticked and keep the current value unless ticked,
+  offers the name box as the next step. When lookup is unavailable, busy or
+  stopped, the next step is the free retry, also after the automatic retries
+  are exhausted. In every lookup state, also after a release was applied, the
+  summary offers Luna as a secondary choice after the lookup controls, never
+  as the next step. An existing-Album review offers Luna the same way. Luna
+  remains an explicitly confirmed paid step that shows the remaining project
+  and daily budget; offering it starts nothing, a lookup result never starts
+  it, and it may also run beside applied lookup values. In an import, Luna
+  suggestions return to the summary labelled as Luna AI and are never
+  collapsed: those for empty values or values from file tags arrive ticked,
+  the others arrive unticked and keep the current value unless ticked,
   unticking rejects one, and none is applied until the administrator accepts it
   or approves the publication with it ticked. A ticked suggestion for the Album
-  title, a track title, the Artist entries or the label gets identity candidates
-  and preselections as if it were applied, and the approval includes their
-  decisions. Luna receives the current draft values whatever their source. Only
-  the MusicBrainz release applied to the import, if any, is given to Luna, as
-  untrusted context labelled with its source, and each Luna suggestion records
-  it. Other candidates and all iTunes evidence and identifiers are never sent to
-  Luna. Luna never chooses an identity, supplies a MusicBrainz ID, selects a
-  release or presents its values as lookup evidence.
+  title, a track title, the Artist entries or the label gets identity
+  candidates and preselections as if it were applied, and the approval
+  includes their decisions. Luna receives the current draft values whatever
+  their source. Only the MusicBrainz release applied to the import or review,
+  if any, is given to Luna, as untrusted context labelled with its source, and
+  each Luna suggestion records it. Other candidates and all iTunes evidence and
+  identifiers are never sent to Luna. Luna never chooses an identity, supplies
+  a MusicBrainz ID, selects a release or presents its values as lookup
+  evidence.
 - Metadata lookup artwork is Cover Art Archive artwork, or iTunes artwork for an
   iTunes-only candidate, from a fixed allowlist of artwork hosts. The server
   fetches artwork only from those hosts, including after every redirect, and
@@ -1839,7 +2141,8 @@ The wire protocol and operational bounds are documented in
   as a cover candidate under the existing staged-upload lifecycle and selects it
   as described in Administrator Album Imports; a failed fetch or staging, or one
   whose outcome is unknown, keeps the current cover choice. Metadata lookup
-  never creates an external artwork reference.
+  never creates an external artwork reference. An existing-Album review stages
+  no artwork; its candidates' artwork is only a transient protected preview.
 - Metadata lookup results and evidence are bounded private project data that
   only current administrators can read.
 

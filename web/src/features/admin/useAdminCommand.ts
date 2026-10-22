@@ -6,8 +6,12 @@ import { ADMIN_IMPORT_RELOAD_REQUIRED, adminEndpointRequest } from './adminTrans
 import { ADMIN_RELOAD_REQUIRED, adminWorkspace } from './adminWorkspace';
 
 interface Intent { path: string; body: string; operationId: string; method: string }
-/** `musicbrainz_id_in_use`: another Artist, or another Organization, already keeps the MusicBrainz ID an edit sets. */
-interface CommandState<T> { running: boolean; intent: Intent | null; result: T | null; error: 'unknown' | 'conflict' | 'error' | 'reload' | 'musicbrainz_id_in_use' | null }
+/**
+ * `error` names its message (`common.<error>`): an outcome kind (`unknown`, `conflict`, `error`, `reload`), `musicbrainz_id_in_use`
+ * (another Artist, or another Organization, already keeps the MusicBrainz ID an edit sets), or an existing-Album review's metadata
+ * lookup refusal (`lookup_<code>`).
+ */
+interface CommandState<T> { running: boolean; intent: Intent | null; result: T | null; error: string | null }
 /** Clears catalog projections after a confirmed global edit, while retaining identity and Save membership facts. */
 export function clearCatalogProjections(client: QueryClient) {
   const filter = { predicate: (query: { queryKey: readonly unknown[] }) => query.queryKey[0] === 'listener'
@@ -50,6 +54,10 @@ export class AdminCommand<T extends { receipt: { operationId: string } }> {
       // A source import or review saved by a newer release refuses this change before admission.
       if (error instanceof ApiError && error.kind === 'http' && error.status === 409 && error.code === ADMIN_IMPORT_RELOAD_REQUIRED) { this.update({ running: false, intent: null, result: null, error: 'reload' }); return; }
       if (error instanceof ApiError && error.kind === 'http' && error.status === 409 && error.code === 'ADMIN_CATALOG_MUSICBRAINZ_ID_IN_USE') { this.update({ running: false, intent: null, result: null, error: 'musicbrainz_id_in_use' }); return; }
+      // A metadata lookup refusal (ADMIN_IMPORT_LOOKUP_*, at any status, a 503 unavailable included) has its own message and is
+      // definite: nothing is retried, as useAdminMutation.ts treats it.
+      const own = /^ADMIN_IMPORT_(LOOKUP_\w+)$/.exec(error instanceof ApiError && error.kind === 'http' ? error.code ?? '' : '')?.[1];
+      if (own) { this.update({ running: false, intent: null, result: null, error: own.toLowerCase() }); return; }
       const definite = error instanceof ApiError && error.kind === 'http' && [400, 401, 403, 404, 409, 422].includes(error.status ?? 0);
       this.update({ running: false, intent: definite ? null : intent, result: null, error: definite ? (error instanceof ApiError && error.status === 409 ? 'conflict' : 'error') : 'unknown' });
     }

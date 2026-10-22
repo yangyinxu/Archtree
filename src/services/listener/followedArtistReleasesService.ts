@@ -11,6 +11,8 @@ import type { Document } from 'mongodb';
 import { getDb } from '../../infrastructure/database';
 import { isArtistFollowEnabled } from '../../config/artistFollowRollout';
 import { readyPublicAlbumFilter, readyPublicArtistFilter, readyPublicTrackVisibilityFilter, publicAudioVisibilityPipeline } from '../catalog/catalogVisibilityService';
+// Listener and content reads exclude a catalog-owned administrator field.
+import { withoutExpectedTracklistStage } from '../catalog/albumExpectedTracklist';
 
 /** Contextual Home explanation; never a field on a public catalog summary. */
 export interface FollowedArtistReason {
@@ -139,8 +141,9 @@ export const resolveFollowedArtistReleases = async (
     if (!userId || !negotiated || !isArtistFollowEnabled()) return [];
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 20) return [];
     const { start, end } = followedReleaseWindow(now);
+    // The administrator-only expected tracklist never travels through the reason stages' $$ROOT group.
     const albumQualification = [
-        { $match: readyPublicAlbumFilter }, ...dateStages(start, end),
+        { $match: readyPublicAlbumFilter }, withoutExpectedTracklistStage, ...dateStages(start, end),
         ...playableAlbumStages(), ...reasonStages(userId, ['primary', 'featured'])
     ];
     const finish = (contentType: 'album' | 'audioTrack'): Document[] => [

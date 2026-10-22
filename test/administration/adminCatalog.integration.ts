@@ -28,6 +28,11 @@
  *   - Disc and Track Numbers saved together reorder once, and an unassigned MediaTrack stores its disc without an Album write
  *   - concurrent Disc Number edits in one Album serialize and the final order reflects both
  *   - an Artist or Organization MusicBrainz ID is set, replaced and cleared through explicit edits, one per kind, and never by another caller
+ *   - an Album's stored expected tracklist changes its revision but never its snapshot, and catalog patches and cover changes neither write nor drop it
+ *   - clearing an Album's expected tracklist removes only that key at the captured revision and replays its receipt
+ *   - a stale, absent, invalid or unauthorized clear writes nothing
+ *   - concurrent clears commit once and a failed receipt keeps the tracklist
+ *   - a clear combined with hiding the Album commits both in one update, a refused hide keeps the tracklist, and a legacy Album clears too
  * @end-catalog */
 
 import assert from 'node:assert/strict';
@@ -582,4 +587,236 @@ test('an Artist or Organization MusicBrainz ID is set, replaced and cleared thro
     await db().collection('organizations').insertOne({ _id: freed, name: 'Successor Label', organizationType: 'label', description: '', lifecycleStatus: 'ready' });
     await edit('organization', freed.toHexString(), mbid(2));
     assert.equal((await db().collection('organizations').findOne({ _id: freed }))!.musicBrainzId, mbid(2));
+});
+
+test('an Album\'s stored expected tracklist changes its revision but never its snapshot, and catalog patches and cover changes neither write nor drop it', async () => {
+    const actor = admin.toHexString(), albumId = album.toHexString(), path = `/api/admin/v1/catalog/album/${albumId}`;
+    const tracklist = { source: 'musicbrainz', appliedAt: new Date('2026-10-20T08:00:00.000Z'), rows: [
+        { discNumber: 1, trackNumber: 1, title: 'Unheard Catalog Row One', durationMs: 200_000 },
+        { discNumber: 1, trackNumber: 2, title: 'Unheard Catalog Row Two', durationMs: null }
+    ] };
+    const expectAbsent = (label: string, payload: unknown) => {
+        const text = JSON.stringify(payload);
+        for (const forbidden of ['expectedTracklist', 'Unheard Catalog Row']) assert.equal(text.includes(forbidden), false, `${label} carried ${forbidden}`);
+    };
+    const read = async () => (await getAdminCatalogItem(actor, 'album', albumId)).item;
+    const before = await read();
+    // A raw write (no route writes it yet) changes the revision, so earlier reviews and edits become stale.
+    await db().collection('albums').updateOne({ _id: album }, { $set: { expectedTracklist: tracklist } });
+    const stored = await read();
+    assert.notEqual(stored.revision, before.revision);
+    assert.deepEqual(stored.fields, before.fields);
+    for (const route of [path, '/api/admin/v1/catalog/album']) {
+        const response = await request(route); assert.equal(response.status, 200, route);
+        const body = await response.json(); expectAbsent(route, body);
+        if (route === path) assert.deepEqual(Object.keys(body.item.fields).sort(), Object.keys(before.fields).sort());
+        if (route === '/api/admin/v1/catalog/album') assert.ok(body.items.some((item: any) => item.id === albumId), 'list includes the Album');
+    }
+    // Only the Album's track list shows its rows, matched to its members, and never under the stored key.
+    const tracks = await (await request(`${path}/tracks`)).json();
+    assert.deepEqual(tracks.expected.rows.map((row: any) => row.title), tracklist.rows.map(row => row.title));
+    assert.equal(JSON.stringify(tracks).includes('expectedTracklist'), false);
+    // A stale revision from before the write is a conflict.
+    await assert.rejects(editAdminCatalogItem(actor, 'album', albumId, { operationId: randomUUID(), expectedRevision: before.revision, fields: { title: 'Stale title' } }),
+        code('ADMIN_CATALOG_REVISION_CONFLICT'));
+    // A title PATCH keeps the stored tracklist and answers no part of it.
+    const patched = await request(path, { operationId: randomUUID(), expectedRevision: stored.revision, fields: { title: 'Patched Synthetic Album' } });
+    assert.equal(patched.status, 200);
+    const patchBody = await patched.json(); expectAbsent('PATCH', patchBody);
+    assert.deepEqual(Object.keys(patchBody.item.fields).sort(), Object.keys(before.fields).sort());
+    let document = (await db().collection('albums').findOne({ _id: album }))!;
+    assert.equal(document.title, 'Patched Synthetic Album'); assert.deepEqual(document.expectedTracklist, tracklist);
+    // A cover change answers the same snapshot without it and keeps it stored.
+    const cleared = await fetch(`${base}${path}/cover`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ operationId: randomUUID(), expectedRevision: (await read()).revision }) });
+    assert.equal(cleared.status, 200);
+    const coverBody = await cleared.json(); expectAbsent('cover DELETE', coverBody);
+    assert.equal(coverBody.item.id, albumId); assert.equal(coverBody.coverOperation.state, 'complete');
+    assert.deepEqual(Object.keys(coverBody.item.fields).sort(), Object.keys(before.fields).sort());
+    document = (await db().collection('albums').findOne({ _id: album }))!;
+    assert.equal(document.title, 'Patched Synthetic Album'); assert.deepEqual(document.expectedTracklist, tracklist);
+    // Naming the field, inside fields or at the top level, is invalid input that writes nothing and stores no receipt.
+    const current = (await read()).revision, receipts = await db().collection('adminCatalogMutations').countDocuments();
+    for (const body of [
+        { operationId: randomUUID(), expectedRevision: current, fields: { expectedTracklist: null } },
+        { operationId: randomUUID(), expectedRevision: current, fields: { title: 'Named title', expectedTracklist: tracklist } },
+        { operationId: randomUUID(), expectedRevision: current, expectedTracklist: null },
+        { operationId: randomUUID(), expectedRevision: current, fields: { title: 'Named title' }, expectedTracklist: tracklist }
+    ]) {
+        const response = await request(path, body);
+        assert.equal(response.status, 400, JSON.stringify(body)); assert.deepEqual(await response.json(), { code: 'ADMIN_CATALOG_INVALID_INPUT' });
+    }
+    assert.equal(await db().collection('adminCatalogMutations').countDocuments(), receipts);
+    document = (await db().collection('albums').findOne({ _id: album }))!;
+    assert.equal(document.title, 'Patched Synthetic Album'); assert.deepEqual(document.expectedTracklist, tracklist);
+    // A null value reads as none: it and a removed key give one revision.
+    await db().collection('albums').updateOne({ _id: album }, { $set: { expectedTracklist: null } });
+    const nullRevision = (await read()).revision;
+    await db().collection('albums').updateOne({ _id: album }, { $unset: { expectedTracklist: '' } });
+    assert.equal((await read()).revision, nullRevision);
+    assert.equal(adminCatalogItemRevision('album', (await db().collection('albums').findOne({ _id: album }))!), nullRevision);
+});
+
+test('clearing an Album\'s expected tracklist removes only that key at the captured revision and replays its receipt', async () => {
+    const actor = admin.toHexString(), albumId = album.toHexString(), path = `/api/admin/v1/catalog/album/${albumId}`;
+    const tracklist = { source: 'musicbrainz', appliedAt: new Date('2026-10-20T08:00:00.000Z'), rows: [
+        { discNumber: 1, trackNumber: 1, title: 'Cleared Synthetic Row One', durationMs: 200_000 },
+        { discNumber: 1, trackNumber: 2, title: 'Cleared Synthetic Row Two', durationMs: null }
+    ] };
+    await db().collection('audioTracks').updateOne({ _id: track }, { $set: { discNumber: 1, trackNumber: 1 } });
+    await db().collection('albums').updateOne({ _id: album }, { $set: { expectedTracklist: tracklist } });
+    const before = (await getAdminCatalogItem(actor, 'album', albumId)).item, documentBefore = (await db().collection('albums').findOne({ _id: album }))!;
+    const tracksBefore = await (await request(`${path}/tracks`)).json();
+    assert.deepEqual(tracksBefore.expected.rows.map((row: any) => [row.title, row.memberIds]), [['Cleared Synthetic Row One', [track.toHexString()]], ['Cleared Synthetic Row Two', []]]);
+    const listenerBefore = await getListenerAlbum(albumId);
+    assert.deepEqual(listenerBefore?.tracks.map(value => value.id), [track.toHexString()]);
+
+    const body = { operationId: randomUUID(), expectedRevision: before.revision, clearExpectedTracklist: true };
+    const response = await request(path, body);
+    assert.equal(response.status, 200);
+    const result = await response.json();
+    // The response is the ordinary catalog result: the snapshot never names the tracklist.
+    assert.deepEqual(Object.keys(result), ['item', 'receipt']); assert.deepEqual(result.receipt, { operationId: body.operationId });
+    assert.deepEqual(result.item.fields, before.fields); assert.equal(JSON.stringify(result).includes('Cleared Synthetic Row'), false);
+    const document = (await db().collection('albums').findOne({ _id: album }))!;
+    assert.equal('expectedTracklist' in document, false);
+    assert.equal(document.adminRevision, Number(documentBefore.adminRevision ?? 0) + 1);
+    assert.equal(document.title, documentBefore.title); assert.deepEqual(document.audioTrackIds, documentBefore.audioTrackIds);
+    assert.equal(document.visibility, documentBefore.visibility);
+    assert.notEqual(result.item.revision, before.revision); assert.equal(result.item.revision, adminCatalogItemRevision('album', document));
+    // The members, their numbering and what listeners receive are unchanged; only the rows are gone.
+    const tracksAfter = await (await request(`${path}/tracks`)).json();
+    assert.equal(tracksAfter.expected, null); assert.deepEqual(tracksAfter.tracks, tracksBefore.tracks);
+    assert.deepEqual(await getListenerAlbum(albumId), listenerBefore);
+
+    // An unconfirmed outcome resends the identical body: the receipt answers it and the Album changes once.
+    const receipts = await db().collection('adminCatalogMutations').countDocuments();
+    assert.deepEqual(JSON.parse(JSON.stringify(await editAdminCatalogItem(actor, 'album', albumId, body))), result);
+    assert.equal((await db().collection('albums').findOne({ _id: album }))!.adminRevision, document.adminRevision);
+    assert.equal(await db().collection('adminCatalogMutations').countDocuments(), receipts);
+    await assert.rejects(editAdminCatalogItem(actor, 'album', albumId, { ...body, fields: { title: 'Different intent' } }), code('ADMIN_CATALOG_IDEMPOTENCY_CONFLICT'));
+
+    // A clear combined with a field edit applies both in one update.
+    await db().collection('albums').updateOne({ _id: album }, { $set: { expectedTracklist: tracklist } });
+    const combinedBefore = (await db().collection('albums').findOne({ _id: album }))!;
+    const combined = await editAdminCatalogItem(actor, 'album', albumId, { operationId: randomUUID(),
+        expectedRevision: (await getAdminCatalogItem(actor, 'album', albumId)).item.revision, fields: { title: 'Combined synthetic title' }, clearExpectedTracklist: true }) as any;
+    let stored = (await db().collection('albums').findOne({ _id: album }))!;
+    assert.equal(stored.title, 'Combined synthetic title'); assert.equal('expectedTracklist' in stored, false);
+    assert.equal(stored.adminRevision, Number(combinedBefore.adminRevision) + 1); assert.equal(combined.item.fields.title, 'Combined synthetic title');
+    // A malformed stored value counts as stored, so it is cleared too.
+    await db().collection('albums').updateOne({ _id: album }, { $set: { expectedTracklist: { source: 'other', rows: 'malformed' } } });
+    await editAdminCatalogItem(actor, 'album', albumId, { operationId: randomUUID(), expectedRevision: (await getAdminCatalogItem(actor, 'album', albumId)).item.revision, clearExpectedTracklist: true });
+    stored = (await db().collection('albums').findOne({ _id: album }))!;
+    assert.equal('expectedTracklist' in stored, false); assert.equal(stored.title, 'Combined synthetic title');
+});
+
+test('a stale, absent, invalid or unauthorized clear writes nothing', async () => {
+    const actor = admin.toHexString(), albumId = album.toHexString(), path = `/api/admin/v1/catalog/album/${albumId}`;
+    const tracklist = { source: 'itunes', appliedAt: new Date('2026-10-20T08:00:00.000Z'), rows: [{ discNumber: 1, trackNumber: 1, title: 'Kept Synthetic Row', durationMs: null }] };
+    const read = async () => (await getAdminCatalogItem(actor, 'album', albumId)).item.revision;
+    const clear = (expectedRevision: string, extra: Record<string, unknown> = {}) => ({ operationId: randomUUID(), expectedRevision, clearExpectedTracklist: true, ...extra });
+    const refused = async (response: Response, status: number, expectedCode?: string) => {
+        assert.equal(response.status, status);
+        if (expectedCode) assert.deepEqual(await response.json(), { code: expectedCode });
+    };
+    // Nothing stored, or null stored: the confirmation named a tracklist that is not there.
+    const withoutTracklist = await read();
+    await refused(await request(path, clear(withoutTracklist)), 409, 'ADMIN_CATALOG_EXPECTED_TRACKLIST_ABSENT');
+    assert.equal('expectedTracklist' in (await db().collection('albums').findOne({ _id: album }))!, false);
+    await db().collection('albums').updateOne({ _id: album }, { $set: { expectedTracklist: null } });
+    await assert.rejects(editAdminCatalogItem(actor, 'album', albumId, clear(await read())), code('ADMIN_CATALOG_EXPECTED_TRACKLIST_ABSENT'));
+    assert.equal((await db().collection('albums').findOne({ _id: album }))!.expectedTracklist, null);
+    assert.equal(await db().collection('adminCatalogMutations').countDocuments(), 0);
+
+    await db().collection('albums').updateOne({ _id: album }, { $set: { expectedTracklist: tracklist } });
+    const current = await read(), documentBefore = (await db().collection('albums').findOne({ _id: album }))!;
+    const unchanged = async (label: string) => {
+        assert.deepEqual(await db().collection('albums').findOne({ _id: album }), documentBefore, label);
+        assert.equal(await db().collection('adminCatalogMutations').countDocuments(), 0, label);
+    };
+    // A tab that read the Album before the tracklist was stored holds a stale revision.
+    await refused(await request(path, clear(withoutTracklist)), 409, 'ADMIN_CATALOG_REVISION_CONFLICT');
+    await unchanged('stale');
+    for (const value of [false, 'true', 1, null, {}]) {
+        await refused(await request(path, clear(current, { clearExpectedTracklist: value })), 400, 'ADMIN_CATALOG_INVALID_INPUT');
+        await unchanged(JSON.stringify(value));
+    }
+    await refused(await request(path, { operationId: randomUUID(), expectedRevision: current, fields: { clearExpectedTracklist: true } }), 400, 'ADMIN_CATALOG_INVALID_INPUT');
+    await unchanged('inside fields');
+    // Only an Album keeps an expected tracklist.
+    const organization = new ObjectId();
+    await db().collection('organizations').insertOne({ _id: organization, name: 'Synthetic Label', organizationType: 'label', description: '', lifecycleStatus: 'ready' });
+    for (const [kind, id] of [['artist', artist], ['audioTrack', track], ['organization', organization]] as const) {
+        const revision = (await getAdminCatalogItem(actor, kind, id.toHexString())).item.revision;
+        await refused(await request(`/api/admin/v1/catalog/${kind}/${id}`, clear(revision)), 400, 'ADMIN_CATALOG_INVALID_INPUT');
+    }
+    await unchanged('other kinds');
+    // Ordinary, anonymous and revoked callers are refused before anything is read or written.
+    await refused(await request(path, clear(current), userToken), 403);
+    await refused(await request(path, clear(current), ''), 401);
+    await db().collection('users').updateOne({ _id: admin }, { $set: { role: 'user' } });
+    await refused(await request(path, clear(current)), 403);
+    await assert.rejects(editAdminCatalogItem(actor, 'album', albumId, clear(current)), code('ADMIN_PERMISSION_REQUIRED'));
+    await db().collection('users').updateOne({ _id: admin }, { $set: { role: 'admin' } });
+    await unchanged('unauthorized');
+});
+
+test('concurrent clears commit once and a failed receipt keeps the tracklist', async () => {
+    const actor = admin.toHexString(), albumId = album.toHexString();
+    const tracklist = { source: 'musicbrainz', appliedAt: new Date('2026-10-20T08:00:00.000Z'), rows: [{ discNumber: 1, trackNumber: 1, title: 'Raced Synthetic Row', durationMs: 1_000 }] };
+    await db().collection('albums').updateOne({ _id: album }, { $set: { expectedTracklist: tracklist } });
+    const revision = (await getAdminCatalogItem(actor, 'album', albumId)).item.revision;
+    const adminRevision = Number((await db().collection('albums').findOne({ _id: album }))!.adminRevision ?? 0);
+    // Two tabs confirm the same captured revision: the later transaction rereads the new revision and is refused.
+    const race = await Promise.allSettled([0, 1].map(() => editAdminCatalogItem(actor, 'album', albumId, { operationId: randomUUID(), expectedRevision: revision, clearExpectedTracklist: true })));
+    assert.equal(race.filter(result => result.status === 'fulfilled').length, 1);
+    assert.ok(race.some(result => result.status === 'rejected' && (result.reason as { code?: string }).code === 'ADMIN_CATALOG_REVISION_CONFLICT'));
+    let document = (await db().collection('albums').findOne({ _id: album }))!;
+    assert.equal('expectedTracklist' in document, false); assert.equal(document.adminRevision, adminRevision + 1);
+    assert.equal(await db().collection('adminCatalogMutations').countDocuments(), 1);
+
+    // A receipt that cannot be stored aborts the whole transaction: the tracklist and revision stay as they were.
+    await db().collection('albums').updateOne({ _id: album }, { $set: { expectedTracklist: tracklist } });
+    await db().collection('adminCatalogMutations').insertMany(Array.from({ length: 256 }, () => ({ actor, operationId: randomUUID(), fingerprint: 'synthetic',
+        result: null, expiresAt: new Date(Date.now() + 86_400_000) })));
+    const before = (await db().collection('albums').findOne({ _id: album }))!, current = (await getAdminCatalogItem(actor, 'album', albumId)).item.revision;
+    await assert.rejects(editAdminCatalogItem(actor, 'album', albumId, { operationId: randomUUID(), expectedRevision: current, clearExpectedTracklist: true }),
+        (error: any) => error.code === 'ADMIN_CATALOG_RECEIPT_LIMIT' && error.statusCode === 429);
+    document = (await db().collection('albums').findOne({ _id: album }))!;
+    assert.deepEqual(document, before); assert.deepEqual(document.expectedTracklist, tracklist);
+    assert.equal((await getAdminCatalogItem(actor, 'album', albumId)).item.revision, current);
+});
+
+test('a clear combined with hiding the Album commits both in one update, a refused hide keeps the tracklist, and a legacy Album clears too', async () => {
+    const actor = admin.toHexString(), albumId = album.toHexString();
+    const tracklist = { source: 'musicbrainz', appliedAt: new Date('2026-10-20T08:00:00.000Z'), rows: [{ discNumber: 1, trackNumber: 1, title: 'Hidden Synthetic Row', durationMs: null }] };
+    const clearAndHide = async (id = albumId) => ({ operationId: randomUUID(), expectedRevision: (await getAdminCatalogItem(actor, 'album', id)).item.revision,
+        visibility: 'hidden', clearExpectedTracklist: true });
+    // Hiding an Album whose artwork still needs migration is refused inside the transaction, so the clear is not written either.
+    await db().collection('albums').updateOne({ _id: album }, { $set: { expectedTracklist: tracklist, coverArtUrl: 'https://example.test/old-public-art' } });
+    const refusedBefore = (await db().collection('albums').findOne({ _id: album }))!;
+    await assert.rejects(editAdminCatalogItem(actor, 'album', albumId, await clearAndHide()), code('ADMIN_VISIBILITY_STORAGE_MIGRATION_REQUIRED'));
+    assert.deepEqual(await db().collection('albums').findOne({ _id: album }), refusedBefore);
+    assert.equal(await db().collection('adminCatalogMutations').countDocuments(), 0);
+    await db().collection('albums').updateOne({ _id: album }, { $unset: { coverArtUrl: '' } });
+    const before = (await db().collection('albums').findOne({ _id: album }))!;
+    const result = await editAdminCatalogItem(actor, 'album', albumId, await clearAndHide()) as any;
+    const stored = (await db().collection('albums').findOne({ _id: album }))!;
+    assert.equal(stored.visibility, 'hidden'); assert.equal('expectedTracklist' in stored, false); assert.equal(result.item.visibility, 'hidden');
+    // One update: each revision counter moves once.
+    assert.equal(stored.adminRevision, Number(before.adminRevision ?? 0) + 1); assert.equal(stored.referenceRevision, Number(before.referenceRevision ?? 0) + 1);
+    assert.equal(result.item.revision, adminCatalogItemRevision('album', stored));
+    assert.equal(await getListenerAlbum(albumId), null);
+
+    // An older Album without a lifecycle state or declared order keeps and clears a tracklist the same way.
+    const legacy = new ObjectId();
+    await db().collection('albums').insertOne({ _id: legacy, title: 'Synthetic legacy Album', expectedTracklist: tracklist });
+    const legacyPath = `/api/admin/v1/catalog/album/${legacy}`;
+    assert.deepEqual((await (await request(`${legacyPath}/tracks`)).json()).expected.rows.map((row: any) => row.title), ['Hidden Synthetic Row']);
+    const legacyRevision = (await getAdminCatalogItem(actor, 'album', legacy.toHexString())).item.revision;
+    assert.equal((await request(legacyPath, { operationId: randomUUID(), expectedRevision: legacyRevision, clearExpectedTracklist: true })).status, 200);
+    const cleared = (await db().collection('albums').findOne({ _id: legacy }))!;
+    assert.equal('expectedTracklist' in cleared, false); assert.equal(cleared.title, 'Synthetic legacy Album'); assert.equal('lifecycleStatus' in cleared, false);
+    assert.equal((await (await request(`${legacyPath}/tracks`)).json()).expected, null);
 });

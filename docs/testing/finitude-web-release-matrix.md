@@ -101,29 +101,72 @@ no decision and no Luna tick; that a tie lists only the values that differ with
 each release's barcode, catalogue number, country and medium and is chosen from
 the keyboard; that a conflict with the administrator's label is kept from the
 keyboard while the summary reflows at 320, 768 and 1440 px; that an unavailable
-lookup offers Luna first beside a free retry, that a retry that stays
-unavailable keeps both, and that Luna starts only after its confirmation shows
-the budget, its suggestion for an empty title then arriving ticked; that an
-import without a folder or usable tags offers Luna beside an empty name box that
-looks up a typed name from the keyboard and stores nothing; and that after a
-lookup finds no release Luna is offered, and its ticked Artist entries, label
-and Disc Number are preselected in one confirmation, which offers no Apply
-ticked suggestions now and approves with their preselections and ticks, with axe
+lookup offers the free Retry lookup as its only next step and Use Luna AI (paid)
+after the name box without the retry's primary style, that a retry that stays
+unavailable keeps that order, and that Luna starts only after its paid AI
+confirmation shows the budget, its suggestion for an empty title then arriving
+ticked; that an import without a folder or usable tags offers no step button and
+an empty name box that looks up a typed name from the keyboard and stores
+nothing, with Use Luna AI (paid) after it; and that after a lookup finds no
+release Use Luna AI (paid) is offered after the name box without a retry, and
+its ticked Artist entries, label and Disc Number are preselected in one
+confirmation, which offers no Apply ticked suggestions now and approves with
+their preselections and ticks, with axe
 scans throughout. Another shows a candidate whose release reports front artwork
 through the protected administrator preview (a mocked WebP; no request reaches a
 lookup host), checks that the summary says Publish waits while the applied
 release's cover is staged and keeps Publish disabled, and that once the staged
 lookup cover arrives it is chosen automatically, named in the summary and the
 confirmation, and carried by the one publish request. Another applies an
-iTunes-only result after MusicBrainz stayed unavailable: the summary says it
-was not checked against MusicBrainz with Luna first beside a free retry, its
-values are flagged as iTunes only and not checked, the chooser marks the
-candidate the same way with an axe scan, the summary reflows at 320, 768 and
-1440 px, and one confirmation publishes it.
+iTunes-only result after MusicBrainz stayed unavailable: the summary says it was
+not checked against MusicBrainz with a free retry as its only next step and Use
+Luna AI (paid) after it, its values are flagged as iTunes only and not checked,
+the chooser marks the candidate the same way with an axe scan, the summary
+reflows at 320, 768 and 1440 px, and one confirmation publishes it. Another
+appends two unnumbered files to an Album with an expected tracklist: the
+summary says they fill none of its two missing-file rows and flags each file
+without a Track Number while Publish stays available, with an axe scan and
+reflow at 320, 768 and 1440 px; Number from the Album's expected tracklist
+sends one field save of the proposed Disc and Track Numbers and row title,
+after which each file names the row it fills and the button is gone; and the
+confirmation names the row each new track fills without the numbering button,
+with an axe scan and reflow at 320 px, before one approval publishes it.
 
 The catalog reviews spec checks that an existing-Album review shows the Album's
-Artist Credits and label read-only and applies a Disc Number change, and that a
-Luna label suggestion shows only as an identity hint that Keep current rejects.
+Artist Credits and label read-only, saves a Disc Number change as one per-value
+change (never sending Credits, the label or visibility) and applies it, that its
+Luna button reads Use Luna AI (paid) and opens a confirmation titled as a paid
+AI service, and that a Luna label suggestion shows only as an identity hint that
+Keep current rejects. Another shows an Album's expected tracklist with its rows
+without a file, the members outside it and the note for an Album without a
+primary Artist Credit at 1280 px in English and 390 px in Chinese with an axe
+scan. Its open clear confirmation turns stale when the Album changes elsewhere,
+and after the page rereads the Album and its tracks, one confirmed request
+clears it at the newer revision, after which the Tracks section returns to the
+plain Album order. An existing-Album review opens on its metadata lookup
+summary, whose Look up button is in the first screen above the paid Luna AI
+button, also for 100 tracks. At 1280 px in English and 390 px in Chinese it
+looks up the Album by its prefilled saved title, shows the run queued and then
+applied after the review detail is read again, answers one conflict with Keep
+current and the rest, a track's Artists included, with Use all MusicBrainz in
+one request each made against the saved values, shows a member filled from its
+own release track, the expected tracklist with its row without a file, and the
+guest Artist shared by the Album and a track as one identity row saved as
+created, with axe scans and reflow down to 320 px. The full flow starts from the
+Album page: Complete from MusicBrainz (free) creates an Album completion whose
+automatic lookup is queued and then applied; after the conflicts and the guest
+identity are answered, Update original Album and its confirmation show the
+Album's values, Artist entries and label, each identity line, the expected
+tracklist with its row without a file, and the member stored as Unknown with
+its own track's artist and Unknown → Documented, while the member whose track
+credits only a placeholder is not listed; applying sends the selected fields,
+members, preselections, ID writes and value revision, after which the Album
+page shows the new Credits and the expected tracklist and the member page its
+Artist and documented attribution. The Album page also reads the manual wording
+where lookup is not configured, shows the action disabled with its reason, and
+offers Open Album completion for an open review and Start another completion,
+which sends `another: true`. An iTunes-only result says Use iTunes and flags
+every value it wrote.
 
 The historical 2026-08-19 MediaTrack amendment passed
 304/304 server tests, 214/214 Web unit/component tests, 148/148 integration
@@ -478,22 +521,24 @@ player control still works.
   release with nothing to answer, and publishes after one confirmation; that the
   second lists only the values that differ with each edition's barcode,
   catalogue number, country and medium, and that Publish waits until one or
-  none is chosen; and that the third offers Luna beside an empty name box.
-  Type a name of your own for one Artist entry or the label before the lookup
-  applies and confirm Keep mine and Use lookup value appear and Publish waits
-  for the answer. Make lookup unavailable and confirm Retry lookup comes first,
-  then Analyze with Luna once the automatic retries end, and that Analyze shows
-  the project and daily budget and starts nothing until confirmed; confirm
-  Luna's suggestions for empty or tag values arrive ticked, others unticked, and
-  that unticking keeps the current value at approval. With no tags and no
-  match, let Luna suggest the Album title, the Artist entries and the label, and
-  confirm the same publication confirmation preselects them as new; then name an
+  none is chosen; and that the third offers an empty name box as the next step,
+  with Use Luna AI (paid) after it as a secondary button. Type a name of your
+  own for one Artist entry or the label before the lookup applies and confirm
+  Keep mine and Use lookup value appear and Publish waits for the answer. Make
+  lookup unavailable and confirm Retry lookup stays the next step, also once the
+  automatic retries end, with Use Luna AI (paid) after the name box and never
+  primary, and that Use Luna AI (paid) names a paid AI service, shows the
+  project and daily budget and starts nothing until confirmed; confirm Luna's
+  suggestions for empty or tag values arrive ticked, others unticked, and that
+  unticking keeps the current value at approval. With no tags and no match, let
+  Luna suggest the Album title, the Artist entries and the label, and confirm
+  the same publication confirmation preselects them as new; then name an
   existing Organization like the suggested label and confirm its row needs a
   decision and Apply ticked suggestions now appears only then. Confirm the name
   box refuses a link, keeps no history and that no global search appears.
   Without an operator contact, confirm the summary says lookup is not
-  configured, offers Luna and shows neither a retry nor the name box. Repeat
-  with a screen reader at 320 CSS px.
+  configured, offers Use Luna AI (paid) as a secondary button and shows neither
+  a retry nor the name box. Repeat with a screen reader at 320 CSS px.
 - As an administrator, with metadata lookup configured against MusicBrainz in a
   development environment, import a popular Album with many editions (for
   example Hotel California by Eagles) whose files match exactly one edition
@@ -527,9 +572,57 @@ player control still works.
   its iTunes artwork is staged and chosen automatically while the browser
   requests no mzstatic address, and Publish needs one confirmation. With
   MusicBrainz unreachable, confirm the result is also marked Not checked
-  against MusicBrainz with Luna first beside a free retry; with iTunes
-  unreachable, confirm the summary says iTunes was unavailable and Publish
-  stops waiting once its retries end. Repeat with a screen reader at 320 CSS px.
+  against MusicBrainz with a free retry as the next step and Use Luna AI (paid)
+  after the lookup controls; with iTunes unreachable, confirm the summary says
+  iTunes was unavailable with the name box as the next step and Publish stops
+  waiting once its retries end. Repeat with a screen reader at 320 CSS px.
+- As an administrator, with metadata lookup configured against MusicBrainz in a
+  development environment, open the Album page of an Album that lacks some
+  tracks of its release and has a track without Artists. Confirm its Complete
+  from MusicBrainz (free) button mentions no AI, that its confirmation lists
+  what is completed and says the cover is not, and that confirming opens a
+  review whose lookup starts by itself; on the Album page, Start another
+  completion is then a separate choice, and an Album with a Video track shows
+  the button disabled with its reason. Without the lookup contact, confirm it
+  reads Create Album completion for manual editing and starts no lookup.
+  In the review, confirm the automatic lookup applies the release,
+  fills empty values without asking, shows each differing value as a conflict
+  with Keep current and Use MusicBrainz, and that Use all MusicBrainz answers
+  them all, each answered value then folded once among the values that need no
+  answer. Confirm the member without Artists shows its own track's artists from
+  MusicBrainz, never the Album's; a member with other Artists shows one
+  conflict; a member whose track has no usable credit stays unchanged with its
+  reason; choosing a release whose tracks pair with the members in no single way
+  says that track values and track Artists are not applied and lists every
+  member as unpaired; each identity row names the members it covers; the
+  expected tracklist shows the missing tracks as No file yet; Use Luna AI (paid)
+  follows the lookup summary and is never primary; and Update original Album
+  lists every change with lookup values preselected: the Album's values,
+  Artist entries and label with each reused or created Artist and Organization
+  and each MusicBrainz ID recorded or replaced, the expected tracklist with its
+  missing-file rows, the track values (a number lookup filled through the
+  pairing selected only with the tracklist), and each member whose Credits
+  change with its current and new Credits, removed Credits and attribution
+  change; deselect one member, save an identity decision and confirm the member
+  stays deselected, then confirm it is left unchanged after applying; deselect a
+  number lookup filled through the pairing and confirm it can be selected
+  again.
+  Start from the Album page's Complete from MusicBrainz (free), confirm the
+  automatic lookup runs once, and that the Album page opens the unfinished
+  completion instead of creating another. For an Album only iTunes knows,
+  confirm the buttons read Use iTunes and the values are flagged iTunes only.
+  Repeat in Simplified Chinese (从 MusicBrainz 补全（免费）, 打开专辑补全, 保留当前,
+  使用 MusicBrainz) and with a screen reader at 320 CSS px.
+- As an administrator, in English and then in Simplified Chinese, open an
+  import's Draft section and Review and publish summary and an existing-Album
+  review. Confirm every control that starts Luna reads "Use Luna AI (paid)" or
+  "Use Luna AI again (paid)", or "使用 Luna AI 补全（付费）" or "再次使用 Luna
+  AI 补全（付费）", comes after any lookup controls on the page, is never styled
+  as the primary action, and opens a confirmation that names a paid AI service
+  before anything starts; that Stop Luna AI, the budget lines and Luna status
+  text name Luna AI; and that no control labelled only Analyze, Review,
+  Complete, 校对, 补全 or 分析 starts Luna, while the review pages call the
+  project an Album completion (专辑补全).
 
 ## Media Session observations
 

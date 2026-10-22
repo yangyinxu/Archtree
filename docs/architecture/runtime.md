@@ -241,7 +241,8 @@ by `_id`, so the application account needs insert/update on that collection. The
 lookup response cache stays process-local: each lookup worker keeps its own.
 
 Metadata lookup jobs live in `adminImportLookups`, one record per import project
-(`_id` is the project's `_id`; a new run replaces the previous one). A record
+or existing-Album review (`_id` is the project's `_id`; a new run replaces the
+previous one). A record
 holds its run number, state (`queued`, `running`, `retrying`, `complete`,
 `unavailable`, `stopped` or `superseded`), the granting administrator and a
 one-hour grant, the bound file set, the planned queries and progress, at most 25
@@ -259,18 +260,19 @@ is idle while imports are disabled. The required index
 `admin_import_lookup_worker` (`{ state: 1, leaseUntil: 1, retryAt: 1 }`) also
 creates the collection at startup, so no transaction ever creates it, and
 `requiredIndexRevision` was then `required-indexes-v10-metadata-lookups`. The
-application account needs insert/update on `adminImportLookups`. Import
-documents gain `lookupGate`, a never-projected fence written in the same
+application account needs insert/update on `adminImportLookups`. Import and
+review documents gain `lookupGate`, a never-projected fence written in the same
 transaction as every lookup run started, every lookup state change and every
 re-rank of stored candidates, which never changes the project's `revision`. It
 conflicts only with transactions that also write the import document, so the
 publish gate, which reads it with the lookup record, also writes it. The step
-that completes a run, a re-rank of stored candidates and a choice or conflict
-answer write applied values to the import document in the same transaction as
-the record (and, for the worker and a re-rank, the gate). Automatic writes
-bump only `valueRevision`; a choice or an answer also takes its receipt's
-`revision`. File-tag automation reads the record's applied values in its own
-transaction, so it never replaces them; no index is added.
+that completes a run, a re-rank of stored candidates (for a review, in a save
+or Luna acceptance that changes a member's Disc or Track Number) and a choice
+or conflict answer write applied values to the import or review document in
+the same transaction as the record (and, for the worker and a re-rank, the
+gate). Automatic writes bump only `valueRevision`; a choice or an answer also
+takes its receipt's `revision`. File-tag automation reads the record's applied
+values in its own transaction, so it never replaces them; no index is added.
 
 An application whose release reports front artwork, or whose iTunes-only
 candidate has an allowlisted iTunes artwork address, also records the import's
@@ -320,8 +322,10 @@ duplicates with an aggregate such as `[{ $match: { musicBrainzId: { $type:
 { $match: { count: { $gt: 1 } } }]` on each collection and clear the extra IDs
 through the admin catalog editor. A write that would duplicate an ID fails
 inside its transaction (see [MusicBrainz IDs](catalog.md#musicbrainz-ids)): an
-Admin catalog edit returns `409 ADMIN_CATALOG_MUSICBRAINZ_ID_IN_USE`, and an
-import commit becomes needs attention (`identityConflict`). Once IDs are
+Admin catalog edit returns `409 ADMIN_CATALOG_MUSICBRAINZ_ID_IN_USE`, an
+import commit becomes needs attention (`identityConflict`), and an
+existing-Album review apply returns `409 ADMIN_CATALOG_REVIEW_IDENTITY_CHANGED`
+and writes nothing. Once IDs are
 stored, the release before them is the rollback floor (see
 [Rollback floors](../features/admin-workbench.md#rollback-floors)); it keeps
 the indexes (harmless: its writers never set the field, and listener DTOs were
@@ -341,6 +345,30 @@ saved while rolled back for an entry or label carrying an ID bind none after
 rolling forward and are cleared. The lookup worker sends at most 16 extra
 artist or label alias lookups per run, through the same deployment-wide
 MusicBrainz gate, and a source failure ends that alias phase at once.
+
+An existing-Album review document (`adminAlbumImports`, `purpose`
+`catalogReview`) also keeps its identity decisions (`catalogIdentityDecisions`,
+at most 513, replaced as a whole set) and, once applied, the slots of the
+members whose Artist entries it applied (`catalogApplied.memberCredits`); its
+`musicBrainzNames` keep names for the IDs its members' entries carry too, at
+most 513 IDs of 32 names (an import keeps 21), and its `localizedNames` keep
+the groups naming its members' entries too, at most 512. Neither the decisions
+nor the member slots appear in the review detail; the decisions are returned
+only by `GET /catalog-reviews/:id/candidates`. Applying a
+review that resolves identities increments the same identity-fence document
+(`adminImportAnalysisSlots`, `_id` `identity`) as a format-3 import commit, and
+a MusicBrainz ID another record took meanwhile fails that transaction on the
+unique index (`409 ADMIN_CATALOG_REVIEW_IDENTITY_CHANGED`). Creating a review
+where lookup is available writes its lookup record and `lookupGate` in the
+creation transaction. Every review creation increments the creation fence
+(`adminImportAnalysisSlots`, `_id` `catalog-review-creation`, seeded at startup
+like the identity fence), so concurrent creations conflict and the one that
+runs again sees the other's review. Finding an Album's open review (the
+eligibility read and the creation check) scans catalog reviews newest first
+through `admin_project_purpose_inventory` (its `purpose` prefix only), keeping
+unapplied reviews of that captured Album ID and revision, and returns at most
+25, each then source-checked, within the usual 3-second bound: its cost grows
+with the number of stored reviews, applied ones included. No index changes.
 
 Playback Audio/Video GETs that briefly overlap an older stream may wait up to two
 seconds for an existing admission slot. The pending pool is bounded to 32 per

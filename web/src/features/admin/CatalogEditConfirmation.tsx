@@ -6,14 +6,17 @@ import { useLocalization } from '../../localization/LocalizationProvider';
 import type { MessageKey } from '../../localization/contract';
 import { useAdminAccess, useAdminText } from './AdminAccess';
 import { adminEndpointRequest } from './adminTransport';
-import { catalogResponse, type CatalogCredit, type CatalogItem, type catalogPatch } from './catalogApi';
+import { catalogResponse, type CatalogCredit, type CatalogEditPatch, type CatalogItem } from './catalogApi';
+import { expectedSummaryVariables, type CatalogAlbumExpectedSummary } from './catalogAlbumExpectedSummary';
 import { reviewValueText } from './reviewValueText';
 import styles from './adminStyles';
 
-/** The displayed differences and eventual command share this captured item and partial patch. */
+/** The displayed differences and eventual command share this captured item and partial patch or expected tracklist clear. */
 export interface CatalogEditSnapshot {
   item: CatalogItem;
-  patch: ReturnType<typeof catalogPatch>;
+  patch: CatalogEditPatch;
+  /** The tracklist a clear removes, as the Tracks section last read it. */
+  expected?: CatalogAlbumExpectedSummary;
 }
 
 /** Resolves only a credit's display name; its identity, role and position remain frozen in the patch. */
@@ -57,14 +60,24 @@ function FieldValue({ field, value }: { field: string; value: unknown }) {
 export function CatalogEditConfirmation({ snapshot, stale, disabled, onClose, onConfirm }: {
   snapshot: CatalogEditSnapshot; stale: boolean; disabled: boolean; onClose: () => void; onConfirm: () => void;
 }) {
-  const t = useAdminText(), initialFocus = useRef<HTMLElement>(null);
-  const { item, patch } = snapshot;
+  const t = useAdminText(), initialFocus = useRef<HTMLElement>(null), { locale } = useLocalization();
+  const { item, patch, expected } = snapshot;
   const previous = item.fields as Record<string, unknown>;
-  const changes = [...Object.entries(patch.fields ?? {}), ...(patch.visibility ? [['visibility', patch.visibility] as const] : [])];
+  // A clear changes no field: it shows the stored tracklist against none instead.
+  const clearing = 'clearExpectedTracklist' in patch;
+  const changes = clearing ? [] : [...Object.entries(patch.fields ?? {}), ...(patch.visibility ? [['visibility', patch.visibility] as const] : [])];
   return <ModalDialog title={t('catalog.confirm')} description={t('catalog.confirm_copy')}
     headerContent={<div className={styles.target}><strong>{('name' in item.fields ? item.fields.name : item.fields.title) || t('common.untitled')}</strong></div>}
     initialFocusRef={initialFocus} onClose={onClose}>
     {stale && <p role="alert" className={styles.error}>{t('catalog.confirm_stale')}</p>}
+    {clearing && <article className={styles.card}>
+      <h3>{t('catalog.album_expected')}</h3>
+      <div className={styles.diff}>
+        <div><strong>{t('catalog.current_value')}</strong><pre>{expected ? t('catalog.album_expected_summary', expectedSummaryVariables(expected, locale)) : t('catalog.album_expected')}</pre></div>
+        <div><strong>{t('catalog_review.saved_value')}</strong><pre>{t('catalog.album_expected_none')}</pre></div>
+      </div>
+      <p className={styles.muted}>{t('catalog.album_expected_clear_copy')}</p>
+    </article>}
     {changes.map(([field, value]) => <article className={styles.card} key={field}>
       <h3>{t(field === 'credits' ? 'catalog.credits' : field === 'attributionStatus' ? 'catalog.attribution' : `field.${field}`)}</h3>
       <div className={styles.diff}>
@@ -73,6 +86,6 @@ export function CatalogEditConfirmation({ snapshot, stale, disabled, onClose, on
       </div>
     </article>)}
     <div className={styles.dialogActions}><button className={styles.button} type="button" onClick={onClose}>{t('common.cancel')}</button>
-      <button className={`${styles.button} ${styles.primary}`} type="button" disabled={disabled || stale || !changes.length} onClick={onConfirm}>{t('catalog.save')}</button></div>
+      <button className={`${styles.button} ${styles.primary}`} type="button" disabled={disabled || stale || (!clearing && !changes.length)} onClick={onConfirm}>{t(clearing ? 'catalog.album_expected_clear' : 'catalog.save')}</button></div>
   </ModalDialog>;
 }

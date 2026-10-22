@@ -872,7 +872,7 @@
       "variables": {}
     },
     "admin.action.analyze": {
-      "description": "Starts naming-context analysis after approval.",
+      "description": "Administrator workbench: Draft section button that opens the paid Luna AI confirmation; names Luna, AI and paid.",
       "delivery": [
         "runtime"
       ],
@@ -963,7 +963,7 @@
       "variables": {}
     },
     "admin.action.reanalyze": {
-      "description": "Requests another allowed analysis generation.",
+      "description": "Administrator workbench: Draft section button that opens the paid Luna AI confirmation for another run; names Luna, AI and paid.",
       "delivery": [
         "runtime"
       ],
@@ -1012,7 +1012,7 @@
       "variables": {}
     },
     "admin.analysis.budget_daily": {
-      "description": "Administrator workbench: Luna analysis confirmation, what is left today across the deployment.",
+      "description": "Administrator workbench: paid Luna AI confirmation, the paid Luna AI calls left today across the deployment.",
       "delivery": [
         "runtime"
       ],
@@ -1021,7 +1021,7 @@
       }
     },
     "admin.analysis.budget_project": {
-      "description": "Administrator workbench: Luna analysis confirmation, what is left for this project.",
+      "description": "Administrator workbench: paid Luna AI confirmation, the Luna AI runs and paid AI calls left for this project.",
       "delivery": [
         "runtime"
       ],
@@ -1031,49 +1031,142 @@
       }
     },
     "admin.analysis.confirm": {
-      "description": "Analyze confirmation: what Luna receives (folder and file names, current draft values, file tags and the applied MusicBrainz release, if any); it only suggests values and may incur a provider charge.",
+      "description": "Administrator workbench: paid Luna AI confirmation, what Luna AI receives (folder and file names, current draft values, file tags and the applied MusicBrainz release, if any); it only suggests values and is a paid AI service that may incur a provider charge.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.analysis.confirm_action": {
-      "description": "Administrator workbench: Luna analysis confirmation, starts the paid analysis.",
+      "description": "Administrator workbench: confirm button of the Luna AI confirmation that starts the paid run; names Luna, AI and paid.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.analysis.confirm_title": {
-      "description": "Administrator workbench: Luna analysis confirmation title.",
+      "description": "Administrator workbench: title of the Luna AI confirmation; names Luna, says it is AI and says it is paid.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.analysis.reanalyze": {
-      "description": "Administrator workbench: analysis reanalyze.",
+      "description": "Administrator workbench: starts another paid Luna AI run. Unused; kept because shipped Web, iOS and Android packaged bundles contain it.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.analysis.start": {
-      "description": "Administrator workbench: analysis start.",
+      "description": "Administrator workbench: starts a paid Luna AI run. Unused; kept because shipped Web, iOS and Android packaged bundles contain it.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.analysis.stop": {
-      "description": "Administrator workbench: analysis stop.",
+      "description": "Administrator workbench: stops a queued or running Luna AI run.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.analysis.unavailable": {
-      "description": "Administrator workbench: analysis unavailable.",
+      "description": "Administrator workbench: Luna AI is unavailable; the draft stays editable by hand.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.append_rows.already_filled": {
+      "description": "Administrator workbench: flags an appended file whose expected-tracklist row already has a file, or that another listed file also fills.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.append_rows.duration": {
+      "description": "Administrator workbench: flags an appended file whose duration differs from its expected-tracklist row's by more than the lookup tolerance.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "seconds": "number"
+      }
+    },
+    "admin.append_rows.fills": {
+      "description": "Administrator workbench: how many of the append target Album's missing-file rows the shown files fill.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "filled": "number",
+        "missing": "number"
+      }
+    },
+    "admin.append_rows.no_disc_number": {
+      "description": "Administrator workbench: flags an appended file without a Disc Number when the expected tracklist has several discs.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.append_rows.no_row": {
+      "description": "Administrator workbench: an appended file fills no row of the target Album's expected tracklist.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.append_rows.no_track_number": {
+      "description": "Administrator workbench: flags an appended file without a Track Number.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.append_rows.number": {
+      "description": "Administrator workbench: secondary button that numbers appended files from the target Album's expected tracklist in one field save.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.append_rows.number_help": {
+      "description": "Administrator workbench: explains which files numbering from the expected tracklist changes and when it also sets their titles.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.append_rows.outside": {
+      "description": "Administrator workbench: flags an appended file whose position is not a row of the expected tracklist.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.append_rows.row": {
+      "description": "Administrator workbench: the expected-tracklist row an appended file fills, with its disc, track and title.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "disc": "string",
+        "title": "string",
+        "track": "string"
+      }
+    },
+    "admin.append_rows.title": {
+      "description": "Administrator workbench: heading of the append target Album's expected tracklist rows in the summary and confirmation.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.append_rows.unsaved_target": {
+      "description": "Administrator workbench: the confirmation's Review decisions target another Album than the saved ones, so its rows are not shown.",
       "delivery": [
         "runtime"
       ],
@@ -1135,36 +1228,64 @@
       ],
       "variables": {}
     },
+    "admin.catalog_review.adds_precision": {
+      "description": "Administrator workbench: existing-Album review summary, a date conflict that only adds precision to the saved date.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.album_credits_not_copied": {
+      "description": "Album completion confirmation, when the Album's primary Artist Credits change: Album Credits are never copied to tracks.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.catalog_review.analysis_again": {
-      "description": "Run Luna review again",
+      "description": "Existing-Album review: starts another paid Luna AI run; names Luna, AI and paid.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.catalog_review.analysis_confirm": {
-      "description": "Start Luna review",
+      "description": "Existing-Album review: starts a paid Luna AI run (also its confirm button); names Luna, AI and paid.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.analysis_confirm_title": {
+      "description": "Existing-Album review: title of the confirmation dialog for a paid Luna AI run; names Luna, says it is AI and says it is paid.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.catalog_review.analysis_copy": {
-      "description": "Luna will use the saved metadata and available original filenames. This may incur an AI service charge. It creates suggestions only; applying them requires a separate confirmation.",
+      "description": "Existing-Album review: what Luna AI uses, that it is a paid AI service, and that it only suggests.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.catalog_review.analysis_limit": {
-      "description": "This project has reached its analysis limit. Continue reviewing manually.",
+      "description": "Existing-Album review: this project reached its Luna AI run limit; manual review continues.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.catalog_review.analysis_running": {
-      "description": "Luna is reviewing in the background. You can leave this page; results will be saved here.",
+      "description": "Existing-Album review: Luna AI runs in the background and saves its results to this review.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.answer_conflict_first": {
+      "description": "Album completion, Update original Album step: a change whose lookup conflict is unanswered cannot be selected.",
       "delivery": [
         "runtime"
       ],
@@ -1200,8 +1321,15 @@
       ],
       "variables": {}
     },
+    "admin.catalog_review.apply_confirm_copy": {
+      "description": "Album completion, Update original Album confirmation: only the changes listed update the Album, never its tracks, files, cover or visibility.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.catalog_review.apply_copy": {
-      "description": "Only selected saved changes will update the original Album. Other information and media stay in place.",
+      "description": "Album completion, Update original Album step: lookup values arrive selected and can be deselected; only selected changes update the Album, never its tracks, files, cover or visibility.",
       "delivery": [
         "runtime"
       ],
@@ -1228,6 +1356,13 @@
       ],
       "variables": {}
     },
+    "admin.catalog_review.artist_mismatch": {
+      "description": "Administrator workbench: existing-Album review summary, flag: the applied release credits an artist none of the Album's primary Artists names.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.catalog_review.artist_read_only": {
       "description": "Artist name (read-only)",
       "delivery": [
@@ -1235,43 +1370,104 @@
       ],
       "variables": {}
     },
+    "admin.catalog_review.attribution_change": {
+      "description": "Album completion confirmation: a member's attribution state before and after applying, such as Unknown → Documented.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "from": "string",
+        "to": "string"
+      }
+    },
+    "admin.catalog_review.attribution_none": {
+      "description": "Album completion confirmation: a member whose attribution state is not stored.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.conflicts": {
+      "description": "Administrator workbench: existing-Album review summary, heading of the lookup values that differ from the Album's saved ones.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.catalog_review.context_copy": {
-      "description": "Luna uses saved metadata and retained original filenames. Missing historical filenames and folder names stay unknown.",
+      "description": "Existing-Album review: what Luna AI can use (saved metadata and retained original filenames); missing historical names stay unknown.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.catalog_review.context_title": {
-      "description": "What Luna can use",
+      "description": "Existing-Album review: heading of the section on what Luna AI can use.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.catalog_review.create": {
-      "description": "Review existing Album",
+      "description": "Administrator Album page: the action that creates an Album completion and looks the Album up on MusicBrainz, a free service; it never starts Luna AI.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.create_another": {
+      "description": "Administrator Album page: explicitly creates another Album completion while one is unfinished.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.catalog_review.create_confirm": {
-      "description": "Create review project",
+      "description": "Album completion creation dialog: the confirm button where metadata lookup is not configured (manual editing).",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.catalog_review.create_copy": {
-      "description": "Create a private review of the current saved Album and its tracks. Start Luna separately after reviewing the saved context. Creating this project does not change the catalog.",
+      "description": "Album completion creation dialog where metadata lookup is available: what the free MusicBrainz lookup completes, that it does not complete the cover, that the catalog changes only after confirmation and that paid Luna AI never starts.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.create_manual": {
+      "description": "Administrator Album page: the action creating an Album completion for manual editing where metadata lookup is not configured.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.create_manual_copy": {
+      "description": "Album completion creation dialog where metadata lookup is not configured: it creates a completion for manual editing, and the catalog changes only after confirmation.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.credits_removed": {
+      "description": "Album completion confirmation: the Credits a member loses.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "credits": "string"
+      }
+    },
+    "admin.catalog_review.current_value": {
+      "description": "Administrator workbench: existing-Album review summary, label of a conflict's current saved value.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.catalog_review.draft_saved": {
-      "description": "Review draft saved",
+      "description": "Album completion editor: status after the private completion draft is saved.",
       "delivery": [
         "runtime"
       ],
@@ -1306,14 +1502,14 @@
       "variables": {}
     },
     "admin.catalog_review.empty_attention": {
-      "description": "Luna review needs attention. Check the issue above or continue editing manually.",
+      "description": "Existing-Album review: Luna AI needs attention; check the issue shown or keep editing by hand.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.catalog_review.empty_cancelled": {
-      "description": "The Luna review was stopped. You can still edit the draft manually.",
+      "description": "Existing-Album review: Luna AI was stopped; the draft stays editable by hand.",
       "delivery": [
         "runtime"
       ],
@@ -1327,14 +1523,14 @@
       "variables": {}
     },
     "admin.catalog_review.empty_idle": {
-      "description": "Luna has not run yet. Start a review or edit the draft manually.",
+      "description": "Existing-Album review: Luna AI has not run yet; editing by hand comes first, then paid Luna AI.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.catalog_review.empty_no_suggestions": {
-      "description": "Luna did not suggest changes. You can still edit the draft manually.",
+      "description": "Existing-Album review: Luna AI suggested no changes; the draft stays editable by hand.",
       "delivery": [
         "runtime"
       ],
@@ -1347,8 +1543,74 @@
       ],
       "variables": {}
     },
+    "admin.catalog_review.expected_copy": {
+      "description": "Administrator workbench: existing-Album review summary, explains that rows without a file are administrator information only and create no track.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.expected_rows": {
+      "description": "Administrator workbench: existing-Album review summary, expected tracklist preview, its row count and how many rows have no file.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "noFile": "number",
+        "rows": "number"
+      }
+    },
     "admin.catalog_review.filename_missing": {
       "description": "Original filename not retained",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.flag_characters": {
+      "description": "Administrator workbench: existing-Album review summary, flag: a release value with characters that cannot be saved is not applied.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.flag_format": {
+      "description": "Administrator workbench: existing-Album review summary, flag: a release value that cannot be read is not applied.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.flag_length": {
+      "description": "Administrator workbench: existing-Album review summary, flag: a release value that is too long is not applied.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.flag_no_track_credit": {
+      "description": "Administrator workbench: existing-Album review summary, a track's Artists stay unchanged because its own release track has no usable artist credit.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.flag_not_applicable": {
+      "description": "Administrator workbench: existing-Album review summary, flag: the value is not applicable because the review does not show every Credit it would change.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.flag_placeholder": {
+      "description": "Administrator workbench: existing-Album review summary, flag: a release credit naming only a placeholder is not applied.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.flag_size": {
+      "description": "Administrator workbench: existing-Album review summary, flag: a release value over the review limits is not applied.",
       "delivery": [
         "runtime"
       ],
@@ -1360,6 +1622,334 @@
         "runtime"
       ],
       "variables": {}
+    },
+    "admin.catalog_review.identities_copy": {
+      "description": "Administrator workbench: existing-Album review summary, explains that one decision covers an artist across the Album and its tracks, and that name matches prove nothing.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.identities_title": {
+      "description": "Administrator workbench: existing-Album review summary, heading of the Artist and label identity rows.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.identity_answers": {
+      "description": "Administrator workbench: existing-Album review summary, how many identity rows still need a record chosen, existing or new.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.catalog_review.identity_answers_first": {
+      "description": "Album completion, Update original Album step: why the update waits: the named Artists or label of selected changes need a record chosen.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "names": "string"
+      }
+    },
+    "admin.catalog_review.identity_bound": {
+      "description": "Administrator workbench: existing-Album review summary, identity row bound to the record the Album's Credits already name.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "name": "string"
+      }
+    },
+    "admin.catalog_review.identity_conflicting": {
+      "description": "Administrator workbench: existing-Album review summary, identity row whose entries name different Artists.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.identity_creates": {
+      "description": "Album completion confirmation: an Artist or label Organization the update creates.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "name": "string"
+      }
+    },
+    "admin.catalog_review.identity_decision_stale": {
+      "description": "Administrator workbench: existing-Album review summary, identity row whose saved reuse decision names a record that changed since; the decision is no longer kept.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.identity_keep_id": {
+      "description": "Administrator workbench: existing-Album review summary, identity row choice that keeps the bound record's own MusicBrainz ID.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "id": "string"
+      }
+    },
+    "admin.catalog_review.identity_names": {
+      "description": "Administrator workbench: existing-Album review summary, identity row, the other names credited for the same artist.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "names": "string"
+      }
+    },
+    "admin.catalog_review.identity_records_id": {
+      "description": "Administrator workbench: existing-Album review summary, identity row, the MusicBrainz ID applying records on its record.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "id": "string"
+      }
+    },
+    "admin.catalog_review.ids_only": {
+      "description": "Album completion confirmation: a list whose Credits stay the same while MusicBrainz IDs are recorded.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.ineligible_album_not_ready": {
+      "description": "Administrator Album page: why the completion action is disabled: the Album is missing or not ready.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.ineligible_membership_inconsistent": {
+      "description": "Administrator Album page: why the completion action is disabled: a listed track belongs to another Album.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.ineligible_membership_invalid": {
+      "description": "Administrator Album page: why the completion action is disabled: a malformed track list.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.ineligible_too_many_tracks": {
+      "description": "Administrator Album page: why the completion action is disabled: over 100 tracks.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.ineligible_tracks_not_ready": {
+      "description": "Administrator Album page: why the completion action is disabled: a member is missing or not ready.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.ineligible_values_unsupported": {
+      "description": "Administrator Album page: why the completion action is disabled: a stored title, date, Disc or Track Number, or the tracks' original file names, are more than an Album completion can hold.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.ineligible_video_tracks": {
+      "description": "Administrator Album page: why the completion action is disabled: a Video member.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.keep_all_current": {
+      "description": "Administrator workbench: existing-Album review summary, answer that keeps the current value of every open conflict.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.keep_current": {
+      "description": "Administrator workbench: existing-Album review summary, answer that keeps the Album's current value of one conflict.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.kept_current": {
+      "description": "Administrator workbench: existing-Album review summary, an answered conflict whose current value was kept.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_applied_none": {
+      "description": "Administrator workbench: existing-Album review summary, status when no release is applied and the Album's saved values are kept.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_difference_pairing": {
+      "description": "Administrator workbench: existing-Album review summary, candidate chooser difference, the Album's tracks do not pair with the release in exactly one way.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_difference_too_many_tracks": {
+      "description": "Administrator workbench: existing-Album review summary, candidate chooser difference, the release has more audio tracks than an expected tracklist holds.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_difference_tracklist_invalid": {
+      "description": "Administrator workbench: existing-Album review summary, candidate chooser difference, the release's tracklist cannot be kept as an expected tracklist.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_left_out": {
+      "description": "Administrator workbench: existing-Album review summary, candidate chooser, how many video or data tracks of the release are left out.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.catalog_review.lookup_missing_rows": {
+      "description": "Administrator workbench: existing-Album review summary, candidate chooser, how many missing-file rows the release would add.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.catalog_review.lookup_no_match": {
+      "description": "Administrator workbench: existing-Album review summary, status when no release matches the Album's tracks.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_no_query": {
+      "description": "Administrator workbench: existing-Album review summary, status when the Album has no saved title to look up.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_not_started": {
+      "description": "Administrator workbench: existing-Album review summary, status before any metadata lookup run, offering the name box or Luna AI (paid).",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_paired": {
+      "description": "Administrator workbench: existing-Album review summary, candidate chooser, how many of the Album's tracks pair with the release, out of all.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "members": "number",
+        "paired": "number"
+      }
+    },
+    "admin.catalog_review.lookup_partial_comparison": {
+      "description": "Administrator workbench: existing-Album review summary, candidate chooser, not every release MusicBrainz found was compared.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_single_choice": {
+      "description": "Administrator workbench: existing-Album review summary, status and chooser heading when the only matching release of a partial comparison is offered, not applied.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_status_matching": {
+      "description": "Administrator workbench: existing-Album review summary, candidate chooser, the release matches the Album's tracks.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_status_not_matching": {
+      "description": "Administrator workbench: existing-Album review summary, candidate chooser, the release does not match the Album's tracks.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_status_unverified": {
+      "description": "Administrator workbench: existing-Album review summary, candidate chooser, the release is not verified and why.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_superseded": {
+      "description": "Administrator workbench: existing-Album review summary, status when the run ended because the Album or its tracks changed or are no longer ready.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_tie": {
+      "description": "Administrator workbench: existing-Album review summary, status and chooser heading when several matching releases need a choice.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_title": {
+      "description": "Administrator workbench: existing-Album review summary, the section heading.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_unknown_discs": {
+      "description": "Administrator workbench: existing-Album review summary, candidate chooser, how many of the Album's tracks have no Disc Number.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.catalog_review.lookup_unknown_durations": {
+      "description": "Administrator workbench: existing-Album review summary, candidate chooser, how many of the Album's tracks have an unknown duration.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.catalog_review.lookup_unpairable": {
+      "description": "Administrator workbench: existing-Album review summary, candidate chooser, the Album's tracks that no track of the release can pair with.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "tracks": "string"
+      }
     },
     "admin.catalog_review.manage_copy": {
       "description": "Artist attribution, cover and visibility are edited in the original Album. Changing that Album requires creating a new review before applying draft changes.",
@@ -1382,8 +1972,91 @@
       ],
       "variables": {}
     },
+    "admin.catalog_review.member_filled": {
+      "description": "Administrator workbench: existing-Album review summary, a track's Artists filled from its own release track.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.member_no_pairing": {
+      "description": "Administrator workbench: existing-Album review summary, the Album's tracks do not pair with the applied release in exactly one way, so no track value is applied.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.member_unpaired": {
+      "description": "Administrator workbench: existing-Album review summary, a track's Artists stay unchanged because no release track pairs with it.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.members_copy": {
+      "description": "Administrator workbench: existing-Album review summary, explains that track Artists come only from each track's own release track.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.members_naming_replaced": {
+      "description": "Album completion confirmation: the tracks whose Credits, after applying, still credit an Artist the Album no longer credits as primary.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "tracks": "string"
+      }
+    },
+    "admin.catalog_review.members_title": {
+      "description": "Administrator workbench: existing-Album review summary, heading of each track's Artists from its own release track.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.needs_answers": {
+      "description": "Administrator workbench: existing-Album review summary, how many lookup answers are still needed.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.catalog_review.needs_decision": {
+      "description": "Administrator workbench: existing-Album review summary, identity row that needs an explicit decision.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.catalog_review.no_changes": {
-      "description": "The saved review draft has no changes to apply. Edit the draft or review Luna suggestions to prepare changes.",
+      "description": "Existing-Album review: the saved draft has no changes to apply; edit it or review Luna AI suggestions first.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.number_with_tracklist": {
+      "description": "Administrator workbench: existing-Album review, Update original Album step; a Disc or Track Number metadata lookup filled through its pairing cannot be selected because it applies only with the expected tracklist.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.off_row": {
+      "description": "Album completion, Update original Album step: why the expected tracklist cannot be selected: the members not at their rows after the selected changes.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "tracks": "string"
+      }
+    },
+    "admin.catalog_review.open_copy": {
+      "description": "Administrator Album page: the Album has an unapplied completion whose source is current; it can be opened, or another created.",
       "delivery": [
         "runtime"
       ],
@@ -1404,21 +2077,21 @@
       "variables": {}
     },
     "admin.catalog_review.review_tab": {
-      "description": "Review Luna suggestions",
+      "description": "Existing-Album review: tab that lists the Luna AI suggestions to review.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.catalog_review.save_draft": {
-      "description": "Save review draft",
+      "description": "Album completion editor: button saving the private completion draft.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.catalog_review.save_draft_first": {
-      "description": "Save your draft edits before running Luna, adopting suggestions or updating the original Album.",
+      "description": "Existing-Album review: unsaved draft edits must be saved before looking up metadata, using Luna AI, adopting suggestions or updating the original Album.",
       "delivery": [
         "runtime"
       ],
@@ -1439,7 +2112,7 @@
       "variables": {}
     },
     "admin.catalog_review.scope_copy": {
-      "description": "You are editing a review draft visible to administrators. Saving or adopting suggestions does not update the original Album; confirm that update separately. Luna is optional.",
+      "description": "Existing-Album review: the draft is visible to administrators, saving or adopting does not update the original Album until that update is confirmed separately, and Luna AI is optional.",
       "delivery": [
         "runtime"
       ],
@@ -1494,7 +2167,7 @@
       "variables": {}
     },
     "admin.catalog_review.title": {
-      "description": "Existing Album review",
+      "description": "Administrator workbench: the name of an existing-Album review project (an Album completion).",
       "delivery": [
         "runtime"
       ],
@@ -1507,6 +2180,43 @@
       ],
       "variables": {}
     },
+    "admin.catalog_review.use_all_itunes": {
+      "description": "Administrator workbench: existing-Album review summary, answer that uses the iTunes value of every open conflict of an iTunes-only result.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.use_all_musicbrainz": {
+      "description": "Administrator workbench: existing-Album review summary, answer that uses the MusicBrainz value of every open conflict.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.use_itunes": {
+      "description": "Administrator workbench: existing-Album review summary, answer that uses the iTunes value of one conflict of an iTunes-only result.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.use_musicbrainz": {
+      "description": "Administrator workbench: existing-Album review summary, answer that uses the MusicBrainz value of one conflict.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.used_lookup": {
+      "description": "Administrator workbench: existing-Album review summary, an answered conflict whose lookup value was used; the source (MusicBrainz or iTunes) is untranslated.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "source": "string"
+      }
+    },
     "admin.catalog_review.view_changes": {
       "description": "Review changes to apply ({count})",
       "delivery": [
@@ -1515,6 +2225,13 @@
       "variables": {
         "count": "number"
       }
+    },
+    "admin.catalog_review.waiting_lookup": {
+      "description": "Administrator workbench: existing-Album review summary, applying waits while metadata lookup runs or retries automatically.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
     },
     "admin.catalog.add_credit": {
       "description": "Add credit",
@@ -1529,6 +2246,176 @@
         "runtime"
       ],
       "variables": {}
+    },
+    "admin.catalog.album_expected": {
+      "description": "Administrator workbench: Album catalog page, Tracks section, heading of the expected tracklist rows, the item of its clear confirmation and the accessible name of its row list.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.album_expected_clear": {
+      "description": "Administrator workbench: Album catalog page, Tracks section, button that opens, and in its confirmation applies, clearing the Album's expected tracklist.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.album_expected_clear_copy": {
+      "description": "Administrator workbench: Album catalog page, Tracks section, confirmation note that clearing removes only the expected tracklist and its rows without a file.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.album_expected_copy": {
+      "description": "Administrator workbench: Album catalog page, Tracks section, explanation shown instead of the ordering explanation when the Album keeps an expected tracklist.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.album_expected_no_file": {
+      "description": "Administrator workbench: Album catalog page, Tracks section, badge for an expected tracklist row that no track fills yet.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.album_expected_none": {
+      "description": "Administrator workbench: Album catalog page, Tracks section, confirmation value after clearing: the Album keeps no expected tracklist.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.album_expected_outside": {
+      "description": "Administrator workbench: Album catalog page, Tracks section, heading of the tracks at no expected tracklist row's Disc and Track Number, listed with missing MediaTrack records.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.album_expected_summary": {
+      "description": "Administrator workbench: Album catalog page, Tracks section, summary of the expected tracklist: its source (MusicBrainz or iTunes, untranslated), the date it was applied, its row count and how many rows have no file yet.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "date": "string",
+        "noFile": "number",
+        "rows": "number",
+        "source": "string"
+      }
+    },
+    "admin.catalog.album_expected_upload_only": {
+      "description": "Administrator workbench: Album catalog page, Tracks section, note that an Album without a primary Artist Credit cannot be appended to, so only a Content Manager Audio upload fills its rows without a file.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.album_track_linked_elsewhere": {
+      "description": "Administrator workbench: Album catalog page, read-only Tracks section, badge for a member whose own Album link is absent or names another Album.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.album_track_missing": {
+      "description": "Administrator workbench: Album catalog page, read-only Tracks section, row for a listed track whose MediaTrack record no longer exists.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.album_track_state_deleting": {
+      "description": "Administrator workbench: Album catalog page, read-only Tracks section, state of a track that is being deleted.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.album_track_state_failed": {
+      "description": "Administrator workbench: Album catalog page, read-only Tracks section, state of a track whose media upload failed.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.album_track_state_pending": {
+      "description": "Administrator workbench: Album catalog page, read-only Tracks section, state of a track whose media upload has not finished.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.album_track_state_unavailable": {
+      "description": "Administrator workbench: Album catalog page, read-only Tracks section, state of an uploaded track whose stored media needs repair before it can play.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.album_track_state_unpublished": {
+      "description": "Administrator workbench: Album catalog page, read-only Tracks section, state of an uploaded track that is not published.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.album_tracks": {
+      "description": "Administrator workbench: Album catalog page, read-only Tracks section, heading.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.album_tracks_copy": {
+      "description": "Administrator workbench: Album catalog page, read-only Tracks section, explanation that the list cannot be edited here and follows the Album order.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.album_tracks_empty": {
+      "description": "Administrator workbench: Album catalog page, read-only Tracks section, empty state for an Album without tracks.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.album_tracks_error": {
+      "description": "Administrator workbench: Album catalog page, read-only Tracks section, failure to read the track list.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.album_tracks_legacy": {
+      "description": "Administrator workbench: Album catalog page, read-only Tracks section, explanation for an older Album that stores no track order, shown instead of the ordering explanation.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog.album_tracks_skipped": {
+      "description": "Administrator workbench: Album catalog page, read-only Tracks section, count of stored member entries that are malformed or repeated and need repair.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.catalog.album_tracks_truncated": {
+      "description": "Administrator workbench: Album catalog page, read-only Tracks section, note that only the leading tracks of an oversized Album are listed.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
     },
     "admin.catalog.artist": {
       "description": "Artists",
@@ -2023,7 +2910,7 @@
       "variables": {}
     },
     "admin.common.lookup_refused": {
-      "description": "Administrator workbench: refusal: this project no longer accepts metadata lookup.",
+      "description": "Administrator workbench: refusal: this import or existing-Album review no longer accepts metadata lookup.",
       "delivery": [
         "runtime"
       ],
@@ -3073,6 +3960,13 @@
       ],
       "variables": {}
     },
+    "admin.field.expected_tracklist": {
+      "description": "Field name: an Album's expected tracklist.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.field.hidden": {
       "description": "Administrator workbench: field hidden.",
       "delivery": [
@@ -3244,49 +4138,49 @@
       "variables": {}
     },
     "admin.issue.budget_exhausted": {
-      "description": "This project reached its analysis limit. Continue reviewing or editing the saved draft.",
+      "description": "Luna AI issue in imports and existing-Album reviews: the project reached its Luna AI run limit; review or edit the saved draft.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.issue.grant_expired": {
-      "description": "Analysis permission expired. Review its confirmed status before continuing.",
+      "description": "Luna AI issue in imports and existing-Album reviews: the Luna AI permission expired; check its confirmed status before continuing.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.issue.permission_lost": {
-      "description": "Analysis stopped because its initiating administrator no longer has permission.",
+      "description": "Luna AI issue in imports and existing-Album reviews: Luna AI stopped because its initiating administrator lost permission.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.issue.provider_invalid_response": {
-      "description": "The analysis could not be validated. No suggestions from that response were applied.",
+      "description": "Luna AI issue in imports and existing-Album reviews: the Luna AI response failed validation, so none of its suggestions were applied.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.issue.provider_outcome_unknown": {
-      "description": "The provider outcome is unknown. Another paid analysis is blocked until the outcome is reconciled.",
+      "description": "Luna AI issue in imports and existing-Album reviews: the Luna AI outcome is unknown; another paid Luna AI run is blocked until it is reconciled.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.issue.provider_rejected": {
-      "description": "The analysis request was declined. Review the draft before requesting another analysis.",
+      "description": "Luna AI issue in imports and existing-Album reviews: the Luna AI request was declined; review the draft before using Luna AI again.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.issue.provider_unavailable": {
-      "description": "Analysis is unavailable. The saved draft remains editable.",
+      "description": "Luna AI issue in imports and existing-Album reviews: Luna AI is unavailable; the saved draft stays editable.",
       "delivery": [
         "runtime"
       ],
@@ -3489,7 +4383,7 @@
       "variables": {}
     },
     "admin.lookup.itunes_unavailable": {
-      "description": "Administrator workbench: import summary, MusicBrainz answered without a matching release and the iTunes Search API stayed unavailable through its automatic retries.",
+      "description": "Administrator workbench: import summary, MusicBrainz answered without a matching release and the iTunes Search API stayed unavailable through its automatic retries; another name comes first, then paid Luna AI.",
       "delivery": [
         "runtime"
       ],
@@ -3517,7 +4411,7 @@
       "variables": {}
     },
     "admin.lookup.luna": {
-      "description": "Administrator workbench: import summary, opens the Luna analysis confirmation.",
+      "description": "Administrator workbench: import summary, secondary button after the lookup controls that opens the paid Luna AI confirmation; names Luna, AI and paid.",
       "delivery": [
         "runtime"
       ],
@@ -4193,7 +5087,7 @@
       }
     },
     "admin.publication.luna_names": {
-      "description": "Administrator workbench: publication confirmation, ticked Luna suggestions add names that match existing records, so those rows need an explicit decision; offers to apply them first and answer them in Review.",
+      "description": "Administrator workbench: publication confirmation, ticked Luna AI suggestions add names that match existing records, so those rows need an explicit decision; offers to apply them first and answer them in Review.",
       "delivery": [
         "runtime"
       ],
@@ -4362,21 +5256,21 @@
       "variables": {}
     },
     "admin.review.baseline": {
-      "description": "Administrator workbench: review baseline.",
+      "description": "Administrator workbench: Review heading for the value a suggestion was based on when Luna AI ran.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.review.changed": {
-      "description": "Compact conflict status; detailed baseline guard explanation is secondary.",
+      "description": "Administrator workbench: compact status that the draft changed after Luna AI ran; the detailed baseline guard explanation is secondary.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.review.conflict": {
-      "description": "Administrator workbench: review conflict.",
+      "description": "Administrator workbench: a value changed after Luna AI ran; edit the draft by hand or keep its current value.",
       "delivery": [
         "runtime"
       ],
@@ -4464,7 +5358,7 @@
       }
     },
     "admin.review.suggested": {
-      "description": "Administrator workbench: review suggested.",
+      "description": "Administrator workbench: Review heading for the value Luna AI suggested.",
       "delivery": [
         "runtime"
       ],
@@ -4534,7 +5428,7 @@
       "variables": {}
     },
     "admin.stage.analysis": {
-      "description": "Administrator workbench: stage analysis.",
+      "description": "Administrator workbench: heading and progress label for Luna AI.",
       "delivery": [
         "runtime"
       ],
@@ -4720,7 +5614,7 @@
       "variables": {}
     },
     "admin.summary.luna": {
-      "description": "Administrator workbench: import summary and publication confirmation, Luna suggestions.",
+      "description": "Administrator workbench: import summary and publication confirmation, heading of the Luna AI suggestions.",
       "delivery": [
         "runtime"
       ],
@@ -4741,7 +5635,7 @@
       "variables": {}
     },
     "admin.summary.luna_mark": {
-      "description": "Administrator workbench: import summary, marks a value suggested by Luna.",
+      "description": "Administrator workbench: import summary, marks a value suggested by Luna AI.",
       "delivery": [
         "runtime"
       ],
@@ -4835,7 +5729,7 @@
       "variables": {}
     },
     "admin.summary.waiting_analysis": {
-      "description": "Administrator workbench: import summary, Publish waits for Luna analysis.",
+      "description": "Administrator workbench: import summary, Publish waits while Luna AI runs.",
       "delivery": [
         "runtime"
       ],
@@ -5092,7 +5986,7 @@
       "variables": {}
     },
     "admin.workbench.analyzing": {
-      "description": "Administrator workbench: workbench analyzing.",
+      "description": "Administrator workbench: status that Luna AI is queued or running.",
       "delivery": [
         "runtime"
       ],
@@ -5134,7 +6028,7 @@
       "variables": {}
     },
     "admin.workbench.manage_albums": {
-      "description": "Edit or review existing Album",
+      "description": "Administrator workbench: entry to edit an existing Album or complete it from metadata lookup.",
       "delivery": [
         "runtime"
       ],
@@ -5183,7 +6077,7 @@
       "variables": {}
     },
     "admin.workbench.open_review": {
-      "description": "Open review",
+      "description": "Link opening an existing Album completion (review project).",
       "delivery": [
         "runtime"
       ],
@@ -5197,7 +6091,7 @@
       "variables": {}
     },
     "admin.workbench.review_analyzing": {
-      "description": "In progress",
+      "description": "Existing-Album review status: Luna AI is queued or running.",
       "delivery": [
         "runtime"
       ],
@@ -5218,7 +6112,7 @@
       "variables": {}
     },
     "admin.workbench.review_empty": {
-      "description": "No existing Album reviews yet. Choose an Album to edit its information or start a Luna review.",
+      "description": "Administrator workbench: no Album completions yet; choose an Album to complete it from MusicBrainz or edit it.",
       "delivery": [
         "runtime"
       ],
@@ -5262,14 +6156,14 @@
       }
     },
     "admin.workbench.review_source": {
-      "description": "Existing Album reviews",
+      "description": "Administrator workbench: the queue of Album completions (existing-Album review projects).",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.workbench.review_stage": {
-      "description": "Luna review",
+      "description": "Existing-Album review status label for Luna AI progress.",
       "delivery": [
         "runtime"
       ],

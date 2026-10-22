@@ -11,9 +11,12 @@
  *   - a collection lookup that gives fewer songs than the collection has, or may be cut off at the lookup limit, gives an incomplete iTunes-only candidate
  *   - collection lookups stop at their bound: a further result is skipped without a request, making the stage incomplete
  *   - an iTunes-only release keeps the single artist string as one entry, milliseconds, discs in order, the day date, no label or country, a UPC barcode and allowlisted artwork only
+ *   - each iTunes-only track is credited with its song's single artist string as one primary entry, never split, apart from the release credit
  *   - localized name groups are one result's distinct artist names across storefronts, case-folded, at least two, bounded, and a malformed stage gives none
  *   - a stored stage from another release is read without its unknown parts, and an unreadable one is none
  *   - iTunes unavailable skips its remaining requests; a result left without its collection lookup makes the stage incomplete, skipped searches do not
+ *   - in subset mode a collection is kept with at least as many tracks as members or an unknown count, fewest extra first across the stage's answers, up to four; songs are unchanged
+ *   - a review's stage that leaves out only collections with more tracks than members keeps its exact-count flag; an unknown or equal count, a song or an unknown member count clears it
  * @end-catalog */
 
 /**
@@ -28,10 +31,10 @@ import { after, test } from 'node:test';
 import { METADATA_LOOKUP_JOB_LIMITS, METADATA_LOOKUP_LIMITS, type ItunesCollection, type ItunesSearchResult, type ItunesTrack } from '../../src/administration/lookup/lookupContract';
 import {
     finishItunesBridge, itunesCandidate, itunesCollectionTitle, itunesRelease, itunesRequestsFor, itunesUnavailable, lookupLocalizedGroups, nextItunesCollectionAction, nextItunesSearchAction,
-    planItunesBridge, recordBridgeAnswer, recordItunesAnswer, startItunesStage, storedItunesStage, type LookupItunesItem, type LookupItunesStage
+    planItunesBridge, recordBridgeAnswer, recordItunesAnswer, recordItunesCollection, startItunesStage, storedItunesStage, type LookupItunesItem, type LookupItunesStage
 } from '../../src/administration/lookup/lookupItunesStage';
 import type { PlannedLookupQuery } from '../../src/administration/lookup/lookupQueryPlanner';
-import { proposalForRelease, rankLookupCandidates, type LocalFileEvidence } from '../../src/administration/lookup/lookupRanking';
+import { proposalForRelease, rankLookupCandidates, trackArtistProposal, type LocalFileEvidence } from '../../src/administration/lookup/lookupRanking';
 import { installNetworkGuard } from '../support/networkGuard';
 
 const guard = installNetworkGuard();
@@ -248,6 +251,19 @@ test('an iTunes-only release keeps the single artist string as one entry, millis
     assert.equal(itunesRelease(collection('5', 'X', 'A', 1), [song('6', '5', 'X', 'A')], '000000000000').barcode, null);
 });
 
+test('each iTunes-only track is credited with its song\'s single artist string as one primary entry, never split, apart from the release credit', () => {
+    const built = itunesRelease(collection('5', 'X', 'Synthetic Ensemble', 2), [song('6', '5', 'One', 'Synthetic A feat. Synthetic B', { trackNumber: 1 }),
+        song('7', '5', 'Two', 'Synthetic Ensemble', { trackNumber: 2 })], null);
+    assert.deepEqual(built.media[0].tracks.map(track => track.artistCredit), [
+        [{ name: 'Synthetic A feat. Synthetic B', joinPhrase: '', artistId: '', artistName: 'Synthetic A feat. Synthetic B' }],
+        [{ name: 'Synthetic Ensemble', joinPhrase: '', artistId: '', artistName: 'Synthetic Ensemble' }]]);
+    assert.deepEqual(built.media[0].tracks.map(track => trackArtistProposal(built, track)), [
+        { artists: [{ name: 'Synthetic A feat. Synthetic B', role: 'primary', joinPhrase: null, musicBrainzId: null }] },
+        { artists: [{ name: 'Synthetic Ensemble', role: 'primary', joinPhrase: null, musicBrainzId: null }] }]);
+    // The Album's entries still come from the collection's artist string alone.
+    assert.deepEqual(proposalForRelease(built).artists, [{ name: 'Synthetic Ensemble', role: 'primary', joinPhrase: null, musicBrainzId: null }]);
+});
+
 test('localized name groups are one result\'s distinct artist names across storefronts, case-folded, at least two, bounded, and a malformed stage gives none', () => {
     const stage = stageWith([
         item('song:1', 'song', [['A', 'Isekaijoucho', 'us'], ['B', 'ヰ世界情緒', 'jp'], ['C', 'ISEKAIJOUCHO', 'kr']]),
@@ -281,4 +297,87 @@ test('iTunes unavailable skips its remaining requests; a result left without its
     // Unavailable before the bridge ended: the collection lookups the bridge then needs fail without a request.
     const unfinished = nextItunesCollectionAction({ ...stageWith([item('song:2', 'song', [['A', 'B', 'us']])]), state: 'unavailable', bridge: [], bridgeOutcomes: [] }, 0, false);
     assert.deepEqual([unfinished.action, unfinished.stage.items[0].bridge, unfinished.stage.items[0].collection, unfinished.stage.complete], [null, 'notRun', 'failed', false]);
+});
+
+test('in subset mode a collection is kept with at least as many tracks as members or an unknown count, fewest extra first across the stage\'s answers, up to four; songs are unchanged', () => {
+    const albums = startItunesStage([release('Synthetic Album', { artist: 'Synthetic Artist' })], 'noMatch', 'subset')!;
+    const plain = startItunesStage([release('Synthetic Album', { artist: 'Synthetic Artist' })], 'noMatch')!;
+    // A review's stage starts with its own exact-count flag; an import's has none.
+    assert.deepEqual([albums.exactComplete, 'exactComplete' in plain], [true, false]);
+    const offered = answer([collection('1', 'One', 'A', 1), collection('2', 'Five', 'A', 5), collection('3', 'Unknown', 'A', null), collection('4', 'Two', 'A', 2),
+        collection('5', 'Three', 'A', 3), collection('6', 'None', 'A', 0), collection('7', 'Also Two', 'A', 2)]);
+    // Two members: the two two-track collections in answer order, then three and five tracks, each with its reported count; the
+    // unknown count is left out by the bound, and could have exactly two tracks, so both flags clear. Fewer tracks than members, or
+    // a known none, is never plausible.
+    const kept = recordItunesAnswer(albums, 0, offered, files(2), 'subset');
+    assert.deepEqual([kept.items.map(entry => [entry.key, entry.trackCount]), kept.complete, kept.exactComplete],
+        [[['collection:4', 2], ['collection:7', 2], ['collection:5', 3], ['collection:2', 5]], false, false]);
+    // Results are ordered across answers: a later answer's better fit displaces a larger result kept earlier.
+    const first = recordItunesAnswer(albums, 0, answer([collection('2', 'Five', 'A', 5), collection('3', 'Unknown', 'A', null)]), files(2), 'subset');
+    assert.deepEqual([first.items.map(entry => entry.key), first.complete, first.exactComplete], [['collection:2', 'collection:3'], true, true]);
+    const later = recordItunesAnswer(first, 1, answer([collection('4', 'Two', 'A', 2), collection('5', 'Three', 'A', 3), collection('7', 'Also Two', 'A', 2)]), files(2), 'subset');
+    assert.deepEqual([later.items.map(entry => entry.key), later.complete, later.exactComplete], [['collection:4', 'collection:7', 'collection:5', 'collection:2'], false, false]);
+    // A repeat in a later storefront only gains its names, keeping its place and count.
+    const repeated = recordItunesAnswer(first, 1, answer([collection('2', 'Five JP', 'A', 5)]), files(2), 'subset');
+    assert.deepEqual([repeated.items.map(entry => [entry.key, entry.trackCount, entry.names.map(name => name.title)]), repeated.complete],
+        [[['collection:2', 5, ['Five', 'Five JP']], ['collection:3', null, ['Unknown']]], true]);
+    // An empty Album pairs with any collection that has tracks.
+    assert.deepEqual(recordItunesAnswer(albums, 0, answer([collection('1', 'One', 'A', 1), collection('6', 'None', 'A', 0), collection('3', 'Unknown', 'A', null)]), [], 'subset')
+        .items.map(entry => entry.key), ['collection:1', 'collection:3']);
+    // The exact comparison is unchanged: only counts that can equal the files, in answer order, no stored count or exact-count
+    // flag, and the default is exact.
+    const exact = recordItunesAnswer(plain, 0, offered, files(2), 'exact');
+    assert.deepEqual([exact.items.map(entry => entry.key), exact.items.some(entry => 'trackCount' in entry), 'exactComplete' in exact],
+        [['collection:3', 'collection:4', 'collection:6', 'collection:7'], false, false]);
+    assert.deepEqual(recordItunesAnswer(plain, 0, offered, files(2)), exact);
+    // Songs are kept by a single member's duration in either mode.
+    const songs = startItunesStage([recording('Synthetic Song')], 'noMatch')!;
+    const heard = answer([], [song('11', '21', 'Near', 'A', { trackTimeMillis: 203_000 }), song('12', '22', 'Far', 'A', { trackTimeMillis: 203_001 })]);
+    assert.deepEqual(recordItunesAnswer(songs, 0, heard, [file(200_000)], 'subset').items, recordItunesAnswer(songs, 0, heard, [file(200_000)]).items);
+});
+
+test('a review\'s stage that leaves out only collections with more tracks than members keeps its exact-count flag; an unknown or equal count, a song or an unknown member count clears it', () => {
+    const albums = startItunesStage([release('Synthetic Album', { artist: 'Synthetic Artist' })], 'noMatch', 'subset')!;
+    const counted = (counts: (number | null)[], from = 1) => answer(counts.map((count, index) => collection(String(from + index), `Album ${from + index}`, 'A', count)));
+    // Two members, five collections of two to six tracks: the six-track one is left out, which can never have exactly two.
+    const larger = recordItunesAnswer(albums, 0, counted([6, 5, 4, 3, 2]), files(2), 'subset');
+    assert.deepEqual([larger.items.map(entry => entry.trackCount), larger.complete, larger.exactComplete], [[2, 3, 4, 5], false, true]);
+    // Another exact count arriving later pushes out a larger one: still only larger ones left out.
+    const again = recordItunesAnswer(larger, 1, counted([2], 10), files(2), 'subset');
+    assert.deepEqual([again.items.map(entry => entry.trackCount), again.complete, again.exactComplete], [[2, 2, 3, 4], false, true]);
+    // Five exact counts: one is left out, which could have matched exactly.
+    const crowded = recordItunesAnswer(albums, 0, counted([2, 2, 2, 2, 2]), files(2), 'subset');
+    assert.deepEqual([crowded.items.length, crowded.complete, crowded.exactComplete], [4, false, false]);
+    // A stage read from a record without the flag starts from `complete`.
+    const { exactComplete: _flag, ...unflagged } = albums;
+    assert.deepEqual([recordItunesAnswer(unflagged, 0, counted([6, 5, 4, 3, 2]), files(2), 'subset').exactComplete,
+        recordItunesAnswer({ ...unflagged, complete: false }, 0, counted([2]), files(2), 'subset').exactComplete], [true, false]);
+
+    // Collection lookups skipped by the candidate bound, failed, or left by iTunes unavailable follow the same test with the member count.
+    const pending = (extra: Partial<LookupItunesItem>[]) => ({ ...stageWith(extra.map((fields, index) => item(`collection:${index + 1}`, 'collection', [[`Album ${index + 1}`, 'A', 'us']],
+        { bridge: 'noRelease', collection: 'pending', ...fields }))), bridge: [], finalized: true, exactComplete: true });
+    const skipped = (stage: LookupItunesStage, memberCount?: number) => nextItunesCollectionAction(stage, METADATA_LOOKUP_JOB_LIMITS.candidates, false, memberCount).stage;
+    const flags = (stage: LookupItunesStage) => [stage.complete, stage.exactComplete];
+    assert.deepEqual(flags(skipped(pending([{ trackCount: 3 }, { trackCount: 5 }]), 2)), [false, true]);
+    assert.deepEqual(flags(skipped(pending([{ trackCount: 3 }, { trackCount: 2 }]), 2)), [false, false]);
+    assert.deepEqual(flags(skipped(pending([{ trackCount: 3 }, { trackCount: null }]), 2)), [false, false]);
+    assert.deepEqual(flags(skipped(pending([{ trackCount: 3 }, {}]), 2)), [false, false]);
+    assert.deepEqual(flags(skipped(pending([{ trackCount: 3 }]))), [false, false]);
+    // A song's collection has no known count.
+    const songItem = { ...stageWith([item('song:1', 'song', [['Song', 'A', 'us']], { bridge: 'noRelease', collection: 'pending' })]), bridge: [], finalized: true, exactComplete: true };
+    assert.deepEqual(flags(skipped(songItem, 2)), [false, false]);
+    assert.deepEqual(flags(recordItunesCollection(pending([{ trackCount: 4 }]), 'collection:1', 'failed', 2)), [false, true]);
+    assert.deepEqual(flags(recordItunesCollection(pending([{ trackCount: 2 }]), 'collection:1', 'skipped', 2)), [false, false]);
+    assert.deepEqual(flags(recordItunesCollection(pending([{ trackCount: 2 }]), 'collection:1', 'missing', 2)), [true, true]);
+    assert.deepEqual(flags(itunesUnavailable(pending([{ trackCount: 4 }, { collection: 'fetched', trackCount: 2 }]), 2)), [false, true]);
+    assert.deepEqual(flags(itunesUnavailable(pending([{ trackCount: 2 }]), 2)), [false, false]);
+    // An import's stage never gains the flag.
+    const { exactComplete: _absent, ...imported } = pending([{}]);
+    for (const stage of [skipped(imported, 2), recordItunesCollection(imported, 'collection:1', 'failed', 2), itunesUnavailable(imported, 2)]) {
+        assert.deepEqual([stage.complete, 'exactComplete' in stage], [false, false]);
+    }
+    // The flag and the counts are stored and read back; values of another shape are dropped.
+    assert.deepEqual(storedItunesStage(JSON.parse(JSON.stringify(larger))), larger);
+    const foreign = storedItunesStage({ ...larger, exactComplete: 'yes', items: larger.items.map((entry, index) => ({ ...entry, trackCount: [0, -1, '3', 2.5][index] })) })!;
+    assert.deepEqual(['exactComplete' in foreign, foreign.items.map(entry => 'trackCount' in entry)], [false, [false, false, false, false]]);
 });

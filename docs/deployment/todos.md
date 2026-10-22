@@ -29,8 +29,11 @@ release or cannot run, staging its iTunes artwork. Publish waits while a run or
 that staging is active, a tie is unresolved or a conflict with an
 administrator's own value is unanswered. The Web Review and publish summary
 shows each run's status, ties and conflicts, takes a submitted Album or song
-name and offers a manual retry. Without the contact below, nothing is sent and
-no lookup starts.
+name and offers a manual retry, and an existing-Album review's lookup summary
+does the same for the review's private draft. Creating a review from the Album
+page queues one lookup, and applying the review writes its confirmed values,
+Credits and expected tracklist to the catalog. Without the contact below,
+nothing is sent and no lookup starts.
 
 - [ ] Set `FINITUDE_ADMIN_METADATA_LOOKUP_CONTACT` in production to an operator
       email address or https URL before metadata lookup is enabled for
@@ -45,6 +48,15 @@ no lookup starts.
       `500x500bb.jpg` thumbnails, and that one run stays within its iTunes
       bounds (at most 2 UPC lookups, 3 searches and 4 collection lookups, and 4
       MusicBrainz bridge searches).
+- [ ] During release verification of track artist credits, run lookups for
+      a few compilations in the administrator's library and confirm their
+      fetched releases still fit the 4 MiB candidate budget (none newly
+      `omitted`).
+- [ ] During release verification of existing-Album reviews, look up a few
+      Albums from the administrator's library that lack tracks of a larger
+      edition and confirm the intended edition is among the 25 candidates and
+      that an Album holding every track of the standard edition preselects
+      it.
 
 ## Artist Follow and New Releases Rollout
 
