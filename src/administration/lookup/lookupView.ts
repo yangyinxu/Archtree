@@ -16,9 +16,9 @@
  * whether it was not checked against MusicBrainz), groups, the preselection, the applied values with their conflicts and flags, the
  * iTunes stage's status, what Publish waits for and a submitted run's name with any submitted Artist name; never a URL, ISRC,
  * recording ID, storefront, localized name, account, grant, lease, fence, file-set digest or query. A review's view also admits
- * the catalog trigger, the exact-count basis, the subset differences, each candidate's subset comparison, the review-only value
- * paths (expected tracklist, member Artist entries), the review-only flag reasons, each conflict's `precision` and the applied
- * pairing (`pairs`); an import's view never carries them. Pure.
+ * the catalog trigger, the exact-count basis, the subset differences, each candidate's subset comparison and `byTrackTitle`, the
+ * review-only value paths (expected tracklist, member Artist entries), the review-only flag reasons, each conflict's `precision` and
+ * the applied pairing (`pairs`); an import's view never carries them. Pure.
  */
 import type { ImportDate } from '../import/adminImportContract';
 import { importDraftV2View } from '../import/adminImportDraftCompat';
@@ -55,6 +55,8 @@ type ViewCandidate<Comparison = ViewComparison> = {
     groupKey: string | null; artistMismatch: boolean | null;
     /** Whether the fetched release reports front artwork (a protected preview exists); never an address. */
     artwork: boolean;
+    /** A review's only, and only `true`: its release was first found by a Track-title search. */
+    byTrackTitle?: true;
 };
 /** The iTunes stage: not queried (none, or a run that ended before it), running, waiting for an automatic retry, answered or unavailable. */
 export type ImportLookupItunesStatus = 'notQueried' | 'running' | 'retrying' | 'answered' | 'unavailable';
@@ -203,7 +205,9 @@ function candidateView(stored: Record<string, unknown>, ranked: Record<string, u
         comparison: ranked ? comparisonView(ranked.comparison, mode, slots) : null,
         groupKey: ranked && typeof ranked.groupKey === 'string' && /^[a-f0-9]{64}$/.test(ranked.groupKey) ? ranked.groupKey : null,
         artistMismatch: ranked && typeof ranked.artistMismatch === 'boolean' ? ranked.artistMismatch : null,
-        artwork: release?.frontArtwork === true
+        artwork: release?.frontArtwork === true,
+        // Only `true` is ever sent, so a Web tab opened before Track-title searches still parses every other review candidate.
+        ...(mode === 'review' && stored.basis === 'trackTitle' ? { byTrackTitle: true } : {})
     };
 }
 

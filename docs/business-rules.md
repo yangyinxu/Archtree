@@ -1952,24 +1952,27 @@ The wire protocol and operational bounds are documented in
   reopening a project runs it only when its reconciliation confirms the last
   selected upload. An existing-Album review looks up its Album: it runs
   automatically once when a review is created where lookup is available, from
-  the Album's saved title and the names of its primary Artist Credits, and
-  runs when the administrator submits an Album or song name, optionally with
-  an Artist name, or retries. iOS and Android do not offer metadata lookup.
+  the Album's saved title and the names of its primary Artist Credits and,
+  when needed, its saved Track titles as described below, and runs when the
+  administrator submits an Album or song name, optionally with an Artist name,
+  or retries. iOS and Android do not offer metadata lookup.
 - Metadata lookup accepts names, not links. The server queries only fixed,
   server-chosen services and never fetches an administrator-supplied URL. It
   sends only the submitted text and any submitted Artist name, cleaned tag
-  text, a cleaned folder name or an existing Album's saved title and primary
-  Artist names, terms taken from earlier results of the same lookup, and
-  embedded identifiers; every identifier or barcode used in a query must match
-  its expected format. An automatic lookup never sends file names, sends a
-  folder name only when no usable tags exist, and no lookup sends account data
-  or audio. A review's automatic lookup never sends Track titles or original
-  filenames. Apart from artwork from the fixed artwork-host allowlist, the
-  server follows no link found in a lookup response. Metadata lookup never
-  downloads audio, audio previews or streams from any service, and
-  audio-preview and store links are discarded before results are stored. The
-  lookup box is not listener Search: it keeps no search history and does not
-  restore global music search to the administration layout.
+  text, a cleaned folder name or an existing Album's saved title, primary
+  Artist names and at most two of its saved Track titles with the primary
+  Artist names of those Tracks, terms taken from earlier results of the same
+  lookup, and embedded identifiers; every identifier or barcode used in a
+  query must match its expected format. An automatic lookup never sends file
+  names, sends a folder name only when no usable tags exist, and no lookup
+  sends account data or audio. A review's lookup never sends original
+  filenames, and sends saved Track titles only to MusicBrainz, as described
+  below. Apart from artwork from the fixed artwork-host allowlist, the server
+  follows no link found in a lookup response. Metadata lookup never downloads
+  audio, audio previews or streams from any service, and audio-preview and
+  store links are discarded before results are stored. The lookup box is not
+  listener Search: it keeps no search history and does not restore global
+  music search to the administration layout.
 - The name box takes an Album or song name and an optional Artist name, in
   imports and existing-Album reviews alike. The Album or song name is
   required; an Artist name alone is refused. Each is a name, not a link, of
@@ -2082,6 +2085,49 @@ The wire protocol and operational bounds are documented in
   of a complete comparison is preselected, and two or more matching groups are
   a tie. The view of differences also shows each candidate's track count, the
   members it pairs and how many missing-file rows it would add.
+- An existing-Album review's lookup, automatic or submitted, can also search
+  MusicBrainz recordings by at most two of the Album's Track titles, as the
+  review captured them from the catalog. It does so only when its searches
+  for the Album title or submitted name, once their releases are compared,
+  preselect nothing: for any reason, a tie included, when those searches name
+  no Artist because the Album shows no primary Artist name usable for search
+  and none was submitted; otherwise only because no candidate matches or the
+  comparison is partial. Track titles are compared and searched without a
+  trailing version or featuring note. The most distinctive titles are
+  picked: a title must occur once in the Album and differ from the Album
+  title, the submitted name and a title already picked. Generic titles of the
+  fixed list in docs/features/admin-workbench.md, an instrumental, off-vocal
+  or karaoke version, a title of only digits and punctuation, and a title
+  equal to the member's retained original filename with or without its
+  extension, ending in an audio file extension, or shaped like a file name (a
+  leading track number and separator, or underscores instead of spaces) are
+  skipped. On the cleaned title, each Han, kana or Hangul character counts
+  two and every other letter or digit one, while whitespace and punctuation
+  count zero; a title below four is skipped, and heavier titles come first,
+  then Album order. Each title is searched once, credited to the submitted
+  Artist name when one was given, else to the member's own first primary
+  Artist name that is not a placeholder credit, as the review captured it,
+  else to the Album's first such name, else alone. When the title searches
+  credited to an Artist returned no release, each title is searched alone
+  instead. A title searched alone must weigh at least eight.
+  These searches count among the run's planned searches, follow its title
+  searches, wait for MusicBrainz's request-rate bound even in a submitted
+  lookup, and precede the iTunes fallback, which never receives a Track
+  title. Until they are sent or skipped, the title searches leave 10 of the
+  run's bounded release lookups for them, and each Track-title search admits
+  at most 5 releases its recordings appear on, fewest extra tracks first; a
+  release it found that is already a candidate counts as found by it. These
+  releases match only through the subset pairing, so the members' durations
+  and own numbers decide; no value comes from a recording a title found. A
+  Track-title search that reports more recordings than it returns leaves the
+  comparison partial, so a release found that way is usually offered, not
+  applied. Track-title searches that are not sent never make the comparison
+  partial; one the source does not answer ends them without an automatic
+  retry, the comparison counts as partial, and the run completes with the
+  candidates it has. A matching group whose releases were all first found
+  through a Track title does not stop the iTunes fallback. The candidate
+  chooser marks a release first found through a Track title. A re-rank never
+  sends these searches, and imports never search by Track title.
 - Applying a candidate, automatically when it is preselected or when the
   administrator chooses it, writes all its supported values in one step: the
   Album title, Artist entries, label and date, and each matched file's track

@@ -3,12 +3,13 @@
  *   Types: ImportLookupView, ReviewLookupView, ImportLookupResponse, ImportSummaryState, ImportAppendTracklist
  *   Constants: reviewValuePathSchema, lookupViewSchema, reviewLookupViewSchema, lookupResponseSchema
  * Internal
- *   Functions: comparisonFor, candidateSchemaFor, lookupViewFor
+ *   Functions: comparisonFor, candidateFields, keyMatches, lookupViewFor
  *   Constants: integer, run, text, candidateKey, releaseId, mbid, source, groupKey, trackPath, valuePath,
  *              reviewTrackPath, slotId, bases, basis, reviewBasis, flagReasons, discNumber, trackNumber,
- *              comparisonSchema, pairSchema, subsetSchema, reviewComparisonSchema, proposalSchema, groupSchema,
- *              lookupValueSchema, expectedRows, reviewLookupValueSchema, appliedSchema, reviewAppliedSchema,
- *              rowTitle, knownDuration, appendTracklistSchema, summarySchema
+ *              comparisonSchema, pairSchema, subsetSchema, reviewComparisonSchema, candidateSchema,
+ *              reviewCandidateSchema, proposalSchema, groupSchema, lookupValueSchema, expectedRows,
+ *              reviewLookupValueSchema, appliedSchema, reviewAppliedSchema, rowTitle, knownDuration,
+ *              appendTracklistSchema, summarySchema
  * @end-catalog */
 
 import { z } from 'zod';
@@ -19,8 +20,8 @@ import { artistEntrySchema, expectedTracklistRowSchema, importDateSchema, labelE
  * (src/administration/lookup/lookupView.ts): bounded candidate evidence, groups, the preselection, the applied values with their
  * conflicts and flags, and what Publish waits for; and the import's summary state (src/administration/import/adminImportSummary.ts).
  * An existing-Album review's view (GET /catalog-reviews/:id/lookup) shares it and also admits the catalog trigger, the exact-count
- * basis, the subset differences and comparison, the review-only value paths, flag reasons and conflict precision, and the applied
- * pairing; an import's view refuses every one of them. The summary reads (importSummaryQuery.ts, catalogReviewSummaryQuery.ts) load
+ * basis, the subset differences and comparison, each candidate's `byTrackTitle`, the review-only value paths, flag reasons and
+ * conflict precision, and the applied pairing; an import's view refuses every one of them. The summary reads (importSummaryQuery.ts, catalogReviewSummaryQuery.ts) load
  * it with the read, so no chunk that shares those queries carries it.
  */
 const integer = z.number().int().nonnegative();
@@ -65,15 +66,20 @@ const subsetSchema = z.object({ leftOutTracks: integer, pairing: z.enum(['unique
   missingTrackCount: integer.nullable(), unpairableSlotIds: z.array(uuidSchema).max(100) }).strict();
 const reviewComparisonSchema = z.object({ ...comparisonFor(z.enum(['trackCount', 'discCount', 'duration', 'pairing', 'tooManyTracks', 'tracklistInvalid']), 6),
   subset: subsetSchema.nullable() }).strict();
-/** One candidate's evidence with its mode's comparison (zod refuses to extend a refined object, so each mode builds its own). */
-const candidateSchemaFor = <Comparison extends z.ZodType>(comparison: Comparison) => z.object({
+/** One candidate's evidence fields with its mode's comparison (zod refuses to extend a refined object, so each mode builds its own). */
+const candidateFields = <Comparison extends z.ZodType>(comparison: Comparison) => ({
   // An iTunes-only candidate, and whether it was not checked against MusicBrainz (MusicBrainz's, unchecked, from a server sending none).
   key: candidateKey, releaseId, source, notChecked: z.boolean().default(false), status: z.enum(['matching', 'unverified', 'notMatching', 'incomplete']), title: text.nullable(), artist: text.nullable(),
   label: text.nullable(), catalogNumber: text.nullable(), barcode: z.string().max(14).nullable(), country: z.string().max(2).nullable(), date: importDateSchema.nullable(),
   formats: z.array(z.string().max(100)).max(20), trackCount: integer.nullable(), comparison: comparison.nullable(), groupKey: groupKey.nullable(), artistMismatch: z.boolean().nullable(),
   // Whether a protected front-artwork preview exists (never an address); false from a server that sends none.
   artwork: z.boolean().default(false)
-}).strict().refine(candidate => candidate.key === `${candidate.source}:${candidate.releaseId}`, 'Mismatched lookup candidate');
+});
+const keyMatches = (candidate: { key: string; source: string; releaseId: string }) => candidate.key === `${candidate.source}:${candidate.releaseId}`;
+const candidateSchema = z.object(candidateFields(comparisonSchema)).strict().refine(keyMatches, 'Mismatched lookup candidate');
+/** A review candidate also says whether a Track-title search first found its release (false from a server that sends none). */
+const reviewCandidateSchema = z.object({ byTrackTitle: z.boolean().default(false), ...candidateFields(reviewComparisonSchema) }).strict()
+  .refine(keyMatches, 'Mismatched lookup candidate');
 /**
  * The values a matching group would write, with the MusicBrainz ID each entry and the label credit (null from a server that sends
  * none); text is evidence and is shown, never applied from here.
@@ -131,10 +137,10 @@ const lookupViewFor = <Trigger extends z.ZodType, Candidate extends z.ZodType, B
   // The iTunes fallback stage: not queried, running, waiting for an automatic retry, answered or unavailable.
   itunes: z.enum(['notQueried', 'running', 'retrying', 'answered', 'unavailable']).default('notQueried')
 }).strict();
-export const lookupViewSchema = lookupViewFor({ trigger: z.enum(['tags', 'folder', 'submitted']), candidate: candidateSchemaFor(comparisonSchema), basis, applied: appliedSchema,
+export const lookupViewSchema = lookupViewFor({ trigger: z.enum(['tags', 'folder', 'submitted']), candidate: candidateSchema, basis, applied: appliedSchema,
   path: valuePath, answers: 305 });
 /** An existing-Album review's lookup view: the catalog trigger, the review comparison, bases, applied values and value paths. */
-export const reviewLookupViewSchema = lookupViewFor({ trigger: z.enum(['tags', 'folder', 'submitted', 'catalog']), candidate: candidateSchemaFor(reviewComparisonSchema),
+export const reviewLookupViewSchema = lookupViewFor({ trigger: z.enum(['tags', 'folder', 'submitted', 'catalog']), candidate: reviewCandidateSchema,
   basis: reviewBasis, applied: reviewAppliedSchema, path: reviewValuePathSchema, answers: 406 });
 const rowTitle = z.string().min(1).max(300);
 const knownDuration = z.number().int().min(1).nullable();

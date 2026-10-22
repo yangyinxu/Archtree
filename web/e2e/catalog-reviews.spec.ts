@@ -36,7 +36,9 @@ import AxeBuilder from '@axe-core/playwright';
 import sharp from 'sharp';
 import { capabilities, session, viewer } from '../src/features/admin/adminFixtures.testSupport';
 import { albumId, capturedCatalogReview, catalogAlbum, catalogAlbumTracks, catalogAlbumTracksWithExpected, catalogReview, reviewId, slotId, slotTwo, titleSuggestionId } from '../src/features/admin/catalogReviewFixtures.testSupport';
-import { guestHandle, reviewAfterLookup, reviewIdentityResponse, reviewItunesLookupResponse, reviewLookupResponse } from '../src/features/admin/catalogReviewLookupFixtures.testSupport';
+import {
+  guestHandle, reviewAfterLookup, reviewIdentityResponse, reviewItunesLookupResponse, reviewLookupResponse, reviewTieLookupResponse
+} from '../src/features/admin/catalogReviewLookupFixtures.testSupport';
 import type { CatalogAlbumTracks } from '../src/features/admin/catalogAlbumTracksApi';
 import type { CatalogReview, ReviewDraftChange, ReviewField } from '../src/features/admin/catalogReviewApi';
 import type { ReviewDecisionItem, ReviewIdentityResponse, ReviewLookupResponse } from '../src/features/admin/catalogReviewLookupApi';
@@ -1296,6 +1298,34 @@ test('an iTunes-only lookup result names iTunes on its answers and flags every v
   await capture(page, '33-review-lookup-itunes', 390); await reflow(page);
   expect(api.writes).toEqual([]);
 });
+
+for (const variant of localizedViewports) {
+  const { width } = variant;
+  test(`an existing-Album review marks a release first found through a track title in its candidate chooser at ${width}px ${variant.locale}`, async ({ page }) => {
+    locale = variant.locale;
+    await page.setViewportSize({ width, height: width === 1280 ? 720 : 844 });
+    const api = await setup(page); api.ready();
+    // A tie whose second release a track-title search found first.
+    const tie = reviewTieLookupResponse(), lookup = tie.lookup!;
+    api.looked({ ...tie, lookup: { ...lookup, candidates: lookup.candidates.map((candidate, index) => ({ ...candidate, byTrackTitle: index === 1 })) } });
+    await enter(page, `/finitude/admin/catalog-reviews/${reviewId}`);
+    const summary = page.getByRole('region', { name: label('admin.catalog_review.lookup_title'), exact: true });
+    const chooser = summary.getByRole('region', { name: label('admin.catalog_review.lookup_tie'), exact: true });
+    const marked = label('admin.lookup.found_by_track_title');
+    const cards = chooser.getByRole('listitem').filter({ has: page.locator('strong') });
+    await expect(cards).toHaveCount(2);
+    await expect(cards.nth(0).getByText(marked, { exact: true })).toHaveCount(0);
+    await expect(cards.nth(1).getByText(marked, { exact: true })).toBeVisible();
+    // The folded list marks the same release, and only it, once it is opened.
+    const found = label('admin.lookup.candidates', { count: 2 });
+    const folded = summary.locator('details', { has: page.getByText(found, { exact: true }) });
+    await folded.getByText(found, { exact: true }).click();
+    await expect(folded.getByText(marked, { exact: true })).toHaveCount(1);
+    await expect(folded.getByText(marked, { exact: true })).toBeVisible();
+    await reflow(page);
+    expect(api.writes).toEqual([]);
+  });
+}
 
 for (const width of [320, 768, 1440]) {
   test(`read-only Credits and label context stay readable while a captured Disc Number is edited and applied at ${width}px`, async ({ page }) => {

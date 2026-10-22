@@ -57,6 +57,12 @@ nothing is sent and no lookup starts.
       edition and confirm the intended edition is among the 25 candidates and
       that an Album holding every track of the standard edition preselects
       it.
+- [ ] During release verification of track-title assisted lookup, look up a
+      few Albums from the administrator's library whose title search finds
+      many editions and confirm that keeping 10 of the 25 release lookups for
+      track titles rarely turns a preselection into an offer, and that an
+      Album whose title search finds nothing is offered its release through a
+      track title; the 10 is the `trackTitleCandidates` constant.
 
 ## Artist Follow and New Releases Rollout
 

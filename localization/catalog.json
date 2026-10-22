@@ -1430,7 +1430,7 @@
       "variables": {}
     },
     "admin.catalog_review.create_copy": {
-      "description": "Album completion creation dialog where metadata lookup is available: what the free MusicBrainz lookup completes, that it does not complete the cover, that the catalog changes only after confirmation and that paid Luna AI never starts.",
+      "description": "Album completion creation dialog where metadata lookup is available: what the free MusicBrainz lookup completes from the saved title and primary Artists and, when needed, up to two saved track titles, that it does not complete the cover, that the catalog changes only after confirmation and that paid Luna AI never starts.",
       "delivery": [
         "runtime"
       ],
@@ -4514,6 +4514,13 @@
         "candidate": "string",
         "local": "string"
       }
+    },
+    "admin.lookup.found_by_track_title": {
+      "description": "Administrator workbench: Album completion candidate chooser, a release that a MusicBrainz search by one of the Album's saved track titles found first.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
     },
     "admin.lookup.incomplete": {
       "description": "Administrator workbench: import summary, releases were found but none of their details could be fetched.",

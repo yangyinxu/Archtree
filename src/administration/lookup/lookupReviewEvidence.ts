@@ -4,12 +4,14 @@
  *              catalogReviewPrimaryNames, catalogReviewFileEvidence, planCatalogReviewLookup
  * Internal
  *   Types: ReviewSource
- *   Functions: isRecord, list, sha256, manifestSlots, capturedDuration
+ *   Functions: isRecord, list, sha256, manifestSlots, shownPrimaryCredits, firstUsableCredit,
+ *              catalogReviewTrackTitles, capturedDuration
  * @end-catalog */
 
 /**
  * An existing-Album review's metadata lookup inputs, used where an import reads its uploaded files: the members it binds, the
- * ranking evidence of each member and the run plan from the Album's saved title and shown primary Artist names. A review has no
+ * ranking evidence of each member and the run plan from the Album's saved title and shown primary Artist names, with its saved
+ * Track titles (each with its own, else the Album's, primary Artist name) for the optional Track-title searches. A review has no
  * uploads, so its members are bound through its source check (readCatalogReviewSource), never through file identities. Pure: no
  * database and no review service, so metadataLookupRecord.ts imports it without a cycle. Every function is total on malformed
  * stored shapes.
@@ -18,7 +20,9 @@ import { createHash } from 'node:crypto';
 import { hasOwn, originKey } from '../import/adminImportDraft';
 import { importDraftV2View } from '../import/adminImportDraftCompat';
 import type { AdminImportDocument } from '../import/adminImportService';
+import { isPlaceholderCredit } from './lookupIdentifiers';
 import { planMetadataLookup, plannableSubmittedArtist, type LookupPlan } from './lookupQueryPlanner';
+import { distinctiveTrackTitles, type TrackTitleMember } from './lookupTrackTitles';
 import type { LocalFileEvidence, LookupComparisonMode } from './lookupRanking';
 import type { LookupFileIdentity, MetadataLookupInput, MetadataLookupSubmission } from './metadataLookupRecord';
 
@@ -49,21 +53,46 @@ export function catalogReviewLookupFileSet(doc: Pick<ReviewSource, 'manifest' | 
 }
 
 /**
- * The names of the Album's shown primary Artist Credits as the review captured them: primary Artist Credits that name a draft
- * entry and a ready record with a non-empty name, in stored order, a name repeated in another case once. Empty without a readable
- * capture (a review not yet admitted to lookup).
+ * Shown primary Artist Credits of captured `credits`: primary Artist Credits that name a draft entry and a ready record with a
+ * non-empty name, in stored order, a name repeated in another case once, each with its record's MusicBrainz ID as captured.
  */
-export function catalogReviewPrimaryNames(doc: Pick<ReviewSource, 'catalogCapture'>): string[] {
-    const capture: unknown = doc.catalogCapture, album = isRecord(capture) ? capture.album : null;
-    const names: string[] = [], seen = new Set<string>();
-    for (const credit of list(isRecord(album) ? album.credits : null)) {
+function shownPrimaryCredits(credits: unknown): { name: string; musicBrainzId: unknown }[] {
+    const shown: { name: string; musicBrainzId: unknown }[] = [], seen = new Set<string>();
+    for (const credit of list(credits)) {
         if (!isRecord(credit) || credit.subjectType !== 'artist' || credit.role !== 'primary' || typeof credit.entryKey !== 'string' || !isRecord(credit.subject)) continue;
         const name = typeof credit.subject.name === 'string' ? credit.subject.name.trim() : '';
         const folded = name.normalize('NFC').toLowerCase();
         if (!name || seen.has(folded)) continue;
-        seen.add(folded); names.push(name);
+        seen.add(folded); shown.push({ name, musicBrainzId: credit.subject.musicBrainzId });
     }
-    return names;
+    return shown;
+}
+
+/**
+ * The names of the Album's shown primary Artist Credits as the review captured them (shownPrimaryCredits). Empty without a
+ * readable capture (a review not yet admitted to lookup).
+ */
+export function catalogReviewPrimaryNames(doc: Pick<ReviewSource, 'catalogCapture'>): string[] {
+    const capture: unknown = doc.catalogCapture, album = isRecord(capture) ? capture.album : null;
+    return shownPrimaryCredits(isRecord(album) ? album.credits : null).map(credit => credit.name);
+}
+
+/** The first of shown primary Artist Credits that is no placeholder by name or MusicBrainz ID; null without one. */
+const firstUsableCredit = (credits: unknown): string | null =>
+    shownPrimaryCredits(credits).find(credit => !isPlaceholderCredit(credit.name, credit.musicBrainzId))?.name ?? null;
+
+/**
+ * Each source track's saved title as the review captured it from the catalog (never a draft value), its retained original
+ * filename (read only to skip a title equal to it) and its credit: its own first shown primary Artist name that is no placeholder
+ * by name or MusicBrainz ID, else the Album's first such name, in source order.
+ */
+function catalogReviewTrackTitles(doc: Pick<ReviewSource, 'catalogSource' | 'catalogCapture'>): TrackTitleMember[] {
+    const capture: unknown = doc.catalogCapture, members = list(isRecord(capture) ? capture.members : null);
+    const album = firstUsableCredit(isRecord(capture) && isRecord(capture.album) ? capture.album.credits : null);
+    return list(isRecord(doc.catalogSource) ? doc.catalogSource.tracks : null).filter(isRecord).map(track => {
+        const member = members.find(item => isRecord(item) && typeof track.slotId === 'string' && item.slotId === track.slotId);
+        return { title: track.title, originalFileName: track.originalFileName, artist: firstUsableCredit(isRecord(member) ? member.credits : null) ?? album };
+    });
 }
 
 /** A member's captured duration: exact milliseconds (precision 0) or a legacy whole-second value (precision 1000); null when unknown. */
@@ -104,16 +133,19 @@ export function catalogReviewFileEvidence(doc: ReviewSource): LocalFileEvidence[
 /**
  * A review run's input and plan: the Album's saved title as the review captured it, with its shown primary Artist names as the
  * credited artists (`catalog`), or with `submitted` the submitted text planned with those names, or with its Artist name in their
- * place (kept only when it can be sent). Track titles, file names, folders, labels and identifiers are never inputs.
+ * place (kept only when it can be sent). Its distinctive saved Track titles plan the optional Track-title searches (only into the
+ * queries, never the input); file names, folders, labels and identifiers are never sent.
  */
 export function planCatalogReviewLookup(doc: ReviewSource, options: { submitted?: MetadataLookupSubmission } = {}): { input: MetadataLookupInput; plan: LookupPlan } {
     const credited = catalogReviewPrimaryNames(doc), fileCount = manifestSlots(doc).length;
+    const album = isRecord(doc.catalogSource) && isRecord(doc.catalogSource.album) && typeof doc.catalogSource.album.title === 'string' ? doc.catalogSource.album.title : null;
+    const trackTitles = (submittedText?: string) => distinctiveTrackTitles(catalogReviewTrackTitles(doc), { albumTitle: album, submittedText });
     if (options.submitted) {
         const submitted: MetadataLookupSubmission = { kind: options.submitted.kind, text: options.submitted.text,
             ...(plannableSubmittedArtist(options.submitted.artist) ? { artist: options.submitted.artist } : {}) };
-        return { input: { trigger: 'submitted', submitted }, plan: planMetadataLookup({ trigger: 'submitted', submitted, credited, fileCount }) };
+        return { input: { trigger: 'submitted', submitted },
+            plan: planMetadataLookup({ trigger: 'submitted', submitted, credited, fileCount, trackTitles: trackTitles(submitted.text) }) };
     }
-    const album = isRecord(doc.catalogSource) && isRecord(doc.catalogSource.album) && typeof doc.catalogSource.album.title === 'string' ? doc.catalogSource.album.title : null;
     return { input: { trigger: 'catalog', submitted: null },
-        plan: planMetadataLookup({ trigger: 'catalog', tags: { album, albumArtist: null, title: null, artist: null }, credited, fileCount }) };
+        plan: planMetadataLookup({ trigger: 'catalog', tags: { album, albumArtist: null, title: null, artist: null }, credited, fileCount, trackTitles: trackTitles() }) };
 }

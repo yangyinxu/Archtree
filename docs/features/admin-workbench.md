@@ -1307,10 +1307,12 @@ the eligibility read load, so the row below does not move, and the Album's copy
 is top-aligned with its cover, so rows the read adds only grow the hero
 downward. The hero has no separate manual-editing entry: the details form
 directly below it is the manual editor.
-The action's confirmation says lookup completes the title, release date,
-Artists, label, track titles, Disc and Track Numbers, each track's own Artists
-and the expected tracklist but not the cover, that nothing changes until the
-changes are confirmed and that Luna AI (paid) never starts; where lookup is not
+The action's confirmation says lookup searches by the saved title and primary
+Artists and, when that does not settle the match, by up to two saved track
+titles; that it completes the title, release date, Artists, label, track
+titles, Disc and Track Numbers, each track's own Artists and the expected
+tracklist but not the cover; that nothing changes until the changes are
+confirmed and that Luna AI (paid) never starts; where lookup is not
 configured the action reads **Create Album completion for manual editing**. The separate
 **Album completions** queue retains saved projects when the browser closes.
 **Unfinished** includes all unapplied reviews; **Album updated** confirms that
@@ -1329,7 +1331,9 @@ Artist name or else the saved Album title (its **Artist (optional)**
 hint says that an empty field uses the Album's primary Artists), the
 candidate chooser (review copy about the Album's tracks, and per candidate
 the members it pairs with each pair listed, the missing-file rows it
-adds, video or data tracks left out and members no track can pair with),
+adds, video or data tracks left out and members no track can pair with; a
+release first found through a saved track title is marked **Found through a
+track title**),
 from two open conflicts **Keep all current** and **Use all MusicBrainz** (or
 iTunes), each answering every open conflict in one request, member conflicts
 included; the Album's conflicts with **Keep current** and **Use MusicBrainz**
@@ -1729,7 +1733,9 @@ Catalog review routes (relative to `/api/admin/v1`):
 - `POST /catalog-reviews/:id/lookup` `{operationId, expectedRevision, kind,
   text, artist?}` (`kind` `album` or `song`; text and an optional `artist`
   string of at most 1000 characters each) looks up a submitted name with the
-  submitted Artist name, else the review's shown primary Artist names, and
+  submitted Artist name, else the review's shown primary Artist names, then,
+  when needed, up to two saved Track titles (see Existing-Album reviews under
+  [Lookup runs](#lookup-runs)), and
   `POST /catalog-reviews/:id/lookup/retry` `{operationId, expectedRevision}`
   repeats the last run's input and queries (a `catalog` run's too): `202` with
   the review response and receipt `lookup` or `lookup-retry`. Bodies are at
@@ -1795,7 +1801,8 @@ Catalog review routes (relative to `/api/admin/v1`):
 - The catalog trigger (review creation calls it where lookup is available):
   `queueCatalogReviewLookup` starts a review's one automatic run in the
   caller's administrator transaction under a `create` grant, from the Album's
-  saved title and first usable shown primary Artist name (see [Lookup
+  saved title and first usable shown primary Artist name and, when needed, up
+  to two of its saved Track titles (see Existing-Album reviews under [Lookup
   runs](#lookup-runs)). It admits and stores nothing while lookup is not
   configured, rechecks the administrator, converts the review as above
   (refusals included), and queues nothing once the review had its automatic
@@ -2606,6 +2613,23 @@ roll back to:
   `admin.lookup.artist_hint_review` keys. After deploying it, a Web client's
   cached bundle from before it is refused once for lacking those keys, so it
   shows English until the new bundle loads.
+- Track-title searches need no floor; no collection or index changes. The
+  release before them ignores `trackTitleSearch` and `creditFound` and drops
+  `byTrackTitle` from its views. A run of theirs still searching there sends
+  the stored Track-title queries as ordinary recording searches with their
+  planned credit, without the decision, the reservation or the bare fallback,
+  and a run already past them completes without them; both stay within the
+  same caps, and iTunes never gets a Track title. Rolled forward again, a run
+  that release advanced past them records them as skipped and never sends
+  them again. A Web tab opened before them cannot parse a review view with a
+  candidate a Track-title search found (only those carry `byTrackTitle`), so
+  reload open admin Web tabs after deploying or rolling back across them. Every
+  earlier key and its variables are kept, so Web, iOS and Android clients
+  accept this release's remote bundles. A Web tab opened after them keeps its
+  active bundle instead of accepting a remote bundle from a release before
+  them, which lacks the `admin.lookup.found_by_track_title` key. After
+  deploying them, a Web client's cached bundle from before them is refused once
+  for lacking that key, so it shows English until the new bundle loads.
 - Luna ticks need no floor of their own: an approval applies them to ordinary
   suggestion decisions and draft values. A release before them refuses the
   `suggestionTicks` this Web sends as invalid input and holds an approval
@@ -2957,6 +2981,49 @@ below). The source layer, the jobs and their routes live in
     only while name and Artist together fit its 200 characters. It never enters
     the draft, `musicBrainzNames`, identity candidates, the ranking's artist
     comparison or Luna's context.
+  - Track-title searches (existing-Album reviews only).
+    `src/administration/lookup/lookupTrackTitles.ts` picks, from the titles the
+    review captured from the catalog (`catalogSource.tracks`, never the draft),
+    the most distinctive ones. Each title is cleaned like tag text (format
+    characters removed, control characters as spaces, NFC, whitespace
+    collapsed; a link, an empty text or one over 200 characters is skipped),
+    then up to three trailing segments (a `()`, `[]`, `（）` or `【】` group,
+    else the text after a spaced `-`, `–` or `—`, each with text before it)
+    are peeled: one naming an instrumental, off-vocal or karaoke version
+    (instrumental, inst, off vocal, karaoke, backing track, オフボーカル,
+    カラオケ, インスト, 伴奏, 纯音乐, 純音樂, 반주, 연주곡, or `MR` in upper
+    case and not followed by a period, so `Mr. Big` marks nothing) skips the
+    title, one holding a note word (feat, ft, featuring, remaster, remastered,
+    version, ver, edit, mix, remix, live, mono, stereo, acoustic) is removed,
+    and any other stops the peeling. A title is also skipped when it looks like
+    a file name (equal to the member's retained original filename with or
+    without its extension, ending in `.mp3`, `.flac`, `.m4a`, `.aac`, `.wav`,
+    `.ogg`, `.opus` or `.aiff`, starting with a track number and a separator,
+    or without whitespace and either holding an underscore or made only of
+    ASCII with a run of three digits), is only digits and punctuation or a
+    generic title of the list under [What lookup sends](#what-lookup-sends),
+    equals the Album title or the submitted name (each without its notes),
+    occurs more than once in the Album (compared folded: NFKC, lower case, no
+    punctuation, symbol or whitespace), or weighs less than 4: each Han,
+    Hiragana, Katakana or Hangul character, or a letter those scripts share
+    (the prolonged sound mark `ー`, also half-width, and the iteration marks),
+    counts 2, any other letter or digit 1 and anything else 0. The rest rank
+    heaviest first, then in Album order, and a title equal to one ranked
+    earlier once folded is dropped. The planner keeps at most two
+    (`METADATA_LOOKUP_JOB_LIMITS.trackTitleSearches`) after every title search
+    and its fallbacks, and only when it planned a title search, so an unusable
+    Album title still plans nothing; each is a recording search of basis
+    `trackTitle`, credited to the submitted Artist name, else to the member's
+    own first shown primary Artist name that is no placeholder (by name or
+    MusicBrainz ID), else to the Album's first such name (also by name or
+    MusicBrainz ID, so Various Artists under a localized name never credits
+    one), else sent alone, which needs a weight of at least 8. A title whose
+    credited search would exceed the 500-character query bound, or that repeats
+    a planned search, gives way to the next one. Each carries `when`:
+    `noPreselection` when none of the planned title searches names an Artist (a
+    credited one dropped over the query bound names none), else
+    `noMatchOrPartial` (see Existing-Album reviews under
+    [Lookup runs](#lookup-runs)). Imports never plan them.
   - The normalized spelling applies to tag and folder text only; submitted
     text is sent as typed. It applies NFKC (full-width forms and `～` fold),
     writes the wave dash `〜` as `~`, joins "Sound Track" (or "Sound-Track")
@@ -3068,11 +3135,13 @@ below). The source layer, the jobs and their routes live in
 
 - **When.** Only after MusicBrainz returned no matching candidate: the run's
   planned searches and the release lookups they led to left no matching group
-  (unverified, non-matching and incomplete candidates do not count). It also
-  starts when MusicBrainz stayed unavailable through its automatic retries
-  during the planned searches (reason `searchUnavailable`). A run whose only
-  queries are a release MBID or an ISRC has no iTunes stage. The stage is
-  derived from the run's stored planned queries, so a manual retry repeats it.
+  (unverified, non-matching and incomplete candidates do not count, and nor
+  does a matching group whose releases were all first found by a Track-title
+  search). It also starts when MusicBrainz stayed unavailable through its
+  automatic retries during the planned searches (reason `searchUnavailable`).
+  A run whose only queries are a release MBID or an ISRC has no iTunes stage.
+  The stage is derived from the run's stored planned queries, so a manual
+  retry repeats it.
 - **Requests.** First, for a valid barcode every file shares (a placeholder,
   meaning an all-zero, malformed or bad-check-digit GTIN, is never sent),
   `lookup?upc=<digits>&entity=song` in at most two storefronts chosen by the
@@ -3084,7 +3153,8 @@ below). The source layer, the jobs and their routes live in
   then `us` for Hangul, `jp`, `tw` then `us` for other Han text, otherwise `us`
   then `jp`. The term is the text and its credited artist (never a label
   term), or the text alone when that is over 200 characters; a recording
-  search becomes `entity=song`, anything else `entity=album`.
+  search becomes `entity=song`, anything else `entity=album`. A review's
+  Track-title searches never give the term, so no Track title reaches iTunes.
 - **Results.** A collection (album search or UPC lookup) is kept when its track
   count can equal the number of files (or is unknown); a song when, for a
   one-file import with a known duration, its milliseconds are within the
@@ -3232,7 +3302,11 @@ database, what the step stores and which request comes next.
   `{kind, id, state, names}` with `state` `pending`, `fetched`, `missing`
   (404 or an answer for another ID) or `failed`; a record from an earlier
   release has none and completes without them, as one without `itunesStage`,
-  `exhausted` or `attempts.itunes` does without those.
+  `exhausted` or `attempts.itunes` does without those. A review run whose plan
+  has Track-title searches also records `trackTitleSearch` (`sent` or
+  `skipped`, absent while undecided) and `creditFound` (true once a title
+  search that named an Artist returned a release); both are absent on a new
+  run, so a manual retry decides again.
 - **States.** `queued`, `running` and `retrying` are active; `complete`,
   `unavailable`, `stopped` and `superseded` end a run. A stopped run's issue is
   `permissionLost` or `grantExpired`, an unavailable one's `sourceUnavailable`,
@@ -3301,7 +3375,9 @@ database, what the step stores and which request comes next.
   lookups the remaining candidates become incomplete and the run completes
   with `sourceUnavailable`. When iTunes's retries run out, the run completes
   with what it has and no issue of its own (the view's `itunes` is
-  `unavailable`). A manual retry starts a new run with the same queries.
+  `unavailable`). A manual retry starts a new run with the same queries. A
+  Track-title search that is busy, throttled or unavailable is never retried
+  (see Existing-Album reviews below).
 - **Candidates.** Releases are stored without ISRCs, within 4 MiB of JSON for
   all candidates together, and candidates plus ranking stay within 12 MiB: while
   over it, the largest fetched releases are omitted and the rest ranked again. A
@@ -3357,6 +3433,34 @@ database, what the step stores and which request comes next.
   `exactComplete` only when its reported count is unknown or equals the member
   count, and a song always does. Its alias lookups add each fetched release's audio-track artists, in
   track order after that release's credit and first label, within the same 16.
+  A review run whose plan ends in Track-title searches (see Planning and
+  ranking under [Metadata lookup](#metadata-lookup)) keeps 10 of its 25
+  release lookups for them while they are undecided: its title searches admit
+  at most 15 releases and are handed out only below that bound, and a bound
+  stop clears both flags and moves to the decision. Once no detail is pending,
+  and before the iTunes stage, the run decides: it skips them when MusicBrainz
+  is exhausted, the ranking preselects, or (`noMatchOrPartial`) a complete
+  comparison has a matching group, a tie included; with `noPreselection` it
+  sends them whenever nothing is preselected. A skip leaves both flags as they
+  are. Sent, each waits for its gate (`wait` mode, even in a submitted run)
+  and admits at most 5 releases (`trackTitleCandidates / trackTitleSearches`),
+  fewest extra tracks first, within the 25; a release already a candidate
+  counts as admitted, and keeps the basis it was first found by. One that
+  reports more recordings than it returns clears both flags, and a refused one
+  is passed over like one that is not sent, and the next is sent. When the
+  plan's title searches named an Artist and none of them returned a release (no
+  `creditFound`), each title is sent alone instead, and one weighing less than
+  8 is then passed over without making the comparison partial. A Track-title
+  search that is busy, throttled or unavailable is not retried and counts no
+  attempt: the remaining ones are dropped, both flags clear, and the run
+  continues in the same step to its details, the iTunes check and its aliases,
+  completing with the candidates it has; MusicBrainz exhausted before the
+  decision skips them. A matching group found only through Track titles does
+  not stop the iTunes stage. A record that is undecided but already past them,
+  or already has an iTunes stage, records them as skipped. A re-rank sends none
+  of them. Sending them stays within the run's six planned searches and 25
+  release lookups per attempt, and a run whose plan has no Track-title search
+  behaves as before.
   Each stored step also requires a format-3 review that is not applied and whose
   source is current (the Album ready and unchanged, its membership, member
   revisions and media evidence unchanged); otherwise the run ends `superseded`
@@ -3748,9 +3852,11 @@ among values, conflicts and flags (at most 406 of each), the flag reasons
 `notApplicable` and `noTrackCredit`, a `precision` boolean on each conflict
 (a date that only adds precision) and `pairs`: the applied single pairing
 (at most 100 pairs of this review's slots, each once, within the tracklist's
-number bounds), or `null` without one or for any value out of bounds. An
-import's view never carries these keys, and a run with the `catalog` input has
-no import view. The Web parses a review's view with its own strict schema
+number bounds), or `null` without one or for any value out of bounds. Each
+review candidate carries `byTrackTitle: true` when a Track-title search first
+found its release, and no such key otherwise.
+An import's view never carries these keys, and a run with the `catalog` input
+has no import view. The Web parses a review's view with its own strict schema
 (`reviewLookupViewSchema` in `importLookupApi.ts`, read through
 `catalogReviewLookupApi.ts`), which admits exactly these keys beyond the import
 view's, so the import page still refuses them.
@@ -3827,10 +3933,15 @@ publication confirmation. The approval and the publication commit never read
   name and any submitted Artist name; for an existing-Album review, the
   Album's saved title as the review captured it with its first usable shown
   primary Artist name (never split on ` / ` or read as a label), or a
-  submitted name with the submitted Artist name, else with that name; the
-  cleaned folder name only when no usable tags exist, only for
-  folder-chosen imports and automatically only once per project (a manual
-  retry of that run repeats it); release MBIDs from earlier results of the
+  submitted name with the submitted Artist name, else with that name; for
+  such a review, also at most two of its saved Track titles, without a
+  trailing version or featuring note, as recording searches credited to the
+  submitted Artist name, the member's own first shown primary Artist name or
+  the Album's first one, each no placeholder by name or MusicBrainz ID, or
+  alone; the cleaned folder name only when no
+  usable tags exist, only for folder-chosen imports and automatically only
+  once per project (a manual retry of that run repeats it); release MBIDs from
+  earlier results of the
   same run; artist and label MBIDs credited by releases the same run fetched
   (alias lookups, at most 16; a review's also the artists their audio tracks
   credit); normalized spellings of tag, folder or saved-title text
@@ -3839,11 +3950,12 @@ publication confirmation. The approval and the publication commit never read
   number of selected files, or of a review's members, is never sent; the run
   uses it only locally.
 - To Apple's iTunes Search API, only when MusicBrainz returned no matching
-  candidate, and only `https://itunes.apple.com/search` and `/lookup` (at most
-  9 requests per run attempt): the run's search term (its text and credited
-  artist, a submitted Artist name included while both fit the 200-character
-  term, never a respelling), the fixed storefront code, the digits of a valid
-  barcode every file shares (never a placeholder such as all zeros), and
+  candidate (a match found only through Track titles does not count), and only
+  `https://itunes.apple.com/search` and `/lookup` (at most 9 requests per run
+  attempt): the run's search term (its text and credited artist, a submitted
+  Artist name included while both fit the 200-character term, never a
+  respelling or a Track title), the fixed storefront code, the digits of a
+  valid barcode every file shares (never a placeholder such as all zeros), and
   collection IDs from earlier results of the same run. To the iTunes artwork
   hosts, only the rewritten path of an iTunes-only candidate's stored artwork
   address.
@@ -3851,8 +3963,23 @@ publication confirmation. The approval and the publication commit never read
   the same import's or review's lookup candidates (a staged cover or a
   preview; a review only previews), and the
   archive.org redirects they lead to.
-- A review never sends its Track titles, original filenames, folders, labels,
-  catalog IDs or identifiers.
+- A review never sends its original filenames, folders, labels, catalog IDs or
+  identifiers, and sends at most two saved Track titles (without a trailing
+  version or featuring note) only to MusicBrainz, as above. The following
+  generic titles are never searched; they are compared folded (NFKC, lower
+  case, no punctuation, symbol or whitespace) with trailing digits removed, so
+  `Interlude 2` and `Track01` are generic too (`GENERIC_TRACK_TITLES` in
+  `lookupTrackTitles.ts`):
+  - English: intro, introduction, outro, interlude, prelude, prologue,
+    epilogue, overture, skit, reprise, bonus, bonus track, hidden track,
+    secret track, untitled, untitled track, no title, instrumental, inst,
+    karaoke, off vocal, backing track, tv size, track.
+  - Japanese: イントロ, アウトロ, インタールード, インスト,
+    インストゥルメンタル, オフボーカル, カラオケ, ボーナストラック, 無題,
+    トラック.
+  - Chinese: 前奏, 序曲, 间奏, 間奏, 尾声, 尾聲, 伴奏, 纯音乐, 純音樂, 无题,
+    未命名 (and 無題, above).
+  - Korean: 인트로, 아웃트로, 반주, 연주곡.
 - Never file names, relative path segments, account data (including any
   account's email address) or audio. The only contact sent is the operator
   contact configured in `FINITUDE_ADMIN_METADATA_LOOKUP_CONTACT`, in the

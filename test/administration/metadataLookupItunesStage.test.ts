@@ -17,7 +17,7 @@
  *   - iTunes unavailable skips its remaining requests; a result left without its collection lookup makes the stage incomplete, skipped searches do not
  *   - in subset mode a collection is kept with at least as many tracks as members or an unknown count, fewest extra first across the stage's answers, up to four; songs are unchanged
  *   - a review's stage that leaves out only collections with more tracks than members keeps its exact-count flag; an unknown or equal count, a song or an unknown member count clears it
- *   - a submitted Artist name is the iTunes term's artist, and a later release's Track-title search never gives an iTunes request
+ *   - a submitted Artist name is the iTunes term's artist, and a Track-title search never gives an iTunes request, even planned first
  * @end-catalog */
 
 /**
@@ -383,7 +383,7 @@ test('a review\'s stage that leaves out only collections with more tracks than m
     assert.deepEqual(['exactComplete' in foreign, foreign.items.map(entry => 'trackCount' in entry)], [false, [false, false, false, false]]);
 });
 
-test('a submitted Artist name is the iTunes term\'s artist, and a later release\'s Track-title search never gives an iTunes request', () => {
+test('a submitted Artist name is the iTunes term\'s artist, and a Track-title search never gives an iTunes request, even planned first', () => {
     const typed = (kind: 'album' | 'song') => itunesRequestsFor(planMetadataLookup({ trigger: 'submitted', fileCount: 2, submitted: { kind, text: 'Synthetic Album', artist: 'Synthetic Typed' },
         tags: { album: 'Synthetic Album', albumArtist: 'Synthetic Ensemble', title: null, artist: null } }).queries);
     for (const kind of ['album', 'song'] as const) {
@@ -391,6 +391,12 @@ test('a submitted Artist name is the iTunes term\'s artist, and a later release\
         assert.deepEqual(requests.map(request => request.kind === 'itunesSearch' && [request.term, request.entity]), [['Synthetic Album Synthetic Typed', kind], ['Synthetic Album Synthetic Typed', kind]]);
         assert.equal(JSON.stringify(requests).includes('Synthetic Ensemble'), false, kind);
     }
-    // A recording search a later release stores with another basis is never the iTunes text search.
-    assert.deepEqual(itunesRequestsFor([{ kind: 'musicBrainzRecordingSearch', query: { recording: 'Synthetic Distinct Title' }, basis: 'trackTitle' }] as unknown[]), []);
+    // A Track-title search is never the iTunes text search: a plan of only such searches gives no request and no stage, and one
+    // planned before a title search leaves the title search's term.
+    const titleSearch: PlannedLookupQuery = { kind: 'musicBrainzRecordingSearch', query: { recording: 'Synthetic Distinct Title', artist: 'Synthetic Ensemble' }, basis: 'trackTitle', when: 'noMatchOrPartial' };
+    assert.deepEqual(itunesRequestsFor([titleSearch, { ...titleSearch, query: { recording: 'Another Distinct Title' }, when: 'noPreselection' }]), []);
+    assert.equal(startItunesStage([titleSearch], 'noMatch', 'subset'), null);
+    const stage = startItunesStage([titleSearch, release('Synthetic Album', { artist: 'Synthetic Ensemble' })], 'noMatch', 'subset')!;
+    assert.deepEqual([stage.text, stage.requests.map(request => request.kind === 'itunesSearch' && request.term)], ['synthetic album', ['Synthetic Album Synthetic Ensemble', 'Synthetic Album Synthetic Ensemble']]);
+    assert.equal(JSON.stringify(stage).includes('Distinct'), false);
 });

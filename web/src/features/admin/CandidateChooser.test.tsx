@@ -18,6 +18,7 @@
  *   - an iTunes-only candidate is marked as such, and as not checked against MusicBrainz when it was not, and previews through its own encoded key
  *   - an existing-Album review candidate shows the members it pairs, the missing-file rows it adds, tracks left out and members no track can pair with
  *   - a review tie, the offered single choice, unverified releases and the disclosures speak of the Album's tracks; an import keeps its file wording
+ *   - a review release first found through a track title is marked so in the tie view, the offered single choice and the folded list; another release and any import candidate are not
  * @end-catalog */
 
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
@@ -280,4 +281,25 @@ test('a review tie, the offered single choice, unverified releases and the discl
   mount(view({ candidates: [candidate(1)], groups: [group(1, [[1, 1, 'First']])], disclosure: { unknownLocalDurations: 0, unknownLocalDiscNumbers: 0, partialComparison: true } }));
   expect(screen.getByRole('region', { name: /^One release matches these files but was not applied/ })).toBeInTheDocument();
   expect(screen.queryByText(/Tracks paired/)).not.toBeInTheDocument();
+});
+
+test('a review release first found through a track title is marked so in the tie view, the offered single choice and the folded list; another release and any import candidate are not', () => {
+  const marked = 'Found through a track title';
+  mountReview(reviewView({ candidates: [reviewCandidate(1, { byTrackTitle: true }), reviewCandidate(2, { byTrackTitle: false })], groups: [group(1, [[1, 1, 'First']]), group(2, [[1, 1, 'Other']])],
+    needsAnswer: { tie: true, conflicts: [] } }));
+  const region = screen.getByRole('region', { name: 'Several releases match this Album\'s tracks. Choose one, or none.' });
+  const [byTitle, other] = within(region).getAllByRole('listitem').filter(item => item.querySelector('strong'));
+  expect(within(byTitle).getByText(marked)).toBeInTheDocument();
+  expect(within(other).queryByText(marked)).toBeNull();
+  unfold(screen.getByText('Releases found: 2'));
+  expect(screen.getAllByText(marked)).toHaveLength(2);
+  cleanup();
+  mountReview(reviewView({ candidates: [reviewCandidate(1, { byTrackTitle: true })], groups: [group(1, [[1, 1, 'First']])],
+    disclosure: { unknownLocalDurations: 0, unknownLocalDiscNumbers: 0, partialComparison: true } }));
+  expect(within(screen.getByRole('region', { name: /^One release matches this Album's tracks but was not applied/ })).getByText(marked)).toBeInTheDocument();
+  cleanup();
+  // An import view never carries the key; even a candidate given one is not marked outside a review.
+  mount(view({ candidates: [{ ...candidate(1), byTrackTitle: true } as Candidate] }));
+  unfold(screen.getByText('Releases found: 1'));
+  expect(screen.queryByText(marked)).toBeNull();
 });

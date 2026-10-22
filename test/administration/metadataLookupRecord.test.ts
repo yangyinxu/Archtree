@@ -15,6 +15,7 @@
  *   - lookup accepts only a writable Draft v2 import project that no publication locks and that has not completed
  *   - candidates are distinct after normalization, capped at 25 in a stable order, and a release found by ID is fetched
  *   - admission prefers releases whose reported track count can match the files, and a search is complete only when every offered release that could match was admitted
+ *   - admission stops at a given bound, never past 25 in either mode, and a release found again keeps the basis it was first found by
  *   - details record missing, failed and compact fetched releases, and a release over the byte budget is omitted
  *   - a stored release keeps distinct track credits and stores one equal to the release credit as a marker that reads back as that credit
  *   - track credits count toward the candidate byte budget: repeated credits fit through the marker, and distinct ones over the budget omit the release
@@ -307,6 +308,23 @@ test('admission prefers releases whose reported track count can match the files,
     assert.equal(lookupHitsAdmitted(merged, [{ releaseId: 'not-an-mbid' }, { releaseId: releaseId(10).toUpperCase() }], 9), true);
 });
 
+test('admission stops at a given bound, never past 25 in either mode, and a release found again keeps the basis it was first found by', () => {
+    const offered = Array.from({ length: 30 }, (_unused, index) => ({ releaseId: releaseId(index), summary: { trackCount: 2 } as never }));
+    for (const comparison of ['exact', 'subset'] as const) {
+        assert.equal(mergeLookupCandidates([], offered, 'albumText', 2, comparison, 3).length, 3, comparison);
+        assert.equal(mergeLookupCandidates([], offered, 'albumText', 2, comparison, 40).length, METADATA_LOOKUP_JOB_LIMITS.candidates, comparison);
+        assert.equal(mergeLookupCandidates([], offered, 'albumText', 2, comparison).length, METADATA_LOOKUP_JOB_LIMITS.candidates, comparison);
+        assert.equal(mergeLookupCandidates([], offered, 'albumText', 2, comparison, Number.NaN).length, METADATA_LOOKUP_JOB_LIMITS.candidates, comparison);
+        // A bound at or below the stored count admits nothing new.
+        const three = mergeLookupCandidates([], offered, 'albumText', 2, comparison, 3);
+        assert.deepEqual(mergeLookupCandidates(three, offered.slice(10), 'trackTitle', 2, comparison, 3), three, comparison);
+    }
+    // A Track-title search's releases carry its basis; one a title search found first keeps that basis.
+    const first = mergeLookupCandidates([], [{ releaseId: releaseId(1) }], 'trackTitle', 2, 'subset', 5);
+    const again = mergeLookupCandidates(first, [{ releaseId: releaseId(1) }, { releaseId: releaseId(2) }], 'albumText', 2, 'subset');
+    assert.deepEqual(again.map(candidate => [candidate.releaseId, candidate.basis]), [[releaseId(1), 'trackTitle'], [releaseId(2), 'albumText']]);
+});
+
 test('details record missing, failed and compact fetched releases, and a release over the byte budget is omitted', () => {
     const withIsrcs = releases.find(release => release.media.some(medium => medium.tracks.some(track => track.isrcs.length)))!;
     let candidates = mergeLookupCandidates([], [{ releaseId: withIsrcs.releaseId }, { releaseId: releaseId(1) }, { releaseId: releaseId(2) }], 'albumText');
@@ -507,6 +525,9 @@ test('a new run replaces the previous results and carries only the automatic cou
     const third = startLookupRun({ ...previous, attempts: { musicbrainz: 2, itunes: 3 }, exhausted: { musicbrainz: 'sourceUnavailable', itunes: 'sourceBusy' },
         itunesStage: { reason: 'noMatch', text: null, requests: [], requestIndex: 0, items: [], bridge: [], bridgeIndex: 0, bridgeOutcomes: [], state: 'answered', complete: false, finalized: true } }, init);
     assert.deepEqual([third.attempts, third.exhausted, third.itunesStage], [{ musicbrainz: 0, itunes: 0 }, {}, null]);
+    // Nor does a review run's Track-title decision or credit marker: the next run decides again.
+    const fourth = startLookupRun({ ...previous, trackTitleSearch: 'sent', creditFound: true }, init);
+    assert.deepEqual(['trackTitleSearch' in fourth, 'creditFound' in fourth], [false, false]);
     const later = new Date(now.getTime() + 1000), granted = refreshLookupGrant(first, '0000000000000000000000e2', 'choose', later);
     assert.deepEqual([granted.actorId, granted.grantSource, granted.grantExpiresAt.getTime(), granted.run, granted.state], ['0000000000000000000000e2', 'choose', later.getTime() + METADATA_LOOKUP_JOB_LIMITS.grantMs, 1, 'queued']);
 });

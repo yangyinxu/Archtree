@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "locale": "en-US",
-  "revision": "sha256-iyRkwP8wNKav81GpGGGKMwOEn1rm3GjxsCbAy7IT9PU",
+  "revision": "sha256-S1J-gJ5TK1Qvdzbi5YRTwy3x4N1QP5GBVhFt-xzTGS0",
   "messages": {
     "account.common.back_account": "← Back to Account",
     "account.common.checking": "Checking your account…",
@@ -202,7 +202,7 @@
     "admin.catalog_review.create": "Complete from MusicBrainz (free)",
     "admin.catalog_review.create_another": "Start another completion",
     "admin.catalog_review.create_confirm": "Create Album completion",
-    "admin.catalog_review.create_copy": "Creates a private Album completion and looks up this Album on MusicBrainz, a free service, by its saved title and primary Artists. Lookup can complete the title, release date, Artists, label, track titles, Disc and Track Numbers, each track's own Artists and the expected tracklist; it does not complete the cover. Nothing in the catalog changes until you confirm the changes, and Luna AI (paid) never starts.",
+    "admin.catalog_review.create_copy": "Creates a private Album completion and looks up this Album on MusicBrainz, a free service, by its saved title and primary Artists and, when that does not settle the match, by up to two of its saved track titles. Lookup can complete the title, release date, Artists, label, track titles, Disc and Track Numbers, each track's own Artists and the expected tracklist; it does not complete the cover. Nothing in the catalog changes until you confirm the changes, and Luna AI (paid) never starts.",
     "admin.catalog_review.create_manual": "Create Album completion for manual editing",
     "admin.catalog_review.create_manual_copy": "Metadata lookup is not available on this server, so this creates a private Album completion for manual editing. Nothing in the catalog changes until you confirm the changes.",
     "admin.catalog_review.credits_removed": "Credits removed: {credits}",
@@ -627,6 +627,7 @@
     "admin.lookup.difference_disc_count": "Discs: {local} here, {candidate} on the release",
     "admin.lookup.difference_duration": "Track durations differ",
     "admin.lookup.difference_track_count": "Tracks: {local} here, {candidate} on the release",
+    "admin.lookup.found_by_track_title": "Found through a track title",
     "admin.lookup.incomplete": "Release details could not be fetched, so no match was confirmed. Retry the lookup at no cost, or use Luna AI (paid).",
     "admin.lookup.itunes_only": "iTunes only",
     "admin.lookup.itunes_unavailable": "MusicBrainz found no matching release, and the iTunes Search API was unavailable. Try another name, or use Luna AI (paid).",
