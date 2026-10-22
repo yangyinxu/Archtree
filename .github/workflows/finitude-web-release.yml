@@ -132,7 +132,7 @@ jobs:
           MONGODB_CI_VERSION: 8.0.12
         run: |
           sudo apt-get update
-          sudo apt-get install --yes curl gnupg ffmpeg
+          sudo apt-get install --yes --no-install-recommends curl gnupg ffmpeg
           curl -fsSL https://pgp.mongodb.com/server-8.0.asc \
             --output "${RUNNER_TEMP}/mongodb-server-8.0.asc"
           sudo gpg --batch --yes --dearmor \
@@ -182,7 +182,7 @@ jobs:
           MONGODB_CI_VERSION: 8.0.12
         run: |
           sudo apt-get update
-          sudo apt-get install --yes curl gnupg ffmpeg
+          sudo apt-get install --yes --no-install-recommends curl gnupg ffmpeg
           curl -fsSL https://pgp.mongodb.com/server-8.0.asc \
             --output "${RUNNER_TEMP}/mongodb-server-8.0.asc"
           sudo gpg --batch --yes --dearmor \
