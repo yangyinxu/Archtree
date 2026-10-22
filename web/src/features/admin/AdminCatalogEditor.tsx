@@ -24,6 +24,7 @@ import { CatalogArtwork, catalogFallbacks, catalogLabels, catalogMetadata, catal
 import type { CatalogEditSnapshot } from './CatalogEditConfirmation';
 import catalogStyles from '../catalog/CatalogPages.module.css';
 import styles from './adminStyles';
+import heroStyles from './AdminCatalogEditor.module.css';
 const CatalogCover = lazy(() => import('./CatalogCover').then(module => ({ default: module.CatalogCover })));
 const CatalogFields = lazy(() => import('./CatalogFields').then(module => ({ default: module.CatalogFields })));
 const CatalogReviewStart = lazy(() => import('./CatalogReviewStart').then(module => ({ default: module.CatalogReviewStart })));
@@ -104,15 +105,20 @@ export function AdminCatalogEditor({ kind, id }: { kind: CatalogKind; id: string
   };
   const refresh = <button className={styles.button} disabled={query.isFetching || mutation.running || !online} onClick={refreshPage}>{t('common.refresh')}</button>;
   return <section className={styles.page}><AdminNav /><Link className={styles.back} to={inventoryPath(kind)}>{t('catalog.back')}</Link>
-    {saved ? <header className={catalogStyles.hero} style={{ alignItems: 'center' }}>
+    {/* The hero is as tall as its cover or copy. An Album's copy hangs from the cover's top edge, so a note row its eligibility
+        read adds only grows the hero downward; the other heroes' copy never changes after loading and stays centered. */}
+    {saved ? <header className={catalogStyles.hero} style={{ alignItems: kind === 'album' ? 'start' : 'center', minHeight: 'auto' }}>
       <CatalogArtwork item={saved} viewerId={access.viewerId} refresh={artworkRefresh} detail alt={saved.kind === 'artist' ? sharedText('content.artist.portrait_alt', { name: title }) : sharedText('content.album.cover_alt', { title })} />
       <div className={catalogStyles.heroCopy}><p className={catalogStyles.eyebrow}>{sharedText(catalogLabels[kind])}</p><h1 style={{ fontSize: 'clamp(1.5rem, 3.2vw, 2.5rem)', maxWidth: 'none', lineHeight: 1.1, overflowWrap: 'anywhere' }}>{title}</h1><p className={catalogStyles.metadata}>{catalogMetadata(saved, t)}</p>
-        <div className={styles.actions} role="group" aria-label={t('catalog.edit')}>{canEdit && !locked ? <a className={styles.link} href="#catalog-details">{t('catalog_review.manual_edit')}</a> : <button className={styles.button} type="button" disabled>{t('catalog_review.manual_edit')}</button>}
-          {kind === 'album' && <Suspense fallback={null}><CatalogReviewStart item={item!} disabled={locked || conflict || Boolean(edit?.dirty)} /></Suspense>}
-          {(kind === 'album' || kind === 'audioTrack') && access.conversion && !edit?.dirty && !conflict && <Link className={styles.link} to={`/admin/conversions?${kind === 'album' ? 'album' : 'track'}=${id}`}>{t('conversion.existing')}</Link>}
+        {/* The Album completion first, then a quieter row; manual editing is the details form directly below the hero. */}
+        <div className={heroStyles.actions} role="group" aria-label={t('catalog.edit')}>
+          {kind === 'album' && <div className={heroStyles.completion}><Suspense fallback={null}><CatalogReviewStart item={item!} disabled={locked || conflict || Boolean(edit?.dirty)}
+            note={edit?.dirty ? t('catalog_review.save_first') : undefined} /></Suspense></div>}
+          <div className={heroStyles.secondary}>
+            {(kind === 'album' || kind === 'audioTrack') && access.conversion && !edit?.dirty && !conflict && <Link className={styles.link} to={`/admin/conversions?${kind === 'album' ? 'album' : 'track'}=${id}`}>{t('conversion.existing')}</Link>}
+            {refresh}
+          </div>
         </div>
-        {edit?.dirty && <p className={styles.muted}>{t('catalog_review.save_first')}</p>}
-        <div className={styles.actions}>{refresh}</div>
       </div>
     </header>
     : <header className={styles.header}><div><h1 className={styles.title}>{t('catalog.edit')}</h1><p className={styles.meta}>{t(`catalog.${kind}`)}</p></div>{refresh}</header>}

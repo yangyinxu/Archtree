@@ -1,0 +1,67 @@
+/* The detail hero's actions: the Album completion first, then a quieter row of secondary actions. */
+.actions {
+  display: grid;
+  gap: 1rem;
+  margin-top: 1.1rem;
+}
+
+/* CatalogReviewStart renders into this block: each note takes a whole row and the buttons share one wrapping row. The minimum
+   height holds the primary button's place while its chunk and eligibility read load, so the row below never moves. */
+.completion {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  min-height: 2.5rem;
+}
+
+.completion > p,
+.completion > [role=alert] {
+  flex-basis: 100%;
+  margin: 0;
+}
+
+.completion > p {
+  font-size: 0.85rem;
+}
+
+/* A disabled completion button drops the accent so it never reads as the live primary action. */
+.completion > button:disabled {
+  background: var(--color-surface-hover);
+  border-color: var(--color-border);
+  color: var(--color-text-subtle);
+  opacity: 1;
+}
+
+.secondary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+/* Quieter than the completion's secondary button: a faint outline and muted text that only brighten on hover. */
+.secondary > a,
+.secondary > button {
+  background: transparent;
+  border-color: var(--color-border);
+  color: var(--color-text-muted);
+  font-size: 0.8rem;
+  min-height: 2.25rem;
+  padding: 0.35rem 0.85rem;
+}
+
+.secondary > a:hover,
+.secondary > button:hover:not(:disabled) {
+  border-color: var(--color-border-strong);
+  color: var(--color-text);
+  filter: none;
+  transform: none;
+}
+
+/* On the single-column hero the completion buttons fill the row, sharing it when they fit. */
+@media (max-width: 520px) {
+  .completion > a,
+  .completion > button {
+    flex: 1 1 auto;
+  }
+}

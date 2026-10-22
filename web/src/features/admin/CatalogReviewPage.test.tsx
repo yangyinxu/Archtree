@@ -206,6 +206,7 @@ test('without catalog editing the Album page action stays disabled and says new 
   mountStart({ ...catalogAlbum(), capabilities: { editing: false, visibility: false } });
   expect(screen.getByRole('button', { name: create })).toBeDisabled();
   expect(screen.getByText('Catalog editing and new Album completions are currently turned off. You can view saved information and recover existing operations.')).toBeVisible();
+  expect(screen.getByRole('button', { name: create })).toHaveAccessibleDescription('Catalog editing and new Album completions are currently turned off. You can view saved information and recover existing operations.');
   await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
   expect(fetch.mock.calls[0][0]).toBe(`/api/admin/v1/catalog-reviews/eligibility?albumId=${catalogAlbum().id}`);
   expect(screen.getByRole('button', { name: create })).toBeDisabled();

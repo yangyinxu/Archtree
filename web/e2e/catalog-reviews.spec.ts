@@ -585,16 +585,13 @@ for (const variant of localizedViewports) {
     expect(hero.width).toBeLessThanOrEqual(variant.width === 1280 ? 245 : 195);
     const actions = page.getByRole('group', { name: label('admin.catalog.edit'), exact: true });
     await expect(actions).toBeVisible();
-    const manual = actions.getByRole('link', { name: label('admin.catalog_review.manual_edit'), exact: true });
-    await expect(manual).toHaveAttribute('href', /#catalog-details$/);
+    // Manual editing is the details form directly below the hero, which offers no separate entry to it.
+    await expect(page.getByText(label('admin.catalog_review.manual_edit'), { exact: true })).toHaveCount(0);
     await expect(actions.getByRole('button', { name: label('admin.catalog_review.create'), exact: true })).toBeVisible();
     await expect(actions.getByRole('link', { name: label('admin.conversion.existing'), exact: true })).toHaveAttribute('href', `/finitude/admin/conversions?album=${albumId}`);
     await expect(page.locator('#catalog-details')).toBeVisible();
     await expect(page.getByRole('textbox', { name: label('admin.field.title'), exact: true })).toHaveValue(title);
     await capture(page, '21-cover-led-detail', variant.width); await reflow(page);
-    await manual.click();
-    await expect(page.getByRole('heading', { name: label('admin.layout.catalog_details'), exact: true })).toBeInViewport();
-    await expect(page).toHaveURL(/#catalog-details$/);
     await page.getByRole('link', { name: label('admin.catalog.back'), exact: true }).click();
     await expect(page).toHaveURL(/\/finitude\/admin\/catalog$/); await expect(entry).toBeVisible();
     expect(api.writes).toEqual([]);
@@ -746,8 +743,8 @@ for (const kind of remainingCatalogKinds) for (const variant of localizedViewpor
     expect(hero.width).toBeGreaterThanOrEqual(variant.width === 1280 ? 235 : 185);
     expect(hero.width).toBeLessThanOrEqual(variant.width === 1280 ? 245 : 195);
     const actions = page.getByRole('group', { name: label('admin.catalog.edit'), exact: true }); await expect(actions).toBeVisible();
-    const manual = actions.getByRole('link', { name: label('admin.catalog_review.manual_edit'), exact: true });
-    await expect(manual).toHaveAttribute('href', /#catalog-details$/);
+    await expect(page.getByText(label('admin.catalog_review.manual_edit'), { exact: true })).toHaveCount(0);
+    await expect(actions.getByRole('button', { name: label('admin.common.refresh'), exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: label('admin.catalog_review.create'), exact: true })).toHaveCount(0);
     const conversion = actions.getByRole('link', { name: label('admin.conversion.existing'), exact: true });
     if (kind === 'audioTrack') await expect(conversion).toHaveAttribute('href', `/finitude/admin/conversions?track=${item.id}`);
@@ -758,8 +755,6 @@ for (const kind of remainingCatalogKinds) for (const variant of localizedViewpor
     if ('bio' in item.fields) await expect(page.getByRole('textbox', { name: label('admin.field.bio'), exact: true })).toHaveValue(item.fields.bio);
     if ('description' in item.fields) await expect(page.getByRole('textbox', { name: label('admin.field.description'), exact: true })).toHaveValue(item.fields.description);
     await capture(page, `24-${kind}-detail`, variant.width); await reflow(page);
-    await manual.click(); await expect(page.getByRole('heading', { name: label('admin.layout.catalog_details'), exact: true })).toBeInViewport();
-    await expect(page).toHaveURL(/#catalog-details$/);
     await page.getByRole('link', { name: label('admin.catalog.back'), exact: true }).click();
     await expect(page).toHaveURL(new RegExp(`/finitude/admin/catalog\\?kind=${kind}$`));
     await expect(page.getByRole('button', { name: catalogCategoryLabel(kind), exact: true })).toHaveAttribute('aria-pressed', 'true');
@@ -815,7 +810,7 @@ for (const variant of localizedViewports) {
     expect(api.writes).toEqual([]);
     await capture(page, '02-catalog-entry', width); await reflow(page);
     await page.getByRole('link', { name: 'Synthetic catalog Album', exact: true }).click();
-    await page.getByRole('group', { name: label('admin.catalog.edit'), exact: true }).getByRole('link', { name: label('admin.catalog_review.manual_edit'), exact: true }).click();
+    // Manual editing happens in the details form directly below the hero.
     await page.getByRole('textbox', { name: label('admin.field.title'), exact: true }).fill('Manually corrected synthetic Album');
     await expect(page.getByRole('heading', { name: label('admin.layout.catalog_details'), exact: true })).toBeVisible();
     await capture(page, '02b-manual-editor', width);
@@ -1172,12 +1167,78 @@ test('an Album that cannot have a completion shows the action disabled with its 
   await page.setViewportSize({ width: 390, height: 844 });
   const api = await setup(page, true, null, { ineligible: 'videoTracks' });
   await enter(page, `/finitude/admin/catalog/album/${albumId}`);
-  const action = page.getByRole('group', { name: label('admin.catalog.edit'), exact: true }).getByRole('button', { name: label('admin.catalog_review.create'), exact: true });
+  const actions = page.getByRole('group', { name: label('admin.catalog.edit'), exact: true });
+  const action = actions.getByRole('button', { name: label('admin.catalog_review.create'), exact: true });
   await expect(action).toHaveAccessibleDescription(label('admin.catalog_review.ineligible_video_tracks'));
   await expect(action).toBeDisabled();
+  // The reason sits under the disabled button, above the quieter row.
+  const [button, reason, refresh] = await Promise.all([action, actions.getByText(label('admin.catalog_review.ineligible_video_tracks'), { exact: true }),
+    actions.getByRole('button', { name: label('admin.common.refresh'), exact: true })].map(control => control.boundingBox()));
+  expect(reason!.y).toBeGreaterThanOrEqual(button!.y + button!.height); expect(Math.abs(reason!.x - button!.x)).toBeLessThan(1);
+  expect(refresh!.y).toBeGreaterThanOrEqual(reason!.y + reason!.height);
   await reflow(page);
   expect(api.writes).toEqual([]);
 });
+
+for (const width of [390, 768, 1440] as const) {
+  test(`the Album hero leads with its completion, keeps the quieter actions on their own row and holds still while eligibility loads at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 });
+    const api = await setup(page);
+    // Holds the eligibility read so the hero is measured before and after it answers; `open` answers with an open completion.
+    let release = () => {}, open = false;
+    let held = new Promise<void>(resolve => { release = resolve; });
+    await page.route(url => url.pathname === '/api/admin/v1/catalog-reviews/eligibility', async route => {
+      await held;
+      if (!open) return route.fallback();
+      return route.fulfill({ json: { eligible: true, reason: null, openReviewId: reviewId, lookupAvailable: true }, headers: { 'X-Finitude-Account-Viewer': viewer, 'Cache-Control': 'no-store' } });
+    });
+    await enter(page, `/finitude/admin/catalog/album/${albumId}`);
+    const actions = page.getByRole('group', { name: label('admin.catalog.edit'), exact: true });
+    const start = actions.getByRole('button', { name: label('admin.catalog_review.create'), exact: true });
+    const conversion = actions.getByRole('link', { name: label('admin.conversion.existing'), exact: true });
+    const refresh = actions.getByRole('button', { name: label('admin.common.refresh'), exact: true });
+    await expect(refresh).toBeVisible();
+    const early = await refresh.boundingBox();
+    await expect(start).toBeDisabled();
+    const pending = await refresh.boundingBox();
+    release(); await expect(start).toBeEnabled();
+    expect([pending, await refresh.boundingBox()]).toEqual([early, early]);
+    const boxes = async (...controls: Locator[]) => Promise.all(controls.map(async control => (await control.boundingBox())!));
+    const [startBox, conversionBox, refreshBox] = await boxes(start, conversion, refresh);
+    // The quieter row starts under the completion at the same left edge, keeps one line and lighter buttons.
+    expect(conversionBox.y).toBeGreaterThanOrEqual(startBox.y + startBox.height); expect(Math.abs(conversionBox.x - startBox.x)).toBeLessThan(1);
+    expect(Math.abs(refreshBox.y - conversionBox.y)).toBeLessThan(1); expect(refreshBox.height).toBeLessThan(startBox.height);
+    for (const box of [startBox, conversionBox, refreshBox]) expect(box.x + box.width).toBeLessThanOrEqual(width);
+    await capture(page, '38-album-hero', width); await reflow(page);
+    // Keyboard order follows the visual order.
+    await start.focus(); await page.keyboard.press('Tab'); await expect(conversion).toBeFocused();
+    await page.keyboard.press('Tab'); await expect(refresh).toBeFocused();
+    // An open completion: its note on its own line, then Open Album completion first and Start another completion after it. The
+    // rows it adds grow the hero downward, so the title stays where it was while the read was pending.
+    open = true; held = new Promise<void>(resolve => { release = resolve; });
+    await page.getByRole('link', { name: label('admin.catalog.back'), exact: true }).click();
+    await page.getByRole('link', { name: 'Synthetic catalog Album', exact: true }).click();
+    const title = page.getByRole('heading', { name: 'Synthetic catalog Album', level: 1, exact: true });
+    await expect(start).toBeDisabled();
+    const pendingTitle = await title.boundingBox();
+    release();
+    const opener = actions.getByRole('link', { name: label('admin.workbench.open_review'), exact: true });
+    const another = actions.getByRole('button', { name: label('admin.catalog_review.create_another'), exact: true });
+    await expect(opener).toHaveAttribute('href', `/finitude/admin/catalog-reviews/${reviewId}`); await expect(another).toBeEnabled();
+    expect(await title.boundingBox()).toEqual(pendingTitle);
+    const [noteBox, openerBox, anotherBox, belowBox] = await boxes(actions.getByText(label('admin.catalog_review.open_copy'), { exact: true }), opener, another, conversion);
+    expect(openerBox.y).toBeGreaterThanOrEqual(noteBox.y + noteBox.height); expect(Math.abs(openerBox.x - noteBox.x)).toBeLessThan(1);
+    // The two buttons share a row or wrap to the start of the next one.
+    if (Math.abs(anotherBox.y - openerBox.y) < 1) expect(anotherBox.x).toBeGreaterThan(openerBox.x + openerBox.width);
+    else { expect(anotherBox.y).toBeGreaterThanOrEqual(openerBox.y + openerBox.height); expect(Math.abs(anotherBox.x - openerBox.x)).toBeLessThan(1); }
+    expect(belowBox.y).toBeGreaterThanOrEqual(anotherBox.y + anotherBox.height);
+    for (const box of [noteBox, openerBox, anotherBox]) expect(box.x + box.width).toBeLessThanOrEqual(width);
+    await capture(page, '39-album-hero-open', width); await reflow(page);
+    await opener.focus();
+    for (const next of [another, conversion, refresh]) { await page.keyboard.press('Tab'); await expect(next).toBeFocused(); }
+    expect(api.writes).toEqual([]);
+  });
+}
 
 test('an iTunes-only lookup result names iTunes on its answers and flags every value it wrote', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });

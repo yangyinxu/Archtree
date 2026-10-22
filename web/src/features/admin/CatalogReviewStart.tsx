@@ -22,9 +22,11 @@ const eligibilitySchema = z.object({ eligible: z.boolean(),
  * disabled while that read loads, with a retry when it fails, and with the reason for an Album that cannot have a review. While an
  * unapplied review whose source is current exists, it opens that review and creating another is an explicit choice. While
  * catalog editing is off it still opens that review, and creating stays disabled. Creating is a separate confirmation of the
- * frozen Album; a refused creation reads the eligibility again.
+ * frozen Album; a refused creation reads the eligibility again. It renders into the page hero's completion block, which gives
+ * each note its own row: the open-completion note above the buttons, and the reasons below them, which describe the buttons.
+ * `note` is the page's own reason, such as unsaved edits.
  */
-export function CatalogReviewStart({ item, disabled = false }: { item: CatalogItem; disabled?: boolean }) {
+export function CatalogReviewStart({ item, disabled = false, note }: { item: CatalogItem; disabled?: boolean; note?: string }) {
   const t = useAdminText(), access = useAdminAccess(), online = useOnline(), navigate = useNavigate(), id = useId();
   const [target, setTarget] = useState<{ item: CatalogItem; another: boolean } | null>(null);
   const cancel = useRef<HTMLButtonElement>(null);
@@ -45,18 +47,21 @@ export function CatalogReviewStart({ item, disabled = false }: { item: CatalogIt
   // A creation refused because a review opened meanwhile (or anything else changed) shows what the Album offers now.
   useEffect(() => { if (mutation.error === 'conflict') void query.refetch(); }, [mutation.error]);
   if (item.kind !== 'album') return null;
-  const state = query.data, lookup = state?.lookupAvailable ?? true, reason = state?.reason ? `${id}-reason` : undefined;
+  const state = query.data, lookup = state?.lookupAvailable ?? true;
+  // Every reason shown under the buttons describes them, so a disabled button is announced with why.
+  const reasons = [note && `${id}-note`, !canCreate && `${id}-unavailable`, state?.reason && `${id}-reason`].filter(Boolean).join(' ') || undefined;
   const label = t(lookup ? 'catalog_review.create' : 'catalog_review.create_manual');
   const blocked = (value: CatalogItem) => locked || !canCreate || value.revision !== item.revision;
   return <>
     {state?.openReviewId ? <><p className={styles.muted}>{t('catalog_review.open_copy')}</p>
-      <Link className={styles.link} to={`/admin/catalog-reviews/${state.openReviewId}`}>{t('workbench.open_review')}</Link>
-      <button className={styles.button} type="button" disabled={locked || !canCreate || !state.eligible} aria-describedby={reason}
+      <Link className={`${styles.link} ${styles.primary}`} to={`/admin/catalog-reviews/${state.openReviewId}`}>{t('workbench.open_review')}</Link>
+      <button className={styles.button} type="button" disabled={locked || !canCreate || !state.eligible} aria-describedby={reasons}
         onClick={() => setTarget({ item, another: true })}>{t('catalog_review.create_another')}</button></>
-      : <button className={styles.button} type="button" disabled={locked || !canCreate || !state?.eligible} aria-describedby={reason}
+      : <button className={`${styles.button} ${styles.primary}`} type="button" disabled={locked || !canCreate || !state?.eligible} aria-describedby={reasons}
         onClick={() => setTarget({ item, another: false })}>{label}</button>}
-    {!canCreate && <p className={styles.muted}>{t('catalog_review.unavailable')}</p>}
-    {state?.reason && <p id={reason} className={styles.muted}>{t(`catalog_review.ineligible_${state.reason}`)}</p>}
+    {note && <p id={`${id}-note`} className={styles.muted}>{note}</p>}
+    {!canCreate && <p id={`${id}-unavailable`} className={styles.muted}>{t('catalog_review.unavailable')}</p>}
+    {state?.reason && <p id={`${id}-reason`} className={styles.muted}>{t(`catalog_review.ineligible_${state.reason}`)}</p>}
     {query.isError && <div role="alert" className={styles.error}><p>{t('common.error')}</p>
       <button className={styles.button} type="button" disabled={query.isFetching || !online} onClick={() => void query.refetch()}>{t('common.retry')}</button></div>}
     {mutation.error && <div role="alert" className={styles.error}><p>{t(`common.${mutation.error}`)}</p>

@@ -165,8 +165,13 @@ page shows the new Credits and the expected tracklist and the member page its
 Artist and documented attribution. The Album page also reads the manual wording
 where lookup is not configured, shows the action disabled with its reason, and
 offers Open Album completion for an open review and Start another completion,
-which sends `another: true`. An iTunes-only result says Use iTunes and flags
-every value it wrote.
+which sends `another: true`. At 390, 768 and 1440 px the Album hero leads with
+the completion (an open review's note on its own line above Open Album
+completion and Start another completion, a reason under the disabled button),
+puts Convert to MP3 and Refresh status on a quieter row below in the same
+keyboard order, offers no separate manual-editing entry, and keeps that row
+and the title still while the eligibility read is pending, with an axe scan. An iTunes-only
+result says Use iTunes and flags every value it wrote.
 
 The historical 2026-08-19 MediaTrack amendment passed
 304/304 server tests, 214/214 Web unit/component tests, 148/148 integration

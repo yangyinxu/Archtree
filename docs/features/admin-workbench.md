@@ -1282,12 +1282,26 @@ has an unapplied review whose source is current, the page links **Open Album
 completion** instead and offers **Start another completion**, which sends
 `another: true`; a refused creation reads the eligibility again. While catalog
 editing is turned off the page still reads the eligibility and links an open
-review, and both creation actions stay disabled. Its
-confirmation says lookup completes the title, release date, Artists, label,
-track titles, Disc and Track Numbers, each track's own Artists and the expected
-tracklist but not the cover, that nothing changes until the changes are
-confirmed and that Luna AI (paid) never starts; where lookup is not configured
-the action reads **Create Album completion for manual editing**. The separate
+review, and both creation actions stay disabled. The Album page's hero leads
+with the completion: the primary **Complete from MusicBrainz (free)** button,
+or, for an open review, its note on its own line above **Open Album
+completion** (primary) and **Start another completion**, with any reason the
+action is unavailable under the buttons. Each such reason (unsaved catalog
+edits, catalog editing turned off, or the Album's ineligibility) is the
+buttons' accessible description, and a disabled completion button loses the
+accent so it never reads as the live action. **Convert to MP3** and **Refresh
+status** follow on a quieter row of their own, with fainter outlines, in the
+same keyboard order. On a single-column hero the completion buttons fill their
+row. The completion block keeps the primary button's place while its chunk and
+the eligibility read load, so the row below does not move, and the Album's copy
+is top-aligned with its cover, so rows the read adds only grow the hero
+downward. The hero has no separate manual-editing entry: the details form
+directly below it is the manual editor.
+The action's confirmation says lookup completes the title, release date,
+Artists, label, track titles, Disc and Track Numbers, each track's own Artists
+and the expected tracklist but not the cover, that nothing changes until the
+changes are confirmed and that Luna AI (paid) never starts; where lookup is not
+configured the action reads **Create Album completion for manual editing**. The separate
 **Album completions** queue retains saved projects when the browser closes.
 **Unfinished** includes all unapplied reviews; **Album updated** confirms that
 this project's selected fields were applied. Luna progress and the
@@ -1342,7 +1356,10 @@ connection. Switching to User view on an administration page opens Home as a new
 history entry, so browser Back returns to that page, which shows the Admin view
 gate as any User view visit does and never restarts a stopped upload queue.
 The catalog uses artwork/name entries for Albums, Artists, MediaTracks and
-Organizations, with management actions on their detail pages. The inventory
+Organizations, with management actions on their detail pages: the hero groups
+them, an Album's completion first, then Convert to MP3 (Albums and
+MediaTracks) and Refresh status on a quieter row, and the details form below
+the hero is where manual edits are made. The inventory
 loads separately from editing controls. Its optional `kind=artist`,
 `kind=audioTrack` or `kind=organization` query parameter selects a category;
 missing or unsupported values select Albums. Detail return links retain that
