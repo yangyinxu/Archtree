@@ -61,6 +61,7 @@
  *   - choosing applies a candidate or none to the review draft only, a member stored with unknown attribution and no Credits takes its own track's artist, and answers bind their tracklist and member bases
  *   - review choose and resolve routes guard authentication, the current admin and the viewer, keep their body limits in any letter case, answer with replaying receipts, and every refusal writes nothing
  *   - renumbering a member re-ranks the review's completed run in the save, without a request, and applies a sole preselection only while the run applied nothing; a title save re-ranks nothing
+ *   - a release chosen while its pairing is not single writes only Album values, keeps that application through a renumbering save, and choosing it again writes its tracklist and member values
  *   - a failed write inside a choice, an answer or a re-ranking save stores nothing, and the same request is then admitted once and replays
  *   - applying a review refuses a selected value with an unanswered lookup conflict until it is answered, never for a tie or an unselected conflict, and refuses a number a pairing filled without its tracklist
  *   - pairing-filled Disc Numbers apply together with the expected tracklist that places them, which is stored with the Album
@@ -1558,6 +1559,39 @@ test('renumbering a member re-ranks the review\'s completed run in the save, wit
     const again = await record();
     assert.ok(again.ranking.rankedAt > reranked.ranking.rankedAt);
     assert.deepEqual([again.applied, (await current(id)).item.draft.album.expectedTracklist?.length], [reranked.applied, 2]);
+}));
+
+test('a release chosen while its pairing is not single writes only Album values, keeps that application through a renumbering save, and choosing it again writes its tracklist and member values', () => withLookup(async () => {
+    const review = await create(), id = review.item.id, _id = new ObjectId(id), slots = review.item.source.tracks.map(track => track.slotId), candidateKey = `musicbrainz:${lookupMbid(1)}`;
+    const record = async () => (await db().collection('adminImportLookups').findOne({ _id }))!;
+    const patch = async (changes: Change[]) => { const response = await request(`/catalog-reviews/${id}`, 'PATCH', { ...mutation((await current(id)).item.revision), changes }); return { status: response.status, body: await response.json() }; };
+    await submitCatalogReviewLookup(String(actor), id, { ...mutation(1), kind: 'album', text: 'Existing Album' });
+    // Without their own Track Numbers either member fits either one-minute track, so the release is unverified and nothing is applied.
+    assert.equal((await patch(slots.map((slotId, index) => ({ path: `tracks.${slotId}.trackNumber`, base: index + 1, value: null })))).status, 200);
+    await drainLookup([...reviewSearches([[lookupMbid(1), 2]]), ...pairableRelease(lookupMbid(1))]);
+    const unpaired = (await current(id)).item;
+    // Chosen now, it writes Album values only: no pairing, no member values and no expected tracklist.
+    const chosen = await chooseCatalogReviewLookup(String(actor), id, { ...mutation(unpaired.revision), run: 1, candidateKey });
+    const first = (await record()).applied!;
+    assert.deepEqual([first.choice, first.candidateKey, first.pairs, first.values.some(value => value.path === 'album.expectedTracklist' || value.path.startsWith('tracks.'))],
+        ['chosen', candidateKey, null, false]);
+    assert.deepEqual([chosen.item.draft.album.expectedTracklist, chosen.item.draft.tracks.map(track => track.trackNumber)], [unpaired.draft.album.expectedTracklist, [null, null]]);
+    // Saving the numbers re-ranks the run but keeps its application; the view shows the now single pairing beside the unpaired application.
+    assert.equal((await patch(slots.map((slotId, index) => ({ path: `tracks.${slotId}.trackNumber`, base: null, value: index + 1 })))).status, 200);
+    assert.deepEqual((await record()).applied, first);
+    const view = (await getCatalogReviewLookup(String(actor), id)).lookup!, shown = view.candidates.find(candidate => candidate.key === candidateKey)!;
+    assert.deepEqual([view.applied?.choice, view.applied?.pairs, shown.status, shown.comparison && 'subset' in shown.comparison ? shown.comparison.subset?.pairing : undefined],
+        ['chosen', null, 'matching', 'unique']);
+    // Choosing the same release again computes its values anew: the pairing, the members' numbers and the expected tracklist are written.
+    const saved = (await current(id)).item;
+    const again = await chooseCatalogReviewLookup(String(actor), id, { ...mutation(saved.revision), run: 1, candidateKey });
+    const second = (await record()).applied!;
+    assert.deepEqual([again.receipt?.kind, second.choice, second.pairs, second.values.some(value => value.path === 'album.expectedTracklist')],
+        ['lookup-choose', 'chosen', slots.map((slotId, index) => ({ slotId, discNumber: 1, trackNumber: index + 1 })), true]);
+    assert.deepEqual([again.item.draft.album.expectedTracklist?.map(row => row.title), again.item.draft.tracks.map(track => [track.discNumber, track.trackNumber])],
+        [['Looked Up Track 1', 'Looked Up Track 2'], [[1, 1], [1, 2]]]);
+    assert.ok(again.item.valueRevision > saved.valueRevision);
+    assert.deepEqual((await importCollection().findOne({ _id }))!.receipts.map(receipt => receipt.kind).slice(-4), ['edit', 'lookup-choose', 'edit', 'lookup-choose']);
 }));
 
 test('a failed write inside a choice, an answer or a re-ranking save stores nothing, and the same request is then admitted once and replays', () => withLookup(async () => {

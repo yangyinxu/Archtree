@@ -18,6 +18,7 @@
  *   - a review candidate says whether a Track-title search first found its release; the import view never carries the key, and no view shows the decision, credit marker or timing
  *   - a review view shows its applied pairing, review-only value paths, conflict precision and flag reasons within 406 values; the import view keeps them all out
  *   - a submitted run's Artist name is projected in import and review views only when it is a bounded string, otherwise the key is absent
+ *   - a review view shows an active run's progress from stored counters and times only, within bounds; a finished run and every import view carry no progress key
  * @end-catalog */
 
 /**
@@ -412,4 +413,54 @@ test('a submitted run\'s Artist name is projected in import and review views onl
         assert.deepEqual(view(submitted(undefined), target), view(plain, target));
     }
     assert.deepEqual(importLookupView(plain, doc)!.input, { trigger: 'submitted', submitted: { kind: 'album', text: 'Synthetic Album' } });
+});
+
+test('a review view shows an active run\'s progress from stored counters and times only, within bounds; a finished run and every import view carry no progress key', () => {
+    const doc = reviewLookupDocument({ primaryNames: ['Synthetic Lead'], members: numberedMembers([210_000, 220_000]) });
+    const started = new Date('2026-10-19T00:00:00Z'), stepped = new Date('2026-10-19T00:00:14Z');
+    const query = { kind: 'musicBrainzReleaseSearch', query: { release: 'Synthetic Album' }, basis: 'albumText' } as never;
+    const base = reviewRecord(doc, [], { state: 'queued', phase: 'search', queryIndex: 0, queries: [query, query], candidates: [], ranking: null, createdAt: started, updatedAt: stepped });
+    const progress = (extra: Partial<MetadataLookupRecord>) => catalogReviewLookupView({ ...base, ...extra } as MetadataLookupRecord, doc)!.progress;
+    const times = { startedAt: started.toISOString(), updatedAt: stepped.toISOString() };
+    const request = { kind: 'itunesSearch', term: 'Synthetic Album', entity: 'album', storefront: 'jp' };
+    const item = (n: number, collection: string) => ({ key: `collection:${n}`, kind: 'collection', collectionId: String(1689358560 + n), names: [{ storefront: 'jp', title: 'Synthetic Album', artist: 'Synthetic Lead' }],
+        barcode: null, bridge: 'found', collection });
+    const stage = (extra: Record<string, unknown>) => ({ reason: 'noMatch', text: 'synthetic album', requests: [request, request, request], requestIndex: 0, items: [], bridge: null, bridgeIndex: 0,
+        bridgeOutcomes: [], state: 'running', complete: true, finalized: false, ...extra }) as never;
+    const bridge = (n: number) => Array.from({ length: n }, () => ({ ...(query as object), itemKeys: ['collection:1'] }));
+    const alias = (state: string) => ({ kind: 'artist', id: mbid(1), state, names: [] });
+    // A queued run reports its planned searches; a running or retrying one reports its stored phase's counts.
+    assert.deepEqual(progress({}), { phase: 'search', done: 0, total: 2, ...times });
+    assert.deepEqual([
+        progress({ state: 'running', queryIndex: 1 }),
+        progress({ state: 'running', phase: 'details', candidates: [stored(release(1)), stored(release(2), 'failed'), stored(release(3), 'pending')] }),
+        progress({ state: 'running', phase: 'itunes', itunesStage: stage({ requestIndex: 1 }) }),
+        progress({ state: 'running', phase: 'itunes', itunesStage: stage({ requestIndex: 3, items: [item(1, 'fetched'), item(2, 'pending'), item(3, 'notNeeded')] }) }),
+        progress({ state: 'running', phase: 'itunes', itunesStage: null }),
+        progress({ state: 'running', phase: 'bridge', itunesStage: stage({ requestIndex: 3, bridge: bridge(4), bridgeIndex: 2 }) }),
+        progress({ state: 'running', phase: 'aliases', aliases: [alias('fetched'), alias('failed'), alias('pending')] as never }),
+        progress({ state: 'retrying', phase: 'details', candidates: [stored(release(1)), stored(release(3), 'pending')] })
+    ].map(value => value && [value.phase, value.done, value.total]), [['search', 1, 2], ['details', 2, 3], ['itunes', 1, 3], ['itunes', 1, 2], ['itunes', 0, 0], ['bridge', 2, 4],
+        ['aliases', 2, 3], ['details', 1, 2]]);
+    // The trailing Track-title searches count only once the run sends them.
+    const titled = { kind: 'musicBrainzRecordingSearch', query: { recording: 'Synthetic Song' }, basis: 'trackTitle', when: 'noMatchOrPartial' } as never;
+    const planned = [query, query, titled, titled, titled];
+    assert.deepEqual([progress({ queries: planned }), progress({ queries: planned, trackTitleSearch: 'skipped' } as never), progress({ queries: planned, queryIndex: 3, trackTitleSearch: 'sent' } as never)]
+        .map(value => value && [value.done, value.total]), [[0, 2], [0, 2], [3, 5]]);
+    // Counts stay within 100 and never above their total; an unreadable counter counts nothing.
+    assert.deepEqual([progress({ queries: Array.from({ length: 150 }, () => query), queryIndex: 200 }), progress({ queryIndex: -1 }), progress({ queryIndex: 1.5 }), progress({ queryIndex: 5 })]
+        .map(value => value && [value.done, value.total]), [[100, 100], [0, 2], [0, 2], [2, 2]]);
+    // A finished run, the completed phase, an unknown phase and a start or last-step time that is unreadable or outside the years
+    // 0000-9999 (which the Web's strict date-time schema refuses) show no progress key at all.
+    for (const extra of [{ state: 'complete' }, { state: 'stopped' }, { state: 'unavailable' }, { state: 'superseded' }, { state: 'running', phase: 'done' }, { state: 'running', phase: 'other' },
+        { createdAt: undefined }, { createdAt: new Date(Number.NaN) }, { updatedAt: '2026-10-19T00:00:14Z' }, { createdAt: new Date('+010000-01-01T00:00:00Z') },
+        { updatedAt: new Date('-000001-01-01T00:00:00Z') }] as Partial<MetadataLookupRecord>[]) {
+        const view = catalogReviewLookupView({ ...base, ...extra } as MetadataLookupRecord, doc)!;
+        assert.equal('progress' in view, false, JSON.stringify(extra));
+    }
+    // Numbers and times only: exactly the five keys, and the view still carries no query.
+    const view = catalogReviewLookupView(base, doc)! as unknown as Record<string, unknown>;
+    assert.deepEqual([Object.keys(view.progress as object).sort(), 'queries' in view, JSON.stringify(view).includes('Synthetic Album')], [['done', 'phase', 'startedAt', 'total', 'updatedAt'], false, false]);
+    // An import's view of the same active run never carries it.
+    assert.equal('progress' in (importLookupView({ ...record(project(), []), state: 'queued', phase: 'search', queryIndex: 0 }, project())! as object), false);
 });

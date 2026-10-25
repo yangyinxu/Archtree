@@ -64,6 +64,8 @@ function ReviewProject({ id }: { id: string }) {
   const latestRevision = useRef(0);
   const [stage, setStage] = useState<Stage>(() => adminWorkspace.buffer(`catalog-review-stage:${id}`) ?? 'draft');
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
+  // How many members the last fill from the track titles gave numbers, until the next edit.
+  const [filled, setFilled] = useState(0);
   const mutation = useCatalogReviewCommand(id, { id });
   const query = useQuery({
     queryKey: ['admin-catalog-reviews', access.viewerId, access.epoch, access.generation, id],
@@ -155,7 +157,13 @@ function ReviewProject({ id }: { id: string }) {
       {item.state === 'applied' ? <section className={styles.notice} role="status"><h2>{t('catalog_review.applied')}</h2><p>{t('catalog_review.applied_copy')}</p></section>
         : item.sourceStatus !== 'current' && <p role="alert" className={styles.error}>{t(`catalog_review.source_${item.sourceStatus}`)}</p>}
       {item.state !== 'applied' && <Suspense fallback={null}><CatalogReviewSummary item={item} error={mutation.error}
-        disabled={locked || editor.dirty || conflict || item.sourceStatus !== 'current'} onRun={mutate} /></Suspense>}
+        disabled={locked || editor.dirty || conflict || item.sourceStatus !== 'current'} onRun={mutate}
+        // Numbers from the track titles become unsaved draft values the administrator checks and saves (the save re-ranks lookup).
+        onFillNumbers={numbers => {
+          const draft = { ...editor.draft, tracks: editor.draft.tracks.map(track => ({ ...track, ...numbers[track.slotId] })) };
+          setEditor({ ...editor, draft, dirty: reviewDraftChanges(editor.base, draft).length > 0 }); setStage('draft'); setFilled(Object.keys(numbers).length);
+          setTimeout(() => document.getElementById('catalog-review-save')?.focus());
+        }} /></Suspense>}
       {item.state !== 'applied' && <>
         {/* Luna AI follows the metadata lookup summary as a paid, secondary action; never primary. */}
         <div className={styles.actions}>{active
@@ -188,9 +196,9 @@ function ReviewProject({ id }: { id: string }) {
       {editor.dirty && <p role="status" className={styles.muted}>{t('catalog_review.save_draft_first')}</p>}
       <div hidden={stage !== 'draft'} role="tabpanel" id="catalog-review-panel-draft" aria-labelledby="catalog-review-tab-draft">
         <form className={styles.panel} onSubmit={event => { event.preventDefault(); if (!locked && !conflict) mutation.command.run(path, { expectedRevision: editor.revision, changes: reviewDraftChanges(editor.base, editor.draft) }); }}>
-          <header className={styles.sectionHeader}><h2>{t('layout.metadata')}</h2><button className={`${styles.button} ${styles.primary}`} type="submit" disabled={locked || !editor.dirty || conflict}>{t('catalog_review.save_draft')}</button></header>
-          <p role="status" className={styles.meta}>{t(editor.dirty ? 'common.unsaved' : 'catalog_review.draft_saved')}</p>
-          <CatalogReviewDraftEditor draft={editor.draft} source={item.source} filenames={filenames} disabled={locked} manageAlbumHref={originalHref} onChange={draft => setEditor({ ...editor, draft, dirty: reviewDraftChanges(editor.base, draft).length > 0 })} />
+          <header className={styles.sectionHeader}><h2>{t('layout.metadata')}</h2><button id="catalog-review-save" className={`${styles.button} ${styles.primary}`} type="submit" disabled={locked || !editor.dirty || conflict}>{t('catalog_review.save_draft')}</button></header>
+          <p role="status" className={styles.meta}>{filled && editor.dirty ? t('catalog_review.fill_numbers_done', { count: filled }) : t(editor.dirty ? 'common.unsaved' : 'catalog_review.draft_saved')}</p>
+          <CatalogReviewDraftEditor draft={editor.draft} source={item.source} filenames={filenames} disabled={locked} manageAlbumHref={originalHref} onChange={draft => { setFilled(0); setEditor({ ...editor, draft, dirty: reviewDraftChanges(editor.base, draft).length > 0 }); }} />
         </form>
       </div>
       <div hidden={stage !== 'review'} role="tabpanel" id="catalog-review-panel-review" aria-labelledby="catalog-review-tab-review">

@@ -38,6 +38,8 @@
  *   - a save refused because another administrator changed the value reloads the saved review and offers it
  *   - metadata lookup comes first: its controls precede the paid Luna AI button, which is never primary, and Luna AI suggestions arrive unticked
  *   - an applied review shows no lookup summary and never reads it
+ *   - filling numbers from the titles writes them into the unsaved draft, opens Edit draft and focuses Save, and the save sends only those numbers
+ *   - filling numbers keeps a member's saved Track Number and sends only the empty ones, and fills nothing where a saved number disagrees with its title
  *   - lookup waits for unsaved draft edits, and the save-first message names metadata lookup
  *   - a lookup submission, a choice and an answer are sent with the shown revision, and their receipts are read without a reload
  *   - a lookup refusal shows its own message and keeps no intent to retry
@@ -69,7 +71,8 @@ import { AdminCatalogReviewPage } from './AdminCatalogReviewPage';
 import { AdminControls } from './AdminControls';
 import type { CatalogReview, ReviewDraftChange, ReviewField } from './catalogReviewApi';
 import { artistEntryKey, capturedCatalogReview, catalogAlbum, catalogReview, legacyCatalogReview, otherReviewId, reviewEligibility, reviewId, reviewJson, session, slotId, slotTwo, titleSuggestionId, trackSuggestionId, viewer } from './catalogReviewFixtures.testSupport';
-import { guestHandle, leadHandle, leadMusicBrainzId, reviewAfterLookup, reviewIdentityResponse, reviewLookupResponse, reviewTieLookupResponse } from './catalogReviewLookupFixtures.testSupport';
+import { guestHandle, leadHandle, leadMusicBrainzId, pairingLookupResponse, pairingReview, reviewAfterLookup, reviewIdentityResponse, reviewLookupResponse,
+  reviewTieLookupResponse } from './catalogReviewLookupFixtures.testSupport';
 import type { ReviewIdentityResponse, ReviewLookupResponse } from './catalogReviewLookupApi';
 import styles from './adminStyles';
 
@@ -920,6 +923,65 @@ test('an applied review shows no lookup summary and never reads it', async () =>
   mountPage(); await screen.findByRole('heading', { name: 'Changes applied to the existing Album' });
   expect(screen.queryByRole('region', { name: 'Metadata lookup' })).not.toBeInTheDocument();
   expect(reads.some(path => path.endsWith('/lookup') || path.endsWith('/candidates'))).toBe(false);
+});
+
+test('filling numbers from the titles writes them into the unsaved draft, opens Edit draft and focuses Save, and the save sends only those numbers', async () => {
+  let item = pairingReview(); const writes: Array<{ path: string; body: Record<string, unknown> }> = [];
+  routeSummary(() => item, pairingLookupResponse, (path, body) => {
+    writes.push({ path, body });
+    const receipt = { operationId: String(body.operationId), kind: 'edit' as const, revision: item.revision + 1 };
+    item = { ...item, revision: receipt.revision, draft: withChanges(item.draft, body.changes as ReviewDraftChange[]), receipts: [receipt] };
+    return reviewJson({ item, receipt });
+  });
+  mountPage();
+  fireEvent.click(await screen.findByRole('tab', { name: 'Update original Album' }));
+  const box = await screen.findByRole('group', { name: 'Look up by name' });
+  // The summary's primary button; the possible release's card below offers the same.
+  const fill = (await screen.findAllByRole('button', { name: 'Fill Disc and Track Numbers from titles' }))[0];
+  expect(fill).toHaveClass(styles.primary);
+  fireEvent.click(fill);
+  expect(screen.getByRole('tab', { name: 'Edit draft' })).toHaveAttribute('aria-selected', 'true');
+  expect(screen.getByRole('tabpanel', { name: 'Edit draft' })).toBeVisible();
+  expect(['1 · Disc number', '1 · Track number', '2 · Disc number', '2 · Track number'].map(name => (screen.getByRole('spinbutton', { name }) as HTMLInputElement).value)).toEqual(['1', '1', '1', '2']);
+  const save = screen.getByRole('button', { name: 'Save completion draft' });
+  await waitFor(() => expect(document.activeElement).toBe(save));
+  // The numbers are unsaved draft values: nothing was sent, the draft says what was filled, and the summary waits for the save.
+  expect(screen.getByText('Filled Disc or Track Numbers from the titles for 2 tracks; they are not saved yet. Check them below, then save the completion draft.')).toHaveAttribute('role', 'status');
+  expect(box).toBeDisabled();
+  expect(writes).toEqual([]);
+  fireEvent.click(save);
+  await waitFor(() => expect(writes).toHaveLength(1));
+  expect(writes[0].path).toBe(`/api/admin/v1/catalog-reviews/${reviewId}`);
+  expect(writes[0].body.changes).toEqual([1, 2].flatMap((position, index) => ['discNumber', 'trackNumber'].map(field => ({ path: `tracks.${[slotId, slotTwo][index]}.${field}`, base: null,
+    value: field === 'discNumber' ? 1 : position }))));
+  await waitFor(() => expect(screen.getByText('Completion draft saved')).toBeVisible());
+});
+
+test('filling numbers keeps a member\'s saved Track Number and sends only the empty ones, and fills nothing where a saved number disagrees with its title', async () => {
+  let item = pairingReview(); item.draft.tracks[1].trackNumber = 2; item.source.tracks[1].trackNumber = 2;
+  const writes: Array<Record<string, unknown>> = [];
+  routeSummary(() => item, pairingLookupResponse, (_path, body) => {
+    writes.push(body);
+    const receipt = { operationId: String(body.operationId), kind: 'edit' as const, revision: item.revision + 1 };
+    item = { ...item, revision: receipt.revision, draft: withChanges(item.draft, body.changes as ReviewDraftChange[]), receipts: [receipt] };
+    return reviewJson({ item, receipt });
+  });
+  mountPage();
+  // A saved number that agrees with its title is kept, and only the empty numbers fill; editing then withdraws the filled note.
+  fireEvent.click((await screen.findAllByRole('button', { name: 'Fill Disc and Track Numbers from titles' }))[0]);
+  expect(screen.getByRole('spinbutton', { name: '2 · Track number' })).toHaveValue(2);
+  expect(screen.getByText(/^Filled Disc or Track Numbers from the titles for 2 tracks;/)).toBeVisible();
+  fireEvent.click(screen.getByRole('button', { name: 'Save completion draft' }));
+  await waitFor(() => expect(writes).toHaveLength(1));
+  expect(writes[0].changes).toEqual([{ path: `tracks.${slotId}.discNumber`, base: null, value: 1 }, { path: `tracks.${slotId}.trackNumber`, base: null, value: 1 },
+    { path: `tracks.${slotTwo}.discNumber`, base: null, value: 1 }]);
+  await waitFor(() => expect(screen.getByText('Completion draft saved')).toBeVisible());
+  cleanup();
+  // A saved number that disagrees with its own title fills nothing, so no two members can claim one position.
+  item = pairingReview(); item.draft.tracks[1].trackNumber = 7; item.source.tracks[1].trackNumber = 7;
+  mountPage();
+  await screen.findByText(/^Found 1 possible release/);
+  expect(screen.queryByRole('button', { name: 'Fill Disc and Track Numbers from titles' })).not.toBeInTheDocument();
 });
 
 test('lookup waits for unsaved draft edits, and the save-first message names metadata lookup', async () => {

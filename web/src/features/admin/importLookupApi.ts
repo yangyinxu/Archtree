@@ -8,8 +8,8 @@
  *              reviewTrackPath, slotId, bases, basis, reviewBasis, flagReasons, discNumber, trackNumber,
  *              comparisonSchema, pairSchema, subsetSchema, reviewComparisonSchema, candidateSchema,
  *              reviewCandidateSchema, proposalSchema, groupSchema, lookupValueSchema, expectedRows,
- *              reviewLookupValueSchema, appliedSchema, reviewAppliedSchema, rowTitle, knownDuration,
- *              appendTracklistSchema, summarySchema
+ *              reviewLookupValueSchema, appliedSchema, reviewAppliedSchema, progressSchema, rowTitle,
+ *              knownDuration, appendTracklistSchema, summarySchema
  * @end-catalog */
 
 import { z } from 'zod';
@@ -21,8 +21,8 @@ import { artistEntrySchema, expectedTracklistRowSchema, importDateSchema, labelE
  * conflicts and flags, and what Publish waits for; and the import's summary state (src/administration/import/adminImportSummary.ts).
  * An existing-Album review's view (GET /catalog-reviews/:id/lookup) shares it and also admits the catalog trigger, the exact-count
  * basis, the subset differences and comparison, each candidate's `byTrackTitle`, the review-only value paths, flag reasons and
- * conflict precision, and the applied pairing; an import's view refuses every one of them. The summary reads (importSummaryQuery.ts, catalogReviewSummaryQuery.ts) load
- * it with the read, so no chunk that shares those queries carries it.
+ * conflict precision, the applied pairing, and an active run's progress; an import's view refuses every one of them. The summary reads (importSummaryQuery.ts,
+ * catalogReviewSummaryQuery.ts) load it with the read, so no chunk that shares those queries carries it.
  */
 const integer = z.number().int().nonnegative();
 const run = z.number().int().min(1);
@@ -139,9 +139,15 @@ const lookupViewFor = <Trigger extends z.ZodType, Candidate extends z.ZodType, B
 }).strict();
 export const lookupViewSchema = lookupViewFor({ trigger: z.enum(['tags', 'folder', 'submitted']), candidate: candidateSchema, basis, applied: appliedSchema,
   path: valuePath, answers: 305 });
-/** An existing-Album review's lookup view: the catalog trigger, the review comparison, bases, applied values and value paths. */
+/**
+ * A review's queued, running or retrying run (absent otherwise, and from a server that sends none): its phase, the done and total
+ * counts of that phase's bounded steps within 100, and the run's start and last-step times; numbers and times only.
+ */
+const progressSchema = z.object({ phase: z.enum(['search', 'details', 'itunes', 'bridge', 'aliases']), done: integer.max(100), total: integer.max(100),
+  startedAt: z.iso.datetime(), updatedAt: z.iso.datetime() }).strict().refine(progress => progress.done <= progress.total, 'Invalid lookup progress');
+/** An existing-Album review's lookup view: the catalog trigger, the review comparison, bases, applied values, value paths and progress. */
 export const reviewLookupViewSchema = lookupViewFor({ trigger: z.enum(['tags', 'folder', 'submitted', 'catalog']), candidate: reviewCandidateSchema,
-  basis: reviewBasis, applied: reviewAppliedSchema, path: reviewValuePathSchema, answers: 406 });
+  basis: reviewBasis, applied: reviewAppliedSchema, path: reviewValuePathSchema, answers: 406 }).extend({ progress: progressSchema.optional() });
 const rowTitle = z.string().min(1).max(300);
 const knownDuration = z.number().int().min(1).nullable();
 /**

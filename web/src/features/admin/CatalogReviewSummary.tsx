@@ -18,6 +18,7 @@ import { expectedRowMembers, lookupAnswers, memberRows, type ReviewConflict } fr
 import type { LookupBox as Box } from './LookupBox';
 import { lookupActive, lookupNextStep, reviewLookupKey } from './lookupNextStep';
 import { lookupIdText, lookupValueAt, lookupValueText } from './lookupValueText';
+import { progressPhaseKey, reviewLookupStatus, titleNumbers, type Message, type TitleNumbers } from './reviewLookupStatus';
 import { useOnline } from './useAdminOnline';
 import styles from './adminStyles';
 
@@ -34,16 +35,22 @@ const memberPath = (path: string) => /^tracks\.[^.]+\.artists$/.test(path);
 /**
  * The lookup-first summary of an existing-Album review (owner rules: docs/business-rules.md, Catalog Visibility and
  * Administration, existing-Album reviews; Administrator Metadata Lookup). It presents what the server decides and never starts
- * Luna: the lookup status with the free retry as its only primary button, the name box prefilled with the saved Album title and
- * its optional Artist field, the candidate chooser with each candidate's subset facts, conflicts answered one by one or all at
- * once by buttons that name the applied candidate's source (MusicBrainz or iTunes), the values to check, each member's track
+ * Luna: the lookup status, refined for the review (reviewLookupStatus.ts), with the free retry, or filling the Disc and Track
+ * Numbers from the track titles (`onFillNumbers`, into the unsaved draft) where that is the next step, as its only primary button;
+ * an active run's progress, whose elapsed time and the note that it keeps running after the page is left sit beside the polite
+ * status, outside it, so each poll does not announce them; the name box prefilled with the saved Album title and its optional
+ * Artist field, which asks before it replaces an active run, followed by the fill as a plain button where it is only offered; the
+ * candidate chooser with each candidate's subset facts and reason, and its sections while nothing matched as a group, conflicts
+ * answered one by one or all at once by buttons that name the applied candidate's source (MusicBrainz or iTunes), the values to check, each member's track
  * Artist row with its reason, the expected tracklist with its missing-file rows, the identity rows and the values that need no
  * answer. Answers wait while a run is active. A read showing a newer revision or value revision (lookup applications change only
  * the latter) reads the review detail again; a refused answer reads this summary and the identity rows again. A chunk it loads
  * that cannot load asks for a reload in its place.
  */
-export function CatalogReviewSummary({ item, disabled, error, onRun }: {
+export function CatalogReviewSummary({ item, disabled, error, onRun, onFillNumbers }: {
   item: CatalogReview; disabled: boolean; error: string | null; onRun: (action: string, payload: object) => void;
+  /** Writes the Disc and Track Numbers the titles give into the unsaved draft, opens Edit draft and focuses its save. */
+  onFillNumbers: (numbers: TitleNumbers['numbers']) => void;
 }) {
   const t = useAdminText(), access = useAdminAccess(), online = useOnline(), client = useQueryClient(), id = useId();
   const query = useQuery(catalogReviewSummaryQuery(access, item, online)), data = query.data, lookup = data?.lookup ?? null, summary = data?.summary;
@@ -67,11 +74,24 @@ export function CatalogReviewSummary({ item, disabled, error, onRun }: {
   const { status, retry } = lookupNextStep(lookup, { available: summary.lookupAvailable, uploadsWaiting: false });
   const applied = lookup?.applied ?? null, shown = applied && applied.choice !== 'none' ? applied : null;
   const release = lookup?.candidates.find(candidate => candidate.key === applied?.candidateKey)?.title ?? '—';
+  // The Album name the run searched (a song name never is: then the saved title) compares the titles, the saved draft's numbers
+  // the fill; a poll's time moves the elapsed time.
+  const submitted = lookup?.input.submitted, searched = submitted?.kind === 'album' ? submitted.text : item.draft.album.title;
+  const artists = item.draft.album.artists.filter(entry => entry.role === 'primary').map(entry => entry.name);
+  const numbers = titleNumbers(item.draft.tracks, new Set(item.source.tracks.filter(track => track.discNumber !== undefined).map(track => track.slotId)));
+  const fill = numbers?.count ? { count: numbers.count, run: () => onFillNumbers(numbers.numbers) } : null;
+  const refined = lookup && reviewLookupStatus(lookup, status, { members: item.draft.tracks.length, searched, artists, now: query.dataUpdatedAt || Date.now(), numbers });
+  const say = (message: Message) => t(message.key, message.values?.phase ? { ...message.values, phase: t(progressPhaseKey(String(message.values.phase))) } : message.values);
+  // The refined messages read as one status; a Chinese sentence ends with its own full stop and takes no space after it.
+  const statusText = refined ? refined.messages.map(say).reduce((text, next) => `${text}${text.endsWith('。') ? '' : ' '}${next}`)
+    : t(reviewLookupKey(status), { title: release });
+  // A previous revision's read shown while the current one loads takes no answer.
+  const busy = disabled || query.isPlaceholderData, answering = busy || lookupActive(lookup?.state);
+  const fillButton = (next: boolean) => fill && <div className={styles.actions}><button type="button" className={next ? `${styles.button} ${styles.primary}` : styles.button}
+    disabled={busy} onClick={fill.run}>{t('catalog_review.fill_numbers')}</button></div>;
   const needed = new Set(lookup?.needsAnswer.conflicts ?? []), open = (applied?.conflicts ?? []).filter(conflict => needed.has(conflict.path));
   const albumOpen = open.filter(conflict => !memberPath(conflict.path)), conflictPaths = new Set((applied?.conflicts ?? []).map(conflict => conflict.path));
   const source = applied?.source === 'itunes' ? 'iTunes' : 'MusicBrainz', use = applied?.source === 'itunes' ? 'itunes' : 'musicbrainz';
-  // A previous revision's read shown while the current one loads takes no answer.
-  const busy = disabled || query.isPlaceholderData, answering = busy || lookupActive(lookup?.state);
   const resolve = (conflicts: readonly ReviewConflict[], answer: 'mine' | 'lookup') =>
     onRun('lookup/resolve', { run: applied!.run, candidateKey: applied!.candidateKey, answers: lookupAnswers(conflicts, item.draft, answer) });
   const card = (conflict: ReviewConflict, heading: string) => {
@@ -107,12 +127,16 @@ export function CatalogReviewSummary({ item, disabled, error, onRun }: {
   const section = (name: string, heading: string, body: ReactNode) => <section aria-labelledby={`${id}-${name}`}><h3 id={`${id}-${name}`}>{heading}</h3>{body}</section>;
   return <section aria-labelledby={`${id}-title`} className={styles.panel}>
     <h2 id={`${id}-title`}>{t('catalog_review.lookup_title')}</h2>
-    <p role="status">{t(reviewLookupKey(status), { title: release })}</p>
+    {/* A full-width bracket or full stop carries its own space, and a dot parts the time from the keeps-running note. */}
+    <p><span role="status">{statusText}</span>{refined?.elapsed && `${/[）」』]$/u.test(statusText) ? '' : ' '}· ${say(refined.elapsed)}`}
+      {lookupActive(lookup?.state) && <>{refined?.elapsed ? ' · ' : statusText.endsWith('。') ? '' : ' '}<span className={styles.muted}>{t('catalog_review.lookup_keeps_running')}</span></>}</p>
     {retry && <div className={styles.actions}><button type="button" className={`${styles.button} ${styles.primary}`} disabled={busy} onClick={() => onRun('lookup/retry', {})}>{t('lookup.retry')}</button></div>}
+    {refined?.fill === 'next' && fillButton(true)}
     {summary.lookupAvailable && <Suspense fallback={null}><LookupBox key={box} lookup={lookup} rootLabel="" defaultText={item.draft.album.title} mode="review" disabled={busy}
-      onSubmit={(kind, text, artist) => onRun('lookup', { kind, text, ...(artist ? { artist } : {}) })} /></Suspense>}
+      active={lookupActive(lookup?.state)} onSubmit={(kind, text, artist) => onRun('lookup', { kind, text, ...(artist ? { artist } : {}) })} /></Suspense>}
+    {refined?.fill === 'offer' && fillButton(false)}
     {lookup?.state === 'complete' && lookup.candidates.length > 0 && <Suspense fallback={null}><CandidateChooser projectId={item.id} viewerId={access.viewerId} lookup={lookup}
-      review={{ tracks: item.draft.tracks }} disabled={busy} onChoose={candidateKey => onRun('lookup/choose', { run: lookup.run, candidateKey })} /></Suspense>}
+      review={{ tracks: item.draft.tracks, searched, artists, fill }} disabled={busy} onChoose={candidateKey => onRun('lookup/choose', { run: lookup.run, candidateKey })} /></Suspense>}
     {/* The bulk answers cover every open conflict, the members' included, so they also serve member conflicts alone. */}
     {open.length >= 2 && <div className={styles.actions}>
       <button type="button" className={styles.button} disabled={answering} onClick={() => resolve(open, 'mine')}>{t('catalog_review.keep_all_current')}</button>
@@ -124,7 +148,7 @@ export function CatalogReviewSummary({ item, disabled, error, onRun }: {
       {flagged.map(flag => <li key={flag.path}>{`${label(flag.path)}: ${t(`catalog_review.flag_${flag.reason}`)}`}</li>)}</ul>}
     {members && (!members.paired || members.rows.length > 0) && section('members', t('catalog_review.members_title'), <>
       <p className={styles.muted}>{t('catalog_review.members_copy')}</p>
-      {!members.paired && <p>{t('catalog_review.member_no_pairing')}</p>}
+      {!members.paired && <p>{t(refined?.messages[0].key === 'catalog_review.lookup_applied_album_only' ? 'catalog_review.member_paired_since' : 'catalog_review.member_no_pairing')}</p>}
       {members.rows.length > 0 && <ul className={styles.cards}>{members.rows.map(row => row.state === 'conflict' ? card(row.conflict, member(row.slotId))
         : <li key={row.slotId} className={styles.card}><strong>{member(row.slotId)}</strong><p>{row.state === 'filled' ? `${entriesByline(row.entries) || '—'} · ${t('catalog_review.member_filled')}`
           : row.state === 'answered' ? `${lookupValueText(row.conflict.lookup)} · ${answered(row.conflict)}`

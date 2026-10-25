@@ -2,20 +2,22 @@
  * Exports
  *   Functions: CandidateChooser
  * Internal
- *   Types: Candidate, Proposal, Subset, Preview
+ *   Types: Candidate, ReviewCandidate, Proposal, Subset, Preview
  *   Functions: proposalText
  *   Constants: PREVIEWS_AT_ONCE, RETRY_MS, fields, fieldKeys
  * @end-catalog */
 
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { useAdminText } from './AdminAccess';
 import { entriesByline } from './artistEntriesByline';
 import type { ImportLookupView, ReviewLookupView } from './importLookupApi';
 import { reviewLookupKey } from './lookupNextStep';
+import { candidateReason, releaseGroups, reviewSections } from './reviewLookupStatus';
 import { reviewValueText } from './reviewValueText';
 import styles from './adminStyles';
 
 type Candidate = ImportLookupView['candidates'][number] | ReviewLookupView['candidates'][number];
+type ReviewCandidate = ReviewLookupView['candidates'][number];
 type Proposal = ImportLookupView['groups'][number]['proposal'];
 /** A review candidate's subset comparison, when it has one. */
 type Subset = NonNullable<NonNullable<ReviewLookupView['candidates'][number]['comparison']>['subset']>;
@@ -47,18 +49,32 @@ const proposalText = (field: typeof fields[number], proposal: Proposal, withId?:
  * represents a group there, else in the folded list, and there only once the list is opened), at most two loading at a time in the
  * order shown, and a preview that fails is tried once more after two seconds, then hidden. For an existing-Album review (`review`,
  * its draft tracks) the copy speaks of the Album's tracks, previews come from the review, and each candidate with a subset
- * comparison also shows how many members it pairs (listing each pair), the missing-file rows it would add, the video or data
- * tracks it leaves out and the members no track of it can pair with; a release first found through one of the Album's saved track
- * titles is marked as such.
+ * comparison also shows the members it pairs (listed only for a single pairing), the expected tracklist and its missing-file rows
+ * only where choosing brings them in, the video or data tracks it leaves out and the members no track of it can pair with; a
+ * release first found through one of the Album's saved track titles is marked as such. A review card without a proposal gives one
+ * reason (reviewLookupStatus.ts) in place of the status sentence and differences. While a review's run has no matching group, its
+ * candidates are grouped into releases (editions sharing every value but media and country) in three sections: possible matches
+ * open (previews at once), the other releases the tracks may fit and those that do not fit or could not be read, both folded
+ * (previews once opened). A release card acts for one edition and lets each other edition be chosen under Choose another edition,
+ * so every candidate stays selectable. A possible match whose members pair in no single way keeps choosing it under Other options
+ * as Album values only (each other edition likewise); the first such card offers filling the Disc and Track Numbers from the
+ * titles (`review.fill`) or says they can be entered in Edit draft, then used where a member has no duration, else compared again.
+ * The release this run applied without a pairing whose pairing is now single can be used again, a primary button where it is not
+ * folded, which brings in its tracklist and track details; with groups it is also listed above the folded list. In a review, the
+ * tie or offer sentence names its region without being printed again (the summary's status says it), and the offered release's
+ * card names its editions like a possible match, with Use this release as the primary button, the next step.
  */
 export function CandidateChooser({ projectId, viewerId, lookup, review, disabled, onChoose }: {
-  projectId: string; viewerId: string; lookup: ImportLookupView | ReviewLookupView; review?: { tracks: readonly { slotId: string; title: string }[] }; disabled: boolean;
+  projectId: string; viewerId: string; lookup: ImportLookupView | ReviewLookupView; disabled: boolean;
+  /** An existing-Album review: its saved tracks, the searched text, its primary Artists' names and an eligible fill (else null). */
+  review?: { tracks: readonly { slotId: string; title: string }[]; searched: string; artists: readonly string[]; fill: { count: number; run: () => void } | null };
   onChoose: (candidateKey: string | null) => void;
 }) {
   const t0 = useAdminText(), id = useId(), tie = lookup.needsAnswer.tie, single = lookup.groups.length === 1;
   // A review's own copy for messages whose import wording names the files.
   const t: typeof t0 = (key, variables) => t0(review ? reviewLookupKey(key) : key, variables);
-  const [previews, setPreviews] = useState<ReadonlyMap<string, Preview>>(() => new Map()), [foldedOpen, setFoldedOpen] = useState(false);
+  const [previews, setPreviews] = useState<ReadonlyMap<string, Preview>>(() => new Map()), [open, setOpen] = useState<ReadonlySet<string>>(() => new Set());
+  const toggle = (name: string, value: boolean) => setOpen(previous => { const next = new Set(previous); if (value) next.add(name); else next.delete(name); return next; });
   const timers = useRef(new Set<ReturnType<typeof setTimeout>>());
   useEffect(() => { const pending = timers.current; return () => pending.forEach(clearTimeout); }, []);
   const mark = (key: string, from: Preview, to: Preview) => setPreviews(previous => previous.get(key) === from ? new Map(previous).set(key, to) : previous);
@@ -75,9 +91,20 @@ export function CandidateChooser({ projectId, viewerId, lookup, review, disabled
   const byId = (field: typeof fields[number]) => !single && (field === 'artists' || field === 'label') && new Set(lookup.groups.map(group => proposalText(field, group.proposal))).size === 1;
   const withId = (text: string, musicBrainzId: string | null) => musicBrainzId ? `${text} · ${t('lookup.musicbrainz_id', { id: musicBrainzId })}` : text;
   const representatives = lookup.groups.flatMap(group => lookup.candidates.filter(candidate => candidate.key === group.representativeKey).map(candidate => ({ candidate, proposal: group.proposal })));
-  // Each release's preview appears once, in the order shown (the folded list's once it is opened).
-  const above = tie || offered ? representatives.map(({ candidate }) => candidate.key) : [];
-  const order = [...above, ...(foldedOpen ? lookup.candidates.map(candidate => candidate.key).filter(key => !above.includes(key)) : [])]
+  // A review's sections while nothing matched as a group (never with a tie or an offered choice); a release card acts for the
+  // edition this run chose, else its first.
+  const sections = review && !lookup.groups.length ? reviewSections(lookup.candidates as ReviewCandidate[], review.searched, review.artists) : null;
+  const acting = (group: readonly Candidate[]) => group.find(candidate => candidate.key === chosen) ?? group[0];
+  const subsetOf = (candidate: Candidate) => candidate.comparison && 'subset' in candidate.comparison ? candidate.comparison.subset : null;
+  const pairs = lookup.applied && 'pairs' in lookup.applied ? lookup.applied.pairs : undefined;
+  // The release this run chose without a pairing, now pairing in one way, can be used again for its tracklist and track details.
+  const again = (candidate: Candidate) => Boolean(review) && chosen === candidate.key && lookup.applied?.choice === 'chosen' && pairs === null
+    && subsetOf(candidate)?.pairing === 'unique' && Boolean(candidate.comparison?.trackCount.local);
+  const rechoose = sections || tie || offered ? [] : lookup.candidates.filter(again);
+  // Each release's preview appears once, in the order shown (a folded list's once it is opened).
+  const above = (tie || offered ? representatives.map(({ candidate }) => candidate) : sections ? sections.possible.map(acting) : rechoose).map(candidate => candidate.key);
+  const folds = sections ? [...(open.has('o') ? sections.others : []), ...(open.has('n') ? sections.rest : [])].map(acting) : open.has('a') ? lookup.candidates : [];
+  const order = [...above, ...folds.map(candidate => candidate.key).filter(key => !above.includes(key))]
     .filter(key => lookup.candidates.some(candidate => candidate.key === key && candidate.artwork)).join(' ');
   // Turns go to the first waiting previews shown; one no longer shown gives its turn back and waits again.
   useEffect(() => setPreviews(previous => {
@@ -95,37 +122,84 @@ export function CandidateChooser({ projectId, viewerId, lookup, review, disabled
   const fact = (key: string, value: string | null) => <div key={key}><dt>{t(key)}</dt><dd>{value || '—'}</dd></div>;
   const member = (slotId: string) => { const index = review!.tracks.findIndex(track => track.slotId === slotId); return `${index + 1} · ${review!.tracks[index]?.title || '—'}`; };
   const position = (disc: number, track: number) => t('publication.track_position', { disc: String(disc), track: String(track) });
-  // A review candidate's subset facts: the members it pairs, the missing-file rows it adds, tracks left out and unpairable members.
-  const subsetFacts = (subset: Subset, members: number) => <>
-    <details className={styles.details}><summary>{t('catalog_review.lookup_paired', { paired: subset.pairs.length, members })}</summary>
-      <ul>{subset.pairs.map(pair => <li key={pair.slotId}>{`${member(pair.slotId)} → ${position(pair.discNumber, pair.trackNumber)}`}</li>)}</ul></details>
-    {subset.missingTrackCount !== null && <p className={styles.muted}>{t('catalog_review.lookup_missing_rows', { count: subset.missingTrackCount })}</p>}
+  // An edition's media and country, as a release card names its editions.
+  const edition = (entry: Candidate) => [[...new Set(entry.formats)].join(', ') || '—', entry.country && `(${entry.country})`].filter(Boolean).join(' ');
+  // A review candidate's subset facts: the members it pairs (only for a single pairing), the expected tracklist and its missing-file
+  // rows where choosing brings them in (else that it brings in none), tracks left out and unpairable members (unless the reason says so).
+  const subsetFacts = (subset: Subset, members: number, unpairable: boolean) => <>
+    {subset.pairing === 'unique' && members > 0 && <details className={styles.details}><summary>{t('catalog_review.lookup_paired', { paired: subset.pairs.length, members })}</summary>
+      <ul>{subset.pairs.map(pair => <li key={pair.slotId}>{`${member(pair.slotId)} → ${position(pair.discNumber, pair.trackNumber)}`}</li>)}</ul></details>}
+    {subset.missingTrackCount !== null && <p className={styles.muted}>{subset.pairing === 'unique' || !members ? t('catalog_review.lookup_missing_rows', { count: subset.missingTrackCount })
+      : t('catalog_review.lookup_no_tracklist')}</p>}
     {subset.leftOutTracks > 0 && <p className={styles.muted}>{t('catalog_review.lookup_left_out', { count: subset.leftOutTracks })}</p>}
-    {subset.unpairableSlotIds.length > 0 && <p className={styles.muted}>{t('catalog_review.lookup_unpairable', { tracks: subset.unpairableSlotIds.map(member).join(', ') })}</p>}
+    {subset.unpairableSlotIds.length > 0 && !unpairable && <p className={styles.muted}>{t('catalog_review.lookup_unpairable', { tracks: subset.unpairableSlotIds.map(member).join(', ') })}</p>}
   </>;
-  // The tie view lists each group's representative with its proposal; the folded list every candidate with its status.
-  const list = (prefix: string, shown: { candidate: Candidate; proposal: Proposal | null }[]) => <ul className={styles.cards}>{shown.map(({ candidate, proposal }, index) => {
-    const comparison = candidate.comparison;
-    return <li key={candidate.key} className={styles.card}>
-      {artwork(candidate, prefix === 'a')}
-      <strong id={`${id}-${prefix}${index}`}>{[candidate.title ?? '—', candidate.artist].filter(Boolean).join(' · ')}</strong>
-      {candidate.source === 'itunes' && <p className={styles.muted}>{[t('lookup.itunes_only'), candidate.notChecked && t('lookup.not_checked')].filter(Boolean).join(' · ')}</p>}
-      {'byTrackTitle' in candidate && candidate.byTrackTitle && review && <p className={styles.muted}>{t('lookup.found_by_track_title')}</p>}
-      {!proposal && <p className={styles.muted}>{[t(`lookup.status_${candidate.status}`), candidate.label, reviewValueText(candidate.date), candidate.trackCount === null ? null : t('lookup.track_count', { count: candidate.trackCount })].filter(Boolean).join(' · ')}</p>}
-      <dl>
-        {proposal && differing.map(field => fact(fieldKeys[field], proposalText(field, proposal, byId(field) ? withId : undefined)))}
-        {fact('lookup.barcode', candidate.barcode)}{fact('lookup.catalog_number', candidate.catalogNumber)}{fact('lookup.country', candidate.country)}{fact('lookup.medium', candidate.formats.join(', '))}
-      </dl>
-      {review && comparison && 'subset' in comparison && comparison.subset && subsetFacts(comparison.subset, comparison.trackCount.local)}
-      {comparison && candidate.status === 'notMatching' && <ul>{comparison.differences.map(difference => <li key={difference}>{t(`lookup.difference_${difference}`, difference === 'discCount'
-        ? { local: String(comparison.discCount.local ?? '—'), candidate: String(comparison.discCount.candidate) } : { local: String(comparison.trackCount.local), candidate: String(comparison.trackCount.candidate) })}</li>)}</ul>}
-      <button type="button" className={styles.button} disabled={disabled || chosen === candidate.key} aria-describedby={`${id}-${prefix}${index}`} onClick={() => onChoose(candidate.key)}>{t(chosen === candidate.key ? 'lookup.chosen' : 'lookup.choose')}</button>
-    </li>;
-  })}</ul>;
-  const disclosure = lookup.disclosure, unknown = disclosure ? ([['lookup.unknown_durations', disclosure.unknownLocalDurations], ['lookup.unknown_discs', disclosure.unknownLocalDiscNumbers]] as const).filter(([, count]) => count > 0) : [];
+  // The tie view lists each group's representative with its proposal; the folded list every candidate with its status, a review
+  // card its reason; a review section one card per release (`group`, its editions), a possible match's with its own choices.
+  const list = (prefix: string, shown: { candidate: Candidate; proposal: Proposal | null; group?: readonly Candidate[] }[], possible = false) => {
+    // A possible match with members whose pairing is not single writes Album values only; the first such card offers the numbers.
+    const albumOnly = (entry: Candidate) => possible && Boolean(entry.comparison?.trackCount.local) && subsetOf(entry)?.pairing !== 'unique' && !again(entry);
+    const hinted = shown.findIndex(({ candidate }) => albumOnly(candidate));
+    return <ul className={styles.cards}>{shown.map(({ candidate, proposal, group = [candidate] }, index) => {
+      const comparison = candidate.comparison, subset = subsetOf(candidate), members = comparison?.trackCount.local ?? 0, title = `${id}-${prefix}${index}`;
+      const reason = review && !proposal ? candidateReason(candidate as ReviewCandidate, slotIds => slotIds.map(member).join(', ')) : null;
+      // Choosing an edition; the release this run applied without a pairing, now pairing in one way, is primary where it is not folded,
+      // and so is a review's offered release, the next step.
+      const choose = (text: string, entry = candidate) => <button key={entry.key} type="button"
+        className={('pr'.includes(prefix) ? again(entry) : review && offered && prefix === 't' && entry === candidate) ? `${styles.button} ${styles.primary}` : styles.button}
+        disabled={disabled || (chosen === entry.key && !again(entry))} aria-describedby={title} onClick={() => onChoose(entry.key)}>{chosen === entry.key && !again(entry) ? t('lookup.chosen') : text}</button>;
+      const unknown = (comparison?.unknownLocalDurations ?? 0) > 0;
+      return <li key={candidate.key} className={styles.card}>
+        {artwork(candidate, 'aon'.includes(prefix))}
+        <strong id={title}>{[candidate.title ?? '—', candidate.artist].filter(Boolean).join(' · ')}</strong>
+        {candidate.source === 'itunes' && <p className={styles.muted}>{[t('lookup.itunes_only'), candidate.notChecked && t('lookup.not_checked')].filter(Boolean).join(' · ')}</p>}
+        {'byTrackTitle' in candidate && candidate.byTrackTitle && review && <p className={styles.muted}>{t('lookup.found_by_track_title')}</p>}
+        {group.length > 1 && <p className={styles.muted}>{t('catalog_review.lookup_editions', { count: group.length, editions: group.map(edition).join(' · ') })}</p>}
+        {reason && <p>{t(reason.key, reason.values)}</p>}
+        {!proposal && <p className={styles.muted}>{[!reason && t(`lookup.status_${candidate.status}`), candidate.label, reviewValueText(candidate.date), candidate.trackCount === null ? null : t('lookup.track_count', { count: candidate.trackCount })].filter(Boolean).join(' · ')}</p>}
+        <dl>
+          {proposal && differing.map(field => fact(fieldKeys[field], proposalText(field, proposal, byId(field) ? withId : undefined)))}
+          {fact('lookup.barcode', candidate.barcode)}{fact('lookup.catalog_number', candidate.catalogNumber)}
+          {group.length === 1 && <>{fact('lookup.country', candidate.country)}{fact('lookup.medium', candidate.formats.join(', '))}</>}
+        </dl>
+        {review && subset && subsetFacts(subset, members, reason?.key === 'catalog_review.lookup_unpairable')}
+        {comparison && !reason && candidate.status === 'notMatching' && <ul>{comparison.differences.map(difference => <li key={difference}>{t(`lookup.difference_${difference}`, difference === 'discCount'
+          ? { local: String(comparison.discCount.local ?? '—'), candidate: String(comparison.discCount.candidate) } : { local: String(comparison.trackCount.local), candidate: String(comparison.trackCount.candidate) })}</li>)}</ul>}
+        {again(candidate) ? <><p>{t('catalog_review.lookup_choose_again_copy')}</p>{choose(t('catalog_review.lookup_choose_again'))}</>
+          // A possible match whose members pair in no single way: the numbers come first, and choosing it writes Album values only.
+          : albumOnly(candidate) ? <>
+            {index === hinted && (review!.fill ? <><p>{t(unknown ? 'catalog_review.lookup_fill_hint_durations' : 'catalog_review.lookup_fill_hint', { count: review!.fill.count })}</p>
+              <button type="button" className={styles.button} disabled={disabled} aria-describedby={title} onClick={review!.fill.run}>{t('catalog_review.fill_numbers')}</button></>
+              : <p>{t(unknown ? 'catalog_review.lookup_fill_unavailable_durations' : 'catalog_review.lookup_fill_unavailable')}</p>)}
+            <details className={styles.details}><summary>{t('catalog_review.lookup_other_options')}</summary><p className={styles.muted}>{t('catalog_review.lookup_album_only_copy')}</p>
+              {choose(t('catalog_review.lookup_choose_album_only'))}</details></>
+          : choose(t('lookup.choose'))}
+        {group.length > 1 && <details className={styles.details}><summary>{t('catalog_review.lookup_editions_choose')}</summary><div className={styles.actions}>
+          {group.filter(entry => entry !== candidate).map(entry => choose(t(albumOnly(entry) ? 'catalog_review.lookup_choose_edition_album_only' : 'catalog_review.lookup_choose_edition',
+            { edition: edition(entry) }), entry))}</div></details>}
+      </li>;
+    })}</ul>;
+  };
+  // A possible match's fill hint stands in for the unknown Disc Numbers line.
+  const fillHinted = Boolean(review?.fill) && Boolean(sections?.possible.map(acting).some(candidate => candidate.comparison?.trackCount.local && subsetOf(candidate)?.pairing !== 'unique'
+    && !again(candidate)));
+  const disclosure = lookup.disclosure, unknown = disclosure ? ([['lookup.unknown_durations', disclosure.unknownLocalDurations], ['lookup.unknown_discs', disclosure.unknownLocalDiscNumbers]] as const)
+    .filter(([key, count]) => count > 0 && !(fillHinted && key === 'lookup.unknown_discs')) : [];
   const disclosed = [...unknown.map(([key, count]) => <p key={key} className={styles.muted}>{t(key, { count })}</p>),
     disclosure?.partialComparison && <p key="partial" className={styles.muted}>{t('lookup.partial_comparison')}</p>];
   const none = <div className={styles.actions}><button type="button" className={styles.button} disabled={disabled || (chosen === null && lookup.applied?.choice === 'none')} onClick={() => onChoose(null)}>{t('lookup.choose_none')}</button></div>;
-  const all = <details className={styles.details} onToggle={event => setFoldedOpen(event.currentTarget.open)}><summary>{t('lookup.candidates', { count: lookup.candidates.length })}</summary>{list('a', lookup.candidates.map(candidate => ({ candidate, proposal: null })))}{!tie && !offered && none}</details>;
-  return tie || offered ? <><section aria-labelledby={`${id}-tie`}><h3 id={`${id}-tie`}>{t(tie ? 'lookup.tie' : 'lookup.single_choice')}</h3>{disclosed}{list('t', representatives)}{none}</section>{all}</> : <>{disclosed}{all}</>;
+  const fold = (prefix: string, heading: string, body: ReactNode) => <details className={styles.details} onToggle={event => toggle(prefix, event.currentTarget.open)}><summary>{heading}</summary>{body}</details>;
+  const releases = (groups: Candidate[][]) => groups.map(group => ({ candidate: acting(group), proposal: null, group }));
+  const all = fold('a', t('lookup.candidates', { count: lookup.candidates.length }), <>{list('a', lookup.candidates.map(candidate => ({ candidate, proposal: null })))}{!tie && !offered && none}</>);
+  // A review's summary already says the tie or offer sentence as its status, so here it only names the region; its offered release
+  // names its editions as a possible match does.
+  const heading = t(tie ? 'lookup.tie' : 'lookup.single_choice'), editions = review && offered ? releaseGroups(lookup.candidates as ReviewCandidate[]) : [];
+  return tie || offered ? <><section aria-label={review ? heading : undefined} aria-labelledby={review ? undefined : `${id}-tie`}>{!review && <h3 id={`${id}-tie`}>{heading}</h3>}{disclosed}
+    {list('t', representatives.map(entry => ({ ...entry, group: editions.find(group => group.includes(entry.candidate as ReviewCandidate)) })))}{none}</section>{all}</>
+    : sections ? <>{disclosed}
+      {sections.possible.length > 0 && <section aria-labelledby={`${id}-possible`}><h3 id={`${id}-possible`}>{t('catalog_review.lookup_section_possible', { count: sections.possible.length })}</h3>
+        {list('p', releases(sections.possible), true)}</section>}
+      {sections.others.length > 0 && fold('o', t('catalog_review.lookup_section_other_fit', { count: sections.others.length }), list('o', releases(sections.others)))}
+      {sections.rest.length > 0 && fold('n', t('catalog_review.lookup_section_not_fit', { count: sections.rest.length }), list('n', releases(sections.rest)))}{none}</>
+    : <>{disclosed}{rechoose.length > 0 && list('r', rechoose.map(candidate => ({ candidate, proposal: null })))}{all}</>;
 }

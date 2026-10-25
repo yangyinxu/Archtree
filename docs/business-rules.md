@@ -2220,28 +2220,34 @@ The wire protocol and operational bounds are documented in
   Administration.
 - When metadata lookup finds no release or no matching release, or cannot run
   because no usable tags, folder name or submitted name exist, the summary
-  offers the name box as the next step. When lookup is unavailable, busy or
-  stopped, the next step is the free retry, also after the automatic retries
-  are exhausted. In every lookup state, also after a release was applied, the
-  summary offers Luna as a secondary choice after the lookup controls, never
-  as the next step. An existing-Album review offers Luna the same way. Luna
-  remains an explicitly confirmed paid step that shows the remaining project
-  and daily budget; offering it starts nothing, a lookup result never starts
-  it, and it may also run beside applied lookup values. In an import, Luna
-  suggestions return to the summary labelled as Luna AI and are never
-  collapsed: those for empty values or values from file tags arrive ticked,
-  the others arrive unticked and keep the current value unless ticked,
+  offers the name box as the next step. In an existing-Album review where lookup
+  finds no matching release, the summary says why: the Album has no members,
+  members have no duration, or the members fit a release in more than one way.
+  When the members' saved titles start with the positions that Track-title
+  lookup reads, the review offers filling the Disc and Track Numbers the draft
+  lacks from them, for the administrator to check and save, which compares
+  again. This is the next step when the titles give both Disc and Track Numbers,
+  and is otherwise offered after the name box, which stays available. When
+  lookup is unavailable, busy or stopped, the next step is the free retry, also
+  after the automatic retries are exhausted. In every lookup state, also after a
+  release was applied, the summary offers Luna as a secondary choice after the
+  lookup controls, never as the next step. An existing-Album review offers Luna
+  the same way. Luna remains an explicitly confirmed paid step that shows the
+  remaining project and daily budget; offering it starts nothing, a lookup
+  result never starts it, and it may also run beside applied lookup values. In
+  an import, Luna suggestions return to the summary labelled as Luna AI and are
+  never collapsed: those for empty values or values from file tags arrive
+  ticked, the others arrive unticked and keep the current value unless ticked,
   unticking rejects one, and none is applied until the administrator accepts it
   or approves the publication with it ticked. A ticked suggestion for the Album
-  title, a track title, the Artist entries or the label gets identity
-  candidates and preselections as if it were applied, and the approval
-  includes their decisions. Luna receives the current draft values whatever
-  their source. Only the MusicBrainz release applied to the import or review,
-  if any, is given to Luna, as untrusted context labelled with its source, and
-  each Luna suggestion records it. Other candidates and all iTunes evidence and
-  identifiers are never sent to Luna. Luna never chooses an identity, supplies
-  a MusicBrainz ID, selects a release or presents its values as lookup
-  evidence.
+  title, a track title, the Artist entries or the label gets identity candidates
+  and preselections as if it were applied, and the approval includes their
+  decisions. Luna receives the current draft values whatever their source. Only
+  the MusicBrainz release applied to the import or review, if any, is given to
+  Luna, as untrusted context labelled with its source, and each Luna suggestion
+  records it. Other candidates and all iTunes evidence and identifiers are never
+  sent to Luna. Luna never chooses an identity, supplies a MusicBrainz ID,
+  selects a release or presents its values as lookup evidence.
 - Metadata lookup artwork is Cover Art Archive artwork, or iTunes artwork for an
   iTunes-only candidate, from a fixed allowlist of artwork hosts. The server
   fetches artwork only from those hosts, including after every redirect, and

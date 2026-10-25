@@ -4,6 +4,7 @@
  * Tests
  *   - a server-shaped review summary parses with the catalog trigger, the exact-count basis, subset comparisons, review paths, precision, flags and pairs
  *   - a missing or malformed value revision, extra keys, forged paths, rows on a member path and a member that is not a slot are refused
+ *   - an active run's progress parses within its bounds, numbers and times only, and a view without it parses too
  *   - the identity read parses bound, conflicting and unbound rows, the label, more candidates than an import reads and Credit views
  *   - a decision without its bound ID, a preselection with an extra key, an Album or track candidate and a malformed revision are refused
  *   - the identity read's default selection and kept expected tracklist are required, strict and well formed
@@ -60,6 +61,19 @@ test('a missing or malformed value revision, extra keys, forged paths, rows on a
   refused(lookup => { lookup.candidates[0].comparison.subset.recordingId = 'synthetic'; });
   refused(lookup => { delete lookup.applied.pairs; });
   refused(lookup => { lookup.input.trigger = 'filename'; });
+});
+
+test('an active run\'s progress parses within its bounds, numbers and times only, and a view without it parses too', () => {
+  const progress = { phase: 'details', done: 3, total: 5, startedAt: '2026-10-25T00:00:00.000Z', updatedAt: '2026-10-25T00:00:14.000Z' };
+  const active = (value: unknown) => withLookup(lookup => { lookup.state = 'running'; lookup.progress = value; });
+  expect(reviewLookupResponseSchema.parse(active(progress)).lookup!.progress).toEqual(progress);
+  expect(reviewLookupResponseSchema.parse(reviewLookupResponse()).lookup!.progress).toBeUndefined();
+  for (const phase of ['search', 'details', 'itunes', 'bridge', 'aliases']) expect(parse(active({ ...progress, phase })).success, phase).toBe(true);
+  expect(parse(active({ ...progress, done: 100, total: 100 })).success).toBe(true);
+  expect(parse(active({ ...progress, done: 0, total: 0 })).success).toBe(true);
+  for (const value of [{ ...progress, query: 'Synthetic Album' }, { ...progress, done: 6 }, { ...progress, done: 101, total: 101 }, { ...progress, total: 101 }, { ...progress, phase: 'done' },
+    { ...progress, phase: 'other' }, { ...progress, done: -1 }, { ...progress, done: 1.5 }, { ...progress, startedAt: '2026-10-25' }, { ...progress, updatedAt: 'yesterday' },
+    { ...progress, startedAt: undefined }, null, 'details']) expect(parse(active(value)).success, JSON.stringify(value)).toBe(false);
 });
 
 test('the identity read parses bound, conflicting and unbound rows, the label, more candidates than an import reads and Credit views', () => {

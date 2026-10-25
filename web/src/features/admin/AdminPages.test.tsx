@@ -459,7 +459,7 @@ test.each([
   }));
   mount('/admin/imports?source=catalogReviews');
   const card = within((await screen.findByRole('heading', { name: 'Existing Album task' })).closest('li')!);
-  expect(card.getByText('Luna AI')).toBeVisible();
+  expect(card.getByText('Luna AI (paid, optional)')).toBeVisible();
   expect(card.getByText(label)).toBeVisible();
   expect(card.getByText('Original Album')).toBeVisible();
   expect(card.getByText(applied ? 'Updated' : 'Not updated')).toBeVisible();

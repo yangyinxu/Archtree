@@ -1316,7 +1316,8 @@ confirmed and that Luna AI (paid) never starts; where lookup is not
 configured the action reads **Create Album completion for manual editing**. The separate
 **Album completions** queue retains saved projects when the browser closes.
 **Unfinished** includes all unapplied reviews; **Album updated** confirms that
-this project's selected fields were applied. Luna progress and the
+this project's selected fields were applied. Luna progress, labelled **Luna AI
+(paid, optional)** on the review page and the workbench card, and the
 original-Album update status are shown separately. **Save completion draft**
 changes only the private draft and sends only the values edited since the saved
 draft was loaded (an edit changed back is no change), so it never overwrites
@@ -1325,13 +1326,21 @@ apply can write (see below), lookup-filled and lookup-answered values preselecte
 and deselectable, and confirms their frozen old/new values. An unapplied review opens on its **Metadata lookup** summary,
 above its tabs and loaded as its own chunk (a chunk that cannot load, the
 summary's or one it loads, asks for a reload in its place, leaving manual
-editing usable): the lookup status with the free **Retry lookup** as its only
-primary button, the name box prefilled with the last submitted name and
-Artist name or else the saved Album title (its **Artist (optional)**
-hint says that an empty field uses the Album's primary Artists), the
-candidate chooser (review copy about the Album's tracks, and per candidate
-the members it pairs with each pair listed, the missing-file rows it
-adds, video or data tracks left out and members no track can pair with; a
+editing usable): the lookup status, refined for a review (see the review's
+lookup summary below), with the free **Retry lookup** or, where entering the
+numbers is the next step, **Fill Disc and Track Numbers from titles** as its
+only primary button, or while a run is queued or running its progress line; the
+name box prefilled with the last submitted name and Artist name or else the
+saved Album title (its **Artist (optional)** hint says that an empty field uses
+the Album's primary Artists), which asks before it replaces a queued, running
+or retrying run, followed by the fill as a plain button where it is only
+offered; the candidate chooser (review copy about the Album's tracks; while the
+run has no matching group, possible matches first and the other releases in two
+folded sections; per candidate one short reason, the editions a release card
+groups, each choosable,
+the members it pairs with each pair listed for a single pairing, the expected
+tracklist and its missing-file rows only where choosing brings them in, video
+or data tracks left out and members no track can pair with; a
 release first found through a saved track title is marked **Found through a
 track title**),
 from two open conflicts **Keep all current** and **Use all MusicBrainz** (or
@@ -1516,8 +1525,9 @@ Credit edit.
 
 A review's lookup summary (`CatalogReviewSummary.tsx`) presents what the server
 decides. Its statuses and next steps are the import summary's
-(`lookupNextStep.ts`, shared with `ImportSummary.tsx`), in the review's own
-words where the import's wording names files, tags or the import: before a
+(`lookupNextStep.ts`, shared with `ImportSummary.tsx`, and refined as below), in
+the review's own words where the import's wording names files, tags or the
+import: before a
 review's first run it says lookup has not run, with the name box next, and where
 lookup is not configured (`lookupAvailable` false) it says so and offers neither
 a retry nor the name box. It reads `GET /catalog-reviews/:id/lookup` for each
@@ -1541,6 +1551,140 @@ stale: the server refuses to keep it (`409 ADMIN_IMPORT_DUPLICATE_STALE`), so
 its row shows undecided with a note, it takes no candidate from another entry
 and every save leaves it out. Each lookup refusal has its own message, as on the
 import page, and reads the summary and its identity rows again.
+
+Where the shared next step is no match (`lookup.no_match`), or no match with the
+iTunes fallback unavailable (`lookup.itunes_unavailable`, which then adds that a
+matching release may be missing from the list), the review refines it in
+`reviewLookupStatus.ts`. The review summary imports it, and so does the chooser
+shared with the import page, which loads it with its own chunk but never calls
+it there, so `lookupNextStep.ts` and the import page's initial chunks stay
+unchanged. It takes the first cause that applies. An Album without members says
+that its tracks cannot confirm a release and how many releases have a matching
+name, which choosing brings in with every row without a file, and, when the run
+named no Artist (none was submitted and the Album has no primary Artist entry),
+that adding one narrows the results. Otherwise it looks at the releases the
+tracks fit: the possible matches (below), else the other unverified candidates,
+saying that their titles differ from the name searched. It names the first of
+them and the cause: a member without a duration, where saving numbers alone
+cannot make a release match, so the step is entering the Disc and Track Numbers,
+saving, then choosing a release, which brings in its expected tracklist and
+track details through the single pairing the numbers make, or, once such a
+release pairs in exactly one way, using it; members that pair with it in more
+than one way, every duration known, where entering the numbers and saving
+compares again for free; or a single pairing that a release track without a
+duration left unconfirmed, where the step is using that release. Entering the
+numbers is the next step, with **Fill Disc and Track Numbers from titles** as
+the summary's only primary button, only when the titles give every member a Disc
+and Track Number (see below) and the draft still lacks one of them (owner rules,
+next-step bullet). Where the titles give Track Numbers alone, the fill follows
+the name box as a plain button, and the cause, like the one for titles without
+positions, says that another name can be looked up or the numbers entered in
+**Edit draft**. Anything else is a real no match, which says so without naming a
+paid step; **Use Luna AI (paid)** stays the page's secondary button after the
+summary. A release this run applied for its Album values only (`applied.pairs`
+null) whose pairing a saved number has since made single replaces the applied
+status with one saying that using it again brings in its tracklist and track
+details, and the track Artists section says the same in place of its no-pairing
+line.
+
+A possible match is an unverified candidate whose normalized title equals the
+normalized Album name the run searched (the submitted Album name, else the saved
+Album title, which a song lookup also compares) or, when no candidate's does,
+contains it or is contained in it. A title is normalized by removing a trailing
+credit (after a full-width `／`, or after an ASCII `/` with spaces on both sides,
+so `Love/Hate` keeps its slash), then Unicode NFKC, lower case, turning
+`「」『』()（）[]` into spaces, collapsing whitespace and removing a leading or
+trailing primary Artist name (the whole saved name, or one part of a decorated
+name such as `Name -Romanized-` or `Name (Romanized)`). Candidates that share
+title, Artist, label, date, barcode, catalogue number and track count are one
+release with several editions (formats and country may differ), and the status
+and section counts count releases.
+
+The view's `progress` drives the active status: while a run is queued the
+summary says so, and while it runs it names the phase (searching MusicBrainz by
+name, reading release details, the iTunes fallback, checking iTunes results on
+MusicBrainz, reading Artist and label aliases), with its done and total counts
+when the total is not zero. Only that text is the polite status. The time waited
+or run (m:ss from `startedAt` to the later of the summary's last read and
+`updatedAt`, so a client clock behind the server's still counts, never below
+0:00) follows it outside the status, so a poll does not announce it. A retrying
+run, or a view without `progress`, keeps the shared status and its retry.
+Queued, running and retrying runs add **Lookup keeps running if you leave this
+page.** on the same line, after the status; a dot parts the time from the
+status, directly after a full-width closing bracket, and from that note. While a
+run is queued, running or retrying, submitting the name box first asks (**This
+stops the current lookup and starts a new one with the name above.**, with
+**Stop and look up again** and **Cancel**), since the server replaces an active
+run on submission; the box stays usable, as automatic retries can last minutes,
+and editing the name, the Artist or the kind withdraws the question. A run that
+ends while the question is open leaves it open as whether to look up the name
+now (**Look up now**), so a submission is never dropped unseen.
+
+The review chooser (the import chooser is unchanged) lists, while the run has no
+matching group, **Possible matches** open, one card per release naming its
+editions' media and countries, then **Other releases the tracks may fit** (other
+unverified candidates: a similar title first, then a credit that agrees with the
+Album's primary Artists, then the server's order) and **Releases that do not fit
+or could not be read** (non-matching and incomplete candidates), both folded,
+and **Use none of these** after them. A release card acts for the edition this
+run chose, else its first, and lists each other edition under **Choose another
+edition**, so every candidate stays selectable; its previews load at once, a
+folded section's once it is opened. Each review card without a proposal shows
+one reason in place of the status sentence and the differences: the tracks all
+pair and their durations agree; they fit in more than one way; members without a
+duration leave the positions unknown, or the single pairing unconfirmed; a
+paired release track has no duration; the Album has no members; the release has
+too few audio tracks; members no track can pair with; members that cannot each
+take a different track; a tracklist over its bounds or invalid; or details that
+could not be fetched. The missing-file row count appears only when the pairing
+is single or the Album has no members; otherwise the card says that choosing
+brings in no expected tracklist or track details, and **Tracks paired** shows
+only for a single pairing of an Album with members. On a possible match with
+members whose pairing is not single, **Use this release** moves under **Other
+options** as **Use Album values only (title, Artists, label, release date)**
+with that warning, enabled exactly when the plain button would be, and each
+other edition in that state is offered for its Album values only too. The first
+such card offers **Fill Disc and Track Numbers from titles** with a hint naming
+how many members get a number (saving then compares again for free or, where a
+member has no duration, lets the release be used for its tracklist) in place of
+the unknown-Disc-Number disclosure, or, where nothing can be filled from the
+titles, says that the numbers can be entered in **Edit draft**. The candidate
+this run chose without a pairing (`applied.pairs` null) whose pairing is now
+single offers **Use this release again (with track details)** on its card, a
+primary button where it is not folded, and, while the run has matching groups,
+also above the folded list; choosing it again computes its values anew, so it
+brings in the paired member values and the expected tracklist. Where the run's
+only matching group of a partial comparison is offered, or a tie needs an
+answer, the review chooser does not repeat the summary's status sentence: it
+only names the region with it. The offered release's card names its editions and
+lets each other one be chosen, as a possible match's does, and its **Use this
+release** is the primary button, since choosing it is the next step; **Use none
+of these** stays a plain button.
+
+**Fill Disc and Track Numbers from titles** is offered only when the saved
+titles give positions exactly as Track-title searches read them
+(`src/administration/lookup/lookupTitlePositions.ts`; the Web test repeats the
+rows of `test/administration/lookupTitlePositions.test.ts`): every member's
+title, whitespace collapsed and trimmed, starts with a position of one form,
+`1-01 ` or `1.01.` giving the Disc and Track Number and `01.`, `01 `, `01 . ` or
+`01 - ` (also with `–` or `—`) the Track Number alone, every number is at least
+1, and the positions increase strictly by Disc Number (a missing one counting as
+1), then Track Number, in Album order. A Track Number alone counts only with two
+or more members, and a lone member only with a Disc Number and a Track Number
+written with a leading zero, so a lone "7 Rings", "1-2 Punch" or "1.5 Seconds"
+never counts, nor does `01_` or `12) `; titles that all start with increasing
+numbers, such as "24 Hours" before "99 Luftballons", read as positions, the same
+known limit as on the server. A saved number that disagrees with its own title,
+titles on several discs where a member's Disc Number cannot be filled (the
+review captured none for it), or no empty number left offer nothing, so filling
+never makes two members claim one position. It writes only the empty numbers, a
+Disc Number only where the review captured one, into the **Edit draft** tab as
+unsaved values, switches to that tab, says there for how many tracks it filled
+numbers until the next edit or save, and focuses **Save completion draft**; the
+administrator checks them and saves through the ordinary review save, which
+re-ranks the stored candidates without a lookup run. They are the
+administrator's own numbers: they constrain pairing and reach the catalog only
+when the review is applied.
 
 Catalog review routes (relative to `/api/admin/v1`):
 
@@ -2660,6 +2804,20 @@ roll back to:
   after rolling back across them. After deploying them, a Web client's cached
   bundle from before them is refused once for lacking that key, so it shows
   English until the new bundle loads.
+- The review's refined lookup status, sections, card reasons, **Fill Disc and
+  Track Numbers from titles**, re-choosing and progress line need no floor of
+  their own; no collection or index changes, and they store nothing new. A
+  release before them leaves `progress` out of a review's lookup view, which
+  this Web reads as no progress and shows the earlier active status. A Web tab
+  opened before them cannot parse a review view carrying `progress`, so reload
+  open admin Web tabs after deploying or rolling back across them. They change
+  message values and add message keys; every earlier key and its variables are
+  kept, so Web, iOS and Android clients accept this release's remote bundles.
+  A Web tab opened after them keeps its active bundle instead of accepting a
+  remote bundle from a release before them, which lacks the new keys, so reload
+  open workbench tabs after rolling back across them. After deploying them, a
+  Web client's cached bundle from before them is refused once for lacking those
+  keys, so it shows English until the new bundle loads.
 - Automatic covers need no floor of their own. A release before them shows and
   publishes only a stored, explicit `selectedCoverSlotId`, so an import whose
   choice is still automatic shows No cover there and publishes no cover unless
@@ -3685,8 +3843,9 @@ fills only empty or automatic values that are still as it saw them.
 - **All or nothing.** A write bumps `valueRevision` once and keeps only
   decisions still bound to their entry or label; `revision`, receipts and the
   editing allowance never change. Applying the same candidate again writes
-  nothing. A failure in the worker step aborts values, gate and record
-  together, and the run resumes at its stored step after its lease.
+  nothing while its values are unchanged. A failure in the worker step aborts
+  values, gate and record together, and the run resumes at its stored step
+  after its lease.
 - **Re-ranking.** A confirmation that leaves the file set incomplete, or that
   reaches the automatic-run limit, re-ranks a completed run's stored
   candidates when their evidence changed (Disc and Track Numbers aside, which
@@ -3710,7 +3869,10 @@ fills only empty or automatic values that are still as it saw them.
   acceptance). They are computed against the review's own evidence: Disc and
   Track Numbers that lookup wrote (automatic) never constrain pairing, so
   choosing B after A writes B's pairing and a re-rank right after an application
-  changes nothing. The Album title, Artist entries, label and date are offered
+  changes nothing. Choosing the applied candidate again computes its values
+  anew, so after a saved Disc or Track Number has made its pairing single it
+  writes the paired member values and the expected tracklist. The Album title,
+  Artist entries, label and date are offered
   always; the expected tracklist (`album.expectedTracklist`) and each paired
   member's title, Disc Number, Track Number and track Artist entries
   (`tracks.<slotId>.artists`) only through a single pairing of the members with
@@ -3870,7 +4032,22 @@ among values, conflicts and flags (at most 406 of each), the flag reasons
 (at most 100 pairs of this review's slots, each once, within the tracklist's
 number bounds), or `null` without one or for any value out of bounds. Each
 review candidate carries `byTrackTitle: true` when a Track-title search first
-found its release, and no such key otherwise.
+found its release, and no such key otherwise. While its run is queued, running
+or retrying, a review's view also carries `progress`, built from stored fields
+only: `phase` is the stored phase (`search`, `details`, `itunes`, `bridge` or
+`aliases`), and `done` of `total` counts the planned searches sent (`queryIndex`
+of `queries`, also while queued; the trailing Track-title searches count only
+once the run sends them, as it often skips them), the candidates whose details
+are no longer pending, the iTunes requests sent (`requestIndex` of `requests`)
+or, once all were sent, the collection lookups settled, the bridge searches sent
+(`bridgeIndex` of `bridge`) or the alias lookups no longer pending (0 of 0 in
+`itunes` without a readable stage); both are integers, `done` at most `total`
+and `total` at most 100. `startedAt` and `updatedAt` are the run's `createdAt`
+(each run is stored afresh) and `updatedAt`. It holds numbers and timestamps
+only, never a query text, so the view still carries no query; a finished run,
+the `done` phase, an unknown phase, or a time that is unreadable or outside the
+years 0000-9999 (which the Web's strict date-time schema refuses) shows no such
+key.
 An import's view never carries these keys, and a run with the `catalog` input
 has no import view. The Web parses a review's view with its own strict schema
 (`reviewLookupViewSchema` in `importLookupApi.ts`, read through

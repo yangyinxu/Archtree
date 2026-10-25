@@ -193,6 +193,31 @@ screen and shows the Artist hint; and at 1280 px in English and 390 px in
 Chinese its tie chooser marks only the release a track-title search found first
 as Found through a track title, as does the opened folded list of every release
 found, without sending anything; each with an axe scan and no overflow.
+Another, from a review lookup shaped like a live Album (two members without Disc
+or Track Numbers whose titles start with 1-01 and 1-02, two editions of one
+release they fit in more than one way, and ten releases they do not fit, with a
+partial comparison), shows at 1280 px in English and 390 px in Chinese the
+possible-pairing status, naming no paid step, with Fill Disc and Track Numbers
+from titles as its only primary button, in the first screen; Possible match (1
+release) open with one card naming both editions, the reason that the tracks fit
+in more than one way, no missing-file row count but the line that choosing
+brings in no expected tracklist, the fill again and Use Album values only under
+Other options; and the releases that do not fit as the only other section,
+folded, before Use none of these. Filling from another tab switches to Edit
+draft with both Disc and Track Numbers filled and unsaved and Save completion
+draft focused, sending nothing; saving sends only those four values, after which
+the release is offered, said once, as the status, on a card naming both editions
+with its 18 missing-file rows and Use this release as the only primary button,
+which brings in the 20-row expected tracklist. At 1280 px, choosing Album values
+only first shows that track values are not applied; saving the numbers filled
+from the card then offers Use this release again (with track details) above the
+folded list, which brings in the tracklist. A queued run shows its queued line
+and a running one its step with done and total counts, each with its elapsed
+time outside the status and the note Lookup keeps running if you leave this
+page, parted by dots and with no space before the dot after a Chinese full-width
+bracket; submitting the name box during the run asks first: Cancel sends nothing
+and Stop and look up again sends one lookup request. Each with an axe scan and
+no overflow, also at 320 px.
 
 The historical 2026-08-19 MediaTrack amendment passed
 304/304 server tests, 214/214 Web unit/component tests, 148/148 integration
@@ -639,6 +664,24 @@ player control still works.
   confirm the buttons read Use iTunes and the values are flagged iTunes only.
   Repeat in Simplified Chinese (从 MusicBrainz 补全（免费）, 打开专辑补全, 保留当前,
   使用 MusicBrainz) and with a screen reader at 320 CSS px.
+- As an administrator, with metadata lookup configured against MusicBrainz in a
+  development environment, open an Album completion for an Album whose track
+  titles start with 1-01, 1-02 and so on but whose tracks have no Disc or Track
+  Numbers. Confirm the summary names the possible release and says the track
+  positions are unclear, names no paid step in that sentence, offers Fill Disc
+  and Track Numbers from titles as its only primary button, and that Use Luna AI
+  (paid) still follows the lookup controls and is never primary; that the
+  release's card names its editions, does not promise missing-file rows and
+  offers Album values only under Other options; that filling only fills empty
+  numbers in Edit draft, focuses Save completion draft and saves nothing; and
+  that saving offers the release, said once, on a card naming its editions with
+  Use this release as the only primary button, or applies it, and that Use this
+  release brings in its expected tracklist. While a lookup is queued or runs,
+  confirm the queued or progress line and the note Lookup keeps running if you
+  leave this page, that a screen reader announces the status once rather than
+  every few seconds, and that a new name asks before replacing the run. Repeat
+  in Simplified Chinese (从标题填写碟号/曲号, 可能匹配, 离开页面后查找仍会继续。) and with a screen
+  reader at 320 CSS px.
 - As an administrator, open an unfinished Album completion and choose Discard
   completion. Confirm its confirmation names the Album and says the catalog
   does not change; Cancel keeps the completion; confirming returns to the Album
