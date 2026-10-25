@@ -12,11 +12,13 @@
  *   - the track titles give Disc and Track Numbers only for positions of one form increasing in Album order, and only empty numbers fill
  *   - the track titles read the positions the server lookup removes, row by row of its table
  *   - each card gives one reason, the first that applies
+ *   - the fit of a no-match run: an empty Album's same-title releases; else possible matches before other fits, with the cause in its order
+ *   - a release applied for its Album values only is offered again only once its pairing is single and only for the applied status
  * @end-catalog */
 
 import type { ReviewLookupView } from './importLookupApi';
 import { pairedLookupResponse, pairingApplication, pairingEditions, pairingLookupResponse } from './catalogReviewLookupFixtures.testSupport';
-import { candidateReason, editionKey, elapsedText, normalizedTitle, releaseGroups, reviewLookupStatus, reviewSections, titleNumbers, titleTier } from './reviewLookupStatus';
+import { candidateReason, editionKey, elapsedText, normalizedTitle, releaseGroups, reviewAppliedAgain, reviewLookupFit, reviewLookupStatus, reviewSections, titleNumbers, titleTier } from './reviewLookupStatus';
 
 /**
  * The review's own reading of its lookup view, without rendering: normalized titles, releases and their editions, the sections,
@@ -269,4 +271,27 @@ test('each card gives one reason, the first that applies', () => {
   expect(reason(candidate(1, 'X', { pairing: 'unique' }))).toEqual({ key: 'catalog_review.lookup_reason_release_durations', values: undefined });
   expect(reason(candidate(1, 'X', { pairing: null }))).toEqual({ key: 'lookup.status_unverified' });
   expect(reason(candidate(1, 'X', { status: 'matching', pairing: 'unique' }))).toEqual({ key: 'catalog_review.lookup_reason_matching', values: { count: 2 } });
+});
+
+test('the fit of a no-match run: an empty Album\'s same-title releases; else possible matches before other fits, with the cause in its order', () => {
+  const empty = reviewLookupFit(numberOnes(), { members: 0, searched: 'Synthetic Number Ones', artists: [] });
+  expect(empty && !empty.members && keys(empty.releases)).toEqual(Array.from({ length: 6 }, () => ['Synthetic Number Ones']));
+  // Members without a duration come before a pairing that is not single; the best-of's four editions differ in barcode.
+  expect(reviewLookupFit(bestOf(), bestOfContext)).toMatchObject({ members: true, possible: true, cause: 'durations', unknown: 3 });
+  expect((reviewLookupFit(bestOf(), bestOfContext) as { releases: Candidate[][] }).releases).toHaveLength(4);
+  expect(reviewLookupFit(view(live().candidates), liveContext)).toMatchObject({ members: true, possible: true, cause: 'pairing', unknown: 0 });
+  expect(reviewLookupFit(reshaped('unique'), liveContext)).toMatchObject({ cause: 'release_durations' });
+  expect(reviewLookupFit(reshaped('unique', 1), liveContext)).toMatchObject({ cause: 'paired_durations', unknown: 1 });
+  // With no possible match, the releases whose titles differ are the fit; nothing that fits is a real no match.
+  const other = reviewLookupFit(view(live().candidates), { ...liveContext, searched: 'Unrelated Synthetic Title' });
+  expect(other).toMatchObject({ members: true, possible: false, cause: 'pairing' });
+  expect(reviewLookupFit(view(live().candidates.filter(entry => entry.status !== 'unverified')), liveContext)).toBeNull();
+});
+
+test('a release applied for its Album values only is offered again only once its pairing is single and only for the applied status', () => {
+  const again = pairedLookupResponse(pairingApplication(pairingEditions[0], false)).lookup!;
+  expect(reviewAppliedAgain(again, 'lookup.applied')?.key).toBe(pairingEditions[0]);
+  expect(reviewAppliedAgain(again, 'lookup.applied_itunes')).toBeUndefined();
+  expect(reviewAppliedAgain(pairedLookupResponse(pairingApplication(pairingEditions[0], true)).lookup!, 'lookup.applied')).toBeUndefined();
+  expect(reviewAppliedAgain({ ...pairingLookupResponse().lookup!, applied: pairingApplication(pairingEditions[0], false) }, 'lookup.applied')).toBeUndefined();
 });

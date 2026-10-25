@@ -6,12 +6,14 @@
  *   Constants: CatalogReviewDiscard
  * @end-catalog */
 
-import { lazy, Suspense, useState, type ComponentProps, type ComponentType } from 'react';
+import { lazy, Suspense, useRef, useState, type ComponentProps, type ComponentType } from 'react';
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { Link, useSearchParams } from 'react-router';
+import { useLocalization } from '../../localization/LocalizationProvider';
 import { AdminGate, useAdminAccess, useAdminText } from './AdminAccess';
 import { adminEndpointRequest, adminRequest, filters, workbenchSchema, type WorkbenchFilter } from './adminApi';
-import { reviewWorkbenchSchema } from './catalogReviewApi';
+import { reviewWorkbenchSchema } from './catalogReviewWorkbenchApi';
+import { lookupBriefMessage, lookupBriefNeedsYou } from './lookupBrief';
 import { ImportStages, useOnline } from './AdminShared';
 import { AdminNav } from './AdminNav';
 import { adminWorkspace } from './adminWorkspace';
@@ -24,13 +26,20 @@ const CatalogReviewDiscard = lazy<ComponentType<ComponentProps<typeof Discard>>>
 
 /**
  * Separate private queues share filters; source navigation never admits analysis or catalog writes. An unfinished Album
- * completion's card offers Discard completion, naming its catalog Album; a discard reads the queue again, which drops the card.
- * The action itself stays disabled while the review page's own change runs or is unconfirmed.
+ * completion's card leads with its metadata lookup status (the server's lookup brief; none from a server before it), then the
+ * Original Album and, once Luna AI was used, its status; Lookup needs you counts and filters the loaded cards whose lookup asks
+ * for an answer, a choice, numbers or the free retry; another filter turns it off. The queue reads itself every 5 seconds while a
+ * loaded card's Luna AI, or an unfinished card's lookup, is queued or running, every 10 while such a lookup only retries, and never
+ * offline; it stops following lookups 15 minutes after it first saw one active (a run that never advances, such as one queued while
+ * the worker is idle), until none is. Dates follow the interface language. An unfinished card offers Discard completion, naming
+ * its catalog Album; a discard reads the queue again, which drops the card. The action itself stays disabled while the review
+ * page's own change runs or is unconfirmed.
  */
 function Workbench() {
-  const t = useAdminText();
+  const t = useAdminText(), { locale } = useLocalization();
   const access = useAdminAccess();
   const online = useOnline();
+  const when = (value: string) => new Date(value).toLocaleString(locale, { dateStyle: 'medium', timeStyle: 'short' });
   const [location, setLocation] = useSearchParams();
   const source = location.get('source') === 'catalogReviews' ? 'catalogReviews' : 'imports';
   const setSource = (value: 'imports' | 'catalogReviews') => setLocation(previous => {
@@ -42,6 +51,9 @@ function Workbench() {
   const [mine, setMine] = useState(false);
   const [search, setSearch] = useState('');
   const [submitted, setSubmitted] = useState('');
+  const [lookupOnly, setLookupOnly] = useState(false);
+  // When the queue first saw an unfinished card's lookup active, so following it stays bounded.
+  const lookupSince = useRef<number | null>(null);
   const parameters = (cursor: string | null) => {
     const params = new URLSearchParams({ filter, limit: '25' });
     if (mine) params.set('startedByMe', 'true');
@@ -65,13 +77,22 @@ function Workbench() {
     queryFn: ({ signal, pageParam }) => adminEndpointRequest(`/catalog-reviews?${parameters(pageParam)}`, reviewWorkbenchSchema, { signal }),
     getNextPageParam: page => page.nextCursor ?? undefined,
     retry: false, gcTime: 0, refetchOnWindowFocus: 'always',
-    refetchInterval: query => online && query.state.data?.pages.some(page => page.items.some(item => ['running', 'queued'].includes(item.analysis.state))) ? 5000 : false
+    refetchInterval: query => {
+      const items = query.state.data?.pages.flatMap(page => page.items) ?? [];
+      const looking = (...states: string[]) => items.some(item => item.state === 'reviewing' && states.includes(item.lookup?.state ?? ''));
+      lookupSince.current = looking('queued', 'running', 'retrying') ? lookupSince.current ?? Date.now() : null;
+      const follow = lookupSince.current !== null && Date.now() - lookupSince.current < 15 * 60_000;
+      return !online ? false : items.some(item => ['running', 'queued'].includes(item.analysis.state)) || (follow && looking('queued', 'running')) ? 5000
+        : follow ? 10_000 : false;
+    }
   });
   const query = source === 'imports' ? imports : reviews;
   const importItems = [...new Map((imports.data?.pages.flatMap(page => page.items) ?? []).map(item => [item.id, item])).values()];
   const reviewItems = [...new Map((reviews.data?.pages.flatMap(page => page.items) ?? []).map(item => [item.id, item])).values()];
-  const empty = source === 'imports' ? importItems.length === 0 : reviewItems.length === 0;
-  const unfiltered = filter === 'all' && !mine && !submitted;
+  // Lookup needs you narrows the loaded cards (at most 25 a page) on this side; Load more can add to it.
+  const needing = reviewItems.filter(item => item.state === 'reviewing' && lookupBriefNeedsYou(item.lookup)), shownReviews = lookupOnly ? needing : reviewItems;
+  const empty = source === 'imports' ? importItems.length === 0 : shownReviews.length === 0;
+  const unfiltered = filter === 'all' && !mine && !submitted && !(source === 'catalogReviews' && lookupOnly);
   return <section className={styles.page}><AdminNav />
     <header className={styles.header}><div><h1 className={styles.title}>{t('workbench.title')}</h1><div className={styles.actions}>
       <button className={styles.button} type="button" disabled={query.isFetching || !online} onClick={() => void query.refetch()}>{t('common.refresh')}</button>
@@ -84,9 +105,12 @@ function Workbench() {
       <button className={styles.filter} type="button" aria-pressed={source === 'catalogReviews'} onClick={() => setSource('catalogReviews')}>{t('workbench.review_source')}</button>
     </div>
     <div className={styles.filters} aria-label={t('workbench.title')}>
-      {filters.map(value => <button type="button" className={styles.filter} aria-pressed={value === filter} key={value} onClick={() => setFilter(value)}>
+      {filters.map(value => <button type="button" className={styles.filter} aria-pressed={value === filter} key={value} onClick={() => { setFilter(value); setLookupOnly(false); }}>
         {t(source === 'catalogReviews' && value === 'awaitingReview' ? 'workbench.review_unfinished'
-          : source === 'catalogReviews' && value === 'completed' ? 'workbench.review_completed' : `workbench.${value}`)}{query.data && ` (${query.data.pages[0].counts[value]})`}</button>)}
+          : source === 'catalogReviews' && value === 'completed' ? 'workbench.review_completed'
+            : source === 'catalogReviews' && value === 'needsAttention' ? 'workbench.review_luna_attention' : `workbench.${value}`)}{query.data && ` (${query.data.pages[0].counts[value]})`}</button>)}
+      {source === 'catalogReviews' && (needing.length > 0 || lookupOnly) && <button type="button" className={styles.filter} aria-pressed={lookupOnly}
+        onClick={() => setLookupOnly(!lookupOnly)}>{t('workbench.review_lookup')}{` (${needing.length})`}</button>}
     </div>
     <form className={styles.toolbar} onSubmit={event => { event.preventDefault(); setSubmitted(search.trim()); }}>
       <label className={styles.field}>{t('workbench.search')}<input className={styles.input} value={search} maxLength={100} onChange={event => setSearch(event.target.value)} /></label>
@@ -103,11 +127,11 @@ function Workbench() {
     <ul className={styles.cards}>{source === 'imports' ? importItems.map(item => <li className={styles.card} key={item.id}>
       <h2><Link className={styles.itemLink} to={`/admin/imports/${item.id}`}>{item.title || item.rootLabel || t('common.untitled')}</Link></h2>
       <p className={styles.muted}>{item.artistName}</p><ImportStages item={item} />
-      <p className={styles.muted}>{t('common.last_updated', { date: new Date(item.updatedAt).toLocaleString() })}</p>
+      <p className={styles.muted}>{t('common.last_updated', { date: when(item.updatedAt) })}</p>
       <Link className={styles.link} to={`/admin/imports/${item.id}`} onClick={() => {
         if (!['preparing', 'needsAttention', 'complete'].includes(item.publication)) adminWorkspace.retain(`stage:${item.id}`, 'draft', access);
       }}>{t(['preparing', 'needsAttention', 'complete'].includes(item.publication) ? 'workbench.open' : 'action.edit')}</Link>
-    </li>) : reviewItems.map(item => {
+    </li>) : shownReviews.map(item => {
       // A finished analysis is not a catalog write; applied reviews close any historical suggestions.
       const stage = item.state === 'applied' ? 'workbench.review_closed'
         : ['queued', 'running'].includes(item.analysis.state) ? 'workbench.review_analyzing'
@@ -115,21 +139,24 @@ function Workbench() {
         : item.pendingSuggestions > 0 ? 'workbench.review_pending'
         : item.analysis.state === 'complete' ? 'workbench.review_handled'
         : item.analysis.state === 'cancelled' ? 'state.cancelled' : 'workbench.review_not_started';
-      const luna = ['queued', 'running'].includes(item.analysis.state);
+      const lunaActive = ['queued', 'running'].includes(item.analysis.state), lunaUsed = lunaActive || item.analysis.generation > 0;
+      // An applied completion's lookup asks for nothing more; a server before lookup briefs sends none.
+      const lookup = item.state === 'applied' || item.lookup === undefined ? null : lookupBriefMessage(item.lookup);
       return <li className={styles.card} key={item.id}>
         <h2><Link className={styles.itemLink} to={`/admin/catalog-reviews/${item.id}`}>{item.title || t('common.untitled')}</Link></h2>
         {item.state === 'applied' && <span className={styles.badge}>{t('catalog_review.applied')}</span>}
         <dl className={styles.statusRow}>
-          <div><dt>{t('workbench.review_stage')}</dt><dd>{t(stage, { count: item.pendingSuggestions })}{['queued', 'running'].includes(item.analysis.state) && item.analysis.totalChunks > 0 && ` · ${item.analysis.completedChunks}/${item.analysis.totalChunks}`}</dd></div>
+          {lookup && <div><dt>{t('catalog_review.lookup_title')}</dt><dd>{t(lookup.key, lookup.values)}</dd></div>}
           <div><dt>{t('workbench.review_album')}</dt><dd>{t(item.state === 'applied' ? 'workbench.review_updated' : 'workbench.review_not_updated')}</dd></div>
+          {lunaUsed && <div><dt>{t('workbench.review_stage')}</dt><dd>{t(stage, { count: item.pendingSuggestions })}{lunaActive && item.analysis.totalChunks > 0 && ` · ${item.analysis.completedChunks}/${item.analysis.totalChunks}`}</dd></div>}
         </dl>
-        <p className={styles.muted}>{t('common.last_updated', { date: new Date(item.updatedAt).toLocaleString() })}</p>
+        <p className={styles.muted}>{t('common.last_updated', { date: when(item.updatedAt) })}</p>
         <div className={styles.actions}>
           <Link className={styles.link} to={`/admin/catalog-reviews/${item.id}`}>{t('workbench.open_review')}</Link>
           <Link className={styles.link} to={`/admin/catalog/album/${item.albumId}`}>{t('published.edit_album')}</Link>
         </div>
         {item.state !== 'applied' && <Suspense fallback={null}><CatalogReviewDiscard id={item.id} albumId={item.albumId} albumTitle={item.albumTitle} draftTitle={item.title}
-          expectedRevision={item.revision} disabled={luna} reason={luna ? 'catalog_review.discard_luna' : null} /></Suspense>}
+          expectedRevision={item.revision} disabled={lunaActive} reason={lunaActive ? 'catalog_review.discard_luna' : null} /></Suspense>}
       </li>;
     })}</ul>
     {query.hasNextPage && <button className={styles.button} disabled={query.isFetchingNextPage || !online} onClick={() => void query.fetchNextPage()}>{t('workbench.more')}</button>}

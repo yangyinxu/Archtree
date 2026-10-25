@@ -35,6 +35,9 @@
  *   - an active run says whether it is queued or which step runs, with its counts and, beside the status, the time since it started and that it keeps running
  *   - the polite status of a running step does not change between polls; only the elapsed time beside it moves
  *   - while a run is active, a name is looked up only after confirming that it stops that run; Cancel sends nothing
+ *   - the open-answer counters follow the status line, before the candidates, and the panel has the anchors the step bar links to
+ *   - an iTunes-only result checked against MusicBrainz, and an artist mismatch, keep the results open with their values to check once nothing else is open
+ *   - once an applied release leaves nothing open the results fold under one disclosure, which stays open while an answer, an identity row or an active run waits
  * @end-catalog */
 
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
@@ -664,4 +667,79 @@ test('while a run is active, a name is looked up only after confirming that it s
   fireEvent.click(within(box).getByRole('button', { name: 'Stop and look up again' }));
   expect(onRun.mock.calls).toEqual([['lookup', { kind: 'album', text: 'Synthetic Live Album 2' }]]);
   expect(within(box).queryByRole('alert')).not.toBeInTheDocument();
+});
+
+test('the open-answer counters follow the status line, before the candidates, and the panel has the anchors the step bar links to', async () => {
+  const { section } = mount(applied());
+  const counter = await within(section()).findByText('Lookup answers still needed: 3');
+  expect(counter.previousElementSibling).toHaveTextContent('Applied release: Synthetic catalog Album (Complete)');
+  // The records to choose follow it once the identity rows are read, as the identity rows below say too.
+  await waitFor(() => expect(counter.nextElementSibling).toHaveTextContent('Records to choose, existing or new: 1'));
+  expect(counter.nextElementSibling).toHaveAttribute('role', 'status');
+  expect(counter.compareDocumentPosition(within(section()).getByRole('group', { name: 'Look up by name' })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(section()).toHaveAttribute('id', 'catalog-review-lookup');
+  // The first open answer (here the bulk answers) and the identity rows carry the anchors of the Answer questions step.
+  expect(section().querySelector('#catalog-review-answers')).toContainElement(within(section()).getByRole('button', { name: 'Keep all current' }));
+  expect(section().querySelector('#catalog-review-identities')).toContainElement(within(section()).getByRole('region', { name: 'Artists and label' }));
+});
+
+test('an iTunes-only result checked against MusicBrainz, and an artist mismatch, keep the results open with their values to check once nothing else is open', async () => {
+  const settle = (response: ReviewLookupResponse) => {
+    const lookup = response.lookup!;
+    lookup.needsAnswer = { tie: false, conflicts: [] }; lookup.applied!.conflicts = lookup.applied!.conflicts.map(conflict => ({ ...conflict, answer: 'mine' as const }));
+    response.summary.needsAnswer = { tie: false, conflicts: [] };
+    return response;
+  };
+  const checked = settle(reviewItunesLookupResponse()), itunes = checked.lookup!;
+  itunes.applied!.notChecked = false; itunes.preselection!.notChecked = false; itunes.candidates = itunes.candidates.map(candidate => ({ ...candidate, notChecked: false }));
+  const mismatch = settle(withLookup(lookup => { lookup.preselection!.artistMismatch = true; }));
+  const decided = reviewIdentityResponse(); decided.identities = decided.identities.map(row => ({ ...row, needsAnswer: false }));
+  for (const [response, flag] of [[checked, 'Artists: Synthetic catalog Artist feat. Synthetic guest · iTunes only'], [mismatch, /credits an artist that none/]] as const) {
+    const fetch = vi.fn(async (path: string) => reviewJson(path.endsWith('/lookup') ? response : decided));
+    vi.stubGlobal('fetch', fetch);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } }); client.setQueryData(['browser-session'], session);
+    render(<QueryClientProvider client={client}><MemoryRouter><CatalogReviewSummary item={applied()} disabled={false} error={null} onRun={vi.fn()} onFillNumbers={vi.fn()} /></MemoryRouter></QueryClientProvider>);
+    // Both reads answered: no answer and no identity row is open.
+    await waitFor(() => { expect(fetch.mock.calls.some(([path]) => String(path).endsWith('/candidates'))).toBe(true); expect(client.isFetching()).toBe(0); });
+    expect(screen.queryByText(/still needed|Records to choose/)).not.toBeInTheDocument();
+    expect(screen.getByText('Lookup results and applied values').closest('details')).toHaveAttribute('open');
+    expect(within(screen.getByRole('list', { name: 'Values to check' })).getByText(flag)).toBeVisible();
+    cleanup();
+  }
+});
+
+test('once an applied release leaves nothing open the results fold under one disclosure, which stays open while an answer, an identity row or an active run waits', async () => {
+  const answered = withLookup(lookup => {
+    lookup.needsAnswer = { tie: false, conflicts: [] }; lookup.applied!.conflicts = lookup.applied!.conflicts.map(conflict => ({ ...conflict, answer: 'mine' as const }));
+  });
+  answered.summary.needsAnswer = { tie: false, conflicts: [] };
+  const decided = reviewIdentityResponse(); decided.identities = decided.identities.map(row => ({ ...row, needsAnswer: false }));
+  const fold = () => screen.getByText('Lookup results and applied values').closest('details')!;
+  // Answers still open: the disclosure is open.
+  mount(applied());
+  await screen.findByText('Lookup answers still needed: 3');
+  expect(fold()).toHaveAttribute('open');
+  cleanup();
+  // Every answer given but an identity row still needs one: open.
+  mount(applied(), answered);
+  await screen.findByRole('region', { name: 'Artists and label' });
+  expect(fold()).toHaveAttribute('open');
+  cleanup();
+  // Nothing open: folded, and a disclosure the administrator opens stays open across a new render.
+  const fetch = vi.fn(async (path: string) => reviewJson(path.endsWith('/lookup') ? answered : decided));
+  vi.stubGlobal('fetch', fetch);
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } }); client.setQueryData(['browser-session'], session);
+  const element = <QueryClientProvider client={client}><MemoryRouter><CatalogReviewSummary item={applied()} disabled={false} error={null} onRun={vi.fn()} onFillNumbers={vi.fn()} /></MemoryRouter></QueryClientProvider>;
+  const view = render(element);
+  await waitFor(() => expect(fold()).not.toHaveAttribute('open'));
+  expect(screen.getByText('Applied release: Synthetic catalog Album (Complete)')).toBeVisible();
+  fireEvent.click(screen.getByText('Lookup results and applied values'));
+  fold().open = true;
+  view.rerender(element);
+  expect(fold()).toHaveAttribute('open');
+  cleanup();
+  // An active run keeps it open.
+  mount(applied(), withLookup(lookup => { Object.assign(lookup, { state: 'running', needsAnswer: { tie: false, conflicts: [] } }); }));
+  await screen.findByText(/Lookup keeps running/);
+  expect(fold()).toHaveAttribute('open');
 });

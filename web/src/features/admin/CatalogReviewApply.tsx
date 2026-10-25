@@ -1,10 +1,9 @@
-import { Fragment, lazy, Suspense, useId, type ComponentProps, type ComponentType } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { useAdminAccess, useAdminText } from './AdminAccess';
+import { Fragment, lazy, Suspense, useEffect, useId, type ComponentProps, type ComponentType } from 'react';
+import { useAdminText } from './AdminAccess';
 import type { CatalogReview } from './catalogReviewApi';
-import { reviewApplyModel, type ApplyChoice, type ApplyItem, type ReviewApplySelection } from './catalogReviewApplyModel';
+import type { ApplyChoice, ApplyItem, ReviewApplySelection } from './catalogReviewApplyModel';
 import type * as Items from './CatalogReviewApplyItems';
-import { catalogReviewCandidatesQuery, catalogReviewSummaryQuery } from './catalogReviewSummaryQuery';
+import { useReviewApplyModel } from './useReviewApplyModel';
 import styles from './adminStyles';
 
 /** Stands in for the value views when their chunk cannot load (a deploy replaced it); the choices beside them stay readable. */
@@ -21,19 +20,13 @@ const ApplyAlbumNote = view<ComponentProps<typeof Items.ApplyAlbumNote>>(module 
  * Administration, applying an existing-Album review): every change an apply can write (catalogReviewApplyModel.ts), each with its
  * saved and new value, selected by default as the rules say and deselectable unless a hold explains why it cannot be selected yet,
  * the identities the selection owns and, for a captured review, the lookup summary and identity reads it rests on (the summary's
- * cached read, never polled from here). The parent keeps the explicit choices, each with the basis of the item it was made on, and
- * freezes the confirmed selection.
+ * cached read, never polled from here; useReviewApplyModel.ts, which the step bar's count shares). The parent keeps the explicit
+ * choices, each with the basis of the item it was made on, and freezes the confirmed selection.
  */
 export function CatalogReviewApply({ item, choices, disabled, onChoose, onConfirm }: { item: CatalogReview; choices: Readonly<Record<string, ApplyChoice>>; disabled: boolean;
   onChoose: (key: string, choice: ApplyChoice) => void; onConfirm: (selection: ReviewApplySelection) => void }) {
-  const t = useAdminText(), access = useAdminAccess(), id = useId();
-  const captured = item.draft.album.expectedTracklist !== undefined && item.state === 'reviewing';
-  // The summary's own read polls; this observer only shares its cached result, so whether the browser is online does not matter here.
-  const summary = useQuery({ ...catalogReviewSummaryQuery(access, item, true), refetchInterval: false, enabled: captured });
-  const identity = useQuery({ ...catalogReviewCandidatesQuery(access, item), enabled: captured && item.sourceStatus === 'current' });
-  const read = summary.isPlaceholderData ? undefined : summary.data, rows = identity.isPlaceholderData ? undefined : identity.data;
-  const model = reviewApplyModel({ item, lookup: read?.lookup ?? null, summary: read ?? null, waiting: read?.summary.waiting ?? null, identity: rows ?? null, choices });
-  const count = model.selection.fields.length + model.selection.memberCredits.length, reads = captured && item.sourceStatus === 'current' ? [summary, identity] : [];
+  const t = useAdminText(), id = useId();
+  const { model, count, reads } = useReviewApplyModel(item, choices);
   const track = (slotId: string) => { const index = item.draft.tracks.findIndex(value => value.slotId === slotId); return `${index + 1} · ${item.draft.tracks[index]?.title || '—'}`; };
   const hold = (entry: ApplyItem) => entry.hold === 'conflict' ? t('catalog_review.answer_conflict_first') : entry.hold === 'tracklist' ? t('catalog_review.number_with_tracklist')
     : t('catalog_review.off_row', { tracks: entry.offSlotIds.map(track).join(', ') });
@@ -59,4 +52,17 @@ export function CatalogReviewApply({ item, choices, disabled, onChoose, onConfir
     {model.blocking.identities.length > 0 && <p>{t('catalog_review.identity_answers_first', { names: model.blocking.identities.join(', ') })}</p>}
     {item.state === 'reviewing' && item.sourceStatus === 'current' && !item.capabilities.apply && <p>{t('catalog_review.unavailable')}</p>}
   </section>;
+}
+
+/**
+ * This step's count (its selected fields and members), how many changes it lists, the identity rows that need an answer and
+ * whether its selection is ready to apply (no lookup or Luna AI wait, identity block or outdated read), reported to the step bar
+ * without rendering anything, from the same model and reads as this step; it shares this step's chunk.
+ */
+export function CatalogReviewApplyCount({ item, choices, onCount }: { item: CatalogReview; choices: Readonly<Record<string, ApplyChoice>>;
+  onCount: (value: { count: number; items: number; identityAnswers: number; ready: boolean }) => void }) {
+  const { model, count, identity } = useReviewApplyModel(item, choices), items = model.items.length, ready = model.ready;
+  const identityAnswers = identity ? identity.identities.filter(row => row.needsAnswer).length + (identity.label?.needsAnswer ? 1 : 0) : 0;
+  useEffect(() => onCount({ count, items, identityAnswers, ready }), [count, items, identityAnswers, ready]);
+  return null;
 }

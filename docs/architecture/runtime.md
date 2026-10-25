@@ -368,7 +368,12 @@ eligibility read and the creation check) scans catalog reviews newest first
 through `admin_project_purpose_inventory` (its `purpose` prefix only), keeping
 unapplied reviews of that captured Album ID and revision, and returns at most
 25, each then source-checked, within the usual 3-second bound: its cost grows
-with the number of stored reviews, applied ones included. No index changes.
+with the number of stored reviews, applied ones included. To compute each
+review's text-free lookup brief, the review queue reads the lookup records of
+the reviews on its page (at most 25) in one more query by `_id`, and the
+eligibility read takes the open review and then its lookup record by `_id`; both
+lookup reads leave out ranking evidence and candidate proposals and run within
+the same 3-second bound. No index changes.
 
 Discarding an unapplied review (`discardCatalogReview` in
 `src/administration/catalog/adminCatalogReviewDiscard.ts`) replaces its

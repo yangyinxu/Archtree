@@ -218,6 +218,32 @@ page, parted by dots and with no space before the dot after a Chinese full-width
 bracket; submitting the name box during the run asks first: Cancel sends nothing
 and Stop and look up again sends one lookup request. Each with an axe scan and
 no overflow, also at 320 px.
+From the same live-shaped lookup, the review page's three steps read 1 release
+may fit and Disc and Track Numbers needed, one step per row at 390 px and on one
+row at 1280 px. An Album completion started from the Album page, once its title
+and date conflicts are answered and its identity decided, says Nothing left to
+answer and Everything is answered; you can update the original Album, with
+Review changes to apply (6) as the primary button, the same six as Update
+original Album (6), which opens the Update step and focuses its tab; after
+applying, that step lists What was updated (the five fields written) with the
+time in the interface language, offers no checkbox and no Update original Album,
+the third step reads Updated with that time, and no Luna AI line shows, as Luna
+AI never ran. After a manual completion with Luna AI is applied, What was
+updated lists the one field written and the Luna AI line reads closed. After the
+last lookup answer and identity decision, the lookup results fold under Lookup
+results and applied values, which opens on request. The Album page's
+open-completion note, when the eligibility read carries the open completion's
+lookup brief, says in one sentence that it found 1 release the tracks may fit
+and needs Disc and Track Numbers, on its own row above Open Album completion.
+The Album completions queue, at 1280 px in English and 390 px in Chinese, leads
+each card with Metadata lookup (running, 1 release the tracks may fit with Disc
+and Track Numbers needed, a release applied with 2 lookup answers needed), shows
+no Luna AI cell before Luna AI has run and dates in the interface language;
+Lookup needs you (2) narrows it to the two cards that ask for something, and the
+running card turns into No matching release found on a later read without any
+action, after which the queue stops reading (checked at 1280 px). The mobile
+workbench shows an import card's Last confirmed date as the page formats it in
+English. Each with an axe scan and no overflow.
 
 The historical 2026-08-19 MediaTrack amendment passed
 304/304 server tests, 214/214 Web unit/component tests, 148/148 integration
@@ -690,6 +716,25 @@ player control still works.
   before discarding this completion."; an applied completion offers no
   discard. Repeat from the workbench's Album completions queue, in Simplified
   Chinese (放弃补全), and with a screen reader at 320 CSS px.
+- As an administrator, with metadata lookup configured against MusicBrainz in a
+  development environment, open the Album completions queue while a completion's
+  lookup runs. Confirm its card leads with Metadata lookup and changes without a
+  reload once the run ends, that the queue then stops reading (no further list
+  requests in the network panel), that Lookup needs you counts and filters the
+  cards whose lookup asks for something, that Luna AI shows only on cards where
+  it ran, and that dates read in the interface language. Open a completion and
+  confirm the three steps, their links to the lookup summary, that Use Luna AI
+  (paid) still follows the lookup summary and is never primary, that Review
+  changes to apply and Update original Album show the same count, the ready line
+  once nothing is left to answer and Luna AI is not running (never while the
+  free retry is the next step), the lookup results folding once nothing is open
+  (never for an iTunes-only result or an artist mismatch), and, after applying,
+  What was updated with the time, the fields and the release used, and no Update
+  original Album. On the Album page, confirm the open-completion note says where
+  its lookup stands. Repeat in Simplified Chinese (元数据查找, 查找需处理,
+  ① 查找发行, 已更新的内容, 厂牌) and with a screen reader at 320 CSS px,
+  confirming the steps are announced as a group of three label and value pairs
+  and not on each refresh.
 - As an administrator, in English and then in Simplified Chinese, open an
   import's Draft section and Review and publish summary and an existing-Album
   review. Confirm every control that starts Luna reads "Use Luna AI (paid)" or

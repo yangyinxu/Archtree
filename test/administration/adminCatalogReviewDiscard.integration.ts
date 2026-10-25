@@ -322,7 +322,7 @@ test('after a discard the eligibility opens the other open completion or none, a
     assert.deepEqual([afterFirst.counts.all, afterFirst.items.map(item => item.id), (await eligibility()).openReviewId], [1, [a.item.id], a.item.id]);
     assert.equal((await discard(a.item.id, mutation(1))).status, 200);
     const afterBoth = await list();
-    assert.deepEqual([afterBoth.counts.all, afterBoth.items, await eligibility()], [0, [], { eligible: true, reason: null, openReviewId: null, lookupAvailable: false }]);
+    assert.deepEqual([afterBoth.counts.all, afterBoth.items, await eligibility()], [0, [], { eligible: true, reason: null, openReviewId: null, lookupAvailable: false, openLookup: null }]);
     // With none open, the Album page's action creates a new review without asking for another one.
     const fresh = await createRouted(null);
     assert.equal((await eligibility()).openReviewId, fresh.item.id);

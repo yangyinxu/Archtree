@@ -10,6 +10,9 @@
  *   - an Album revision change leaves its open creation approval disabled instead of silently rebasing
  *   - an unconfirmed review creation retries the original UUID and snapshot only when explicitly requested
  *   - without catalog editing the Album page action stays disabled and says new completions are off, while an open completion is still linked
+ *   - an open completion's note says what its lookup found, and the plain note stays when the server sends no brief
+ *   - an open completion's note follows its active lookup until the lookup ends
+ *   - the step bar replaces the scope paragraph and the Luna AI and Original Album status row
  *   - an open completion on an Album that cannot have another is linked, and Start another completion is disabled with the reason
  *   - the eligibility is read for the Album revision shown, and again for a newer revision
  *   - reopening and manual editing touch only the private review, preserving catalog projections and identity controls
@@ -70,6 +73,7 @@ import { CatalogReviewStart } from './CatalogReviewStart';
 import { AdminCatalogReviewPage } from './AdminCatalogReviewPage';
 import { AdminControls } from './AdminControls';
 import type { CatalogReview, ReviewDraftChange, ReviewField } from './catalogReviewApi';
+import type { LookupBrief } from './lookupBrief';
 import { artistEntryKey, capturedCatalogReview, catalogAlbum, catalogReview, legacyCatalogReview, otherReviewId, reviewEligibility, reviewId, reviewJson, session, slotId, slotTwo, titleSuggestionId, trackSuggestionId, viewer } from './catalogReviewFixtures.testSupport';
 import { guestHandle, leadHandle, leadMusicBrainzId, pairingLookupResponse, pairingReview, reviewAfterLookup, reviewIdentityResponse, reviewLookupResponse,
   reviewTieLookupResponse } from './catalogReviewLookupFixtures.testSupport';
@@ -229,6 +233,56 @@ test('without catalog editing the Album page action stays disabled and says new 
   expect(writesOf(fetch)).toEqual([]);
 });
 
+test('an open completion\'s note says what its lookup found, and the plain note stays when the server sends no brief', async () => {
+  routeStart(undefined, reviewEligibility({ openReviewId: otherReviewId, openLookup: { state: 'complete', outcome: 'possible', answers: 0, next: 'numbers', releases: 1 } }));
+  mountStart();
+  expect(await screen.findByText('This Album has an unfinished completion: found 1 release the tracks may fit; Disc and Track Numbers are needed.')).toBeVisible();
+  expect(screen.queryByText('This Album already has an unfinished completion. Open it, or start another one.')).not.toBeInTheDocument();
+  expect(screen.getByRole('link', { name: 'Open Album completion' })).toHaveAttribute('href', `/admin/catalog-reviews/${otherReviewId}`);
+  // The creation dialog keeps the plain note.
+  fireEvent.click(screen.getByRole('button', { name: 'Start another completion' }));
+  expect(within(screen.getByRole('dialog')).getByText(/This Album already has an unfinished completion/)).toBeVisible();
+  cleanup();
+  for (const openLookup of [undefined, null]) {
+    routeStart(undefined, reviewEligibility({ openReviewId: otherReviewId, ...(openLookup === undefined ? {} : { openLookup }) }));
+    mountStart();
+    expect(await screen.findByText('This Album already has an unfinished completion. Open it, or start another one.')).toBeVisible();
+    cleanup();
+  }
+});
+
+test('an open completion\'s note follows its active lookup until the lookup ends', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  try {
+    let openLookup: LookupBrief = { state: 'running', outcome: 'active', answers: 0, next: null, releases: 0 }, reads = 0;
+    vi.stubGlobal('fetch', vi.fn(async (path: string) => { if (path.includes('/catalog-reviews/eligibility')) reads++; return path.includes('/catalog-reviews/eligibility')
+      ? reviewJson(reviewEligibility({ openReviewId: otherReviewId, openLookup })) : reviewJson({ code: 'unexpected' }, 500); }));
+    mountStart();
+    expect(await screen.findByText('This Album has an unfinished completion; its metadata lookup is running.')).toBeVisible();
+    openLookup = { state: 'complete', outcome: 'none', answers: 0, next: null, releases: 0 };
+    await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+    expect(await screen.findByText('This Album has an unfinished completion; its metadata lookup found no matching release.')).toBeVisible();
+    const settled = reads;
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+    expect(reads).toBe(settled);
+  } finally { vi.useRealTimers(); }
+});
+
+test('the step bar replaces the scope paragraph and the Luna AI and Original Album status row', async () => {
+  const item = catalogReview();
+  vi.stubGlobal('fetch', vi.fn(async () => reviewJson({ item, receipt: null })));
+  mountPage();
+  const steps = within(await screen.findByRole('group', { name: 'Completion steps' }));
+  expect(steps.getByText('① Find release')).toBeVisible();
+  expect(steps.getByText('② Answer questions')).toBeVisible();
+  expect(steps.getByText('③ Update original Album')).toBeVisible();
+  expect(screen.queryByText(/You are editing a completion draft/)).not.toBeInTheDocument();
+  expect(screen.queryByText('Original Album')).not.toBeInTheDocument();
+  // Luna AI ran once here, so its line follows the steps, outside them.
+  expect(screen.getByText('Luna AI (paid, optional)').nextElementSibling).toHaveTextContent('Suggestions awaiting review · 2');
+  expect(steps.queryByText(/Luna AI/)).not.toBeInTheDocument();
+});
+
 test('an open completion on an Album that cannot have another is linked, and Start another completion is disabled with the reason', async () => {
   routeStart(undefined, reviewEligibility({ eligible: false, reason: 'tracksNotReady', openReviewId: reviewId }));
   mountStart();
@@ -284,7 +338,7 @@ test('reopening and manual editing touch only the private review, preserving cat
   expect(screen.getByText('Original filename not retained')).toBeVisible();
   fireEvent.change(title, { target: { value: 'Private human correction' } });
   fireEvent.change(screen.getByRole('spinbutton', { name: '2 · Disc number' }), { target: { value: '2' } });
-  expect(screen.getByRole('button', { name: 'Use Luna AI again (paid)' })).toBeDisabled();
+  expect(await screen.findByRole('button', { name: 'Use Luna AI again (paid)' })).toBeDisabled();
   fireEvent.click(screen.getByRole('button', { name: 'Save completion draft' }));
   await waitFor(() => expect(writes).toHaveLength(1));
   await waitFor(() => expect(screen.getByRole('button', { name: 'Save completion draft' })).toBeDisabled());
@@ -329,11 +383,18 @@ test.each([['without saved changes', false], ['with a saved change', true]] as c
   const luna = await screen.findByRole('button', { name: 'Use Luna AI (paid)' });
   expect(luna).not.toHaveClass(styles.primary);
   if (changed) {
-    const review = screen.getByRole('button', { name: 'Review changes to apply (1)' });
+    // A manual change is listed in Update original Album unselected: selecting it there is the next step, so the step to it is
+    // the primary button, without a count and without the ready line.
+    const review = await screen.findByRole('button', { name: 'Review changes to apply' });
     expect(review).toHaveClass(styles.primary);
-    // The action row keeps its order: Luna AI first, then the primary step to the saved changes.
-    expect(luna.compareDocumentPosition(review) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  } else expect(screen.queryByRole('button', { name: /^Review changes to apply/ })).not.toBeInTheDocument();
+    expect(screen.getByText('1 change to select')).toBeVisible();
+    expect(screen.queryByText('Everything is answered; you can update the original Album.')).not.toBeInTheDocument();
+    // The steps above the lookup summary lead to the saved changes; Luna AI follows the summary.
+    expect(review.compareDocumentPosition(luna) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  } else {
+    await screen.findByText('No changes yet');
+    expect(screen.queryByRole('button', { name: /^Review changes to apply/ })).not.toBeInTheDocument();
+  }
   fireEvent.click(luna);
   const dialog = within(await screen.findByRole('dialog', { name: 'Use Luna AI? This is a paid AI service' }));
   expect(dialog.getByRole('button', { name: 'Use Luna AI (paid)' })).toHaveClass(styles.primary);
@@ -463,7 +524,12 @@ test('an applied historical review remains read-only on every stage and never st
   fireEvent.click(screen.getByRole('tab', { name: 'Review Luna AI suggestions' }));
   expect(await screen.findByRole('checkbox', { name: 'Title' })).toBeDisabled();
   fireEvent.click(screen.getByRole('tab', { name: 'Update original Album' }));
-  expect(screen.getByRole('button', { name: /^Update original Album \(/ })).toBeDisabled();
+  // The step lists what was updated, read-only: nothing to select and no update.
+  const panel = within(screen.getByRole('tabpanel', { name: 'Update original Album' }));
+  expect(await panel.findByRole('heading', { name: 'What was updated' })).toBeVisible();
+  expect(panel.getByRole('listitem')).toHaveTextContent('Title');
+  expect(panel.queryByRole('checkbox')).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /^Update original Album \(/ })).not.toBeInTheDocument();
   expect(writes).toEqual([]);
 });
 
@@ -739,7 +805,7 @@ test.each(['idle', 'running', 'empty', 'handled', 'manual', 'cancelled'] as cons
   expect(panel.queryByText('There are no pending suggestions.')).not.toBeInTheDocument();
   if (state === 'running') expect(panel.queryByRole('button')).not.toBeInTheDocument();
   else {
-    fireEvent.click(panel.getByRole('button', { name: state === 'manual' ? 'Review changes to apply (1)' : 'Edit draft' }));
+    fireEvent.click(panel.getByRole('button', { name: state === 'manual' ? 'Review changes to apply' : 'Edit draft' }));
     expect(screen.getByRole('tab', { name: state === 'manual' ? 'Update original Album' : 'Edit draft' })).toHaveFocus();
     if (state === 'manual') expect(await screen.findByRole('checkbox', { name: 'Update Album · Synthetic catalog Album · Title' })).toBeVisible();
     else expect(screen.getByRole('textbox', { name: 'Title' })).toBeVisible();
@@ -805,13 +871,14 @@ test('a v1 review response the strict schema refuses asks for a reload instead o
 
 test('a captured review saves only changed editable values, never its expected tracklist or member Artist entries', async () => {
   let item = capturedCatalogReview(); const writes: Array<Record<string, unknown>> = [];
-  vi.stubGlobal('fetch', vi.fn(async (_path: string, init: RequestInit) => {
+  vi.stubGlobal('fetch', vi.fn(async (path: string, init: RequestInit) => {
     if (init.method === 'PATCH') {
       const body = JSON.parse(String(init.body)), receipt = { operationId: body.operationId, kind: 'edit' as const, revision: item.revision + 1 }; writes.push(body);
       item = { ...item, revision: receipt.revision, draft: withChanges(item.draft, body.changes), receipts: [receipt] };
       return reviewJson({ item, receipt });
     }
-    return reviewJson({ item, receipt: null });
+    // The step bar reads a captured review's lookup summary and identity rows.
+    return reviewJson(path.endsWith('/lookup') ? notStarted() : path.endsWith('/candidates') ? reviewIdentityResponse() : { item, receipt: null });
   }));
   mountPage();
   fireEvent.change(await screen.findByRole('spinbutton', { name: '1 · Track number' }), { target: { value: '3' } });

@@ -1306,7 +1306,19 @@ row. The completion block keeps the primary button's place while its chunk and
 the eligibility read load, so the row below does not move, and the Album's copy
 is top-aligned with its cover, so rows the read adds only grow the hero
 downward. The hero has no separate manual-editing entry: the details form
-directly below it is the manual editor.
+directly below it is the manual editor. An open review's note says, in one
+sentence from the eligibility read's `openLookup`, where its metadata lookup
+stands: queued, running or retrying; a release applied, with how many lookup
+answers are still needed; a release applied from iTunes that a free retry can
+check against MusicBrainz; a release whose Album values only were applied, to
+use again for its tracklist; matching releases to choose from; how many
+releases that may fit were found and whether Disc and Track Numbers are needed;
+no release used; no matching release; or a lookup that did not finish or is
+unavailable, with the free retry where it is offered. While that lookup is
+queued, running or retrying, the page reads the eligibility again every 5
+seconds, for at most 180 reads and never offline. Without a run, or without that
+key (a release before it), the note says only that the Album has an unfinished
+completion, as the dialog for starting another completion always does.
 The action's confirmation says lookup searches by the saved title and primary
 Artists and, when that does not settle the match, by up to two saved track
 titles; that it completes the title, release date, Artists, label, track
@@ -1316,21 +1328,89 @@ confirmed and that Luna AI (paid) never starts; where lookup is not
 configured the action reads **Create Album completion for manual editing**. The separate
 **Album completions** queue retains saved projects when the browser closes.
 **Unfinished** includes all unapplied reviews; **Album updated** confirms that
-this project's selected fields were applied. Luna progress, labelled **Luna AI
-(paid, optional)** on the review page and the workbench card, and the
-original-Album update status are shown separately. **Save completion draft**
+this project's selected fields were applied. An unfinished card's first cell,
+**Metadata lookup**, shows its item's lookup brief (see `GET /catalog-reviews`
+below) in plain words that never name AI or Luna: **Lookup has not run**,
+queued, running, will retry automatically, did not finish (with the free retry
+where lookup runs) or unavailable, **Release applied** with how many lookup
+answers are still needed, a release applied from iTunes that a free retry can
+check against MusicBrainz, a release whose Album values only were applied, a
+matching release to choose, how many releases that may fit were found and
+whether Disc and Track Numbers are needed, no release used, or
+**No matching release found**. **Original Album** follows, then
+**Luna AI (paid, optional)** only once Luna AI was used (queued, running or a
+generation above 0); an applied card shows no lookup cell, nor does a card from
+a release before lookup briefs. **Lookup needs you (N)**, after the filters,
+narrows the cards loaded so far to unfinished completions whose lookup asks for
+an answer, a choice, Disc and Track Numbers or the free retry; N counts them
+among those cards, **Load more** can add to both, the chip shows only while N
+is above 0 or it is on, and choosing another filter turns it off. On this queue
+the needs-attention filter reads **Luna AI needs attention**. The queue reads
+itself again every 5 seconds while a loaded card's Luna AI, or an unfinished
+card's metadata lookup, is queued or running, every 10 seconds while such a
+lookup only waits to retry, and stops when none is, while offline, and 15
+minutes after it first saw a lookup active (a run that never advances, such as
+one queued while imports are off); **Refresh status** and returning to the tab
+still read it. Card dates follow the interface language, as on the import page.
+**Save completion draft**
 changes only the private draft and sends only the values edited since the saved
 draft was loaded (an edit changed back is no change), so it never overwrites
 another value saved meanwhile; **Update original Album** lists every change the
 apply can write (see below), lookup-filled and lookup-answered values preselected
-and deselectable, and confirms their frozen old/new values. An unapplied review opens on its **Metadata lookup** summary,
+and deselectable, and confirms their frozen old/new values. A review page leads
+with its three steps in place of a status row: **① Find release**,
+**② Answer questions** and **③ Update original Album**, a group of label and
+value pairs that is no live region, so a poll announces nothing, one step per
+row at narrow widths. They load as one chunk with the Luna AI controls and the
+applied view; a chunk that cannot load leaves the steps out, while the Luna AI
+controls and the applied view ask for a reload in their place. A review
+captured for lookup shows a dash in each step until its lookup read lands, and
+while that read fails. On an unapplied review **Find release** links to the
+lookup summary; it reads the review's lookup view as the summary does, through
+the same brief as the list items (see `GET /catalog-reviews` below): not run,
+queued, running, retrying, the release applied by title (or, applied from
+iTunes, that a free retry can check it against MusicBrainz), a matching release
+found, how many releases that may fit were found (editions counted once), no
+release used, no matching release, or a lookup that did not finish or is
+unavailable. **Answer questions** says **Disc and Track Numbers needed** where
+the summary's cause is the members' positions or missing durations,
+**Choose a release** for a tie or an offered match, else how many lookup
+answers are still needed (as the summary, the workbench card and the Album page
+count them) with how many records the identity rows still need beside them, or
+those records alone, **Choose a release** for a possible release that can be
+chosen or a release to use again, or **Nothing left to answer**; it links to the
+first open answer, else the identity rows, else the lookup summary, and shows a
+dash while a run is active and once applied. **Update original Album** shows
+how many changes the Update step has selected as it stands (that step's own
+count), how many it lists to select (manual values are not selected by
+default), **No changes yet**, or, once applied, **Updated** with the date and
+time in the interface language. While that step lists changes,
+**Review changes to apply** opens it, with its count once something is
+selected. Once no lookup step is left (no active run, Disc and Track Numbers,
+choice or free retry), nothing is left to answer, Luna AI is not queued or
+running and the Update step's selection is ready to apply (the source current,
+a change selected, no identity row blocking it and its reads current), the
+steps add **Everything is answered; you can update the original Album.** as a
+polite status and that button becomes the primary one; with everything else
+clear but none of the listed changes selected yet, it is primary without a
+count or that line. When the last answer makes the changes ready and leaves the
+focus on the page or in a folded section, the focus moves to that button. Both
+show on the Edit draft tab only, and the button is disabled while the draft has
+unsaved edits. An applied review's steps offer **What was updated** instead,
+which opens the Update step. Once Luna AI was used (queued, running or a
+generation above 0), one muted line gives **Luna AI (paid, optional)** and its
+state: above the Luna AI controls on an unapplied review, under the steps on an
+applied one. Then an unapplied review shows its **Metadata lookup** summary,
 above its tabs and loaded as its own chunk (a chunk that cannot load, the
 summary's or one it loads, asks for a reload in its place, leaving manual
 editing usable): the lookup status, refined for a review (see the review's
 lookup summary below), with the free **Retry lookup** or, where entering the
 numbers is the next step, **Fill Disc and Track Numbers from titles** as its
-only primary button, or while a run is queued or running its progress line; the
-name box prefilled with the last submitted name and Artist name or else the
+only primary button, or while a run is queued or running its progress line;
+right after the status, whether applying waits for an active run, how many
+lookup answers are still needed and how many records the identity rows still
+need; the name box prefilled with the last submitted
+name and Artist name or else the
 saved Album title (its **Artist (optional)** hint says that an empty field uses
 the Album's primary Artists), which asks before it replaces a queued, running
 or retrying run, followed by the fill as a plain button where it is only
@@ -1358,7 +1438,14 @@ open conflict proposes, with each row's members, its rows without a file and the
 members outside it; the identity rows (one per artist shared by the Album and
 its tracks, naming every entry it covers, and the label) with **Save
 decisions**, which sends the whole decision set; and the values that need no
-answer, folded, each once. Lookup controls are disabled while a command runs,
+answer, folded, each once. Once the release applied to the draft leaves nothing
+open (no active run, free retry, refined status, lookup answer or identity row
+that needs a record) and is neither an iTunes-only result nor an artist
+mismatch, whose values to check are never collapsed (so an iTunes-only result
+never folds), everything after the name box folds under
+**Lookup results and applied values**, which opens again on request and by
+itself as soon as something opens; it stays mounted, so unsaved identity choices
+survive it. Lookup controls are disabled while a command runs,
 offline, while the draft has unsaved or conflicting edits and while the source
 is not current, and answers also while a run is active; the summary polls while
 a run is active and reads the review detail again when its read shows a newer
@@ -1371,7 +1458,15 @@ follows that summary, above the track editor, is never styled as the primary
 action and always has its own confirmation, titled "Use Luna AI? This is a paid
 AI service", whose confirm button keeps the primary style and repeats **Use Luna
 AI (paid)**; its suggestions arrive unticked in **Review Luna AI suggestions**
-and change the draft only when adopted.
+and change the draft only when adopted. An applied review is read-only: its
+Update step shows **What was updated** in place of the selection, with when the
+original Album was updated (in the interface language), each field the apply
+wrote (`applied.fields`, named as in the selection: the Album's title, date,
+Artists, label and expected tracklist, and each Track's title, Disc and Track
+Number), for a review captured for lookup a note that any track Artist changes
+are not listed, or that only track Artists were updated when the apply wrote no
+listed field, and the release its metadata lookup applied, if any, with its
+source. It offers no **Update original Album** and no count.
 **Discard completion** (never primary) follows the Luna AI controls on an
 unapplied review page, whatever its source status, and ends each unfinished card
 of the **Album completions** queue; an applied completion offers none. It is
@@ -1517,8 +1612,11 @@ preselections and ID writes of the identities a selected list or label owns. A
 `409` refusal (a new candidate or ID holder, a decided record or ID changed, a
 lookup application unseen) reads the review, its summary and its identity rows
 again, so a row that needs an answer is shown in the same review, and keeps
-nothing to retry. The page's **Review changes to apply** count and the Review
-step's empty state count title, date and number changes only. Luna's Artist and label suggestions appear only in a hint panel of the
+nothing to retry. The steps' **Review changes to apply** count and their third
+step's are this step's own count of selected changes, so they always equal its
+**Update original Album (N)**; the Review step's empty state offers this step
+without a count. Luna's Artist and label suggestions appear only in a hint panel
+of the
 Review step, which can keep the current values (rejecting a suggestion) but
 never adopts one or changes a Credit; acting on a hint is a separate catalog
 Credit edit.
@@ -1726,12 +1824,12 @@ Catalog review routes (relative to `/api/admin/v1`):
   stored; the read-only context is not counted, because it cannot be shortened
   from the review.
 - `GET /catalog-reviews/eligibility?albumId=` (registered before `/:id`):
-  `200 {eligible, reason, openReviewId, lookupAvailable}`, private no-store,
-  writing nothing. `reason` is null when a review can be created, else the
-  first refusal creation would give: `albumNotReady` (missing or not ready),
+  `200 {eligible, reason, openReviewId, lookupAvailable, openLookup}`, private
+  no-store, writing nothing. `reason` is null when a review can be created, else
+  the first refusal creation would give: `albumNotReady` (missing or not ready),
   `membershipInvalid` (not a list, a malformed or repeated member ID),
-  `tooManyTracks` (over 100 members), `videoTracks`, `membershipInconsistent`
-  (a member linked to another Album), `tracksNotReady` (a missing or unready
+  `tooManyTracks` (over 100 members), `videoTracks`, `membershipInconsistent` (a
+  member linked to another Album), `tracksNotReady` (a missing or unready
   member) or `valuesUnsupported` (values creation refuses as more than a review
   holds: the 48 KB draft cap, retained filenames over 24,000 bytes or a stored
   title, date, Disc or Track Number the review parsers refuse; creation and this
@@ -1739,9 +1837,16 @@ Catalog review routes (relative to `/api/admin/v1`):
   Album at its current revision whose source is current (of at most 25 matching
   reviews, newest first; changed, unavailable, applied and newer-format reviews
   are not open, and a discarded review is never found), whatever the reason.
-  `lookupAvailable` is whether metadata lookup runs on this server. A
-  missing, repeated, malformed or extra query key is `400
-  ADMIN_IMPORT_INVALID_INPUT`; the route has the guards of every review route.
+  `lookupAvailable` is whether metadata lookup runs on this server. `openLookup`
+  is the open review's lookup brief, as on the review list's items (below), or
+  null without an open review, without a readable run or for a lookup record it
+  cannot read (rather than failing the read); the read takes that
+  review and then its lookup record by `_id`, the record without its ranking
+  evidence and proposals. A missing, repeated, malformed or extra query key is
+  `400 ADMIN_IMPORT_INVALID_INPUT`; the route has the guards of every review
+  route. This Web reads a response without `openLookup` (a release before it) as
+  no lookup brief; a Web tab opened before it refuses the key and asks for a
+  reload, so reload admin Web tabs after deploying it.
 - `GET /catalog-reviews` and `GET /catalog-reviews/:id`: independent bounded
   workbench pagination and private readback. `sourceStatus` distinguishes current,
   changed and unavailable sources. For a review captured for metadata lookup
@@ -1771,6 +1876,32 @@ Catalog review routes (relative to `/api/admin/v1`):
   administrator may have changed); a discard confirmation names it. The Web's
   strict workbench schema requires it, so reload admin Web tabs across deploy or
   rollback.
+  Each list item also carries `lookup`, its review's lookup brief
+  `{state, outcome, answers, next, releases}` (`catalogReviewLookupBrief.ts`):
+  enumerations and two bounded counts, never a title, name or query, computed
+  from the review's lookup view as the review page reads it (its shared next
+  step, its possible matches, editions counted once, and its cause), from one
+  read of the page's lookup records by `_id` that leaves out ranking evidence
+  and proposals. `state` is the run's `queued`, `running`, `retrying` or
+  `complete`, or `failed` for one that ended unavailable, stopped or superseded.
+  `outcome` is `active` while the run is queued, running or retrying; `applied`
+  once a release of this run is in the draft, its Album values only included;
+  `matched` while matching releases wait for a choice (a tie or the offered
+  match of a partial comparison), or when none of the matching releases is in
+  use or **Use none of these** was chosen; `possible` when nothing matched but
+  the review page shows releases the tracks may fit (for an Album without
+  members, releases to choose from, when the run found any); `none` for no
+  match, no release or nothing
+  to search; and `unavailable` when MusicBrainz, its release details or the run
+  did not finish. `answers` is the open lookup answers (unanswered conflicts of
+  the applied release, a tie counting as one), at most 407; `next` is what the
+  review page asks for next (`retry`, `choose`, `numbers` or null); `releases`
+  (at most 25) counts the possible releases, 0 unless `possible`. `lookup` is
+  null without a readable run or for a lookup record it cannot read (rather
+  than failing the page); applied reviews keep theirs. This Web reads an
+  item without `lookup` (a release before it) as no lookup cell; a Web tab
+  opened before it refuses the key and asks for a reload, so reload admin Web
+  tabs after deploying it.
 - `PATCH /catalog-reviews/:id` and `POST` to `/analyze`, `/adopt` or
   `/cancel-analysis`: save/review privately with the original UUID and numeric
   revision. Analysis uses the existing import flag, provider and shared budgets;
@@ -2818,6 +2949,23 @@ roll back to:
   open workbench tabs after rolling back across them. After deploying them, a
   Web client's cached bundle from before them is refused once for lacking those
   keys, so it shows English until the new bundle loads.
+- Lookup briefs on Album completion cards and the Album page, the review page's
+  steps and its read-only applied view need no floor of their own; no collection
+  or index changes, and they store nothing. A release before them leaves
+  `lookup` out of list items and `openLookup` out of the eligibility read, which
+  this Web reads as no lookup status: a card then shows the Original Album and,
+  once used, Luna AI, **Lookup needs you** shows no chip, and the Album page
+  shows the plain open-completion note. A Web tab opened before them cannot
+  parse a list item or an eligibility read carrying them and asks for a reload,
+  so reload open admin Web tabs after deploying them; review pages keep working,
+  as their reads are unchanged. They change message values and add message keys;
+  every earlier key and its variables are kept, so Web, iOS and Android clients
+  accept this release's remote bundles. A Web tab opened after them keeps its
+  active bundle instead of accepting a remote bundle from a release before them,
+  which lacks the new keys, so reload open workbench tabs after rolling back
+  across them. After deploying them, a Web client's cached bundle from before
+  them is refused once for lacking those keys, so it shows English until the new
+  bundle loads.
 - Automatic covers need no floor of their own. A release before them shows and
   publishes only a stored, explicit `selectedCoverSlotId`, so an import whose
   choice is still automatic shows No cover there and publishes no cover unless

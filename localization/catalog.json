@@ -1305,6 +1305,46 @@
       ],
       "variables": {}
     },
+    "admin.catalog_review.applied_members_note": {
+      "description": "Administrator workbench: note under an applied Album completion's list: any track Artist changes are not listed.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.applied_members_only": {
+      "description": "Administrator workbench: an applied Album completion that updated only its tracks' Artists, which the list does not name.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.applied_release": {
+      "description": "Administrator workbench: the release an applied Album completion's metadata lookup applied, by title, and its source (MusicBrainz or iTunes).",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "source": "string",
+        "title": "string"
+      }
+    },
+    "admin.catalog_review.applied_title": {
+      "description": "Administrator workbench: heading of an applied Album completion's read-only list of what was updated, and the button that opens it.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.applied_when": {
+      "description": "Administrator workbench: when an applied Album completion updated the original Album, a date and time in the interface language.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "date": "string"
+      }
+    },
     "admin.catalog_review.apply_action": {
       "description": "Update original Album ({count})",
       "delivery": [
@@ -1886,6 +1926,117 @@
       ],
       "variables": {}
     },
+    "admin.catalog_review.lookup_brief_applied": {
+      "description": "Administrator workbench: an Album completion's metadata lookup state when a release found is applied to the completion draft and nothing is left to answer, as a workbench card's Metadata lookup cell or the first completion step shows it; names no AI.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_brief_applied_again": {
+      "description": "Administrator workbench: an Album completion's metadata lookup state when a release was applied for its Album values only and using it again would bring in its tracklist, as a workbench card's Metadata lookup cell or the first completion step shows it; names no AI.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_brief_applied_answers": {
+      "description": "Administrator workbench: an Album completion's metadata lookup state when a release found is applied and lookup answers (differing values, a tie) are still needed, as a workbench card's Metadata lookup cell or the first completion step shows it; names no AI.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.catalog_review.lookup_brief_applied_retry": {
+      "description": "Administrator workbench: an Album completion's metadata lookup state when a release found on iTunes only is applied to the completion draft but was not checked against MusicBrainz, and retrying the lookup for free can check it, as a workbench card's Metadata lookup cell or the first completion step shows it; names no AI.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_brief_choose": {
+      "description": "Administrator workbench: an Album completion's metadata lookup state when matching releases wait for the administrator to choose one, as a workbench card's Metadata lookup cell or the first completion step shows it; names no AI.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_brief_no_match": {
+      "description": "Administrator workbench: an Album completion's metadata lookup state when no release fits, none was found or there was nothing to search, as a workbench card's Metadata lookup cell or the first completion step shows it; names no AI.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_brief_not_run": {
+      "description": "Administrator workbench: an Album completion's metadata lookup state when no lookup has run, as a workbench card's Metadata lookup cell or the first completion step shows it; names no AI.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_brief_not_used": {
+      "description": "Administrator workbench: an Album completion's metadata lookup state when matching releases were found but none was used, as a workbench card's Metadata lookup cell or the first completion step shows it; names no AI.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_brief_possible_choose": {
+      "description": "Administrator workbench: an Album completion's metadata lookup state when releases the tracks may fit (or, for an Album without tracks, releases) were found and one can be chosen, as a workbench card's Metadata lookup cell or the first completion step shows it; names no AI.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.catalog_review.lookup_brief_possible_numbers": {
+      "description": "Administrator workbench: an Album completion's metadata lookup state when releases the tracks may fit were found but Disc and Track Numbers are needed to pair them, as a workbench card's Metadata lookup cell or the first completion step shows it; names no AI.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.catalog_review.lookup_brief_queued": {
+      "description": "Administrator workbench: an Album completion's metadata lookup state while the run waits to start, as a workbench card's Metadata lookup cell or the first completion step shows it; names no AI.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_brief_retry": {
+      "description": "Administrator workbench: an Album completion's metadata lookup state when the run did not finish and the free retry is offered, as a workbench card's Metadata lookup cell or the first completion step shows it; names no AI.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_brief_retrying": {
+      "description": "Administrator workbench: an Album completion's metadata lookup state while the run waits for an automatic retry, as a workbench card's Metadata lookup cell or the first completion step shows it; names no AI.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_brief_running": {
+      "description": "Administrator workbench: an Album completion's metadata lookup state while the run searches, as a workbench card's Metadata lookup cell or the first completion step shows it; names no AI.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_brief_unavailable": {
+      "description": "Administrator workbench: an Album completion's metadata lookup state when the run did not finish and no retry is offered here, as a workbench card's Metadata lookup cell or the first completion step shows it; names no AI.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.catalog_review.lookup_cause_durations": {
       "description": "Administrator workbench: existing-Album review summary, status cause after the found sentence: members have no duration; the next step is filling the Disc and Track Numbers from the titles, saving, then choosing the release.",
       "delivery": [
@@ -1972,6 +2123,13 @@
       "variables": {
         "edition": "string"
       }
+    },
+    "admin.catalog_review.lookup_details": {
+      "description": "Administrator workbench: disclosure that folds an Album completion's lookup results and applied values once nothing is left open.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
     },
     "admin.catalog_review.lookup_difference_pairing": {
       "description": "Administrator workbench: existing-Album review summary, candidate chooser difference, the Album's tracks cannot each pair with a different track of the release.",
@@ -2552,6 +2710,110 @@
       ],
       "variables": {}
     },
+    "admin.catalog_review.open_lookup_applied": {
+      "description": "Administrator Album page: the note about the Album's unfinished completion when its metadata lookup applied a release found and nothing is left to answer; one complete sentence; names no AI.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.open_lookup_applied_again": {
+      "description": "Administrator Album page: the note about the Album's unfinished completion when its metadata lookup applied a release for its Album values only, which can be used again to bring in its tracklist; one complete sentence; names no AI.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.open_lookup_applied_answers": {
+      "description": "Administrator Album page: the note about the Album's unfinished completion when its metadata lookup applied a release found and lookup answers are still needed; one complete sentence; names no AI.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.catalog_review.open_lookup_applied_retry": {
+      "description": "Administrator Album page: the note about the Album's unfinished completion when its metadata lookup applied a release found on iTunes only that was not checked against MusicBrainz, and retrying the lookup for free can check it; one complete sentence; names no AI.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.open_lookup_choose": {
+      "description": "Administrator Album page: the note about the Album's unfinished completion when its metadata lookup found matching releases that wait for a choice; one complete sentence; names no AI.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.open_lookup_no_match": {
+      "description": "Administrator Album page: the note about the Album's unfinished completion when its metadata lookup found no matching release; one complete sentence; names no AI.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.open_lookup_not_used": {
+      "description": "Administrator Album page: the note about the Album's unfinished completion when its metadata lookup found matching releases but none was used; one complete sentence; names no AI.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.open_lookup_possible_choose": {
+      "description": "Administrator Album page: the note about the Album's unfinished completion when its metadata lookup found releases the tracks may fit (or releases for an Album without tracks) that can be chosen; one complete sentence; names no AI.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.catalog_review.open_lookup_possible_numbers": {
+      "description": "Administrator Album page: the note about the Album's unfinished completion when its metadata lookup found releases the tracks may fit that need Disc and Track Numbers; one complete sentence; names no AI.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.catalog_review.open_lookup_queued": {
+      "description": "Administrator Album page: the note about the Album's unfinished completion when its metadata lookup waits to start; one complete sentence; names no AI.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.open_lookup_retry": {
+      "description": "Administrator Album page: the note about the Album's unfinished completion when its metadata lookup did not finish and can be retried for free; one complete sentence; names no AI.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.open_lookup_retrying": {
+      "description": "Administrator Album page: the note about the Album's unfinished completion when its metadata lookup waits for an automatic retry; one complete sentence; names no AI.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.open_lookup_running": {
+      "description": "Administrator Album page: the note about the Album's unfinished completion when its metadata lookup is searching; one complete sentence; names no AI.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.open_lookup_unavailable": {
+      "description": "Administrator Album page: the note about the Album's unfinished completion when its metadata lookup did not finish and cannot be retried here; one complete sentence; names no AI.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.catalog_review.original_value": {
       "description": "Original Album information",
       "delivery": [
@@ -2642,6 +2904,139 @@
       ],
       "variables": {}
     },
+    "admin.catalog_review.step_answer": {
+      "description": "Administrator workbench: label of an Album completion's second step, answering what lookup and the identity rows ask.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.step_answers_choose": {
+      "description": "Administrator workbench: second completion step's state: a release must be chosen in the lookup summary.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.step_answers_count": {
+      "description": "Administrator workbench: second completion step's state: how many lookup answers are still needed, as the lookup summary, the workbench card and the Album page count them.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.catalog_review.step_answers_identity": {
+      "description": "Administrator workbench: second completion step's state: how many Artist or label records (existing or new) still need to be chosen in the identity rows; shown beside the lookup answers count, or alone.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.catalog_review.step_answers_none": {
+      "description": "Administrator workbench: second completion step's state: nothing is left waiting for an answer.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.step_answers_numbers": {
+      "description": "Administrator workbench: second completion step's state: Disc and Track Numbers must be entered before a release can be used.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.step_find": {
+      "description": "Administrator workbench: label of an Album completion's first step, finding a release with metadata lookup.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.step_find_applied": {
+      "description": "Administrator workbench: first completion step's state: the release metadata lookup applied, by title.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "title": "string"
+      }
+    },
+    "admin.catalog_review.step_find_matching": {
+      "description": "Administrator workbench: first completion step's state: matching releases were found and wait for a choice.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.step_find_possible": {
+      "description": "Administrator workbench: first completion step's state: how many releases the tracks may fit (for an Album without tracks, releases with its name) were found.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.catalog_review.step_update": {
+      "description": "Administrator workbench: label of an Album completion's third step, updating the original Album.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.step_update_count": {
+      "description": "Administrator workbench: third completion step's state: how many changes are selected in Update original Album.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.catalog_review.step_update_done": {
+      "description": "Administrator workbench: third completion step's state once applied: when the original Album was updated, a date and time in the interface language.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "date": "string"
+      }
+    },
+    "admin.catalog_review.step_update_none": {
+      "description": "Administrator workbench: third completion step's state: the completion draft has no change to apply yet.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.step_update_unselected": {
+      "description": "Administrator workbench: third completion step's state: changes are listed in Update original Album but none is selected yet (manual values are not selected by default), so they are to be selected there.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.catalog_review.steps_label": {
+      "description": "Administrator workbench: accessible name of an Album completion's three steps above its metadata lookup summary.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.steps_ready": {
+      "description": "Administrator workbench: line under the completion steps once nothing is left to answer and changes are ready to apply.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.catalog_review.target_album": {
       "description": "Album",
       "delivery": [
@@ -2715,6 +3110,13 @@
       "variables": {
         "count": "number"
       }
+    },
+    "admin.catalog_review.view_changes_plain": {
+      "description": "Administrator workbench: button from the Review step's empty state to the Update original Album step, without a count.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
     },
     "admin.catalog_review.waiting_lookup": {
       "description": "Administrator workbench: existing-Album review summary, applying waits while metadata lookup runs or retries automatically.",
@@ -6715,6 +7117,20 @@
     },
     "admin.workbench.review_handled": {
       "description": "No pending suggestions",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.workbench.review_lookup": {
+      "description": "Administrator workbench: filter of the Album completions queue that narrows the loaded cards to those whose metadata lookup asks for an answer, a choice, numbers or a retry; the code appends the count.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.workbench.review_luna_attention": {
+      "description": "Administrator workbench: filter of the Album completions queue for completions whose Luna AI run needs attention; the code appends the count.",
       "delivery": [
         "runtime"
       ],

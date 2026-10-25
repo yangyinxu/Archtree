@@ -14,13 +14,15 @@
  *   - a malformed expected tracklist or member entry list fails the strict review parse
  *   - a review save lists only the changed editable values with their bases, in a fixed order, never Credits, label, visibility or review-only values
  *   - a workbench item requires the catalog Album title beside the draft title
+ *   - a workbench item accepts a lookup brief, none from an older server, or null, and refuses a malformed one
  * @end-catalog */
 
 import { advanceAccountEpoch, captureAccountOperation } from '../../api/accountEpoch';
 import { adminEndpointRequest } from './adminApi';
 import { adminWorkspace } from './adminWorkspace';
 import { expectedTracklistRowSchema, importDraftV2Schema } from './adminNamingSchema';
-import { reviewChanges, reviewDetailSchema, reviewDraftChanges, reviewMutationSchema, reviewResponseSchema, reviewWorkbenchSchema } from './catalogReviewApi';
+import { reviewChanges, reviewDetailSchema, reviewDraftChanges, reviewMutationSchema, reviewResponseSchema } from './catalogReviewApi';
+import { reviewWorkbenchSchema } from './catalogReviewWorkbenchApi';
 import { artistEntryKey, capturedCatalogReview, catalogReview, deferred, legacyCatalogReview, reviewJson, slotId, slotTwo, viewer } from './catalogReviewFixtures.testSupport';
 import { reviewValueText } from './ImportReview';
 
@@ -240,4 +242,16 @@ test('a workbench item requires the catalog Album title beside the draft title',
   const { albumTitle: _missing, ...withoutAlbumTitle } = item;
   for (const value of [withoutAlbumTitle, { ...item, albumTitle: 'x'.repeat(301) }, { ...item, albumTitle: null }, { ...item, albumName: 'Synthetic catalog Album' }])
     expect(reviewWorkbenchSchema.safeParse(page(value)).success).toBe(false);
+});
+
+test('a workbench item accepts a lookup brief, none from an older server, or null, and refuses a malformed one', () => {
+  const item = { id: 'e'.repeat(24), revision: 2, createdAt: '2026-10-01T00:00:00.000Z', updatedAt: '2026-10-01T00:00:00.000Z', startedByMe: true, state: 'reviewing',
+    analysis: catalogReview().analysis, albumId: '1'.repeat(24), title: 'Draft Album title', albumTitle: 'Synthetic catalog Album', pendingSuggestions: 0 };
+  const page = (value: Record<string, unknown>) => ({ items: [value], counts: { all: 1, analyzing: 0, awaitingReview: 1, needsAttention: 0, completed: 0 }, nextCursor: null });
+  const lookup = { state: 'complete', outcome: 'possible', answers: 0, next: 'numbers', releases: 1 };
+  expect(reviewWorkbenchSchema.parse(page({ ...item, lookup })).items[0].lookup).toEqual(lookup);
+  expect(reviewWorkbenchSchema.parse(page(item)).items[0].lookup).toBeUndefined();
+  expect(reviewWorkbenchSchema.parse(page({ ...item, lookup: null })).items[0].lookup).toBeNull();
+  for (const value of [{ ...lookup, outcome: 'found' }, { ...lookup, title: 'Synthetic' }, { ...lookup, answers: 408 }, { ...lookup, releases: 26 }, { ...lookup, next: 'luna' }])
+    expect(reviewWorkbenchSchema.safeParse(page({ ...item, lookup: value })).success).toBe(false);
 });

@@ -10,6 +10,7 @@
 import type { CatalogItem } from './catalogApi';
 import type { CatalogAlbumTracks } from './catalogAlbumTracksApi';
 import type { CatalogReview } from './catalogReviewApi';
+import type { LookupBrief } from './lookupBrief';
 import { slotId, slotTwo, viewer } from './adminFixtures.testSupport';
 
 export { deferred, session, slotId, slotTwo, viewer } from './adminFixtures.testSupport';
@@ -100,8 +101,11 @@ export const catalogAlbumTracksWithExpected = (): CatalogAlbumTracks => ({
   }
 });
 
-/** The Album page's eligibility read (GET /catalog-reviews/eligibility): a review can be created and lookup runs, unless overridden. */
-export const reviewEligibility = (overrides: Partial<{ eligible: boolean; reason: string | null; openReviewId: string | null; lookupAvailable: boolean }> = {}) =>
+/**
+ * The Album page's eligibility read (GET /catalog-reviews/eligibility): a review can be created and lookup runs, unless overridden;
+ * `openLookup` (the open completion's lookup brief) is absent, as from a server before it, unless given.
+ */
+export const reviewEligibility = (overrides: Partial<{ eligible: boolean; reason: string | null; openReviewId: string | null; lookupAvailable: boolean; openLookup: LookupBrief | null }> = {}) =>
   ({ eligible: true, reason: null, openReviewId: null, lookupAvailable: true, ...overrides });
 
 export const reviewJson = (value: unknown, status = 200, account = viewer) => new Response(JSON.stringify(value), {

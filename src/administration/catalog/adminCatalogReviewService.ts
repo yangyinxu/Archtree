@@ -28,11 +28,12 @@ import { adminCatalogEditableFields, adminCatalogItemRevision, readAdminCatalogR
 import { ADMIN_IMPORT_LIMITS as LIMITS, AdminImportError, cleanText, exact, invalidImport, objectId, parseImportDate, record, uuid, type ImportDate, type ImportManifest, type ImportWorkbenchFilter } from '../import/adminImportContract';
 import { CATALOG_REVIEW_DRAFT_V3, DRAFT_V2, DRAFT_V2_LIMITS, derivedEntryKey, draftBytes, foldImportName, hasOwn, parseDiscNumber, parseDraftTitle, parseTrackNumber, sameDraftValue, type ImportArtistEntry, type ImportDraftV2, type ImportLabelEntry } from '../import/adminImportDraft';
 import { applyAdministratorChanges, boundDraftChanges, boundedJson, draftWithinSizeLimit, parseDraftChanges, storedDraftV2, type ImportDraftChange, type ImportDraftPath } from '../import/adminImportValueState';
-import { adminImportDetail, adoptAdminProjectSuggestions, analyzeAdminProject, CATALOG_REVIEW_CREATION_FENCE_ID, idleAnalysis, importCollection, importDigest, mutateAdminProject, parseAdminProjectMutation, withImportAdmin, type AdminImportDocument, type AdminProjectPolicy, type ProjectReceipt } from '../import/adminImportService';
+import { adminImportDetail, adoptAdminProjectSuggestions, analyzeAdminProject, CATALOG_REVIEW_CREATION_FENCE_ID, idleAnalysis, importCollection, importDigest, importLookupRecords, mutateAdminProject, parseAdminProjectMutation, withImportAdmin, type AdminImportDocument, type AdminProjectPolicy, type ProjectReceipt } from '../import/adminImportService';
 import { importCandidateProjection, importCandidateRevision, readyImportCandidate } from '../import/adminImportIdentity';
 import { OpenAiImportAnalysisProvider, type ImportAnalysisProvider } from '../import/adminImportProvider';
 import { catalogReviewAppliedView, catalogReviewCappedDraft, catalogReviewDraftView, catalogReviewSourceView, importDraftV2View, importDraftVersion, importDraftWritable, importProjectV2View, LEGACY_REVIEW_RECEIPT_KINDS, legacyManifestView, legacyReceiptsView } from '../import/adminImportDraftCompat';
 import { readCatalogReviewTombstone } from './adminCatalogReviewDiscard';
+import { CATALOG_REVIEW_LOOKUP_BRIEF_PROJECTION, catalogReviewLookupBriefOrNone, type CatalogReviewLookupBrief } from '../lookup/catalogReviewLookupBrief';
 import {
     CATALOG_REVIEW_MAX_FIELDS, type CatalogReviewCapturedSubject, type CatalogReviewDetail, type CatalogReviewEligibility, type CatalogReviewField, type CatalogReviewIneligibility,
     type CatalogReviewReceipt, type CatalogReviewResponse, type CatalogReviewSource, type CatalogReviewWorkbench
@@ -341,8 +342,9 @@ export async function createCatalogReview(actor: string, raw: unknown,
  * Catalog Visibility and Administration): whether a review can be created, else the first reason as creation would refuse it
  * (a missing or unready Album, a membership that is not a list, over 100 members, a malformed or repeated member ID, a Video
  * member, a member linked to another Album, a missing or unready member, values a review cannot hold), the open review
- * (openCatalogReviewId) whatever the reason, and whether metadata lookup runs. Exactly `albumId`, an ObjectId string, else
- * invalid input. Writes nothing.
+ * (openCatalogReviewId) whatever the reason with its lookup brief (read with that review and its lookup record, ranking evidence
+ * and proposals left out; null for a record it cannot read), and whether metadata lookup runs. Exactly `albumId`, an ObjectId string, else invalid input. Writes
+ * nothing.
  */
 export async function getCatalogReviewEligibility(actor: string, query: Record<string, unknown>,
     configuration: () => MetadataLookupConfiguration = metadataLookupConfiguration): Promise<CatalogReviewEligibility> {
@@ -351,9 +353,15 @@ export async function getCatalogReviewEligibility(actor: string, query: Record<s
     const lookupAvailable = configuration().available;
     return withImportAdmin(actor, async session => {
         const album = await readAdminCatalogRecord('album', albumId, session);
-        if (!album) return { eligible: false, reason: 'albumNotReady', openReviewId: null, lookupAvailable };
+        if (!album) return { eligible: false, reason: 'albumNotReady', openReviewId: null, lookupAvailable, openLookup: null };
         const reason = await catalogReviewIneligibility(album, session);
-        return { eligible: reason === null, reason, openReviewId: await openCatalogReviewId(albumId, album, session), lookupAvailable };
+        const openReviewId = await openCatalogReviewId(albumId, album, session);
+        let openLookup: CatalogReviewLookupBrief | null = null;
+        if (openReviewId) {
+            const _id = new ObjectId(openReviewId), doc = await importCollection().findOne({ _id, ...reviewFilter }, { session, projection: { catalogCapture: 0 } });
+            if (doc) openLookup = catalogReviewLookupBriefOrNone((await importLookupRecords([_id], session, CATALOG_REVIEW_LOOKUP_BRIEF_PROJECTION)).get(openReviewId) ?? null, doc, lookupAvailable);
+        }
+        return { eligible: reason === null, reason, openReviewId, lookupAvailable, openLookup };
     });
 }
 /**
@@ -455,7 +463,13 @@ const filters: Record<ImportWorkbenchFilter, Record<string, unknown>> = {
     all: {}, analyzing: { 'analysis.state': { $in: ['queued', 'running'] }, catalogApplied: { $exists: false } },
     awaitingReview: { catalogApplied: { $exists: false } }, needsAttention: { 'analysis.state': 'needsAttention', catalogApplied: { $exists: false } }, completed: { catalogApplied: { $exists: true } }
 };
-export async function listCatalogReviews(actor: string, query: Record<string, unknown>): Promise<CatalogReviewWorkbench> {
+/**
+ * GET /catalog-reviews: a page of reviews (at most 25) with the counts of every filter. Each card's lookup brief comes from one
+ * read of the page's lookup records, ranking evidence and proposals left out, and is null for a record it cannot read;
+ * `configuration` says whether lookup runs here.
+ */
+export async function listCatalogReviews(actor: string, query: Record<string, unknown>,
+    configuration: () => MetadataLookupConfiguration = metadataLookupConfiguration): Promise<CatalogReviewWorkbench> {
     exact(query, ['filter', 'startedByMe', 'q', 'limit', 'cursor']);
     const filter = query.filter ?? 'all'; if (typeof filter !== 'string' || !Object.hasOwnProperty.call(filters, filter)) return invalidImport();
     if (query.startedByMe !== undefined && !['true', 'false'].includes(query.startedByMe as string)) return invalidImport();
@@ -476,8 +490,9 @@ export async function listCatalogReviews(actor: string, query: Record<string, un
         for (const [name, selector] of Object.entries(filters)) counts[name as ImportWorkbenchFilter] = await importCollection().countDocuments({ $and: [base, selector] }, { session, maxTimeMS: 3_000 });
         const docs = await importCollection().find({ $and: [base, filters[filter as ImportWorkbenchFilter], page] }, { session, projection: { catalogCapture: 0 } }).sort({ createdAt: -1, _id: -1 }).limit(limit + 1).maxTimeMS(3_000).toArray();
         const more = docs.length > limit; docs.splice(limit); const last = docs[docs.length - 1];
+        const records = await importLookupRecords(docs.map(doc => doc._id), session, CATALOG_REVIEW_LOOKUP_BRIEF_PROJECTION), available = configuration().available;
         // Rows read the same Draft v2 allowlist as the detail, so a pending Artist suggestion counts too.
         // `albumTitle` is the catalog Album's title as the review captured it, which the discard confirmation names; `title` is the draft's.
-        return { counts, items: docs.map(doc => { const item = adminImportDetail(doc, actor), source = catalogReviewSourceView(doc.catalogSource); return { id: item.id, revision: item.revision, createdAt: item.createdAt, updatedAt: item.updatedAt, startedByMe: item.startedByMe, state: doc.catalogApplied ? 'applied' as const : 'reviewing' as const, analysis: item.analysis, albumId: source.album.id, albumTitle: source.album.title, title: item.draft.album.title, pendingSuggestions: item.suggestions.filter(value => value.decision === 'pending').length }; }), nextCursor: more && last ? Buffer.from(JSON.stringify({ id: String(last._id), at: last.createdAt.toISOString(), scope })).toString('base64url') : null };
+        return { counts, items: docs.map(doc => { const item = adminImportDetail(doc, actor), source = catalogReviewSourceView(doc.catalogSource); return { id: item.id, revision: item.revision, createdAt: item.createdAt, updatedAt: item.updatedAt, startedByMe: item.startedByMe, state: doc.catalogApplied ? 'applied' as const : 'reviewing' as const, analysis: item.analysis, albumId: source.album.id, albumTitle: source.album.title, title: item.draft.album.title, pendingSuggestions: item.suggestions.filter(value => value.decision === 'pending').length, lookup: catalogReviewLookupBriefOrNone(records.get(String(doc._id)) ?? null, doc, available) }; }), nextCursor: more && last ? Buffer.from(JSON.stringify({ id: String(last._id), at: last.createdAt.toISOString(), scope })).toString('base64url') : null };
     });
 }

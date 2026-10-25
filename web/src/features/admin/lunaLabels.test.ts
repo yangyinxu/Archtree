@@ -39,7 +39,7 @@ const status = [...family('admin.analysis.'),
   ...['provider_unavailable', 'provider_rejected', 'provider_invalid_response', 'provider_outcome_unknown', 'grant_expired', 'permission_lost', 'budget_exhausted'].map(issue => `admin.issue.${issue}`),
   'admin.review.baseline', 'admin.review.changed', 'admin.review.conflict', 'admin.review.suggested',
   ...family('admin.summary.luna', suggestionControls), 'admin.summary.waiting_analysis', 'admin.stage.analysis',
-  ...family('admin.workbench.').filter(key => key.includes('analyzing')), 'admin.workbench.review_stage',
+  ...family('admin.workbench.').filter(key => key.includes('analyzing')), 'admin.workbench.review_stage', 'admin.workbench.review_luna_attention',
   ...['analysis_limit', 'analysis_running', 'empty_attention', 'empty_cancelled', 'empty_no_suggestions'].map(copy => `admin.catalog_review.${copy}`)];
 const lookupProse = [...['incomplete', 'itunes_unavailable', 'no_match', 'no_query', 'no_release', 'not_configured', 'not_started', 'stopped', 'unavailable'].map(state => `admin.lookup.${state}`),
   'admin.common.lookup_unavailable', ...['not_started', 'no_query'].map(state => `admin.catalog_review.lookup_${state}`)];
@@ -49,12 +49,14 @@ const reviewLookupProse = [...['no_match', 'empty_album', 'add_artist', 'possibl
   'running_count_status', 'elapsed', 'waited', 'keeps_running', 'fill_hint', 'fill_hint_durations', 'fill_unavailable', 'fill_unavailable_durations', 'no_tracklist', 'album_only_copy',
   'choose_again_copy', 'replace_copy', 'replace_ended'].map(copy => `admin.catalog_review.lookup_${copy}`), ...family('admin.catalog_review.lookup_reason_'),
   ...family('admin.catalog_review.lookup_cause_'), ...family('admin.catalog_review.lookup_phase_'), ...family('admin.catalog_review.lookup_section_'),
-  'admin.catalog_review.member_paired_since', 'admin.catalog_review.fill_numbers_done'];
+  'admin.catalog_review.member_paired_since', 'admin.catalog_review.fill_numbers_done',
+  // The lookup status on workbench cards, the Album page's note, the completion steps and the applied view.
+  ...family('admin.catalog_review.lookup_brief_'), ...family('admin.catalog_review.open_lookup_'), ...family('admin.catalog_review.step'), ...family('admin.catalog_review.applied_')];
 const lookupControls = [...['retry', 'submit', 'box', 'name', 'kind_album', 'kind_song', 'choose', 'choose_none'].map(control => `admin.lookup.${control}`),
   'admin.summary.keep_mine', 'admin.summary.use_lookup',
   ...['keep_current', 'use_musicbrainz', 'use_itunes', 'keep_all_current', 'use_all_musicbrainz', 'use_all_itunes', 'create', 'fill_numbers', 'lookup_choose_album_only',
     'lookup_choose_again', 'lookup_replace_confirm', 'lookup_replace_now', 'lookup_other_options', 'lookup_editions_choose', 'lookup_choose_edition', 'lookup_choose_edition_album_only']
-    .map(control => `admin.catalog_review.${control}`)];
+    .map(control => `admin.catalog_review.${control}`), 'admin.workbench.review_lookup', 'admin.catalog_review.view_changes_plain', 'admin.catalog_review.lookup_details'];
 const generic = ['Analyze', 'Analyze again', 'Review', 'Proofread', 'Complete', '分析', '校对', '重新校对', '补全'];
 /** Every [locale, key, message] for the keys, in both shipped locales. */
 const each = (keys: string[]) => Object.entries(locales).flatMap(([locale, messages]) => keys.map(key => [locale, key, messages[key]] as const));
@@ -67,6 +69,8 @@ test('every listed key exists in both shipped locales, and each family read by p
     'admin.analysis.stop', 'admin.analysis.unavailable', 'admin.analysis.budget_project', 'admin.analysis.budget_daily', 'admin.analysis.confirm']));
   expect(family('admin.summary.luna', suggestionControls)).toEqual(expect.arrayContaining(['admin.summary.luna', 'admin.summary.luna_mark']));
   expect(status).toEqual(expect.arrayContaining(['admin.workbench.analyzing', 'admin.workbench.review_analyzing']));
+  expect(reviewLookupProse).toEqual(expect.arrayContaining(['admin.catalog_review.lookup_brief_possible_numbers', 'admin.catalog_review.open_lookup_applied_answers',
+    'admin.catalog_review.step_answers_count', 'admin.catalog_review.steps_ready', 'admin.catalog_review.applied_release']));
 });
 
 test('every control that starts or confirms Luna names Luna AI and says it is paid in every shipped locale, never with a generic label alone', () => {

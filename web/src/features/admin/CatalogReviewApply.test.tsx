@@ -16,13 +16,14 @@
  *   - a failed identity read keeps the update disabled and offers a retry, after which the review-only items appear
  *   - while the identity read is pending a captured review says it is loading and cannot update, and lists its review-only items once it answers
  *   - the confirmation repeats the frozen selection: each selected change, the Album note after the Artist entries, the identity lines and the count it sends
+ *   - the headless count reports the step's count, the changes it lists, the identity rows needing an answer and whether it is ready, and follows a deselection
  * @end-catalog */
 
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { captureAccountOperation } from '../../api/accountEpoch';
 import { adminWorkspace } from './adminWorkspace';
-import { CatalogReviewApply } from './CatalogReviewApply';
+import { CatalogReviewApply, CatalogReviewApplyCount } from './CatalogReviewApply';
 import { ApplyItemSummary } from './CatalogReviewApplyItems';
 import { CatalogReviewConfirmation } from './CatalogReviewConfirmation';
 import { memberKey, reviewApplyModel, type ReviewApplySelection } from './catalogReviewApplyModel';
@@ -299,4 +300,23 @@ test('the confirmation repeats the frozen selection: each selected change, the A
   expect(within(screen.getByRole('dialog')).getByRole('button', { name: 'Update original Album (4)' })).toBeDisabled();
   fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }));
   expect(onClose).toHaveBeenCalledTimes(1);
+});
+
+test('the headless count reports the step\'s count, the changes it lists, the identity rows needing an answer and whether it is ready, and follows a deselection', async () => {
+  const { item, lookup } = lookedUp(), identity = reviewIdentityResponse(), client = new QueryClient({ defaultOptions: { queries: { retry: false } } }), onCount = vi.fn();
+  client.setQueryData(['browser-session'], session);
+  vi.stubGlobal('fetch', vi.fn(async (path: string) => reviewJson(path.endsWith('/lookup') ? lookup : identity)));
+  const model = (choices: Record<string, { checked: boolean; basis: string }>) => reviewApplyModel({ item, lookup: lookup.lookup, summary: lookup, waiting: lookup.summary.waiting, identity, choices });
+  const expected = model({}), element = (choices: Record<string, { checked: boolean; basis: string }>) => <QueryClientProvider client={client}>
+    <CatalogReviewApplyCount item={item} choices={choices} onCount={onCount} /></QueryClientProvider>;
+  const view = render(element({}));
+  // It renders nothing; once the reads arrive it reports what the step shows: its selected count, its items, the guest to answer
+  // and, since the guest blocks applying, that the selection is not ready.
+  expect(view.container).toBeEmptyDOMElement();
+  const count = expected.selection.fields.length + expected.selection.memberCredits.length;
+  expect(expected.ready).toBe(false);
+  await waitFor(() => expect(onCount).toHaveBeenLastCalledWith({ count, items: expected.items.length, identityAnswers: 1, ready: false }));
+  const first = expected.items.find(entry => entry.selected && entry.hold === null)!;
+  view.rerender(element({ [first.key]: { checked: false, basis: first.basis } }));
+  await waitFor(() => expect(onCount).toHaveBeenLastCalledWith({ count: count - 1, items: expected.items.length, identityAnswers: 1, ready: false }));
 });
