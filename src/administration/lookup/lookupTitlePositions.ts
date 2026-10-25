@@ -3,8 +3,10 @@
  * under which those positions count: every title has one, all in one form, and they are distinct and increase in Album order.
  * Track-title search planning (lookupTrackTitles.ts) removes them under that guard. The review page fills Disc and Track Numbers
  * from titles under a guard of its own, which is meant to accept exactly the table in
- * test/administration/lookupTitlePositions.test.ts. Positions are never written by the server and never used for pairing. Total
- * on any input; nothing here makes a request.
+ * test/administration/lookupTitlePositions.test.ts. An existing-Album review's pairing also reads them, through
+ * trackTitlePositions (lookupTrackTitles.ts), and the same positions of retained original filenames, as hints only to choose
+ * among pairings (lookupReviewEvidence.ts, lookupSubset.ts); they become values only as the Disc and Track Numbers lookup writes
+ * through such a pairing. Total on any input; nothing here makes a request.
  */
 
 /** A title's leading position: its Disc Number (null when the title names none), its Track Number and the text after it. */

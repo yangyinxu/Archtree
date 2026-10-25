@@ -15,18 +15,19 @@
  *   - weights count Han, kana and Hangul twice and other letters and digits once, a title below four is skipped, and heavier titles rank first
  *   - the whole ranked list comes back, never capped, with each member's own Artist name as given
  *   - an empty Album gives no title, and malformed or unsendable members never throw and give none
+ *   - the positions a review's pairing reads are those Track-title searches read: each title cleaned, then counted under the Album guard
  * @end-catalog */
 
 /**
  * The pure picker of an existing Album's distinctive saved Track titles (lookupTrackTitles.ts): generic, version-marked,
- * file-name-shaped, repeated and light titles skipped, trailing notes removed, weights and the ranked order, and totality on
- * malformed members. Titles are synthetic or common song-title shapes; no network.
+ * file-name-shaped, repeated and light titles skipped, trailing notes removed, weights and the ranked order, totality on
+ * malformed members, and the positions a review's pairing reads from the same titles. Titles are synthetic or common song-title shapes; no network.
  */
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { after, test } from 'node:test';
 import {
-    distinctiveTrackTitles, GENERIC_TRACK_TITLES, TRACK_TITLE_MIN_WEIGHT, trackTitleText, trackTitleWeight, UNCREDITED_TRACK_TITLE_MIN_WEIGHT
+    distinctiveTrackTitles, GENERIC_TRACK_TITLES, TRACK_TITLE_MIN_WEIGHT, trackTitlePositions, trackTitleText, trackTitleWeight, UNCREDITED_TRACK_TITLE_MIN_WEIGHT
 } from '../../src/administration/lookup/lookupTrackTitles';
 import { installNetworkGuard } from '../support/networkGuard';
 
@@ -207,4 +208,21 @@ test('an empty Album gives no title, and malformed or unsendable members never t
         { title: 'Synthetic\u200b Song\u0007 Title', artist: 'Synthetic Band' }];
     assert.deepEqual(distinctiveTrackTitles(members, { albumTitle: { title: 'x' } as never, submittedText: ['x'] as never }), [
         { text: 'Valid Synthetic Song', artist: null, weight: 18 }, { text: 'Synthetic Song Title', artist: 'Synthetic Band', weight: 18 }]);
+});
+
+test('the positions a review\'s pairing reads are those Track-title searches read: each title cleaned, then counted under the Album guard', () => {
+    const at = (discNumber: number | null, trackNumber: number, rest: string) => ({ discNumber, trackNumber, rest });
+    // A format character is removed and a control character read as a space before the position is read.
+    assert.deepEqual(trackTitlePositions(['\u200b1-01 Synthetic A', '1-02\u0007Synthetic B']), [at(1, 1, 'Synthetic A'), at(1, 2, 'Synthetic B')]);
+    assert.deepEqual(trackTitlePositions(['01 Synthetic A', '02 - Synthetic B', '03.Synthetic C']), [at(null, 1, 'Synthetic A'), at(null, 2, 'Synthetic B'), at(null, 3, 'Synthetic C')]);
+    // A title that does not clean (over 200 characters, a link, a lone surrogate, not a string) reads as none, so no title counts.
+    for (const second of [`02 ${'x'.repeat(200)}`, '02 https://example.test/song', '02 Synthetic \ud800', 7, null]) {
+        assert.equal(trackTitlePositions(['01 Synthetic A', second]), null, String(second).slice(0, 20));
+    }
+    // The guard is that of lookupTitlePositions.ts: one form, distinct and increasing; a lone title needs a padded Disc and Track.
+    for (const titles of [['01 A', '1-02 B'], ['02 A', '01 B'], ['7 Rings', 'thank u, next'], ['01 A'], ['7 Rings'], []]) {
+        assert.equal(trackTitlePositions(titles), null, JSON.stringify(titles));
+    }
+    assert.deepEqual(trackTitlePositions(['1-01 Synthetic Single']), [at(1, 1, 'Synthetic Single')]);
+    assert.equal(trackTitlePositions('01 A' as never), null);
 });

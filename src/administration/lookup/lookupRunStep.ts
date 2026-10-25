@@ -10,22 +10,23 @@
 
 /**
  * One step of a metadata lookup run, without a database: the request a step performs (outside any transaction) and the pure
- * decision that stores its answer and chooses the next request. A run sends its planned queries in order (the fallbacks only
- * when the searches before them found no candidate) until 25 candidates are known, admitting first the releases whose reported
- * track count can equal the number of files (the count is only used here, never sent), then fetches each pending candidate's
- * details (those plausible releases first). When MusicBrainz then has no matching candidate (or its searches stayed unavailable),
- * the iTunes stage runs (lookupItunesStage.ts): its UPC lookups and searches, the bridge searches of the names found (their
- * releases merged and fetched like any search's), then a collection lookup for each result the bridge did not find, which becomes
- * an iTunes-only candidate. Last, it looks up the aliases of at most 16 credited artists and labels (in ranked order, each once,
- * never a placeholder; a source failure ends the alias phase, recording every remaining target as failed and never retrying, so
- * value application never waits for an outage), then ranks with them and the iTunes localized names. It records whether its
- * searches were complete, so a lone matching group of a partial comparison is never preselected. An existing-Album review's run
- * compares in subset mode: releases are admitted and fetched fewest extra tracks first, its searches record a second completeness
- * flag for the exact-count preselection, its iTunes stage keeps collections with at least as many tracks as members with that
- * flag of its own, and its alias targets add each fetched release's track artists. A review whose plan ends in Track-title
- * searches keeps 10 of the 25 release lookups for them while they are undecided; once the title searches' releases are compared, it
- * sends them (in wait mode, each admitting at most 5 releases) only when that comparison preselects nothing, before the iTunes
- * stage, and records the decision. Per attempt a run sends at most
+ * decision that stores its answer and chooses the next request. A run sends its planned queries in order (the fallbacks only when
+ * the searches before them found no candidate) until 25 candidates are known, admitting first the releases whose reported track
+ * count can equal the number of files (the count is only used here, never sent), then fetches each pending candidate's details
+ * (those plausible releases first). When MusicBrainz then has no matching candidate (or its searches stayed unavailable), and, in
+ * an existing-Album review, no release of the searched title whose credit agrees and whose tracks fit
+ * (catalogReviewItunesSkippable), the iTunes stage runs (lookupItunesStage.ts): its UPC lookups and searches, the bridge searches
+ * of the names found (their releases merged and fetched like any search's), then a collection lookup for each result the bridge did
+ * not find, which becomes an iTunes-only candidate. Last, it looks up the aliases of at most 16 credited artists and labels (in
+ * ranked order, each once, never a placeholder; a source failure ends the alias phase, recording every remaining target as failed
+ * and never retrying, so value application never waits for an outage), then ranks with them and the iTunes localized names. It
+ * records whether its searches were complete, so a lone matching group of a partial comparison is never preselected. An
+ * existing-Album review's run compares in subset mode: releases are admitted and fetched fewest extra tracks first, its searches
+ * record a second completeness flag for the exact-count preselection, its iTunes stage keeps collections with at least as many
+ * tracks as members with that flag of its own, and its alias targets add each fetched release's track artists. A review whose plan
+ * ends in Track-title searches keeps 10 of the 25 release lookups for them while they are undecided; once the title searches'
+ * releases are compared, it sends them (in wait mode, each admitting at most 5 releases) only when that comparison preselects
+ * nothing, before the iTunes stage, and records the decision. Per attempt a run sends at most
  * `METADATA_LOOKUP_LIMITS.plannedQueries` searches, `METADATA_LOOKUP_JOB_LIMITS.candidates` release lookups and `aliasLookups`
  * alias lookups to MusicBrainz, and alongside them at most `bridgeSearches` bridge searches and, to iTunes, `itunesUpcLookups` UPC
  * lookups, `itunesSearches` searches and `itunesCollectionLookups` collection lookups: at most 60 requests, each through its
@@ -45,7 +46,7 @@ import {
 } from './lookupItunesStage';
 import { isFallbackLookupQuery, isTrackTitleLookupQuery, trackTitleLookupTiming, type PlannedLookupQuery } from './lookupQueryPlanner';
 import { lookupTrackCountPlausible, lookupTrackCredit } from './lookupRanking';
-import { lookupComparisonFor } from './lookupReviewEvidence';
+import { catalogReviewItunesSkippable, lookupComparisonFor } from './lookupReviewEvidence';
 import { lookupAudioTrackCount, lookupSurplusRank, releaseAudioTracks } from './lookupSubset';
 import { trackTitleWeight, UNCREDITED_TRACK_TITLE_MIN_WEIGHT } from './lookupTrackTitles';
 import type { MusicBrainzClient } from './musicBrainzClient';
@@ -186,24 +187,25 @@ const storedExhausted = (raw: unknown): Exhausted => {
 };
 
 /**
- * Stores one request's result and decides the next request (pure): the planned queries in order until 25 candidates are known
- * (the fallbacks are skipped when a candidate is known as they start), then each pending candidate's details (plausible track
- * counts first), then, when MusicBrainz has no matching candidate, the iTunes stage (its requests, its bridge searches before the
- * bridged releases' details, then its collection lookups), then the alias lookups (lookupAliasTargets; skipped once MusicBrainz is
- * exhausted), then ranking. A source failure schedules an automatic retry of that source, a throttled first failure within
- * seconds. Once MusicBrainz's retries run out it is exhausted for the run: no further search, release or alias lookup is sent,
- * pending details are failed (incomplete), unsent bridge searches leave their results unavailable, and, without a stage yet, the
- * iTunes stage starts if MusicBrainz has no matching group (else a search phase ends unavailable, never "no release", as does a
- * stage started that way that finds no iTunes-only candidate). Once iTunes's retries run out, its remaining requests are skipped
- * and the run completes with what it has. A source failure of an alias lookup (busy, throttled or unavailable) records it and
- * every remaining alias target as failed and ranks in the same step, never retried or counted as an attempt; a refused one fails
- * only its target. A record without `aliases`, `itunesStage` or `exhausted`, from an earlier release, completes without them.
- * Track-title searches (an existing-Album review's plan tail): while they are undecided, title searches admit at most 15 releases
- * and are handed out only below that bound (a bound stop is partial and moves to the decision). Once no detail is pending, they are
- * skipped when MusicBrainz is exhausted, the ranking preselects, or, with title searches that named an Artist, a complete
- * comparison has a matching group; otherwise they are sent, credited as planned unless those credited searches returned no release
- * (then alone, and only titles weighing at least eight), each admitting at most 5 releases. One the source does not answer ends
- * them without a retry or an attempt, leaving the comparison partial. A matching group found only by Track titles never stops
+ * Stores one request's result and decides the next request (pure): the planned queries in order until 25 candidates are known (the
+ * fallbacks are skipped when a candidate is known as they start), then each pending candidate's details (plausible track counts
+ * first), then, when MusicBrainz has no matching candidate and the iTunes stage is needed (itunesNotNeeded: an existing-Album
+ * review also skips it for a release of the searched title whose credit agrees and whose tracks fit), the iTunes stage (its
+ * requests, its bridge searches before the bridged releases' details, then its collection lookups), then the alias lookups
+ * (lookupAliasTargets; skipped once MusicBrainz is exhausted), then ranking. A source failure schedules an automatic retry of that
+ * source, a throttled first failure within seconds. Once MusicBrainz's retries run out it is exhausted for the run: no further
+ * search, release or alias lookup is sent, pending details are failed (incomplete), unsent bridge searches leave their results
+ * unavailable, and, without a stage yet, the iTunes stage starts if it is needed (else a search phase ends unavailable, never "no
+ * release", as does a stage started that way that finds no iTunes-only candidate). Once iTunes's retries run out, its remaining
+ * requests are skipped and the run completes with what it has. A source failure of an alias lookup (busy, throttled or unavailable)
+ * records it and every remaining alias target as failed and ranks in the same step, never retried or counted as an attempt; a
+ * refused one fails only its target. A record without `aliases`, `itunesStage` or `exhausted`, from an earlier release, completes
+ * without them. Track-title searches (an existing-Album review's plan tail): while they are undecided, title searches admit at most
+ * 15 releases and are handed out only below that bound (a bound stop is partial and moves to the decision). Once no detail is
+ * pending, they are skipped when MusicBrainz is exhausted, the ranking preselects, or, with title searches that named an Artist, a
+ * complete comparison has a matching group; otherwise they are sent, credited as planned unless those credited searches returned no
+ * release (then alone, and only titles weighing at least eight), each admitting at most 5 releases. One the source does not answer
+ * ends them without a retry or an attempt, leaving the comparison partial. A matching group found only by Track titles never stops
  * the iTunes stage. A stored record past them, or with an iTunes stage, while undecided records them as skipped.
  */
 export function proceedLookupRun(record: MetadataLookupRecord, doc: AdminImportDocument, result: LookupStepResult | null, now: Date): { next: MetadataLookupRecord; step: LookupStep } {
@@ -238,8 +240,16 @@ export function proceedLookupRun(record: MetadataLookupRecord, doc: AdminImportD
         const candidates = mergeLookupCandidates(next.candidates, found, basis, fileCount, 'subset', bound), admitted = lookupSubsetHitsAdmitted(candidates, found, fileCount);
         return { candidates, searchComplete: next.searchComplete === true && complete && admitted.subset, exactSearchComplete: next.exactSearchComplete === true && complete && admitted.exact };
     };
-    /** Whether a matching group has a release first found other than by a Track title: only such a group stops the iTunes stage. */
-    const matched = () => rank().ranking.groups.some(group => group.memberKeys.some(key => next.candidates.find(candidate => candidate.key === key)?.basis !== 'trackTitle'));
+    /**
+     * Whether the iTunes stage is not needed: a matching group holds a release first found other than by a Track title (one found
+     * only that way never stops it), or, in a review, such a release has the searched title, a credit that agrees and tracks that
+     * fit (catalogReviewItunesSkippable). A skipped stage stores nothing and leaves both completeness flags as they are.
+     */
+    const itunesNotNeeded = () => {
+        const ranking = rank().ranking, byTrackTitle = (key: string) => next.candidates.find(candidate => candidate.key === key)?.basis === 'trackTitle';
+        return ranking.groups.some(group => group.memberKeys.some(key => !byTrackTitle(key)))
+            || (subset && catalogReviewItunesSkippable(doc, next.input, ranking.candidates, byTrackTitle));
+    };
     /**
      * The next Track-title search from `from` while fewer than 25 candidates are known (`queryIndex` moves to it): alone when a title
      * search of the plan named an Artist and none of them returned a release, and then passed over when it weighs below eight; null
@@ -286,7 +296,7 @@ export function proceedLookupRun(record: MetadataLookupRecord, doc: AdminImportD
             next = { ...next, queryIndex: queries.length, candidates: next.candidates.map(candidate => candidate.details === 'pending' ? { ...candidate, details: 'failed' } : candidate),
                 ...(skip ? { trackTitleSearch: 'skipped' as const } : {}) };
             if (!stage) {
-                stage = !matched() ? startItunesStage(queries, searching ? 'searchUnavailable' : 'noMatch', comparison) : null;
+                stage = !itunesNotNeeded() ? startItunesStage(queries, searching ? 'searchUnavailable' : 'noMatch', comparison) : null;
                 if (!stage && searching) return { next: endLookupRun({ ...next, exhausted }, 'unavailable', failed, now), step: idleLookupStep };
             }
         }
@@ -379,9 +389,9 @@ export function proceedLookupRun(record: MetadataLookupRecord, doc: AdminImportD
                 if (action) return running(action, 'search');
             }
         }
-        // MusicBrainz answered without a matching candidate (one found only by Track titles does not count): the stage starts once,
-        // when the run's queries give an iTunes request.
-        if (!stage && !matched()) {
+        // MusicBrainz answered without a matching candidate (one found only by Track titles does not count) and, in a review,
+        // without a fitting release of the searched title: the stage starts once, when the run's queries give an iTunes request.
+        if (!stage && !itunesNotNeeded()) {
             stage = startItunesStage(queries, 'noMatch', comparison);
             const searched = stage ? nextItunesSearchAction(stage, musicBrainzExhausted) : null;
             if (searched) stage = searched.stage;

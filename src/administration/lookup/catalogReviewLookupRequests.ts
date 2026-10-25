@@ -101,14 +101,19 @@ export async function retryCatalogReviewLookup(actor: string, id: string, raw: u
  * `{operationId, expectedRevision, run, candidateKey}`: applies a candidate of the current run, or none (`candidateKey: null`), to
  * the review's draft. Admitted only for a format-3 review whose capture is readable and whose source is current
  * (admitMetadataLookup's check: 409 ADMIN_IMPORT_LOOKUP_REFUSED, ADMIN_IMPORT_RELOAD_REQUIRED or
- * ADMIN_CATALOG_REVIEW_SOURCE_CHANGED); the run and candidate refusals are the import's (chooseLookupCandidate).
+ * ADMIN_CATALOG_REVIEW_SOURCE_CHANGED); the run and candidate refusals are the import's (chooseLookupCandidate). A ranking whose
+ * evidence changed, as one stored before position hints existed whose members carry them has, re-ranks first in the same
+ * transaction (rerankCatalogReviewLookup; a preselection it applies is then replaced by the choice), so the view after the choice
+ * rests on the current pairing, while the choice follows the pairing the ranking read before it showed.
  */
 export async function chooseCatalogReviewLookup(actor: string, id: string, raw: unknown): Promise<CatalogReviewResponse> {
     const { body, run, candidateKey } = parseLookupChoice(raw);
     return mutateAdminProject(actor, id, body, 'lookup-choose', async (doc, session) => {
         await admitMetadataLookup(doc, session, 'check');
+        const shown = await adminImportLookupCollection().findOne({ _id: doc._id }, { session });
+        await rerankCatalogReviewLookup(doc, actor, session);
         const stored = await adminImportLookupCollection().findOne({ _id: doc._id }, { session });
-        await storeLookupRecord(chooseLookupCandidate(doc, stored, { run, candidateKey, actorId: actor, operationId: body.operationId }, new Date(),
+        await storeLookupRecord(chooseLookupCandidate(doc, stored, { run, candidateKey, actorId: actor, operationId: body.operationId, shown }, new Date(),
             await readLookupApplicationContext(doc, stored, session)), session);
     }, catalogReviewProjectPolicy);
 }

@@ -2004,8 +2004,9 @@ The wire protocol and operational bounds are documented in
   never read this way.
 - Metadata lookup uses these sources in order:
   - MusicBrainz is the primary source, with Cover Art Archive for artwork.
-  - Unless MusicBrainz returns a matching candidate, the Apple iTunes Search API
-    is queried in several fixed storefronts. Titles and names found there, such
+  - Unless MusicBrainz returns a matching candidate, or an existing-Album review
+    skips it as described below, the Apple iTunes Search API is queried in
+    several fixed storefronts. Titles and names found there, such
     as the Japanese title for a romanized query or the romanized title for a
     Japanese one, are looked up again in MusicBrainz, and an embedded barcode
     may be looked up in iTunes to find them. An iTunes result becomes a
@@ -2013,13 +2014,26 @@ The wire protocol and operational bounds are documented in
     or cannot run; in the latter case it is marked as not checked against
     MusicBrainz.
   - Deezer, Spotify and other services are not used.
-- An existing-Album review uses the same sources in the same order. Its iTunes
-  fallback, MusicBrainz bridge and iTunes-only candidates follow the import
-  rules with the review's comparison: an iTunes-only candidate is preselected
-  only under the same conditions, its values and expected tracklist are
-  flagged as iTunes only and never collapsed, and its single artist string,
-  like each of its tracks' artist strings, is one Artist entry that is never
-  split.
+- An existing-Album review uses the same sources in the same order, except that
+  it skips the iTunes fallback when MusicBrainz returned a release, first found
+  other than through a Track title, that is unverified only because its pairing
+  is not single or a member or paired track has no duration, whose credited
+  artist agrees directly with one of the Album's primary Artist names, or either
+  part of a decorated one, while none of those names is a placeholder credit,
+  and whose title equals the Album name the run searched: a submitted Album
+  name, else the Album's saved title; a run submitted with a song name never
+  skips it. Titles are compared without a trailing segment after `／`, after `/`
+  with spaces on both sides, or after `/` followed only by one of those Artist
+  names or parts, in NFKC form and lower case, with the brackets `「」『』()[]`
+  read as spaces and whitespace collapsed, and without one of those Artist names
+  or parts at their start or end. A skipped fallback leaves no release out of
+  the comparison, which stays as complete as MusicBrainz's searches left it.
+  Otherwise its iTunes fallback, MusicBrainz bridge and iTunes-only candidates
+  follow the import rules with the review's comparison: an iTunes-only candidate
+  is preselected only under the same conditions, its values and expected
+  tracklist are flagged as iTunes only and never collapsed, and its single
+  artist string, like each of its tracks' artist strings, is one Artist entry
+  that is never split.
 - Metadata lookup responses are untrusted data. Each source is bounded in time
   and size, and its request-rate and concurrency bounds apply across the whole
   deployment; automatic lookups wait for them, and a submitted lookup that
@@ -2051,16 +2065,28 @@ The wire protocol and operational bounds are documented in
   Number equal the member's own where it has them, a missing Disc Number
   matching any disc. A member's own numbers are those captured from the
   catalog or saved by the administrator; numbers that lookup wrote never
-  constrain pairing. A candidate matches only when exactly one such pairing
-  exists and every paired duration is known. A release with fewer tracks than
-  the Album has members never matches; more than one pairing, or a member or
-  paired track without a duration, leaves it unverified; an Album without
-  members matches no candidate, so nothing is preselected, but any candidate
-  it chooses pairs trivially. The release tracks that no member pairs with are
-  the missing-file rows the candidate would add, and the view of differences
-  names each member that no track of the release can pair with. Saving a
-  review Disc or Track Number re-ranks the stored candidates without new
-  requests; a re-rank is not a lookup run. While no candidate was chosen, a
+  constrain pairing. The pairing is single when exactly one such pairing exists.
+  When more exist, it is still single when exactly one of them gives every
+  member the track at the position its Track title starts with, as the review
+  captured it, read and counted as for Track-title searches below, or, when
+  those titles' positions do not count, at the position its retained original
+  filename starts with, read and counted the same way, a position without a Disc
+  Number matching any disc; failing that, when exactly one of them, or of those
+  that give every member its position where several do, pairs every member with
+  a track whose duration is within half a second of its own, both known to the
+  millisecond, which a release track length in whole seconds is not taken to be.
+  Those positions are never sent, are not the member's own numbers and become
+  values only as the numbers lookup writes through that pairing; the ranking
+  records what decided it. A candidate matches only when its pairing is single
+  and every paired duration is known. A release with fewer tracks than the Album
+  has members never matches; a pairing that is not single, or a member or paired
+  track without a duration, leaves it unverified; an Album without members
+  matches no candidate, so nothing is preselected, but any candidate it chooses
+  pairs trivially. The release tracks that no member pairs with are the
+  missing-file rows the candidate would add, and the view of differences names
+  each member that no track of the release can pair with. Saving a review Disc
+  or Track Number re-ranks the stored candidates without new requests; a re-rank
+  is not a lookup run. While no candidate was chosen, a
   re-rank that leaves exactly one preselectable group applies it as a
   preselection would. A re-rank never removes values already applied, and the
   expected tracklist then follows the placement check of applying the review.
@@ -2143,8 +2169,8 @@ The wire protocol and operational bounds are documented in
   run's bounded release lookups for them, and each Track-title search admits
   at most 5 releases its recordings appear on, fewest extra tracks first; a
   release it found that is already a candidate counts as found by it. These
-  releases match only through the subset pairing, so the members' durations
-  and own numbers decide; no value comes from a recording a title found. A
+  releases match only through the subset pairing, so the members' durations, own
+  numbers and positions decide; no value comes from a recording a title found. A
   Track-title search that reports more recordings than it returns leaves the
   comparison partial, so a release found that way is usually offered, not
   applied. Track-title searches that are not sent never make the comparison

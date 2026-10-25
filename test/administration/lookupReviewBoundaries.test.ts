@@ -10,6 +10,7 @@
  *   - a review's value rules are pure: no database, no lookup record, value application or lookup service
  *   - a review's lookup evidence and the lookup record are pure: no database, and the evidence never loads the record back
  *   - the Track-title picker is pure: it loads only the lookup contract, identifiers and title positions, and a review's lookup evidence loads it
+ *   - the review title comparison is pure: it loads only the decorated-name readers, and a review's lookup evidence loads it
  *   - the reader skips type-only imports and follows value imports, so the checks above are not vacuous
  * @end-catalog */
 
@@ -113,6 +114,14 @@ test('the Track-title picker is pure: it loads only the lookup contract, identif
     const loaded = reachable(picker);
     assert.deepEqual([loaded.has(database), loaded.has(lookupRecord), loaded.has(lookupService), loaded.has(reviewEvidence), loaded.has(reviewService)], [false, false, false, false, false]);
     assert.ok(runtimeImports(reviewEvidence).includes(picker));
+});
+
+test('the review title comparison is pure: it loads only the decorated-name readers, and a review\'s lookup evidence loads it', () => {
+    const titles = 'src/administration/lookup/lookupTitleNormalize.ts';
+    assert.deepEqual(runtimeImports(titles), ['src/administration/lookup/lookupDecoratedNames.ts']);
+    const loaded = reachable(titles);
+    assert.deepEqual([loaded.has(database), loaded.has(lookupRecord), loaded.has(lookupService), loaded.has(reviewEvidence), loaded.has(reviewService)], [false, false, false, false, false]);
+    assert.ok(runtimeImports(reviewEvidence).includes(titles));
 });
 
 test('the reader skips type-only imports and follows value imports, so the checks above are not vacuous', () => {

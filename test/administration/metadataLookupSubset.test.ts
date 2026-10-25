@@ -2,8 +2,10 @@
  * Internal
  *   Types: Disc
  *   Functions: recorded, mbid, synthetic, candidate, incomplete, file, files, membersOf, subset, entryOf, slot,
- *              member, pair, seeded, pick, shuffle, randomGraph, fits, allMatchings, bruteForce, bySlotId
- *   Constants: guard, releases, noIdentifiers, lead, guest, various, standard, deluxe, threeMembers
+ *              member, pair, seeded, pick, shuffle, randomGraph, fits, allMatchings, bruteForce, bySlotId,
+ *              hint, hinted, hintedGraph, resolvedByBruteForce
+ *   Constants: guard, releases, noIdentifiers, lead, guest, various, standard, deluxe, threeMembers, liveRows,
+ *              liveMembers
  * Tests
  *   - audio tracks leave out video and data media, matched case-insensitively with a null format as audio, and keep the Disc Numbers an applied release gives
  *   - rows come in disc and track order with NFC trimmed titles, and a 150-track release or rows over 32 KiB offer no tracklist
@@ -15,6 +17,12 @@
  *   - pairing and forced pairs agree with a brute-force check on 500 small graphs from a seeded generator
  *   - forced pairs with one extra file leave the extra file unpaired, and two files that fit one row are both left unforced
  *   - pairing and forced pairs are invariant under any permutation of slots and members
+ *   - title positions decide a pairing that is not single: each member takes the compatible track at its position, a missing Disc Number matching any disc, and never against its own numbers
+ *   - near-exact durations decide only when exactly one pairing keeps every member within half a second, both known to the millisecond
+ *   - the resolved pairing agrees with a brute-force count on 500 seeded graphs and is invariant under any permutation of slots and members
+ *   - a subset candidate whose pairing positions or near-exact durations decide matches, records how and groups with an edition of equal values; a strictly single one records nothing
+ *   - with unknown durations, title positions give a single pairing that stays unverified, and choosing it writes the tracklist
+ *   - a resolved subset ranking is identical under any permutation of candidates and members
  *   - a release with more tracks than members matches through a single pairing and reports its pairs, missing tracks, left-out tracks and missing count
  *   - a multi-disc subset of the Blue Archive CD pairs on disc 2 by own numbers, and across discs where the numbers decide
  *   - members with missing Disc Numbers and repeated Track Numbers pair by duration, and stay unverified when durations cannot decide
@@ -47,7 +55,7 @@
 /**
  * Subset pairing and ranking without a database or network (lookupSubset.ts and the subset mode of lookupRanking.ts): which
  * release tracks are audio, the expected tracklist rows and their bounds, single, ambiguous and impossible pairings checked
- * against brute force, forced pairs, subset statuses, groups, the exact-count preference, completeness, the admission helpers
+ * against brute force, their resolution by position hints and near-exact durations, forced pairs, subset statuses, groups, the exact-count preference, completeness, the admission helpers
  * and per-track artist credits. Recorded releases are parsed by the production parser; everything else is synthetic.
  */
 import assert from 'node:assert/strict';
@@ -60,8 +68,9 @@ import {
     lookupSubsetAssignment, lookupTrackCredit, proposalForRelease, rankLookupCandidates, trackArtistProposal, type LocalFileEvidence, type LookupCandidate, type RankedLookup
 } from '../../src/administration/lookup/lookupRanking';
 import {
-    LOOKUP_EXPECTED_TRACKLIST_BOUNDS, LOOKUP_LEFT_OUT_MEDIUM_FORMATS, expectedTracklistFromRelease, lookupAudioTrackCount, lookupForcedPairs, lookupSubsetPairing,
-    lookupSubsetTrackCountPlausible, lookupSurplusRank, lookupUnpairableMembers, releaseAudioTracks, type LookupPairingMember, type LookupPairingSlot, type LookupSubsetPair
+    LOOKUP_EXPECTED_TRACKLIST_BOUNDS, LOOKUP_LEFT_OUT_MEDIUM_FORMATS, expectedTracklistFromRelease, lookupAudioTrackCount, lookupForcedPairs, lookupResolvedPairing,
+    lookupSubsetPairing, lookupSubsetTrackCountPlausible, lookupSurplusRank, lookupUnpairableMembers, releaseAudioTracks, type LookupPairingMember, type LookupPairingSlot,
+    type LookupPositionHint, type LookupSubsetPair
 } from '../../src/administration/lookup/lookupSubset';
 import { parseMusicBrainzRelease } from '../../src/administration/lookup/musicBrainzClient';
 import { fixtureRoot, loadLookupFixture } from '../support/metadataLookupFixtures';
@@ -334,6 +343,181 @@ test('pairing and forced pairs are invariant under any permutation of slots and 
         if (again.kind === 'unique' && pairing.kind === 'unique') assert.deepEqual(bySlotId(again.pairs), bySlotId(pairing.pairs), label);
         assert.deepEqual(bySlotId(lookupForcedPairs(permutedSlots, permutedMembers)), bySlotId(forced), label);
     }
+});
+
+/** A position hint as a review's evidence carries it (lookupReviewEvidence.ts); `title` by default. */
+const hint = (discNumber: number | null, trackNumber: number, from: LookupPositionHint['from'] = 'title'): LookupPositionHint => ({ discNumber, trackNumber, from });
+const hinted = (one: LookupPairingMember, positionHint: unknown): LookupPairingMember => ({ ...one, positionHint: positionHint as LookupPositionHint });
+/** The rows of a live Album's release: its first member is within 3 seconds of 1-1 (19 ms off) and 2-2 (713 ms off), its second only of 1-2. */
+const liveRows = [slot(1, 1, 215_640), slot(1, 2, 382_746), slot(1, 3, 250_000), slot(2, 1, 300_000), slot(2, 2, 214_946)];
+const liveMembers = [member('a', null, null, 215_659), member('b', null, null, 382_752)];
+
+test('title positions decide a pairing that is not single: each member takes the compatible track at its position, a missing Disc Number matching any disc, and never against its own numbers', () => {
+    const titled = [hinted(liveMembers[0], hint(1, 1)), hinted(liveMembers[1], hint(1, 2))];
+    assert.deepEqual(lookupSubsetPairing(liveRows, titled), { kind: 'ambiguous' }, 'the strict pairing is unchanged');
+    assert.deepEqual(lookupResolvedPairing(liveRows, titled), { kind: 'unique', pairs: [pair('a', 1, 1), pair('b', 1, 2)], pairedBy: 'titlePositions' });
+    const named = [hinted(liveMembers[0], hint(1, 1, 'fileName')), hinted(liveMembers[1], hint(1, 2, 'fileName'))];
+    assert.deepEqual(lookupResolvedPairing(liveRows, named), { kind: 'unique', pairs: [pair('a', 1, 1), pair('b', 1, 2)], pairedBy: 'fileNamePositions' });
+    // Legacy whole-second durations keep the tier out, so only positions can decide here.
+    const legacy = [member('a', null, null, 216_000, 1000), member('b', null, null, 383_000, 1000)];
+    assert.deepEqual(lookupSubsetPairing(liveRows, legacy), { kind: 'ambiguous' });
+    assert.deepEqual(lookupResolvedPairing(liveRows, [hinted(legacy[0], hint(1, 1)), hinted(legacy[1], hint(1, 2))]),
+        { kind: 'unique', pairs: [pair('a', 1, 1), pair('b', 1, 2)], pairedBy: 'titlePositions' });
+    // Mixed sources, a member without a hint or a malformed hint: no position step.
+    for (const second of [hint(1, 2, 'fileName'), undefined, { discNumber: 1, trackNumber: 0, from: 'title' }, { discNumber: 1, trackNumber: 2, from: 'x' },
+        { discNumber: 0, trackNumber: 2, from: 'title' }, { discNumber: '1', trackNumber: 2, from: 'title' }, { discNumber: 1, trackNumber: 2.5, from: 'title' }, 'title']) {
+        assert.deepEqual(lookupResolvedPairing(liveRows, [hinted(legacy[0], hint(1, 1)), second === undefined ? legacy[1] : hinted(legacy[1], second)]), { kind: 'ambiguous' },
+            JSON.stringify(second));
+    }
+    // A hint at an incompatible track (more than 3 seconds off) or at a missing position adds nothing.
+    for (const first of [hint(1, 3), hint(1, 9), hint(3, 1)]) {
+        assert.deepEqual(lookupResolvedPairing(liveRows, [hinted(legacy[0], first), hinted(legacy[1], hint(1, 2))]), { kind: 'ambiguous' }, JSON.stringify(first));
+    }
+    // Positions that no pairing agrees with do not count, so near-exact durations still decide among every pairing.
+    assert.deepEqual(lookupResolvedPairing(liveRows, [hinted(liveMembers[0], hint(1, 3)), hinted(liveMembers[1], hint(1, 2))]),
+        { kind: 'unique', pairs: [pair('a', 1, 1), pair('b', 1, 2)], pairedBy: 'nearExactDuration' });
+    // Track-only positions on two discs whose first tracks both fit leave two pairings: the tier decides among them, or nothing does.
+    const twoDiscs = (second: number) => [slot(1, 1, 200_010), slot(1, 2, 250_010), slot(2, 1, second), slot(2, 2, 250_810)];
+    const trackOnly = [hinted(member('a', null, null, 200_000), hint(null, 1)), hinted(member('b', null, null, 250_000), hint(null, 2))];
+    assert.deepEqual(lookupResolvedPairing(twoDiscs(200_710), trackOnly), { kind: 'unique', pairs: [pair('a', 1, 1), pair('b', 1, 2)], pairedBy: 'nearExactDuration' });
+    assert.deepEqual(lookupResolvedPairing(twoDiscs(200_310), trackOnly), { kind: 'ambiguous' });
+    // The tier never overrides the positions: here only pairings against them are near-exact, so the pairing stays ambiguous.
+    const crossed = [slot(1, 1, 200_010), slot(1, 2, 201_010), slot(2, 1, 202_010), slot(2, 2, 202_510)];
+    const against = [hinted(member('a', null, null, 201_010), hint(null, 1)), hinted(member('b', null, null, 200_010), hint(null, 2))];
+    assert.deepEqual(lookupResolvedPairing(crossed, against.map(({ positionHint: _hint, ...one }) => one)),
+        { kind: 'unique', pairs: [pair('a', 1, 2), pair('b', 1, 1)], pairedBy: 'nearExactDuration' }, 'without positions the tier decides');
+    assert.deepEqual(lookupResolvedPairing(crossed, against), { kind: 'ambiguous' });
+    // Own numbers win: a member whose own Track Number is 2 is never paired with 1-1, whatever its hint says.
+    const flat = [slot(1, 1, 200_000), slot(1, 2, 200_000), slot(2, 2, 200_000)];
+    assert.deepEqual(lookupResolvedPairing(flat, [hinted(member('a', null, 2, 200_000), hint(1, 1)), hinted(member('b', null, null, 200_000), hint(1, 2))]), { kind: 'ambiguous' });
+    assert.deepEqual(lookupResolvedPairing(flat, [hinted(member('a', null, 2, 200_000), hint(2, 2)), hinted(member('b', null, null, 200_000), hint(1, 2))]),
+        { kind: 'unique', pairs: [pair('a', 2, 2), pair('b', 1, 2)], pairedBy: 'titlePositions' }, 'a hint that agrees with the own numbers narrows them');
+    // A strictly single pairing keeps no pairedBy even with hints; none stays none; no members is the one empty pairing.
+    const single = [slot(1, 1, 200_000), slot(1, 2, 300_000)];
+    assert.deepEqual(lookupResolvedPairing(single, [hinted(member('a', null, null, 200_000), hint(1, 2)), hinted(member('b', null, null, 300_000), hint(1, 1))]),
+        { kind: 'unique', pairs: [pair('a', 1, 1), pair('b', 1, 2)] });
+    assert.deepEqual(lookupResolvedPairing(single, [hinted(member('a', null, null, 200_000), hint(1, 1)), hinted(member('b', null, null, 201_000), hint(1, 2))]), { kind: 'none' });
+    assert.deepEqual(lookupResolvedPairing(single, []), { kind: 'unique', pairs: [] });
+});
+
+test('near-exact durations decide only when exactly one pairing keeps every member within half a second, both known to the millisecond', () => {
+    assert.deepEqual(lookupResolvedPairing(liveRows, liveMembers), { kind: 'unique', pairs: [pair('a', 1, 1), pair('b', 1, 2)], pairedBy: 'nearExactDuration' });
+    // 500 ms is inclusive: a track 501 ms off is out of the tier, one 500 ms off is in.
+    const boundary = (second: number) => [slot(1, 1, 200_010), slot(1, 2, second)];
+    const close = [member('a', null, null, 200_010), member('b', null, null, 200_410)];
+    assert.deepEqual(lookupSubsetPairing(boundary(200_511), close), { kind: 'ambiguous' });
+    assert.deepEqual(lookupResolvedPairing(boundary(200_511), close), { kind: 'unique', pairs: [pair('a', 1, 1), pair('b', 1, 2)], pairedBy: 'nearExactDuration' });
+    assert.deepEqual(lookupResolvedPairing(boundary(200_510), close), { kind: 'ambiguous' });
+    assert.deepEqual(lookupResolvedPairing(boundary(200_511), close, 3000, 100), { kind: 'ambiguous' }, 'the tier is a parameter');
+    // A release length of whole seconds may be rounded, so it never takes part: the true track may sit just outside the tier.
+    assert.deepEqual(lookupResolvedPairing([slot(1, 1, 200_000), slot(1, 2, 201_000)], [member('a', null, null, 200_700)]), { kind: 'ambiguous' });
+    assert.deepEqual(lookupResolvedPairing([slot(1, 1, 200_000), slot(1, 2, 201_001)], [member('a', null, null, 200_700)]),
+        { kind: 'unique', pairs: [pair('a', 1, 2)], pairedBy: 'nearExactDuration' });
+    // Two members within half a second of each other and of two tracks stay ambiguous.
+    assert.deepEqual(lookupResolvedPairing([slot(1, 1, 200_010), slot(1, 2, 200_290)], [member('a', null, null, 200_000), member('b', null, null, 200_300)]), { kind: 'ambiguous' });
+    // A legacy or unknown member duration never takes part.
+    assert.deepEqual(lookupResolvedPairing(liveRows, [member('a', null, null, 215_659, 1000), liveMembers[1]]), { kind: 'ambiguous' });
+    assert.deepEqual(lookupResolvedPairing(liveRows, [member('a', null, null, null), liveMembers[1]]), { kind: 'ambiguous' });
+    // A track without a duration is never near-exact.
+    assert.deepEqual(lookupResolvedPairing([slot(1, 1, 200_010), slot(1, 2, null), slot(1, 3, 300_010)], [member('a', null, null, 200_000), member('b', null, null, 300_000)]),
+        { kind: 'unique', pairs: [pair('a', 1, 1), pair('b', 1, 3)], pairedBy: 'nearExactDuration' });
+});
+
+/**
+ * A small random graph whose members mostly sit near distinct slots (one more member than slots now and then), all
+ * with position hints 40% of the time (sometimes wrong, mixed or missing).
+ */
+const hintedGraph = (random: () => number) => {
+    const positions = shuffle(random, [[1, 1], [1, 2], [1, 3], [2, 1], [2, 2], [2, 3]]).slice(0, 1 + Math.floor(random() * 6));
+    const slots = positions.map(([disc, track]) => slot(disc, track, pick(random, [null, 200_000, 200_700, 201_400, 202_100, 202_800])));
+    const hinting = random() < 0.4, source = pick(random, ['title', 'fileName'] as const), targets = shuffle(random, slots);
+    const members = Array.from({ length: Math.floor(random() * Math.min(6, slots.length + 2)) }, (_unused, index) => {
+        const near = targets[index] ?? pick(random, slots), base = near.durationMs ?? 200_000;
+        const one = member(`m${index}`, pick(random, [null, null, null, near.discNumber]), pick(random, [null, null, null, null, near.trackNumber]),
+            pick(random, [base, base + 150, base - 300, base + 450, base + 600, base + 2500, null]), pick(random, [0, 0, 0, 0, 0, 1000] as const));
+        if (!hinting || random() < 0.03) return one;
+        const at = random() < 0.85 ? near : pick(random, slots);
+        return hinted(one, hint(random() < 0.25 ? null : at.discNumber, at.trackNumber, random() < 0.03 ? 'fileName' : source));
+    });
+    return { slots, members };
+};
+/**
+ * The resolved pairing by exhaustive search: the strict count, then the complete matchings agreeing with every hint, then those
+ * near-exact (a slot length of whole seconds never is) among the agreeing ones when several agree, else among all.
+ */
+const resolvedByBruteForce = (slots: LookupPairingSlot[], members: LookupPairingMember[]) => {
+    const complete = allMatchings(slots, members).filter(matching => matching.every(index => index >= 0));
+    const pairsOf = (matching: number[]) => matching.map((index, at) => pair(members[at].slotId, slots[index].discNumber, slots[index].trackNumber));
+    if (complete.length < 2) return complete.length ? { kind: 'unique', pairs: pairsOf(complete[0]) } : { kind: 'none' };
+    const hints = members.map(one => one.positionHint), source = hints[0]?.from;
+    let among = complete;
+    if (source && hints.every(value => value?.from === source)) {
+        const agreeing = complete.filter(matching => matching.every((index, at) => (hints[at]!.discNumber === null || hints[at]!.discNumber === slots[index].discNumber)
+            && hints[at]!.trackNumber === slots[index].trackNumber));
+        if (agreeing.length === 1) return { kind: 'unique', pairs: pairsOf(agreeing[0]), pairedBy: source === 'title' ? 'titlePositions' : 'fileNamePositions' };
+        if (agreeing.length > 1) among = agreeing;
+    }
+    const near = among.filter(matching => matching.every((index, at) => members[at].durationPrecisionMs === 0 && members[at].durationMs !== null
+        && slots[index].durationMs !== null && slots[index].durationMs! % 1000 !== 0 && Math.abs(members[at].durationMs! - slots[index].durationMs!) <= 500));
+    return near.length === 1 ? { kind: 'unique', pairs: pairsOf(near[0]), pairedBy: 'nearExactDuration' } : { kind: 'ambiguous' };
+};
+
+test('the resolved pairing agrees with a brute-force count on 500 seeded graphs and is invariant under any permutation of slots and members', () => {
+    const random = seeded(20261025), outcomes = new Map<string, number>();
+    for (let round = 0; round < 500; round++) {
+        const { slots, members } = hintedGraph(random), label = JSON.stringify({ slots, members });
+        const resolved = lookupResolvedPairing(slots, members);
+        assert.deepEqual(resolved, resolvedByBruteForce(slots, members), label);
+        const again = lookupResolvedPairing(shuffle(random, slots), shuffle(random, members));
+        assert.deepEqual([again.kind, again.kind === 'unique' ? again.pairedBy : null], [resolved.kind, resolved.kind === 'unique' ? resolved.pairedBy : null], label);
+        if (again.kind === 'unique' && resolved.kind === 'unique') assert.deepEqual(bySlotId(again.pairs), bySlotId(resolved.pairs), label);
+        const outcome = resolved.kind === 'unique' ? resolved.pairedBy ?? 'unique' : resolved.kind;
+        outcomes.set(outcome, (outcomes.get(outcome) ?? 0) + 1);
+    }
+    // The generator reaches every outcome often enough for the comparison to mean something.
+    for (const outcome of ['unique', 'titlePositions', 'fileNamePositions', 'nearExactDuration', 'ambiguous', 'none']) {
+        assert.ok((outcomes.get(outcome) ?? 0) >= 20, `${outcome}: ${outcomes.get(outcome)}`);
+    }
+});
+
+test('a subset candidate whose pairing positions or near-exact durations decide matches, records how and groups with an edition of equal values; a strictly single one records nothing', () => {
+    const discs = (format: string): Disc[] => [{ format, lengths: [215_640, 382_746, 250_000] }, { format, lengths: [300_000, 214_946] }];
+    const cd = synthetic(150, discs('CD')), digital = synthetic(151, discs('Digital Media'));
+    const members = [file(0, 215_659, { positionHint: hint(1, 1) }), file(1, 382_752, { positionHint: hint(1, 2) })];
+    for (const [evidence, pairedBy] of [[members, 'titlePositions'], [members.map(({ positionHint: _hint, ...one }) => one), 'nearExactDuration']] as const) {
+        const ranked = subset([candidate(cd), candidate(digital)], evidence);
+        for (const value of [cd, digital]) {
+            const entry = entryOf(ranked, value);
+            assert.deepEqual([entry.status, entry.comparison!.subset!.pairing, entry.comparison!.subset!.pairedBy, entry.comparison!.subset!.pairs],
+                ['matching', 'unique', pairedBy, [pair('slot-00', 1, 1), pair('slot-01', 1, 2)]]);
+        }
+        assert.deepEqual([ranked.groups.length, ranked.groups[0].memberKeys.length, ranked.preselection?.basis], [1, 2, 'onlyMatchingGroup'], pairedBy);
+        // How the pairing was decided never enters the group key.
+        assert.equal(ranked.groups[0].groupKey, subset([candidate(cd)], [file(0, 215_659, { discNumber: 1, trackNumber: 1 }), file(1, 382_752)]).groups[0].groupKey);
+    }
+    const strict = subset([candidate(standard)], threeMembers.map((one, index) => ({ ...one, positionHint: hint(1, index + 1) })));
+    assert.deepEqual([entryOf(strict, standard).status, Object.keys(entryOf(strict, standard).comparison!.subset!).includes('pairedBy')], ['matching', false]);
+});
+
+test('with unknown durations, title positions give a single pairing that stays unverified, and choosing it writes the tracklist', () => {
+    const five = synthetic(152, [{ lengths: [200_000, 230_000, 260_000, 290_000, 320_000] }]);
+    const members = [0, 1, 2].map(index => file(index, null, { positionHint: hint(1, index + 1) }));
+    const ranked = subset([candidate(five)], members), entry = entryOf(ranked, five);
+    assert.deepEqual([entry.status, entry.comparison!.subset!.pairing, entry.comparison!.subset!.pairedBy, entry.comparison!.subset!.missingTracks, ranked.groups, ranked.preselection],
+        ['unverified', 'unique', 'titlePositions', [{ discNumber: 1, trackNumber: 4 }, { discNumber: 1, trackNumber: 5 }], [], null]);
+    assert.deepEqual(lookupSubsetAssignment(five, members)!.map(item => [item.slotId, item.discNumber, item.trackNumber]), [['slot-00', 1, 1], ['slot-01', 1, 2], ['slot-02', 1, 3]]);
+    // Without the positions the same Album pairs in more than one way, and choosing writes no tracklist.
+    const plain = subset([candidate(five)], members.map(({ positionHint: _hint, ...one }) => one));
+    assert.deepEqual([entryOf(plain, five).comparison!.subset!.pairing, lookupSubsetAssignment(five, files([null, null, null]))], ['ambiguous', null]);
+});
+
+test('a resolved subset ranking is identical under any permutation of candidates and members', () => {
+    const discs: Disc[] = [{ lengths: [215_640, 382_746, 250_000] }, { lengths: [300_000, 214_946] }];
+    const input = [candidate(synthetic(153, discs)), candidate(synthetic(154, discs, { title: 'Synthetic Live' })), candidate(deluxe), incomplete(155, { reportedTrackCount: 1 })];
+    const members = [file(0, 215_659, { positionHint: hint(1, 1) }), file(1, 382_752, { positionHint: hint(1, 2) })];
+    const expected = subset(input, members), random = seeded(25);
+    for (let round = 0; round < 10; round++) assert.deepEqual(subset(shuffle(random, input), shuffle(random, members)), expected);
+    assert.deepEqual([expected.groups.length, expected.candidates.filter(entry => entry.comparison?.subset?.pairedBy === 'titlePositions').length], [2, 2]);
 });
 
 test('a release with more tracks than members matches through a single pairing and reports its pairs, missing tracks, left-out tracks and missing count', () => {

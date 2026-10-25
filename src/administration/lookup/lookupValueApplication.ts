@@ -10,7 +10,7 @@
  *   Functions: stale, emptyValue, emptyFor, slotOf, isRecord, isEntryLike, valueAt, applicable, lookupText,
  *              lookupEntryList, lookupArtistEntries, idOf, itemsOf, foundNames, storedValues, storedConflicts,
  *              offerKey, idPath, withLookupIds, freshGrant, bumpValueRevision, keepFoundNames,
- *              applicationFields, restoreApplicationFields, rerankEvidence
+ *              applicationFields, restoreApplicationFields, rerankEvidence, shownAmbiguous
  *   Constants: lookupPath, invisible, idsIn, noContext, LABEL, APPLICATION_FIELDS
  * @end-catalog */
 
@@ -198,18 +198,20 @@ export function lookupCandidateValues(release: MusicBrainzRelease, files: readon
 /**
  * Every supported value a fetched release offers an existing-Album review, in the order Album title, Artist entries, label, date
  * and expected tracklist, then each paired member's title, Disc Number, Track Number and track Artist entries in manifest order;
- * the values left out with their reason; and the single pairing the track values rest on (`pairs`, in manifest order; null
- * without one). The Album's entries reuse the keys of the saved entries they agree with (reviewEntryAgrees with the names `found`
- * for each ID); they, and the label, are left out as `notApplicable` while the capture shows not every primary and featured Artist
- * Credit, or the label is read-only. The expected tracklist and every member value come only through a single pairing
- * (lookupSubsetAssignment against the review's own numbers; an Album without members pairs trivially), and a release whose
- * tracklist is over its bounds offers neither (`size`, or `format` for an invalid one). A member's entries come only from its own
- * paired track's credit, never the release's or the Album's, keyed per member; a track without a usable credit is `noTrackCredit`
- * or `placeholder`, a member whose capture is incomplete `notApplicable`, and a list that would take the distinct identities
- * (reviewIdentityKey, the Album's entries first) past 512 `size`. Pure.
+ * the values left out with their reason; and the single pairing the track values rest on (`pairs`, in manifest order; null without
+ * one). The Album's entries reuse the keys of the saved entries they agree with (reviewEntryAgrees with the names `found` for each
+ * ID); they, and the label, are left out as `notApplicable` while the capture shows not every primary and featured Artist Credit,
+ * or the label is read-only. The expected tracklist and every member value come only through a single pairing
+ * (lookupSubsetAssignment against the review's own numbers and position hints, resolved as the ranking resolves them, or only the
+ * strict pairing with `strictPairing`, so the Disc and Track Numbers written are automatic values that never constrain a later
+ * pairing; an Album without members pairs trivially), and a release whose tracklist is over its bounds offers neither (`size`, or
+ * `format` for an invalid one). A member's entries come only from its own paired track's credit, never the release's or the
+ * Album's, keyed per member; a track without a usable credit is `noTrackCredit` or `placeholder`, a member whose capture is
+ * incomplete `notApplicable`, and a list that would take the distinct identities (reviewIdentityKey, the Album's entries first)
+ * past 512 `size`. Pure.
  */
-export function reviewCandidateValues(release: MusicBrainzRelease, doc: AdminImportDocument, draft: ImportDraftV2, found: ReadonlyMap<string, readonly string[]>):
-    { values: LookupAppliedValue[]; flagged: LookupValueFlag[]; pairs: LookupSubsetPair[] | null } {
+export function reviewCandidateValues(release: MusicBrainzRelease, doc: AdminImportDocument, draft: ImportDraftV2, found: ReadonlyMap<string, readonly string[]>,
+    options: { strictPairing?: boolean } = {}): { values: LookupAppliedValue[]; flagged: LookupValueFlag[]; pairs: LookupSubsetPair[] | null } {
     const values: LookupAppliedValue[] = [], flagged: LookupValueFlag[] = [], reviewId = doc._id.toHexString();
     const text = (path: ImportDraftPath, raw: unknown, max: number) => {
         const result = lookupText(raw, max);
@@ -246,7 +248,7 @@ export function reviewCandidateValues(release: MusicBrainzRelease, doc: AdminImp
         if (tracklist.reason !== 'trackCount') flagged.push({ path: 'album.expectedTracklist', reason: tracklist.reason === 'tooManyTracks' ? 'size' : 'format' });
         return { values, flagged, pairs: null };
     }
-    const assignment = lookupSubsetAssignment(release, catalogReviewFileEvidence(doc));
+    const assignment = lookupSubsetAssignment(release, catalogReviewFileEvidence(doc), undefined, options.strictPairing !== true);
     if (!assignment) return { values, flagged, pairs: null };
     values.push({ path: 'album.expectedTracklist', value: tracklist.rows, slotId: null });
     const paired = new Map(assignment.map(item => [item.slotId, item])), members = reviewMemberStates(doc), pairs: LookupSubsetPair[] = [];
@@ -407,10 +409,11 @@ function withLookupIds(path: ImportDraftPath, current: unknown, lookup: unknown)
 /**
  * Who applies a candidate, how and when. `grantExpiresAt` bounds the cover staging the application queues (the run's grant for a
  * preselection the worker applies, a fresh one for a choice or re-rank); absent, it is `now` plus the lookup grant.
+ * `strictPairing` (a review choice only, never stored): pair without lookupResolvedPairing, as the ranking the administrator saw did.
  */
 export type LookupApplicationIntent = {
     run: number; choice: LookupApplication['choice']; basis: LookupApplication['basis']; actorId: string; operationId: string | null; now: Date;
-    grantExpiresAt?: Date;
+    grantExpiresAt?: Date; strictPairing?: boolean;
 };
 /** A fresh lookup grant from `now`, as refreshLookupGrant sets it. */
 const freshGrant = (now: Date) => new Date(now.getTime() + METADATA_LOOKUP_JOB_LIMITS.grantMs);
@@ -490,7 +493,7 @@ export function applyLookupCandidate(doc: AdminImportDocument, previous: LookupA
     };
     const found = review ? foundNames(candidate?.release, context.aliases, { tracks: true }) : null;
     const supplied: { values: LookupAppliedValue[]; flagged: LookupValueFlag[]; pairs: LookupSubsetPair[] | null } = !candidate?.release ? { values: [], flagged: [], pairs: null }
-        : review ? reviewCandidateValues(candidate.release, doc, basis, found!)
+        : review ? reviewCandidateValues(candidate.release, doc, basis, found!, { strictPairing: intent.strictPairing === true })
             : { ...lookupCandidateValues(candidate.release, lookupFileEvidence(doc), draft, doc._id.toHexString()), pairs: null };
     const suppliedPaths = new Set<string>(supplied.values.map(item => item.path)), suppliedValues = new Map<string, unknown>(supplied.values.map(item => [item.path, item.value]));
     // The IDs this candidate offers per Album entry key, per member path and entry key, and for the label; only these may be
@@ -769,7 +772,9 @@ export function applyPreselectedLookup(doc: AdminImportDocument, record: Metadat
 /**
  * Import file evidence a re-rank compares: everything but Disc and Track Numbers, which an application itself writes (in the
  * ranking's file order, so they never change a ranking) and which would otherwise make every later trigger re-rank without new
- * evidence. A review's evidence is compared whole: it never holds a number lookup wrote, and its own numbers constrain pairing.
+ * evidence. A review's evidence is compared whole: it never holds a number lookup wrote, its own numbers constrain pairing, and
+ * its position hints come from the capture, which never changes (a ranking stored before them re-ranks once when its members
+ * carry hints; one whose members carry none differs only at a changed own number).
  */
 const rerankEvidence = (files: unknown) => Array.isArray(files)
     ? files.map(file => isRecord(file) ? Object.fromEntries(Object.entries(file).filter(([name]) => name !== 'discNumber' && name !== 'trackNumber')) : file) : files;
@@ -832,13 +837,26 @@ export function lookupAnswersNeeded(record: Partial<MetadataLookupRecord> | null
 }
 
 /**
+ * Whether the ranking an administrator was shown (`shown`, of `run`) listed candidate `key` as pairing in more than one way, read
+ * from its stored subset comparison; false for any other or malformed shape.
+ */
+const shownAmbiguous = (shown: unknown, run: number, key: string | null) => {
+    const ranking = isRecord(shown) && shown.run === run && isRecord(shown.ranking) ? shown.ranking : null;
+    const entry = key !== null && Array.isArray(ranking?.candidates) ? ranking!.candidates.find(item => isRecord(item) && item.key === key) : undefined;
+    return isRecord(entry) && isRecord(entry.comparison) && isRecord(entry.comparison.subset) && entry.comparison.subset.pairing === 'ambiguous';
+};
+/**
  * An administrator's choice of a candidate of the current run (complete, with fetched details) or of none (any finished run),
  * applied at once; the run's grant moves to that administrator (`choose`), which also bounds the cover staging it queues. Refused
  * as stale for another run, an active run or an unknown candidate, and as incomplete for a candidate without fetched details or
- * whose fetched release has another ID.
+ * whose fetched release has another ID. A review applies a candidate that the ranking the administrator was shown (`shown`, the
+ * record before a re-rank in the same request; else `record`) listed as pairing in more than one way through its strict pairing
+ * only, so a choice never writes a tracklist or member values that ranking did not show, as on a ranking stored before position
+ * hints existed; once re-ranked, choosing it again brings them in.
  */
 export function chooseLookupCandidate(doc: AdminImportDocument, record: MetadataLookupRecord | null,
-    request: { run: number; candidateKey: string | null; actorId: string; operationId: string }, now: Date, context: LookupApplicationContext = noContext): MetadataLookupRecord {
+    request: { run: number; candidateKey: string | null; actorId: string; operationId: string; shown?: unknown }, now: Date,
+    context: LookupApplicationContext = noContext): MetadataLookupRecord {
     if (!record || record.run !== request.run || isBlockingLookupState(record.state)) throw stale();
     let candidate: StoredLookupCandidate | null = null;
     if (request.candidateKey !== null) {
@@ -849,7 +867,7 @@ export function chooseLookupCandidate(doc: AdminImportDocument, record: Metadata
     }
     const { application } = applyLookupCandidate(doc, isRecord(record.applied) ? record.applied : null, candidate, {
         run: record.run, choice: candidate ? 'chosen' : 'none', basis: candidate ? 'chosen' : null, actorId: request.actorId, operationId: request.operationId, now,
-        grantExpiresAt: freshGrant(now)
+        grantExpiresAt: freshGrant(now), strictPairing: shownAmbiguous(request.shown === undefined ? record : request.shown, record.run, request.candidateKey)
     }, context);
     return refreshLookupGrant({ ...record, applied: application }, request.actorId, 'choose', now);
 }

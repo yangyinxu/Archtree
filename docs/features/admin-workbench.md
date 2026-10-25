@@ -1950,15 +1950,17 @@ Catalog review routes (relative to `/api/admin/v1`):
   whose metadata lookup run completed with candidates, and an `/adopt` that
   accepts a Luna Disc or Track Number, re-rank the stored candidates in the
   same transaction, without any request, when the change altered the ranking
-  evidence (a member's own Disc or Track Number; a title or date save
-  re-ranks nothing): the run's ranking and `lookupGate` are written with the
-  change, and a sole preselection is applied to the review's draft only while
-  the run has applied nothing (no preselection, choice or none of that run),
-  so a re-rank never removes or replaces values an application of the run
-  wrote. While lookup is unavailable, or no longer admits the review (its
-  Album deleted, not ready or changed elsewhere), the change is saved without
-  a re-rank. A failure of that write aborts the whole change, writing
-  nothing; the same request is then admitted afresh.
+  evidence (a member's own Disc or Track Number; a title or date save re-ranks
+  nothing, except once for a ranking stored before position hints existed whose
+  members now carry them, see Pairing resolution under [Metadata
+  lookup](#metadata-lookup)): the run's ranking and `lookupGate` are written
+  with the change, and a sole preselection is applied to the review's draft only
+  while the run has applied nothing (no preselection, choice or none of that
+  run), so a re-rank never removes or replaces values an application of the run
+  wrote. While lookup is unavailable, or no longer admits the review (its Album
+  deleted, not ready or changed elsewhere), the change is saved without a
+  re-rank. A failure of that write aborts the whole change, writing nothing; the
+  same request is then admitted afresh.
 - Metadata lookup admission (review creation where lookup is available, and
   the review lookup routes below, which the Web review summary calls, admit
   it): the first lookup
@@ -2040,7 +2042,9 @@ Catalog review routes (relative to `/api/admin/v1`):
   (`musicbrainz:<mbid>` or `itunes:<collection ID>`), or none
   (`candidateKey: null`), to the review's
   private draft (see Existing-Album reviews under [Value
-  application](#value-application)), and
+  application](#value-application); a ranking whose evidence changed re-ranks
+  first, and the choice follows the pairing it showed before, see Pairing
+  resolution under [Metadata lookup](#metadata-lookup)), and
   `POST /catalog-reviews/:id/lookup/resolve`
   `{operationId, expectedRevision, run, candidateKey, answers}` answers 1 to 406
   of the applied candidate's conflicts, all or nothing: each answer is exactly
@@ -2936,6 +2940,21 @@ roll back to:
   and a stored reuse or create answer for it is no longer used. Values and
   MusicBrainz IDs this release already applied stay. Open Web tabs need no
   reload.
+- Automatic pairing resolution and the review's skipped iTunes fallback need no
+  floor; no collection, index, view shape or message key changes. A release
+  before them ignores a stored subset comparison's `pairedBy`, which no view
+  projects, and its members' `positionHint`, and pairs strictly again whenever
+  it re-ranks or runs: a candidate whose pairing only positions or the
+  half-second tier made single is then unverified again and preselects nothing
+  new. It re-ranks at any save of a review whose stored members carry a
+  `positionHint`, since the evidence then differs, else at a saved Disc or Track
+  Number; until then such a candidate still shows as matching, and choosing it
+  there writes only its Album values, as for any pairing that is not single.
+  Values this release applied through such a pairing stay, `applied.pairs`
+  included, and apply as any pairing-filled numbers do. It starts the iTunes
+  fallback again in the review runs that reach that step under it; a run already
+  past that step, or completed, has no iTunes stage, which reads as not queried.
+  Open Web tabs need no reload.
 - Luna ticks need no floor of their own: an approval applies them to ordinary
   suggestion decisions and draft values. A release before them refuses the
   `suggestionTicks` this Web sends as invalid input and holds an approval
@@ -3395,6 +3414,8 @@ below). The source layer, the jobs and their routes live in
     page's Disc and Track Number filling from titles is meant to accept
     exactly the same positions (the table in
     `test/administration/lookupTitlePositions.test.ts`).
+    The same reading (`trackTitlePositions`) gives a review's pairing hints (see
+    Pairing resolution under the subset comparison below).
     Then up to three trailing segments (a `()`, `[]`, `（）` or `【】` group,
     else the text after a spaced `-`, `–` or `—`, each with text before it)
     are peeled: one naming an instrumental, off-vocal or karaoke version
@@ -3490,10 +3511,11 @@ below). The source layer, the jobs and their routes live in
     positions, Disc Numbers up to 999, Track Numbers up to 9999 and non-empty
     NFC, trimmed titles of at most 300 characters without control, invisible
     formatting or lone surrogate characters (`tracklistInvalid`). Otherwise it
-    matches when its pairing is the only one, the Album has members and every
-    paired duration is known, and it is unverified (listed, never preselected)
-    when several pairings exist, a paired duration is unknown or the Album has
-    no members (the empty pairing, so any candidate can still be chosen). The
+    matches when its pairing is the only one (or the one Pairing resolution
+    below leaves), the Album has members and every paired duration is known,
+    and it is unverified (listed, never preselected) when several pairings
+    remain, a paired duration is unknown or the Album has no members (the empty
+    pairing, so any candidate can still be chosen). The
     comparison lists the pairs, the tracks no member pairs with (the
     missing-file rows it would add, also counted), the tracks left out and the
     members no audio track can pair with (for releases of at most 100 audio
@@ -3526,6 +3548,60 @@ below). The source layer, the jobs and their routes live in
     never one known to have none, and order them by fewest extra tracks,
     unknown counts next and smaller counts last. The pairs every largest
     pairing contains (forced pairs) are computed for numbering appended files.
+  - Pairing resolution (existing-Album reviews only; `lookupResolvedPairing` in
+    `src/administration/lookup/lookupSubset.ts`, which the ranking and value
+    application both call, so a choice writes the pairs a current ranking
+    showed). When the strict pairing above finds more than one pairing, it
+    restricts every member to some of its compatible tracks and keeps the result
+    only when exactly one pairing of every member is left. First, positions:
+    each member's `positionHint` (on its evidence in `ranking.files`, present on
+    every member or none, from `lookupReviewEvidence.ts`) is the leading Disc
+    and Track Number of the Track title the review captured
+    (`catalogSource.tracks`, never the draft) or, only when those titles do not
+    count, of its retained original filename, both read by `trackTitlePositions`
+    (`lookupTrackTitles.ts`: each cleaned as Track-title searches clean titles,
+    then counted under the guard of `lookupTitlePositions.ts`); each member
+    keeps only its compatible tracks at that position, a position without a Disc
+    Number matching any disc. Then a near-exact tier: each member keeps only its
+    compatible tracks whose duration is within
+    `METADATA_LOOKUP_LIMITS.nearExactDurationMs` (500 ms, inclusive) of its own,
+    both known to the millisecond: the member's not a legacy `m:ss` one and the
+    track's not a whole number of seconds, a length MusicBrainz may hold
+    rounded. When several pairings agree with the positions, the tier chooses
+    only among them, so it never pairs a member against its position; when none
+    agrees, the positions do not count and it chooses among all. Either step
+    keeps only compatible tracks, so the 3-second tolerance and the members' own
+    numbers still hold, and a hint only chooses among tracks a member could take
+    anyway. The stored subset comparison then holds `pairing: 'unique'` with its
+    `pairs` and `pairedBy` (`titlePositions`, `fileNamePositions` or
+    `nearExactDuration`), which is absent for a pairing that was single without
+    either step and for one still ambiguous. `pairedBy` never enters a group
+    key, so equal editions still share a group, and the lookup view does not
+    project it (its subset fields are allowlisted), so the Web's strict schema
+    is unchanged. Such a pairing is single everywhere: its candidate can match,
+    group, be preselected or offered, and applying it writes the paired members'
+    values and the expected tracklist, its Disc and Track Numbers as automatic
+    values, which never constrain a later pairing. Positions are read on the
+    server only, never sent and never stored as values. They come from the
+    capture, which a save never changes, so a title save still re-ranks nothing,
+    except that a review ranking stored before hints existed, whose members now
+    carry them, re-ranks once at its next save, Luna acceptance or choice, since
+    its evidence then differs; one whose members carry none keeps its stored
+    pairing until a Disc or Track Number save or a new run, even where the
+    half-second tier would now decide it. A choice follows the pairing the
+    ranking showed the administrator: `/lookup/choose` re-ranks first
+    (`rerankCatalogReviewLookup`, in the same transaction; a preselection that
+    re-rank applies is replaced by the choice), and a candidate that the ranking
+    read before it listed as `ambiguous` is applied through the strict pairing
+    only (`chooseLookupCandidate`), so it brings in its Album values only, as
+    its card said; the re-ranked view then offers using it again, which brings
+    in its expected tracklist and track details. So two members whose titles
+    start with `1-01` and `1-02`, the first within 3 seconds of two tracks (19
+    ms and 713 ms off), pair with Disc 1 Tracks 1 and 2 by their positions, and
+    by the tier without them; two members within half a second of each other and
+    of the same two tracks, without positions, stay ambiguous. Imports keep
+    their ordered comparison and carry no hints, and the forced pairs of an
+    append's numbering (`lookupForcedPairs`) read no positions and no tier.
 - **Fixtures.** `npm run record:metadata-lookup-fixtures -- --live` re-records
   the trimmed public responses in `test/fixtures/metadataLookup/`. It contacts
   the live services with a recorder User-Agent and the contract rates, so only
@@ -3552,6 +3628,41 @@ below). The source layer, the jobs and their routes live in
   A run whose only queries are a release MBID or an ISRC has no iTunes stage.
   The stage is derived from the run's stored planned queries, so a manual
   retry repeats it.
+- **Reviews that skip it.** An existing-Album review's run does not start the
+  stage, wherever it would start (after the details, or once MusicBrainz ran out
+  of retries), when the ranking at that point holds a MusicBrainz candidate
+  first found other than by a Track-title search that is `unverified` while the
+  Album has members (its pairing is not single, or a member or paired track has
+  no duration), whose credit agrees with one of the Album's shown primary Artist
+  names (its `artistMismatch` is false while there is at least one name and none
+  of them is a placeholder credit by name or MusicBrainz ID, so a placeholder's
+  agreement never counts: the joined credit, a credited name or a credited
+  artist's canonical name equals one of them, or either part of a decorated one,
+  case-insensitively; no alias or localized name is known yet at that point),
+  and whose release title equals the title the run searched: the captured saved
+  title of a `catalog` run or the text of an Album-name submission, never a song
+  name (`catalogReviewItunesSkippable` in `lookupReviewEvidence.ts`).
+  `src/administration/lookup/lookupTitleNormalize.ts` compares the titles with
+  the Album's primary Artist names: first the ending the run drops before
+  searching, a `/` or `／` followed only by one of those names or either part of
+  a decorated one (`titleWithoutTrailingCredit`), then the text after the last
+  `／`, or after the last `/` when whitespace surrounds it, when text follows
+  it, each removed only when a letter or digit stays before it, then NFKC, lower
+  case, `「」『』()[]` read as spaces and whitespace collapsed, and one of those
+  names or either part of a decorated one removed at the start or end next to a
+  space; a title that compares as nothing equals nothing. Any other slash inside
+  a title stays, so `Fate/Zero` and `Fate/stay night` never compare alike, and a
+  name splits into parts only when it is decorated (`lookupDecoratedNames.ts`).
+  So `雪の華15周年記念ベスト盤 BIBLE／中島美嘉`, also with `/`, and a release
+  titled `雪の華15周年記念ベスト盤 BIBLE`, credited to 中島美嘉, have the same
+  title. The review page's same-title reading (`normalizedTitle` in the Web)
+  differs only in reading decorated names more loosely and in keeping a credit
+  after a slash without spaces. A skipped stage sends no iTunes request and
+  stores no `itunesStage` (the view's `itunes` stays `notQueried`, as for a run
+  whose queries give no iTunes request; nothing records that it was skipped),
+  and it leaves nothing out, so the comparison stays as complete as the searches
+  left it, and a lone matching group, such as one a later saved Disc or Track
+  Number makes, is then preselected rather than offered. Imports never skip it.
 - **Requests.** First, for a valid barcode every file shares (a placeholder,
   meaning an all-zero, malformed or bad-check-digit GTIN, is never sent),
   `lookup?upc=<digits>&entity=song` in at most two storefronts chosen by the
@@ -3866,9 +3977,12 @@ database, what the step stores and which request comes next.
   attempt: the remaining ones are dropped, both flags clear, and the run
   continues in the same step to its details, the iTunes check and its aliases,
   completing with the candidates it has; MusicBrainz exhausted before the
-  decision skips them. A matching group found only through Track titles does
-  not stop the iTunes stage. A record that is undecided but already past them,
-  or already has an iTunes stage, records them as skipped. A re-rank sends none
+  decision skips them. A matching group found only through Track titles does not
+  stop the iTunes stage, nor does a release found only through them let the run
+  skip it (see Reviews that skip it under [iTunes fallback and MusicBrainz
+  bridge](#itunes-fallback-and-musicbrainz-bridge)). A record that is undecided
+  but already past them, or already has an iTunes stage, records them as
+  skipped. A re-rank sends none
   of them. Sending them stays within the run's six planned searches and 25
   release lookups per attempt, and a run whose plan has no Track-title search
   behaves as before.
@@ -4386,7 +4500,10 @@ publication confirmation. The approval and the publication commit never read
   by its first part, which alone credits a Track-title search (see Planning
   and ranking under [Metadata lookup](#metadata-lookup)).
 - To Apple's iTunes Search API, only when MusicBrainz returned no matching
-  candidate (a match found only through Track titles does not count), and only
+  candidate (a match found only through Track titles does not count) and no
+  existing-Album review skipped it (see Reviews that skip it under [iTunes
+  fallback and MusicBrainz bridge](#itunes-fallback-and-musicbrainz-bridge)),
+  and only
   `https://itunes.apple.com/search` and `/lookup` (at most 9 requests per run
   attempt): the run's search term (its text and credited artist, a submitted
   Artist name included while both fit the 200-character term, never a
@@ -4403,7 +4520,8 @@ publication confirmation. The approval and the publication commit never read
   identifiers, and sends at most two saved Track titles (without a guarded
   leading position or a trailing version or featuring note; a title named
   like its file is sent only without its position, never as the filename)
-  only to MusicBrainz, as above. The following
+  only to MusicBrainz, as above. Its ranking reads the original filenames'
+  leading positions on the server only, to choose among pairings. The following
   generic titles are never searched; they are compared folded (NFKC, lower
   case, no punctuation, symbol or whitespace) with trailing digits removed, so
   `Interlude 2` and `Track01` are generic too (`GENERIC_TRACK_TITLES` in

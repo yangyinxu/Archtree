@@ -17,6 +17,8 @@
  *   - Credits naming one Artist in two letter cases show one entry, so the Album's list is never applied while a title still is; a list captured before that rule is applied only once answered with lookup
  *   - an expected tracklist applies only while every paired member sits at its row after the selected changes, and pairing-filled numbers only with a tracklist that places them
  *   - pairing-filled numbers apply alone against a kept tracklist that places them, and never against one that does not
+ *   - members without own numbers whose saved titles start with Disc and Track positions pair by them: the run preselects, fills automatic numbers and applying writes them with the tracklist
+ *   - a choice on a ranking stored before position hints existed re-ranks it first and brings in Album values only, as shown; choosing again brings in the tracklist and numbers
  *   - member Credits: a conflict kept is never applied and an unanswered one waits; a used one replaces legacy Credits of the Artists it names and keeps every other Credit
  *   - a member whose track credits only a placeholder, or nothing, keeps no Credits even when the Album gains its first primary Artist
  *   - a write failing late in the apply, or Credit writes turned off, leaves no record, ID, Credit, tracklist or receipt behind; the same apply is then admitted once
@@ -467,6 +469,61 @@ test('pairing-filled numbers apply alone against a kept tracklist that places th
         } else await assert.rejects(applyShown(id, numbers), code('ADMIN_IMPORT_INVALID_INPUT'));
         await db().collection('audioTracks').updateMany({}, { $unset: { trackNumber: '' } });
     }
+}));
+
+test('members without own numbers whose saved titles start with Disc and Track positions pair by them: the run preselects, fills automatic numbers and applying writes them with the tracklist', () => withLookup(async () => {
+    // Both members last 1:00 (legacy whole seconds) like both release tracks, so durations alone fit them either way.
+    await db().collection('audioTracks').updateMany({}, { $unset: { trackNumber: '' } });
+    for (const [id, title] of [[first, '1-01 Synthetic Night'], [second, '1-02 Synthetic Goose']] as const) await db().collection('audioTracks').updateOne({ _id: id }, { $set: { title } });
+    const { id, _id, slots } = await completedReview(run());
+    const stored = await db().collection('adminImportLookups').findOne({ _id });
+    assert.deepEqual([stored!.ranking.preselection?.basis, stored!.ranking.candidates[0].comparison.subset.pairing, stored!.ranking.candidates[0].comparison.subset.pairedBy,
+        stored!.ranking.files.map((file: any) => file.positionHint)], ['exactTrackCount', 'unique', 'titlePositions',
+        [{ discNumber: 1, trackNumber: 1, from: 'title' }, { discNumber: 1, trackNumber: 2, from: 'title' }]]);
+    assert.deepEqual(stored!.applied.pairs, [{ slotId: slots[0], discNumber: 1, trackNumber: 1 }, { slotId: slots[1], discNumber: 1, trackNumber: 2 }]);
+    assert.deepEqual((await current(id)).item.draft.tracks.map(track => [track.discNumber, track.trackNumber]), [[1, 1], [1, 2]]);
+    // The view projects its subset fields one by one, so how the pairing was decided stays on the server.
+    const view = await (await request(`/catalog-reviews/${id}/lookup`)).json() as any;
+    assert.deepEqual([view.lookup.candidates[0].comparison.subset.pairing, Object.keys(view.lookup.candidates[0].comparison.subset).includes('pairedBy')], ['unique', false]);
+    const applied = await applyShown(id, [field('expectedTracklist'), ...slots.map(slotId => field('trackNumber', slotId))]);
+    assert.equal(applied.item.state, 'applied');
+    assert.deepEqual([(await record('audioTracks', first)).trackNumber, (await record('audioTracks', second)).trackNumber], [1, 2]);
+    assert.deepEqual((await record('albums', album)).expectedTracklist.rows.map((row: any) => [row.discNumber, row.trackNumber, row.durationMs]), [[1, 1, 60_000], [1, 2, 60_000]]);
+    // Titles without positions leave the same release unsettled: nothing is preselected.
+    await db().collection('adminAlbumImports').deleteMany({}); await db().collection('adminImportLookups').deleteMany({});
+    await db().collection('albums').updateOne({ _id: album }, { $unset: { expectedTracklist: '' } });
+    await db().collection('audioTracks').updateMany({}, { $unset: { trackNumber: '' } });
+    for (const [index, track] of [first, second].entries()) await db().collection('audioTracks').updateOne({ _id: track }, { $set: { title: `Track ${index + 1}` } });
+    const control = await completedReview(run());
+    const unsettled = await db().collection('adminImportLookups').findOne({ _id: control._id });
+    assert.deepEqual([unsettled!.ranking.preselection, unsettled!.ranking.candidates[0].comparison.subset.pairing, unsettled!.applied], [null, 'ambiguous', null]);
+}));
+
+test('a choice on a ranking stored before position hints existed re-ranks it first and brings in Album values only, as shown; choosing again brings in the tracklist and numbers', () => withLookup(async () => {
+    // Both members last 1:00 like both release tracks, and their titles carry no position: the run leaves the release unsettled.
+    await db().collection('audioTracks').updateMany({}, { $unset: { trackNumber: '' } });
+    const { id, _id, slots } = await completedReview(run()), candidateKey = `musicbrainz:${lookupMbid(1)}`;
+    const stored = await db().collection('adminImportLookups').findOne({ _id });
+    assert.deepEqual([stored!.ranking.candidates[0].comparison.subset.pairing, stored!.applied, stored!.ranking.files.some((file: any) => 'positionHint' in file)], ['ambiguous', null, false]);
+    // The captured titles start with their positions, as an Album's titles did before this release read them as pairing hints.
+    await db().collection('adminAlbumImports').updateOne({ _id }, { $set: { 'catalogSource.tracks.0.title': '1-01 Track 1', 'catalogSource.tracks.1.title': '1-02 Track 2' } });
+    const shown = await (await request(`/catalog-reviews/${id}/lookup`)).json() as any;
+    assert.equal(shown.lookup.candidates[0].comparison.subset.pairing, 'ambiguous');
+    // Choosing it as shown (Album values only) re-ranks first: the record and the view then pair the members in one way.
+    await chooseCatalogReviewLookup(String(actor), id, { ...mutation((await current(id)).item.revision), run: 1, candidateKey });
+    const chosen = await db().collection('adminImportLookups').findOne({ _id });
+    assert.deepEqual([chosen!.applied.choice, chosen!.applied.pairs, chosen!.ranking.candidates[0].comparison.subset.pairedBy, chosen!.ranking.files.map((file: any) => file.positionHint?.trackNumber)],
+        ['chosen', null, 'titlePositions', [1, 2]]);
+    let draft = (await current(id)).item.draft;
+    assert.deepEqual([draft.album.expectedTracklist, draft.tracks.map(track => [track.discNumber, track.trackNumber])], [null, [[null, null], [null, null]]]);
+    const view = await (await request(`/catalog-reviews/${id}/lookup`)).json() as any;
+    assert.deepEqual([view.lookup.candidates[0].comparison.subset.pairing, view.lookup.applied.pairs], ['unique', null]);
+    // Choosing it again, now shown as pairing in one way, brings in the expected tracklist and the members' numbers.
+    await chooseCatalogReviewLookup(String(actor), id, { ...mutation((await current(id)).item.revision), run: 1, candidateKey });
+    const again = await db().collection('adminImportLookups').findOne({ _id });
+    assert.deepEqual(again!.applied.pairs, [{ slotId: slots[0], discNumber: 1, trackNumber: 1 }, { slotId: slots[1], discNumber: 1, trackNumber: 2 }]);
+    draft = (await current(id)).item.draft;
+    assert.deepEqual([(draft.album.expectedTracklist as unknown[]).length, draft.tracks.map(track => [track.discNumber, track.trackNumber])], [2, [[1, 1], [1, 2]]]);
 }));
 
 test('member Credits: a conflict kept is never applied and an unanswered one waits; a used one replaces legacy Credits of the Artists it names and keeps every other Credit', () => withLookup(async () => {

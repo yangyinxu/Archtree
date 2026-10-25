@@ -308,6 +308,15 @@ gate document (one request at a time, 3 seconds apart). The release before the
 fallback ignores these fields (see
 [Rollback floors](../features/admin-workbench.md#rollback-floors)).
 
+Automatic pairing resolution adds no collection, index or
+`requiredIndexRevision` change: a review's stored ranking may hold each member's
+`positionHint` in its `files` (a bounded Disc and Track Number and its source,
+read from the capture) and, on a candidate's subset comparison, `pairedBy`, the
+step that decided its pairing (a bounded value, not projected); a review run
+that skips the iTunes fallback stores no `itunesStage`. The release before it
+ignores both (see
+[Rollback floors](../features/admin-workbench.md#rollback-floors)).
+
 MusicBrainz IDs add two required unique partial indexes, `artist_musicbrainz_id`
 on `artists` and `organization_musicbrainz_id` on `organizations`, each
 `{ musicBrainzId: 1 }` with the partial filter

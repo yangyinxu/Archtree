@@ -754,6 +754,21 @@ player control still works.
   ① 查找发行, 已更新的内容, 厂牌) and with a screen reader at 320 CSS px,
   confirming the steps are announced as a group of three label and value pairs
   and not on each refresh.
+- As an administrator, with metadata lookup configured against MusicBrainz in a
+  development environment, open the Album completion of an Album whose tracks
+  have exact durations but no Disc or Track Numbers, whose track titles start
+  with them, such as 1-01 and 1-02, and whose first track's duration is within 3
+  seconds of two tracks of its release, such as CANDY LIVE 2, and look it up
+  again by its title. Confirm the release is applied without entering any
+  numbers, that lookup never reports searching iTunes and no candidate is marked
+  iTunes only, and that Update original Album lists the Disc and Track Numbers
+  lookup filled with the expected tracklist. Repeat for an Album whose tracks
+  have no duration and whose titles start with their numbers, such as
+  雪の華15周年記念ベスト盤 BIBLE／中島美嘉 with 1.01.雪の華 and 1.02.WILL, and
+  confirm its releases of the same title are listed without iTunes-only releases
+  and that Use this release on one of them, before any number is saved, brings
+  in its expected tracklist and the members' numbers. Repeat in Simplified
+  Chinese (使用此发行, 更新原专辑, 仅来自 iTunes).
 - As an administrator, in English and then in Simplified Chinese, open an
   import's Draft section and Review and publish summary and an existing-Album
   review. Confirm every control that starts Luna reads "Use Luna AI (paid)" or
