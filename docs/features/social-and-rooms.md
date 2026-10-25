@@ -333,6 +333,54 @@ Run it safely:
   FFmpeg-enabled deployment has been verified; keep the log's final summary with
   the release evidence.
 
+#### Audio duration backfill preview
+
+Audio analyzed before the duration probe existed keeps
+`mediaRepresentation.durationMs: null` when rooms reject its format (FLAC and
+the other lossless formats above), and the single-file Content Manager form
+stored an empty display `duration` unless one was typed. Such a track has no
+duration that metadata lookup can read, so no release can be verified for its
+Album. `npm run backfill:audio-durations` previews the repair from an operator
+checkout. It walks ready, published Audio in ID order and selects each track
+with neither a positive exact duration nor a readable `m:ss`/`h:mm:ss` display
+duration, the rule Album completion applies. It then downloads the current
+source, pinned to the stored ETag/version when a readable representation
+exists, and decodes it with the probe. The preview never writes to the database
+or storage and has no `--apply`.
+
+```sh
+# Catalog reads only: list the candidates without downloading.
+npm run backfill:audio-durations -- --catalog-only --log=audio-durations.jsonl
+# Download and measure each candidate (at most --limit=1..1000, default 100, per run).
+npm run backfill:audio-durations -- --log=audio-durations.jsonl
+# Continue after the previous summary's resumeAfter until a summary reports finished=true.
+npm run backfill:audio-durations -- --log=audio-durations.jsonl --after=<resumeAfter>
+```
+
+Each candidate prints one JSON line: `mediaTrackId`, `albumId`, Disc and Track
+Numbers, `representation` (`missing` when never analyzed, `stored`, or
+`invalid` when malformed), `result` (`wouldUpdate`, `unprobeable`, `stale` for a
+replaced or missing object, `failed` with a bounded `reason`, or `listed` with
+`--catalog-only`), the measured `durationMs`, and `set`, the fields an apply
+would write: `mediaRepresentation.durationMs` only on a readable `unsupported`
+representation, and the whole-second display `duration`. A summary line
+follows. Titles, storage keys and validators are never printed. Exit codes: 0
+finished or limited (see `finished`), 1 could not run, 130/143 interrupted. Use
+the same private `.env`, FFmpeg runtime and read-only S3 permissions as the
+room audio backfill; each measured candidate downloads its full source into
+`TMPDIR`.
+
+An apply mode is deliberately absent until the owner approves a production
+write. When added, it must `$set` only the previewed fields with one
+`updateOne` per track, filtered on `_id`, `s3Key`, the `duration` it read and
+the exact `mediaRepresentation` it read, so a replaced, re-analyzed or edited
+track is skipped rather than overwritten. It must create no representation
+revision, room analysis evidence or storage object. For a `missing` track,
+explicit room audio analysis from a checkout that contains the probe also
+records the exact duration in a new `unsupported` representation. An
+existing-Album review keeps the member durations it captured, so discard and
+reopen a review started before the backfill.
+
 Verified room response MIME types come from the inspected format rather than an
 upload declaration. Room URLs pin an opaque media revision and HEAD/GET validate the same stored S3
 ETag/version. S3 permissions must cover `GetObjectVersion` and

@@ -1692,7 +1692,9 @@ Catalog review routes (relative to `/api/admin/v1`):
   format-3 review whose capture this release cannot read is
   `409 ADMIN_IMPORT_RELOAD_REQUIRED`. The capture, kept server-only at
   `catalogCapture`, holds each member's duration (its exact media duration, or
-  else its whole-second text) and attribution state (an explicit `unknown`
+  else its whole-second text; see
+  [Audio duration backfill preview](social-and-rooms.md#audio-duration-backfill-preview)
+  for members with neither) and attribution state (an explicit `unknown`
   kept apart from none); the Album's and each member's ordered Credits as the
   canonical Credit lifecycle reads them (an unmigrated member's legacy Artist
   links as legacy unspecified Credits, an unreadable list as unreadable), each
