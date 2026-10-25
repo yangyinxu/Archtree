@@ -18,6 +18,7 @@
  *   - in subset mode a collection is kept with at least as many tracks as members or an unknown count, fewest extra first across the stage's answers, up to four; songs are unchanged
  *   - a review's stage that leaves out only collections with more tracks than members keeps its exact-count flag; an unknown or equal count, a song or an unknown member count clears it
  *   - a submitted Artist name is the iTunes term's artist, and a Track-title search never gives an iTunes request, even planned first
+ *   - a decorated artist tag gives the iTunes term its first part, from the first search, while a typed decorated Artist name stays whole
  * @end-catalog */
 
 /**
@@ -399,4 +400,17 @@ test('a submitted Artist name is the iTunes term\'s artist, and a Track-title se
     const stage = startItunesStage([titleSearch, release('Synthetic Album', { artist: 'Synthetic Ensemble' })], 'noMatch', 'subset')!;
     assert.deepEqual([stage.text, stage.requests.map(request => request.kind === 'itunesSearch' && request.term)], ['synthetic album', ['Synthetic Album Synthetic Ensemble', 'Synthetic Album Synthetic Ensemble']]);
     assert.equal(JSON.stringify(stage).includes('Distinct'), false);
+});
+
+test('a decorated artist tag gives the iTunes term its first part, from the first search, while a typed decorated Artist name stays whole', () => {
+    const decorated = 'ヰ世界情緒 -Isekaijoucho-';
+    const terms = (input: Parameters<typeof planMetadataLookup>[0]) => itunesRequestsFor(planMetadataLookup(input).queries)
+        .map(request => request.kind === 'itunesSearch' && request.term);
+    const tagged = terms({ trigger: 'tags', fileCount: 2, tags: { album: 'CANDY LIVE 2', albumArtist: decorated, title: null, artist: null } });
+    assert.ok(tagged.length > 0);
+    for (const term of tagged) assert.equal(term, 'CANDY LIVE 2 ヰ世界情緒');
+    const typed = terms({ trigger: 'submitted', fileCount: 2, submitted: { kind: 'album', text: 'CANDY LIVE 2', artist: decorated },
+        tags: { album: null, albumArtist: decorated, title: null, artist: null } });
+    assert.ok(typed.length > 0);
+    for (const term of typed) assert.equal(term, `CANDY LIVE 2 ${decorated}`);
 });

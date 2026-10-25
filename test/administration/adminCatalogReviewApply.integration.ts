@@ -8,6 +8,7 @@
  * Tests
  *   - candidates and decisions routes guard authentication, the current admin and the viewer, stay private, take 768 KB in any letter case, and decisions replay unlisted
  *   - applying fills Artist entries, the label, member Credits from their own tracks and the expected tracklist, creating and reusing records with their IDs, once across retries
+ *   - a decorated primary Artist agrees with a release credited to its first part: applying keeps the Artist and its name, records the release's MusicBrainz ID and needs no decision
  *   - an editor that sends fields only applies them without Credits, records, IDs, tracklist or identity fence
  *   - a name candidate needs an explicit decision, a candidate that appears after the confirmation read shows its row again, and a decided record that changed is stale
  *   - a captured Artist or a member's Artist renamed during the review makes it stale and nothing is written; an ID holder appearing shows the row again, and one not ready is an identity change
@@ -224,6 +225,28 @@ test('applying fills Artist entries, the label, member Credits from their own tr
     assert.deepEqual(await applyCatalogReview(String(actor), id, body), applied);
     assert.equal(await catalogState(), state);
     assert.deepEqual([await db().collection('artists').countDocuments({ name: 'Track Singer' }), await db().collection('organizations').countDocuments()], [1, 1]);
+}));
+
+test('a decorated primary Artist agrees with a release credited to its first part: applying keeps the Artist and its name, records the release\'s MusicBrainz ID and needs no decision', () => withLookup(async () => {
+    const decorated = '合成情緒 -Gouseijoucho-';
+    await db().collection('artists').updateOne({ _id: artist }, { $set: { name: decorated } });
+    const { id, _id } = await completedReview([reviewSearch({ release: 'Existing Album', artist: '合成情緒' }, [[lookupMbid(1), 2]]),
+        reviewSearch({ release: 'Existing Album' }, [[lookupMbid(1), 2]]), reviewSearch({ release: 'Existing Album', artist: decorated }, []),
+        ...creditedRelease(lookupMbid(1), { releaseArtists: [[lookupMbid(30), '合成情緒']], label: null })]);
+    // The run searched the first part first, preselected the release without a flag and raised no Artist conflict.
+    const stored = (await db().collection('adminImportLookups').findOne({ _id }))!;
+    assert.deepEqual([stored.queries.map((query: { query: unknown }) => query.query), stored.ranking.preselection?.artistMismatch, stored.applied.candidateKey,
+        stored.applied.conflicts.map((item: { path: string }) => item.path).filter((path: string) => path.endsWith('.artists'))], [[{ release: 'Existing Album', artist: '合成情緒' },
+        { release: 'Existing Album' }, { release: 'Existing Album', artist: decorated }], false, `musicbrainz:${lookupMbid(1)}`, []]);
+    assert.deepEqual((await current(id)).item.draft.album.artists.map(entry => [entry.name, entry.musicBrainzId]), [[decorated, lookupMbid(30)]]);
+    // The entry is bound to its captured Artist, which records the ID; nothing needs a decision.
+    const shown = await candidatesOf(id), row = shown.identities.find(item => item.musicBrainzId === lookupMbid(30))!;
+    assert.deepEqual([row.state, row.bound.map(item => item.id), row.needsAnswer, row.musicBrainzIdWrite?.musicBrainzId], ['bound', [String(artist)], false, lookupMbid(30)]);
+    const applied = await applyShown(id, [field('artists')]);
+    assert.equal(applied.item.state, 'applied');
+    const kept = await record('artists', artist);
+    assert.deepEqual([kept.name, kept.musicBrainzId, await db().collection('artists').countDocuments()], [decorated, lookupMbid(30), 1]);
+    assert.deepEqual((await record('albums', album)).credits.map((credit: any) => [credit.subjectId, credit.role]), [[String(artist), 'primary']]);
 }));
 
 test('an editor that sends fields only applies them without Credits, records, IDs, tracklist or identity fence', () => withLookup(async () => {

@@ -13,6 +13,7 @@
  *   - each member's Track-title search is credited to its own first shown primary Artist name, never an unshown or placeholder Credit
  *   - without a usable name of its own, a member is credited to the Album's first primary name that is no placeholder by name or MusicBrainz ID, else searched alone
  *   - a saved title equal to the submitted name, with its note or in another case, is not searched again, and the next one in rank takes its place
+ *   - a review with numbered saved titles and a decorated primary name plans its Track titles without positions, credited to the first part, and never sends a filename
  *   - only a review compares in subset mode
  * @end-catalog */
 
@@ -230,6 +231,38 @@ test('a saved title equal to the submitted name, with its note or in another cas
         .map(query => (query as { recording: string }).recording);
     assert.deepEqual(recordings('first saved song (Live)'), ['Second Saved Song', 'Third Saved Song']);
     assert.deepEqual(recordings('Other'), ['Second Saved Song', 'First Saved Song']);
+});
+
+test('a review with numbered saved titles and a decorated primary name plans its Track titles without positions, credited to the first part, and never sends a filename', () => {
+    const decorated = '合成情緒 -Gouseijoucho-';
+    const doc = reviewLookupDocument({ title: 'Synthetic Live 2', primaryNames: [decorated], members: [{ durationMs: 215_659, title: '1-01 Synthetic Night(Live)' },
+        { durationMs: 382_752, title: '1-02 Synthetic Mother Goose(Live)' }] });
+    // Each saved title is named like its retained file.
+    for (const track of (doc.catalogSource as unknown as { tracks: { title: string; originalFileName: string }[] }).tracks) track.originalFileName = `${track.title}.wav`;
+    const planned = planCatalogReviewLookup(doc).plan.queries;
+    assert.deepEqual(planned, [
+        { kind: 'musicBrainzReleaseSearch', query: { release: 'Synthetic Live 2', artist: '合成情緒' }, basis: 'albumText' },
+        { kind: 'musicBrainzReleaseSearch', query: { release: 'Synthetic Live 2' }, basis: 'albumText' },
+        { kind: 'musicBrainzReleaseSearch', query: { release: 'Synthetic Live 2', artist: decorated }, basis: 'albumText' },
+        trackTitle('Synthetic Mother Goose', '合成情緒', 'noMatchOrPartial'), trackTitle('Synthetic Night', '合成情緒', 'noMatchOrPartial')
+    ]);
+    const sent = JSON.stringify(planned);
+    for (const text of ['1-01', '1-02', '.wav', '(Live)']) assert.equal(sent.includes(text), false, text);
+    // The ranking's artist evidence keeps the saved name as it is.
+    assert.deepEqual(catalogReviewFileEvidence(doc).map(file => file.artistTags), [[decorated], [decorated]]);
+    // A saved title ending in a slash and a part of that name is searched without the ending; a submitted name is sent as typed.
+    const best = reviewLookupDocument({ title: 'Synthetic Best／合成情緒', primaryNames: [decorated] });
+    assert.deepEqual(terms(planCatalogReviewLookup(best).plan.queries), [{ release: 'Synthetic Best', artist: '合成情緒' }, { release: 'Synthetic Best' },
+        { release: 'Synthetic Best', artist: decorated }]);
+    assert.deepEqual(terms(planCatalogReviewLookup(best, { submitted: { kind: 'album', text: 'Synthetic Best／合成情緒' } }).plan.queries), [
+        { release: 'Synthetic Best／合成情緒', artist: '合成情緒' }, { release: 'Synthetic Best／合成情緒' }, { release: 'Synthetic Best／合成情緒', artist: decorated }]);
+    // Positions written with dots and no space, under such a title, are removed too; titles named like their files are still searched.
+    const dotted = reviewLookupDocument({ title: 'Synthetic Best／合成情緒', primaryNames: [decorated], members: [{ durationMs: 200_000, title: '1.01.Synthetic Snow' },
+        { durationMs: 210_000, title: '1.02.Synthetic Will' }] });
+    for (const track of (dotted.catalogSource as unknown as { tracks: { title: string; originalFileName: string }[] }).tracks) track.originalFileName = `${track.title}.flac`;
+    const numbered = planCatalogReviewLookup(dotted).plan.queries;
+    assert.deepEqual(terms(numbered, true), [{ recording: 'Synthetic Snow', artist: '合成情緒' }, { recording: 'Synthetic Will', artist: '合成情緒' }]);
+    for (const text of ['1.0', '.flac', '／']) assert.equal(JSON.stringify(numbered).includes(text), false, text);
 });
 
 test('only a review compares in subset mode', () => {

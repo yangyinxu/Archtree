@@ -708,6 +708,25 @@ player control still works.
   every few seconds, and that a new name asks before replacing the run. Repeat
   in Simplified Chinese (从标题填写碟号/曲号, 可能匹配, 离开页面后查找仍会继续。) and with a screen
   reader at 320 CSS px.
+- As an administrator, with metadata lookup configured against MusicBrainz in a
+  development environment, open the Album completion of an Album whose primary
+  Artist is saved with its romanized name added, such as
+  ヰ世界情緒 -Isekaijoucho-, and whose track titles all start with their Disc
+  and Track Numbers, such as 1-01 and 1-02, and look it up again by its title
+  with the Artist field empty. Confirm the releases credited to ヰ世界情緒 are
+  listed; that choosing one shows no conflict on the Album's Artists (a
+  member whose Credits have another role only still gets one on its own
+  Artists), keeps the saved Artist name and, when that Artist keeps no
+  MusicBrainz ID, lists its ID among the IDs Update original Album records;
+  and that a release applied automatically shows no note that it credits an
+  artist none of the Album's primary Artists names. Repeat for an Album whose
+  title ends with a slash and its Artist, such as
+  雪の華15周年記念ベスト盤 BIBLE／中島美嘉 with track titles 1.01.雪の華 and
+  1.02.WILL, starting its completion with Complete from MusicBrainz (free)
+  on the Album page so the automatic lookup searches its saved title, and
+  confirm the release titled without that ending is listed and a release
+  that only a song title found is marked Found through a track title.
+  Repeat in Simplified Chinese (通过曲名找到).
 - As an administrator, open an unfinished Album completion and choose Discard
   completion. Confirm its confirmation names the Album and says the catalog
   does not change; Cancel keeps the completion; confirming returns to the Album

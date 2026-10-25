@@ -48,6 +48,7 @@
  *   - only a review admits the expected tracklist and member Artist entries as lookup value paths
  *   - a review choice fills an empty label, date, expected tracklist and missing Disc Numbers, records conflicts for differing titles, stores its pairing, stages no cover and reads no file tags
  *   - review Artist entries agree by an alias, by a stored ID under another credited name and by byline phrases; reordered entries are one conflict keeping the saved keys
+ *   - a decorated saved Album name agrees with a release credited to either part: it keeps its name, gains the ID and is no conflict; a member does the same
  *   - review entries appended after agreeing saved entries are written as the saved list extended; choosing none or another candidate restores the saved list
  *   - a changed join phrase and an added name equal to a saved one are each one conflict on the whole list; another MusicBrainz ID under the same name is an ID conflict
  *   - a lookup answer to an extended list's ID conflict keeps the saved list: none or another candidate restores it with its kept ID, and the same candidate again keeps the answer
@@ -1103,6 +1104,27 @@ test('review Artist entries agree by an alias, by a stored ID under another cred
     assert.deepEqual(swapped.application.conflicts, [{ path: 'album.artists', slotId: null, answer: null, lookup: [lookupEntry(reviewEntryKey(1), 'Synthetic Second', syntheticMbid(2), 'primary', ', '),
         lookupEntry(reviewEntryKey(0), 'Synthetic Lead', syntheticMbid(1))] }]);
     assert.deepEqual(reviewDraftOf(reordered).album.artists.map(item => item.name), ['Synthetic Lead', 'Synthetic Second']);
+});
+
+test('a decorated saved Album name agrees with a release credited to either part: it keeps its name, gains the ID and is no conflict; a member does the same', () => {
+    const decorated = '合成情緒 -Gouseijoucho-', one = [200_000];
+    for (const name of ['合成情緒', 'Gouseijoucho']) {
+        const doc = reviewLookupDocument({ albumEntries: [{ name: decorated }] });
+        const { application } = applyLookupCandidate(doc, null, reviewRelease(1, one, { releaseCredit: credit(name, syntheticMbid(1)) }), intent());
+        assert.deepEqual([application.conflicts, reviewDraftOf(doc).album.artists], [[], [lookupEntry(reviewEntryKey(0), decorated, syntheticMbid(1))]], name);
+        assert.deepEqual(application.musicBrainzIds?.filter(item => item.path === 'album.artists'),
+            [{ path: 'album.artists', entryKey: reviewEntryKey(0), musicBrainzId: syntheticMbid(1) }], name);
+    }
+    // Another name is still one conflict on the whole list.
+    const other = reviewLookupDocument({ albumEntries: [{ name: decorated }] });
+    assert.deepEqual(pathsOf(applyLookupCandidate(other, null, reviewRelease(1, one, { releaseCredit: credit('合成', syntheticMbid(2)) }), intent()).application.conflicts),
+        ['album.artists']);
+    // A member's decorated entry agrees with its own track's credit, keeps its key and name and gains the ID, recorded with its path.
+    const member = reviewLookupDocument({ albumEntries: [{ name: 'Synthetic Ensemble' }], members: [{ durationMs: 200_000, trackNumber: 1, artists: [{ name: decorated }] }] });
+    const path = `tracks.${reviewSlot(0)}.artists`;
+    const applied = applyLookupCandidate(member, null, reviewRelease(1, one, { credits: [credit('合成情緒', syntheticMbid(5))] }), intent()).application;
+    assert.deepEqual([pathsOf(applied.conflicts), reviewDraftOf(member).tracks[0].artists], [[], [lookupEntry(reviewMemberEntryKey(0, 0), decorated, syntheticMbid(5))]]);
+    assert.deepEqual(applied.musicBrainzIds?.filter(item => item.path === path), [{ path, entryKey: reviewMemberEntryKey(0, 0), musicBrainzId: syntheticMbid(5) }]);
 });
 
 test('review entries appended after agreeing saved entries are written as the saved list extended; choosing none or another candidate restores the saved list', () => {

@@ -19,6 +19,7 @@ import {
     METADATA_LOOKUP_LIMITS, SAME_AS_RELEASE_CREDIT, type LookupArtistCredit, type LookupDate, type MusicBrainzRelease, type MusicBrainzReleaseSummary,
     type MusicBrainzTrack
 } from './lookupContract';
+import { decoratedNameParts } from './lookupDecoratedNames';
 import { isPlaceholderCredit, normalizeGtin, normalizeItunesId, normalizeMusicBrainzId } from './lookupIdentifiers';
 import {
     LOOKUP_EXPECTED_TRACKLIST_BOUNDS, expectedTracklistFromRelease, lookupAudioTrackCount, lookupDurationMs, lookupSubsetPairing, lookupSubsetTrackCountPlausible,
@@ -356,13 +357,14 @@ const compareSubset = (release: MusicBrainzRelease, files: readonly LocalFileEvi
 };
 
 /**
- * True when artist tags exist and none equals the joined credit, a credited name, a canonical artist name, an alias the lookup
- * found for a credited artist (`aliases`, by MusicBrainz ID) or another name of an iTunes localized name group (`localized`) that
- * holds one of those names.
+ * True when artist tags exist and none, nor either part of a decorated one (lookupDecoratedNames.ts), equals the joined credit, a
+ * credited name, a canonical artist name, an alias the lookup found for a credited artist (`aliases`, by MusicBrainz ID) or another
+ * name of an iTunes localized name group (`localized`) that holds one of those names. Only the tag side is read for parts.
  */
 const artistMismatchFor = (release: MusicBrainzRelease, files: readonly LocalFileEvidence[], aliases?: ReadonlyMap<string, readonly string[]>,
     localized?: readonly (readonly string[])[]) => {
-    const tags = new Set(files.flatMap(file => file.artistTags).filter(tag => typeof tag === 'string').map(folded).filter(Boolean));
+    const tags = new Set(files.flatMap(file => file.artistTags).filter((tag): tag is string => typeof tag === 'string')
+        .flatMap(tag => [tag, ...(decoratedNameParts(tag) ?? [])]).map(folded).filter(Boolean));
     if (!tags.size) return false;
     const names = new Set([
         folded(release.artistCredit.map(credit => credit.name + credit.joinPhrase).join('')),

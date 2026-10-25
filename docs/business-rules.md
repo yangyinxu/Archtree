@@ -881,9 +881,11 @@ The wire protocol and operational bounds are documented in
   entry, never split. A track's credit is usable when an entry remains after
   placeholders and repeats are dropped and the list is not left out for its
   format or a review bound; a left-out list is shown. An entry names a
-  captured Artist when that Artist's saved name equals, case-insensitively,
-  the entry's name or a name or alias lookup found for its MusicBrainz ID, or
-  when that Artist already keeps the entry's MusicBrainz ID. A paired member
+  captured Artist when that Artist's saved name, or either part of a
+  decorated one (see Administrator Metadata Lookup), equals,
+  case-insensitively, the entry's name or a name or alias lookup found for
+  its MusicBrainz ID, or when that Artist already keeps the entry's
+  MusicBrainz ID. A paired member
   without any Artist Credit receives a usable proposal as automatic values,
   whether its attribution is unknown or not stored. A member whose track
   Artist entries agree with the proposal, as many entries, each naming the
@@ -1987,6 +1989,19 @@ The wire protocol and operational bounds are documented in
   repeat it, and the box shows it again until another run replaces it; it
   never becomes an Artist entry or other draft value, never counts as
   evidence for an identity or a preselection, and is never given to Luna.
+- An artist tag or saved Artist name is decorated when a name without Latin
+  letters is followed by its romanized form, in Latin letters with only
+  digits, spaces and simple punctuation besides, between hyphens after a
+  space, as in `ヰ世界情緒 -Isekaijoucho-`, or in round brackets, full-width
+  forms included. Its first part is that name and its other part the
+  romanized form. A search for an Album or song name credited to a
+  decorated name, other than a Track-title search, is sent credited to its
+  first part and then to the whole name; the added search counts among the
+  run's planned searches, so it may leave room for only one Track-title
+  search. A saved Album title that ends in `／` or `/` and one of the Album's
+  primary Artist names, or either part of a decorated one, is searched
+  without that ending. A submitted name or Artist name is sent as typed and
+  never read this way.
 - Metadata lookup uses these sources in order:
   - MusicBrainz is the primary source, with Cover Art Archive for artwork.
   - Unless MusicBrainz returns a matching candidate, the Apple iTunes Search API
@@ -2061,8 +2076,9 @@ The wire protocol and operational bounds are documented in
   when not every release the search found could be compared; the only
   matching group of a partial comparison is offered, not applied, and needs no
   answer. A preselection whose credited artist agrees with no
-  non-empty artist tag of the files, directly or through a MusicBrainz alias or
-  iTunes localized name that the lookup found, is flagged and never collapsed. A
+  non-empty artist tag of the files, or either part of a decorated one,
+  directly or through a MusicBrainz alias or iTunes localized name that the
+  lookup found, is flagged and never collapsed. A
   preselection is a proposal that the publication approval confirms. An
   incomplete or unranked candidate is never preselected. An iTunes-only
   candidate is preselected only after MusicBrainz answered without a release or
@@ -2093,7 +2109,16 @@ The wire protocol and operational bounds are documented in
   no Artist because the Album shows no primary Artist name usable for search
   and none was submitted; otherwise only because no candidate matches or the
   comparison is partial. Track titles are compared and searched without a
-  trailing version or featuring note. The most distinctive titles are
+  trailing version or featuring note and, when every member's title starts
+  with a position, all of one form, either a Track Number or a Disc Number,
+  `-` or `.` and a Track Number, followed by a period, spaces, or a spaced
+  period, hyphen or dash, as in `1-01 Song`, `1.01.Song` or `01 - Song`,
+  and those positions are distinct and increase in Album order, without
+  that position. A Track Number alone counts only on an Album of two or
+  more members, and a lone member's title only with a Disc Number and a
+  Track Number written with a leading zero. The rest is checked like any
+  other title, so `1.01.雪の華` is searched as `雪の華`, even when its file
+  was named `1.01.雪の華.flac`. The most distinctive titles are
   picked: a title must occur once in the Album and differ from the Album
   title, the submitted name and a title already picked. Generic titles of the
   fixed list in docs/features/admin-workbench.md, an instrumental, off-vocal
@@ -2107,7 +2132,8 @@ The wire protocol and operational bounds are documented in
   then Album order. Each title is searched once, credited to the submitted
   Artist name when one was given, else to the member's own first primary
   Artist name that is not a placeholder credit, as the review captured it,
-  else to the Album's first such name, else alone. When the title searches
+  else to the Album's first such name, else alone; a decorated name is used
+  by its first part. When the title searches
   credited to an Artist returned no release, each title is searched alone
   instead. A title searched alone must weigh at least eight.
   These searches count among the run's planned searches, follow its title
@@ -2162,8 +2188,9 @@ The wire protocol and operational bounds are documented in
   preselected. Because pairing keeps every Disc and Track Number that is the
   member's own, lookup fills only missing ones and never contradicts them. An
   entry agrees with a captured entry, wherever it stands, when its role is the
-  same and its name equals, case-insensitively, that entry's saved name or a
-  name or alias lookup found for its MusicBrainz ID, or the Artist that
+  same and that entry's saved name, or either part of a decorated one,
+  equals, case-insensitively, its name or a name or alias lookup found for
+  its MusicBrainz ID, or the Artist that
   captured Credit names already keeps the entry's MusicBrainz ID; an agreeing
   entry keeps the captured Credit's Artist and saved name, gains the ID, and
   needs no identity decision. Join phrases compare as bylines present them: a

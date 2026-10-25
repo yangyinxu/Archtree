@@ -43,6 +43,7 @@
  *   - a typed Artist is never evidence: the preselection's artist flag compares the release with the tags or primary names
  *   - Track-title searches are skipped, sending no recording search and keeping both completeness flags, when the title searches preselect or a credited complete comparison ties
  *   - Track-title searches are sent when no group matches, the comparison is partial, or, without a primary Artist, any tie; alone when the credited title searches returned no release
+ *   - a review whose primary name is decorated searches its first part, then bare, then the whole name, and its Track titles and iTunes term carry the first part
  *   - while Track-title searches are undecided, title searches admit at most 15 releases, and a bound stop moves to the decision, which sends them
  *   - each Track-title search admits at most five releases, fewest extra tracks first, never past 25 candidates, and a release already found counts as admitted
  *   - a Track-title search sent alone must weigh at least eight: a lighter one is passed over without making the comparison partial
@@ -1128,6 +1129,30 @@ test('Track-title searches are sent when no group matches, the comparison is par
         ['sent', 2, false, recordingUrls(firstAlone, secondAlone)]);
     // No iTunes term ever holds a Track title.
     for (const client of [nothing, truncated, partial, tying]) assert.equal(client.itunesCalls.some(call => call.includes('Distinct')), false);
+});
+
+test('a review whose primary name is decorated searches its first part, then bare, then the whole name, and its Track titles and iTunes term carry the first part', async () => {
+    const decorated = '合成情緒 -Gouseijoucho-';
+    const doc = reviewLookupDocument({ title: 'Synthetic Live 2', primaryNames: [decorated], members: [{ durationMs: 200_000, title: '1-01 Synthetic Night(Live)' },
+        { durationMs: 210_000, title: '1-02 Synthetic Goose(Live)' }] });
+    const record = reviewRunOf(doc), first = { release: 'Synthetic Live 2', artist: '合成情緒' }, whole = { release: 'Synthetic Live 2', artist: decorated };
+    const bare = { release: 'Synthetic Live 2' }, night = { recording: 'Synthetic Night', artist: '合成情緒' }, goose = { recording: 'Synthetic Goose', artist: '合成情緒' };
+    assert.deepEqual(record.queries.map(query => (query as { query: unknown }).query), [first, bare, whole, night, goose]);
+    // The release credits the first part: its exact count is preselected without a flag, and no Track title or iTunes request is sent.
+    const matching = clientOf([searchAnswer(first, [[mbid(1), 2]]), searchAnswer(bare, [[mbid(1), 2]]), searchAnswer(whole, []), creditedAnswer(mbid(1), [['合成情緒', mbid(30)]]),
+        aliasAnswer('artist', mbid(30), ['合成情緒'])]);
+    const matched = await drive(record, doc, matching);
+    assert.deepEqual([matched.state, matched.ranking!.preselection?.basis, matched.ranking!.preselection?.artistMismatch, matched.trackTitleSearch, recordingSearches(matching),
+        matching.itunesCalls, sent(matching).searches], ['complete', 'exactTrackCount', false, 'skipped', [], [], 3]);
+    // Nothing matches: the first-part search found a release, so the Track titles keep their credit to the first part, and the
+    // iTunes term carries the first part, never the romanized one.
+    const missing = clientOf([searchAnswer(first, [[mbid(1), 2]]), searchAnswer(bare, [[mbid(1), 2]]), searchAnswer(whole, []), releaseAnswer(mbid(1), [100_000, 110_000]),
+        recordingAnswer(night), recordingAnswer(goose)]);
+    const done = await drive(record, doc, missing);
+    assert.deepEqual([done.state, done.trackTitleSearch, done.creditFound, recordingSearches(missing)], ['complete', 'sent', true, recordingUrls(night, goose)]);
+    assert.ok(missing.itunesCalls.length > 0);
+    for (const call of missing.itunesCalls) assert.ok(call.endsWith('Synthetic Live 2 合成情緒') && !call.includes('Gouseijoucho'), call);
+    assert.equal(JSON.stringify(missing.requests.map(request => decodeURIComponent(request.url))).includes('1-0'), false);
 });
 
 test('while Track-title searches are undecided, title searches admit at most 15 releases, and a bound stop moves to the decision, which sends them', async () => {

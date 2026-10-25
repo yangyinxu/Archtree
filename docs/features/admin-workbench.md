@@ -286,8 +286,10 @@ summary only presents it:
   not on the applied candidate), values resting on an applied iTunes-only
   candidate (marked "iTunes only", and "Not checked against MusicBrainz" when
   MusicBrainz did not rule it out), a preselection whose artist matches no
-  artist tag, directly or through an alias or iTunes localized name the lookup
-  found, and pending Luna suggestions with their ticks.
+  artist tag, or either part of a decorated one (see Planning and ranking
+  under [Metadata lookup](#metadata-lookup)), directly or through an alias or
+  iTunes localized name the lookup found, and pending Luna suggestions with
+  their ticks.
 - **Expected tracklist.** When the saved Album decision appends to an Album
   that has an expected tracklist (`appendTracklist`, until the publication is
   complete), the summary, under
@@ -2101,7 +2103,8 @@ Catalog review routes (relative to `/api/admin/v1`):
   Credit shows is bound to that Credit's Artist; a member entry is bound to one
   of that member's captured Artists of any role (the Credit showing it, else the
   first keeping the entry's MusicBrainz ID, else the first whose saved name
-  equals the entry's name or a name lookup found for its ID). `state` is
+  equals the entry's name or a name lookup found for its ID, else the first
+  whose saved name is decorated and either part of it does). `state` is
   `bound` (one record: every entry of the identity resolves to it),
   `conflicting` (bound entries naming different Artists: each keeps its own,
   no ID is recorded, and its unbound entries need a decision) or `unbound`
@@ -2916,6 +2919,23 @@ roll back to:
   them, which lacks the `admin.lookup.found_by_track_title` key. After
   deploying them, a Web client's cached bundle from before them is refused once
   for lacking that key, so it shows English until the new bundle loads.
+- Decorated names and numbered Track titles need no floor; no collection,
+  index, stored shape, view shape or message key changes. A release before
+  them plans a decorated name whole only, searches a saved title with its
+  trailing `／` or `/` Artist ending, and skips Track titles that start with
+  a position followed by `-`, `.`, `_` or `)`, while it searches one
+  followed only by a space, such as `01 Song`, with its number. Runs this
+  release planned keep their stored queries there, which are ordinary
+  searches within the same caps, and a manual retry repeats them. It
+  compares decorated names whole again: a re-rank there flags their
+  candidates as crediting another artist again, and applying or choosing a
+  candidate there makes such an Artist list one conflict instead of an
+  agreeing one. It binds a member entry to a captured Artist only by the
+  whole saved name, so an entry bound only through a decorated part needs a
+  reuse or create answer there; rolled forward again, that entry is bound
+  and a stored reuse or create answer for it is no longer used. Values and
+  MusicBrainz IDs this release already applied stay. Open Web tabs need no
+  reload.
 - Luna ticks need no floor of their own: an approval applies them to ordinary
   suggestion decisions and draft values. A release before them refuses the
   `suggestionTicks` this Web sends as invalid input and holds an approval
@@ -3304,13 +3324,78 @@ below). The source layer, the jobs and their routes live in
     only while name and Artist together fit its 200 characters. It never enters
     the draft, `musicBrainzNames`, identity candidates, the ranking's artist
     comparison or Luna's context.
+  - Decorated names (`src/administration/lookup/lookupDecoratedNames.ts`). An
+    album-artist or artist tag name, or a review's primary Artist name, is
+    decorated when, after NFKC (which folds full-width brackets and hyphens)
+    with whitespace collapsed, it is a first part holding a letter, no Latin
+    letter and no round bracket, followed by a space and a romanized part
+    between hyphens (`ヰ世界情緒 -Isekaijoucho-`, with no space just inside
+    either hyphen and no hyphen inside the part) or by a romanized part in
+    round brackets, with or without a space before them
+    (`中島美嘉 (Mika Nakashima)`). The romanized part holds a Latin letter and
+    only Latin letters, digits, spaces and `.`, `'`, `’`, `-`, `&` or `!`.
+    Neither part may be a placeholder credit and a name over 200 characters
+    is never decorated, so `YUKI (JUDY AND MARY)`,
+    `ヴァリアス (Various Artists)` or a name with a bracketed part in another
+    script is not decorated. When the name a credited search uses is
+    decorated, that search is planned with the first part in its place, then
+    the bare search follows, then the search credited to the whole name as
+    before; the respelled fallbacks respell only the first credited search
+    and the bare text, so a decorated name adds one search. The cap of six
+    still drops title searches from the end, fallbacks first, and in an
+    import crowded by identifiers the whole-name search goes before the
+    bare one. Track-title searches only fill the room the title searches
+    leave, so a respelled saved title with a decorated name leaves room for
+    one. The iTunes term comes from the first of these searches, so it
+    carries the first part. A Track-title search credited to a decorated
+    name uses its first part only. A submitted name or Artist name is never
+    read this way, nor is the artist half of a folder name. Ranking counts a
+    decorated artist tag, which for a review is a primary Artist name, as
+    agreeing when the whole name or either part equals a credited,
+    canonical, joined, alias or localized name; a decorated credited name is
+    compared whole. A review's value application and
+    identity rows compare its decorated saved names the same way (see
+    [Value application](#value-application)). A stored ranking keeps its
+    flags until its next re-rank.
+  - A review's saved Album title that ends in `／` or `/` and one of the
+    Album's shown primary Artist names, or either part of a decorated one,
+    compared after NFKC, case-insensitively, trimmed and with whitespace
+    collapsed, is planned without that ending wherever the saved title is
+    searched, respelled fallbacks included:
+    `雪の華15周年記念ベスト盤 BIBLE／中島美嘉`, credited to `中島美嘉`, searches
+    `雪の華15周年記念ベスト盤 BIBLE`. The shortest such ending counts, so
+    `Back in Black/AC/DC` credited to AC/DC searches `Back in Black`; a letter
+    or digit must remain before it, and the plan does not grow. A Track title
+    is still compared with the saved title. A stored run and its manual retry
+    keep the queries it planned; a newly submitted lookup plans again.
   - Track-title searches (existing-Album reviews only).
     `src/administration/lookup/lookupTrackTitles.ts` picks, from the titles the
     review captured from the catalog (`catalogSource.tracks`, never the draft),
     the most distinctive ones. Each title is cleaned like tag text (format
     characters removed, control characters as spaces, NFC, whitespace
-    collapsed; a link, an empty text or one over 200 characters is skipped),
-    then up to three trailing segments (a `()`, `[]`, `（）` or `【】` group,
+    collapsed; a link, an empty text or one over 200 characters is skipped).
+    When every member's cleaned title starts with a position, all of one
+    form (all with a Disc Number or all without), and the positions are
+    distinct and increase in Album order
+    (`src/administration/lookup/lookupTitlePositions.ts`), each title then
+    loses its position: an optional Disc Number of one or two digits and `-`
+    or `.`, then a Track Number of one to three digits, then `.` with any
+    spaces after it, a spaced `.`, a spaced `-`, `–` or `—`, or whitespace,
+    with text after it. Digits are ASCII, and a Disc or Track Number of 0
+    never counts. Positions compare by Disc Number, then Track Number, a
+    missing Disc Number counting as 1. So `1-01 Song`, `1.01.Song`,
+    `1.01. Song`, `01.Song`, `01 Song`, `01 . Song` and `01 - Song` all
+    become `Song`, while `01 ...Baby` keeps `...Baby`, `01-Song`, `01_Song`
+    or `12) Song` keep their numbers (and are skipped as file-name shaped
+    below), and `7 Rings`, `99 Luftballons` or `24 Hours` keep theirs unless
+    every title of the Album starts with a number and those numbers
+    increase. A lone member's title loses only a Disc Number and a Track
+    Number written with a leading zero (`1-01`, `1.01.`), so a single named
+    `7 Rings`, `1.5 Seconds` or `1-2 Punch` keeps its number. The review
+    page's Disc and Track Number filling from titles is meant to accept
+    exactly the same positions (the table in
+    `test/administration/lookupTitlePositions.test.ts`).
+    Then up to three trailing segments (a `()`, `[]`, `（）` or `【】` group,
     else the text after a spaced `-`, `–` or `—`, each with text before it)
     are peeled: one naming an instrumental, off-vocal or karaoke version
     (instrumental, inst, off vocal, karaoke, backing track, オフボーカル,
@@ -3322,7 +3407,9 @@ below). The source layer, the jobs and their routes live in
     a file name (equal to the member's retained original filename with or
     without its extension, ending in `.mp3`, `.flac`, `.m4a`, `.aac`, `.wav`,
     `.ogg`, `.opus` or `.aiff`, starting with a track number and a separator, or
-    without whitespace and holding an underscore between two other characters),
+    without whitespace and holding an underscore between two other characters;
+    checked once any position is removed, so `1.01.雪の華` from the file
+    `1.01.雪の華.flac` is searched as `雪の華`),
     is only digits and punctuation or a generic title of the list under
     [What lookup sends](#what-lookup-sends), equals the Album title or the
     submitted name (each without its notes), occurs more than once in the Album
@@ -3339,7 +3426,8 @@ below). The source layer, the jobs and their routes live in
     own first shown primary Artist name that is no placeholder (by name or
     MusicBrainz ID), else to the Album's first such name (also by name or
     MusicBrainz ID, so Various Artists under a localized name never credits
-    one), else sent alone, which needs a weight of at least 8. A title whose
+    one), by its first part alone when that name is decorated, else sent
+    alone, which needs a weight of at least 8. A title whose
     credited search would exceed the 500-character query bound, or that repeats
     a planned search, gives way to the next one. Each carries `when`:
     `noPreselection` when none of the planned title searches names an Artist (a
@@ -3474,7 +3562,8 @@ below). The source layer, the jobs and their routes live in
   three storefronts chosen by the term's script: `jp` then `us` for kana, `kr`
   then `us` for Hangul, `jp`, `tw` then `us` for other Han text, otherwise `us`
   then `jp`. The term is the text and its credited artist (never a label
-  term), or the text alone when that is over 200 characters; a recording
+  term; for a decorated name its first part, which that search is credited
+  to), or the text alone when that is over 200 characters; a recording
   search becomes `entity=song`, anything else `entity=album`. A review's
   Track-title searches never give the term, so no Track title reaches iTunes.
 - **Results.** A collection (album search or UPC lookup) is kept when its track
@@ -4031,9 +4120,11 @@ fills only empty or automatic values that are still as it saw them.
   tracklist bounds is flagged on `album.expectedTracklist` (`size` over 100
   audio tracks or 32 KB, `format` for an invalid one) and offers no member
   values. An Artist entry agrees with a saved one when its role is the same and
-  the saved entry's Artist keeps its MusicBrainz ID, or the saved name equals,
-  case-insensitively, the credited name or a credited name, canonical name or
-  alias the run found for its ID, whatever ID the saved entry keeps; join
+  the saved entry's Artist keeps its MusicBrainz ID, or the saved name, or
+  either part of a decorated one (see Planning and ranking under [Metadata
+  lookup](#metadata-lookup)), equals, case-insensitively, the credited name or
+  a credited name, canonical name or alias the run found for its ID, whatever
+  ID the saved entry keeps; join
   phrases compare as bylines present them (a missing or invalid one is `, `, the
   last entry's is ignored). A lookup entry takes the key of the first saved
   entry it agrees with, wherever that stands, else a key derived from the review
@@ -4272,11 +4363,13 @@ publication confirmation. The approval and the publication commit never read
   the shared album text and album-artist names, or a one-file import's title
   and artist; shared identifiers that pass their format checks; a submitted
   name and any submitted Artist name; for an existing-Album review, the
-  Album's saved title as the review captured it with its first usable shown
+  Album's saved title as the review captured it, without a trailing `／` or
+  `/` and primary Artist name, with its first usable shown
   primary Artist name (never split on ` / ` or read as a label), or a
   submitted name with the submitted Artist name, else with that name; for
   such a review, also at most two of its saved Track titles, without a
-  trailing version or featuring note, as recording searches credited to the
+  guarded leading position or a trailing version or featuring note, as
+  recording searches credited to the
   submitted Artist name, the member's own first shown primary Artist name or
   the Album's first one, each no placeholder by name or MusicBrainz ID, or
   alone; the cleaned folder name only when no
@@ -4289,7 +4382,9 @@ publication confirmation. The approval and the publication commit never read
   as fallbacks; and the bridge terms, the titles and artist names the iTunes
   Search API showed for the same run (at most 4 searches). The
   number of selected files, or of a review's members, is never sent; the run
-  uses it only locally.
+  uses it only locally. A decorated tag or primary Artist name is also sent
+  by its first part, which alone credits a Track-title search (see Planning
+  and ranking under [Metadata lookup](#metadata-lookup)).
 - To Apple's iTunes Search API, only when MusicBrainz returned no matching
   candidate (a match found only through Track titles does not count), and only
   `https://itunes.apple.com/search` and `/lookup` (at most 9 requests per run
@@ -4305,8 +4400,10 @@ publication confirmation. The approval and the publication commit never read
   preview; a review only previews), and the
   archive.org redirects they lead to.
 - A review never sends its original filenames, folders, labels, catalog IDs or
-  identifiers, and sends at most two saved Track titles (without a trailing
-  version or featuring note) only to MusicBrainz, as above. The following
+  identifiers, and sends at most two saved Track titles (without a guarded
+  leading position or a trailing version or featuring note; a title named
+  like its file is sent only without its position, never as the filename)
+  only to MusicBrainz, as above. The following
   generic titles are never searched; they are compared folded (NFKC, lower
   case, no punctuation, symbol or whitespace) with trailing digits removed, so
   `Interlude 2` and `Track01` are generic too (`GENERIC_TRACK_TITLES` in

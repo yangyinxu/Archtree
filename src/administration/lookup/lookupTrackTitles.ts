@@ -12,11 +12,15 @@
 /**
  * Pure picker of an existing Album's distinctive saved Track titles for MusicBrainz recording searches (lookupQueryPlanner.ts):
  * each title cleaned like tag text and without its trailing version or featuring notes, generic, instrumental, file-name-shaped,
- * repeated and light titles skipped, the rest ranked by weight, then Album order. Total on malformed input. It never receives a
- * draft value, and a member's retained original filename is read only to skip a title equal to it; no filename is ever returned.
+ * repeated and light titles skipped, the rest ranked by weight, then Album order. When every member's cleaned title starts with a
+ * position (a Track Number, or a Disc and Track Number) and the positions are distinct and increase in Album order under the guard
+ * of lookupTitlePositions.ts, each loses it before any check, so a title named like its file is compared and searched by its rest.
+ * Total on malformed input. It never receives a draft value, and a member's retained original filename is read only to skip a
+ * title equal to it; no filename or position is ever returned.
  */
 import { METADATA_LOOKUP_LIMITS } from './lookupContract';
 import { cleanLookupTerm } from './lookupIdentifiers';
+import { leadingTitlePositions } from './lookupTitlePositions';
 
 /** A title lighter than this is never picked. */
 export const TRACK_TITLE_MIN_WEIGHT = 4;
@@ -126,15 +130,20 @@ export function trackTitleWeight(text: unknown): number {
 
 /**
  * The distinctive titles of `members` (source order, which is Album order), heaviest first, then in Album order, each fold once:
- * the full ranked list, never capped (the planner keeps at most two). A member is skipped when its title does not clean, marks an
+ * the full ranked list, never capped (the planner keeps at most two). When every member's cleaned title starts with a position and
+ * the positions count under the guard of leadingTitlePositions, each title is read without its position from
+ * here on, its occurrence count and filename check included. A member is skipped when its title does not clean, marks an
  * instrumental, off-vocal or karaoke version, looks like a file name, is only digits and punctuation or a generic title once its
  * notes and trailing digits are removed, equals the Album title or the submitted text (each without its notes), occurs more than
  * once in the Album (its whole cleaned title folded, so every member that has it is skipped), or weighs less than
  * TRACK_TITLE_MIN_WEIGHT. A member that is no record, or whose title is no string, gives nothing; a non-string Artist reads as null.
  */
 export function distinctiveTrackTitles(members: readonly unknown[], context: { albumTitle: unknown; submittedText?: unknown }): DistinctiveTrackTitle[] {
-    const read = (Array.isArray(members) ? members : []).map(member => isRecord(member) && typeof member.title === 'string'
+    const cleaned = (Array.isArray(members) ? members : []).map(member => isRecord(member) && typeof member.title === 'string'
         ? { member, cleaned: cleanTrackTitle(member.title) } : null);
+    // A member without a usable title fails the guard, so no title loses its leading number.
+    const positions = leadingTitlePositions(cleaned.map(entry => entry?.cleaned ?? null));
+    const read = positions ? cleaned.map((entry, index) => entry && { ...entry, cleaned: positions[index].rest }) : cleaned;
     const occurrences = new Map<string, number>();
     for (const entry of read) if (entry?.cleaned) occurrences.set(fold(entry.cleaned), (occurrences.get(fold(entry.cleaned)) ?? 0) + 1);
     const excluded = [context.albumTitle, context.submittedText].map(trackTitleText).filter((text): text is string => text !== null).map(fold);

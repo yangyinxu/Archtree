@@ -6,6 +6,7 @@
  * Tests
  *   - entries share an identity by MusicBrainz ID, else by name in any letter case; one name under two IDs is two identities, named after the first entry
  *   - Album entries bind by key only; a member entry binds by key, then by the ID its Artist keeps, then by its name or a found name, whatever the Credit's role
+ *   - a member entry binds to a captured Artist whose saved name is decorated through either part, by name or a found name, after any whole-name match
  *   - bound entries naming different Artists make one conflicting identity; its unbound entries need an explicit choice and it is never preselected
  *   - the default selection covers only lists that may be applied and changed; a list holding two names equal in any letter case is never applicable
  *   - captured entries rebuild the list review context showed: entries only, each record's name and ID, and a phrase only before another entry
@@ -106,6 +107,22 @@ test('Album entries bind by key only; a member entry binds by key, then by the I
         [null, memberArtist(0, 0), '0000000000000000000d0201', memberArtist(2, 0), memberArtist(3, 0), null]);
     // A member's names found for an ID it carries are kept for reviews (the import bound never keeps them).
     assert.deepEqual([...model.found], [[syntheticMbid(6), ['Captured Alias']]]);
+});
+
+test('a member entry binds to a captured Artist whose saved name is decorated through either part, by name or a found name, after any whole-name match', () => {
+    const doc = reviewLookupDocument({ members: members(3, () => ({ artists: [{ name: '合成情緒 -Gouseijoucho-' }] })) });
+    doc.musicBrainzNames = [{ musicBrainzId: syntheticMbid(8), names: ['Gouseijoucho'] }];
+    const tracks = draftOf(doc).tracks;
+    tracks[0].artists = [proposed(5, '合成情緒')];
+    tracks[1].artists = [proposed(6, 'Gouseijoucho Official', syntheticMbid(8))];
+    tracks[2].artists = [proposed(7, 'Gouseijoucho Band')];
+    const model = modelOf(doc), boundOf = (slot: string) => model.identities.flatMap(identity => identity.entries).find(item => item.slotId === slot)?.boundTo?.id ?? null;
+    assert.deepEqual([boundOf(reviewSlot(0)), boundOf(reviewSlot(1)), boundOf(reviewSlot(2))], [memberArtist(0, 0), memberArtist(1, 0), null]);
+    // A captured Artist saved under the entry's whole name is preferred to an earlier one that agrees only through a part.
+    const both = reviewLookupDocument({ members: members(1, () => ({ artists: [{ name: '合成情緒 -Gouseijoucho-' }, { name: '合成情緒', role: 'featured' }] })) });
+    draftOf(both).tracks[0].artists = [proposed(8, '合成情緒')];
+    const bound = modelOf(both).identities.flatMap(identity => identity.entries).find(item => item.slotId === reviewSlot(0))?.boundTo?.id ?? null;
+    assert.equal(bound, memberArtist(0, 1));
 });
 
 test('bound entries naming different Artists make one conflicting identity; its unbound entries need an explicit choice and it is never preselected', async () => {

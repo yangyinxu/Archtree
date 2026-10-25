@@ -35,6 +35,7 @@
  *   - members no audio track can pair with are named only for a release within the expected-tracklist bound
  *   - an iTunes-only candidate never shares a subset group with a MusicBrainz one, and is preselected only when MusicBrainz ruled it out or stayed unavailable
  *   - in subset mode the members' artist names flag a preselection whose credited artist agrees with none, as an import's tags do
+ *   - a decorated member Artist name agrees with a release credited to either part, and the ranking is otherwise identical; an import tag agrees the same way
  *   - the admission helpers accept an unknown count or at least the member count, and rank the fewest extra tracks first
  *   - the subset assignment gives titles, numbers, durations and track artists only for a single pairing
  *   - track credits: a featuring phrase makes the following entries featured, repeats and placeholders are dropped, and MusicBrainz IDs are kept
@@ -629,6 +630,43 @@ test('in subset mode the members\' artist names flag a preselection whose credit
     // An alias the run found for the credited artist agrees, and members without names flag nothing.
     assert.equal(subset([candidate(standard)], named(['Synthetic Alias']), { aliases: new Map([[lead.artistId, ['Synthetic Alias']]]) }).preselection?.artistMismatch, false);
     assert.equal(subset([candidate(standard)], threeMembers).preselection?.artistMismatch, false);
+});
+
+test('a decorated member Artist name agrees with a release credited to either part, and the ranking is otherwise identical; an import tag agrees the same way', () => {
+    // The recorded 色彩α release credits ヰ世界情緒; its members carry its own durations and numbers.
+    const colors = recorded('a235c19e'), artistId = '0e51b3c5-28c3-4608-aea1-ce01eca91dd2', decorated = 'ヰ世界情緒 -Isekaijoucho-';
+    const named = (artistTags: string[]) => membersOf(colors, true).map(one => ({ ...one, artistTags }));
+    const rank = (artistTags: string[], options: Parameters<typeof rankLookupCandidates>[2] = {}) => subset([candidate(colors)], named(artistTags), options);
+    const flags = (ranked: RankedLookup) => [ranked.preselection?.artistMismatch, entryOf(ranked, colors).artistMismatch];
+    const agreeing = rank([decorated]);
+    assert.deepEqual([agreeing.preselection?.basis, ...flags(agreeing)], ['exactTrackCount', false, false]);
+    for (const form of ['ヰ世界情緒 (Isekaijoucho)', 'ヰ世界情緒（Isekaijoucho）']) assert.deepEqual(flags(rank([form])), [false, false], form);
+    // The flag is the only difference from the saved name's first part alone, or from a stranger's name.
+    assert.deepEqual(agreeing, rank(['ヰ世界情緒']));
+    const stranger = rank(['Synthetic Stranger']);
+    assert.deepEqual(flags(stranger), [true, true]);
+    const unflagged = (ranked: RankedLookup) => ({ ...ranked, preselection: ranked.preselection && { ...ranked.preselection, artistMismatch: null },
+        candidates: ranked.candidates.map(entry => ({ ...entry, artistMismatch: null })) });
+    assert.deepEqual(unflagged(agreeing), unflagged(stranger));
+    // The romanized part agrees through an alias the run found, as a plain name does; a decorated credited name is never split.
+    const aliases = new Map([[artistId, ['Isekaijoucho']]]);
+    assert.deepEqual([flags(rank(['Isekaijoucho']))[0], flags(rank(['Isekaijoucho'], { aliases }))[0]], [true, false]);
+    assert.deepEqual([flags(rank(['合成 -Isekaijoucho-']))[0], flags(rank(['合成 -Isekaijoucho-'], { aliases }))[0]], [true, false]);
+    assert.equal(flags(rank(['Isekaijoucho'], { aliases: new Map([[artistId, [decorated]]]) }))[0], true);
+    // An import compares its artist tags the same way.
+    const exact = rankLookupCandidates([candidate(colors)], named([decorated]));
+    assert.deepEqual([exact.preselection?.basis, exact.preselection?.artistMismatch], ['onlyMatchingGroup', false]);
+    // Every recorded release credited to that artist, a joint credit included, re-ranks together identically to the first part
+    // alone, with no flag; against a stranger's name only the flags differ.
+    const credited = releases.filter(value => value.artistCredit.some(credit => credit.name === 'ヰ世界情緒')).map(value => candidate(value));
+    assert.equal(credited.length, 8);
+    const together = (artistTags: string[]) => subset(credited, named(artistTags));
+    const all = together([decorated]);
+    assert.deepEqual(all, together(['ヰ世界情緒']));
+    assert.deepEqual([...new Set(all.candidates.map(entry => entry.artistMismatch))], [false]);
+    const strangers = together(['Synthetic Stranger']);
+    assert.deepEqual([...new Set(strangers.candidates.map(entry => entry.artistMismatch))], [true]);
+    assert.deepEqual(unflagged(all), unflagged(strangers));
 });
 
 test('the admission helpers accept an unknown count or at least the member count, and rank the fewest extra tracks first', () => {

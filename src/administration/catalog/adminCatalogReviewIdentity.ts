@@ -35,6 +35,7 @@ import { importLocalizedNameMap } from '../import/adminImportLocalizedNames';
 import { importMusicBrainzNameMap, mergeImportMusicBrainzNames, musicBrainzIdWriteFor, readMusicBrainzIdState, type MusicBrainzIdState } from '../import/adminImportMusicBrainzIds';
 import type { AdminImportDocument } from '../import/adminImportService';
 import { boundedJson } from '../import/adminImportValueState';
+import { decoratedNameParts } from '../lookup/lookupDecoratedNames';
 import { REVIEW_LOOKUP_LIMITS, reviewIdentityKey } from '../lookup/lookupReviewValues';
 import {
     CATALOG_REVIEW_MAX_DECISIONS, type CatalogReviewCapturedCredit, type CatalogReviewCreditView, type CatalogReviewIdentityDecision,
@@ -106,7 +107,8 @@ const withoutIds = (entries: readonly ImportArtistEntry[]) => entries.map(({ key
 /**
  * The record a member entry names among that member's captured Artist Credits of any role (`taken`: records earlier entries of
  * the list hold): the Credit whose entry key is the entry's; otherwise the first whose record keeps the entry's MusicBrainz ID;
- * otherwise the first whose saved name equals, case-insensitively, the entry's name or a name lookup found for its ID.
+ * otherwise the first whose saved name equals, case-insensitively, the entry's name or a name lookup found for its ID; otherwise
+ * the first with a decorated saved name (lookupDecoratedNames.ts) either part of which does.
  */
 function memberBinding(entry: ImportArtistEntry, credits: readonly CatalogReviewCapturedCredit[], taken: ReadonlySet<string>, found: ReadonlyMap<string, readonly string[]>): ReviewBoundRecord | null {
     const artists = credits.filter(credit => credit.subjectType === 'artist' && subjectOf(credit) !== null);
@@ -116,7 +118,9 @@ function memberBinding(entry: ImportArtistEntry, credits: readonly CatalogReview
     const byId = id ? free.find(credit => subjectOf(credit)!.musicBrainzId === id) : undefined;
     if (byId) return subjectOf(byId);
     const names = new Set([entry.name, ...(id ? found.get(id) ?? [] : [])].filter((name): name is string => typeof name === 'string').map(fold));
-    const byName = free.find(credit => names.has(fold(subjectOf(credit)!.name)));
+    // A whole saved name is matched before a part of a decorated one, so an Artist saved under the entry's own name is preferred.
+    const byName = free.find(credit => names.has(fold(subjectOf(credit)!.name)))
+        ?? free.find(credit => (decoratedNameParts(subjectOf(credit)!.name) ?? []).some(name => names.has(fold(name))));
     return byName ? subjectOf(byName) : null;
 }
 

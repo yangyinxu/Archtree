@@ -10,6 +10,7 @@
  * @end-catalog */
 
 import { METADATA_LOOKUP_JOB_LIMITS, METADATA_LOOKUP_LIMITS } from './lookupContract';
+import { decoratedNameParts, titleWithoutTrailingCredit } from './lookupDecoratedNames';
 import { cleanLookupTerm, isPlaceholderCredit, lookupTermProblem, normalizeGtin, normalizeIsrc, normalizeMusicBrainzId } from './lookupIdentifiers';
 import { UNCREDITED_TRACK_TITLE_MIN_WEIGHT } from './lookupTrackTitles';
 import { musicBrainzLuceneQuery, type MusicBrainzRecordingQuery, type MusicBrainzReleaseQuery } from './musicBrainzClient';
@@ -29,6 +30,9 @@ import { musicBrainzLuceneQuery, type MusicBrainzRecordingQuery, type MusicBrain
  * trailing remaster note dropped), the credited search first. An existing Album's distinctive saved
  * Track titles, given as `trackTitles`, plan at most two recording searches after every title search and
  * its fallbacks, and only beside a title search; imports never plan them.
+ * A decorated artist tag or saved primary Artist name (lookupDecoratedNames.ts) credits the name searches by its first part, then
+ * after the bare search whole, and a Track-title search by its first part; a review's saved Album title that ends in a slash and
+ * one of its primary Artist names is searched without that ending. A submitted Artist name is never read this way.
  */
 export type LookupPlanInput = {
     /** `catalog`: an existing Album, looked up by its saved title (`tags.album`) and `credited` names only. */
@@ -171,31 +175,48 @@ export const planMetadataLookup = (input: LookupPlanInput): LookupPlan => {
     const typedArtist = input.trigger === 'submitted' && input.submitted?.artist !== undefined ? term(input.submitted.artist) : null;
     const textCredit = typedArtist ? { artists: [typedArtist], labels: [] as string[] } : credited;
     const songArtist = typedArtist ?? (input.credited ? credited.artists[0] : splitCreditedNames(tags?.artist ?? tags?.albumArtist ?? null).artists[0]);
+    /** The names a credited search uses: a decorated tag or saved Artist name (never a typed one) by its first part, then whole. */
+    const creditNames = (name: string | undefined): string[] => {
+        const parts = name && !typedArtist ? decoratedNameParts(name) : null;
+        return parts ? [parts[0], name!] : name ? [name] : [];
+    };
     /**
-     * Credited then bare release text, then with `normalize` the fallbacks in the normalized spelling: the credited search
-     * respelled, then the bare text respelled, except a folder's whole "Artist - Album" name, which names no release.
+     * The first credited search, bare release text, any other credited search (a decorated name's whole one, the first to go over
+     * the cap), then with `normalize` the fallbacks in the normalized spelling: the first credited search respelled, then the bare
+     * text respelled, except a folder's whole "Artist - Album" name, which names no release.
      */
-    const releaseQueries = (bare: string, basis: 'albumText' | 'folder', creditedQuery: MusicBrainzReleaseQuery | null, normalize: boolean) => {
+    const releaseQueries = (bare: string, basis: 'albumText' | 'folder', creditedQueries: readonly MusicBrainzReleaseQuery[], normalize: boolean) => {
         const search = (query: MusicBrainzReleaseQuery, fallback: boolean) =>
             queries.push({ kind: 'musicBrainzReleaseSearch', query, basis, ...(fallback ? { fallback: true as const } : {}) });
-        if (creditedQuery) search(creditedQuery, false);
+        const [first, ...others] = creditedQueries;
+        if (first) search(first, false);
         search({ release: bare }, false);
+        for (const query of others) search(query, false);
         if (!normalize) return;
-        const creditedVariant = creditedQuery?.release ? normalizedLookupTitle(creditedQuery.release) : null;
-        if (creditedQuery && creditedVariant) search({ ...creditedQuery, release: creditedVariant }, true);
-        const bareVariant = basis === 'folder' && creditedQuery ? null : normalizedLookupTitle(bare);
+        // Only the first credited search is respelled, so a decorated name's whole-name search adds no fallback.
+        const creditedVariant = first?.release ? normalizedLookupTitle(first.release) : null;
+        if (first && creditedVariant) search({ ...first, release: creditedVariant }, true);
+        const bareVariant = basis === 'folder' && first ? null : normalizedLookupTitle(bare);
         if (bareVariant) search({ release: bareVariant }, true);
     };
     const albumQueries = (release: string, normalize: boolean) => {
-        const [artist, label] = [textCredit.artists[0], textCredit.labels[0]];
-        releaseQueries(release, 'albumText', artist || label ? { release, ...(artist ? { artist } : {}), ...(label ? { label } : {}) } : null, normalize);
+        const label = textCredit.labels[0], artists = creditNames(textCredit.artists[0]);
+        releaseQueries(release, 'albumText', artists.length ? artists.map(artist => ({ release, artist, ...(label ? { label } : {}) }))
+            : label ? [{ release, label }] : [], normalize);
     };
-    /** Credited then bare recording text, then with `normalize` both again in the normalized spelling as fallbacks. */
+    /**
+     * Credited then bare recording text, then with `normalize` both again in the normalized spelling as fallbacks; a decorated name
+     * credits the first search by its first part, adds its whole-name search after the bare one, and credits its fallback by its
+     * first part only.
+     */
     const songQueries = (recording: string, normalize: boolean) => {
         const search = (text: string, fallback: boolean) => {
             const flag = fallback ? { fallback: true as const } : {};
-            if (songArtist) queries.push({ kind: 'musicBrainzRecordingSearch', query: { recording: text, artist: songArtist }, basis: 'songText', ...flag });
+            const credited = (artist: string) => queries.push({ kind: 'musicBrainzRecordingSearch', query: { recording: text, artist }, basis: 'songText', ...flag });
+            const [first, whole] = creditNames(songArtist);
+            if (first) credited(first);
             queries.push({ kind: 'musicBrainzRecordingSearch', query: { recording: text }, basis: 'songText', ...flag });
+            if (whole && !fallback) credited(whole);
         };
         search(recording, false);
         const variant = normalize ? normalizedLookupTitle(recording) : null;
@@ -206,7 +227,7 @@ export const planMetadataLookup = (input: LookupPlanInput): LookupPlan => {
         if (!folder) return;
         const parts = folder.split(' - ');
         const artist = parts.length === 2 ? tagTerm(parts[0]) : null, release = parts.length === 2 ? tagTerm(parts[1]) : null;
-        releaseQueries(folder, 'folder', artist && release && !isPlaceholderCredit(artist) ? { artist, release } : null, true);
+        releaseQueries(folder, 'folder', artist && release && !isPlaceholderCredit(artist) ? [{ artist, release }] : [], true);
     };
 
     const identifiers = input.identifiers ?? {};
@@ -233,8 +254,9 @@ export const planMetadataLookup = (input: LookupPlanInput): LookupPlan => {
         else folderQueries();
     } else if (input.trigger === 'catalog') {
         // An existing Album is looked up by its saved title only (Track titles only through `trackTitles`): never a file name, folder or identifier.
+        // A trailing slash and primary Artist name, which the credited search already sends, is left out of every search of the title.
         const album = tagTerm(tags?.album);
-        if (album) albumQueries(album, true);
+        if (album) albumQueries(titleWithoutTrailingCredit(album, credited.artists) ?? album, true);
     } else folderQueries();
 
     // The plan keeps its order: identifiers first, then each text search before its fallbacks, so the cap drops fallbacks first.
@@ -247,8 +269,8 @@ export const planMetadataLookup = (input: LookupPlanInput): LookupPlan => {
     }).slice(0, METADATA_LOOKUP_LIMITS.plannedQueries);
     // Track-title searches follow every title search and its fallbacks, so the cap never drops a title search for them; a plan never
     // holds them alone. They are credited to the submitted Artist name, else the name given with the title (the review resolves the
-    // member's own, else the Album's, by name and MusicBrainz ID), never to a name-only fallback. `when` follows the planned title
-    // searches, so one dropped over the query bound counts as naming no Artist.
+    // member's own, else the Album's, by name and MusicBrainz ID; a decorated one by its first part), never to a name-only fallback.
+    // `when` follows the planned title searches, so one dropped over the query bound counts as naming no Artist.
     const titleSearches = unique.filter(query => query.basis === 'albumText' || query.basis === 'songText');
     if (input.trackTitles?.length && titleSearches.length) {
         const when = titleSearches.some(query => 'query' in query && typeof (query.query as { artist?: unknown }).artist === 'string') ? 'noMatchOrPartial' : 'noPreselection';
@@ -258,7 +280,7 @@ export const planMetadataLookup = (input: LookupPlanInput): LookupPlan => {
             const recording = term(title?.text);
             if (!recording) continue;
             const own = tagTerm(title.artist);
-            const artist = typedArtist ?? (own && !isPlaceholderCredit(own) ? own : null);
+            const artist = typedArtist ?? (own && !isPlaceholderCredit(own) ? decoratedNameParts(own)?.[0] ?? own : null);
             // A title searched alone must be distinctive enough on its own.
             if (!artist && !(title.weight >= UNCREDITED_TRACK_TITLE_MIN_WEIGHT)) continue;
             const query: PlannedLookupQuery = { kind: 'musicBrainzRecordingSearch', query: { recording, ...(artist ? { artist } : {}) }, basis: 'trackTitle', when };
