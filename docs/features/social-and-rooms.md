@@ -213,6 +213,21 @@ plus full FFmpeg decoding to the null muxer. HE-AAC, encrypted/fragmented MP4,
 external references, Video and unverified audio remain outside room selection.
 Ordinary playback remains available if inspection fails or the decoder is absent.
 
+Audio the room analyzer rejects still gets an exact duration when its leading
+bytes name FLAC (also behind an ID3v2 tag), AIFF/AIFC, RIFF WAVE (for example
+24-bit or 96 kHz) or an MP4 container (for example ALAC):
+`src/services/roomAudio/audioDurationProbe.ts` fully decodes the first audio
+stream with the same FFmpeg hardening, capacity and deadline, forcing that one
+demuxer (`-f` and `-format_whitelist` name only it) and admitting up to seven
+embedded pictures (`-max_streams 8`; room decoding keeps 2), and records the decoded
+timeline as `mediaRepresentation.durationMs`. Header durations are never
+trusted, so a FLAC with an unknown or overstated STREAMINFO sample count is
+measured correctly. The representation keeps `format: 'unsupported'` and
+`seekable: false`, so rooms, streaming content types and listener playback are
+unchanged; metadata lookup reads the duration for Album completion. Upload
+inspection and explicit analysis both probe; a decoder fault while probing is
+recorded as retryable analysis evidence, exactly like an inspection fault.
+
 Install FFmpeg and run `npm run doctor` before compressed-media development or
 rollout. `ROOM_AUDIO_FFMPEG_PATH` may select an absolute executable path; otherwise
 `ffmpeg` is resolved on PATH. Each process permits at most two simultaneous
