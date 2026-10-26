@@ -2283,14 +2283,19 @@ The wire protocol and operational bounds are documented in
   and Track Numbers the draft lacks from them, for the administrator to check
   and save, which compares again. This is the next step when the titles give
   both Disc and Track Numbers, and is otherwise offered after the name box,
-  which stays available. When lookup is unavailable, busy or stopped, the next
-  step is the free retry, also after the automatic retries are exhausted. While
-  a review's source is no longer current, a run that ended for that reason
-  offers no retry; when the Album changed, the summary offers opening the Album
-  to start a new review. In every lookup state, also after a release was
-  applied, the summary offers Luna as a secondary choice after the lookup
-  controls, never as the next step. An existing-Album review offers Luna the
-  same way. Luna remains an explicitly confirmed paid step that shows the
+  which stays available. After the name box, the review also offers pairing the
+  members by hand with a release that they fit in more than one way and whose
+  title makes it a possible match: the administrator gives each member a
+  distinct track of that release it can pair with, and saving stores those
+  positions as the administrator's own Disc and Track Numbers, which compares
+  again, and then uses that release. When lookup is unavailable, busy or
+  stopped, the next step is the free retry, also after the automatic retries are
+  exhausted. While a review's source is no longer current, a run that ended for
+  that reason offers no retry; when the Album changed, the summary offers
+  opening the Album to start a new review. In every lookup state, also after a
+  release was applied, the summary offers Luna as a secondary choice after the
+  lookup controls, never as the next step. An existing-Album review offers Luna
+  the same way. Luna remains an explicitly confirmed paid step that shows the
   remaining project and daily budget; offering it starts nothing, a lookup
   result never starts it, and it may also run beside applied lookup values. In
   an import, Luna suggestions return to the summary labelled as Luna AI and are

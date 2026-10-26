@@ -1668,23 +1668,27 @@ review revision and, while online, every 3 seconds while a lookup is queued or
 running or waits on a busy source and every 10 seconds while it waits out an
 outage, and the identity rows (`GET /catalog-reviews/:id/candidates`) for each
 revision and `valueRevision`. Its name box, candidate chooser and identity rows
-load as their own chunks, the first two shared with the import page. The name
-box sends `POST /catalog-reviews/:id/lookup`, with `artist` only when the
-Artist field is not empty, and refuses a link in either field in place,
-**Retry lookup** sends `/lookup/retry`, candidate previews load from `GET
+load as their own chunks, the first two shared with the import page, and the
+chooser loads its pairing panel (`CandidatePairing.tsx`) as another only when it
+is opened. The name box sends `POST /catalog-reviews/:id/lookup`, with `artist`
+only when the Artist field is not empty, and refuses a link in either field in
+place, **Retry lookup** sends `/lookup/retry`, candidate previews load from `GET
 /catalog-reviews/:id/lookup/candidates/:key/artwork`, choosing a release or
-**Use none of these** sends `/lookup/choose`, and each answer, and each bulk
-answer covering every listed conflict, is one `/lookup/resolve` request, every
-answer in it bound to the saved value it was made against. Each identity
-choice sends `POST /catalog-reviews/:id/decisions` with the whole decision set
-(**Save decisions** sends it again after a refused save); the review keeps them
-until an apply sends the identity items its confirmation showed, which the Web's
-**Update original Album** does. A saved reuse or replace whose
-record the identity read lists at another revision, or no longer lists, is
-stale: the server refuses to keep it (`409 ADMIN_IMPORT_DUPLICATE_STALE`), so
-its row shows undecided with a note, it takes no candidate from another entry
-and every save leaves it out. Each lookup refusal has its own message, as on the
-import page, and reads the summary and its identity rows again.
+**Use none of these** sends `/lookup/choose`, the pairing panel reads `GET
+/catalog-reviews/:id/lookup/candidates/:key/pairing` and saves through the
+review save and `/lookup/choose` (see **Pair tracks by hand** below), and each
+answer, and each bulk answer covering every listed conflict, is one
+`/lookup/resolve` request, every answer in it bound to the saved value it was
+made against. Each identity choice sends `POST /catalog-reviews/:id/decisions`
+with the whole decision set (**Save decisions** sends it again after a refused
+save); the review keeps them until an apply sends the identity items its
+confirmation showed, which the Web's **Update original Album** does. A saved
+reuse or replace whose record the identity read lists at another revision, or no
+longer lists, is stale: the server refuses to keep it (`409
+ADMIN_IMPORT_DUPLICATE_STALE`), so its row shows undecided with a note, it takes
+no candidate from another entry and every save leaves it out. Each lookup
+refusal has its own message, as on the import page, and reads the summary and
+its identity rows again.
 
 Where the shared next step is no match (`lookup.no_match`), or no match with the
 iTunes fallback unavailable (`lookup.itunes_unavailable`, which then adds that a
@@ -1715,14 +1719,15 @@ fit pairs with them in exactly one way, the titles give every member a Disc and
 Track Number (see below) and the draft still lacks one of them (owner rules,
 next-step bullet). Where the titles give Track Numbers alone, the fill follows
 the name box as a plain button, and the cause, like the one for titles without
-positions, says that another name can be looked up or the numbers entered in
-**Edit draft**. Anything else is a real no match, which says so without naming a
-paid step; **Use Luna AI (paid)** stays the page's secondary button after the
-summary. A release this run applied for its Album values only (`applied.pairs`
-null) whose pairing a saved number has since made single replaces the applied
-status with one saying that using it again brings in its tracklist and track
-details, and the track Artists section says the same in place of its no-pairing
-line.
+positions, says that another name can be looked up, the tracks paired by hand
+with a possible match where one is listed (see **Pair tracks by hand** below),
+or the numbers entered in **Edit draft**. Anything else is a real no match,
+which says so without naming a paid step; **Use Luna AI (paid)** stays the
+page's secondary button after the summary. A release this run applied for its
+Album values only (`applied.pairs` null) whose pairing a saved number has since
+made single replaces the applied status with one saying that using it again
+brings in its tracklist and track details, and the track Artists section says
+the same in place of its no-pairing line.
 
 A possible match is an unverified candidate whose normalized title equals the
 normalized Album name the run searched (the submitted Album name, else the saved
@@ -1857,16 +1862,18 @@ it the unknown-Disc-Number disclosure stays out. On a possible match with
 members whose pairing is not single, **Use this release** moves under **Other
 options** as **Use Album values only (title, Artists, label, release date)**
 with that warning, enabled exactly when the plain button would be, and each
-other edition in that state is offered for its Album values only too. While no
+other edition in that state is offered for its Album values only too; the card
+also offers **Pair tracks by hand** (below) before **Other options**. While no
 possible match pairs with the members in exactly one way, the first such card
 offers **Fill Disc and Track Numbers from titles** with a hint naming
 how many members get a number (saving then compares again for free or, where a
 member has no duration, lets the release be used for its tracklist) in place of
 the unknown-Disc-Number disclosure, or, where nothing can be filled from the
-titles, says that the numbers can be entered in **Edit draft**. The candidate
-this run chose without a pairing (`applied.pairs` null) whose pairing is now
-single offers **Use this release again (with track details)** on its card, a
-primary button where it is not folded, and, while the run has matching groups,
+titles, says that the tracks can be paired with it by hand or the numbers
+entered in **Edit draft**. The candidate this run chose without a pairing
+(`applied.pairs` null) whose pairing is now single offers **Use this release
+again (with track details)** on its card, a primary button where it is not
+folded, and, while the run has matching groups,
 also above the folded list; choosing it again computes its values anew, so it
 brings in the paired member values and the expected tracklist. Where the run's
 only matching group of a partial comparison is offered, or a tie needs an
@@ -1900,6 +1907,68 @@ administrator checks them and saves through the ordinary review save, which
 re-ranks the stored candidates without a lookup run. They are the
 administrator's own numbers: they constrain pairing and reach the catalog only
 when the review is applied.
+
+**Pair tracks by hand** opens the pairing panel (`CandidatePairing.tsx`, its own
+chunk; one that cannot load asks for a reload in its place) for that card's
+edition, below the chooser's sections and one at a time. It keeps one place in
+the tree whichever view the chooser shows, and the summary's results keep one
+element whether or not a release is applied, so a re-rank that moves the release
+out of **Possible matches**, or a first applied release, neither closes it nor
+clears its choices. It reads `GET
+/catalog-reviews/:id/lookup/candidates/:key/pairing` (below) and is headed
+**Pair the tracks with "X" (20 tracks on 2 discs)**. Each member, in Album order
+with its saved title and duration, gets a list of the release tracks it can pair
+with, as pairing reads its own numbers and duration: those within the tolerance
+where both durations are known, and every release track where the member's is
+not, closest first, each read as `1-1 Title · 3:35.64 · differs by 0.02 s`
+(**same duration** under 0.005 seconds, **duration unknown** without one). A
+member's own Disc or Track Number (captured from the catalog or saved by the
+administrator) restricts its list to the release tracks at that number, and the
+panel cannot change it: its copy says to change it in **Edit draft** to pair the
+member differently. A member that every complete pairing gives the same release
+track starts on it, saying **Only 1-2 "Title" can pair with this track**; the
+others start on **Choose a release track**. A release track another member took
+is disabled with **used by track N**, so no two members take one, and a release
+track outside the tolerance is never offered, since numbers placing a member
+there would leave the release unpaired (owner rules, next-step bullet). The
+panel says what saving does: the numbers become the administrator's own values
+in the completion draft, then the release is used with its expected tracklist,
+its rows without a file and its track details, and the original Album changes
+only through **Update original Album**. **Save pairing and use this release**
+stays disabled while a member has no release track (**N tracks still need a
+release track.**). It saves every member's chosen Disc and Track Number, also
+one equal to the saved draft so that it becomes the administrator's own, as one
+ordinary review save (`PATCH /catalog-reviews/:id`), which re-ranks the stored
+candidates without a lookup run; a member of a review captured before Disc
+Numbers were captured (`discSavable` false) keeps its Disc Number as shown,
+which a save may not change, so only its Track Number is sent and the re-rank
+decides. It then reads the lookup summary and, unless that re-rank applied this
+release or another of its editions through this pairing, chooses it for the run
+the panel opened from (`POST /catalog-reviews/:id/lookup/choose`); the saved
+numbers pair the members with it in exactly one way, so choosing brings in its
+expected tracklist and track details; where the latest result does not pair the
+members with it in exactly one way, as after a newer run, it chooses nothing and
+says that the numbers are saved but the release was not used. Meanwhile it says
+**Saving the Disc and Track Numbers…**, then **Using this release…**. A save the
+server refused uses nothing and keeps the panel's choices, and saving again
+starts a new save at the revision read again; a save that fails or cannot be
+confirmed (a network failure, a server error or an unreadable answer) says so,
+keeps the panel's choices, and **Save pairing and use this release** sends the
+same save again, which the server applies at most once. A choice that fails
+after the save keeps the numbers and offers **Use this release**, which chooses
+without saving again: a refused choice as a new one, an unconfirmed one as the
+same choice again. A reload request says to reload and leaves only **Cancel**; a
+read that fails says so with **Try again**. **Cancel** closes the panel without
+saving; after an outcome the panel could not confirm, it also has the page read
+the review again. Focus returns to the opener after **Cancel**, and to the
+summary's lookup panel once the release is used or when the opener is gone. The
+numbers behave like those filled from the titles: they constrain pairing, stay
+when another release is chosen and reach the catalog only when the review is
+applied. Like the chooser's other buttons, the opener and the save are disabled
+while the draft has unsaved edits, a change runs or the review's source is not
+current, and the chooser's other choices wait while the panel saves; the opener
+is never on a card of the other sections, in a tie or an offered choice, or for
+an Album without members.
 
 Catalog review routes (relative to `/api/admin/v1`):
 
@@ -2195,6 +2264,43 @@ Catalog review routes (relative to `/api/admin/v1`):
   this route), private WebP answer, read-only checks and error codes without a
   body; a review's candidate is never found under `/imports`, nor an import's
   here.
+- `GET /catalog-reviews/:id/lookup/candidates/:key/pairing` (the review
+  chooser's pairing panel): `200 {run, revision, rows, members}` for a candidate
+  of the review's current, completed run, read in one snapshot, storing nothing
+  in the review or its lookup record (only the administrator fence every review
+  read writes), behind the same administrator, current-viewer and `no-store`
+  guards as the other review routes (no `viewer` query). `run` is the completed
+  run and `revision` the review revision it was read at, which the panel's save
+  and choice bind to. `rows` (at most 100) are the candidate's tracks on audio
+  media in Disc then Track Number order, as its expected tracklist would hold
+  them (`releaseAudioTracks` of its stored release details: video, data and
+  pregap tracks left out), each `{disc, track, title, durationMs}`: the stored
+  release's track title, NFC and trimmed, and its length (`null` when unknown).
+  `members` (at most 100) are the review's members in Album order, each
+  `{slotId, title, durationMs, saved, discSavable, options, forced}`: the saved
+  draft's title, the duration ranking uses (`null` when unknown), `saved`, the
+  saved draft's Disc and Track Number as `{disc, track}` (each `null` when
+  empty), `discSavable`, whether a save may change its Disc Number (false only
+  for a review captured before Disc Numbers were captured), the rows it can pair
+  with as `{disc, track, deltaMs}`, closest first, then those whose `deltaMs` is
+  `null` (a duration unknown on either side) in row order, and `forced`, the row
+  every complete pairing gives it as `{disc, track}`, else `null`. Both come
+  from `lookupPairingOptions` in `lookupSubset.ts`, which reuses the ranking's
+  compatibility and `lookupForcedPairs`: the member's own Disc and Track Number
+  where it has them (captured or saved by the administrator, never numbers
+  lookup wrote; a missing Disc Number matches any disc) and a duration within
+  the tolerance plus the member's precision where both are known. The answer
+  carries no release, recording or track ID, ISRC, URL or label, and no text but
+  the stored release's track titles and the review's own titles; the candidate
+  key is one the view already carries. Refusals: `404
+  ADMIN_CATALOG_REVIEW_NOT_FOUND` (an import, a malformed id or key, a review
+  not captured for lookup or without a completed run, or a key that is not one
+  of the current run's candidates, as after a newer run), `404
+  ADMIN_CATALOG_REVIEW_DISCARDED`, `409
+  ADMIN_IMPORT_LOOKUP_CANDIDATE_INCOMPLETE` (no fetched details of the release
+  its key names, or no expected tracklist within its bounds: no audio track,
+  more than 100, or an invalid one) and `503 ADMIN_IMPORT_LOOKUP_UNAVAILABLE`
+  (lookup not configured); `/imports` has no such route.
 - The catalog trigger (review creation calls it where lookup is available):
   `queueCatalogReviewLookup` starts a review's one automatic run in the
   caller's administrator transaction under a `create` grant, from the Album's
@@ -3155,6 +3261,19 @@ roll back to:
   keys, so reload open workbench tabs after rolling back across them. After
   deploying them, a Web client's cached bundle from before them is refused once
   for lacking those keys, so it shows English until the new bundle loads.
+- Pairing tracks by hand needs no floor of its own; no collection, index, stored
+  shape or view shape changes, and its read stores nothing. A release before it
+  answers the pairing route as not found, so a Web tab opened after it shows the
+  panel's load error there; numbers a panel saved are ordinary review saves and
+  its choice an ordinary choice, which that release keeps and applies like any
+  others. Open admin Web tabs need no reload for its reads. It changes message
+  values and adds message keys; every earlier key and its variables are kept, so
+  Web, iOS and Android clients accept this release's remote bundles. A Web tab
+  opened after it keeps its active bundle instead of accepting a remote bundle
+  from a release before it, which lacks the new keys, so reload open workbench
+  tabs after rolling back across it. After deploying it, a Web client's cached
+  bundle from before it is refused once for lacking those keys, so it shows
+  English until the new bundle loads.
 - Automatic covers need no floor of their own. A release before them shows and
   publishes only a stored, explicit `selectedCoverSlotId`, so an import whose
   choice is still automatic shows No cover there and publishes no cover unless

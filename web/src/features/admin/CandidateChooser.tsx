@@ -3,12 +3,13 @@
  *   Functions: CandidateChooser
  * Internal
  *   Types: Candidate, ReviewCandidate, Proposal, Subset, Preview
- *   Functions: proposalText
- *   Constants: PREVIEWS_AT_ONCE, RETRY_MS, fields, fieldKeys
+ *   Functions: proposalText, PairingUnavailable
+ *   Constants: PREVIEWS_AT_ONCE, RETRY_MS, fields, fieldKeys, CandidatePairing
  * @end-catalog */
 
-import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { lazy, Suspense, useEffect, useId, useRef, useState, type ComponentProps, type ComponentType, type ReactNode } from 'react';
 import { useAdminText } from './AdminAccess';
+import type { CandidatePairing as Pairing } from './CandidatePairing';
 import { entriesByline } from './artistEntriesByline';
 import type { ImportLookupView, ReviewLookupView } from './importLookupApi';
 import { reviewLookupKey } from './lookupNextStep';
@@ -35,6 +36,11 @@ const proposalText = (field: typeof fields[number], proposal: Proposal, withId?:
   ? (withId ? proposal.artists.map(entry => withId(entry.name, entry.musicBrainzId)).join(' · ') : entriesByline(proposal.artists)) || '—'
   : field === 'tracks' ? proposal.tracks.map(track => `${track.discNumber}.${track.trackNumber} ${track.title}`).join(' · ') || '—'
   : field === 'releaseDate' ? reviewValueText(proposal.releaseDate) : field === 'label' && withId && proposal.label ? withId(proposal.label, proposal.labelMusicBrainzId) : proposal[field] || '—';
+/** Stands in for a pairing panel whose chunk cannot load (a deploy replaced it); the cards' other choices stay usable. */
+function PairingUnavailable() { const t = useAdminText(); return <p role="alert">{t('common.reload')}</p>; }
+/** The pairing panel, its own chunk, loaded only when a card opens it. */
+const CandidatePairing = lazy<ComponentType<ComponentProps<typeof Pairing>>>(() => import('./CandidatePairing')
+  .then(module => ({ default: module.CandidatePairing }), () => ({ default: PairingUnavailable })));
 
 /**
  * Chooses a release of the current lookup run, or none. While several matching groups tie, it lists each group's representative
@@ -59,21 +65,28 @@ const proposalText = (field: typeof fields[number], proposal: Proposal, withId?:
  * so every candidate stays selectable. A possible match whose members pair in no single way keeps choosing it under Other options
  * as Album values only (each other edition likewise); the first such card offers filling the Disc and Track Numbers from the
  * titles (`review.fill`) or says they can be entered in Edit draft, then used where a member has no duration, else compared again,
- * unless another possible match pairs in one way (then that release is the next step and nothing asks for numbers). A review card
- * whose pairing the title or filename positions or the closest durations made single says so (`pairedBy`), and the unknown
- * Disc Numbers line then stays out.
+ * unless another possible match pairs in one way (then that release is the next step and nothing asks for numbers). Each such
+ * card also offers Pair tracks by hand, which opens the pairing panel (CandidatePairing.tsx, its own chunk) for that edition below
+ * the sections, one at a time; it keeps one place in the tree whichever view a re-rank shows, so it stays open with its state when
+ * the release leaves the possible matches. While it saves, the chooser's other choices wait; once it closes, focus returns to its
+ * opener after Cancel, else (or when the opener is gone) to the summary's lookup panel. A review card whose pairing the title or
+ * filename positions or the closest durations made single says so (`pairedBy`), and the unknown Disc Numbers line then stays out.
  * The release this run applied without a pairing whose pairing is now single can be used again, a primary button where it is not
  * folded, which brings in its tracklist and track details; with groups it is also listed above the folded list. In a review, the
  * tie or offer sentence names its region without being printed again (the summary's status says it), and the offered release's
  * card names its editions like a possible match, with Use this release as the primary button, the next step.
  */
-export function CandidateChooser({ projectId, viewerId, lookup, review, disabled, onChoose }: {
+export function CandidateChooser({ projectId, viewerId, lookup, review, disabled: locked, onChoose }: {
   projectId: string; viewerId: string; lookup: ImportLookupView | ReviewLookupView; disabled: boolean;
   /** An existing-Album review: its saved tracks, the searched text, its primary Artists' names and an eligible fill (else null). */
   review?: { tracks: readonly { slotId: string; title: string }[]; searched: string; artists: readonly string[]; fill: { count: number; run: () => void } | null };
   onChoose: (candidateKey: string | null) => void;
 }) {
   const t0 = useAdminText(), id = useId(), tie = lookup.needsAnswer.tie, single = lookup.groups.length === 1;
+  // The open pairing panel (its candidate and the card's editions) and whether it is saving; an opener's ID follows its candidate, so
+  // a re-rank that reorders the cards never gives it to another release.
+  const [panel, setPanel] = useState<{ key: string; editions: string[] } | null>(null), [saving, setSaving] = useState(false), disabled = locked || saving;
+  const opener = (key: string) => `${id}-pair-${key.replace(/[^A-Za-z0-9_-]/g, '_')}`;
   // A review's own copy for messages whose import wording names the files.
   const t: typeof t0 = (key, variables) => t0(review ? reviewLookupKey(key) : key, variables);
   const [previews, setPreviews] = useState<ReadonlyMap<string, Preview>>(() => new Map()), [open, setOpen] = useState<ReadonlySet<string>>(() => new Set());
@@ -177,6 +190,9 @@ export function CandidateChooser({ projectId, viewerId, lookup, review, disabled
             {index === hinted && (review!.fill ? <><p>{t(unknown ? 'catalog_review.lookup_fill_hint_durations' : 'catalog_review.lookup_fill_hint', { count: review!.fill.count })}</p>
               <button type="button" className={styles.button} disabled={disabled} aria-describedby={title} onClick={review!.fill.run}>{t('catalog_review.fill_numbers')}</button></>
               : <p>{t(unknown ? 'catalog_review.lookup_fill_unavailable_durations' : 'catalog_review.lookup_fill_unavailable')}</p>)}
+            <button id={opener(candidate.key)} type="button" className={styles.button} disabled={disabled} aria-expanded={panel?.key === candidate.key} aria-describedby={title}
+              onClick={() => setPanel(panel?.key === candidate.key ? null : { key: candidate.key, editions: group.map(entry => entry.key) })}>
+              {t('catalog_review.lookup_pair_by_hand')}</button>
             <details className={styles.details}><summary>{t('catalog_review.lookup_other_options')}</summary><p className={styles.muted}>{t('catalog_review.lookup_album_only_copy')}</p>
               {choose(t('catalog_review.lookup_choose_album_only'))}</details></>
           : choose(t('lookup.choose'))}
@@ -198,16 +214,24 @@ export function CandidateChooser({ projectId, viewerId, lookup, review, disabled
   const none = <div className={styles.actions}><button type="button" className={styles.button} disabled={disabled || (chosen === null && lookup.applied?.choice === 'none')} onClick={() => onChoose(null)}>{t('lookup.choose_none')}</button></div>;
   const fold = (prefix: string, heading: string, body: ReactNode) => <details className={styles.details} onToggle={event => toggle(prefix, event.currentTarget.open)}><summary>{heading}</summary>{body}</details>;
   const releases = (groups: Candidate[][]) => groups.map(group => ({ candidate: acting(group), proposal: null, group }));
+  // The pairing panel follows the sections. Focus returns to its opener after Cancel; once the release is used, or when the opener
+  // is gone, to the summary's lookup panel, as a re-read usually removes the opener.
+  const opened = panel && lookup.candidates.find(candidate => candidate.key === panel.key);
+  const pairing = panel && opened && <Suspense fallback={<p role="status">{t('common.loading')}</p>}><CandidatePairing key={panel.key} projectId={projectId}
+    candidateKey={panel.key} editions={panel.editions} run={lookup.run} title={opened.title ?? '—'} disabled={locked} onBusy={setSaving}
+    onClose={used => { setPanel(null); ((!used && document.getElementById(opener(panel.key))) || document.getElementById('catalog-review-lookup'))?.focus(); }} /></Suspense>;
   const all = fold('a', t('lookup.candidates', { count: lookup.candidates.length }), <>{list('a', lookup.candidates.map(candidate => ({ candidate, proposal: null })))}{!tie && !offered && none}</>);
   // A review's summary already says the tie or offer sentence as its status, so here it only names the region; its offered release
   // names its editions as a possible match does.
   const heading = t(tie ? 'lookup.tie' : 'lookup.single_choice'), editions = review && offered ? releaseGroups(lookup.candidates as ReviewCandidate[]) : [];
-  return tie || offered ? <><section aria-label={review ? heading : undefined} aria-labelledby={review ? undefined : `${id}-tie`}>{!review && <h3 id={`${id}-tie`}>{heading}</h3>}{disclosed}
-    {list('t', representatives.map(entry => ({ ...entry, group: editions.find(group => group.includes(entry.candidate as ReviewCandidate)) })))}{none}</section>{all}</>
-    : sections ? <>{disclosed}
+  // Each view's parts before and after the pairing panel, which so keeps its place (and its state) whichever view a re-rank shows.
+  const [head, tail] = tie || offered ? [<section aria-label={review ? heading : undefined} aria-labelledby={review ? undefined : `${id}-tie`}>{!review && <h3 id={`${id}-tie`}>{heading}</h3>}
+    {disclosed}{list('t', representatives.map(entry => ({ ...entry, group: editions.find(group => group.includes(entry.candidate as ReviewCandidate)) })))}{none}</section>, all]
+    : sections ? [<>{disclosed}
       {sections.possible.length > 0 && <section aria-labelledby={`${id}-possible`}><h3 id={`${id}-possible`}>{t('catalog_review.lookup_section_possible', { count: sections.possible.length })}</h3>
         {list('p', releases(sections.possible), true)}</section>}
       {sections.others.length > 0 && fold('o', t('catalog_review.lookup_section_other_fit', { count: sections.others.length }), list('o', releases(sections.others)))}
-      {sections.rest.length > 0 && fold('n', t('catalog_review.lookup_section_not_fit', { count: sections.rest.length }), list('n', releases(sections.rest)))}{none}</>
-    : <>{disclosed}{rechoose.length > 0 && list('r', rechoose.map(candidate => ({ candidate, proposal: null })))}{all}</>;
+      {sections.rest.length > 0 && fold('n', t('catalog_review.lookup_section_not_fit', { count: sections.rest.length }), list('n', releases(sections.rest)))}</>, none]
+    : [<>{disclosed}{rechoose.length > 0 && list('r', rechoose.map(candidate => ({ candidate, proposal: null })))}</>, all];
+  return <>{head}{pairing}{tail}</>;
 }

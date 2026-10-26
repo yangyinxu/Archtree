@@ -3,7 +3,7 @@
  *   Types: Candidate, ReviewCandidate, ReviewProps
  *   Functions: release, key, comparison, candidate, group, view, applied, mount, unfold, subset,
  *              reviewCandidate, reviewView, mountReview, live
- *   Constants: importId, viewerId, reviewTracks, liveReview, ambiguousReason, fillHint
+ *   Constants: importId, viewerId, pairingMounts, reviewTracks, liveReview, ambiguousReason, fillHint
  * Tests
  *   - the folded list gives each release its status, label, date and track count, and says how a non-matching one differs
  *   - the tie view repeats only the values that differ, here the disc and track order, and needs one release or none
@@ -29,10 +29,15 @@
  *   - a review's possible matches load their previews at once, and a folded section's only once it is opened
  *   - a review card says how its pairing was made single: by the titles' or file names' track numbers or the closest durations; without it, or on the import page, no such line shows
  *   - a possible match that pairs in one way is the next step, so no other possible match asks for numbers; the unknown Disc Numbers line stays unless the positions or durations made that pairing single
+ *   - a possible match whose members pair in more than one way offers pairing by hand as a plain button that opens one panel after the sections; other choices wait while it saves
+ *   - pairing by hand is offered only on possible matches that pair in more than one way
+ *   - closing the pairing panel returns focus to its own opener after Cancel, and to the lookup panel once the release is used or its opener is gone
  * @end-catalog */
 
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import type { ComponentProps } from 'react';
 import { CandidateChooser } from './CandidateChooser';
+import type { CandidatePairing } from './CandidatePairing';
 import { pairedLookupResponse, pairingApplication, pairingEditions, pairingLookupResponse } from './catalogReviewLookupFixtures.testSupport';
 import type { ImportLookupView, ReviewLookupView } from './importLookupApi';
 import styles from './adminStyles';
@@ -58,6 +63,21 @@ const applied = (run: number, candidateKey: string | null): ImportLookupView['ap
 const importId = 'aaaaaaaaaaaaaaaaaaaaaaaa', viewerId = 'bbbbbbbbbbbbbbbbbbbbbbbb';
 function mount(lookup: ImportLookupView, disabled = false) { const onChoose = vi.fn(); render(<CandidateChooser projectId={importId} viewerId={viewerId} lookup={lookup} disabled={disabled} onChoose={onChoose} />); return onChoose; }
 afterEach(cleanup);
+/** How many times the stand-in pairing panel mounted. */
+const pairingMounts = vi.hoisted(() => ({ count: 0 }));
+// The pairing panel stands in as a region that shows what it was opened with, keeps a count of its own as state, counts its mounts
+// and reports busy, idle, closed (Cancel) and used on request.
+vi.mock('./CandidatePairing', async () => {
+  const { useEffect, useState } = await import('react');
+  return { CandidatePairing: function Panel(props: ComponentProps<typeof CandidatePairing>) {
+    const [picks, setPicks] = useState(0);
+    useEffect(() => { pairingMounts.count++; }, []);
+    return <section aria-label="Synthetic pairing panel">
+      <p>{`${props.candidateKey} ${props.editions.join(',')} ${props.run} ${props.title}`}</p><button type="button" onClick={() => setPicks(picks + 1)}>{`picked ${picks}`}</button>
+      <button type="button" onClick={() => props.onBusy(true)}>busy</button><button type="button" onClick={() => props.onBusy(false)}>idle</button>
+      <button type="button" onClick={() => props.onClose(false)}>close</button><button type="button" onClick={() => { props.onBusy(false); props.onClose(true); }}>used</button></section>;
+  } };
+});
 /** Opens the folded list whose summary is `summary`, as the browser does when it is clicked. */
 const unfold = (summary: HTMLElement) => { const details = summary.closest('details')!; act(() => { details.open = true; fireEvent(details, new Event('toggle')); }); };
 
@@ -388,7 +408,7 @@ test('a possible match whose members pair in no single way offers the numbers fi
   // Without numbers in the titles the card says they can be entered by hand; the unknown Disc Numbers line stays.
   mountReview(live(), liveReview);
   card = within(screen.getByRole('region', { name: /^Possible match/ }));
-  expect(card.getByText('You can enter or correct Disc and Track Numbers in Edit draft; saving the completion draft compares again for free.')).toBeInTheDocument();
+  expect(card.getByText('You can pair the tracks with this release by hand, or enter or correct Disc and Track Numbers in Edit draft, where saving the completion draft compares again for free.')).toBeInTheDocument();
   expect(card.queryByRole('button', { name: /^Fill/ })).not.toBeInTheDocument();
   expect(screen.getByText('Tracks without a disc number: 2. They can pair with a track on any disc, so their positions may be unclear.')).toBeInTheDocument();
   cleanup();
@@ -516,7 +536,7 @@ test('among several possible releases only the first offers the numbers, and a r
   expect(screen.queryByText(fillHint)).not.toBeInTheDocument();
   cleanup();
   mountReview(durations, liveReview);
-  expect(screen.getByText('You can enter Disc and Track Numbers in Edit draft; after saving the completion draft, use this release to bring in its expected tracklist.')).toBeInTheDocument();
+  expect(screen.getByText('You can pair the tracks with this release by hand, or enter Disc and Track Numbers in Edit draft; after saving the completion draft, use this release to bring in its expected tracklist.')).toBeInTheDocument();
 });
 
 test('an import view keeps its flat folded list and status sentences even with unverified candidates of the same title', () => {
@@ -582,4 +602,129 @@ test('a possible match that pairs in one way is the next step, so no other possi
     expect(screen.queryByText(unknownDiscs)).not.toBeInTheDocument();
     cleanup();
   }
+});
+
+test('a possible match whose members pair in more than one way offers pairing by hand as a plain button that opens one panel after the sections; other choices wait while it saves', async () => {
+  const onChoose = vi.fn(), element = (lookup: ReviewLookupView) => <CandidateChooser projectId={importId} viewerId={viewerId} lookup={lookup}
+    review={{ tracks: reviewTracks, fill: null, ...liveReview }} disabled={false} onChoose={onChoose} />;
+  const view = render(element(live()));
+  const card = within(screen.getByRole('region', { name: 'Possible match (1 release)' }));
+  const opener = card.getByRole('button', { name: 'Pair tracks by hand' });
+  expect(opener).toHaveClass(styles.button); expect(opener).not.toHaveClass(styles.primary);
+  expect(opener).toHaveAccessibleDescription('Synthetic Live Album 2 · Synthetic Live Artist');
+  expect(opener).toHaveAttribute('aria-expanded', 'false');
+  // It follows the fill-unavailable line and precedes Other options.
+  const line = card.getByText(/^You can pair the tracks with this release by hand/), options = card.getByText('Other options').closest('details')!;
+  expect(line.compareDocumentPosition(opener) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(opener.compareDocumentPosition(options) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  fireEvent.click(opener);
+  const panel = await screen.findByRole('region', { name: 'Synthetic pairing panel' });
+  expect(opener).toHaveAttribute('aria-expanded', 'true');
+  expect(within(panel).getByText(`${pairingEditions[0]} ${pairingEditions.join(',')} 3 Synthetic Live Album 2`)).toBeInTheDocument();
+  // One panel, after the sections (the folded not-fit one included) and before Use none of these.
+  const notFit = screen.getByText('Releases that do not fit or could not be read (10)').closest('details')!, none = screen.getByRole('button', { name: 'Use none of these' });
+  expect(notFit.compareDocumentPosition(panel) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(panel.compareDocumentPosition(none) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(card.queryByRole('region', { name: 'Synthetic pairing panel' })).not.toBeInTheDocument();
+  // While it saves, the chooser's other choices wait.
+  const albumOnly = card.getByRole('button', { name: 'Use Album values only (title, Artists, label, release date)', hidden: true });
+  fireEvent.click(within(panel).getByRole('button', { name: 'busy' }));
+  for (const button of [none, albumOnly, opener]) expect(button).toBeDisabled();
+  fireEvent.click(within(panel).getByRole('button', { name: 'idle' }));
+  for (const button of [none, albumOnly, opener]) expect(button).toBeEnabled();
+  // Closing it focuses the opener again.
+  fireEvent.click(within(panel).getByRole('button', { name: 'close' }));
+  expect(screen.queryByRole('region', { name: 'Synthetic pairing panel' })).not.toBeInTheDocument();
+  expect(document.activeElement).toBe(opener);
+  expect(opener).toHaveAttribute('aria-expanded', 'false');
+  // The opener also closes the panel it opened.
+  fireEvent.click(opener);
+  await screen.findByRole('region', { name: 'Synthetic pairing panel' });
+  fireEvent.click(opener);
+  expect(screen.queryByRole('region', { name: 'Synthetic pairing panel' })).not.toBeInTheDocument();
+  expect(opener).toHaveAttribute('aria-expanded', 'false');
+  // A save whose re-rank turns the release into an offered matching group removes the sections, and the release applied for its
+  // Album values only, now pairing in one way, is used again in another view; the open panel stays mounted with its state.
+  fireEvent.click(opener);
+  fireEvent.click(within(await screen.findByRole('region', { name: 'Synthetic pairing panel' })).getByRole('button', { name: 'picked 0' }));
+  const mounted = pairingMounts.count;
+  view.rerender(element(pairedLookupResponse().lookup!));
+  expect(screen.queryByRole('region', { name: /^Possible match/ })).not.toBeInTheDocument();
+  expect(within(screen.getByRole('region', { name: 'Synthetic pairing panel' })).getByRole('button', { name: 'picked 1' })).toBeInTheDocument();
+  view.rerender(element(pairedLookupResponse(pairingApplication(pairingEditions[0], false)).lookup!));
+  expect(screen.getAllByRole('button', { name: 'Use this release again (with track details)' }).length).toBeGreaterThan(0);
+  expect(within(screen.getByRole('region', { name: 'Synthetic pairing panel' })).getByRole('button', { name: 'picked 1' })).toBeInTheDocument();
+  view.rerender(element(live()));
+  expect(within(screen.getByRole('region', { name: 'Synthetic pairing panel' })).getByRole('button', { name: 'picked 1' })).toBeInTheDocument();
+  expect(pairingMounts.count).toBe(mounted);
+  // A run without its release shows no panel, and nothing waits for it.
+  view.rerender(element(live({ candidates: live().candidates.filter(entry => !(pairingEditions as readonly string[]).includes(entry.key)) })));
+  expect(screen.queryByRole('region', { name: 'Synthetic pairing panel' })).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Use none of these' })).toBeEnabled();
+  expect(onChoose).not.toHaveBeenCalled();
+});
+
+test('pairing by hand is offered only on possible matches that pair in more than one way', () => {
+  const opener = { name: 'Pair tracks by hand', hidden: true };
+  mount(view({ candidates: [candidate(1, { status: 'unverified', groupKey: null }), candidate(2, { status: 'unverified', groupKey: null })] }));
+  unfold(screen.getByText('Releases found: 2'));
+  expect(screen.queryByRole('button', opener)).not.toBeInTheDocument();
+  cleanup();
+  // A tie and the offered single choice.
+  mountReview(reviewView({ candidates: [reviewCandidate(1), reviewCandidate(2, { status: 'unverified', comparison: { ...comparison(), trackCount: { local: 2, candidate: 3 }, subset: subset({ pairing: 'ambiguous', pairs: [] }) } })],
+    groups: [group(1, [[1, 1, 'First']]), group(2, [[1, 1, 'Other']])], needsAnswer: { tie: true, conflicts: [] } }));
+  unfold(screen.getByText('Releases found: 2'));
+  expect(screen.queryByRole('button', opener)).not.toBeInTheDocument();
+  cleanup();
+  mountReview(pairedLookupResponse().lookup!, liveReview);
+  expect(screen.queryByRole('button', opener)).not.toBeInTheDocument();
+  cleanup();
+  // An Album without members.
+  mountReview(live({ candidates: live().candidates.map(entry => entry.status === 'unverified'
+    ? { ...entry, comparison: { ...entry.comparison!, trackCount: { local: 0, candidate: 20 } } } : entry) }), { ...liveReview, tracks: [] });
+  expect(screen.queryByRole('button', opener)).not.toBeInTheDocument();
+  cleanup();
+  // The other releases the tracks may fit, folded, whose titles differ from the name searched.
+  mountReview(live(), { ...liveReview, searched: 'Synthetic Budokan' });
+  unfold(screen.getByText('Other releases the tracks may fit (1)'));
+  expect(screen.queryByRole('button', opener)).not.toBeInTheDocument();
+  cleanup();
+  // The release this run applied without a pairing, now single, is used again instead.
+  mountReview(pairedLookupResponse(pairingApplication(pairingEditions[0], false)).lookup!, liveReview);
+  expect(screen.getAllByRole('button', { name: 'Use this release again (with track details)' }).length).toBeGreaterThan(0);
+  expect(screen.queryByRole('button', opener)).not.toBeInTheDocument();
+});
+
+test('closing the pairing panel returns focus to its own opener after Cancel, and to the lookup panel once the release is used or its opener is gone', async () => {
+  // Two possible releases of the same title that differ by their label, each pairing in more than one way.
+  const candidates = live().candidates, [first, second] = candidates.filter(entry => (pairingEditions as readonly string[]).includes(entry.key));
+  const others = candidates.filter(entry => entry !== first && entry !== second), relabeled = { ...second, label: 'Synthetic Other Label' };
+  const element = (lookup: ReviewLookupView) => <section id="catalog-review-lookup" tabIndex={-1} aria-label="Synthetic lookup panel">
+    <CandidateChooser projectId={importId} viewerId={viewerId} lookup={lookup} review={{ tracks: reviewTracks, fill: null, ...liveReview }} disabled={false} onChoose={vi.fn()} /></section>;
+  const view = render(element(live({ candidates: [...others, first, relabeled] })));
+  const openers = () => screen.getAllByRole('button', { name: 'Pair tracks by hand' });
+  const card = (button: Element) => button.closest('li')!.textContent!;
+  expect(openers().map(card).map(text => text.includes('Synthetic Other Label'))).toEqual([false, true]);
+  // Opened on the second release, closed after a re-rank that lists it first: focus returns to that release's opener.
+  fireEvent.click(openers()[1]);
+  await screen.findByRole('region', { name: 'Synthetic pairing panel' });
+  view.rerender(element(live({ candidates: [...others, relabeled, first] })));
+  expect(card(openers()[0])).toContain('Synthetic Other Label');
+  fireEvent.click(screen.getByRole('button', { name: 'close' }));
+  expect(document.activeElement).toBe(openers()[0]);
+  // Used: the chooser is idle again and focus moves to the lookup panel, as a re-read usually removes the opener.
+  fireEvent.click(openers()[1]);
+  fireEvent.click(within(await screen.findByRole('region', { name: 'Synthetic pairing panel' })).getByRole('button', { name: 'busy' }));
+  expect(openers()[1]).toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: 'used' }));
+  expect(screen.queryByRole('region', { name: 'Synthetic pairing panel' })).not.toBeInTheDocument();
+  expect(document.activeElement).toBe(screen.getByRole('region', { name: 'Synthetic lookup panel' }));
+  expect(openers()[1]).toBeEnabled();
+  // Cancelled after a re-rank removed its opener (the release now offered as a matching group): focus moves to the lookup panel.
+  fireEvent.click(openers()[0]);
+  await screen.findByRole('region', { name: 'Synthetic pairing panel' });
+  view.rerender(element(pairedLookupResponse().lookup!));
+  expect(screen.queryByRole('button', { name: 'Pair tracks by hand' })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'close' }));
+  expect(document.activeElement).toBe(screen.getByRole('region', { name: 'Synthetic lookup panel' }));
 });

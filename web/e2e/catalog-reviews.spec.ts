@@ -7,7 +7,8 @@
  *              expectFrozenTitle, expectManualChange, editManualAlbum, captureManualDialog, reflow,
  *              expectDecodedPrivateCover, catalogItemName, catalogCategoryLabel, catalogArtworkLabel,
  *              expectOrganizationMark, completionAlbumTracks, placeholderMemberLookup, quietPairingReview,
- *              pairingServer, numberInputs, filledChanges, classList, quoted, escapedText, reenter
+ *              pairingServer, quietUnnumberedReview, handPairingServer, numberInputs, filledChanges, classList,
+ *              quoted, escapedText, reenter
  *   Constants: shots, localizedViewports, privateCoverPath, coverSvg, coverPalettes, privateCoverFixtures,
  *              remainingCatalogKinds
  *   Variables: locale
@@ -17,6 +18,7 @@
  *   - without metadata lookup the Album page creates a completion for manual editing, then opens it, and another one is an explicit choice
  *   - an Album that cannot have a completion shows the action disabled with its reason
  *   - an iTunes-only lookup result names iTunes on its answers and flags every value it wrote
+ *   - pairing by hand sends no choice when the save's re-rank already applied the release, and a choice that fails after the save is offered again without saving
  *   - a superseded lookup of an Album that changed offers opening the Album instead of a retry that cannot run
  *   - a Luna label suggestion is only an identity hint: it is never a Review item, and Keep current rejects it without changing the label
  *   - a long direct catalog confirmation starts at the first old/new field and keeps its actions reachable at 390px
@@ -41,8 +43,8 @@ import sharp from 'sharp';
 import { capabilities, session, viewer } from '../src/features/admin/adminFixtures.testSupport';
 import { albumId, capturedCatalogReview, catalogAlbum, catalogAlbumTracks, catalogAlbumTracksWithExpected, catalogReview, reviewId, slotId, slotTwo, titleSuggestionId } from '../src/features/admin/catalogReviewFixtures.testSupport';
 import {
-  guestHandle, pairedLookupResponse, pairingApplication, pairingEditions, pairingLookupResponse, pairingReview, pairingRows, pairingRunningTimeline, pairingTimeline, reviewAfterLookup,
-  reviewIdentityResponse, reviewItunesLookupResponse, reviewLookupResponse, reviewTieLookupResponse
+  guestHandle, handPairingResponse, handPairingRows, pairedLookupResponse, pairingApplication, pairingEditions, pairingLookupResponse, pairingReview, pairingRows, pairingRunningTimeline,
+  pairingTimeline, reviewAfterLookup, reviewIdentityResponse, reviewItunesLookupResponse, reviewLookupResponse, reviewTieLookupResponse, unnumberedPairingReview
 } from '../src/features/admin/catalogReviewLookupFixtures.testSupport';
 import type { CatalogAlbumTracks } from '../src/features/admin/catalogAlbumTracksApi';
 import type { CatalogReview, ReviewDraftChange, ReviewField } from '../src/features/admin/catalogReviewApi';
@@ -160,6 +162,8 @@ async function setup(page: Page, administrator = true, initialReleaseDate: { yea
   // read still sees that run queued, and the identity rows. Lookup and decision receipts are answered, never listed in the detail.
   let lookup: ReviewLookupResponse['lookup'] = null, completion: ReviewLookupResponse['lookup'] = reviewLookupResponse().lookup, queuedReads = 0;
   let identities: ReviewIdentityResponse = reviewIdentityResponse();
+  // The pairing panel's read of a candidate (none answers it as not found) and how many choices still fail as unavailable.
+  let pairingRead: ((item: CatalogReview) => object) | null = null, failChooses = 0;
   /** The identity read where nothing differs from what the review captured: no identity row or Credit change. */
   const unchanged = (value: ReviewIdentityResponse): ReviewIdentityResponse => ({ ...value, selection: { lists: [], label: false }, keptTracklist: null, identities: [], label: null,
     candidates: { items: [], unavailable: [] }, preselections: [], musicBrainzIds: [], album: null, members: [] });
@@ -297,6 +301,12 @@ async function setup(page: Page, administrator = true, initialReleaseDate: { yea
       return route.fulfill({ json: { lookup, revision: review.revision, valueRevision: review.valueRevision, summary: { waiting: { lookup: active, analysis: ['queued', 'running'].includes(review.analysis.state) },
         needsAnswer: { tie: lookup?.needsAnswer.tie ?? false, conflicts: lookup?.needsAnswer.conflicts ?? [] }, lookupAvailable } }, headers });
     }
+    const pairing = new RegExp(`^/api/admin/v1/catalog-reviews/${reviewId}/lookup/candidates/([^/]+)/pairing$`).exec(path);
+    if (pairing) {
+      // A JSON read of the review's current revision; the viewer is named in its header, never in the query.
+      expect([method, new URL(request.url()).search]).toEqual(['GET', '']);
+      return route.fulfill(pairingRead ? { json: { ...pairingRead(review), revision: review.revision }, headers } : { status: 404, json: { code: 'ADMIN_CATALOG_REVIEW_NOT_FOUND' }, headers });
+    }
     if (path === `/api/admin/v1/catalog-reviews/${reviewId}/candidates`) {
       expect(method).toBe('GET');
       // Without an applied release nothing differs from what the review captured: no identity row or Credit change.
@@ -337,6 +347,7 @@ async function setup(page: Page, administrator = true, initialReleaseDate: { yea
       if (path.endsWith('/lookup/retry')) { queue(lookup!.input); return route.fulfill({ status: 202, json: lookupReceipt(body, 'lookup-retry'), headers }); }
       if (path.endsWith('/lookup/choose')) {
         expect(body.run).toBe(lookup!.run);
+        if (failChooses > 0) { failChooses--; return route.fulfill({ status: 503, json: { code: 'ADMIN_CATALOG_REVIEW_UNAVAILABLE' }, headers }); }
         const key = body.candidateKey as string | null, chosen = choosing?.(key, lookup!, review);
         // A choice that writes values moves the value revision; the receipt moves the revision.
         if (chosen) {
@@ -430,6 +441,10 @@ async function setup(page: Page, administrator = true, initialReleaseDate: { yea
     rerank: (value: typeof reranking) => { reranking = value; },
     /** What choosing a release writes: the view to show and the draft, if values changed; none applies `completion`'s release. */
     choose: (value: typeof choosing) => { choosing = value; },
+    /** What the pairing panel's read answers for the review as it stands (its revision is the review's); none answers not found. */
+    pairing: (value: typeof pairingRead) => { pairingRead = value; },
+    /** The next choice fails as unavailable, its outcome unknown, and changes nothing. */
+    failNextChoose: () => { failChooses++; },
     lookup: () => lookup, identities: () => identities, member: (id: string) => memberItems.get(id)
   };
 }
@@ -1474,7 +1489,8 @@ for (const variant of localizedViewports) {
     await expect(cards.nth(1).getByText(marked, { exact: true })).toBeVisible();
     // The folded list marks the same release, and only it, once it is opened.
     const found = label('admin.lookup.candidates', { count: 2 });
-    const folded = summary.locator('details', { has: page.getByText(found, { exact: true }) });
+    // The folded list is the disclosure whose own summary names it (the results around the chooser are a disclosure too).
+    const folded = summary.getByText(found, { exact: true }).locator('xpath=..');
     await folded.getByText(found, { exact: true }).click();
     await expect(folded.getByText(marked, { exact: true })).toHaveCount(1);
     await expect(folded.getByText(marked, { exact: true })).toBeVisible();
@@ -1500,6 +1516,22 @@ function pairingServer(api: Awaited<ReturnType<typeof setup>>) {
     const paired = current.groups.length > 0;
     const album = { ...item.draft.album, label: { name: 'Synthetic Live Label', musicBrainzId: null }, releaseDate: { year: 2023, month: 3, day: 29 } };
     return { lookup: { ...current, applied: pairingApplication(key, paired) }, draft: { ...item.draft, album: paired ? { ...album, expectedTracklist: pairingRows() } : album } };
+  });
+}
+/** The pairing review whose titles carry no positions (unnumberedPairingReview), as its submitted run left it: no Luna run or suggestion. */
+function quietUnnumberedReview(): CatalogReview {
+  const item = unnumberedPairingReview();
+  return { ...item, analysis: { ...item.analysis, state: 'idle', generation: 0, operationId: null, completedChunks: 0, totalChunks: 0, attemptsUsed: 0 }, suggestions: [] };
+}
+/** pairingServer for the live release's 12 + 8 rows (handPairingRows): a choice through the single pairing writes those as the expected tracklist. */
+function handPairingServer(api: Awaited<ReturnType<typeof setup>>) {
+  pairingServer(api);
+  api.choose((key, current, item) => {
+    if (!key) return undefined;
+    const paired = current.groups.length > 0;
+    const album = { ...item.draft.album, label: { name: 'Synthetic Live Label', musicBrainzId: null }, releaseDate: { year: 2023, month: 3, day: 29 } };
+    return { lookup: { ...current, applied: pairingApplication(key, paired) }, draft: { ...item.draft, album: paired
+      ? { ...album, expectedTracklist: handPairingRows().map(row => ({ discNumber: row.disc, trackNumber: row.track, title: row.title, durationMs: row.durationMs })) } : album } };
   });
 }
 /** The members' Disc and Track Number inputs in Edit draft, in Album order. */
@@ -1695,6 +1727,124 @@ for (const variant of localizedViewports) {
     await reflow(page);
   });
 }
+
+for (const variant of localizedViewports) {
+  const { width } = variant;
+  test(`a possible release whose track titles carry no positions is paired by hand: each track takes a different track of it it can pair with, saved as its numbers, and the release is then used with its tracklist at ${width}px ${variant.locale}`, async ({ page }) => {
+    locale = variant.locale; test.setTimeout(60_000);
+    await page.setViewportSize({ width, height: width === 1280 ? 720 : 844 });
+    const api = await setup(page); api.seed(quietUnnumberedReview(), pairingLookupResponse().lookup); handPairingServer(api);
+    api.pairing(item => handPairingResponse(item.revision));
+    await enter(page, `/finitude/admin/catalog-reviews/${reviewId}`);
+    const summary = page.getByRole('region', { name: label('admin.catalog_review.lookup_title'), exact: true });
+    const pairingReads = () => api.reads.filter(path => path.endsWith('/pairing')).length;
+    // The status names the possible release and that its tracks can be paired by hand; nothing can be filled from the titles.
+    const status = summary.getByText(refinedStatus(message('admin.catalog_review.lookup_possible_found', { count: 1, title: 'Synthetic Live Album 2' }),
+      label('admin.catalog_review.lookup_cause_pairing_pair')), { exact: true });
+    await expect(status).toHaveAttribute('role', 'status');
+    await expect(status).not.toContainText(/Luna|AI/);
+    const possible = summary.getByRole('region', { name: message('admin.catalog_review.lookup_section_possible', { count: 1 }), exact: true });
+    await expect(possible.getByText(label('admin.catalog_review.lookup_fill_unavailable'), { exact: true })).toBeVisible();
+    await expect(summary.getByRole('button', { name: label('admin.catalog_review.fill_numbers'), exact: true })).toHaveCount(0);
+    const opener = possible.getByRole('button', { name: label('admin.catalog_review.lookup_pair_by_hand'), exact: true });
+    expect(await classList(opener)).not.toEqual(await classList(page.locator('#catalog-review-save')));
+    await expect(opener).toHaveAttribute('aria-expanded', 'false');
+    // The panel opens below the sections with its heading focused; Cancel closes it, returns to the opener and sends nothing.
+    const name = message('admin.catalog_review.pairing_title', { title: 'Synthetic Live Album 2', rows: 20, discs: 2 });
+    await opener.click();
+    const panel = summary.getByRole('region', { name, exact: true });
+    await expect(panel.getByRole('heading', { name, exact: true })).toBeFocused();
+    await expect(opener).toHaveAttribute('aria-expanded', 'true');
+    await panel.getByRole('button', { name: label('admin.common.cancel'), exact: true }).click();
+    await expect(panel).toHaveCount(0);
+    await expect(opener).toBeFocused();
+    expect(api.writes).toEqual([]);
+    // Opened again: each track's choices, closest first with how far each duration is; the second track can take only 1-2, so it
+    // starts there, and 1-2 is never offered to the first.
+    await opener.click();
+    const delta = (seconds: string) => message('admin.catalog_review.pairing_delta', { seconds });
+    const one = panel.getByRole('combobox', { name: '1 · Synthetic opening (Live) · 3:35.66', exact: true }), two = panel.getByRole('combobox', { name: '2 · Synthetic second song (Live) · 6:22.75', exact: true });
+    await expect(two).toHaveValue('1:2');
+    await expect(two).toHaveAccessibleDescription(message('admin.catalog_review.pairing_forced', { position: '1-2', title: 'Synthetic live song 2' }));
+    expect(await one.locator('option').allTextContents()).toEqual([label('admin.catalog_review.pairing_choose_track'),
+      `1-1 Synthetic live song 1 · 3:35.64 · ${delta('0.02')}`, `2-2 Synthetic live song 14 · 3:34.95 · ${delta('0.71')}`]);
+    await expect(panel.getByText(message('admin.catalog_review.pairing_outcome', { missing: 18 }), { exact: true })).toBeVisible();
+    await expect(panel.getByText(message('admin.catalog_review.pairing_remaining', { count: 1 }), { exact: true })).toBeVisible();
+    const save = panel.getByRole('button', { name: label('admin.catalog_review.pairing_save'), exact: true });
+    await expect(save).toBeDisabled();
+    await one.selectOption('1:1');
+    await expect(save).toBeEnabled();
+    await expect(panel.getByText(message('admin.catalog_review.pairing_remaining', { count: 1 }), { exact: true })).toHaveCount(0);
+    await panel.scrollIntoViewIfNeeded(); await capture(page, '46-review-hand-pairing', width, false, false); await reflow(page);
+    // Saving sends both tracks' Disc and Track Numbers in one save, then one choice of the release for the run the panel read.
+    await save.click();
+    await expect.poll(() => api.writes.map(write => [write.method, write.path])).toEqual([['PATCH', `/api/admin/v1/catalog-reviews/${reviewId}`],
+      ['POST', `/api/admin/v1/catalog-reviews/${reviewId}/lookup/choose`]]);
+    expect(api.writes[0].body.changes).toEqual(filledChanges());
+    expect([api.writes[1].body.run, api.writes[1].body.candidateKey]).toEqual([3, pairingEditions[0]]);
+    expect(pairingReads()).toBe(2);
+    // The release is used: its 20-row expected tracklist, 18 rows without a file; the panel is gone and focus is on the lookup panel.
+    await expect(summary.getByText(label('admin.lookup.applied', { title: 'Synthetic Live Album 2' }), { exact: true })).toBeVisible();
+    await expect(summary.getByRole('region', { name, exact: true })).toHaveCount(0);
+    await expect(summary).toBeFocused();
+    // Nothing is left open, so the results fold under one disclosure, which opens on request.
+    const results = summary.locator('details').filter({ has: page.getByText(label('admin.catalog_review.lookup_details'), { exact: true }) });
+    await expect(results).toHaveJSProperty('open', false);
+    await results.getByText(label('admin.catalog_review.lookup_details'), { exact: true }).click();
+    await expect(results).toHaveJSProperty('open', true);
+    const expected = summary.getByRole('region', { name: label('admin.catalog.album_expected'), exact: true });
+    await expect(expected.getByText(message('admin.catalog_review.expected_rows', { rows: 20, noFile: 18 }), { exact: true })).toBeVisible();
+    const rows = expected.getByRole('listitem');
+    await expect(rows).toHaveCount(20);
+    await expect(rows.filter({ hasText: label('admin.catalog.album_expected_no_file') })).toHaveCount(18);
+    // Each track takes the release track it was paired with.
+    await expect(rows.first()).toHaveText(`${label('admin.publication.track_position', { disc: '1', track: '1' })} · Synthetic live song 1 · 1 · Synthetic opening (Live)`);
+    await expect(rows.nth(1)).toHaveText(`${label('admin.publication.track_position', { disc: '1', track: '2' })} · Synthetic live song 2 · 2 · Synthetic second song (Live)`);
+    await reflow(page);
+    await page.setViewportSize({ width: 320, height: 844 });
+    await reflow(page);
+  });
+}
+
+test('pairing by hand sends no choice when the save\'s re-rank already applied the release, and a choice that fails after the save is offered again without saving', async ({ page }) => {
+  test.setTimeout(60_000);
+  await page.setViewportSize({ width: 1280, height: 720 });
+  const api = await setup(page); api.seed(quietUnnumberedReview(), pairingLookupResponse().lookup); handPairingServer(api);
+  api.pairing(item => handPairingResponse(item.revision));
+  // The save's re-rank applies the release through the saved pairing itself, as a sole preselection would.
+  api.rerank(draft => draft.tracks.every(track => track.trackNumber !== null) ? pairedLookupResponse(pairingApplication(pairingEditions[0], true)).lookup : undefined);
+  await enter(page, `/finitude/admin/catalog-reviews/${reviewId}`);
+  const summary = page.getByRole('region', { name: label('admin.catalog_review.lookup_title'), exact: true });
+  const name = message('admin.catalog_review.pairing_title', { title: 'Synthetic Live Album 2', rows: 20, discs: 2 });
+  const pair = async () => {
+    await summary.getByRole('button', { name: label('admin.catalog_review.lookup_pair_by_hand'), exact: true }).click();
+    const panel = summary.getByRole('region', { name, exact: true });
+    await panel.getByRole('combobox', { name: '1 · Synthetic opening (Live) · 3:35.66', exact: true }).selectOption('1:1');
+    await panel.getByRole('button', { name: label('admin.catalog_review.pairing_save'), exact: true }).click();
+    return panel;
+  };
+  await pair();
+  await expect(summary.getByText(label('admin.lookup.applied', { title: 'Synthetic Live Album 2' }), { exact: true })).toBeVisible();
+  expect(api.writes.map(write => write.method)).toEqual(['PATCH']);
+  // Again from the start, where the choice after the save fails once with an unknown outcome; the save's re-rank offers the release
+  // in another view of the chooser, and the panel stays open with its saved numbers.
+  api.seed(quietUnnumberedReview(), pairingLookupResponse().lookup); handPairingServer(api); api.failNextChoose();
+  api.writes.length = 0;
+  await enter(page, `/finitude/admin/catalog-reviews/${reviewId}`);
+  await expect(summary.getByRole('button', { name: label('admin.catalog_review.lookup_pair_by_hand'), exact: true })).toBeVisible();
+  const panel = await pair();
+  await expect(panel.getByText(label('admin.catalog_review.pairing_choose_unknown'), { exact: true })).toHaveAttribute('role', 'status');
+  await expect(panel.getByRole('combobox', { name: '1 · Synthetic opening (Live) · 3:35.66', exact: true })).toHaveValue('1:1');
+  await expect.poll(() => api.writes.map(write => write.method)).toEqual(['PATCH', 'POST']);
+  await expect(panel.getByRole('button', { name: label('admin.catalog_review.pairing_save'), exact: true })).toHaveCount(0);
+  const use = panel.getByRole('button', { name: label('admin.lookup.choose'), exact: true });
+  expect(await classList(use)).toEqual(await classList(page.locator('#catalog-review-save')));
+  await use.click();
+  await expect(summary.getByText(label('admin.lookup.applied', { title: 'Synthetic Live Album 2' }), { exact: true })).toBeVisible();
+  const [, failed, chosen] = api.writes;
+  expect([api.writes.map(write => write.method), chosen.body]).toEqual([['PATCH', 'POST', 'POST'], failed.body]);
+  await reflow(page);
+});
 
 for (const variant of localizedViewports) {
   const { width } = variant;

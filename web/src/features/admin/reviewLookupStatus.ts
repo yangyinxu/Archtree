@@ -193,7 +193,8 @@ export type ReviewStatus = { messages: Message[]; elapsed?: Message; fill: 'next
  * duration left unconfirmed, or a pairing that is not single. Numbers are needed only while no such release pairs with the tracks
  * in one way. Entering them is the next step only where the titles give every member a Disc and Track Number (titleNumbers) and
  * the draft still lacks one (owner rules, next-step bullet); Track Numbers alone are offered after the name box, and otherwise the
- * copy says they can be entered in Edit draft. The name box is the next step (`box`) for an Album without members and wherever the
+ * copy says they can be entered in Edit draft, and, where a possible match is listed, that the tracks can be paired with it by hand.
+ * The name box is the next step (`box`) for an Album without members and wherever the
  * numbers are needed but filling them is not the next step. Anything else is a real no match.
  */
 export function reviewLookupStatus(lookup: ReviewLookupView, status: string,
@@ -220,6 +221,6 @@ export function reviewLookupStatus(lookup: ReviewLookupView, status: string,
   if (!fit) return null;
   const { cause, unknown } = fit, numbers = context.numbers, needed = cause === 'durations' || cause === 'pairing', next = needed && Boolean(numbers?.disc && numbers.count);
   return { messages: [reason(fit.possible ? 'possible_found' : 'fit_found', { count: fit.releases.length, title: fit.releases[0][0].title ?? '—' }),
-    reason(`cause_${cause}${needed && !next ? '_manual' : ''}`, unknown ? { unknown } : undefined), ...itunes], fill: next ? 'next' : needed && numbers?.count ? 'offer' : null,
+    reason(`cause_${cause}${needed && !next ? (fit.possible ? '_pair' : '_manual') : ''}`, unknown ? { unknown } : undefined), ...itunes], fill: next ? 'next' : needed && numbers?.count ? 'offer' : null,
     ...(needed && !next ? { box: true as const } : {}) };
 }

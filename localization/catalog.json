@@ -2216,6 +2216,15 @@
         "unknown": "number"
       }
     },
+    "admin.catalog_review.lookup_cause_durations_pair": {
+      "description": "Administrator workbench: existing-Album review summary, status cause after the found sentence: members have no duration, filling numbers from the titles is not the next step and a possible match is listed; another name, pairing by hand or numbers entered in Edit draft (the tab name), the last two bringing in the tracklist.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "unknown": "number"
+      }
+    },
     "admin.catalog_review.lookup_cause_paired_durations": {
       "description": "Administrator workbench: existing-Album review summary, status cause after the found sentence: the tracks pair with a release in exactly one way but members have no duration; the next step is using that release.",
       "delivery": [
@@ -2234,6 +2243,13 @@
     },
     "admin.catalog_review.lookup_cause_pairing_manual": {
       "description": "Administrator workbench: existing-Album review summary, status cause after the found sentence: the tracks fit in more than one way and the titles give no Disc and Track Numbers to fill; another name or numbers entered by hand.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_cause_pairing_pair": {
+      "description": "Administrator workbench: existing-Album review summary, status cause after the found sentence: the tracks fit in more than one way, filling numbers from the titles is not the next step and a possible match is listed; another name, pairing by hand or numbers entered in Edit draft (the tab name).",
       "delivery": [
         "runtime"
       ],
@@ -2381,14 +2397,14 @@
       }
     },
     "admin.catalog_review.lookup_fill_unavailable": {
-      "description": "Administrator workbench: existing-Album review summary and candidate chooser, in place of Fill Disc and Track Numbers from titles when nothing can be filled from the track titles; Edit draft is the tab name.",
+      "description": "Administrator workbench: existing-Album review candidate chooser, possible-match card, in place of Fill Disc and Track Numbers from titles when nothing can be filled from the track titles: pairing by hand (the button that follows) or numbers entered in Edit draft (the tab name).",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.catalog_review.lookup_fill_unavailable_durations": {
-      "description": "Administrator workbench: existing-Album review candidate chooser, possible-match card when members without a duration have no numbers the titles can give: they can be entered in Edit draft, then the release used.",
+      "description": "Administrator workbench: existing-Album review candidate chooser, possible-match card when members without a duration have no numbers the titles can give: pairing by hand (the button that follows), or numbers entered in Edit draft, then the release used.",
       "delivery": [
         "runtime"
       ],
@@ -2488,6 +2504,13 @@
     },
     "admin.catalog_review.lookup_other_options": {
       "description": "Administrator workbench: existing-Album review candidate chooser, folded group of less common choices on a release card.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_pair_by_hand": {
+      "description": "Administrator workbench: existing-Album review candidate chooser, plain button on a possible-match card whose tracks fit the release in more than one way: opens the panel that pairs each track with a track of that release by hand.",
       "delivery": [
         "runtime"
       ],
@@ -3340,6 +3363,154 @@
         "runtime"
       ],
       "variables": {}
+    },
+    "admin.catalog_review.pairing_choose_failed": {
+      "description": "Administrator workbench: existing-Album review pairing panel, after the numbers were saved but the server refused using the release; followed by the Use this release button, which uses it without saving again.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.pairing_choose_track": {
+      "description": "Administrator workbench: existing-Album review pairing panel, empty first choice of a track's list of release tracks.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.pairing_choose_unknown": {
+      "description": "Administrator workbench: existing-Album review pairing panel, after the numbers were saved but using the release failed without a confirmed outcome (a network failure, a server error or an unreadable answer; it may have been used); followed by the Use this release button, which sends the same choice again.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.pairing_choosing": {
+      "description": "Administrator workbench: existing-Album review pairing panel status after the numbers were saved, while the release is being used.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.pairing_copy": {
+      "description": "Administrator workbench: existing-Album review pairing panel, how the choices are listed: only release tracks the track can pair with by duration, closest first; every release track for a track without a duration; a track with its own Disc or Track Number (captured from the catalog or saved by the administrator) lists only release tracks at that number, which only Edit draft changes.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.pairing_delta": {
+      "description": "Administrator workbench: existing-Album review pairing panel, after a release track's duration in a track's choices: how far it is from the track's duration, in seconds with two decimals, formatted by the page.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "seconds": "string"
+      }
+    },
+    "admin.catalog_review.pairing_duration_unknown": {
+      "description": "Administrator workbench: existing-Album review pairing panel, in place of a track's or a release track's duration when it is unknown.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.pairing_forced": {
+      "description": "Administrator workbench: existing-Album review pairing panel, under a track that every complete pairing gives the same release track: its position (disc-track, such as 1-2) and title.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "position": "string",
+        "title": "string"
+      }
+    },
+    "admin.catalog_review.pairing_load_error": {
+      "description": "Administrator workbench: existing-Album review pairing panel, when the release's tracks could not be read (for example after a newer lookup replaced this result); followed by Try again and Cancel.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.pairing_outcome": {
+      "description": "Administrator workbench: existing-Album review pairing panel, what saving does: the numbers become the administrator's own draft values, then the release is used with its expected tracklist (how many rows have no file) and track details; Update original Album is the tab name.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "missing": "number"
+      }
+    },
+    "admin.catalog_review.pairing_remaining": {
+      "description": "Administrator workbench: existing-Album review pairing panel, beside the disabled save button: how many tracks have no release track chosen yet.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.catalog_review.pairing_same_duration": {
+      "description": "Administrator workbench: existing-Album review pairing panel, in place of the difference when the durations differ by less than 0.005 seconds.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.pairing_save": {
+      "description": "Administrator workbench: existing-Album review pairing panel, primary button: saves the chosen positions as the tracks' Disc and Track Numbers, then uses this release.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.pairing_save_failed": {
+      "description": "Administrator workbench: existing-Album review pairing panel, after the server refused the save of the chosen numbers; nothing was saved or used, and saving again starts a new save.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.pairing_save_unknown": {
+      "description": "Administrator workbench: existing-Album review pairing panel, after the save of the chosen numbers failed without a confirmed outcome (a network failure, a server error or an unreadable answer; it may have been stored); the save button sends the same save again.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.pairing_saved_not_single": {
+      "description": "Administrator workbench: existing-Album review pairing panel, after the numbers were saved but the latest lookup result does not pair the tracks with this release in exactly one way (for example after a newer run), so the release was not used.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.pairing_saving": {
+      "description": "Administrator workbench: existing-Album review pairing panel status while the chosen numbers are being saved.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.pairing_taken": {
+      "description": "Administrator workbench: existing-Album review pairing panel, after a release track that another track already took (its position in the Album); that choice is disabled.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "track": "number"
+      }
+    },
+    "admin.catalog_review.pairing_title": {
+      "description": "Administrator workbench: existing-Album review pairing panel heading: the release's title, how many audio tracks it has and on how many discs.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "discs": "number",
+        "rows": "number",
+        "title": "string"
+      }
     },
     "admin.catalog_review.review_copy": {
       "description": "Adopting suggestions saves them to the draft. Then choose which changes to apply to the original Album.",

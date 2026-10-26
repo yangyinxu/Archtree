@@ -191,7 +191,8 @@ export function CatalogReviewSummary({ item, disabled, error, onRun, onFillNumbe
     {folded.length > 0 && <details className={styles.details}><summary>{t('summary.values')}</summary><dl>
       {folded.map(([path, text]) => <div key={path}><dt>{label(path)}</dt><dd>{text}</dd></div>)}</dl></details>}
   </>;
-  return <section id="catalog-review-lookup" aria-labelledby={`${id}-title`} className={styles.panel}>
+  // Focusable for the candidate chooser, which returns focus here once its pairing panel closes without its opener.
+  return <section id="catalog-review-lookup" aria-labelledby={`${id}-title`} className={styles.panel} tabIndex={-1}>
     <h2 id={`${id}-title`}>{t('catalog_review.lookup_title')}</h2>
     {/* A full-width bracket or full stop carries its own space, and a dot parts the time from the keeps-running note. */}
     <p><span role="status">{statusText}</span>{refined?.elapsed && `${/[）」』]$/u.test(statusText) ? '' : ' '}· ${say(refined.elapsed)}`}
@@ -207,7 +208,9 @@ export function CatalogReviewSummary({ item, disabled, error, onRun, onFillNumbe
     {summary.lookupAvailable && <Suspense fallback={null}><LookupBox key={box} lookup={lookup} rootLabel="" defaultText={item.draft.album.title} mode="review" disabled={busy}
       active={lookupActive(lookup?.state)} fold={lookup?.state === 'complete' && !boxNext} onSubmit={(kind, text, artist) => onRun('lookup', { kind, text, ...(artist ? { artist } : {}) })} /></Suspense>}
     {refined?.fill === 'offer' && !numbersOpen && fillButton(false)}
-    {/* The fold keeps one element while a release is applied, so the identity rows never remount and keep unsaved choices. */}
-    {shown ? <details style={{ marginTop: '.75rem' }} open={!settled}><summary style={{ cursor: 'pointer', padding: '.3rem 0' }}>{t('catalog_review.lookup_details')}</summary>{body}</details> : body}
+    {/* One element here, open with no visible summary until a release is applied, so the candidate chooser with its open pairing panel
+        and the identity rows never remount, keeping unsaved choices. */}
+    <details style={shown ? { marginTop: '.75rem' } : undefined} open={shown ? !settled : true}>{shown
+      ? <summary style={{ cursor: 'pointer', padding: '.3rem 0' }}>{t('catalog_review.lookup_details')}</summary> : <summary style={{ display: 'none' }} />}{body}</details>
   </section>;
 }

@@ -317,6 +317,13 @@ projects); a review run that skips the iTunes fallback stores no `itunesStage`.
 The release before it ignores both (see
 [Rollback floors](../features/admin-workbench.md#rollback-floors)).
 
+Pairing tracks by hand adds no collection, index or `requiredIndexRevision`
+change: its read (`GET /catalog-reviews/:id/lookup/candidates/:key/pairing`)
+reads the review document and its lookup record in one snapshot, storing nothing
+in either (only the administrator fence every review read writes), and the
+numbers it saves go through the ordinary review save, whose re-rank writes the
+ranking and the gate as described above.
+
 MusicBrainz IDs add two required unique partial indexes, `artist_musicbrainz_id`
 on `artists` and `organization_musicbrainz_id` on `organizations`, each
 `{ musicBrainzId: 1 }` with the partial filter

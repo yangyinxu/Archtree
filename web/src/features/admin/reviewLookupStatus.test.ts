@@ -116,12 +116,13 @@ test('where nothing matched, the review says which cause applies, in order: no m
     empty)!.messages).toHaveLength(1);
   expect(reviewLookupStatus(numberOnes(), 'lookup.no_match', { ...empty, searched: 'Unrelated' })!.messages[0]).toEqual({ key: 'catalog_review.lookup_empty_album', values: { count: 0 } });
   // Members without a duration come before the pairing, which they also leave ambiguous: saving numbers alone would not match. The
-  // titles' Disc and Track Numbers make entering them the next step; Track Numbers alone are only offered; without any, by hand.
+  // titles' Disc and Track Numbers make entering them the next step; Track Numbers alone are only offered; without any, by hand,
+  // where a possible match is listed also by pairing the tracks with it.
   const found = (count: number, title: string) => ({ key: 'catalog_review.lookup_possible_found', values: { count, title } });
   expect(reviewLookupStatus(bestOf(), 'lookup.no_match', bestOfContext)).toEqual({ fill: 'next',
     messages: [found(4, 'Synthetic Best BIBLE'), { key: 'catalog_review.lookup_cause_durations', values: { unknown: 3 } }] });
   expect(reviewLookupStatus(bestOf(), 'lookup.no_match', { ...bestOfContext, numbers: trackNumbers(3) })).toEqual({ fill: 'offer', box: true,
-    messages: [found(4, 'Synthetic Best BIBLE'), { key: 'catalog_review.lookup_cause_durations_manual', values: { unknown: 3 } }] });
+    messages: [found(4, 'Synthetic Best BIBLE'), { key: 'catalog_review.lookup_cause_durations_pair', values: { unknown: 3 } }] });
   expect(reviewLookupStatus(bestOf(), 'lookup.no_match', { ...bestOfContext, numbers: null })!.fill).toBeNull();
   // Once saved numbers make a possible release pair in one way, the step is using it, never saving again.
   const paired = view(bestOf().candidates.map(entry => entry.title === 'Synthetic Best BIBLE'
@@ -131,8 +132,13 @@ test('where nothing matched, the review says which cause applies, in order: no m
   expect(reviewLookupStatus(live(), 'lookup.no_match', liveContext)).toEqual({ fill: 'next',
     messages: [found(1, 'Synthetic Live Album 2'), { key: 'catalog_review.lookup_cause_pairing', values: undefined }] });
   expect(reviewLookupStatus(live(), 'lookup.no_match', { ...liveContext, numbers: discNumbers(0) })).toEqual({ fill: null, box: true,
-    messages: [found(1, 'Synthetic Live Album 2'), { key: 'catalog_review.lookup_cause_pairing_manual', values: undefined }] });
+    messages: [found(1, 'Synthetic Live Album 2'), { key: 'catalog_review.lookup_cause_pairing_pair', values: undefined }] });
   expect(reviewLookupStatus(live(), 'lookup.no_match', { ...liveContext, numbers: trackNumbers(2) })!.fill).toBe('offer');
+  // Only releases whose titles differ fit, so there is no possible match to pair with by hand: the numbers are entered in Edit draft.
+  expect(reviewLookupStatus(live(), 'lookup.no_match', { ...liveContext, searched: 'Synthetic Budokan', numbers: discNumbers(0) })).toEqual({ fill: null, box: true,
+    messages: [{ key: 'catalog_review.lookup_fit_found', values: { count: 1, title: 'Synthetic Live Album 2' } }, { key: 'catalog_review.lookup_cause_pairing_manual', values: undefined }] });
+  expect(reviewLookupStatus(view(bestOf().candidates, { disclosure: bestOf().disclosure }), 'lookup.no_match', { ...bestOfContext, searched: 'Synthetic Unrelated', numbers: null })!.messages.map(message => message.key))
+    .toEqual(['catalog_review.lookup_fit_found', 'catalog_review.lookup_cause_durations_manual']);
   // A single pairing a release track without a duration left unconfirmed is a cause of its own.
   expect(reviewLookupStatus(reshaped('unique'), 'lookup.no_match', liveContext)).toEqual({ fill: null,
     messages: [found(1, 'Synthetic Live Album 2'), { key: 'catalog_review.lookup_cause_release_durations', values: undefined }] });

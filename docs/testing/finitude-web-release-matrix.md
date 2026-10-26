@@ -274,6 +274,22 @@ leaves the step bar promising none. A matching release paired by the positions
 in its titles says Paired by the track numbers in the titles on its offered card
 and on both editions in Releases found. Each with an axe scan and no overflow,
 the steps and retry flows also at 320 px.
+From a review lookup shaped like the live Album but whose two track titles carry
+no positions (no Disc or Track Numbers; the first track within 3 seconds of
+release tracks 1-1 and 2-2, the second only of 1-2), the possible match's card
+offers Pair tracks by hand as a plain button at 1280 px in English and 390 px in
+Chinese. Its panel names the release with 20 tracks on 2 discs, lists the first
+track's choices closest first (1-1 differs by 0.02 s, then 2-2 differs by 0.71
+s), starts the second on 1-2 with the line that only it can pair with that
+track, and keeps Save pairing and use this release disabled until the first
+track has a release track. Saving sends one review save carrying both tracks'
+Disc and Track Numbers and then one choice of that release, after which the
+summary shows it applied with the 20-row expected tracklist and focus on the
+lookup panel; a save whose re-rank already applied it sends no choice. A choice
+that fails with an unconfirmed outcome says so and keeps the panel open with its
+choices while the chooser shows the release offered; Use this release sends the
+same choice again without saving, and Cancel returns focus to the opener and
+sends nothing. Each with an axe scan and no overflow, also at 320 px.
 
 The historical 2026-08-19 MediaTrack amendment passed
 304/304 server tests, 214/214 Web unit/component tests, 148/148 integration
@@ -804,6 +820,20 @@ player control still works.
   and that Use this release on one of them, before any number is saved, brings
   in its expected tracklist and the members' numbers. Repeat in Simplified
   Chinese (使用此发行, 更新原专辑, 仅来自 iTunes, 按标题中的曲号对应).
+- As an administrator, with metadata lookup configured against MusicBrainz in a
+  development environment, open the Album completion of an Album whose tracks
+  have durations but no Disc or Track Numbers and whose titles carry none, such
+  as アニメ「魔法少女まどか☆マギカ」Ultimate Best／Aniplex, once its lookup lists the release as
+  a possible match. Confirm the card offers Pair tracks by hand, never as the
+  primary button; that the panel lists each track's choices closest first with
+  how far each duration differs, never a release track whose duration is far
+  from the track's, marks a release track another track took as used by that
+  track, and enables Save pairing and use this release only once every track has
+  a release track; that saving fills the Disc and Track Numbers in Edit draft as
+  saved values and applies the release with its expected tracklist and rows
+  without a file; that Update original Album lists those numbers; and that
+  Cancel saves nothing. Repeat in Simplified Chinese (手动对应曲目, 已被曲目 1 使用,
+  保存对应并使用此发行) and with a screen reader at 320 CSS px.
 - As an administrator, with metadata lookup configured against MusicBrainz in a
   development environment, open an Album completion and look up its name with an
   Artist. While it runs, confirm the lookup steps list each search with the name

@@ -3,9 +3,9 @@
  *   Types: Disc
  *   Functions: recorded, mbid, synthetic, candidate, incomplete, file, files, membersOf, subset, entryOf, slot,
  *              member, pair, seeded, pick, shuffle, randomGraph, fits, allMatchings, bruteForce, bySlotId,
- *              hint, hinted, hintedGraph, resolvedByBruteForce
+ *              hint, hinted, option, hintedGraph, resolvedByBruteForce
  *   Constants: guard, releases, noIdentifiers, lead, guest, various, standard, deluxe, threeMembers, liveRows,
- *              liveMembers
+ *              liveMembers, candyRows
  * Tests
  *   - audio tracks leave out video and data media, matched case-insensitively with a null format as audio, and keep the Disc Numbers an applied release gives
  *   - rows come in disc and track order with NFC trimmed titles, and a 150-track release or rows over 32 KiB offer no tracklist
@@ -19,6 +19,11 @@
  *   - pairing and forced pairs are invariant under any permutation of slots and members
  *   - title positions decide a pairing that is not single: each member takes the compatible track at its position, a missing Disc Number matching any disc, and never against its own numbers
  *   - near-exact durations decide only when exactly one pairing keeps every member within half a second, both known to the millisecond
+ *   - hand-pairing options list each member's tracks within the tolerance closest first and mark the track every maximum pairing gives it
+ *   - a member without a duration may take every track its own numbers allow, a track without a duration follows the known ones, and equal differences follow Disc and Track Number
+ *   - own numbers constrain the options and a legacy whole-second duration widens the tolerance by its precision
+ *   - hand-pairing options are exactly the compatible tracks and their forced marks agree with lookupForcedPairs on 500 seeded graphs, whatever the order of the tracks
+ *   - hand-pairing options are bounded to 100 tracks and 100 members
  *   - the resolved pairing agrees with a brute-force count on 500 seeded graphs and is invariant under any permutation of slots and members
  *   - a subset candidate whose pairing positions or near-exact durations decide matches, records how and groups with an edition of equal values; a strictly single one records nothing
  *   - with unknown durations, title positions give a single pairing that stays unverified, and choosing it writes the tracklist
@@ -68,7 +73,8 @@ import {
     lookupSubsetAssignment, lookupTrackCredit, proposalForRelease, rankLookupCandidates, trackArtistProposal, type LocalFileEvidence, type LookupCandidate, type RankedLookup
 } from '../../src/administration/lookup/lookupRanking';
 import {
-    LOOKUP_EXPECTED_TRACKLIST_BOUNDS, LOOKUP_LEFT_OUT_MEDIUM_FORMATS, expectedTracklistFromRelease, lookupAudioTrackCount, lookupForcedPairs, lookupResolvedPairing,
+    LOOKUP_EXPECTED_TRACKLIST_BOUNDS, LOOKUP_LEFT_OUT_MEDIUM_FORMATS, LOOKUP_PAIRING_OPTION_BOUNDS, expectedTracklistFromRelease, lookupAudioTrackCount, lookupForcedPairs,
+    lookupPairingOptions, lookupResolvedPairing,
     lookupSubsetPairing, lookupSubsetTrackCountPlausible, lookupSurplusRank, lookupUnpairableMembers, releaseAudioTracks, type LookupPairingMember, type LookupPairingSlot,
     type LookupPositionHint, type LookupSubsetPair
 } from '../../src/administration/lookup/lookupSubset';
@@ -421,6 +427,81 @@ test('near-exact durations decide only when exactly one pairing keeps every memb
     // A track without a duration is never near-exact.
     assert.deepEqual(lookupResolvedPairing([slot(1, 1, 200_010), slot(1, 2, null), slot(1, 3, 300_010)], [member('a', null, null, 200_000), member('b', null, null, 300_000)]),
         { kind: 'unique', pairs: [pair('a', 1, 1), pair('b', 1, 3)], pairedBy: 'nearExactDuration' });
+});
+
+/** A live release's two discs: 12 and 8 tracks with their stored lengths. */
+const candyRows = [
+    ...[215_640, 382_746, 278_173, 202_400, 284_973, 204_600, 157_253, 310_013, 247_120, 329_720, 422_266, 571_720].map((length, index) => slot(1, index + 1, length)),
+    ...[234_773, 214_946, 338_160, 243_306, 232_066, 675_160, 349_880, 336_946].map((length, index) => slot(2, index + 1, length))
+];
+const option = (discNumber: number, trackNumber: number, deltaMs: number | null) => ({ discNumber, trackNumber, deltaMs });
+
+test('hand-pairing options list each member\'s tracks within the tolerance closest first and mark the track every maximum pairing gives it', () => {
+    const expected = [{ slotId: 'a', options: [option(1, 1, 19), option(2, 2, 713)], forced: null },
+        { slotId: 'b', options: [option(1, 2, 6)], forced: { discNumber: 1, trackNumber: 2 } }];
+    assert.deepEqual(lookupPairingOptions(candyRows, liveMembers), expected);
+    assert.deepEqual(lookupPairingOptions(liveRows, liveMembers), expected);
+    // Position hints are not read: the options are those of the strict pairing.
+    assert.deepEqual(lookupPairingOptions(candyRows, [hinted(liveMembers[0], hint(1, 1)), hinted(liveMembers[1], hint(1, 2))]), expected);
+});
+
+test('a member without a duration may take every track its own numbers allow, a track without a duration follows the known ones, and equal differences follow Disc and Track Number', () => {
+    const [unknown] = lookupPairingOptions(candyRows, [member('u', null, null, null)])!;
+    assert.deepEqual(unknown, { slotId: 'u', options: candyRows.map(row => option(row.discNumber, row.trackNumber, null)), forced: null });
+    assert.deepEqual(lookupPairingOptions(candyRows, [member('u', null, 2, null)]), [{ slotId: 'u', options: [option(1, 2, null), option(2, 2, null)], forced: null }]);
+    assert.deepEqual(lookupPairingOptions([slot(1, 1, null), slot(1, 2, 201_000), slot(2, 1, 199_000)], [member('m', null, null, 200_000)]),
+        [{ slotId: 'm', options: [option(1, 2, 1000), option(2, 1, 1000), option(1, 1, null)], forced: null }]);
+    // Of two members that may take only one track, neither is forced; a single member that may take one track is.
+    assert.deepEqual(lookupPairingOptions([slot(1, 1, 200_000)], [member('a', null, null, 200_000), member('b', null, null, 200_500)])!.map(entry => entry.forced), [null, null]);
+});
+
+test('own numbers constrain the options and a legacy whole-second duration widens the tolerance by its precision', () => {
+    assert.deepEqual(lookupPairingOptions(candyRows, [member('t', null, 1, null)]), [{ slotId: 't', options: [option(1, 1, null), option(2, 1, null)], forced: null }]);
+    assert.deepEqual(lookupPairingOptions(candyRows, [member('o', 2, 2, 215_659)]), [{ slotId: 'o', options: [option(2, 2, 713)], forced: { discNumber: 2, trackNumber: 2 } }]);
+    assert.deepEqual(lookupPairingOptions([slot(1, 1, 63_900), slot(1, 2, 64_100)], [member('l', null, null, 60_000, 1000)]),
+        [{ slotId: 'l', options: [option(1, 1, 3900)], forced: { discNumber: 1, trackNumber: 1 } }]);
+    assert.deepEqual(lookupPairingOptions([slot(1, 1, 63_900)], [member('e', null, null, 60_000)]), [{ slotId: 'e', options: [], forced: null }], 'an exact duration has no precision');
+});
+
+test('hand-pairing options are exactly the compatible tracks and their forced marks agree with lookupForcedPairs on 500 seeded graphs, whatever the order of the tracks', () => {
+    const random = seeded(20261025);
+    let forcedSeen = 0, unknownSeen = 0;
+    for (let round = 0; round < 500; round++) {
+        const { slots, members } = randomGraph(random), label = JSON.stringify({ slots, members });
+        const options = lookupPairingOptions(slots, members)!, forced = lookupForcedPairs(slots, members);
+        assert.equal(options.length, members.length, label);
+        members.forEach((one, index) => {
+            const entry = options[index], compatible = slots.filter(place => fits(one, place));
+            assert.equal(entry.slotId, one.slotId, label);
+            assert.deepEqual(entry.options.map(choice => `${choice.discNumber}:${choice.trackNumber}`).sort(), compatible.map(place => `${place.discNumber}:${place.trackNumber}`).sort(), label);
+            for (const choice of entry.options) {
+                const place = slots.find(item => item.discNumber === choice.discNumber && item.trackNumber === choice.trackNumber)!;
+                assert.equal(choice.deltaMs, one.durationMs === null || place.durationMs === null ? null : Math.abs(one.durationMs - place.durationMs), label);
+                if (choice.deltaMs === null) unknownSeen++;
+            }
+            const rank = (choice: { deltaMs: number | null }) => choice.deltaMs ?? Number.MAX_SAFE_INTEGER;
+            entry.options.forEach((choice, at) => { if (at) assert.ok(rank(entry.options[at - 1]) <= rank(choice), label); });
+            const pair = forced.find(item => item.slotId === one.slotId);
+            assert.deepEqual(entry.forced, pair ? { discNumber: pair.discNumber, trackNumber: pair.trackNumber } : null, label);
+            if (entry.forced) forcedSeen++;
+        });
+        assert.deepEqual(lookupPairingOptions(shuffle(random, slots), members), options, `the order of the tracks: ${label}`);
+    }
+    assert.ok(forcedSeen >= 100 && unknownSeen >= 100, `${forcedSeen} ${unknownSeen}`);
+});
+
+test('hand-pairing options are bounded to 100 tracks and 100 members', () => {
+    assert.deepEqual(LOOKUP_PAIRING_OPTION_BOUNDS, { rows: 100, members: 100 });
+    const rows = (count: number) => Array.from({ length: count }, (_unused, index) => slot(1 + Math.floor(index / 50), 1 + (index % 50), null));
+    const unknowns = (count: number) => Array.from({ length: count }, (_unused, index) => member(`m${index}`, null, null, null));
+    assert.equal(lookupPairingOptions(rows(101), unknowns(1)), null);
+    assert.equal(lookupPairingOptions(rows(1), unknowns(101)), null);
+    const full = lookupPairingOptions(rows(100), unknowns(100))!;
+    assert.equal(full.length, 100);
+    assert.ok(full.every(entry => entry.options.length === 100 && entry.forced === null));
+    assert.deepEqual(lookupPairingOptions(rows(3), []), []);
+    assert.deepEqual(lookupPairingOptions([], unknowns(2)), [{ slotId: 'm0', options: [], forced: null }, { slotId: 'm1', options: [], forced: null }]);
+    assert.deepEqual(lookupPairingOptions(null as never, [null as never]), [{ slotId: '', options: [], forced: null }], 'total on stored shapes');
 });
 
 /**

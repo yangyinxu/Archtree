@@ -42,6 +42,7 @@
  *   - a retrying run says when it retries in the interface language and which retry of how many, with the free retry as its only primary button
  *   - while a run is active its steps follow the status, and after a completed run the names searched and the folded record follow it, before the name box
  *   - after a completed run the name box folds under Didn't find it? Look up another name unless the status points at it, also when the run completes while the page is open, unless the box is in use
+ *   - an open pairing panel keeps its saved state when its save's re-rank applies another release and the choice after it fails
  * @end-catalog */
 
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
@@ -51,8 +52,8 @@ import { captureAccountOperation } from '../../api/accountEpoch';
 import { adminWorkspace } from './adminWorkspace';
 import type { CatalogReview } from './catalogReviewApi';
 import { capturedCatalogReview, catalogReview, reviewJson, session, slotId, slotTwo, viewer } from './catalogReviewFixtures.testSupport';
-import { pairedLookupResponse, pairingApplication, pairingEditions, pairingLookupResponse, pairingReview, pairingRunningTimeline, pairingTimeline, releaseTrackEntries, reviewAfterLookup, reviewIdentityResponse, reviewItunesLookupResponse, reviewLookupResponse, reviewRows,
-  reviewTieLookupResponse } from './catalogReviewLookupFixtures.testSupport';
+import { handPairingResponse, pairedLookupResponse, pairingApplication, pairingEditions, pairingLookupResponse, pairingReview, pairingRunningTimeline, pairingTimeline, releaseTrackEntries, reviewAfterLookup,
+  reviewIdentityResponse, reviewItunesLookupResponse, reviewLookupResponse, reviewRows, reviewTieLookupResponse, unnumberedPairingReview } from './catalogReviewLookupFixtures.testSupport';
 import type { ReviewLookupResponse } from './catalogReviewLookupApi';
 import { CatalogReviewSummary } from './CatalogReviewSummary';
 import { catalogReviewSummaryQuery } from './catalogReviewSummaryQuery';
@@ -555,12 +556,16 @@ test('the review names the cause where nothing matched: members without a durati
   rendered = mount(empty, noMembers);
   expect(await within(rendered.section()).findByText(`${found} This lookup used no Artist name; looking up again with an Artist below can narrow the results.`)).toHaveAttribute('role', 'status');
   cleanup();
-  // Titles without positions: the name box or numbers entered by hand, said once, and nothing is primary.
+  // Titles without positions: the name box, pairing by hand or numbers entered in Edit draft, said once, and nothing is primary.
   const plain = pairingReview(); plain.draft.tracks = plain.draft.tracks.map(track => ({ ...track, title: track.title.slice(5) }));
   rendered = mount(plain, pairingLookupResponse());
   expect(await within(rendered.section()).findByText('Found 1 possible release, "Synthetic Live Album 2". The tracks of this Album all fit, but their positions are unclear, so nothing was applied. '
-    + 'You can look up another name below, or enter Disc and Track Numbers in Edit draft and save the completion draft to compare again for free.')).toHaveAttribute('role', 'status');
-  expect(within(rendered.section()).getAllByText('You can enter or correct Disc and Track Numbers in Edit draft; saving the completion draft compares again for free.')).toHaveLength(1);
+    + 'You can look up another name below, pair the tracks by hand with a possible match below, or enter Disc and Track Numbers in Edit draft and save the completion draft to compare again for free.'))
+    .toHaveAttribute('role', 'status');
+  expect(within(rendered.section()).getAllByText('You can pair the tracks with this release by hand, or enter or correct Disc and Track Numbers in Edit draft, where saving the completion draft compares again for free.'))
+    .toHaveLength(1);
+  const pair = await within(rendered.section()).findByRole('button', { name: 'Pair tracks by hand' });
+  expect(pair).not.toHaveClass(styles.primary);
   expect(within(rendered.section()).queryByRole('button', { name: 'Fill Disc and Track Numbers from titles' })).not.toBeInTheDocument();
   expect(primaries(rendered.section())).toHaveLength(0);
   cleanup();
@@ -910,4 +915,33 @@ test('after a completed run the name box folds under Didn\'t find it? Look up an
     else expect([after.closest('details')?.open, within(watched.section()).getByText(fold).tagName]).toEqual([false, 'SUMMARY']);
     cleanup();
   }
+});
+
+test('an open pairing panel keeps its saved state when its save\'s re-rank applies another release and the choice after it fails', async () => {
+  const item = unnumberedPairingReview(), other = pairingLookupResponse().lookup!.candidates[0];
+  let lookup = pairingLookupResponse();
+  const rendered = mount(item, () => reviewJson(lookup)), base = rendered.fetch.getMockImplementation()!, writes: string[] = [];
+  // The pairing read, the save (whose re-rank applies another release) and a refused choice; every other read is the summary's.
+  vi.stubGlobal('fetch', vi.fn(async (path: string, init: RequestInit = {}) => {
+    if (path.endsWith('/pairing')) return reviewJson(handPairingResponse(item.revision));
+    if (init.method === 'PATCH') {
+      writes.push('save'); lookup = pairedLookupResponse(pairingApplication(other.key, false));
+      return reviewJson({ item: { id: item.id, revision: item.revision + 1 }, receipt: { operationId: JSON.parse(String(init.body)).operationId } });
+    }
+    if (path.endsWith('/lookup/choose')) { writes.push('choose'); return reviewJson({ code: 'ADMIN_IMPORT_LOOKUP_STALE' }, 409); }
+    return base(path);
+  }));
+  const card = await within(rendered.section()).findByRole('region', { name: 'Possible match (1 release)' });
+  expect(within(rendered.section()).queryByText('Lookup results and applied values')).not.toBeInTheDocument();
+  fireEvent.click(within(card).getByRole('button', { name: 'Pair tracks by hand' }));
+  fireEvent.change(await screen.findByRole('combobox', { name: '1 · Synthetic opening (Live) · 3:35.66' }), { target: { value: '1:1' } });
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Save pairing and use this release' })).toBeEnabled());
+  fireEvent.click(screen.getByRole('button', { name: 'Save pairing and use this release' }));
+  // The summary reads the applied release and folds its results, while the panel stays with its saved numbers and Use this release.
+  expect(await within(rendered.section()).findByText('Lookup results and applied values')).toBeInTheDocument();
+  expect(writes).toEqual(['save', 'choose']);
+  const panel = screen.getByRole('region', { name: 'Pair the tracks with "Synthetic Live Album 2" (20 tracks on 2 discs)' });
+  expect(within(panel).getByText('The Disc and Track Numbers are saved, but this release is not in use yet. Use it below.')).toHaveAttribute('role', 'status');
+  expect(within(panel).getByRole('combobox', { name: '1 · Synthetic opening (Live) · 3:35.66' })).toHaveValue('1:1');
+  expect(within(panel).getByRole('button', { name: 'Use this release' })).toBeInTheDocument();
 });

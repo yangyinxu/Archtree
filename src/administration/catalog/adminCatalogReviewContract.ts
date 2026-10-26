@@ -223,6 +223,8 @@ export type CatalogReviewCapture = {
 // selected `fields` and `memberCredits` with the preselections and ID writes it showed and the detail's `valueRevision` as
 // `expectedValueRevision`.
 // GET /:id/lookup/candidates/:key/artwork is a transient WebP preview (catalogReviewLookupRequests.ts, adminImportLookupCover.ts).
+// GET /:id/lookup/candidates/:key/pairing reads one candidate's rows and each member's options for pairing by hand
+// (lookupPairingView.ts); the Web's pairing panel saves the chosen numbers with PATCH /:id, then POST /:id/lookup/choose.
 // POST /:id/discard ({operationId, expectedRevision}, 96 KB) replaces an unapplied review with a tombstone and deletes its lookup
 // record (adminCatalogReviewDiscard.ts); every other /:id route answers a discarded review with 404 ADMIN_CATALOG_REVIEW_DISCARDED
 // (the artwork preview stays a bodiless 404). List items carry `albumTitle` and the review's lookup brief `lookup`; the eligibility read

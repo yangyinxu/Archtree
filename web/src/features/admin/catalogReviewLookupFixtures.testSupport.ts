@@ -2,8 +2,8 @@
  * Exports
  *   Functions: reviewRows, releaseTrackEntries, reviewLookupResponse, reviewItunesLookupResponse,
  *              reviewTieLookupResponse, reviewAfterLookup, reviewIdentityResponse, pairingRows, pairingReview,
- *              pairingLookupResponse, pairingApplication, pairedLookupResponse, pairingTimeline,
- *              pairingRunningTimeline
+ *              pairingLookupResponse, pairingApplication, pairedLookupResponse, handPairingRows,
+ *              unnumberedPairingReview, handPairingResponse, pairingTimeline, pairingRunningTimeline
  *   Constants: reviewRelease, reviewCandidateKey, otherReviewRelease, guestEntryKey, guestTrackEntryKey,
  *              guestHandle, leadHandle, leadRecordId, guestCandidateId, leadMusicBrainzId,
  *              leadOtherMusicBrainzId, leadCreditId, pairingEditions
@@ -205,6 +205,28 @@ export function pairedLookupResponse(applied: NonNullable<ReviewLookupResponse['
       releaseDate: { year: 2023, month: 3, day: 29 }, tracks: pairingRows().map(({ discNumber, trackNumber, title }) => ({ discNumber, trackNumber, title })) } }],
     disclosure: { unknownLocalDurations: 0, unknownLocalDiscNumbers: 0, partialComparison: true }, applied } };
 }
+/**
+ * A live release's 20 audio rows as a pairing read lists them: 12 on the first disc and 8 on the second with their stored lengths
+ * ("Synthetic live song N"), so a member of 215,659 ms fits 1-1 (19 ms off) and 2-2 (713 ms off) and one of 382,752 ms only 1-2.
+ */
+export const handPairingRows = () => [215_640, 382_746, 278_173, 202_400, 284_973, 204_600, 157_253, 310_013, 247_120, 329_720, 422_266, 571_720,
+  234_773, 214_946, 338_160, 243_306, 232_066, 675_160, 349_880, 336_946].map((durationMs, index) => ({ disc: index < 12 ? 1 : 2, track: index < 12 ? index + 1 : index - 11,
+  title: `Synthetic live song ${index + 1}`, durationMs }));
+/** The pairing review (pairingReview) whose two titles carry no positions, so nothing can be filled from them. */
+export function unnumberedPairingReview(): CatalogReview {
+  const item = pairingReview(), titles = ['Synthetic opening (Live)', 'Synthetic second song (Live)'];
+  return { ...item, source: { ...item.source, tracks: item.source.tracks.map((track, index) => ({ ...track, title: titles[index] })) },
+    draft: { ...item.draft, tracks: item.draft.tracks.map((track, index) => ({ ...track, title: titles[index] })) } };
+}
+/**
+ * The pairing read (GET …/lookup/candidates/:key/pairing) of that review's release at `revision`: the first member may take 1-1 or
+ * 2-2, the second only 1-2, which every pairing gives it; neither has saved numbers, and both may save a Disc Number.
+ */
+export const handPairingResponse = (revision = 1) => ({ run: 3, revision, rows: handPairingRows(), members: [
+  { slotId, title: 'Synthetic opening (Live)', durationMs: 215_659, saved: { disc: null as number | null, track: null as number | null }, discSavable: true,
+    options: [{ disc: 1, track: 1, deltaMs: 19 }, { disc: 2, track: 2, deltaMs: 713 }], forced: null as { disc: number; track: number } | null },
+  { slotId: slotTwo, title: 'Synthetic second song (Live)', durationMs: 382_752, saved: { disc: null as number | null, track: null as number | null }, discSavable: true,
+    options: [{ disc: 1, track: 2, deltaMs: 6 }], forced: { disc: 1, track: 2 } as { disc: number; track: number } | null }] });
 type PairingTimeline = NonNullable<NonNullable<ReviewLookupResponse['lookup']>['timeline']>;
 const pairingSearches = (): PairingTimeline['steps'] => [
   { kind: 'albumArtist', state: 'done', texts: [{ text: 'Synthetic Live Album 2', artist: 'Synthetic Live Artist' }] },

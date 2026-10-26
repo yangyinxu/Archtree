@@ -298,7 +298,8 @@ test('every other route reports a discarded review as discarded and changes noth
         ['POST', '/lookup', { ...mutation(revision), kind: 'album', text: 'Existing Album' }], ['POST', '/lookup/retry', mutation(revision)],
         ['POST', '/lookup/choose', { ...mutation(revision), run: 1, candidateKey: null }],
         ['POST', '/lookup/resolve', { ...mutation(revision), run: 1, candidateKey, answers: [{ path: 'album.title', answer: 'mine', base: 'Saved Album Title' }] }],
-        ['POST', '/decisions', { ...mutation(revision), decisions: [] }], ['POST', '/apply', { ...mutation(revision), fields: [albumTitle] }]];
+        ['POST', '/decisions', { ...mutation(revision), decisions: [] }], ['POST', '/apply', { ...mutation(revision), fields: [albumTitle] }],
+        ['GET', `/lookup/candidates/${encodeURIComponent(candidateKey)}/pairing`, undefined]];
     for (const [method, suffix, body] of routes) {
         // The same request for an unknown review is not found, so each body reaches the review read.
         const unknown = await send(`/catalog-reviews/${new ObjectId()}${suffix}`, method, body);
