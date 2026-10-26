@@ -247,7 +247,12 @@ explicitly when diagnosing a slow test, for example
 `--test-force-exit`, so a test file that finishes but leaves a socket, timer, or
 child process open still exits instead of keeping the gate alive. To find such a
 leaked handle, run with `npm run test:server -- --no-test-force-exit`; the run
-then stays open on the affected file.
+then stays open on the affected file. A forced exit discards whatever results a
+test file's process has not yet written into the pipe to the runner, so a
+runner too busy to read used to lose a file's last results while the run still
+passed with fewer tests. Every test file's process therefore preloads
+`scripts/lib/server-test-report-guard.mjs`, which makes those writes blocking
+and fails the file if any results are still queued when it exits.
 
 The server test runner starts unit, Linux, and integration test processes in an
 isolated environment so a private root `.env` never reaches them. It points
