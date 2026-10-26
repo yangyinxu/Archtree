@@ -38,6 +38,9 @@
  *   - the open-answer counters follow the status line, before the candidates, and the panel has the anchors the step bar links to
  *   - an iTunes-only result checked against MusicBrainz, and an artist mismatch, keep the results open with their values to check once nothing else is open
  *   - once an applied release leaves nothing open the results fold under one disclosure, which stays open while an answer, an identity row or an active run waits
+ *   - a retrying run says when it retries in the interface language and which retry of how many, with the free retry as its only primary button
+ *   - while a run is active its steps follow the status, and after a completed run the names searched and the folded record follow it, before the name box
+ *   - after a completed run the name box folds under Didn't find it? Look up another name unless the status points at it, also when the run completes while the page is open, unless the box is in use
  * @end-catalog */
 
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
@@ -47,7 +50,7 @@ import { captureAccountOperation } from '../../api/accountEpoch';
 import { adminWorkspace } from './adminWorkspace';
 import type { CatalogReview } from './catalogReviewApi';
 import { capturedCatalogReview, catalogReview, reviewJson, session, slotId, slotTwo, viewer } from './catalogReviewFixtures.testSupport';
-import { pairedLookupResponse, pairingApplication, pairingEditions, pairingLookupResponse, pairingReview, releaseTrackEntries, reviewAfterLookup, reviewIdentityResponse, reviewItunesLookupResponse, reviewLookupResponse, reviewRows,
+import { pairedLookupResponse, pairingApplication, pairingEditions, pairingLookupResponse, pairingReview, pairingRunningTimeline, pairingTimeline, releaseTrackEntries, reviewAfterLookup, reviewIdentityResponse, reviewItunesLookupResponse, reviewLookupResponse, reviewRows,
   reviewTieLookupResponse } from './catalogReviewLookupFixtures.testSupport';
 import type { ReviewLookupResponse } from './catalogReviewLookupApi';
 import { CatalogReviewSummary } from './CatalogReviewSummary';
@@ -124,8 +127,10 @@ test('where lookup is not configured there is no name box and no retry', async (
 });
 
 test('the free retry is the only primary control while lookup retries, is unavailable or stopped, it retries the run, and no Luna AI control is ever in the summary', async () => {
-  for (const [state, issue, text] of [['retrying', 'sourceUnavailable', /^MusicBrainz is busy or unavailable/], ['unavailable', 'sourceUnavailable', /^Metadata lookup is unavailable/],
-    ['stopped', 'grantExpired', /^Metadata lookup stopped/]] as const) {
+  // Without its stored retry time a retrying run keeps the shared status; an exhausted or stopped run says why by its issue.
+  for (const [state, issue, text] of [['retrying', 'sourceUnavailable', /^MusicBrainz is busy or unavailable/], ['unavailable', 'sourceUnavailable', /^MusicBrainz stayed unavailable/],
+    ['unavailable', 'sourceBusy', /^There were too many requests to MusicBrainz/], ['stopped', 'grantExpired', /^Lookup stopped because it ran past its time limit/],
+    ['stopped', 'permissionLost', /^Lookup stopped because the account that started it/]] as const) {
     const { onRun, section } = mount(catalogReview(), withLookup(lookup => { Object.assign(lookup, { state, issue, applied: null, candidates: [], groups: [], preselection: null, needsAnswer: { tie: false, conflicts: [] } }); }));
     expect(await screen.findByText(text)).toBeInTheDocument();
     await within(section()).findByRole('group', { name: 'Look up by name' });
@@ -439,7 +444,6 @@ test('answered conflicts leave the conflicts and fold away once with the answer 
 
 test('each lookup outcome reads in the review\'s own words, with the retry only where lookup stopped short, and nothing applied shows no applied rows', async () => {
   const cases: [string, (lookup: Lookup) => void, boolean][] = [
-    ['This lookup ended because the Album or its tracks changed or are no longer ready.', lookup => { Object.assign(lookup, { state: 'superseded', applied: null, candidates: [], groups: [], preselection: null }); }, true],
     ['There is nothing to look up: this Album has no saved title. Enter an Album or song name, or use Luna AI (paid).',
       lookup => { Object.assign(lookup, { outcome: 'noQuery', applied: null, candidates: [], groups: [], preselection: null }); }, false],
     ['No release matches this Album\'s tracks. You can still choose one below, or look up another name (free).',
@@ -453,6 +457,21 @@ test('each lookup outcome reads in the review\'s own words, with the retry only 
     expect(within(section()).queryAllByRole('button', { name: 'Retry lookup' })).toHaveLength(retry ? 1 : 0);
     for (const name of ['Track Artists', 'Artists and label', 'Lookup values that differ from the Album\'s'])
       expect(within(section()).queryByRole('region', { name })).not.toBeInTheDocument();
+    cleanup();
+  }
+  // A run that ended because the source was no longer current offers no retry, which could not run while it is not, and the name
+  // box stays open to look up again: where the Album changed, a link opens it to start a new completion; where it is no longer
+  // ready, the source notice above the summary explains it.
+  const superseded = () => withLookup(lookup => { Object.assign(lookup, { state: 'superseded', issue: 'projectClosed', applied: null, candidates: [], groups: [], preselection: null });
+    lookup.needsAnswer.conflicts = []; });
+  for (const sourceStatus of ['changed', 'unavailable', 'current'] as const) {
+    const item = { ...applied(), sourceStatus }, { section } = mount(item, superseded());
+    await within(section()).findByText('This lookup ended because the Album or its tracks changed or are no longer ready.');
+    await within(section()).findByRole('group', { name: 'Look up by name' });
+    expect(within(section()).queryByRole('button', { name: 'Retry lookup' })).not.toBeInTheDocument();
+    if (sourceStatus === 'changed') expect(await within(section()).findByRole('link', { name: 'Open the Album to start a new completion' }))
+      .toHaveAttribute('href', `/admin/catalog/album/${item.source.album.id}`);
+    else expect(within(section()).queryByRole('link', { name: 'Open the Album to start a new completion' })).not.toBeInTheDocument();
     cleanup();
   }
 });
@@ -566,7 +585,7 @@ test('once saved numbers make a possible release pair in one way while durations
     for (const entry of lookup.candidates) if (entry.status === 'unverified') entry.comparison = { ...entry.comparison!, unknownLocalDurations: 2, subset: { ...entry.comparison!.subset!, pairing: 'unique' } };
   }, pairingLookupResponse());
   const { section } = mount(saved, paired);
-  expect(await within(section()).findByText('Found 1 possible release, "Synthetic Live Album 2". The tracks now pair with a release below in exactly one way, but 2 tracks of this Album have no duration, '
+  expect(await within(section()).findByText('Found 1 possible release, "Synthetic Live Album 2". The tracks pair with a release below in exactly one way, but 2 tracks of this Album have no duration, '
     + 'so nothing was applied automatically. Use that release below to bring in its expected tracklist and track details.')).toHaveAttribute('role', 'status');
   expect(within(section()).queryByRole('button', { name: 'Fill Disc and Track Numbers from titles' })).not.toBeInTheDocument();
   expect(within(section()).queryByText(/saving the completion draft compares again/)).not.toBeInTheDocument();
@@ -742,4 +761,94 @@ test('once an applied release leaves nothing open the results fold under one dis
   mount(applied(), withLookup(lookup => { Object.assign(lookup, { state: 'running', needsAnswer: { tie: false, conflicts: [] } }); }));
   await screen.findByText(/Lookup keeps running/);
   expect(fold()).toHaveAttribute('open');
+});
+
+test('a retrying run says when it retries in the interface language and which retry of how many, with the free retry as its only primary button', async () => {
+  const at = '2026-10-22T01:26:10.000Z', time = new Date(at).toLocaleTimeString('en-US', { timeStyle: 'medium' });
+  const retrying = (issue: Lookup['issue'], source: 'musicbrainz' | 'itunes', attempt: number) => withLookup(lookup => {
+    Object.assign(lookup, { run: 4, state: 'retrying', issue, outcome: null, candidates: [], applied: null,
+      timeline: pairingRunningTimeline('2026-10-22T01:25:40.000Z') });
+    lookup.timeline!.retry = { at, source, attempt, limit: 3 };
+  }, pairingLookupResponse());
+  const { section, onRun } = mount(pairingReview(), retrying('sourceBusy', 'musicbrainz', 2));
+  const status = await within(section()).findByText(`Too many requests to MusicBrainz right now, so lookup retries automatically at ${time} (automatic retry 2 of 3). You can also retry now at no cost.`);
+  expect(status).toHaveAttribute('role', 'status');
+  expect(primaries(section()).map(button => button.textContent)).toEqual(['Retry lookup']);
+  fireEvent.click(primaries(section())[0]); expect(onRun).toHaveBeenCalledWith('lookup/retry', {});
+  // A retrying run never shows the request-interval wait, whatever its last step's age.
+  expect(within(section()).queryByText(/^Waiting for/)).not.toBeInTheDocument();
+  cleanup();
+  const itunes = mount(pairingReview(), retrying('sourceUnavailable', 'itunes', 1));
+  expect(await within(itunes.section()).findByText(`iTunes is unavailable right now, so lookup retries automatically at ${time} (automatic retry 1 of 3). You can also retry now at no cost.`))
+    .toHaveAttribute('role', 'status');
+});
+
+test('while a run is active its steps follow the status, and after a completed run the names searched and the folded record follow it, before the name box', async () => {
+  const updatedAt = new Date(Date.now() - 12_000).toISOString();
+  const running = withLookup(lookup => { Object.assign(lookup, { run: 4, state: 'running', outcome: null, candidates: [], applied: null,
+    progress: { phase: 'details', done: 5, total: 12, startedAt: new Date(Date.now() - 30_000).toISOString(), updatedAt }, timeline: pairingRunningTimeline(updatedAt) }); }, pairingLookupResponse());
+  const first = mount(pairingReview(), running);
+  const steps = await within(first.section()).findByRole('list', { name: 'Lookup steps' });
+  expect(within(steps).getAllByRole('listitem')[4]).toHaveTextContent('● Read release details (5 of 12) (in progress)');
+  // The wait counts on this page's clock from when it first saw the run's last step, so the first read shows none however old
+  // the server says that step is, and a later read of the same step does.
+  expect(within(first.section()).queryByText(/^Waiting for/)).not.toBeInTheDocument();
+  const clock = vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 12_000);
+  await act(async () => { await first.client.invalidateQueries(); });
+  expect(await within(first.section()).findByText(/^Waiting for MusicBrainz \(last progress 1\d seconds ago\)$/)).toBeInTheDocument();
+  clock.mockRestore();
+  // The steps come after the status line and are no part of the polite status.
+  const status = within(first.section()).getByRole('status');
+  expect(status.compareDocumentPosition(steps) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(status).not.toHaveTextContent(/Read release details/);
+  cleanup();
+  const completed = withLookup(lookup => { lookup.timeline = pairingTimeline(); }, pairingLookupResponse());
+  const { section } = mount(pairingReview(), completed);
+  const searched = await within(section()).findByText(/^This lookup searched for "Synthetic Live Album 2" · Synthetic Live Artist, then "Synthetic Live Album 2" alone/);
+  const record = within(section()).getByText('Lookup log: took 22 s · 5 searches · 12 releases found');
+  expect(record.closest('details')!.open).toBe(false);
+  const box = await within(section()).findByRole('group', { name: 'Look up by name' });
+  expect(searched.compareDocumentPosition(record) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(record.compareDocumentPosition(box) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+});
+
+test('after a completed run the name box folds under Didn\'t find it? Look up another name unless the status points at it, also when the run completes while the page is open, unless the box is in use', async () => {
+  const fold = 'Didn\'t find it? Look up another name';
+  // An applied release: the box folds and stays reachable.
+  const shown = mount();
+  const box = await within(shown.section()).findByRole('group', { name: 'Look up by name' });
+  const details = box.closest('details')!;
+  expect([details.open, within(details).getByText(fold).tagName]).toEqual([false, 'SUMMARY']);
+  cleanup();
+  // The status makes the name box the next step: a real no match, no release, or numbers that cannot be filled as the next step.
+  const noMatch = withLookup(lookup => { Object.assign(lookup, { applied: null, groups: [], preselection: null }); lookup.candidates[0] = { ...lookup.candidates[0], status: 'notMatching', groupKey: null };
+    lookup.needsAnswer.conflicts = []; });
+  const noRelease = withLookup(lookup => { Object.assign(lookup, { outcome: 'noRelease', applied: null, candidates: [], groups: [], preselection: null }); lookup.needsAnswer.conflicts = []; });
+  const manual = pairingReview(); manual.draft.tracks = manual.draft.tracks.map(track => ({ ...track, title: track.title.replace(/^1-0\d /, '') }));
+  for (const [item, response] of [[applied(), noMatch], [applied(), noRelease], [manual, pairingLookupResponse()]] as const) {
+    const { section } = mount(item, response);
+    const open = await within(section()).findByRole('group', { name: 'Look up by name' });
+    expect(open.closest('details')).toBeNull();
+    expect(within(section()).queryByText(fold)).not.toBeInTheDocument();
+    cleanup();
+  }
+  // Filling the numbers is the next step: the box folds under it.
+  const fillNext = mount(pairingReview(), pairingLookupResponse());
+  expect((await within(fillNext.section()).findByRole('group', { name: 'Look up by name' })).closest('details')).not.toBeNull();
+  cleanup();
+  // A box open while the run ran folds when the same run completes, unless the administrator is using it (here, the focus in it).
+  for (const using of [false, true]) {
+    let response = withLookup(lookup => { Object.assign(lookup, { run: 3, state: 'running', outcome: null, candidates: [], applied: null }); }, pairingLookupResponse());
+    const watched = mount(pairingReview(), () => reviewJson(response));
+    const running = await within(watched.section()).findByRole('group', { name: 'Look up by name' });
+    expect(running.closest('details')).toBeNull();
+    if (using) within(running).getByRole('textbox', { name: 'Name' }).focus();
+    response = withLookup(lookup => { lookup.timeline = pairingTimeline(); }, pairingLookupResponse());
+    await act(async () => { await watched.client.invalidateQueries(); });
+    await within(watched.section()).findByText('Lookup log: took 22 s · 5 searches · 12 releases found');
+    const after = within(watched.section()).getByRole('group', { name: 'Look up by name' });
+    if (using) expect([after, after.closest('details'), document.activeElement]).toEqual([running, null, within(running).getByRole('textbox', { name: 'Name' })]);
+    else expect([after.closest('details')?.open, within(watched.section()).getByText(fold).tagName]).toEqual([false, 'SUMMARY']);
+    cleanup();
+  }
 });

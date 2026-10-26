@@ -2056,7 +2056,7 @@
       }
     },
     "admin.catalog_review.lookup_cause_paired_durations": {
-      "description": "Administrator workbench: existing-Album review summary, status cause after the found sentence: the tracks now pair in exactly one way but members have no duration; the next step is using that release.",
+      "description": "Administrator workbench: existing-Album review summary, status cause after the found sentence: the tracks pair with a release in exactly one way but members have no duration; the next step is using that release.",
       "delivery": [
         "runtime"
       ],
@@ -2187,6 +2187,20 @@
         "count": "number"
       }
     },
+    "admin.catalog_review.lookup_exhausted_busy": {
+      "description": "Administrator workbench: existing-Album review summary, status when MusicBrainz answered with too many requests (or this server's request bound for it stayed busy) until the automatic retries ran out; the free retry button follows.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_exhausted_unavailable": {
+      "description": "Administrator workbench: existing-Album review summary, status when MusicBrainz failed or timed out until the automatic retries ran out; the free retry button follows.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.catalog_review.lookup_fill_hint": {
       "description": "Administrator workbench: existing-Album review candidate chooser, beside Fill Disc and Track Numbers from titles, how many of the Album's tracks lack a Disc or Track Number.",
       "delivery": [
@@ -2229,6 +2243,16 @@
         "title": "string"
       }
     },
+    "admin.catalog_review.lookup_gate_wait": {
+      "description": "Administrator workbench: existing-Album review summary, above the lookup steps while a run is running and its last progress is more than 5 seconds old: the source it waits for (MusicBrainz or iTunes) and the seconds since.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "seconds": "number",
+        "source": "string"
+      }
+    },
     "admin.catalog_review.lookup_itunes_note": {
       "description": "Administrator workbench: existing-Album review summary, last sentence of a refined status when the iTunes fallback was unavailable.",
       "delivery": [
@@ -2250,6 +2274,18 @@
       ],
       "variables": {
         "count": "number"
+      }
+    },
+    "admin.catalog_review.lookup_log": {
+      "description": "Administrator workbench: existing-Album review summary, disclosure that folds a finished run's steps: how long the run took (whole minutes, 0 for under a minute, and seconds), how many searches the steps list as sent and how many releases it found.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "minutes": "number",
+        "releases": "number",
+        "searches": "number",
+        "seconds": "number"
       }
     },
     "admin.catalog_review.lookup_missing_rows": {
@@ -2305,6 +2341,27 @@
         "members": "number",
         "paired": "number"
       }
+    },
+    "admin.catalog_review.lookup_paired_by_file_name_positions": {
+      "description": "Administrator workbench: existing-Album review candidate card: the tracks pair with this release in exactly one way because of the track numbers their original file names start with.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_paired_by_near_exact_duration": {
+      "description": "Administrator workbench: existing-Album review candidate card: the tracks pair with this release in exactly one way because only one pairing has every duration within half a second.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_paired_by_title_positions": {
+      "description": "Administrator workbench: existing-Album review candidate card: the tracks pair with this release in exactly one way because of the track numbers their titles start with.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
     },
     "admin.catalog_review.lookup_partial_comparison": {
       "description": "Administrator workbench: existing-Album review summary, candidate chooser, not every release found was compared.",
@@ -2460,6 +2517,30 @@
       ],
       "variables": {}
     },
+    "admin.catalog_review.lookup_retry_busy": {
+      "description": "Administrator workbench: existing-Album review summary, status while the run waits for an automatic retry because a source answered with too many requests (or this server's request bound for it was busy): the source (MusicBrainz or iTunes), the retry time, which automatic retry it is and how many there are at most; the free retry button follows.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "attempt": "number",
+        "limit": "number",
+        "source": "string",
+        "time": "string"
+      }
+    },
+    "admin.catalog_review.lookup_retry_unavailable": {
+      "description": "Administrator workbench: existing-Album review summary, status while the run waits for an automatic retry because a source failed or timed out: the source (MusicBrainz or iTunes), the retry time, which automatic retry it is and how many there are at most; the free retry button follows.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "attempt": "number",
+        "limit": "number",
+        "source": "string",
+        "time": "string"
+      }
+    },
     "admin.catalog_review.lookup_running_count_status": {
       "description": "Administrator workbench: existing-Album review summary, status while the lookup runs: the phase name and how many of its steps are done out of all (the elapsed time is shown beside it).",
       "delivery": [
@@ -2478,6 +2559,33 @@
       ],
       "variables": {
         "phase": "string"
+      }
+    },
+    "admin.catalog_review.lookup_searched": {
+      "description": "Administrator workbench: existing-Album review summary, after a completed run: the names it searched, the first quoted with any Artist name, then each later one (lookup_searched_then and lookup_searched_then_alone joined).",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "searches": "string"
+      }
+    },
+    "admin.catalog_review.lookup_searched_then": {
+      "description": "Administrator workbench: existing-Album review summary, after a completed run: a later name it searched, quoted, with its Artist name; joined directly after the previous one.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "item": "string"
+      }
+    },
+    "admin.catalog_review.lookup_searched_then_alone": {
+      "description": "Administrator workbench: existing-Album review summary, after a completed run: a later name it searched without an Artist name, quoted; joined directly after the previous one.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "item": "string"
       }
     },
     "admin.catalog_review.lookup_section_not_fit": {
@@ -2535,8 +2643,252 @@
       ],
       "variables": {}
     },
+    "admin.catalog_review.lookup_step_active": {
+      "description": "Administrator workbench: existing-Album review lookup steps: the step in progress, after its mark.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "step": "string"
+      }
+    },
+    "admin.catalog_review.lookup_step_album": {
+      "description": "Administrator workbench: existing-Album review lookup steps: a MusicBrainz search by the Album name alone, with the name it sent.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "text": "string"
+      }
+    },
+    "admin.catalog_review.lookup_step_album_artist": {
+      "description": "Administrator workbench: existing-Album review lookup steps: a MusicBrainz search by the Album name credited to an Artist, with the name and Artist name it sent.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "artist": "string",
+        "text": "string"
+      }
+    },
+    "admin.catalog_review.lookup_step_aliases": {
+      "description": "Administrator workbench: existing-Album review lookup steps: reading the other names of the credited Artists and labels.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_step_bridge": {
+      "description": "Administrator workbench: existing-Album review lookup steps: searching MusicBrainz again for the titles iTunes showed.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_step_bridge_titles": {
+      "description": "Administrator workbench: existing-Album review lookup steps: searching MusicBrainz again for the titles iTunes showed, with the quoted titles that are releases found.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "titles": "string"
+      }
+    },
+    "admin.catalog_review.lookup_step_counted": {
+      "description": "Administrator workbench: existing-Album review lookup steps: a step with how many of its requests are settled out of all.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "done": "number",
+        "step": "string",
+        "total": "number"
+      }
+    },
+    "admin.catalog_review.lookup_step_details": {
+      "description": "Administrator workbench: existing-Album review lookup steps: reading the details of the releases found.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_step_done": {
+      "description": "Administrator workbench: existing-Album review lookup steps: a finished step, after its mark.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "step": "string"
+      }
+    },
+    "admin.catalog_review.lookup_step_itunes": {
+      "description": "Administrator workbench: existing-Album review lookup steps: the iTunes fallback.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_step_itunes_skipped": {
+      "description": "Administrator workbench: existing-Album review lookup steps: the iTunes fallback did not run because iTunes was unavailable, or was not needed.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "reason": "string"
+      }
+    },
+    "admin.catalog_review.lookup_step_not_run": {
+      "description": "Administrator workbench: existing-Album review lookup steps: a step a run that ended (stopped, unavailable or superseded) never reached, after its mark.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "step": "string"
+      }
+    },
+    "admin.catalog_review.lookup_step_not_taken": {
+      "description": "Administrator workbench: existing-Album review lookup steps: a step the run did not take, whose own text already says why (not needed, skipped or unavailable), after its mark.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "step": "string"
+      }
+    },
+    "admin.catalog_review.lookup_step_pending": {
+      "description": "Administrator workbench: existing-Album review lookup steps: a step the active run has not started yet, after its mark.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "step": "string"
+      }
+    },
+    "admin.catalog_review.lookup_step_quoted": {
+      "description": "Administrator workbench: existing-Album review lookup steps: one searched text, quoted.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "text": "string"
+      }
+    },
+    "admin.catalog_review.lookup_step_quoted_artist": {
+      "description": "Administrator workbench: existing-Album review lookup steps: one searched text, quoted, with the Artist name its search was credited to.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "artist": "string",
+        "text": "string"
+      }
+    },
+    "admin.catalog_review.lookup_step_search": {
+      "description": "Administrator workbench: existing-Album review lookup steps: a MusicBrainz search by name whose text is not shown.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_step_skipped": {
+      "description": "Administrator workbench: existing-Album review lookup steps: a step the run skipped, such as a search the release bound left unsent, after its mark.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "step": "string"
+      }
+    },
+    "admin.catalog_review.lookup_step_song": {
+      "description": "Administrator workbench: existing-Album review lookup steps: a MusicBrainz search by the submitted song name alone, with the name it sent.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "text": "string"
+      }
+    },
+    "admin.catalog_review.lookup_step_song_artist": {
+      "description": "Administrator workbench: existing-Album review lookup steps: a MusicBrainz search by the submitted song name credited to an Artist, with the name and Artist name it sent.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "artist": "string",
+        "text": "string"
+      }
+    },
+    "admin.catalog_review.lookup_step_track_title": {
+      "description": "Administrator workbench: existing-Album review lookup steps: the MusicBrainz searches by the Album's track titles, with the quoted titles (and Artist names) they sent.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "titles": "string"
+      }
+    },
+    "admin.catalog_review.lookup_step_track_title_not_needed": {
+      "description": "Administrator workbench: existing-Album review lookup steps: the track titles were not searched because the name searches found a matching release.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_step_track_title_plain": {
+      "description": "Administrator workbench: existing-Album review lookup steps: the MusicBrainz searches by the Album's track titles, without the titles.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_step_track_title_skipped": {
+      "description": "Administrator workbench: existing-Album review lookup steps: why the track titles were not searched: they start with track numbers like file names, equal or look like their file names, are generic, none is distinctive enough, or MusicBrainz was unavailable.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "reason": "string"
+      }
+    },
+    "admin.catalog_review.lookup_step_unconfirmed": {
+      "description": "Administrator workbench: existing-Album review lookup steps: a search the run counted past but may never have sent (it reached its candidate limit, came back partial, ran out of MusicBrainz retries or ended while sending), after its mark.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "step": "string"
+      }
+    },
+    "admin.catalog_review.lookup_steps": {
+      "description": "Administrator workbench: existing-Album review summary, accessible name of the list of the lookup run's steps.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_stopped_permission": {
+      "description": "Administrator workbench: existing-Album review summary, status when the run stopped because the account that started it lost administrator access; the free retry button follows.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_stopped_time": {
+      "description": "Administrator workbench: existing-Album review summary, status when the run stopped because it ran past the time its start allowed; the free retry button follows.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.catalog_review.lookup_superseded": {
       "description": "Administrator workbench: existing-Album review summary, status when the run ended because the Album or its tracks changed or are no longer ready.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_superseded_open": {
+      "description": "Administrator workbench: existing-Album review summary, link to the Album page shown instead of the retry when the run ended because the Album changed since the review was created.",
       "delivery": [
         "runtime"
       ],
@@ -2551,6 +2903,13 @@
     },
     "admin.catalog_review.lookup_title": {
       "description": "Administrator workbench: existing-Album review summary, the section heading.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_try_another": {
+      "description": "Administrator workbench: existing-Album review summary, disclosure that folds the name box after a completed run when the status does not make it the next step.",
       "delivery": [
         "runtime"
       ],

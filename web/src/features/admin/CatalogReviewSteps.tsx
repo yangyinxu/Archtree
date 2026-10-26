@@ -58,9 +58,10 @@ function LunaStatus({ item }: { item: CatalogReview }) {
  * count, is the primary button; it is also primary, without a count, when that step lists changes none of which is selected
  * (manual values), and a plain one otherwise while it lists changes. When the last answer makes the changes ready and leaves the
  * focus on the page or in a folded section, the focus moves to that button. An applied completion offers what was updated
- * instead, and Luna AI's status once Luna AI was used. It reads the summary's cached read (never polled from here; the review
- * page's own brief, reviewLookupBrief.ts) and the Update step's count (in that step's chunk), so its count is that step's. The
- * chunk also holds the Luna AI controls and an applied completion's list of what was updated (CatalogReviewApplied.tsx).
+ * instead, and Luna AI's status once Luna AI was used. A free retry is promised only while the review's source is current. It
+ * reads the summary's cached read (never polled from here; the review page's own brief, reviewLookupBrief.ts) and the Update
+ * step's count (in that step's chunk), so its count is that step's. The chunk also holds the Luna AI controls and an applied
+ * completion's list of what was updated (CatalogReviewApplied.tsx).
  */
 export function CatalogReviewSteps({ item, choices, stage, dirty, onNavigate }: { item: CatalogReview; choices: Readonly<Record<string, ApplyChoice>>;
   stage: 'draft' | 'review' | 'apply'; dirty: boolean; onNavigate: (stage: 'draft' | 'apply') => void }) {
@@ -69,7 +70,8 @@ export function CatalogReviewSteps({ item, choices, stage, dirty, onNavigate }: 
   const [counted, setCounted] = useState<{ count: number; items: number; identityAnswers: number; ready: boolean } | null>(null);
   const button = useRef<HTMLButtonElement>(null), waited = useRef(false);
   const lookup = read.data?.lookup ?? null, submitted = lookup?.input.submitted;
-  const brief = reviewLookupBrief(lookup, { available: read.data?.summary.lookupAvailable ?? false, members: item.draft.tracks.length,
+  // The free retry is promised only while the source is current: a run that ended because it is not cannot be retried until then.
+  const brief = reviewLookupBrief(lookup, { available: (read.data?.summary.lookupAvailable ?? false) && item.sourceStatus === 'current', members: item.draft.tracks.length,
     searched: submitted?.kind === 'album' ? submitted.text : item.draft.album.title, artists: item.draft.album.artists.filter(entry => entry.role === 'primary').map(entry => entry.name) });
   const release = lookup?.candidates.find(candidate => candidate.key === lookup.applied?.candidateKey)?.title ?? null;
   const applied = item.state === 'applied', active = ['queued', 'running'].includes(item.analysis.state), pending = captured && !applied && !read.data;

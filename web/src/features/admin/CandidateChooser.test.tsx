@@ -27,6 +27,8 @@
  *   - among several possible releases only the first offers the numbers, and a release whose members have no duration is then used rather than compared again
  *   - an import view keeps its flat folded list and status sentences even with unverified candidates of the same title
  *   - a review's possible matches load their previews at once, and a folded section's only once it is opened
+ *   - a review card says how its pairing was made single: by the titles' or file names' track numbers or the closest durations; without it, or on the import page, no such line shows
+ *   - a possible match that pairs in one way is the next step, so no other possible match asks for numbers; the unknown Disc Numbers line stays unless the positions or durations made that pairing single
  * @end-catalog */
 
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
@@ -535,4 +537,49 @@ test('a review\'s possible matches load their previews at once, and a folded sec
   unfold(screen.getByText('Releases that do not fit or could not be read (10)'));
   await waitFor(() => expect(previews().length).toBeGreaterThan(1));
   expect(previews().slice(1).every(image => image.closest('details'))).toBe(true);
+});
+
+test('a review card says how its pairing was made single: by the titles\' or file names\' track numbers or the closest durations; without it, or on the import page, no such line shows', () => {
+  const pairedBy = (value: 'titlePositions' | 'fileNamePositions' | 'nearExactDuration' | undefined) => {
+    const response = pairedLookupResponse().lookup!;
+    return { ...response, candidates: response.candidates.map(entry => entry.status === 'matching'
+      ? { ...entry, comparison: { ...entry.comparison!, subset: { ...entry.comparison!.subset!, ...(value ? { pairedBy: value } : {}) } } } : entry) };
+  };
+  const lines = { titlePositions: 'Paired by the track numbers in the titles', fileNamePositions: 'Paired by the track numbers in the file names', nearExactDuration: 'Paired by the closest durations' };
+  for (const [value, line] of Object.entries(lines) as [keyof typeof lines, string][]) {
+    mountReview(pairedBy(value), liveReview);
+    // The offered release's card says it once; the folded list's cards say it too.
+    const offered = screen.getByRole('region', { name: /^One release matches this Album's tracks/ });
+    expect(within(offered).getAllByText(line)).toHaveLength(1);
+    expect(screen.getAllByText(line).length).toBeGreaterThan(1);
+    cleanup();
+  }
+  mountReview(pairedBy(undefined), liveReview);
+  expect(screen.queryByText(/^Paired by/)).not.toBeInTheDocument();
+  cleanup();
+  // The import page never says it, even for a comparison that carried one (its strict schema refuses it first).
+  const subset = { leftOutTracks: 0, pairing: 'unique', pairs: [], missingTrackCount: 0, unpairableSlotIds: [], pairedBy: 'titlePositions' };
+  mount(view({ candidates: [candidate(1, { comparison: { ...comparison(), subset } as unknown as Candidate['comparison'] })] }));
+  expect(screen.getByText('Matches these files · Label 1 · 2021-05 · 2 tracks')).toBeInTheDocument();
+  expect(screen.queryByText(/^Paired by/)).not.toBeInTheDocument();
+});
+
+test('a possible match that pairs in one way is the next step, so no other possible match asks for numbers; the unknown Disc Numbers line stays unless the positions or durations made that pairing single', () => {
+  const run = vi.fn(), unknownDiscs = 'Tracks without a disc number: 2. They can pair with a track on any disc, so their positions may be unclear.';
+  const mixed = (pairedBy?: 'nearExactDuration' | 'titlePositions') => live({ candidates: live().candidates.map(entry => entry.key === pairingEditions[1]
+    ? { ...entry, barcode: '4006381339999', comparison: { ...entry.comparison!, subset: { ...entry.comparison!.subset!, pairing: 'unique' as const, ...(pairedBy ? { pairedBy } : {}) } } } : entry) });
+  mountReview(mixed(), { ...liveReview, fill: { count: 2, run } });
+  const possible = screen.getByRole('region', { name: 'Possible matches (2 releases)' });
+  expect(within(possible).queryByRole('button', { name: 'Fill Disc and Track Numbers from titles' })).not.toBeInTheDocument();
+  expect(screen.queryByText(fillHint)).not.toBeInTheDocument();
+  expect(within(possible).getByRole('button', { name: 'Use this release' })).toBeEnabled();
+  expect(screen.getByText(unknownDiscs)).toBeInTheDocument();
+  cleanup();
+  // Made single by the titles' track numbers or the closest durations, its card says so and no position is called unclear.
+  for (const [pairedBy, line] of [['titlePositions', 'Paired by the track numbers in the titles'], ['nearExactDuration', 'Paired by the closest durations']] as const) {
+    mountReview(mixed(pairedBy), { ...liveReview, fill: { count: 2, run } });
+    expect(within(screen.getByRole('region', { name: 'Possible matches (2 releases)' })).getByText(line)).toBeInTheDocument();
+    expect(screen.queryByText(unknownDiscs)).not.toBeInTheDocument();
+    cleanup();
+  }
 });

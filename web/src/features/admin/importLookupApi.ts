@@ -8,8 +8,8 @@
  *              reviewTrackPath, slotId, bases, basis, reviewBasis, flagReasons, discNumber, trackNumber,
  *              comparisonSchema, pairSchema, subsetSchema, reviewComparisonSchema, candidateSchema,
  *              reviewCandidateSchema, proposalSchema, groupSchema, lookupValueSchema, expectedRows,
- *              reviewLookupValueSchema, appliedSchema, reviewAppliedSchema, progressSchema, rowTitle,
- *              knownDuration, appendTracklistSchema, summarySchema
+ *              reviewLookupValueSchema, appliedSchema, reviewAppliedSchema, progressSchema, searchText,
+ *              stepSchema, timelineSchema, rowTitle, knownDuration, appendTracklistSchema, summarySchema
  * @end-catalog */
 
 import { z } from 'zod';
@@ -20,9 +20,12 @@ import { artistEntrySchema, expectedTracklistRowSchema, importDateSchema, labelE
  * (src/administration/lookup/lookupView.ts): bounded candidate evidence, groups, the preselection, the applied values with their
  * conflicts and flags, and what Publish waits for; and the import's summary state (src/administration/import/adminImportSummary.ts).
  * An existing-Album review's view (GET /catalog-reviews/:id/lookup) shares it and also admits the catalog trigger, the exact-count
- * basis, the subset differences and comparison, each candidate's `byTrackTitle`, the review-only value paths, flag reasons and
- * conflict precision, the applied pairing, and an active run's progress; an import's view refuses every one of them. The summary reads (importSummaryQuery.ts,
- * catalogReviewSummaryQuery.ts) load it with the read, so no chunk that shares those queries carries it.
+ * basis, the subset differences and comparison (with `pairedBy` on a single pairing), each candidate's `byTrackTitle`, the
+ * review-only value paths, flag reasons and conflict precision, the applied pairing, an active run's progress and every run's
+ * `timeline` (its steps with the texts the server allowlists, the Track-title search state, the automatic retry and the run's
+ * times); an import's view refuses every one of them. Both review keys are optional, so this Web still parses a server that sends
+ * neither. The summary reads (importSummaryQuery.ts, catalogReviewSummaryQuery.ts) load it with the read, so no chunk that shares
+ * those queries carries it.
  */
 const integer = z.number().int().nonnegative();
 const run = z.number().int().min(1);
@@ -60,10 +63,12 @@ const comparisonSchema = z.object(comparisonFor(z.enum(['trackCount', 'discCount
 const pairSchema = z.object({ slotId: uuidSchema, discNumber, trackNumber }).strict();
 /**
  * A review candidate's subset comparison: tracks left out as video, data or pregap, the pairing and its pairs, the missing-file rows
- * the release would add, and the members no audio track can pair with.
+ * the release would add, the members no audio track can pair with, and on a single pairing how the title or filename positions or
+ * near-exact durations made it single (`pairedBy`, absent otherwise).
  */
 const subsetSchema = z.object({ leftOutTracks: integer, pairing: z.enum(['unique', 'ambiguous', 'none']).nullable(), pairs: z.array(pairSchema).max(100),
-  missingTrackCount: integer.nullable(), unpairableSlotIds: z.array(uuidSchema).max(100) }).strict();
+  missingTrackCount: integer.nullable(), unpairableSlotIds: z.array(uuidSchema).max(100), pairedBy: z.enum(['titlePositions', 'fileNamePositions', 'nearExactDuration']).optional() }).strict()
+  .refine(subset => !subset.pairedBy || subset.pairing === 'unique', 'Invalid lookup pairing');
 const reviewComparisonSchema = z.object({ ...comparisonFor(z.enum(['trackCount', 'discCount', 'duration', 'pairing', 'tooManyTracks', 'tracklistInvalid']), 6),
   subset: subsetSchema.nullable() }).strict();
 /** One candidate's evidence fields with its mode's comparison (zod refuses to extend a refined object, so each mode builds its own). */
@@ -145,9 +150,29 @@ export const lookupViewSchema = lookupViewFor({ trigger: z.enum(['tags', 'folder
  */
 const progressSchema = z.object({ phase: z.enum(['search', 'details', 'itunes', 'bridge', 'aliases']), done: integer.max(100), total: integer.max(100),
   startedAt: z.iso.datetime(), updatedAt: z.iso.datetime() }).strict().refine(progress => progress.done <= progress.total, 'Invalid lookup progress');
-/** An existing-Album review's lookup view: the catalog trigger, the review comparison, bases, applied values, value paths and progress. */
+const searchText = z.string().min(1).max(200);
+/**
+ * One step of a review run's timeline: a title search (one text, and its Artist name when credited), the Track-title searches
+ * (their titles), or a stage with its settled and total requests (both or neither, within 100); at most four texts. `unconfirmed`
+ * is a search the run may not have sent.
+ */
+const stepSchema = z.object({ kind: z.enum(['albumArtist', 'album', 'songArtist', 'song', 'trackTitle', 'details', 'itunes', 'bridge', 'aliases']),
+  state: z.enum(['done', 'unconfirmed', 'active', 'pending', 'skipped']), done: integer.max(100).optional(), total: integer.max(100).optional(),
+  texts: z.array(z.object({ text: searchText, artist: searchText.optional() }).strict()).min(1).max(4).optional() }).strict()
+  .refine(step => (step.done === undefined) === (step.total === undefined) && (step.done ?? 0) <= (step.total ?? 0), 'Invalid lookup step');
+/**
+ * A review run's timeline: at most 12 steps, the Track-title search state where the server can say it, the run's start, last-step
+ * and end times, and while it waits for an automatic retry, when, for which source and which retry of how many.
+ */
+const timelineSchema = z.object({ steps: z.array(stepSchema).max(12),
+  trackTitleSearch: z.union([z.object({ state: z.enum(['sent', 'notNeeded', 'pending']) }).strict(),
+    z.object({ state: z.literal('skipped'), reason: z.enum(['positionsStart', 'fileName', 'generic', 'noneDistinct', 'unavailable']) }).strict()]).optional(),
+  startedAt: z.iso.datetime(), updatedAt: z.iso.datetime(), completedAt: z.iso.datetime().nullable(),
+  retry: z.object({ at: z.iso.datetime(), source: z.enum(['musicbrainz', 'itunes']), attempt: z.number().int().min(1).max(10), limit: z.number().int().min(1).max(10) }).strict()
+    .refine(retry => retry.attempt <= retry.limit, 'Invalid lookup retry').nullable() }).strict();
+/** An existing-Album review's lookup view: the catalog trigger, the review comparison, bases, applied values, value paths, progress and timeline. */
 export const reviewLookupViewSchema = lookupViewFor({ trigger: z.enum(['tags', 'folder', 'submitted', 'catalog']), candidate: reviewCandidateSchema,
-  basis: reviewBasis, applied: reviewAppliedSchema, path: reviewValuePathSchema, answers: 406 }).extend({ progress: progressSchema.optional() });
+  basis: reviewBasis, applied: reviewAppliedSchema, path: reviewValuePathSchema, answers: 406 }).extend({ progress: progressSchema.optional(), timeline: timelineSchema.optional() });
 const rowTitle = z.string().min(1).max(300);
 const knownDuration = z.number().int().min(1).nullable();
 /**

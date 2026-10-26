@@ -9,21 +9,26 @@
  *              comparisonView, candidateView, appliedPairsView, appliedView, instant, progressView,
  *              lookupRecordView
  *   Constants: states, issues, statuses, differences, reviewDifferences, bases, reviewBases, triggers,
- *              reviewTriggers, flagReasons, reviewFlagReasons, progressPhases, LIMITS, releaseIdPattern,
- *              monthDays
+ *              reviewTriggers, flagReasons, reviewFlagReasons, progressPhases, pairedByValues, LIMITS,
+ *              releaseIdPattern, monthDays
  * @end-catalog */
 
 /**
  * The administrator's allowlisted view of a metadata lookup record: an import's (GET /imports/:id/lookup) or an existing-Album
  * review's (GET /catalog-reviews/:id/lookup). It carries bounded candidate evidence (an iTunes-only candidate marked as such, and
- * whether it was not checked against MusicBrainz), groups, the preselection, the applied values with their conflicts and flags, the
- * iTunes stage's status, what Publish waits for and a submitted run's name with any submitted Artist name; never a URL, ISRC,
- * recording ID, storefront, localized name, account, grant, lease, fence, file-set digest or query. A review's view also admits
- * the catalog trigger, the exact-count basis, the subset differences, each candidate's subset comparison and `byTrackTitle`, the
+ * whether it was not checked against MusicBrainz), groups, the preselection, the applied values with their conflicts and flags,
+ * the iTunes stage's status, what Publish waits for and a submitted run's name with any submitted Artist name; never a URL, ISRC,
+ * recording ID, storefront, localized name, account, grant, lease, fence, file-set digest, stored query, filename, folder name or
+ * identifier. A review's view also admits the catalog trigger, the exact-count basis, the subset differences, each candidate's
+ * subset comparison (with `pairedBy`, how a pairing that was not single became single, only when stored) and `byTrackTitle`, the
  * review-only value paths (expected tracklist, member Artist entries), the review-only flag reasons, each conflict's `precision`,
- * the applied pairing (`pairs`) and, while its run is queued, running or retrying, `progress`: its phase, the done and total counts
- * of that phase's bounded steps and the run's start and last-step times (numbers and times only, never a query); an import's view
- * never carries them. Pure.
+ * the applied pairing (`pairs`), while its run is queued, running or retrying `progress` (its phase, the done and total counts of
+ * that phase's bounded steps and the run's start and last-step times; numbers and times only), and, on the lookup read, for every
+ * run it can read that planned a search `timeline` (lookupTimelineView.ts): its searches and stages as bounded steps (a search
+ * the record cannot vouch was sent as unconfirmed), the texts its searches sent where each is the review's own saved title,
+ * Artist name or Track title or the run's submitted name and Artist name, or an answered bridge search's title a shown candidate
+ * carries (never a filename, folder name, label, identifier, iTunes term or artist), the derived Track-title search state, the
+ * stored retry time with its attempt, and the run's times. An import's view never carries them. Pure.
  */
 import type { ImportDate } from '../import/adminImportContract';
 import { importDraftV2View } from '../import/adminImportDraftCompat';
@@ -38,6 +43,8 @@ import { lookupCandidateSource } from './lookupContract';
 import { normalizeMusicBrainzId } from './lookupIdentifiers';
 import { isTrackTitleLookupQuery } from './lookupQueryPlanner';
 import { storedItunesStage } from './lookupItunesStage';
+import { catalogReviewLookupTimeline, type ViewLookupTimeline } from './lookupTimelineView';
+import type { LookupPairedBy } from './lookupSubset';
 import { isBlockingLookupState, type LookupApplication, type MetadataLookupIssue, type MetadataLookupRecord, type MetadataLookupState } from './metadataLookupRecord';
 
 /** A ranked candidate's counts and differences; the per-file comparison stays internal. */
@@ -45,10 +52,12 @@ type ViewComparison = { trackCount: { local: number; candidate: number }; discCo
     unknownLocalDurations: number; unknownCandidateDurations: number };
 /**
  * A review candidate's subset comparison: tracks left out as video, data or pregap, the pairing and its pairs (members of this
- * review only), how many missing-file rows the release would add, and the members no audio track can pair with.
+ * review only), how many missing-file rows the release would add, the members no audio track can pair with, and for a single
+ * pairing that the title or filename positions or near-exact durations made single, which of them did (`pairedBy`, absent
+ * otherwise).
  */
 export type ViewSubsetComparison = { leftOutTracks: number; pairing: 'unique' | 'ambiguous' | 'none' | null; pairs: { slotId: string; discNumber: number; trackNumber: number }[];
-    missingTrackCount: number | null; unpairableSlotIds: string[] };
+    missingTrackCount: number | null; unpairableSlotIds: string[]; pairedBy?: LookupPairedBy };
 type ViewReviewComparison = Omit<ViewComparison, 'differences'> & { differences: (LookupDifference | LookupSubsetDifference)[]; subset: ViewSubsetComparison | null };
 /**
  * One candidate's evidence. An iTunes-only candidate (`source` itunes, its collection ID as `releaseId`) shows no label, catalogue
@@ -95,10 +104,12 @@ export type ImportLookupView = LookupRecordView<'tags' | 'folder' | 'submitted',
  */
 export type ViewLookupProgress = { phase: 'search' | 'details' | 'itunes' | 'bridge' | 'aliases'; done: number; total: number; startedAt: string; updatedAt: string };
 /**
- * A review's view: the catalog trigger, each candidate's comparison with the subset differences and its subset comparison, and an
- * active run's `progress` (the key is absent otherwise, so a Web tab opened before it still parses every finished run).
+ * A review's view: the catalog trigger, each candidate's comparison with the subset differences and its subset comparison, an
+ * active run's `progress` (the key is absent otherwise) and, on the lookup read, every readable run's `timeline` (absent when its
+ * start or last-step time is unreadable or it planned no search). A Web tab opened before the timeline refuses a view that carries
+ * it, so open tabs reload after a deploy.
  */
-export type CatalogReviewLookupView = LookupRecordView<'tags' | 'folder' | 'submitted' | 'catalog', ViewReviewComparison> & { progress?: ViewLookupProgress };
+export type CatalogReviewLookupView = LookupRecordView<'tags' | 'folder' | 'submitted' | 'catalog', ViewReviewComparison> & { progress?: ViewLookupProgress; timeline?: ViewLookupTimeline };
 type ViewMode = 'import' | 'review';
 
 const states: readonly MetadataLookupState[] = ['queued', 'running', 'retrying', 'complete', 'unavailable', 'stopped', 'superseded'];
@@ -113,6 +124,7 @@ const flagReasons: readonly string[] = ['characters', 'length', 'format', 'size'
 const reviewFlagReasons: readonly string[] = [...flagReasons, 'notApplicable', 'noTrackCredit'];
 /** The phases an active run reports progress for; `done` belongs to a completed run, which shows none. */
 const progressPhases = ['search', 'details', 'itunes', 'bridge', 'aliases'] as const;
+const pairedByValues: readonly LookupPairedBy[] = ['titlePositions', 'fileNamePositions', 'nearExactDuration'];
 /**
  * `values` bounds applied values, conflicts and flags: one per value path (an import's 305, a review's 406, REVIEW_LOOKUP_LIMITS.answers).
  * `progress` bounds a phase's done and total counts.
@@ -181,7 +193,9 @@ function subsetView(raw: unknown, slots: ReadonlySet<string>): ViewSubsetCompari
         if (slots.has(pair.slotId)) pairs.push({ slotId: pair.slotId, discNumber, trackNumber });
     }
     if (raw.unpairableSlotIds.some(slot => typeof slot !== 'string')) return null;
-    return { leftOutTracks, pairing, pairs, missingTrackCount, unpairableSlotIds: [...new Set((raw.unpairableSlotIds as string[]).filter(slot => slots.has(slot)))] };
+    // How a pairing that was not single became single, only on a single pairing and only when stored, so a view without it is unchanged.
+    const pairedBy = pairing === 'unique' && oneOf(raw.pairedBy, pairedByValues) ? raw.pairedBy : null;
+    return { leftOutTracks, pairing, pairs, missingTrackCount, unpairableSlotIds: [...new Set((raw.unpairableSlotIds as string[]).filter(slot => slots.has(slot)))], ...(pairedBy ? { pairedBy } : {}) };
 }
 
 /** A ranked candidate's counts and differences; the per-file comparison stays internal. A review's also carries its subset comparison. */
@@ -320,7 +334,7 @@ function progressView(raw: Record<string, unknown>): ViewLookupProgress | null {
  * ranking's order when the run was ranked, else the stored order as incomplete. `needsAnswer` and `blocking` are what Publish (or
  * applying a review) waits for; for an import an explicit Album reuse decision counts as an append, and a review never appends.
  */
-function lookupRecordView(record: MetadataLookupRecord, doc: AdminImportDocument, mode: ViewMode): CatalogReviewLookupView | null {
+function lookupRecordView(record: MetadataLookupRecord, doc: AdminImportDocument, mode: ViewMode, options: { timeline?: boolean } = {}): CatalogReviewLookupView | null {
     const raw = record as unknown as Record<string, unknown>;
     if (!isRecord(raw) || !oneOf(raw.state, states) || !Number.isSafeInteger(raw.run) || (raw.run as number) < 1) return null;
     const input = isRecord(raw.input) ? raw.input : null;
@@ -353,6 +367,7 @@ function lookupRecordView(record: MetadataLookupRecord, doc: AdminImportDocument
     // An active run's iTunes request (a search, UPC or collection lookup) is running, or retrying while it waits for its automatic
     // retry; a stage still running while the run is no longer blocking ended with it (stopped, superseded or unavailable) unanswered.
     const stage = storedItunesStage(raw.itunesStage), blocking = isBlockingLookupState(raw.state), progress = mode === 'review' ? progressView(raw) : null;
+    const timeline = mode === 'review' && options.timeline ? catalogReviewLookupTimeline(raw, doc, candidates.map(candidate => candidate.title)) : null;
     const itunes: ImportLookupItunesStatus = !stage ? 'notQueried' : stage.state !== 'unavailable' && blocking && raw.phase === 'itunes' ? raw.state === 'retrying' ? 'retrying' : 'running'
         : stage.state !== 'running' ? stage.state : blocking ? 'running' : 'notQueried';
     return {
@@ -362,12 +377,16 @@ function lookupRecordView(record: MetadataLookupRecord, doc: AdminImportDocument
         applied: appliedView(raw.applied, doc, slots, mode),
         staleFiles: [...new Set(list(raw.staleSlotIds).filter((slot): slot is string => typeof slot === 'string' && slots.has(slot)))],
         needsAnswer: { tie: needed.tie, conflicts: needed.conflicts.filter(path => !path.startsWith('tracks.') || slots.has(path.split('.')[1])) },
-        blocking: blocking || needed.tie || needed.conflicts.length > 0, itunes, ...(progress ? { progress } : {})
+        blocking: blocking || needed.tie || needed.conflicts.length > 0, itunes, ...(progress ? { progress } : {}), ...(timeline ? { timeline } : {})
     };
 }
 
 /** An import's view (GET /imports/:id/lookup); null for a record this release cannot read, a review's `catalog` run included. */
 export const importLookupView = (record: MetadataLookupRecord, doc: AdminImportDocument): ImportLookupView | null =>
     lookupRecordView(record, doc, 'import') as ImportLookupView | null;
-/** An existing-Album review's view (GET /catalog-reviews/:id/lookup); null for a record this release cannot read. */
-export const catalogReviewLookupView = (record: MetadataLookupRecord, doc: AdminImportDocument): CatalogReviewLookupView | null => lookupRecordView(record, doc, 'review');
+/**
+ * An existing-Album review's view (GET /catalog-reviews/:id/lookup); null for a record this release cannot read. Only that read
+ * asks for the `timeline`, so a brief built from the view per listed review does not build one.
+ */
+export const catalogReviewLookupView = (record: MetadataLookupRecord, doc: AdminImportDocument, options: { timeline?: boolean } = {}): CatalogReviewLookupView | null =>
+    lookupRecordView(record, doc, 'review', options);

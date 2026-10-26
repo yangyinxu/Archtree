@@ -6,13 +6,14 @@
  * Tests
  *   - a review without a run, or with a record this release cannot read, has no brief
  *   - queued, running and retrying runs are active and wait for nothing else
- *   - a run that ended stopped, superseded or unavailable offers the free retry only where lookup is available
+ *   - a run that ended stopped or unavailable offers the free retry only where lookup is available, and a superseded one never does
  *   - an applied release counts its open conflicts, and an answered one no longer counts
  *   - a tie waits for a choice and counts as one answer; an offered release of a partial comparison waits for a choice without an answer; choosing none leaves nothing to do
  *   - two unnumbered members that fit one release in two ways ask for Disc and Track Numbers and count its two editions once
  *   - members without durations ask for numbers, and same-title releases with different barcodes count separately
  *   - an Album without members needs a choice among its same-name releases, or among any release when none has its name, and none where no release was found
  *   - a single pairing left unconfirmed by a release track's duration needs a choice, not numbers
+ *   - a possible release that pairs in one way, with another that does not, needs a choice, not numbers
  *   - a release used for its Album values only, whose pairing is now single, can be used again
  *   - a real no match, no release and no query report none; MusicBrainz exhausted reports unavailable with the free retry
  *   - the brief carries five keys, enums and counts within bounds, never a title, name or query
@@ -100,11 +101,12 @@ test('queued, running and retrying runs are active and wait for nothing else', (
     }
 });
 
-test('a run that ended stopped, superseded or unavailable offers the free retry only where lookup is available', () => {
+test('a run that ended stopped or unavailable offers the free retry only where lookup is available, and a superseded one never does', () => {
     const doc = timed(), ended = (state: MetadataLookupRecord['state'], issue: MetadataLookupRecord['issue']) => reviewRun(doc, [], { state, issue, outcome: null, ranking: null });
     assert.deepEqual(briefOf(ended('stopped', 'grantExpired'), doc), brief('failed', 'unavailable', 0, 'retry'));
     assert.deepEqual(briefOf(ended('stopped', 'grantExpired'), doc, false), brief('failed', 'unavailable'));
-    assert.deepEqual(briefOf(ended('superseded', 'projectClosed'), doc), brief('failed', 'unavailable', 0, 'retry'));
+    // It ended because the review's source was no longer current, and the server refuses a retry until it is.
+    assert.deepEqual(briefOf(ended('superseded', 'projectClosed'), doc), brief('failed', 'unavailable'));
     assert.deepEqual(briefOf(ended('unavailable', 'sourceUnavailable'), doc), brief('failed', 'unavailable', 0, 'retry'));
     assert.deepEqual(briefOf(ended('unavailable', 'notConfigured'), doc), brief('failed', 'unavailable'));
 });
@@ -167,6 +169,16 @@ test('a single pairing left unconfirmed by a release track\'s duration needs a c
     const doc = timed(), record = reviewRun(doc, [release(1, [210_000, null])]);
     assert.deepEqual(catalogReviewLookupView(record, doc)!.candidates.map(candidate => [candidate.status, candidate.comparison?.subset?.pairing]), [['unverified', 'unique']]);
     assert.deepEqual(briefOf(record, doc), brief('complete', 'possible', 0, 'choose', 1));
+});
+
+test('a possible release that pairs in one way, with another that does not, needs a choice, not numbers', () => {
+    // Two unnumbered members with known durations: one release pairs them in one way (its second track has no duration), the
+    // other fits the first member twice.
+    const doc = reviewLookupDocument({ members: [{ durationMs: 210_000 }, { durationMs: 220_000 }] });
+    const record = reviewRun(doc, [release(1, [210_000, null]), release(2, [210_000, 211_000, 220_000])]);
+    assert.deepEqual(catalogReviewLookupView(record, doc)!.candidates.map(candidate => [candidate.status, candidate.comparison?.subset?.pairing]),
+        [['unverified', 'unique'], ['unverified', 'ambiguous']]);
+    assert.deepEqual(briefOf(record, doc), brief('complete', 'possible', 0, 'choose', 2));
 });
 
 test('a release used for its Album values only, whose pairing is now single, can be used again', () => {

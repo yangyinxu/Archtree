@@ -8,8 +8,8 @@ import { reviewAppliedAgain, reviewLookupFit } from './reviewLookupStatus';
  * The review page's reading of its lookup view as a brief, the one the server sends Album completion cards and the Album page
  * (src/administration/lookup/catalogReviewLookupBrief.ts, which repeats it and is tested against it): the run's state, its
  * outcome, the lookup answers it waits for (as the summary counts them: the applied candidate's open conflicts and a tie), the
- * next step the review page offers and how many releases may match. Null without a run. Pure; it imports types and pure
- * modules only, so the server's test can load it.
+ * next step the review page offers (never the free retry after a superseded run) and how many releases may match. Null without
+ * a run. Pure; it imports types and pure modules only, so the server's test can load it.
  */
 export function reviewLookupBrief(lookup: ReviewLookupView | null, context: { available: boolean; members: number; searched: string; artists: readonly string[] }): LookupBrief | null {
   if (!lookup) return null;
@@ -27,5 +27,6 @@ export function reviewLookupBrief(lookup: ReviewLookupView | null, context: { av
     : status === 'lookup.tie' || status === 'lookup.single_choice' ? brief('matched', 'choose')
     : status === 'lookup.applied_none' ? brief('matched')
     : ['lookup.no_match', 'lookup.itunes_unavailable', 'lookup.no_release', 'lookup.no_query'].includes(status) ? brief('none')
-    : brief('unavailable', retry ? 'retry' : null);
+    // A run superseded because the review's source was no longer current cannot be retried until it is (the server refuses it).
+    : brief('unavailable', retry && lookup.state !== 'superseded' ? 'retry' : null);
 }

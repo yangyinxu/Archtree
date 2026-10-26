@@ -15,6 +15,7 @@
  *   - a page opened with nothing left to answer leaves the focus where it is
  *   - an applied completion says when the Album was updated in the interface language and opens what was updated; Luna AI's status shows only once Luna ran
  *   - the Luna AI controls are never primary, stop a running analysis, and say when the limit is reached or the provider failed
+ *   - a superseded lookup promises no free retry, and another ended run promises it only while the review's source is current
  * @end-catalog */
 
 import { useState } from 'react';
@@ -230,4 +231,16 @@ test('the Luna AI controls are never primary, stop a running analysis, and say w
   expect(screen.getByRole('button', { name: 'Use Luna AI again (paid)' })).toBeDisabled();
   expect(screen.getByText(/limit/i)).toBeVisible();
   expect(screen.getByRole('status')).toHaveTextContent(/\S/);
+});
+
+test('a superseded lookup promises no free retry, and another ended run promises it only while the review\'s source is current', async () => {
+  const ended = (state: 'superseded' | 'stopped', issue: 'projectClosed' | 'grantExpired') => () => {
+    const response = pairingLookupResponse(); Object.assign(response.lookup!, { state, issue, candidates: [] }); return response; };
+  for (const [sourceStatus, stopped] of [['current', 'Lookup did not finish; retry for free'], ['changed', 'Lookup unavailable'], ['unavailable', 'Lookup unavailable']] as const) {
+    for (const [response, text] of [[ended('superseded', 'projectClosed'), 'Lookup unavailable'], [ended('stopped', 'grantExpired'), stopped]] as const) {
+      const { step } = mount(idle({ ...pairingReview(), sourceStatus }), response);
+      await waitFor(() => expect(step('① Find release')).toHaveTextContent(text));
+      cleanup();
+    }
+  }
 });

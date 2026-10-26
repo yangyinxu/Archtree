@@ -2,14 +2,15 @@
  * Exports
  *   Functions: reviewRows, releaseTrackEntries, reviewLookupResponse, reviewItunesLookupResponse,
  *              reviewTieLookupResponse, reviewAfterLookup, reviewIdentityResponse, pairingRows, pairingReview,
- *              pairingLookupResponse, pairingApplication, pairedLookupResponse
+ *              pairingLookupResponse, pairingApplication, pairedLookupResponse, pairingTimeline,
+ *              pairingRunningTimeline
  *   Constants: reviewRelease, reviewCandidateKey, otherReviewRelease, guestEntryKey, guestTrackEntryKey,
  *              guestHandle, leadHandle, leadRecordId, guestCandidateId, leadMusicBrainzId,
  *              leadOtherMusicBrainzId, leadCreditId, pairingEditions
  * Internal
- *   Types: Overrides, PairingCandidate
- *   Functions: entry, pairingEdition
- *   Constants: groupKey
+ *   Types: Overrides, PairingCandidate, PairingTimeline
+ *   Functions: entry, pairingEdition, pairingSearches
+ *   Constants: groupKey, pairingTrackTitles
  * @end-catalog */
 
 import type { ImportArtistEntry } from './adminNamingSchema';
@@ -203,4 +204,28 @@ export function pairedLookupResponse(applied: NonNullable<ReviewLookupResponse['
       artists: [{ name: 'Synthetic Live Artist', role: 'primary', joinPhrase: null, musicBrainzId: null }], label: 'Synthetic Live Label', labelMusicBrainzId: null,
       releaseDate: { year: 2023, month: 3, day: 29 }, tracks: pairingRows().map(({ discNumber, trackNumber, title }) => ({ discNumber, trackNumber, title })) } }],
     disclosure: { unknownLocalDurations: 0, unknownLocalDiscNumbers: 0, partialComparison: true }, applied } };
+}
+type PairingTimeline = NonNullable<NonNullable<ReviewLookupResponse['lookup']>['timeline']>;
+const pairingSearches = (): PairingTimeline['steps'] => [
+  { kind: 'albumArtist', state: 'done', texts: [{ text: 'Synthetic Live Album 2', artist: 'Synthetic Live Artist' }] },
+  { kind: 'album', state: 'done', texts: [{ text: 'Synthetic Live Album 2' }] },
+  { kind: 'albumArtist', state: 'done', texts: [{ text: 'Synthetic Live Album 2', artist: 'Synthetic Live Artist -Romanized-' }] }];
+const pairingTrackTitles = [{ text: 'Synthetic second song', artist: 'Synthetic Live Artist' }, { text: 'Synthetic opening', artist: 'Synthetic Live Artist' }];
+/**
+ * The timeline of that completed run (pairingLookupResponse), in 22 seconds: its three title searches (the Album name with the
+ * decorated Artist name's first part, alone, then with the whole name), both Track titles sent, release details 12 of 12, the
+ * iTunes fallback's two requests, its bridge naming the one title a shown candidate carries, and four alias lookups. Not part of
+ * the responses above, so a server before the timeline stays their shape; `extra` replaces any key.
+ */
+export function pairingTimeline(extra: Partial<PairingTimeline> = {}): PairingTimeline {
+  return { steps: [...pairingSearches(), { kind: 'trackTitle', state: 'done', texts: pairingTrackTitles }, { kind: 'details', state: 'done', done: 12, total: 12 },
+    { kind: 'itunes', state: 'done', done: 2, total: 2 }, { kind: 'bridge', state: 'done', done: 4, total: 4, texts: [{ text: 'Synthetic other Album 1' }] },
+    { kind: 'aliases', state: 'done', done: 4, total: 4 }], trackTitleSearch: { state: 'sent' }, startedAt: '2026-10-22T01:24:52.000Z', updatedAt: '2026-10-22T01:25:14.000Z',
+  completedAt: '2026-10-22T01:25:14.000Z', retry: null, ...extra };
+}
+/** The same run while it reads release details (5 of 12), its last step at `updatedAt`: the title searches sent, the rest waiting. */
+export function pairingRunningTimeline(updatedAt: string): PairingTimeline {
+  return { steps: [...pairingSearches(), { kind: 'trackTitle', state: 'pending', texts: pairingTrackTitles }, { kind: 'details', state: 'active', done: 5, total: 12 },
+    { kind: 'itunes', state: 'pending' }, { kind: 'bridge', state: 'pending' }, { kind: 'aliases', state: 'pending' }], trackTitleSearch: { state: 'pending' },
+  startedAt: '2026-10-22T01:24:52.000Z', updatedAt, completedAt: null, retry: null };
 }

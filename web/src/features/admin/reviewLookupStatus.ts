@@ -13,7 +13,9 @@
 /**
  * The existing-Album review's own reading of its lookup view, beside the next step it shares with the import page
  * (lookupNextStep.ts, which stays as it is): why nothing matched, which releases could match by title, one reason per candidate,
- * the active run's progress, and the Disc and Track Numbers the Album's track titles carry. The review's lookup brief
+ * the active run's progress, when a retrying run retries and which retry of how many (too many requests apart from an unavailable
+ * source), why MusicBrainz's retries ran out or a run stopped, whether the status points at the name box, and the Disc and Track
+ * Numbers the Album's track titles carry. The review's lookup brief
  * (reviewLookupBrief.ts) reads its fit and applied-again checks too. Owner rules: docs/business-rules.md
  * (Administrator Metadata Lookup, next-step bullet); the comparison is described in docs/features/admin-workbench.md. Pure; the
  * review summary imports it, and so does the chooser shared with the import page, which loads it with the chooser chunk but never
@@ -133,7 +135,7 @@ export function reviewLookupFit(lookup: ReviewLookupView, context: { members: nu
   const { possible, others } = reviewSections(lookup.candidates, context.searched, context.artists);
   if (!context.members) return { members: false, releases: possible };
   const fit = possible.length ? possible : others, pairings = fit.flat().map(candidate => candidate.comparison?.subset?.pairing), unknown = lookup.disclosure?.unknownLocalDurations ?? 0;
-  const cause: Cause | null = unknown ? pairings.includes('unique') ? 'paired_durations' : 'durations' : pairings.includes('ambiguous') ? 'pairing' : pairings.includes('unique') ? 'release_durations' : null;
+  const cause: Cause | null = unknown ? pairings.includes('unique') ? 'paired_durations' : 'durations' : pairings.includes('unique') ? 'release_durations' : pairings.includes('ambiguous') ? 'pairing' : null;
   return fit.length && cause ? { members: true, possible: possible.length > 0, releases: fit, cause, unknown } : null;
 }
 /** The release this run applied for its Album values only whose pairing a saved number has since made single, or undefined. */
@@ -170,26 +172,37 @@ export const progressPhaseKey = (phase: string) => `catalog_review.lookup_phase_
 
 /**
  * What the review summary shows in place of the shared status: its messages (the polite status), the time a queued or running run
- * has waited or run (shown beside the status, outside it, as it moves with every read), and whether filling the Disc and Track
- * Numbers from the titles is the next step (`next`, the only primary button) or offered beside the name box (`offer`).
+ * has waited or run (shown beside the status, outside it, as it moves with every read), whether filling the Disc and Track
+ * Numbers from the titles is the next step (`next`, the only primary button) or offered beside the name box (`offer`), and
+ * whether the status points at the name box (`box`, present only then).
  */
-export type ReviewStatus = { messages: Message[]; elapsed?: Message; fill: 'next' | 'offer' | null };
+export type ReviewStatus = { messages: Message[]; elapsed?: Message; fill: 'next' | 'offer' | null; box?: true };
 /**
- * The review's status in place of the shared next step's, or null to keep that one. A queued or running run with `progress` says
- * so and, while running, names its phase and counts (retrying keeps the shared copy and its retry); its time counts from its start
- * to the later of the summary's last read and its last step, so a client clock behind the server's still counts. A release this
- * run applied for its Album values only, whose pairing a saved number has since made single, says that using it again brings in
- * its tracklist. Where the shared step is no match (or iTunes was unavailable besides, said after it), the first cause that
- * applies: an Album without members (with a hint to add an Artist when the run named none); else, among the releases the tracks
- * fit (the possible matches, else those whose titles differ), a member without a duration (or, once the pairing is single, that
- * the release can be used), a pairing that is not single, or a single pairing a release track's unknown duration left unconfirmed.
- * Entering the numbers is the next step only where the titles give every member a Disc and Track Number (titleNumbers) and the
- * draft still lacks one (owner rules, next-step bullet); Track Numbers alone are offered after the name box, and otherwise the copy
- * says they can be entered in Edit draft. Anything else is a real no match.
+ * The review's status in place of the shared next step's, or null to keep that one. A retrying run with its stored retry
+ * (`timeline.retry`) says whether its source had too many requests (`sourceBusy`, also this server's own request bound) or is
+ * unavailable, when it retries (formatted by `time`, else the ISO time) and which automatic retry of how many it is; without it
+ * the shared copy stays. Where the shared status is unavailable because MusicBrainz's retries ran out, it says whether there were
+ * too many requests or MusicBrainz stayed unavailable, and a stopped run says whether its administrator lost access or its time
+ * ran out; the shared retry stays the next step in each. A queued or running run with `progress` says so and, while running, names
+ * its phase and counts; its time counts from its start to the later of the summary's last read and its last step, so a client
+ * clock behind the server's still counts. A release this run applied for its Album values only, whose pairing a saved number has
+ * since made single, says that using it again brings in its tracklist. Where the shared step is no match (or iTunes was
+ * unavailable besides, said after it), the first cause that applies: an Album without members (with a hint to add an Artist when
+ * the run named none); else, among the releases the tracks fit (the possible matches, else those whose titles differ), a member
+ * without a duration (or, once the pairing is single, that the release can be used), a single pairing a release track's unknown
+ * duration left unconfirmed, or a pairing that is not single. Numbers are needed only while no such release pairs with the tracks
+ * in one way. Entering them is the next step only where the titles give every member a Disc and Track Number (titleNumbers) and
+ * the draft still lacks one (owner rules, next-step bullet); Track Numbers alone are offered after the name box, and otherwise the
+ * copy says they can be entered in Edit draft. The name box is the next step (`box`) for an Album without members and wherever the
+ * numbers are needed but filling them is not the next step. Anything else is a real no match.
  */
 export function reviewLookupStatus(lookup: ReviewLookupView, status: string,
-  context: { members: number; searched: string; artists: readonly string[]; now: number; numbers: TitleNumbers | null }): ReviewStatus | null {
-  const progress = lookup.progress;
+  context: { members: number; searched: string; artists: readonly string[]; now: number; numbers: TitleNumbers | null; time?: (at: string) => string }): ReviewStatus | null {
+  const progress = lookup.progress, retry = lookup.timeline?.retry, issue = lookup.issue;
+  if (lookup.state === 'retrying' && retry) return { messages: [reason(`retry_${issue === 'sourceUnavailable' ? 'unavailable' : 'busy'}`, { source: retry.source === 'itunes' ? 'iTunes' : 'MusicBrainz',
+    time: context.time ? context.time(retry.at) : retry.at, attempt: retry.attempt, limit: retry.limit })], fill: null };
+  if (status === 'lookup.unavailable' && (issue === 'sourceBusy' || issue === 'sourceUnavailable')) return { messages: [reason(`exhausted_${issue === 'sourceBusy' ? 'busy' : 'unavailable'}`)], fill: null };
+  if (lookup.state === 'stopped' && (issue === 'permissionLost' || issue === 'grantExpired')) return { messages: [reason(`stopped_${issue === 'grantExpired' ? 'time' : 'permission'}`)], fill: null };
   if (progress && (lookup.state === 'queued' || lookup.state === 'running')) {
     const elapsed = elapsedText(Math.max(context.now, Date.parse(progress.updatedAt) || 0) - Date.parse(progress.startedAt));
     return lookup.state === 'queued' ? { messages: [reason('queued_status')], elapsed: reason('waited', { elapsed }), fill: null }
@@ -201,10 +214,12 @@ export function reviewLookupStatus(lookup: ReviewLookupView, status: string,
   if (status !== 'lookup.no_match' && status !== 'lookup.itunes_unavailable') return null;
   const itunes = status === 'lookup.itunes_unavailable' ? [reason('itunes_note')] : [];
   const fit = reviewLookupFit(lookup, context);
+  // An Album without members never matches, so the name box stays its next step (owner rules, next-step bullet).
   if (fit && !fit.members) return { messages: [reason('empty_album', { count: fit.releases.length }), ...(lookup.input.submitted?.artist || context.artists.length ? [] : [reason('add_artist')]),
-    ...itunes], fill: null };
+    ...itunes], fill: null, box: true };
   if (!fit) return null;
   const { cause, unknown } = fit, numbers = context.numbers, needed = cause === 'durations' || cause === 'pairing', next = needed && Boolean(numbers?.disc && numbers.count);
   return { messages: [reason(fit.possible ? 'possible_found' : 'fit_found', { count: fit.releases.length, title: fit.releases[0][0].title ?? '—' }),
-    reason(`cause_${cause}${needed && !next ? '_manual' : ''}`, unknown ? { unknown } : undefined), ...itunes], fill: next ? 'next' : needed && numbers?.count ? 'offer' : null };
+    reason(`cause_${cause}${needed && !next ? '_manual' : ''}`, unknown ? { unknown } : undefined), ...itunes], fill: next ? 'next' : needed && numbers?.count ? 'offer' : null,
+    ...(needed && !next ? { box: true as const } : {}) };
 }

@@ -2276,16 +2276,21 @@ The wire protocol and operational bounds are documented in
   offers the name box as the next step. In an existing-Album review where lookup
   finds no matching release, the summary says why: the Album has no members,
   members have no duration, or the members fit a release in more than one way.
-  When the members' saved titles start with the positions that Track-title
-  lookup reads, the review offers filling the Disc and Track Numbers the draft
-  lacks from them, for the administrator to check and save, which compares
-  again. This is the next step when the titles give both Disc and Track Numbers,
-  and is otherwise offered after the name box, which stays available. When
-  lookup is unavailable, busy or stopped, the next step is the free retry, also
-  after the automatic retries are exhausted. In every lookup state, also after a
-  release was applied, the summary offers Luna as a secondary choice after the
-  lookup controls, never as the next step. An existing-Album review offers Luna
-  the same way. Luna remains an explicitly confirmed paid step that shows the
+  When the members pair with a release in exactly one way, which a missing
+  duration left unconfirmed, using that release is the next step and the name
+  box stays available. Otherwise, when their saved titles start with the
+  positions that Track-title lookup reads, the review offers filling the Disc
+  and Track Numbers the draft lacks from them, for the administrator to check
+  and save, which compares again. This is the next step when the titles give
+  both Disc and Track Numbers, and is otherwise offered after the name box,
+  which stays available. When lookup is unavailable, busy or stopped, the next
+  step is the free retry, also after the automatic retries are exhausted. While
+  a review's source is no longer current, a run that ended for that reason
+  offers no retry; when the Album changed, the summary offers opening the Album
+  to start a new review. In every lookup state, also after a release was
+  applied, the summary offers Luna as a secondary choice after the lookup
+  controls, never as the next step. An existing-Album review offers Luna the
+  same way. Luna remains an explicitly confirmed paid step that shows the
   remaining project and daily budget; offering it starts nothing, a lookup
   result never starts it, and it may also run beside applied lookup values. In
   an import, Luna suggestions return to the summary labelled as Luna AI and are

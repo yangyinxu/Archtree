@@ -58,7 +58,10 @@ const proposalText = (field: typeof fields[number], proposal: Proposal, withId?:
  * (previews once opened). A release card acts for one edition and lets each other edition be chosen under Choose another edition,
  * so every candidate stays selectable. A possible match whose members pair in no single way keeps choosing it under Other options
  * as Album values only (each other edition likewise); the first such card offers filling the Disc and Track Numbers from the
- * titles (`review.fill`) or says they can be entered in Edit draft, then used where a member has no duration, else compared again.
+ * titles (`review.fill`) or says they can be entered in Edit draft, then used where a member has no duration, else compared again,
+ * unless another possible match pairs in one way (then that release is the next step and nothing asks for numbers). A review card
+ * whose pairing the title or filename positions or the closest durations made single says so (`pairedBy`), and the unknown
+ * Disc Numbers line then stays out.
  * The release this run applied without a pairing whose pairing is now single can be used again, a primary button where it is not
  * folded, which brings in its tracklist and track details; with groups it is also listed above the folded list. In a review, the
  * tie or offer sentence names its region without being printed again (the summary's status says it), and the offered release's
@@ -94,6 +97,8 @@ export function CandidateChooser({ projectId, viewerId, lookup, review, disabled
   // A review's sections while nothing matched as a group (never with a tie or an offered choice); a release card acts for the
   // edition this run chose, else its first.
   const sections = review && !lookup.groups.length ? reviewSections(lookup.candidates as ReviewCandidate[], review.searched, review.artists) : null;
+  // A possible match that pairs in one way is the next step, so no card asks for numbers (owner rules, next-step bullet).
+  const paired = Boolean(sections?.possible.flat().some(candidate => candidate.comparison?.subset?.pairing === 'unique'));
   const acting = (group: readonly Candidate[]) => group.find(candidate => candidate.key === chosen) ?? group[0];
   const subsetOf = (candidate: Candidate) => candidate.comparison && 'subset' in candidate.comparison ? candidate.comparison.subset : null;
   const pairs = lookup.applied && 'pairs' in lookup.applied ? lookup.applied.pairs : undefined;
@@ -139,7 +144,7 @@ export function CandidateChooser({ projectId, viewerId, lookup, review, disabled
   const list = (prefix: string, shown: { candidate: Candidate; proposal: Proposal | null; group?: readonly Candidate[] }[], possible = false) => {
     // A possible match with members whose pairing is not single writes Album values only; the first such card offers the numbers.
     const albumOnly = (entry: Candidate) => possible && Boolean(entry.comparison?.trackCount.local) && subsetOf(entry)?.pairing !== 'unique' && !again(entry);
-    const hinted = shown.findIndex(({ candidate }) => albumOnly(candidate));
+    const hinted = paired ? -1 : shown.findIndex(({ candidate }) => albumOnly(candidate));
     return <ul className={styles.cards}>{shown.map(({ candidate, proposal, group = [candidate] }, index) => {
       const comparison = candidate.comparison, subset = subsetOf(candidate), members = comparison?.trackCount.local ?? 0, title = `${id}-${prefix}${index}`;
       const reason = review && !proposal ? candidateReason(candidate as ReviewCandidate, slotIds => slotIds.map(member).join(', ')) : null;
@@ -156,6 +161,7 @@ export function CandidateChooser({ projectId, viewerId, lookup, review, disabled
         {'byTrackTitle' in candidate && candidate.byTrackTitle && review && <p className={styles.muted}>{t('lookup.found_by_track_title')}</p>}
         {group.length > 1 && <p className={styles.muted}>{t('catalog_review.lookup_editions', { count: group.length, editions: group.map(edition).join(' · ') })}</p>}
         {reason && <p>{t(reason.key, reason.values)}</p>}
+        {review && subset?.pairedBy && <p className={styles.muted}>{t(`catalog_review.lookup_paired_by_${subset.pairedBy}`)}</p>}
         {!proposal && <p className={styles.muted}>{[!reason && t(`lookup.status_${candidate.status}`), candidate.label, reviewValueText(candidate.date), candidate.trackCount === null ? null : t('lookup.track_count', { count: candidate.trackCount })].filter(Boolean).join(' · ')}</p>}
         <dl>
           {proposal && differing.map(field => fact(fieldKeys[field], proposalText(field, proposal, byId(field) ? withId : undefined)))}
@@ -180,11 +186,13 @@ export function CandidateChooser({ projectId, viewerId, lookup, review, disabled
       </li>;
     })}</ul>;
   };
-  // A possible match's fill hint stands in for the unknown Disc Numbers line.
-  const fillHinted = Boolean(review?.fill) && Boolean(sections?.possible.map(acting).some(candidate => candidate.comparison?.trackCount.local && subsetOf(candidate)?.pairing !== 'unique'
+  // A possible match's fill hint stands in for the unknown Disc Numbers line, and a pairing the positions or durations made single
+  // (its card says how) leaves no position unclear.
+  const fillHinted = Boolean(review?.fill) && !paired && Boolean(sections?.possible.map(acting).some(candidate => candidate.comparison?.trackCount.local && subsetOf(candidate)?.pairing !== 'unique'
     && !again(candidate)));
+  const resolved = lookup.candidates.some(candidate => subsetOf(candidate)?.pairedBy);
   const disclosure = lookup.disclosure, unknown = disclosure ? ([['lookup.unknown_durations', disclosure.unknownLocalDurations], ['lookup.unknown_discs', disclosure.unknownLocalDiscNumbers]] as const)
-    .filter(([key, count]) => count > 0 && !(fillHinted && key === 'lookup.unknown_discs')) : [];
+    .filter(([key, count]) => count > 0 && !((fillHinted || resolved) && key === 'lookup.unknown_discs')) : [];
   const disclosed = [...unknown.map(([key, count]) => <p key={key} className={styles.muted}>{t(key, { count })}</p>),
     disclosure?.partialComparison && <p key="partial" className={styles.muted}>{t('lookup.partial_comparison')}</p>];
   const none = <div className={styles.actions}><button type="button" className={styles.button} disabled={disabled || (chosen === null && lookup.applied?.choice === 'none')} onClick={() => onChoose(null)}>{t('lookup.choose_none')}</button></div>;

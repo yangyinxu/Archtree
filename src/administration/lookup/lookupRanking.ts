@@ -81,8 +81,8 @@ export type LookupFileComparison = { slotId: string; localMs: number | null; can
  * What a subset comparison found: tracks left out as video, data or pregap; the pairing (null when the track count or the
  * tracklist already rules the release out) and its pairs in member order; the release tracks no member pairs with (only for a
  * single pairing) and how many missing-file rows the release would add; and the members no audio track can pair with.
- * `pairedBy` says how a pairing that was not single became single (lookupResolvedPairing); absent otherwise, and stored only: the
- * lookup view does not project it.
+ * `pairedBy` says how a pairing that was not single became single (lookupResolvedPairing); absent otherwise; a review's lookup
+ * view shows it on that candidate's subset comparison (lookupView.ts).
  */
 export type LookupSubsetComparison = {
     leftOutTracks: number; pairing: 'unique' | 'ambiguous' | 'none' | null; pairedBy?: LookupPairedBy; pairs: LookupSubsetPair[];

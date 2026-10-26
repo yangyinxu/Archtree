@@ -42,19 +42,23 @@ export type CatalogReviewLookupResponse = { lookup: CatalogReviewLookupView | nu
 const notFound = () => new AdminImportError(404, 'ADMIN_CATALOG_REVIEW_NOT_FOUND');
 
 /**
- * The review's lookup view (null before any run), its revision and value revision and its summary, read in one snapshot. The review is read without
- * its server-only capture; an applied review reads too. A malformed ID or a project that is not a review is not found.
+ * The review's lookup view (null before any run, with its timeline), its revision and value revision and its summary, read in
+ * one snapshot. Of its server-only capture the review is read without the expected tracklist and member durations; the view's
+ * timeline reads only the credited names in it, to admit the Artist names the run searched (catalogReviewSearchTexts), and
+ * nothing of the capture is projected into the response. An applied review reads too. A malformed ID or a project that is not a
+ * review is not found.
  */
 export async function getCatalogReviewLookup(actor: string, id: string, configuration: () => MetadataLookupConfiguration = metadataLookupConfiguration): Promise<CatalogReviewLookupResponse> {
     if (!objectId(id)) throw notFound();
     return withImportAdmin(actor, async session => {
-        const doc = await importCollection().findOne({ _id: new ObjectId(id), purpose: 'catalogReview' }, { session, projection: { catalogCapture: 0 } });
+        const doc = await importCollection().findOne({ _id: new ObjectId(id), purpose: 'catalogReview' },
+            { session, projection: { 'catalogCapture.album.expectedTracklist': 0, 'catalogCapture.members.duration': 0 } });
         if (!doc) throw notFound();
         const stored = await importLookupRecord(doc._id, session), needed = lookupAnswersNeeded(stored, doc, { append: false });
         const slots = new Set((Array.isArray(doc.manifest?.files) ? doc.manifest.files : []).map(file => file.slotId));
         const available = configuration().available, analysis = doc.analysis;
         return {
-            lookup: stored ? catalogReviewLookupView(stored, doc) : null, revision: doc.revision,
+            lookup: stored ? catalogReviewLookupView(stored, doc, { timeline: true }) : null, revision: doc.revision,
             valueRevision: Number.isSafeInteger(doc.valueRevision) && doc.valueRevision! >= 0 ? doc.valueRevision! : 0,
             summary: {
                 // The run's own state, never the review's gate, which an earlier release's worker may leave blocking; analysis also

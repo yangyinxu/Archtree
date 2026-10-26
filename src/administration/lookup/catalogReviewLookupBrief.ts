@@ -35,7 +35,10 @@ export type CatalogReviewLookupBrief = {
     outcome: 'active' | 'applied' | 'matched' | 'possible' | 'none' | 'unavailable';
     /** Open lookup answers as the review page counts them: unanswered conflicts of the applied candidate, plus one for a tie. */
     answers: number;
-    /** What the review page asks for next: the free retry, choosing a release, or entering Disc and Track Numbers. */
+    /**
+     * What the review page asks for next: the free retry (never after a superseded run), choosing a release, or entering Disc and
+     * Track Numbers.
+     */
     next: 'retry' | 'choose' | 'numbers' | null;
     /** For `possible`: the releases (editions grouped) the review page counts; 0 otherwise. */
     releases: number;
@@ -52,7 +55,11 @@ export const CATALOG_REVIEW_LOOKUP_BRIEF_PROJECTION = Object.freeze({
 type View = CatalogReviewLookupView;
 type Candidate = View['candidates'][number];
 
-/** The shared next step (web lookupNextStep.ts) of a view: its status key and whether the free retry is offered. */
+/**
+ * The shared next step (web lookupNextStep.ts) of a view: its status key and whether the free retry is offered, never for a run
+ * superseded because the review's source was no longer current, which the server would refuse while it is not (as the review
+ * page withholds it; the Web brief repeats this).
+ */
 function nextStep(view: View, available: boolean): { status: string; retry: boolean } {
     const applied = view.applied, tie = view.needsAnswer.tie;
     const unmatched = !view.groups.length && (applied?.run !== view.run || applied?.choice === 'none');
@@ -60,7 +67,7 @@ function nextStep(view: View, available: boolean): { status: string; retry: bool
     const [status, retry]: [string, boolean] = view.state === 'queued' || view.state === 'running' ? [view.itunes === 'running' ? 'lookup.active_itunes' : 'lookup.active', false]
         : view.state === 'retrying' ? [view.itunes === 'retrying' ? 'lookup.retrying_itunes' : 'lookup.retrying', true]
         : view.state === 'unavailable' ? [view.issue === 'notConfigured' ? 'lookup.not_configured' : 'lookup.unavailable', view.issue !== 'notConfigured']
-        : view.state !== 'complete' ? [`lookup.${view.state}`, true]
+        : view.state !== 'complete' ? [`lookup.${view.state}`, view.state !== 'superseded']
         : unmatched && view.itunes === 'unavailable' && !musicBrainzDown ? ['lookup.itunes_unavailable', false]
         : unmatched && musicBrainzDown ? [view.candidates.some(candidate => candidate.status === 'incomplete') ? 'lookup.incomplete' : 'lookup.unavailable', true]
         : view.outcome === 'noRelease' || view.outcome === 'noQuery' ? [view.outcome === 'noQuery' ? 'lookup.no_query' : 'lookup.no_release', false]
@@ -101,7 +108,8 @@ const releaseCount = (candidates: readonly Candidate[]) => new Set(candidates.ma
 /**
  * Where the shared step is no match (web reviewLookupFit): for an Album without members its same-title releases (needing a
  * choice), while the run found any release at all; else the releases the tracks fit (possible matches, else those whose titles
- * differ) and whether Disc and Track Numbers are needed; null for a real no match.
+ * differ) and whether Disc and Track Numbers are needed, which they are only while no such release pairs with the tracks in one
+ * way; null for a real no match.
  */
 function fit(view: View, members: number, searched: string, artists: readonly string[]): { releases: number; numbers: boolean } | null {
     const key = pageTitle(searched, artists), titleTier = (candidate: Candidate) => tier(pageTitle(candidate.title ?? '', artists), key);
@@ -112,7 +120,7 @@ function fit(view: View, members: number, searched: string, artists: readonly st
     const chosen = possible.length ? possible : fits.filter(candidate => !possible.includes(candidate));
     const pairings = chosen.map(candidate => candidate.comparison?.subset?.pairing), unknown = view.disclosure?.unknownLocalDurations ?? 0;
     const cause = unknown ? pairings.includes('unique') ? 'paired_durations' : 'durations'
-        : pairings.includes('ambiguous') ? 'pairing' : pairings.includes('unique') ? 'release_durations' : null;
+        : pairings.includes('unique') ? 'release_durations' : pairings.includes('ambiguous') ? 'pairing' : null;
     return chosen.length && cause ? { releases: releaseCount(chosen), numbers: cause === 'durations' || cause === 'pairing' } : null;
 }
 /** A release this run applied for its Album values only whose pairing a saved number has since made single (web reviewAppliedAgain). */

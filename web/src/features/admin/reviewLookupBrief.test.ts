@@ -17,19 +17,28 @@ test('a possible release whose tracks pair in more than one way asks for Disc an
   expect(reviewLookupBrief(pairingLookupResponse().lookup, context())).toEqual({ state: 'complete', outcome: 'possible', answers: 0, next: 'numbers', releases: 1 });
 });
 
+test('a possible release that pairs in one way, beside one that does not, needs a choice, not numbers', () => {
+  const lookup = pairingLookupResponse().lookup!;
+  const mixed = { ...lookup, candidates: lookup.candidates.map(entry => entry.key === pairingEditions[1]
+    ? { ...entry, barcode: '4006381339999', comparison: { ...entry.comparison!, subset: { ...entry.comparison!.subset!, pairing: 'unique' as const } } } : entry) };
+  expect(reviewLookupBrief(mixed, context())).toEqual({ state: 'complete', outcome: 'possible', answers: 0, next: 'choose', releases: 2 });
+});
+
 test('an applied release counts its open conflicts; a tie waits for a choice and counts one answer', () => {
   expect(reviewLookupBrief(reviewLookupResponse().lookup, context(captured))).toEqual({ state: 'complete', outcome: 'applied', answers: 3, next: null, releases: 0 });
   expect(reviewLookupBrief(edited({ needsAnswer: { tie: false, conflicts: ['album.title'] } }), context(captured))).toEqual({ state: 'complete', outcome: 'applied', answers: 1, next: null, releases: 0 });
   expect(reviewLookupBrief(reviewTieLookupResponse().lookup, context(captured))).toEqual({ state: 'complete', outcome: 'matched', answers: 1, next: 'choose', releases: 0 });
 });
 
-test('queued, running and retrying runs are active; a stopped run offers the free retry only where lookup runs; a run that found lookup unconfigured offers none', () => {
+test('queued, running and retrying runs are active; a stopped run offers the free retry only where lookup runs; a superseded run or one that found lookup unconfigured offers none', () => {
   for (const state of ['queued', 'running', 'retrying'] as const) expect(reviewLookupBrief(edited({ state, applied: null, needsAnswer: { tie: false, conflicts: [] } }), context(captured)))
     .toEqual({ state, outcome: 'active', answers: 0, next: null, releases: 0 });
   const stopped = edited({ state: 'stopped', issue: 'grantExpired', applied: null, needsAnswer: { tie: false, conflicts: [] } });
   expect(reviewLookupBrief(stopped, context(captured))).toEqual({ state: 'failed', outcome: 'unavailable', answers: 0, next: 'retry', releases: 0 });
   expect(reviewLookupBrief(stopped, context(captured, false))).toEqual({ state: 'failed', outcome: 'unavailable', answers: 0, next: null, releases: 0 });
   expect(reviewLookupBrief({ ...stopped, state: 'unavailable', issue: 'notConfigured' }, context(captured))).toEqual({ state: 'failed', outcome: 'unavailable', answers: 0, next: null, releases: 0 });
+  // A run superseded because the review's source was no longer current cannot be retried until it is.
+  expect(reviewLookupBrief({ ...stopped, state: 'superseded', issue: 'projectClosed' }, context(captured))).toEqual({ state: 'failed', outcome: 'unavailable', answers: 0, next: null, releases: 0 });
 });
 
 test('an Album without members needs a choice among its same-name releases, and has none to choose where the run found no release', () => {

@@ -16,6 +16,7 @@
  *   - the whole ranked list comes back, never capped, with each member's own Artist name as given
  *   - an empty Album gives no title, and malformed or unsendable members never throw and give none
  *   - the positions a review's pairing reads are those Track-title searches read: each title cleaned, then counted under the Album guard
+ *   - the picker says why it keeps no title: titles starting with a track number like file names, titles equal to or shaped like their file names, generic titles, or none distinctive, a specific reason only when every skipped member shares it; none once a title is kept or for no members
  * @end-catalog */
 
 /**
@@ -27,7 +28,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { after, test } from 'node:test';
 import {
-    distinctiveTrackTitles, GENERIC_TRACK_TITLES, TRACK_TITLE_MIN_WEIGHT, trackTitlePositions, trackTitleText, trackTitleWeight, UNCREDITED_TRACK_TITLE_MIN_WEIGHT
+    distinctiveTrackTitles, GENERIC_TRACK_TITLES, TRACK_TITLE_MIN_WEIGHT, trackTitlePositions, trackTitleSkipReason, trackTitleText, trackTitleWeight, UNCREDITED_TRACK_TITLE_MIN_WEIGHT
 } from '../../src/administration/lookup/lookupTrackTitles';
 import { installNetworkGuard } from '../support/networkGuard';
 
@@ -225,4 +226,25 @@ test('the positions a review\'s pairing reads are those Track-title searches rea
     }
     assert.deepEqual(trackTitlePositions(['1-01 Synthetic Single']), [at(1, 1, 'Synthetic Single')]);
     assert.equal(trackTitlePositions('01 A' as never), null);
+});
+
+test('the picker says why it keeps no title: titles starting with a track number like file names, titles equal to or shaped like their file names, generic titles, or none distinctive, a specific reason only when every skipped member shares it; none once a title is kept or for no members', () => {
+    const why = (titles: unknown[], files: unknown[] = [], album: unknown = 'Synthetic Album') =>
+        trackTitleSkipReason(titles.map((title, index) => member(title, files[index] ?? null)), { albumTitle: album });
+    // Unordered positions fail the guard, so the titles keep them and look like file names.
+    assert.equal(why(['01.Synthetic One', '03.Synthetic Three', '02.Synthetic Two']), 'positionsStart');
+    assert.equal(why(['Synthetic Take Seven', 'synthetic_take_eight'], ['Synthetic Take Seven.wav']), 'fileName');
+    assert.equal(why(['Intro', 'Interlude 2', 'Synthetic Song (Instrumental)', '1999']), 'generic');
+    assert.equal(why(['Synthetic Album', 'Synthetic Album (Live)', 'Ab', 'Echo', 'Echo']), 'noneDistinct');
+    assert.equal(why([7, null, { title: 'x' }]), 'noneDistinct');
+    // The reason is said of every title, so members skipped for different reasons give none distinctive, which is true of all.
+    assert.equal(why(['Intro', 'Outro', '03_synthetic']), 'noneDistinct');
+    assert.equal(why(['Intro', '03_synthetic']), 'noneDistinct');
+    assert.equal(why(['Intro', 'Ab']), 'noneDistinct');
+    // A kept title, or no member at all, gives no reason, and the picker's own result is unchanged for the same inputs.
+    for (const titles of [['Intro', 'Synthetic Distinct Song'], ['1-01 Synthetic Night(Live)', '1-02 Synthetic Goose(Live)'], []]) {
+        assert.equal(why(titles), null, JSON.stringify(titles));
+    }
+    assert.deepEqual(picked(['Intro', 'Synthetic Distinct Song', '03_synthetic', 'Synthetic Distinct Song']), []);
+    assert.deepEqual(picked(['1-01 Synthetic Night(Live)', '1-02 Synthetic Goose(Live)']), ['Synthetic Night', 'Synthetic Goose']);
 });

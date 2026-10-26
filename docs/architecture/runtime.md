@@ -312,9 +312,9 @@ Automatic pairing resolution adds no collection, index or
 `requiredIndexRevision` change: a review's stored ranking may hold each member's
 `positionHint` in its `files` (a bounded Disc and Track Number and its source,
 read from the capture) and, on a candidate's subset comparison, `pairedBy`, the
-step that decided its pairing (a bounded value, not projected); a review run
-that skips the iTunes fallback stores no `itunesStage`. The release before it
-ignores both (see
+step that decided its pairing (a bounded value that only a review's lookup view
+projects); a review run that skips the iTunes fallback stores no `itunesStage`.
+The release before it ignores both (see
 [Rollback floors](../features/admin-workbench.md#rollback-floors)).
 
 MusicBrainz IDs add two required unique partial indexes, `artist_musicbrainz_id`

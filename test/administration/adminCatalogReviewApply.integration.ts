@@ -482,9 +482,9 @@ test('members without own numbers whose saved titles start with Disc and Track p
         [{ discNumber: 1, trackNumber: 1, from: 'title' }, { discNumber: 1, trackNumber: 2, from: 'title' }]]);
     assert.deepEqual(stored!.applied.pairs, [{ slotId: slots[0], discNumber: 1, trackNumber: 1 }, { slotId: slots[1], discNumber: 1, trackNumber: 2 }]);
     assert.deepEqual((await current(id)).item.draft.tracks.map(track => [track.discNumber, track.trackNumber]), [[1, 1], [1, 2]]);
-    // The view projects its subset fields one by one, so how the pairing was decided stays on the server.
+    // The view shows how the pairing was decided.
     const view = await (await request(`/catalog-reviews/${id}/lookup`)).json() as any;
-    assert.deepEqual([view.lookup.candidates[0].comparison.subset.pairing, Object.keys(view.lookup.candidates[0].comparison.subset).includes('pairedBy')], ['unique', false]);
+    assert.deepEqual([view.lookup.candidates[0].comparison.subset.pairing, view.lookup.candidates[0].comparison.subset.pairedBy], ['unique', 'titlePositions']);
     const applied = await applyShown(id, [field('expectedTracklist'), ...slots.map(slotId => field('trackNumber', slotId))]);
     assert.equal(applied.item.state, 'applied');
     assert.deepEqual([(await record('audioTracks', first)).trackNumber, (await record('audioTracks', second)).trackNumber], [1, 2]);

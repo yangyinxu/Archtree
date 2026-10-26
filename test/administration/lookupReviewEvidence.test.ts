@@ -18,6 +18,8 @@
  *   - the searched title is the captured saved title of a catalog run or a submitted Album name, and never a song name
  *   - the iTunes fallback may be skipped only for an unverified MusicBrainz candidate not first found by a Track title, whose credit agrees with no placeholder and whose title is the searched one
  *   - only a review compares in subset mode
+ *   - the texts a review run can have searched are its saved title, also without a trailing credit, its primary and member Artist names with a decorated name's first part, the Track titles picked for the run and a submitted name and Artist, never a filename, label or folder
+ *   - a review run without Track-title searches says why: the picker's reason, or that its titles were too light to search alone; none for an Album without captured members, another input, or a plan that would hold them
  * @end-catalog */
 
 /**
@@ -31,8 +33,8 @@ import { after, test } from 'node:test';
 import '../../src/infrastructure/database';
 import type { AdminImportDocument } from '../../src/administration/import/adminImportService';
 import {
-    catalogReviewFileEvidence, catalogReviewItunesSkippable, catalogReviewLookupFileSet, catalogReviewPrimaryNames, catalogReviewSearchedTitle, isCatalogReviewLookup,
-    lookupComparisonFor, planCatalogReviewLookup
+    catalogReviewFileEvidence, catalogReviewItunesSkippable, catalogReviewLookupFileSet, catalogReviewPrimaryNames, catalogReviewSearchedTitle, catalogReviewSearchTexts,
+    catalogReviewTrackTitleSkip, comparableSearchText, isCatalogReviewLookup, lookupComparisonFor, planCatalogReviewLookup
 } from '../../src/administration/lookup/lookupReviewEvidence';
 import type { RankedLookupCandidate } from '../../src/administration/lookup/lookupRanking';
 import { lookupStaleSlots } from '../../src/administration/lookup/metadataLookupRecord';
@@ -371,4 +373,45 @@ test('the iTunes fallback may be skipped only for an unverified MusicBrainz cand
 test('only a review compares in subset mode', () => {
     assert.deepEqual([isCatalogReviewLookup({ purpose: 'catalogReview' }), lookupComparisonFor({ purpose: 'catalogReview' })], [true, 'subset']);
     for (const purpose of ['import', null, undefined] as const) assert.deepEqual([isCatalogReviewLookup({ purpose }), lookupComparisonFor({ purpose })], [false, 'exact']);
+});
+
+test('the texts a review run can have searched are its saved title, also without a trailing credit, its primary and member Artist names with a decorated name\'s first part, the Track titles picked for the run and a submitted name and Artist, never a filename, label or folder', () => {
+    const decorated = '合成情緒 -Gouseijoucho-';
+    const doc = reviewLookupDocument({ title: 'Synthetic Best／合成情緒', primaryNames: [decorated], members: [
+        { durationMs: 200_000, title: '1.01.Synthetic Snow', originalFileName: 'Synthetic Snow File.flac', artists: [{ name: 'Synthetic Member Singer' }] },
+        { durationMs: 210_000, title: '1.02.Synthetic Will', originalFileName: 'Synthetic Will File.flac' }] });
+    // Each in its compared form: NFKC folds the full-width slash.
+    assert.deepEqual([...catalogReviewSearchTexts(doc, { trigger: 'catalog', submitted: null })].sort(), ['Synthetic Best', 'Synthetic Best/合成情緒', 'Synthetic Member Singer',
+        'Synthetic Snow', 'Synthetic Will', decorated, '合成情緒'].sort());
+    // A submitted name and Artist name join them in their compared form (NFKC, whitespace collapsed), and the titles are picked for that input.
+    const submitted = catalogReviewSearchTexts(doc, { trigger: 'submitted', submitted: { kind: 'album', text: 'Synthetic  Snow', artist: 'Ｓｙｎｔｈｅｔｉｃ Typed' } });
+    assert.deepEqual([submitted.has('Synthetic Snow'), submitted.has('Synthetic Typed'), submitted.has('Synthetic Will')], [true, true, true]);
+    const text = JSON.stringify([...submitted]);
+    for (const hidden of ['File', '.flac', 'Synthetic Label', 'Synthetic Guest', '1.01']) assert.equal(text.includes(hidden), false, hidden);
+    assert.deepEqual([comparableSearchText(' Ｓｙｎｔｈｅｔｉｃ \n Album '), comparableSearchText('   '), comparableSearchText(7), comparableSearchText('x'.repeat(1001))],
+        ['Synthetic Album', null, null, null]);
+    // Malformed captures and inputs never throw.
+    for (const broken of [{ catalogSource: null, catalogCapture: null }, { catalogSource: { album: 7, tracks: 'x' } }]) {
+        assert.doesNotThrow(() => catalogReviewSearchTexts({ ...doc, ...broken } as unknown as AdminImportDocument, { trigger: 'submitted', submitted: 'x' }));
+    }
+});
+
+test('a review run without Track-title searches says why: the picker\'s reason, or that its titles were too light to search alone; none for an Album without captured members, another input, or a plan that would hold them', () => {
+    const catalog = { trigger: 'catalog', submitted: null };
+    const album = (titles: string[], options: { albumEntries?: [] } = {}) => reviewLookupDocument({ members: titles.map((title, index) => ({ durationMs: 200_000 + index, title })), ...options });
+    assert.equal(catalogReviewTrackTitleSkip(album(['01.Synthetic One', '03.Synthetic Three', '02.Synthetic Two']), catalog), 'positionsStart');
+    assert.equal(catalogReviewTrackTitleSkip(album(['Intro', 'Outro']), catalog), 'generic');
+    // Without a usable Artist name, titles light enough to be picked are still too light to search alone.
+    assert.equal(catalogReviewTrackTitleSkip(album(['Rain', 'Snow'], { albumEntries: [] }), catalog), 'noneDistinct');
+    // The submitted name counts: a title equal to it is not distinctive for that run.
+    assert.equal(catalogReviewTrackTitleSkip(album(['Synthetic Only Song']), { trigger: 'submitted', submitted: { kind: 'album', text: 'Synthetic Only Song' } }), 'noneDistinct');
+    // A plan that would hold them gives no reason (the run was planned by an earlier release), and so do an Album without members,
+    // another input and an import document, whose manifest slots are no captured members.
+    assert.equal(catalogReviewTrackTitleSkip(album(['Synthetic Distinct Song', 'Synthetic Other Song']), catalog), null);
+    assert.equal(catalogReviewTrackTitleSkip(reviewLookupDocument(), catalog), null);
+    for (const input of [{ trigger: 'tags', submitted: null }, null, { trigger: 'submitted', submitted: { kind: 'other', text: 'x' } }]) {
+        assert.equal(catalogReviewTrackTitleSkip(album(['Intro', 'Outro']), input), null, JSON.stringify(input));
+    }
+    const imported = { ...album(['Intro', 'Outro']), purpose: 'import', catalogSource: undefined, catalogCapture: undefined } as unknown as AdminImportDocument;
+    assert.equal(catalogReviewTrackTitleSkip(imported, catalog), null);
 });

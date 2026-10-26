@@ -244,6 +244,29 @@ running card turns into No matching release found on a later read without any
 action, after which the queue stops reading (checked at 1280 px). The mobile
 workbench shows an import card's Last confirmed date as the page formats it in
 English. Each with an axe scan and no overflow.
+From a review lookup shaped like the live Album, a running run shows its Lookup
+steps after the status at 1280 px in English and 390 px in Chinese: the searches
+by Album name and Artist and by Album name only, done, with the name and Artist
+name they sent, the Track-title row naming both titles, reading release details
+in progress with its done and total counts and the later steps not started yet,
+and, once the page has seen no new step for more than 5 seconds of its own
+clock, Waiting for MusicBrainz (last progress N seconds ago), none of it a live
+region. Once the run completes, the line This lookup searched for names the
+Album name with its Artist, then alone, then with the whole decorated name; the
+steps fold under Lookup log with the time taken (22 s), the searches sent and
+the releases found, and open on request; the name box, untouched while the run
+ran, folds under Didn't find it? Look up another name, stays folded when the
+page is opened again, and opens from the keyboard. A retrying run says Too many
+requests to MusicBrainz right now with the retry time in the interface language
+and automatic retry 2 of 3, Retry lookup being its only primary button and
+sending one retry; an unreachable source, a run stopped by its time limit or by
+a lost administrator account, and MusicBrainz's retries running out each say so
+with Retry lookup. A run that ended after the Album changed offers Open the
+Album to start a new completion, which opens the Album page, shows no retry and
+leaves the step bar promising none. A matching release paired by the positions
+in its titles says Paired by the track numbers in the titles on its offered card
+and on both editions in Releases found. Each with an axe scan and no overflow,
+the steps and retry flows also at 320 px.
 
 The historical 2026-08-19 MediaTrack amendment passed
 304/304 server tests, 214/214 Web unit/component tests, 148/148 integration
@@ -760,15 +783,32 @@ player control still works.
   with them, such as 1-01 and 1-02, and whose first track's duration is within 3
   seconds of two tracks of its release, such as CANDY LIVE 2, and look it up
   again by its title. Confirm the release is applied without entering any
-  numbers, that lookup never reports searching iTunes and no candidate is marked
-  iTunes only, and that Update original Album lists the Disc and Track Numbers
-  lookup filled with the expected tracklist. Repeat for an Album whose tracks
+  numbers, that its card says Paired by the track numbers in the titles, that
+  the lookup steps say iTunes was not needed and no candidate is marked iTunes
+  only, and that Update original Album lists the Disc and Track Numbers lookup
+  filled with the expected tracklist. Repeat for an Album whose tracks
   have no duration and whose titles start with their numbers, such as
   雪の華15周年記念ベスト盤 BIBLE／中島美嘉 with 1.01.雪の華 and 1.02.WILL, and
   confirm its releases of the same title are listed without iTunes-only releases
   and that Use this release on one of them, before any number is saved, brings
   in its expected tracklist and the members' numbers. Repeat in Simplified
-  Chinese (使用此发行, 更新原专辑, 仅来自 iTunes).
+  Chinese (使用此发行, 更新原专辑, 仅来自 iTunes, 按标题中的曲号对应).
+- As an administrator, with metadata lookup configured against MusicBrainz in a
+  development environment, open an Album completion and look up its name with an
+  Artist. While it runs, confirm the lookup steps list each search with the name
+  and Artist name it sent, then reading release details and any iTunes fallback
+  with done and total counts, that a long wait shows Waiting for MusicBrainz
+  with the seconds since the page saw the last progress, and that a screen
+  reader announces the status once rather than every few seconds and reads each
+  step with its state (in progress, not started yet, not run, skipped or may not
+  have been sent). Once it ends, confirm the steps fold under Lookup log with
+  the time taken, the searches and the releases found, that This lookup searched
+  for names the searches it sent, and that the name box folds under Didn't find
+  it? Look up another name when the run completes while you are not using it,
+  also when the page is opened again after a release was applied, and opens from
+  the keyboard, but stays open while you type in it and when no release was
+  found. Repeat in Simplified Chinese (查找记录, 本次查找, 没找到？换个名称查找) and with a screen
+  reader at 320 CSS px.
 - As an administrator, in English and then in Simplified Chinese, open an
   import's Draft section and Review and publish summary and an existing-Album
   review. Confirm every control that starts Luna reads "Use Luna AI (paid)" or

@@ -1462,9 +1462,10 @@ test('a review run whose release pairs only by its members\' title positions mat
         assert.deepEqual([done.trackTitleSearch, done.itunesStage, client.itunesCalls, done.searchComplete, done.ranking!.disclosure.partialComparison], ['skipped', null, [], true, false]);
         const urls = JSON.stringify(client.requests.map(request => decodeURIComponent(request.url)));
         for (const text of ['1-0', '.flac', 'recording?']) assert.equal(urls.includes(text), false, text);
-        // The view projects the subset comparison field by field, so the Web's strict schema never sees how a pairing was decided.
+        // The view projects the subset comparison field by field; it shows how the pairing was made single.
         for (const candidate of catalogReviewLookupView(done, doc)!.candidates) {
-            assert.deepEqual(Object.keys((candidate.comparison as { subset: object }).subset).sort(), ['leftOutTracks', 'missingTrackCount', 'pairing', 'pairs', 'unpairableSlotIds']);
+            const subset = (candidate.comparison as { subset: { pairedBy?: string } }).subset;
+            assert.deepEqual([Object.keys(subset).sort(), subset.pairedBy], [['leftOutTracks', 'missingTrackCount', 'pairedBy', 'pairing', 'pairs', 'unpairableSlotIds'], pairedBy]);
         }
     }
 });

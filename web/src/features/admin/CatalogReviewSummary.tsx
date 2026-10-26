@@ -3,11 +3,12 @@
  *   Functions: CatalogReviewSummary
  * Internal
  *   Functions: ChunkUnavailable, chunk, memberPath
- *   Constants: LookupBox, CandidateChooser, CatalogReviewIdentities
+ *   Constants: LookupBox, CandidateChooser, CatalogReviewIdentities, LookupProgress
  * @end-catalog */
 
 import { lazy, Suspense, useEffect, useId, type ComponentProps, type ComponentType, type ReactNode } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useLocalization } from '../../localization/LocalizationProvider';
 import { useAdminAccess, useAdminText } from './AdminAccess';
 import { entriesByline } from './artistEntriesByline';
 import type { CatalogReview } from './catalogReviewApi';
@@ -16,6 +17,7 @@ import type { CatalogReviewIdentities as Identities } from './CatalogReviewIdent
 import type { CandidateChooser as Chooser } from './CandidateChooser';
 import { expectedRowMembers, lookupAnswers, memberRows, openLookupAnswers, type ReviewConflict } from './catalogReviewSummaryModel';
 import type { LookupBox as Box } from './LookupBox';
+import type { LookupProgress as Progress } from './LookupProgress';
 import { lookupActive, lookupNextStep, reviewLookupKey } from './lookupNextStep';
 import { lookupIdText, lookupValueAt, lookupValueText } from './lookupValueText';
 import { progressPhaseKey, reviewLookupStatus, titleNumbers, type Message, type TitleNumbers } from './reviewLookupStatus';
@@ -30,17 +32,30 @@ const chunk = <P extends object>(load: () => Promise<ComponentType<P>>) =>
 const LookupBox = chunk<ComponentProps<typeof Box>>(() => import('./LookupBox').then(module => module.LookupBox));
 const CandidateChooser = chunk<ComponentProps<typeof Chooser>>(() => import('./CandidateChooser').then(module => module.CandidateChooser));
 const CatalogReviewIdentities = chunk<ComponentProps<typeof Identities>>(() => import('./CatalogReviewIdentities').then(module => module.CatalogReviewIdentities));
+/**
+ * The lookup steps are supplementary: a chunk that cannot load leaves them out and asks for nothing, unless it carried the only
+ * next step, the Album link of a run that ended because the Album changed; then it asks for a reload.
+ */
+const LookupProgress = lazy<ComponentType<ComponentProps<typeof Progress>>>(() => import('./LookupProgress').then(module => ({ default: module.LookupProgress }),
+  () => ({ default: ({ albumHref }: ComponentProps<typeof Progress>) => albumHref ? <ChunkUnavailable /> : null })));
 const memberPath = (path: string) => /^tracks\.[^.]+\.artists$/.test(path);
 
 /**
  * The lookup-first summary of an existing-Album review (owner rules: docs/business-rules.md, Catalog Visibility and
  * Administration, existing-Album reviews; Administrator Metadata Lookup). It presents what the server decides and never starts
- * Luna: the lookup status, refined for the review (reviewLookupStatus.ts), with the free retry, or filling the Disc and Track
- * Numbers from the track titles (`onFillNumbers`, into the unsaved draft) where that is the next step, as its only primary button;
- * an active run's progress, whose elapsed time and the note that it keeps running after the page is left sit beside the polite
- * status, outside it, so each poll does not announce them; the name box prefilled with the saved Album title and its optional
- * Artist field, which asks before it replaces an active run, followed by the fill as a plain button where it is only offered; the
- * candidate chooser with each candidate's subset facts and reason, and its sections while nothing matched as a group, conflicts
+ * Luna: the lookup status, refined for the review (reviewLookupStatus.ts: also when a retrying run retries and which retry, and
+ * why MusicBrainz's retries ran out or a run stopped), with the free retry, or filling the Disc and Track Numbers from the track
+ * titles (`onFillNumbers`, into the unsaved draft) where that is the next step, as its only primary button; a run that ended
+ * because the review's source was no longer current (superseded) offers no retry, which could not run while it is not, as the
+ * review's brief offers none (where the Album changed, the step list's chunk links to the Album instead); an active run's
+ * progress, whose elapsed time and the note that it keeps running after the page is left sit beside the polite status, outside
+ * it, so each poll does not announce them; the run's steps (LookupProgress.tsx, its own chunk, which renders nothing when it
+ * cannot load, or asks for a reload where it would carry the Album link): open while a run is active, with a note while a
+ * running run waits for its source, and after it the names searched and the steps folded under the run's record; the name box
+ * prefilled with the saved Album title and its optional Artist field, which asks before it replaces an active run, folded under
+ * Didn't find it? Look up another name after a completed run unless the status points at it (also when the run completes while
+ * the page is open, unless the administrator is using the box), followed by the fill as a plain button where it is only offered;
+ * the candidate chooser with each candidate's subset facts and reason, and its sections while nothing matched as a group, conflicts
  * answered one by one or all at once by buttons that name the applied candidate's source (MusicBrainz or iTunes), the values to check, each member's track
  * Artist row with its reason, the expected tracklist with its missing-file rows, the identity rows and the values that need no
  * answer. How many lookup answers and identity records are still needed follow the status line. Once a release this run applied
@@ -57,7 +72,7 @@ export function CatalogReviewSummary({ item, disabled, error, onRun, onFillNumbe
   /** Writes the Disc and Track Numbers the titles give into the unsaved draft, opens Edit draft and focuses its save. */
   onFillNumbers: (numbers: TitleNumbers['numbers']) => void;
 }) {
-  const t = useAdminText(), access = useAdminAccess(), online = useOnline(), client = useQueryClient(), id = useId();
+  const t = useAdminText(), access = useAdminAccess(), online = useOnline(), client = useQueryClient(), id = useId(), { locale } = useLocalization();
   const query = useQuery(catalogReviewSummaryQuery(access, item, online)), data = query.data, lookup = data?.lookup ?? null, summary = data?.summary;
   const key = catalogReviewKey(access, item.id), applied = lookup?.applied ?? null, shown = applied && applied.choice !== 'none' ? applied : null;
   // The identity rows' own read (CatalogReviewIdentities, shown under the same condition), observed here only for the fold.
@@ -86,7 +101,8 @@ export function CatalogReviewSummary({ item, disabled, error, onRun, onFillNumbe
   const artists = item.draft.album.artists.filter(entry => entry.role === 'primary').map(entry => entry.name);
   const numbers = titleNumbers(item.draft.tracks, new Set(item.source.tracks.filter(track => track.discNumber !== undefined).map(track => track.slotId)));
   const fill = numbers?.count ? { count: numbers.count, run: () => onFillNumbers(numbers.numbers) } : null;
-  const refined = lookup && reviewLookupStatus(lookup, status, { members: item.draft.tracks.length, searched, artists, now: query.dataUpdatedAt || Date.now(), numbers });
+  const refined = lookup && reviewLookupStatus(lookup, status, { members: item.draft.tracks.length, searched, artists, now: query.dataUpdatedAt || Date.now(), numbers,
+    time: at => new Date(at).toLocaleTimeString(locale, { timeStyle: 'medium' }) });
   const say = (message: Message) => t(message.key, message.values?.phase ? { ...message.values, phase: t(progressPhaseKey(String(message.values.phase))) } : message.values);
   // The refined messages read as one status; a Chinese sentence ends with its own full stop and takes no space after it.
   const statusText = refined ? refined.messages.map(say).reduce((text, next) => `${text}${text.endsWith('。') ? '' : ' '}${next}`)
@@ -129,6 +145,10 @@ export function CatalogReviewSummary({ item, disabled, error, onRun, onFillNumbe
       .map(conflict => [conflict.path, `${lookupValueText(conflict.lookup)} · ${answered(conflict)}`])];
   // The name box starts from the last submitted name, else the saved title, so a saved title change refills it.
   const box = lookup?.input.submitted ? String(lookup.run) : `${lookup?.run ?? 0}:${item.draft.album.title}`;
+  // A run superseded because the source was no longer current offers no retry (the server refuses it while it is not; the name
+  // box stays open to look up again); the name box is the next step where the status says so, or where nothing was found or matched.
+  const closed = lookup?.state === 'superseded';
+  const boxNext = refined ? refined.box === true : ['lookup.no_match', 'lookup.no_release', 'lookup.no_query', 'lookup.itunes_unavailable'].includes(status);
   // `first`: the first open answer, which the step bar's Answer questions step links to (the bulk answers carry it when shown).
   const section = (name: string, heading: string, body: ReactNode, first = false) => <section id={first ? 'catalog-review-answers' : undefined} aria-labelledby={`${id}-${name}`}>
     <h3 id={`${id}-${name}`}>{heading}</h3>{body}</section>;
@@ -174,10 +194,11 @@ export function CatalogReviewSummary({ item, disabled, error, onRun, onFillNumbe
     {summary.waiting.lookup && <p role="status">{t('catalog_review.waiting_lookup')}</p>}
     {answers > 0 && <p role="status">{t('catalog_review.needs_answers', { count: answers })}</p>}
     {identityNeeded > 0 && <p role="status">{t('catalog_review.identity_answers', { count: identityNeeded })}</p>}
-    {retry && <div className={styles.actions}><button type="button" className={`${styles.button} ${styles.primary}`} disabled={busy} onClick={() => onRun('lookup/retry', {})}>{t('lookup.retry')}</button></div>}
+    {retry && !closed && <div className={styles.actions}><button type="button" className={`${styles.button} ${styles.primary}`} disabled={busy} onClick={() => onRun('lookup/retry', {})}>{t('lookup.retry')}</button></div>}
     {refined?.fill === 'next' && fillButton(true)}
+    {lookup && <Suspense fallback={null}><LookupProgress lookup={lookup} now={query.dataUpdatedAt || Date.now()} albumHref={closed && item.sourceStatus === 'changed' ? `/admin/catalog/album/${item.source.album.id}` : null} /></Suspense>}
     {summary.lookupAvailable && <Suspense fallback={null}><LookupBox key={box} lookup={lookup} rootLabel="" defaultText={item.draft.album.title} mode="review" disabled={busy}
-      active={lookupActive(lookup?.state)} onSubmit={(kind, text, artist) => onRun('lookup', { kind, text, ...(artist ? { artist } : {}) })} /></Suspense>}
+      active={lookupActive(lookup?.state)} fold={lookup?.state === 'complete' && !boxNext} onSubmit={(kind, text, artist) => onRun('lookup', { kind, text, ...(artist ? { artist } : {}) })} /></Suspense>}
     {refined?.fill === 'offer' && fillButton(false)}
     {/* The fold keeps one element while a release is applied, so the identity rows never remount and keep unsaved choices. */}
     {shown ? <details style={{ marginTop: '.75rem' }} open={!settled}><summary style={{ cursor: 'pointer', padding: '.3rem 0' }}>{t('catalog_review.lookup_details')}</summary>{body}</details> : body}

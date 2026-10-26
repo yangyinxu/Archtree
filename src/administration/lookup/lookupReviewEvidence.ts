@@ -2,11 +2,12 @@
  * Exports
  *   Functions: isCatalogReviewLookup, lookupComparisonFor, catalogReviewLookupFileSet,
  *              catalogReviewPrimaryNames, catalogReviewFileEvidence, catalogReviewSearchedTitle,
- *              catalogReviewItunesSkippable, planCatalogReviewLookup
+ *              catalogReviewItunesSkippable, planCatalogReviewLookup, comparableSearchText,
+ *              catalogReviewSearchTexts, catalogReviewTrackTitleSkip
  * Internal
  *   Types: ReviewSource
  *   Functions: isRecord, list, sha256, manifestSlots, shownPrimaryCredits, firstUsableCredit,
- *              catalogReviewTrackTitles, capturedDuration, catalogReviewPositionHints
+ *              catalogReviewTrackTitles, capturedDuration, catalogReviewPositionHints, submittedInput
  * @end-catalog */
 
 /**
@@ -14,9 +15,11 @@
  * ranking evidence of each member (with the positions its captured titles, else filenames, start with as pairing hints) and the
  * run plan from the Album's saved title and shown primary Artist names, with its saved Track titles (each with its own, else the
  * Album's, primary Artist name) for the optional Track-title searches, and whether a run may skip its iTunes fallback for a
- * fitting release of the searched title. A review has no uploads, so its members are bound through its source check
- * (readCatalogReviewSource), never through file identities. Pure: no database and no review service, so metadataLookupRecord.ts
- * imports it without a cycle. Every function is total on malformed stored shapes.
+ * fitting release of the searched title. For the review lookup view's timeline it also gives the texts a run can have searched
+ * (only the review's own saved values and a submitted name) and why a run planned no Track-title search. A review has no
+ * uploads, so its members are bound through its source check (readCatalogReviewSource), never through file identities. Pure: no
+ * database and no review service, so metadataLookupRecord.ts imports it without a cycle. Every function is total on malformed
+ * stored shapes.
  */
 import { createHash } from 'node:crypto';
 import { hasOwn, originKey } from '../import/adminImportDraft';
@@ -24,11 +27,12 @@ import { importDraftV2View } from '../import/adminImportDraftCompat';
 import type { AdminImportDocument } from '../import/adminImportService';
 import { lookupCandidateSource } from './lookupContract';
 import { isPlaceholderCredit } from './lookupIdentifiers';
-import { planMetadataLookup, plannableSubmittedArtist, type LookupPlan } from './lookupQueryPlanner';
+import { decoratedNameParts, titleWithoutTrailingCredit } from './lookupDecoratedNames';
+import { isTrackTitleLookupQuery, planMetadataLookup, plannableSubmittedArtist, type LookupPlan } from './lookupQueryPlanner';
 import type { LocalFileEvidence, LookupComparisonMode, RankedLookupCandidate } from './lookupRanking';
 import type { LookupPositionHint } from './lookupSubset';
 import { sameLookupTitle } from './lookupTitleNormalize';
-import { distinctiveTrackTitles, trackTitlePositions, type TrackTitleMember } from './lookupTrackTitles';
+import { distinctiveTrackTitles, trackTitlePositions, trackTitleSkipReason, type TrackTitleMember, type TrackTitleSkip } from './lookupTrackTitles';
 import type { LookupFileIdentity, MetadataLookupInput, MetadataLookupSubmission } from './metadataLookupRecord';
 
 type ReviewSource = Pick<AdminImportDocument, '_id' | 'purpose' | 'manifest' | 'draft' | 'draftOrigins' | 'catalogSource' | 'catalogEvidence' | 'catalogCapture'>;
@@ -203,4 +207,48 @@ export function planCatalogReviewLookup(doc: ReviewSource, options: { submitted?
     }
     return { input: { trigger: 'catalog', submitted: null },
         plan: planMetadataLookup({ trigger: 'catalog', tags: { album, albumArtist: null, title: null, artist: null }, credited, fileCount, trackTitles: trackTitles() }) };
+}
+
+/** A search text as the lookup view compares it with the review's own texts: NFKC, whitespace collapsed and trimmed; null for a non-string or over 1000 characters. */
+export const comparableSearchText = (value: unknown): string | null =>
+    typeof value === 'string' && value.length <= 1000 ? value.normalize('NFKC').replace(/\s+/gu, ' ').trim() || null : null;
+
+/** A run input's submitted name and kind, with any Artist name, when it is a submitted run's; else null. */
+function submittedInput(input: unknown): MetadataLookupSubmission | null {
+    const value = isRecord(input) ? input : null, submitted = value?.trigger === 'submitted' && isRecord(value.submitted) ? value.submitted : null;
+    if (!submitted || (submitted.kind !== 'album' && submitted.kind !== 'song') || typeof submitted.text !== 'string') return null;
+    return { kind: submitted.kind, text: submitted.text, ...(typeof submitted.artist === 'string' ? { artist: submitted.artist } : {}) };
+}
+
+/**
+ * The texts a review run can have searched, as comparableSearchText compares them: the Album's captured saved title and that title
+ * without a trailing credit, the shown primary Artist names and each member's credited name (its own first usable primary Artist
+ * name, else the Album's) with a decorated name's first part, the captured Track titles the picker keeps for the run's input, and
+ * a submitted name and Artist name. The lookup view shows a stored search text only when it is one of these, so it never shows a
+ * filename, folder name, label or identifier.
+ */
+export function catalogReviewSearchTexts(doc: ReviewSource, input: unknown): ReadonlySet<string> {
+    const names = catalogReviewPrimaryNames(doc), members = catalogReviewTrackTitles(doc), submitted = submittedInput(input);
+    const album = isRecord(doc.catalogSource) && isRecord(doc.catalogSource.album) && typeof doc.catalogSource.album.title === 'string' ? doc.catalogSource.album.title : null;
+    const credited = [...names, ...members.map(member => member.artist), submitted?.artist].filter((name): name is string => typeof name === 'string');
+    const texts = [album, titleWithoutTrailingCredit(album, names), submitted?.text, ...credited.flatMap(name => [name, decoratedNameParts(name)?.[0]]),
+        ...distinctiveTrackTitles(members, { albumTitle: album, submittedText: submitted?.text }).map(title => title.text)];
+    return new Set(texts.map(comparableSearchText).filter((text): text is string => text !== null));
+}
+
+/**
+ * Why a review run planned no Track-title search although the Album has members: the reason the picker kept none of its captured
+ * titles for the run's input (trackTitleSkipReason), else `noneDistinct` when the plan for that input still holds none, as each
+ * kept title was too light to search without an Artist name. Null for an Album without members, an input that is neither the
+ * catalog run's nor a submitted name, or when the plan for that input holds a Track-title search (the run was planned by an
+ * earlier release, so this release cannot say why it holds none).
+ */
+export function catalogReviewTrackTitleSkip(doc: ReviewSource, input: unknown): TrackTitleSkip | null {
+    const submitted = submittedInput(input), members = catalogReviewTrackTitles(doc);
+    if (!members.length || (!submitted && !(isRecord(input) && input.trigger === 'catalog'))) return null;
+    const album = isRecord(doc.catalogSource) && isRecord(doc.catalogSource.album) && typeof doc.catalogSource.album.title === 'string' ? doc.catalogSource.album.title : null;
+    const reason = trackTitleSkipReason(members, { albumTitle: album, submittedText: submitted?.text });
+    if (reason) return reason;
+    const { plan } = planCatalogReviewLookup(doc, submitted ? { submitted } : {});
+    return plan.queries.length && !plan.queries.some(isTrackTitleLookupQuery) ? 'noneDistinct' : null;
 }

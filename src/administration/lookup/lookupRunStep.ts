@@ -253,7 +253,8 @@ export function proceedLookupRun(record: MetadataLookupRecord, doc: AdminImportD
     /**
      * The next Track-title search from `from` while fewer than 25 candidates are known (`queryIndex` moves to it): alone when a title
      * search of the plan named an Artist and none of them returned a release, and then passed over when it weighs below eight; null
-     * (`queryIndex` past the plan) once none is left. A search not handed out never makes the comparison partial.
+     * (`queryIndex` past the plan) once none is left. A search not handed out never makes the comparison partial. A review lookup
+     * view's timeline lists the titles sent the same way (lookupTimelineView.ts); the two change together.
      */
     const nextTrackTitleSearch = (from: number): LookupAction | null => {
         for (let index = from; index < queries.length && next.candidates.length < JOB.candidates; index++) {

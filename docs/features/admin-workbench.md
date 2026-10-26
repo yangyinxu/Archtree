@@ -1374,7 +1374,8 @@ queued, running, retrying, the release applied by title (or, applied from
 iTunes, that a free retry can check it against MusicBrainz), a matching release
 found, how many releases that may fit were found (editions counted once), no
 release used, no matching release, or a lookup that did not finish or is
-unavailable. **Answer questions** says **Disc and Track Numbers needed** where
+unavailable, offering a free retry only while the review's source is current.
+**Answer questions** says **Disc and Track Numbers needed** where
 the summary's cause is the members' positions or missing durations,
 **Choose a release** for a tie or an offered match, else how many lookup
 answers are still needed (as the summary, the workbench card and the Album page
@@ -1406,16 +1407,21 @@ applied one. Then an unapplied review shows its **Metadata lookup** summary,
 above its tabs and loaded as its own chunk (a chunk that cannot load, the
 summary's or one it loads, asks for a reload in its place, leaving manual
 editing usable): the lookup status, refined for a review (see the review's
-lookup summary below), with the free **Retry lookup** or, where entering the
-numbers is the next step, **Fill Disc and Track Numbers from titles** as its
-only primary button, or while a run is queued or running its progress line;
-right after the status, whether applying waits for an active run, how many
-lookup answers are still needed and how many records the identity rows still
-need; the name box prefilled with the last submitted
+lookup summary below), with the free **Retry lookup** (or, for a run that
+ended because the Album changed, **Open the Album to start a new completion**)
+or, where entering the numbers is the next step, **Fill Disc and Track Numbers
+from titles** as its only primary button, or while a run is queued or running
+its progress line; right after the status, whether applying waits for an
+active run, how many lookup answers are still needed and how many records the
+identity rows still need; the run's steps, open while a run is queued, running
+or retrying and, once it ended, folded under its record after a line naming
+what a completed run searched; the name box prefilled with the last submitted
 name and Artist name or else the
 saved Album title (its **Artist (optional)** hint says that an empty field uses
 the Album's primary Artists), which asks before it replaces a queued, running
-or retrying run, followed by the fill as a plain button where it is only
+or retrying run, folded under **Didn't find it? Look up another name** after a
+completed run unless the status makes it the next step (see below), followed
+by the fill as a plain button where it is only
 offered; the candidate chooser (review copy about the Album's tracks; while the
 run has no matching group, possible matches first and the other releases in two
 folded sections; per candidate one short reason, the editions a release card
@@ -1665,17 +1671,20 @@ named no Artist (none was submitted and the Album has no primary Artist entry),
 that adding one narrows the results. Otherwise it looks at the releases the
 tracks fit: the possible matches (below), else the other unverified candidates,
 saying that their titles differ from the name searched. It names the first of
-them and the cause: a member without a duration, where saving numbers alone
-cannot make a release match, so the step is entering the Disc and Track Numbers,
-saving, then choosing a release, which brings in its expected tracklist and
-track details through the single pairing the numbers make, or, once such a
-release pairs in exactly one way, using it; members that pair with it in more
-than one way, every duration known, where entering the numbers and saving
-compares again for free; or a single pairing that a release track without a
-duration left unconfirmed, where the step is using that release. Entering the
-numbers is the next step, with **Fill Disc and Track Numbers from titles** as
-the summary's only primary button, only when the titles give every member a Disc
-and Track Number (see below) and the draft still lacks one of them (owner rules,
+them and the cause. When one of those releases pairs with the members in exactly
+one way (by their own numbers, the positions their titles or original filenames
+start with, or durations within half a second), nothing asks for numbers: the
+step is using that release, which a member without a duration, or a paired
+release track without one, left unconfirmed. Otherwise it is a member without a
+duration, where saving numbers alone cannot make a release match, so the step is
+entering the Disc and Track Numbers, saving, then choosing a release, which
+brings in its expected tracklist and track details through the single pairing
+the numbers make; or members that pair with it in more than one way, every
+duration known, where entering the numbers and saving compares again for free.
+Entering the numbers is the next step, with **Fill Disc and Track Numbers from
+titles** as the summary's only primary button, only when no release the tracks
+fit pairs with them in exactly one way, the titles give every member a Disc and
+Track Number (see below) and the draft still lacks one of them (owner rules,
 next-step bullet). Where the titles give Track Numbers alone, the fill follows
 the name box as a plain button, and the cause, like the one for titles without
 positions, says that another name can be looked up or the numbers entered in
@@ -1707,8 +1716,16 @@ MusicBrainz, reading Artist and label aliases), with its done and total counts
 when the total is not zero. Only that text is the polite status. The time waited
 or run (m:ss from `startedAt` to the later of the summary's last read and
 `updatedAt`, so a client clock behind the server's still counts, never below
-0:00) follows it outside the status, so a poll does not announce it. A retrying
-run, or a view without `progress`, keeps the shared status and its retry.
+0:00) follows it outside the status, so a poll does not announce it. A view
+without `progress` keeps the shared active status. A retrying run says whether
+its source (`timeline.retry.source`: MusicBrainz, or iTunes while the fallback
+retries) had too many requests (`sourceBusy`) or is unavailable
+(`sourceUnavailable`), when it retries (`at`, as a time in the interface
+language) and which automatic retry that is (`attempt` of `limit`), followed by
+**Retry lookup**; a view without `timeline.retry` keeps the shared retrying
+status. Once MusicBrainz's automatic retries ran out with nothing matched, the
+status says whether there were too many requests or it stayed unavailable, with
+**Retry lookup**, and names no paid step.
 Queued, running and retrying runs add **Lookup keeps running if you leave this
 page.** on the same line, after the status; a dot parts the time from the
 status, directly after a full-width closing bracket, and from that note. While a
@@ -1719,6 +1736,70 @@ run on submission; the box stays usable, as automatic retries can last minutes,
 and editing the name, the Artist or the kind withdraws the question. A run that
 ends while the question is open leaves it open as whether to look up the name
 now (**Look up now**), so a submission is never dropped unseen.
+
+A stopped run says why, with **Retry lookup**: the account that started it no
+longer has administrator access (`permissionLost`), or it ran past its time
+limit (`grantExpired`). A run that ended because the review's source was no
+longer current (`superseded`) offers no retry, which the server refuses while
+the source is not current (owner rules, next-step bullet), and its brief on the
+step bar, the workbench card and the Album page offers none either; the name box
+stays open to look up again. When the Album changed, **Open the Album to start a
+new completion** links to the Album page in the retry's place, and when the
+Album or a track is no longer ready, the source notice above the summary
+explains it.
+
+The run's steps (`LookupProgress.tsx`, its own chunk; one that cannot load
+leaves them out and asks for nothing, unless it carried the Album link above,
+the only next step, when it asks for a reload in its place) form a list named
+**Lookup steps**, not a live region, in the order of `timeline.steps`. Each row
+has a mark and its words: ✓ done, ○ **(may not have been sent)** for a search
+the record cannot vouch was sent (`unconfirmed`), ● **(in progress)**, ○ **(not
+started yet)** or, for a step a run that ended never reached, ○ **(not run)**,
+and – **(skipped)**, or – alone where the step's own words say why. A search
+names what it searched by (Album name and Artist, Album name only, song name and
+Artist, song name only) with the text and Artist name it sent, or reads **Search
+by name** where its text is not shown. The Track-title row names the titles it
+searched (as planned while undecided; those the run may not have sent follow in
+a second row) or, from `timeline.trackTitleSearch`, why none was searched: not
+needed because the name searches found a matching release; skipped because the
+titles start with a track number like file names, equal or look like their file
+names, are generic, or none is distinctive enough; or not sent because
+MusicBrainz was unavailable. Reading release details, the iTunes fallback (or
+**not needed**, or **iTunes was unavailable**), checking iTunes results on
+MusicBrainz (with the titles of its answered searches that match a release
+found) and reading Artist and label aliases follow, with their done and total
+counts. While a run is queued, running or retrying the steps show open after the
+status; while it is running and the page has seen no new step
+(`timeline.updatedAt`) for more than 5 seconds of its own clock (from the read
+that first brought that step to the summary's last read), a line above them says
+**Waiting for MusicBrainz** (iTunes in the iTunes phase) **(last progress N
+seconds ago)**. The server's clock plays no part, so a client clock ahead of or
+behind it never shows or hides the line, and a page opened during a long wait
+shows it from its first read more than 5 seconds later. Once a run ended, the
+steps fold under **Lookup log: took N s · N searches · N releases found**
+(**took N min N s** from a minute; from `timeline.startedAt` to `completedAt`,
+else the last step; the title searches done and the Track titles of a done row
+once sent, never a search the run may not have sent; every candidate, as
+**Releases found** counts them), which opens on request.
+
+After a run that completed with no issue, a line before the folded steps names
+the searches it sent whose text is shown, in order (**This lookup searched for
+"X" · Artist, then "X" alone, then …**), never one the run may not have sent; a
+run that completed after MusicBrainz's retries ran out (issue `sourceBusy` or
+`sourceUnavailable`) may not have sent its searches and shows no such line.
+After a completed run the name box also folds under **Didn't find it? Look up
+another name**, a disclosure reachable by keyboard that keeps the box mounted
+and prefilled, unless the status makes the box the next step: no release,
+nothing to search, no release the tracks fit (also when iTunes was unavailable),
+an Album without members, or Disc and Track Numbers needed where filling them
+from the titles is not the next step (owner rules, next-step bullet). The box
+stays open before any run, while a run is queued, running or retrying, and after
+a run that ended otherwise. It folds as it mounts, and also when a run completes
+while the page is open, but then only while the box is untouched (its name,
+Artist and kind as mounted, no question open and the focus outside it), so a box
+the administrator is using never folds. It unfolds whenever the status makes it
+the next step again, as after saved numbers whose free comparison still finds no
+single pairing.
 
 The review chooser (the import chooser is unchanged) lists, while the run has no
 matching group, **Possible matches** open, one card per release naming its
@@ -1739,12 +1820,17 @@ take a different track; a tracklist over its bounds or invalid; or details that
 could not be fetched. The missing-file row count appears only when the pairing
 is single or the Album has no members; otherwise the card says that choosing
 brings in no expected tracklist or track details, and **Tracks paired** shows
-only for a single pairing of an Album with members. On a possible match with
+only for a single pairing of an Album with members. A card whose pairing the
+positions or the half-second tier made single (`pairedBy`) also says **Paired
+by the track numbers in the titles**, **Paired by the track numbers in the file
+names** or **Paired by the closest durations**, and while any candidate carries
+it the unknown-Disc-Number disclosure stays out. On a possible match with
 members whose pairing is not single, **Use this release** moves under **Other
 options** as **Use Album values only (title, Artists, label, release date)**
 with that warning, enabled exactly when the plain button would be, and each
-other edition in that state is offered for its Album values only too. The first
-such card offers **Fill Disc and Track Numbers from titles** with a hint naming
+other edition in that state is offered for its Album values only too. While no
+possible match pairs with the members in exactly one way, the first such card
+offers **Fill Disc and Track Numbers from titles** with a hint naming
 how many members get a number (saving then compares again for free or, where a
 member has no duration, lets the release be used for its tracklist) in place of
 the unknown-Disc-Number disclosure, or, where nothing can be filled from the
@@ -1878,8 +1964,8 @@ Catalog review routes (relative to `/api/admin/v1`):
   administrator may have changed); a discard confirmation names it. The Web's
   strict workbench schema requires it, so reload admin Web tabs across deploy or
   rollback.
-  Each list item also carries `lookup`, its review's lookup brief
-  `{state, outcome, answers, next, releases}` (`catalogReviewLookupBrief.ts`):
+  Each list item also carries `lookup`, its review's lookup brief `{state,
+  outcome, answers, next, releases}` (`catalogReviewLookupBrief.ts`):
   enumerations and two bounded counts, never a title, name or query, computed
   from the review's lookup view as the review page reads it (its shared next
   step, its possible matches, editions counted once, and its cause), from one
@@ -1893,17 +1979,18 @@ Catalog review routes (relative to `/api/admin/v1`):
   use or **Use none of these** was chosen; `possible` when nothing matched but
   the review page shows releases the tracks may fit (for an Album without
   members, releases to choose from, when the run found any); `none` for no
-  match, no release or nothing
-  to search; and `unavailable` when MusicBrainz, its release details or the run
-  did not finish. `answers` is the open lookup answers (unanswered conflicts of
-  the applied release, a tie counting as one), at most 407; `next` is what the
-  review page asks for next (`retry`, `choose`, `numbers` or null); `releases`
-  (at most 25) counts the possible releases, 0 unless `possible`. `lookup` is
-  null without a readable run or for a lookup record it cannot read (rather
-  than failing the page); applied reviews keep theirs. This Web reads an
-  item without `lookup` (a release before it) as no lookup cell; a Web tab
-  opened before it refuses the key and asks for a reload, so reload admin Web
-  tabs after deploying it.
+  match, no release or nothing to search; and `unavailable` when MusicBrainz,
+  its release details or the run did not finish. `answers` is the open lookup
+  answers (unanswered conflicts of the applied release, a tie counting as one),
+  at most 407; `next` is what the review page asks for next (`retry`, `choose`,
+  `numbers` or null; never `retry` after a superseded run, which ended because
+  the review's source was no longer current and which the server refuses to
+  retry until it is, as the review page withholds it); `releases` (at most 25)
+  counts the possible releases, 0 unless `possible`. `lookup` is null without a
+  readable run or for a lookup record it cannot read (rather than failing the
+  page); applied reviews keep theirs. This Web reads an item without `lookup` (a
+  release before it) as no lookup cell; a Web tab opened before it refuses the
+  key and asks for a reload, so reload admin Web tabs after deploying it.
 - `PATCH /catalog-reviews/:id` and `POST` to `/analyze`, `/adopt` or
   `/cancel-analysis`: save/review privately with the original UUID and numeric
   revision. Analysis uses the existing import flag, provider and shared budgets;
@@ -2942,9 +3029,9 @@ roll back to:
   reload.
 - Automatic pairing resolution and the review's skipped iTunes fallback need no
   floor; no collection, index, view shape or message key changes. A release
-  before them ignores a stored subset comparison's `pairedBy`, which no view
-  projects, and its members' `positionHint`, and pairs strictly again whenever
-  it re-ranks or runs: a candidate whose pairing only positions or the
+  before them ignores a stored subset comparison's `pairedBy`, which its views
+  never project, and its members' `positionHint`, and pairs strictly again
+  whenever it re-ranks or runs: a candidate whose pairing only positions or the
   half-second tier made single is then unverified again and preselects nothing
   new. It re-ranks at any save of a review whose stored members carry a
   `positionHint`, since the evidence then differs, else at a saved Disc or Track
@@ -2998,6 +3085,24 @@ roll back to:
   parse a list item or an eligibility read carrying them and asks for a reload,
   so reload open admin Web tabs after deploying them; review pages keep working,
   as their reads are unchanged. They change message values and add message keys;
+  every earlier key and its variables are kept, so Web, iOS and Android clients
+  accept this release's remote bundles. A Web tab opened after them keeps its
+  active bundle instead of accepting a remote bundle from a release before them,
+  which lacks the new keys, so reload open workbench tabs after rolling back
+  across them. After deploying them, a Web client's cached bundle from before
+  them is refused once for lacking those keys, so it shows English until the new
+  bundle loads.
+- A review's lookup steps, retry details, searched names and pairing notes need
+  no floor of their own; no collection, index or stored shape changes, and they
+  store nothing. A release before them leaves `timeline` and each subset
+  comparison's `pairedBy` out of a review's lookup view, which this Web reads as
+  no lookup steps, no searched names and no pairing note: the summary then shows
+  the earlier progress line and the shared retrying status, while the stopped
+  and exhausted copy, the name-box fold and the hidden superseded retry still
+  work (they read the run's state and issue and the review's source), with the
+  Album link but no steps. A Web tab opened before them cannot parse a review
+  view carrying either key, so reload open admin Web tabs after deploying or
+  rolling back across them. They change one message value and add message keys;
   every earlier key and its variables are kept, so Web, iOS and Android clients
   accept this release's remote bundles. A Web tab opened after them keeps its
   active bundle instead of accepting a remote bundle from a release before them,
@@ -3576,9 +3681,10 @@ below). The source layer, the jobs and their routes live in
     `pairs` and `pairedBy` (`titlePositions`, `fileNamePositions` or
     `nearExactDuration`), which is absent for a pairing that was single without
     either step and for one still ambiguous. `pairedBy` never enters a group
-    key, so equal editions still share a group, and the lookup view does not
-    project it (its subset fields are allowlisted), so the Web's strict schema
-    is unchanged. Such a pairing is single everywhere: its candidate can match,
+    key, so equal editions still share a group; a review's lookup view projects
+    it on the candidate's `subset` only when present (see [Lookup
+    routes](#lookup-routes)), and the review chooser names it on the card. Such
+    a pairing is single everywhere: its candidate can match,
     group, be preselected or offered, and applying it writes the paired members'
     values and the expected tracklist, its Disc and Track Numbers as automatic
     values, which never constrain a later pairing. Positions are read on the
@@ -4364,7 +4470,7 @@ applied candidate's `source` and `notChecked`, choice, value paths, conflicts
 introduced, and `musicBrainzId` marking a conflict only in IDs) and flags; stale
 files; and `needsAnswer` and `blocking`. It carries no URL, ISRC, recording ID,
 storefront, localized name, account, grant, lease, fence, file-set digest or
-query.
+query; a review's view adds only the search texts of its `timeline` (below).
 
 An existing-Album review's view (`GET /catalog-reviews/:id/lookup`) is the same
 allowlist with the `catalog` input trigger, the `exactTrackCount` basis for the
@@ -4374,9 +4480,11 @@ preselection and the applied candidate, the subset differences `pairing`,
 `pairing` (`unique`, `ambiguous`, `none`, or `null` when the track count or the
 tracklist ruled the release out first), `pairs` (`{slotId, discNumber,
 trackNumber}` per paired member, at most 100), `missingTrackCount` (the
-missing-file rows the release would add, or `null`) and `unpairableSlotIds`
-(members no audio track can pair with). Pairs and members of another slot are
-dropped; any other value out of bounds shows `subset` as `null`. Its
+missing-file rows the release would add, or `null`), `unpairableSlotIds`
+(members no audio track can pair with) and, only when positions or the
+half-second tier made the pairing single, `pairedBy` (`titlePositions`,
+`fileNamePositions` or `nearExactDuration`). Pairs and members of another slot
+are dropped; any other value out of bounds shows `subset` as `null`. Its
 `needsAnswer` never treats the review as an append. Its `applied` also admits
 the review-only paths `album.expectedTracklist` and `tracks.<slotId>.artists`
 among values, conflicts and flags (at most 406 of each), the flag reasons
@@ -4397,10 +4505,81 @@ or, once all were sent, the collection lookups settled, the bridge searches sent
 `itunes` without a readable stage); both are integers, `done` at most `total`
 and `total` at most 100. `startedAt` and `updatedAt` are the run's `createdAt`
 (each run is stored afresh) and `updatedAt`. It holds numbers and timestamps
-only, never a query text, so the view still carries no query; a finished run,
-the `done` phase, an unknown phase, or a time that is unreadable or outside the
-years 0000-9999 (which the Web's strict date-time schema refuses) shows no such
-key.
+only; a finished run, the `done` phase, an unknown phase, or a time that is
+unreadable or outside the years 0000-9999 (which the Web's strict date-time
+schema refuses) shows no such key. On the review's lookup read (only: the brief
+that Album completion cards and the Album page read never builds one), every
+review run it can read that planned a search also carries `timeline`
+(`lookupTimelineView.ts`), built from the stored run and the review's capture
+only, and absent when the run's start or last-step time is unreadable or outside
+those years, or the run planned no search (it completed at once with `noQuery`,
+which its status explains): `steps`, at most 12 in run order, each with a `kind`
+and a `state` (`done`, `unconfirmed`, `active`, `pending` or `skipped`). First
+come at most 6 title searches (`albumArtist` and `album` for a release search by
+the Album name with or without an Artist name, `songArtist` and `song` for a
+recording search by a submitted song name; a search by barcode, catalogue
+number, release ID, ISRC or folder name, and a respelled fallback, whose sending
+the record does not keep, are never listed): `active` at `queryIndex` while the
+run searches, `done` below it (or `unconfirmed`, below), `pending` while the
+search phase lasts or after a run ended in it, and `skipped` once the run moved
+on without sending it (the candidate bound). Then, where the plan holds
+Track-title searches or a reason can be given, one `trackTitle` step (or two,
+below); then `details`, `itunes`, `bridge` and `aliases` with `done` and `total`
+(settled and all requests: integers, both or neither, `done` at most `total` and
+`total` at most 100). `itunes` is `skipped`, without counts, when its stage is
+unavailable and in a complete run without a stage (the fallback was not needed,
+the review skip applied or the run had no iTunes request); `bridge` is listed
+only with a readable stage or while the run is not complete. A step's `texts` (1
+to 4, each a `text` and optional `artist` of at most 200 characters, absent
+rather than empty) are shown only where each equals, after NFKC and whitespace
+folding, one of the review's own texts (`catalogReviewSearchTexts`): its
+captured saved title and that title without a trailing credit, its primary
+Artist names and each member's credited name, each also by a decorated name's
+first part, the Track titles the picker keeps for the run's input
+(`distinctiveTrackTitles`), and the run's submitted name and Artist name; an
+answered bridge search's title (`bridgeOutcomes` `found` or `none`; one left
+unsent when MusicBrainz's retries ran out checked nothing) only where a shown
+candidate carries it, without its artist. A step whose text fails the check
+keeps its state without `texts`, so the view never carries a filename, folder
+name, label, identifier, iTunes term or iTunes artist. The Track-title step's
+texts are the planned recordings with their Artist names; once sent after
+credited title searches that returned no release, they are listed without them
+and without titles too light to search alone, as the run sends them.
+`trackTitleSearch` is `sent`, `pending` (undecided) or `notNeeded` (decided
+against) from the stored decision while the plan holds Track-title searches, or
+`skipped` with `reason` `unavailable` when the run's MusicBrainz retries ran
+out; when the plan holds none, it is `skipped` with the reason the planner's own
+picking (`trackTitleSkipReason`) gives for the review's captured titles and the
+run's input, said of every title, so a specific reason only when every skipped
+member shares it, else `noneDistinct`: `positionsStart` (titles starting with a
+track number like file names), `fileName` (titles equal to or shaped like their
+file names), `generic` (generic, digit-only or instrumental titles) or
+`noneDistinct` (no title distinctive enough: repeated, the Album title or
+submitted name, too light, too light to search without an Artist name, or
+skipped for different reasons). It is absent for an Album without members and
+for a run an earlier release planned without the Track-title searches this
+release would plan. `retry` is `null` except while the run waits for an
+automatic retry with a readable `retryAt`: then `at`, the `source` retried
+(`itunes` in the `itunes` phase, else `musicbrainz`), `attempt` (that source's
+stored failed attempts, 1 to `limit`) and `limit` (3). `startedAt`, `updatedAt`
+and `completedAt` (`null` while active or unreadable) are the run's times. Some
+ends of a run move `queryIndex` past searches it may never have sent, and the
+record does not keep which were sent, so such a search is `unconfirmed`, never
+`done`: in a plan with Track-title searches, once the title searches are over
+with the search partial (`searchComplete` not true, which the candidate bound of
+15 also leaves), every title search after the plan's first; in a plan without
+them whose search is partial, every title search after the first once
+MusicBrainz's retries ran out after the search phase (which moves `queryIndex`
+past the plan); when MusicBrainz's retries ran out while the run searched (it
+ended in the `search` phase, or its iTunes stage started with reason
+`searchUnavailable`), every title search, the failed one included; and of the
+Track titles sent, every title after the first once the run reached 25
+candidates or its search is partial (a Track-title search the source did not
+answer ends them), or those from `queryIndex` on when the run ended while
+sending them, listed in a second `trackTitle` step (the only one when none is
+certain). Every text shown is one the review already shows the administrator;
+for them the lookup read loads the capture without its expected tracklist and
+member durations, and the view projects nothing else of it.
 An import's view never carries these keys, and a run with the `catalog` input
 has no import view. The Web parses a review's view with its own strict schema
 (`reviewLookupViewSchema` in `importLookupApi.ts`, read through

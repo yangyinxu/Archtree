@@ -10,7 +10,7 @@
  *   - a candidate's artwork flag and the cover-staging wait default to false for a server that sends neither, and are never addresses
  *   - an iTunes-only candidate parses with its collection ID, source and not-checked mark agreeing with its key, and the iTunes status defaults to not queried
  *   - an append target's expected rows parse strictly within their bounds, and a server that sends none reads as null
- *   - an import view refuses everything only a review view carries: the catalog trigger, the exact-count basis, review paths, precision, pairs, subset comparisons, the track-title mark and progress
+ *   - an import view refuses everything only a review view carries: the catalog trigger, the exact-count basis, review paths, precision, pairs, subset comparisons, the track-title mark, progress and the timeline
  *   - a review candidate says whether a track-title search first found its release, false from a server that sends none, and only as a boolean
  *   - a submitted run's Artist name parses in import and review views within 1000 characters; a view without it reads as none
  * @end-catalog */
@@ -169,7 +169,7 @@ test('an append target\'s expected rows parse strictly within their bounds, and 
   refused(value => { value.durationToleranceMs = 60_001; });
 });
 
-test('an import view refuses everything only a review view carries: the catalog trigger, the exact-count basis, review paths, precision, pairs, subset comparisons, the track-title mark and progress', () => {
+test('an import view refuses everything only a review view carries: the catalog trigger, the exact-count basis, review paths, precision, pairs, subset comparisons, the track-title mark, progress and the timeline', () => {
   const item = view(), refused = (value: unknown) => expect(lookupViewSchema.safeParse(value).success).toBe(false);
   refused({ ...item, input: { trigger: 'catalog', submitted: null } });
   refused({ ...item, preselection: { ...item.preselection, basis: 'exactTrackCount' } });
@@ -184,6 +184,9 @@ test('an import view refuses everything only a review view carries: the catalog 
   refused({ ...item, candidates: [{ ...item.candidates[0], comparison: { ...item.candidates[0].comparison, differences: ['pairing'] } }] });
   refused({ ...item, candidates: [{ ...item.candidates[0], byTrackTitle: false }] });
   refused({ ...item, state: 'running', progress: { phase: 'search', done: 0, total: 1, startedAt: '2026-10-25T00:00:00.000Z', updatedAt: '2026-10-25T00:00:00.000Z' } });
+  refused({ ...item, timeline: { steps: [], startedAt: '2026-10-25T00:00:00.000Z', updatedAt: '2026-10-25T00:00:00.000Z', completedAt: null, retry: null } });
+  refused({ ...item, candidates: [{ ...item.candidates[0], comparison: { ...item.candidates[0].comparison,
+    subset: { leftOutTracks: 0, pairing: 'unique', pairs: [], missingTrackCount: 0, unpairableSlotIds: [], pairedBy: 'titlePositions' } } }] });
 });
 
 test('a review candidate says whether a track-title search first found its release, false from a server that sends none, and only as a boolean', () => {

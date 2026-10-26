@@ -1,4 +1,4 @@
-import { useId, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { useAdminText } from './AdminAccess';
 import styles from './adminStyles';
 
@@ -15,11 +15,16 @@ const link = (text: string) => /:\/\/|^www\./i.test(text);
  * search to the administration layout. While the review's run is queued, running or retrying (`active`), Look up first asks
  * whether to stop that run for the new name, since the server replaces an active run on submission; the box stays usable, as
  * automatic retries can last minutes, and any edit withdraws the question. A run that ends meanwhile leaves the question open, as
- * whether to look up the name now, so the submission is never dropped unseen.
+ * whether to look up the name now, so the submission is never dropped unseen. A review can fold it under Didn't find it? Look up
+ * another name (`fold`), a disclosure that keeps the form mounted and reachable by keyboard: as it mounts, and later only while the
+ * form is untouched (its values as mounted, no question open, the focus outside it), so a box the administrator may be using
+ * never folds; it unfolds whenever `fold` turns false.
  */
-export function LookupBox({ lookup, rootLabel, defaultText, mode, disabled, active, onSubmit }: {
+export function LookupBox({ lookup, rootLabel, defaultText, mode, disabled, active, fold, onSubmit }: {
   lookup: { input: { trigger: string; submitted: { kind: 'album' | 'song'; text: string; artist?: string } | null } } | null; rootLabel: string;
   defaultText?: string; mode: 'import' | 'review'; disabled: boolean; active?: boolean;
+  /** Fold the box under Didn't find it? Look up another name: as it mounts, and later only while the form is untouched. */
+  fold?: boolean;
   onSubmit: (kind: 'album' | 'song', text: string, artist: string | null) => void;
 }) {
   const t = useAdminText(), id = useId();
@@ -29,7 +34,16 @@ export function LookupBox({ lookup, rootLabel, defaultText, mode, disabled, acti
   const [refused, setRefused] = useState({ name: false, artist: false });
   // The submission waiting for the administrator to confirm that it replaces the active run.
   const [confirming, setConfirming] = useState<Parameters<typeof onSubmit> | null>(null);
-  return <form className={styles.editor} noValidate onSubmit={event => {
+  const [folded, setFolded] = useState(Boolean(fold));
+  const form = useRef<HTMLFormElement>(null), mounted = useRef({ kind, text, artist });
+  useEffect(() => {
+    const untouched = kind === mounted.current.kind && text === mounted.current.text && artist === mounted.current.artist && !confirming
+      && !form.current?.contains(document.activeElement);
+    if (!fold) setFolded(false);
+    else if (untouched) setFolded(true);
+    // Only a change of `fold` decides; editing the form never folds it.
+  }, [fold]);
+  const box = <form ref={form} className={styles.editor} noValidate onSubmit={event => {
     event.preventDefault();
     const name = text.trim(), credit = artist.trim(), next = { name: link(name), artist: link(credit) };
     setRefused(next);
@@ -50,4 +64,5 @@ export function LookupBox({ lookup, rootLabel, defaultText, mode, disabled, acti
       <button className={styles.button} type="button" onClick={() => setConfirming(null)}>{t('common.cancel')}</button></div></>}
     <p id={`${id}-artist-hint`} className={styles.muted}>{t(`lookup.artist_hint_${mode}`)}</p>
   </fieldset></form>;
+  return folded ? <details className={styles.details}><summary>{t('catalog_review.lookup_try_another')}</summary>{box}</details> : box;
 }

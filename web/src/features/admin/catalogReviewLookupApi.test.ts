@@ -5,6 +5,7 @@
  *   - a server-shaped review summary parses with the catalog trigger, the exact-count basis, subset comparisons, review paths, precision, flags and pairs
  *   - a missing or malformed value revision, extra keys, forged paths, rows on a member path and a member that is not a slot are refused
  *   - an active run's progress parses within its bounds, numbers and times only, and a view without it parses too
+ *   - a review run's timeline and pairing parse within their bounds, and anything else is refused
  *   - the identity read parses bound, conflicting and unbound rows, the label, more candidates than an import reads and Credit views
  *   - a decision without its bound ID, a preselection with an extra key, an Album or track candidate and a malformed revision are refused
  *   - the identity read's default selection and kept expected tracklist are required, strict and well formed
@@ -74,6 +75,37 @@ test('an active run\'s progress parses within its bounds, numbers and times only
   for (const value of [{ ...progress, query: 'Synthetic Album' }, { ...progress, done: 6 }, { ...progress, done: 101, total: 101 }, { ...progress, total: 101 }, { ...progress, phase: 'done' },
     { ...progress, phase: 'other' }, { ...progress, done: -1 }, { ...progress, done: 1.5 }, { ...progress, startedAt: '2026-10-25' }, { ...progress, updatedAt: 'yesterday' },
     { ...progress, startedAt: undefined }, null, 'details']) expect(parse(active(value)).success, JSON.stringify(value)).toBe(false);
+});
+
+test('a review run\'s timeline and pairing parse within their bounds, and anything else is refused', () => {
+  const at = '2026-10-22T01:24:52.000Z';
+  const timeline = { steps: [
+    { kind: 'albumArtist', state: 'done', texts: [{ text: 'Synthetic Album', artist: 'Synthetic Ensemble' }] }, { kind: 'album', state: 'active', texts: [{ text: 'Synthetic Album' }] },
+    { kind: 'songArtist', state: 'pending' }, { kind: 'song', state: 'skipped', texts: [{ text: 'Synthetic Song' }] },
+    { kind: 'trackTitle', state: 'pending', texts: [1, 2, 3, 4].map(n => ({ text: `Synthetic Title ${n}`, artist: 'Synthetic Ensemble' })) },
+    { kind: 'details', state: 'done', done: 2, total: 2 }, { kind: 'itunes', state: 'skipped' }, { kind: 'bridge', state: 'done', done: 0, total: 100, texts: [{ text: 'Synthetic Album' }] },
+    { kind: 'aliases', state: 'pending', done: 0, total: 0 }], trackTitleSearch: { state: 'sent' }, startedAt: at, updatedAt: at, completedAt: null,
+  retry: { at, source: 'musicbrainz', attempt: 2, limit: 3 } };
+  const viewed = (value: unknown) => withLookup(lookup => { lookup.timeline = value; });
+  expect(reviewLookupResponseSchema.parse(viewed(timeline)).lookup!.timeline).toEqual(timeline);
+  expect(reviewLookupResponseSchema.parse(reviewLookupResponse()).lookup!.timeline).toBeUndefined();
+  for (const trackTitleSearch of [{ state: 'notNeeded' }, { state: 'pending' }, ...['positionsStart', 'fileName', 'generic', 'noneDistinct', 'unavailable'].map(reason => ({ state: 'skipped', reason })), undefined])
+    expect(parse(viewed({ ...timeline, trackTitleSearch })).success, JSON.stringify(trackTitleSearch)).toBe(true);
+  expect(parse(viewed({ ...timeline, retry: null, completedAt: at })).success).toBe(true);
+  const step = (change: Record<string, unknown>) => ({ ...timeline, steps: [{ kind: 'details', state: 'done', done: 1, total: 2, ...change }] });
+  for (const value of [step({ kind: 'folder' }), step({ state: 'failed' }), step({ total: undefined }), step({ done: 3 }), step({ done: 1, total: 101 }), step({ done: 1.5 }),
+    step({ texts: [] }), step({ texts: Array.from({ length: 5 }, () => ({ text: 'Synthetic' })) }), step({ texts: [{ text: '' }] }), step({ texts: [{ text: 'x'.repeat(201) }] }),
+    step({ texts: [{ text: 'Synthetic', artist: 'x'.repeat(201) }] }), step({ texts: [{ text: 'Synthetic', recording: 'Synthetic' }] }), step({ query: 'Synthetic Album' }),
+    { ...timeline, steps: Array.from({ length: 13 }, () => timeline.steps[0]) }, { ...timeline, trackTitleSearch: { state: 'skipped' } },
+    { ...timeline, trackTitleSearch: { state: 'skipped', reason: 'other' } }, { ...timeline, trackTitleSearch: { state: 'sent', reason: 'generic' } },
+    { ...timeline, retry: { ...timeline.retry, attempt: 0 } }, { ...timeline, retry: { ...timeline.retry, attempt: 4 } }, { ...timeline, retry: { ...timeline.retry, limit: 11 } },
+    { ...timeline, retry: { ...timeline.retry, source: 'gate' } }, { ...timeline, retry: undefined }, { ...timeline, startedAt: '2026-10-22' }, { ...timeline, completedAt: undefined },
+    { ...timeline, queries: [] }]) expect(parse(viewed(value)).success, JSON.stringify(value).slice(0, 120)).toBe(false);
+  // How a single pairing was made single parses only on a single pairing and only as a known value.
+  const paired = (pairing: string | null, pairedBy: unknown) => withLookup(lookup => { Object.assign(lookup.candidates[0].comparison.subset, { pairing, pairedBy }); });
+  for (const value of ['titlePositions', 'fileNamePositions', 'nearExactDuration']) expect(reviewLookupResponseSchema.parse(paired('unique', value)).lookup!.candidates[0].comparison!.subset!.pairedBy).toBe(value);
+  for (const [pairing, value] of [['ambiguous', 'titlePositions'], [null, 'titlePositions'], ['unique', 'guess'], ['unique', null]] as const)
+    expect(parse(paired(pairing, value)).success, `${pairing} ${value}`).toBe(false);
 });
 
 test('the identity read parses bound, conflicting and unbound rows, the label, more candidates than an import reads and Credit views', () => {
