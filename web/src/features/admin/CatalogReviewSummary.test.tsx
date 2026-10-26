@@ -18,7 +18,7 @@
  *   - the summary polls while a run is active, and a read whose value revision or revision is newer than the detail's reads the review detail again, its first read included
  *   - a refused answer or an edit conflict reads the summary and the identity rows again
  *   - a failed read says so and reads again on Try again
- *   - a disabled summary disables every control it shows
+ *   - a disabled summary disables every control it shows, its identity cards dimmed, except the MusicBrainz ID toggle
  *   - an earlier run's application stays the review's: its conflicts, member rows and identity rows show while a new run waits
  *   - a value lookup could not apply reads as its own reason, Album values and track fields alike, while members keep theirs in their own rows
  *   - the review's saved tracklist shows with its rows without a file when the applied release offers none, and when nothing is applied
@@ -38,6 +38,7 @@
  *   - the open-answer counters follow the status line, before the candidates, and the panel has the anchors the step bar links to
  *   - an iTunes-only result checked against MusicBrainz, and an artist mismatch, keep the results open with their values to check once nothing else is open
  *   - once an applied release leaves nothing open the results fold under one disclosure, which stays open while an answer, an identity row or an active run waits
+ *   - a release applied for its Album values only keeps the results open while its tracks pair in more than one way and the titles can fill the numbers, with the fill on its card and under the status with why
  *   - a retrying run says when it retries in the interface language and which retry of how many, with the free retry as its only primary button
  *   - while a run is active its steps follow the status, and after a completed run the names searched and the folded record follow it, before the name box
  *   - after a completed run the name box folds under Didn't find it? Look up another name unless the status points at it, also when the run completes while the page is open, unless the box is in use
@@ -154,7 +155,7 @@ test('conflict answers name the applied source and answer one conflict against i
   }));
   const conflicts = await within(section()).findByRole('region', { name: 'Lookup values that differ from the Album\'s' });
   const cards = within(conflicts).getAllByRole('listitem');
-  expect(cards.map(card => card.querySelector('strong')!.textContent)).toEqual(['Title', 'Release date · adds precision to the saved date', 'Label: MusicBrainz ID differs']);
+  expect(cards.map(card => card.querySelector('strong')!.textContent)).toEqual(['Title', 'Release date · adds the month or day the saved date lacks', 'Label: MusicBrainz ID differs']);
   expect([...cards[0].querySelectorAll('dt, dd')].map(cell => cell.textContent)).toEqual(['Current', 'Synthetic catalog Album', 'MusicBrainz', 'Synthetic catalog Album (Complete)']);
   expect([...cards[1].querySelectorAll('dd')].map(cell => cell.textContent)).toEqual(['2020', '2020-05-01']);
   expect([...cards[2].querySelectorAll('dd')].map(cell => cell.textContent)).toEqual(['Synthetic Label · —', 'Synthetic Label · 00000000-0000-4000-8000-0000000000b1']);
@@ -201,7 +202,7 @@ test('an iTunes-only application names iTunes on its answers and flags each valu
     'Artists: Synthetic catalog Artist feat. Synthetic guest · iTunes only · Not checked against MusicBrainz',
     'Expected tracklist: 1.1 Synthetic first track · 1.2 Synthetic missing track · 1.3 Synthetic second track · iTunes only · Not checked against MusicBrainz',
     'Track 2 · Track number: 3 · iTunes only · Not checked against MusicBrainz', 'Track 2 · Artists: Synthetic guest · iTunes only · Not checked against MusicBrainz',
-    'Label: Not applicable: the review does not show every Credit this value would change']);
+    'Label: Not applicable: this completion does not show every Credit this value would change']);
   // Nothing an iTunes-only result wrote is folded away.
   expect(within(section()).queryByText('Values that need no answer')).not.toBeInTheDocument();
 });
@@ -211,7 +212,7 @@ test('the label flag, and an artist mismatch only for this run\'s preselection, 
   const flagged = await within(rendered.section()).findByRole('list', { name: 'Values to check' });
   expect(within(flagged).getAllByRole('listitem').map(item => item.textContent)).toEqual([
     'The applied release credits an artist that none of this Album\'s primary Artists names. Check the Artist entries before applying.',
-    'Label: Not applicable: the review does not show every Credit this value would change']);
+    'Label: Not applicable: this completion does not show every Credit this value would change']);
   const fold = within(rendered.section()).getByText('Values that need no answer').closest('details')!;
   expect([...fold.querySelectorAll('dt')].map(term => term.textContent)).toEqual(['Artists', 'Expected tracklist', 'Track 2 · Track number']);
   expect(within(fold).getByText('Synthetic catalog Artist feat. Synthetic guest')).toBeInTheDocument();
@@ -234,7 +235,7 @@ test('Track Artists show a member filled from its own release track, one in conf
   // The member conflict is answered in its own row, never among the Album's.
   expect(within(screen.getByRole('region', { name: 'Lookup values that differ from the Album\'s' })).queryByText('1 · Synthetic first track')).not.toBeInTheDocument();
   for (const [reason, text] of [['noTrackCredit', 'Unchanged: its own release track has no usable artist credit'], ['placeholder', /only a placeholder/], ['notApplicable', /^Not applicable/],
-    ['size', /over the review limits/], ['length', 'Not applied: the release\'s value is too long'], ['characters', 'Not applied: the release\'s value has characters that cannot be saved'],
+    ['size', /over this completion's limits/], ['length', 'Not applied: the release\'s value is too long'], ['characters', 'Not applied: the release\'s value has characters that cannot be saved'],
     ['format', 'Not applied: the release\'s value cannot be read']] as const) {
     cleanup();
     const rendered = mount(applied(), withLookup(lookup => { lookup.applied!.conflicts.splice(2, 1); lookup.applied!.flagged.push({ path: `tracks.${slotId}.artists`, reason }); }));
@@ -360,13 +361,15 @@ test('a failed read says so and reads again on Try again', async () => {
   expect(lookupReads(fetch)).toBe(2);
 });
 
-test('a disabled summary disables every control it shows', async () => {
+test('a disabled summary disables every control it shows, its identity cards dimmed, except the MusicBrainz ID toggle', async () => {
   const { section } = mount(applied(), withLookup(lookup => { lookup.state = 'complete'; }), { disabled: true });
   await within(section()).findByRole('group', { name: 'Look up by name' });
   await within(section()).findByText(/^Releases found:/);
-  await within(section()).findByRole('region', { name: 'Artists and label' });
-  await within(section()).findByRole('button', { name: 'Save decisions' });
-  const controls = [...section().querySelectorAll('button, input, select')];
+  const identities = await within(section()).findByRole('region', { name: 'Artists and label' });
+  const cards = await within(identities).findAllByRole('radio'), toggle = within(identities).getByRole('button', { name: 'Show MusicBrainz IDs' });
+  // Identity cards look unavailable too; showing IDs changes nothing stored.
+  for (const card of cards) expect(card.closest('label')).toHaveStyle({ opacity: '0.62', cursor: 'default' });
+  const controls = [...section().querySelectorAll('button, input, select')].filter(control => control !== toggle);
   expect(controls.length).toBeGreaterThan(8);
   for (const control of controls) expect(control, control.outerHTML.slice(0, 80)).toBeDisabled();
 });
@@ -391,8 +394,8 @@ test('a value lookup could not apply reads as its own reason, Album values and t
   const flagged = await within(section()).findByRole('list', { name: 'Values to check' });
   expect(within(flagged).getAllByRole('listitem').map(item => item.textContent)).toEqual([
     'Title: Not applied: the release\'s value has characters that cannot be saved', 'Artists: Not applied: the release credits only a placeholder such as Various Artists',
-    'Release date: Not applied: the release\'s value cannot be read', 'Expected tracklist: Not applied: the release\'s value is over the review limits',
-    'Label: Not applicable: the review does not show every Credit this value would change', 'Track 1 · Title: Not applied: the release\'s value is too long']);
+    'Release date: Not applied: the release\'s value cannot be read', 'Expected tracklist: Not applied: the release\'s value is over this completion\'s limits',
+    'Label: Not applicable: this completion does not show every Credit this value would change', 'Track 1 · Title: Not applied: the release\'s value is too long']);
   const members = within(section()).getByRole('region', { name: 'Track Artists' });
   expect(within(members).getAllByRole('listitem').map(item => item.textContent)).toEqual(['2 · Synthetic second trackUnchanged: its own release track has no usable artist credit']);
   // Nothing was filled or answered, and nothing is waiting for an answer.
@@ -693,7 +696,7 @@ test('the open-answer counters follow the status line, before the candidates, an
   const counter = await within(section()).findByText('Lookup answers still needed: 3');
   expect(counter.previousElementSibling).toHaveTextContent('Applied release: Synthetic catalog Album (Complete)');
   // The records to choose follow it once the identity rows are read, as the identity rows below say too.
-  await waitFor(() => expect(counter.nextElementSibling).toHaveTextContent('Records to choose, existing or new: 1'));
+  await waitFor(() => expect(counter.nextElementSibling).toHaveTextContent('Artists or labels to choose, existing or new: 1'));
   expect(counter.nextElementSibling).toHaveAttribute('role', 'status');
   expect(counter.compareDocumentPosition(within(section()).getByRole('group', { name: 'Look up by name' })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(section()).toHaveAttribute('id', 'catalog-review-lookup');
@@ -720,7 +723,7 @@ test('an iTunes-only result checked against MusicBrainz, and an artist mismatch,
     render(<QueryClientProvider client={client}><MemoryRouter><CatalogReviewSummary item={applied()} disabled={false} error={null} onRun={vi.fn()} onFillNumbers={vi.fn()} /></MemoryRouter></QueryClientProvider>);
     // Both reads answered: no answer and no identity row is open.
     await waitFor(() => { expect(fetch.mock.calls.some(([path]) => String(path).endsWith('/candidates'))).toBe(true); expect(client.isFetching()).toBe(0); });
-    expect(screen.queryByText(/still needed|Records to choose/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/still needed|Artists or labels to choose/)).not.toBeInTheDocument();
     expect(screen.getByText('Lookup results and applied values').closest('details')).toHaveAttribute('open');
     expect(within(screen.getByRole('list', { name: 'Values to check' })).getByText(flag)).toBeVisible();
     cleanup();
@@ -761,6 +764,62 @@ test('once an applied release leaves nothing open the results fold under one dis
   mount(applied(), withLookup(lookup => { Object.assign(lookup, { state: 'running', needsAnswer: { tie: false, conflicts: [] } }); }));
   await screen.findByText(/Lookup keeps running/);
   expect(fold()).toHaveAttribute('open');
+});
+
+test('a release applied for its Album values only keeps the results open while its tracks pair in more than one way and the titles can fill the numbers, with the fill on its card and under the status with why', async () => {
+  let durations = 0;
+  const albumOnly = (key: string) => withLookup(lookup => {
+    lookup.applied = pairingApplication(key, false);
+    for (const candidate of lookup.candidates) candidate.comparison!.unknownLocalDurations = durations;
+  }, pairingLookupResponse());
+  const decided = reviewIdentityResponse(); decided.identities = decided.identities.map(row => ({ ...row, needsAnswer: false }));
+  const fold = () => screen.getByText('Lookup results and applied values').closest('details')!;
+  const fillName = 'Fill Disc and Track Numbers from titles';
+  const show = async (item: CatalogReview, key: string = pairingEditions[0], title = 'Synthetic Live Album 2') => {
+    const fetch = vi.fn(async (path: string) => reviewJson(path.endsWith('/lookup') ? albumOnly(key) : decided));
+    vi.stubGlobal('fetch', fetch);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } }); client.setQueryData(['browser-session'], session);
+    const onFillNumbers = vi.fn();
+    render(<QueryClientProvider client={client}><MemoryRouter><CatalogReviewSummary item={item} disabled={false} error={null} onRun={vi.fn()} onFillNumbers={onFillNumbers} /></MemoryRouter></QueryClientProvider>);
+    // Both reads answered: no answer and no identity row is open.
+    await waitFor(() => { expect(fetch.mock.calls.some(([path]) => String(path).endsWith('/candidates'))).toBe(true); expect(client.isFetching()).toBe(0); });
+    expect(screen.getByText(`Applied release: ${title}`)).toHaveAttribute('role', 'status');
+    return onFillNumbers;
+  };
+  const onFillNumbers = await show(pairingReview());
+  expect(fold()).toHaveAttribute('open');
+  const card = await within(fold()).findByRole('region', { name: 'Possible match (1 release)' });
+  expect(within(fold()).getAllByRole('button', { name: fillName })).toEqual([within(card).getByRole('button', { name: fillName })]);
+  // The same fill is offered under the status, outside the results, as a plain button after why the tracks are not applied and
+  // what filling the numbers does, before the name box: the first screen says it.
+  const outside = (text: string | RegExp) => screen.getAllByText(text).filter(element => !fold().contains(element));
+  const offered = screen.getAllByRole('button', { name: fillName }).filter(button => !fold().contains(button));
+  expect(offered).toHaveLength(1);
+  expect(offered[0].className).not.toMatch(/primary/);
+  const [why] = outside('This Album\'s tracks do not pair with the applied release in exactly one way, so track values and track Artists are not applied.');
+  const [hint] = outside(/^2 tracks have no Disc or Track Number\. .*saving the completion draft compares again for free\.$/);
+  const order = [screen.getByText('Applied release: Synthetic Live Album 2'), why, hint, offered[0], screen.getByRole('group', { name: 'Look up by name' }), fold()];
+  for (const [index, element] of order.slice(1).entries()) expect(order[index].compareDocumentPosition(element) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  fireEvent.click(offered[0]);
+  expect(onFillNumbers).toHaveBeenCalledTimes(1);
+  cleanup();
+  // With durations unknown, the hint says to use the release again once the numbers are saved.
+  durations = 1;
+  await show(pairingReview());
+  expect(outside(/^2 tracks have no Disc or Track Number\. .*after saving the completion draft, use this release to bring in its expected tracklist\.$/)).toHaveLength(1);
+  durations = 0;
+  cleanup();
+  // Titles without their positions cannot fill the numbers: nothing is left open, so the results fold.
+  const plain = pairingReview(); plain.draft.tracks = plain.draft.tracks.map(track => ({ ...track, title: track.title.slice(5) }));
+  await show(plain);
+  expect(fold()).not.toHaveAttribute('open');
+  cleanup();
+  // A release the tracks do not fit at all, chosen for its Album values only: filling numbers cannot pair it, so the results fold
+  // and nothing outside them offers the fill or its hint.
+  await show(pairingReview(), 'musicbrainz:0000000b-0000-4000-8000-0000000000e0', 'Synthetic other Album 1');
+  expect(fold()).not.toHaveAttribute('open');
+  expect(screen.queryAllByRole('button', { name: fillName, hidden: true }).filter(button => !fold().contains(button))).toEqual([]);
+  expect(screen.queryAllByText(/^2 tracks have no Disc or Track Number\./).filter(element => !fold().contains(element))).toEqual([]);
 });
 
 test('a retrying run says when it retries in the interface language and which retry of how many, with the free retry as its only primary button', async () => {

@@ -885,7 +885,7 @@ for (const variant of localizedViewports) {
     await page.getByRole('button', { name: label('admin.catalog_review.create') }).click();
     const creation = page.getByRole('dialog', { name: label('admin.catalog_review.create') });
     await expect(creation.getByRole('heading', { name: label('admin.catalog_review.create'), exact: true })).toBeVisible();
-    await expect(creation.getByText('Manually corrected synthetic Album', { exact: true })).toBeVisible();
+    await expect(creation.getByText(label('admin.catalog_review.create_search', { terms: 'Manually corrected synthetic Album' }), { exact: true })).toBeVisible();
     expect(api.writes).toHaveLength(1);
     await expect(creation.getByText(label('admin.catalog_review.create_copy'), { exact: true })).toBeVisible();
     await creation.getByRole('button', { name: label('admin.catalog_review.create'), exact: true }).click();
@@ -1055,7 +1055,7 @@ for (const variant of localizedViewports) {
     await expect(memberConflict.getByText('Synthetic release track Artist', { exact: true })).toBeVisible();
     await expect(memberConflict.getByRole('button', { name: label('admin.catalog_review.use_musicbrainz'), exact: true })).toBeVisible();
     const expected = summary.getByRole('region', { name: label('admin.catalog.album_expected'), exact: true });
-    await expect(expected.getByText(locale === 'zh-Hans' ? /共 3 行.*1 行缺文件/ : /^3 rows, 1 without a file$/)).toBeVisible();
+    await expect(expected.getByText(message('admin.catalog_review.expected_rows', { rows: 3, noFile: 1 }), { exact: true })).toBeVisible();
     const position = (track: string) => label('admin.publication.track_position', { disc: '1', track });
     await expect(expected.getByRole('listitem')).toHaveText([`${position('1')} · Synthetic first track · 1 · Synthetic first track`,
       `${position('2')} · Synthetic missing track · ${label('admin.catalog.album_expected_no_file')}`, `${position('3')} · Synthetic second track · 2 · Synthetic second track`]);
@@ -1064,9 +1064,19 @@ for (const variant of localizedViewports) {
     const guest = identities.getByRole('listitem').filter({ has: page.getByText(label('admin.catalog_review.needs_decision'), { exact: true }) });
     await expect(guest.getByRole('listitem')).toHaveText([`${label('admin.catalog_review.target_album')} · Synthetic guest · ${label('catalog.credit.featured')}`,
       `2 · Synthetic second track · Synthetic guest · ${label('catalog.credit.primary')}`]);
+    // Each choice is a card, and a name match alone chooses nothing.
+    const guestCard = (key: 'admin.catalog_review.identity_reuse' | 'admin.catalog_review.identity_create') => guest.getByRole('radio', { name: label(key, { name: 'Synthetic guest' }), exact: true });
+    await expect(guest.getByRole('radio')).toHaveCount(2);
+    for (const key of ['admin.catalog_review.identity_reuse', 'admin.catalog_review.identity_create'] as const) await expect(guestCard(key)).not.toBeChecked();
     await capture(page, '31-review-lookup-applied', width); await reflow(page);
-    await guest.getByRole('combobox').selectOption({ label: label('admin.duplicates.distinct') });
-    await identities.getByRole('button', { name: label('admin.action.save_decisions'), exact: true }).click();
+    // MusicBrainz IDs show only once asked for.
+    await expect(identities).not.toContainText('00000000-0000-4000-8000-0000000000a1');
+    const ids = identities.getByRole('button', { name: label('admin.catalog_review.identity_show_ids'), exact: true });
+    await ids.click(); await expect(ids).toHaveAttribute('aria-pressed', 'true');
+    await expect(identities).toContainText(label('admin.lookup.musicbrainz_id', { id: '00000000-0000-4000-8000-0000000000a1' }));
+    await ids.click(); await expect(ids).toHaveAttribute('aria-pressed', 'false');
+    // Choosing a card saves the whole decision set at once.
+    await guestCard('admin.catalog_review.identity_create').check();
     await expect.poll(() => api.writes.filter(write => write.path.endsWith('/decisions')).map(write => write.body.decisions)).toEqual([
       [{ scope: 'artist', identity: guestHandle, boundName: 'Synthetic guest', action: 'create-distinct', candidateId: null, candidateRevision: null }]]);
     await expect(identities.getByText(label('admin.catalog_review.needs_decision'), { exact: true })).toHaveCount(0);
@@ -1122,6 +1132,7 @@ for (const variant of localizedViewports) {
     await expect(start).toBeEnabled();
     await start.click();
     const creation = page.getByRole('dialog', { name: label('admin.catalog_review.create') });
+    await expect(creation.getByText(label('admin.catalog_review.create_search', { terms: 'Synthetic catalog Album' }), { exact: true })).toBeVisible();
     await expect(creation.getByText(label('admin.catalog_review.create_copy'), { exact: true })).toBeVisible();
     await reflow(page);
     await creation.getByRole('button', { name: label('admin.catalog_review.create'), exact: true }).click();
@@ -1141,8 +1152,7 @@ for (const variant of localizedViewports) {
     await expect.poll(() => api.writes.filter(write => write.path.endsWith('/lookup/resolve')).length).toBe(1);
     const identities = summary.getByRole('region', { name: label('admin.catalog_review.identities_title'), exact: true });
     const guest = identities.getByRole('listitem').filter({ has: page.getByText(label('admin.catalog_review.needs_decision'), { exact: true }) });
-    await guest.getByRole('combobox').selectOption({ label: label('admin.duplicates.distinct') });
-    await identities.getByRole('button', { name: label('admin.action.save_decisions'), exact: true }).click();
+    await guest.getByRole('radio', { name: label('admin.catalog_review.identity_create', { name: 'Synthetic guest' }), exact: true }).check();
     await expect(identities.getByText(label('admin.catalog_review.needs_decision'), { exact: true })).toHaveCount(0);
     // Nothing is left to answer: the steps say so and lead, as their primary button, to the Update step's six selected changes.
     const steps = page.getByRole('group', { name: label('admin.catalog_review.steps_label'), exact: true });
@@ -1173,7 +1183,7 @@ for (const variant of localizedViewports) {
     await expect(card(change('album', album, 'admin.field.artists')).getByText('Synthetic catalog Artist feat. Synthetic guest', { exact: true })).toBeVisible();
     const tracklist = card(change('album', album, 'admin.field.expected_tracklist'));
     await expect(tracklist.getByText(label('admin.catalog.album_expected_none'), { exact: true })).toBeVisible();
-    await expect(tracklist.getByText(locale === 'zh-Hans' ? /共 3 行.*1 行缺文件/ : /^3 rows, 1 without a file$/)).toBeVisible();
+    await expect(tracklist.getByText(message('admin.catalog_review.expected_rows', { rows: 3, noFile: 1 }), { exact: true })).toBeVisible();
     const member = card(change('track', second, 'admin.field.artists'));
     await expect(member.getByText('Synthetic guest', { exact: true })).toBeVisible();
     await expect(member.getByText(label('admin.catalog_review.attribution_change', { from: label('admin.catalog.unknown'), to: label('admin.catalog.documented') }), { exact: true })).toBeVisible();
@@ -1405,12 +1415,18 @@ for (const variant of localizedViewports) {
     await expect(card('Synthetic possible completion').getByText(label('admin.common.last_updated', { date }), { exact: true })).toBeVisible();
     // Lookup needs you narrows the queue to the two cards whose lookup asks for something.
     const chip = page.getByRole('button', { name: `${label('admin.workbench.review_lookup')} (2)`, exact: true });
+    const all = page.getByRole('button', { name: `${label('admin.workbench.all')} (3)`, exact: true });
     await chip.click(); await expect(chip).toHaveAttribute('aria-pressed', 'true');
     await expect(page.getByRole('heading', { level: 2 })).toHaveText(['Synthetic possible completion', 'Synthetic answered completion']);
+    // All does not show as chosen meanwhile: it looks like any chip that is not pressed.
+    await expect(all).toHaveAttribute('aria-pressed', 'false');
+    const background = (locator: Locator) => locator.evaluate(element => getComputedStyle(element).backgroundColor);
+    const completed = page.getByRole('button', { name: new RegExp(`^${label('admin.workbench.review_completed')} \\(`) });
+    expect(await background(all)).toBe(await background(completed));
     await capture(page, '47-workbench-lookup-needs-you', width); await reflow(page);
     // Another filter turns it off and shows that filter's cards.
-    await page.getByRole('button', { name: `${label('admin.workbench.all')} (3)`, exact: true }).click();
-    await expect(chip).toHaveAttribute('aria-pressed', 'false');
+    await all.click();
+    await expect(chip).toHaveAttribute('aria-pressed', 'false'); await expect(all).toHaveAttribute('aria-pressed', 'true');
     await expect(card('Synthetic running completion')).toBeVisible();
     // The running lookup ends; a later read shows it without any action, and then the queue stops reading.
     running = { state: 'complete', outcome: 'none', answers: 0, next: null, releases: 0 };
@@ -1619,18 +1635,32 @@ for (const variant of localizedViewports) {
     await possible.getByRole('button', { name: label('admin.catalog_review.lookup_choose_album_only'), exact: true }).click();
     await expect.poll(chooses).toEqual([[3, pairingEditions[0]]]);
     await expect(summary.getByText(label('admin.lookup.applied', { title: 'Synthetic Live Album 2' }), { exact: true })).toBeVisible();
-    // Nothing is left to answer, so the results fold under one disclosure; opened, they still explain the tracks and offer the fill.
+    // The tracks still pair in more than one way and the titles can fill the numbers, so the results stay open: they explain the
+    // tracks and keep the fill on the card in view.
     const results = summary.locator('details').filter({ has: page.getByText(label('admin.catalog_review.lookup_details'), { exact: true }) });
-    await expect(results).toHaveJSProperty('open', false);
-    await results.getByText(label('admin.catalog_review.lookup_details'), { exact: true }).click();
     await expect(results).toHaveJSProperty('open', true);
     const noPairing = summary.getByRole('region', { name: label('admin.catalog_review.members_title'), exact: true }).getByText(label('admin.catalog_review.member_no_pairing'), { exact: true });
     await expect(noPairing).toBeVisible();
     await expect(summary.getByRole('region', { name: label('admin.catalog.album_expected'), exact: true })).toHaveCount(0);
     await expect(possible.getByRole('button', { name: label('admin.lookup.chosen'), exact: true, includeHidden: true })).toBeDisabled();
-    // The status is no longer a no match, so only the card still offers the fill.
-    await expect(summary.getByRole('button', { name: fillName, exact: true })).toHaveCount(1);
-    await possible.getByRole('button', { name: fillName, exact: true }).click();
+    // The status is no longer a no match: the card still offers the fill, and so does a plain button under the status, outside the
+    // results, after why the tracks are not applied and what filling the numbers does, before the name box.
+    await expect(summary.getByRole('button', { name: fillName, exact: true })).toHaveCount(2);
+    await expect(possible.getByRole('button', { name: fillName, exact: true })).toBeVisible();
+    await expect(results.getByRole('button', { name: fillName, exact: true })).toHaveCount(1);
+    const offered = summary.getByRole('button', { name: fillName, exact: true }).first();
+    const why = summary.getByText(label('admin.catalog_review.member_no_pairing'), { exact: true }), hint = summary.getByText(message('admin.catalog_review.lookup_fill_hint', { count: 2 }), { exact: true });
+    await expect(why).toHaveCount(2); await expect(hint).toHaveCount(2);
+    await expect(results.getByText(message('admin.catalog_review.lookup_fill_hint', { count: 2 }), { exact: true })).toHaveCount(1);
+    // Measured in one frame: the Update step's button takes focus once nothing is left to answer, and the page scrolls smoothly to it.
+    const order = [summary.getByText(label('admin.lookup.applied', { title: 'Synthetic Live Album 2' }), { exact: true }), why.first(), hint.first(), offered,
+      summary.getByText(label('admin.catalog_review.lookup_try_another'), { exact: true }).or(summary.getByRole('group', { name: label('admin.lookup.box'), exact: true })).first()];
+    const handles = await Promise.all(order.map(locator => locator.elementHandle()));
+    const tops = await page.evaluate(elements => elements.map(element => element!.getBoundingClientRect().top), handles);
+    for (let index = 1; index < tops.length; index += 1) expect(tops[index]).toBeGreaterThan(tops[index - 1]);
+    // A plain button: not styled as the primary Save completion draft.
+    expect(await classList(offered)).not.toEqual(await classList(page.locator('#catalog-review-save')));
+    await offered.click();
     const save = page.getByRole('button', { name: label('admin.catalog_review.save_draft'), exact: true });
     await expect(save).toBeFocused();
     await save.click();
@@ -1652,6 +1682,10 @@ for (const variant of localizedViewports) {
     await again.scrollIntoViewIfNeeded(); await capture(page, '45-review-rechoose', width, false, false); await reflow(page);
     await again.click();
     await expect.poll(chooses).toEqual([[3, pairingEditions[0]], [3, pairingEditions[0]]]);
+    // The tracklist is written and nothing is left open, so the results fold again; opened, they list its rows.
+    await expect(results).toHaveJSProperty('open', false);
+    await results.getByText(label('admin.catalog_review.lookup_details'), { exact: true }).click();
+    await expect(results).toHaveJSProperty('open', true);
     const rows = summary.getByRole('region', { name: label('admin.catalog.album_expected'), exact: true }).getByRole('listitem');
     await expect(rows).toHaveCount(20);
     await expect(noPairing).toHaveCount(0);
@@ -2066,7 +2100,7 @@ test('reverting catalog edits restores review and cover actions without issuing 
   await expect(page.getByText(label('admin.catalog_review.save_first'), { exact: true })).toHaveCount(0);
   await review.click();
   const confirmation = page.getByRole('dialog', { name: label('admin.catalog_review.create') });
-  await expect(confirmation.getByText('Synthetic catalog Album', { exact: true })).toBeVisible();
+  await expect(confirmation.getByText(label('admin.catalog_review.create_search', { terms: 'Synthetic catalog Album' }), { exact: true })).toBeVisible();
   await confirmation.getByRole('button', { name: label('admin.common.cancel'), exact: true }).click();
   await cover.click();
   await expect(page.getByRole('textbox', { name: label('admin.workbench.search'), exact: true })).toBeVisible();

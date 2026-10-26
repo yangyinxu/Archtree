@@ -7,7 +7,7 @@
  *   - rows that need no answer are folded, while values from file tags, an artist mismatch and Luna suggestions are flagged outside the fold
  *   - Publish stays unavailable while the server says it waits or needs answers, a placeholder-only credit says so at once, and otherwise it opens the confirmation
  *   - a lookup conflict only in MusicBrainz IDs is headed as one and shows each side's IDs beside the names
- *   - a conflict with the administrator's value offers Keep mine or Use lookup value bound to the saved value, and an append shows Album values as not applied
+ *   - a conflict with the administrator's value offers Keep current or Use lookup value bound to the saved value, and an append shows Album values as not applied
  *   - Luna label and Disc Number suggestions arrive as ticked rows of their own, and an append marks the label not applied
  *   - a tie lists the values that differ with each release's barcode, catalogue number, country and medium, and allows one release or none
  *   - the only next-step button is a free retry while lookup is busy, unavailable or stopped, the name box is next when nothing matches, and the secondary paid Luna AI button follows the lookup controls in every lookup state
@@ -164,19 +164,19 @@ test('a lookup conflict only in MusicBrainz IDs is headed as one and shows each 
   item.draft.album.label = { name: 'Sit Records', musicBrainzId: mine };
   const conflicts = [{ path: 'album.label', slotId: null, lookup: { name: 'Sit Records', musicBrainzId: theirs }, answer: null, musicBrainzId: true }];
   const { section } = mount(item, lookupResponse({ lookup: view({ applied: applied({ conflicts }), needsAnswer: { tie: false, conflicts: ['album.label'] } }) }));
-  const [row] = within(await within(section()).findByRole('region', { name: 'Lookup values that differ from yours' })).getAllByRole('listitem');
+  const [row] = within(await within(section()).findByRole('region', { name: 'Lookup values that differ from the current ones' })).getAllByRole('listitem');
   expect(row.querySelector('strong')!.textContent).toBe('Label: MusicBrainz ID differs');
   expect(within(row).getByText(`Sit Records · ${mine}`)).toBeInTheDocument(); expect(within(row).getByText(`Sit Records · ${theirs}`)).toBeInTheDocument();
 });
 
-test('a conflict with the administrator\'s value offers Keep mine or Use lookup value bound to the saved value, and an append shows Album values as not applied', async () => {
+test('a conflict with the administrator\'s value offers Keep current or Use lookup value bound to the saved value, and an append shows Album values as not applied', async () => {
   const item = detail(); item.draft.album.label = labelEntry('Mine'); item.draft.tracks[1].trackNumber = 7; item.revision = 4;
   const conflicts = [{ path: 'album.label', slotId: null, lookup: labelEntry('Lookup Label'), answer: null }, { path: `tracks.${slotTwo}.trackNumber`, slotId: slotTwo, lookup: 2, answer: null }];
   const { run, section } = mount(item, lookupResponse({ lookup: view({ applied: applied({ conflicts }), needsAnswer: { tie: false, conflicts: ['album.label', `tracks.${slotTwo}.trackNumber`] } }) }));
-  const rows = within(await within(section()).findByRole('region', { name: 'Lookup values that differ from yours' })).getAllByRole('listitem');
+  const rows = within(await within(section()).findByRole('region', { name: 'Lookup values that differ from the current ones' })).getAllByRole('listitem');
   expect(rows.map(row => row.querySelector('strong')!.textContent)).toEqual(['Label', 'Track 2 · Track number']);
   expect(within(rows[0]).getByText('Mine')).toBeInTheDocument(); expect(within(rows[0]).getByText('Lookup Label')).toBeInTheDocument();
-  const keep = within(rows[0]).getByRole('button', { name: 'Keep mine' });
+  const keep = within(rows[0]).getByRole('button', { name: 'Keep current' });
   expect(keep).toHaveAccessibleDescription('Label');
   fireEvent.click(keep);
   fireEvent.click(within(rows[1]).getByRole('button', { name: 'Use lookup value' }));
@@ -190,7 +190,7 @@ test('a conflict with the administrator\'s value offers Keep mine or Use lookup 
   expect(screen.getByText('Lookup Label · Not applied')).toBeInTheDocument();
   expect(screen.getByText('Mine · Not applied')).toBeInTheDocument();
   expect(screen.getByRole('combobox', { name: 'Visibility' })).toBeDisabled();
-  expect(within(screen.getByRole('region', { name: 'Lookup values that differ from yours' })).getAllByRole('listitem')).toHaveLength(1);
+  expect(within(screen.getByRole('region', { name: 'Lookup values that differ from the current ones' })).getAllByRole('listitem')).toHaveLength(1);
   cleanup();
   // An append applies no Album value, so a Luna suggestion for one says so; a track suggestion is applied as usual.
   mount(item, lookupResponse({ summary: summary({ append: true, luna: [{ id: 'c'.repeat(24), tick: 'ticked' }, { id: 'd'.repeat(24), tick: 'unticked' }] }) }));
@@ -244,7 +244,7 @@ test('a tie lists the values that differ with each release\'s barcode, catalogue
   mount(detail(), lookupResponse({ lookup: view({ candidates: [candidate(1), differing], groups: [group(1, 'Synthetic Album')], applied: applied() }) }));
   const fold = (await screen.findByText('Releases found: 2')).closest('details')!;
   expect(fold).not.toHaveAttribute('open');
-  expect(within(fold).getByText('Tracks: 2 here, 3 on the release')).toBeInTheDocument();
+  expect(within(fold).getByText('Tracks: 2 in these files, 3 on the release')).toBeInTheDocument();
   expect(within(fold).getByRole('button', { name: 'Applied' })).toBeDisabled();
   expect(within(fold).getByRole('button', { name: 'Use this release' })).toBeEnabled();
 });
@@ -272,7 +272,7 @@ test('the only next-step button is a free retry while lookup is busy, unavailabl
     [{ candidates: [candidate(1)], groups: [group(1, 'Synthetic Album')], applied: applied() }, 'Applied release: Synthetic Album 1', luna],
     // The only matching release of a partial comparison is offered, never applied unasked: no next step, and no answer needed.
     [{ candidates: [candidate(1)], groups: [group(1, 'Synthetic Album')], disclosure: { unknownLocalDurations: 0, unknownLocalDiscNumbers: 0, partialComparison: true } },
-      'One release matches these files but was not applied, because not every release MusicBrainz found was compared. You can choose it, another release or none.', luna],
+      'One release matches these files but was not applied, because not every release found was compared. You can choose it, another release or none.', luna],
     // Once none is chosen for this run, it says so.
     [{ candidates: [candidate(1)], groups: [group(1, 'Synthetic Album')], applied: { ...applied(), candidateKey: null, choice: 'none' },
       disclosure: { unknownLocalDurations: 0, unknownLocalDiscNumbers: 0, partialComparison: true } }, 'No release is applied. Values from file tags are kept.', luna]
@@ -337,7 +337,7 @@ test('the paid Luna AI button follows the conflict answers, the values to check 
   const conflicts = [{ path: 'album.label', slotId: null, lookup: labelEntry('Lookup Label'), answer: null }];
   const { section } = mount(item, lookupResponse({ lookup: view({ candidates: [candidate(1)], groups: [group(1, 'Synthetic Album')], applied: applied({ conflicts }), needsAnswer: { tie: false, conflicts: ['album.label'] } }),
     summary: summary({ luna: [{ id: 'c'.repeat(24), tick: 'ticked' }] }) }));
-  const luna = await within(section()).findByRole('button', { name: 'Use Luna AI (paid)' }), answers = within(section()).getAllByRole('button', { name: /^(Keep mine|Use lookup value)$/ });
+  const luna = await within(section()).findByRole('button', { name: 'Use Luna AI (paid)' }), answers = within(section()).getAllByRole('button', { name: /^(Keep current|Use lookup value)$/ });
   expect(answers).toHaveLength(2);
   await expectSteps(section(), ['Use Luna AI (paid)'], { chooser: true });
   for (const control of [...answers, within(section()).getByRole('list', { name: 'Values to check' })]) expect(follows(control, luna), control.textContent ?? '').toBe(true);
@@ -504,7 +504,7 @@ test('Publish is not offered before the summary read settles or after it fails, 
   mount(item, lookupResponse({ lookup: view({ state: 'stopped', outcome: null, issue: 'permissionLost', candidates: [candidate(1)], applied: applied({ conflicts }), needsAnswer: { tie: false, conflicts: ['album.label'] } }),
     summary: summary({ luna: [{ id: 'c'.repeat(24), tick: 'ticked' }] }) }), { disabled: true });
   expect(await screen.findByRole('combobox', { name: 'Visibility' })).toBeDisabled();
-  for (const name of ['Retry lookup', 'Use Luna AI (paid)', 'Keep mine', 'Use lookup value', 'Apply ticked suggestions now']) expect(screen.getByRole('button', { name })).toBeDisabled();
+  for (const name of ['Retry lookup', 'Use Luna AI (paid)', 'Keep current', 'Use lookup value', 'Apply ticked suggestions now']) expect(screen.getByRole('button', { name })).toBeDisabled();
   expect(screen.getByRole('checkbox', { name: /^Title/ })).toBeDisabled();
   for (const name of ['Name', 'Artist (optional)']) expect(within(screen.getByRole('group', { name: 'Look up by name' })).getByRole('textbox', { name })).toBeDisabled();
   // Publish includes unsaved edits, so only its own gate holds it.
@@ -559,12 +559,12 @@ test('answered conflicts fold with their answer, an artist mismatch is flagged o
     { approval: { draft: { ...item.draft, album: { ...item.draft.album, title: 'Unsaved Title' } }, changes } });
   expect(await ready()).toBeEnabled();
   const fold = screen.getByText('Values that need no answer').closest('details')!;
-  expect(within(fold).getByText('Lookup Label · Kept yours')).toBeInTheDocument(); expect(within(fold).getByText('Lookup Song · Lookup value used')).toBeInTheDocument();
+  expect(within(fold).getByText('Lookup Label · Current value kept')).toBeInTheDocument(); expect(within(fold).getByText('Lookup Song · Lookup value used')).toBeInTheDocument();
   // The unsaved title is folded with its shown value; the release date and the first track's title rest on file tags.
   expect(within(fold).getByText('Unsaved Title')).toBeInTheDocument();
   expect(within(screen.getByRole('list', { name: 'Values to check' })).getAllByRole('listitem').map(entry => entry.textContent))
     .toEqual(['Release date: — · From file tags only', 'Track 1 · Title: — · From file tags only']);
-  expect(screen.queryByRole('region', { name: 'Lookup values that differ from yours' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('region', { name: 'Lookup values that differ from the current ones' })).not.toBeInTheDocument();
   cleanup();
   // The mismatch of a preselection applied in an earlier run is not this run's; an append flags no Album value.
   mount(item, lookupResponse({ summary: summary({ append: true }), lookup: view({ run: 2, preselection, applied: applied({ run: 1 }) }) }));
@@ -660,14 +660,14 @@ test('the iTunes stage has its own status and next step: searching iTunes, retry
   const luna = ['Use Luna AI (paid)'], retry = ['Retry lookup', 'Use Luna AI (paid)'];
   const cases: [Record<string, unknown>, string, string[]][] = [
     // The stage also runs after MusicBrainz stayed unavailable, so its status claims no MusicBrainz answer.
-    [{ state: 'running', outcome: null, itunes: 'running' }, 'Looking up metadata in the iTunes Search API…', luna],
-    [{ state: 'retrying', outcome: null, issue: 'sourceBusy', itunes: 'retrying' }, 'The iTunes Search API is busy or unavailable, so lookup retries automatically. You can retry now at no cost.', retry],
+    [{ state: 'running', outcome: null, itunes: 'running' }, 'Looking up metadata in iTunes…', luna],
+    [{ state: 'retrying', outcome: null, issue: 'sourceBusy', itunes: 'retrying' }, 'iTunes is busy or unavailable, so lookup retries automatically. You can retry now at no cost.', retry],
     // MusicBrainz is still retried as before while the stage has not started.
     [{ state: 'retrying', outcome: null, issue: 'sourceBusy', itunes: 'notQueried' }, 'MusicBrainz is busy or unavailable, so lookup retries automatically. You can retry now at no cost.', retry],
     // Nothing matched, so the name box is the next step, as for any run that found no matching release.
-    [{ outcome: 'noRelease', itunes: 'unavailable' }, 'MusicBrainz found no matching release, and the iTunes Search API was unavailable. Try another name, or use Luna AI (paid).', luna],
+    [{ outcome: 'noRelease', itunes: 'unavailable' }, 'MusicBrainz found no matching release, and iTunes was unavailable. Try another name, or use Luna AI (paid).', luna],
     [{ candidates: [candidate(2, { status: 'notMatching', groupKey: null })], itunes: 'unavailable' },
-      'MusicBrainz found no matching release, and the iTunes Search API was unavailable. Try another name, or use Luna AI (paid).', luna],
+      'MusicBrainz found no matching release, and iTunes was unavailable. Try another name, or use Luna AI (paid).', luna],
     // MusicBrainz stayed unavailable (the completed run keeps its issue): never no match, whatever iTunes answered.
     [{ candidates: [candidate(2, { status: 'incomplete', groupKey: null, comparison: null })], issue: 'sourceUnavailable', itunes: 'unavailable' },
       'Release details could not be fetched, so no match was confirmed. Retry the lookup at no cost, or use Luna AI (paid).', retry],
@@ -749,7 +749,7 @@ test('an append to an Album with an expected tracklist lists the row each append
   const item = appendItem();
   let rendered = mount(item, appendResponse());
   const section = await rowsSection();
-  expect(within(section).getByText('These files fill 1 of the Album\'s 2 missing-file rows.')).toBeInTheDocument();
+  expect(within(section).getByText('These files fill 1 of the Album\'s 2 rows without a file.')).toBeInTheDocument();
   expect(rowItems(section)).toEqual(['Disc 1 · Track 2 · First Song · Row Disc 1 · Track 2: Second Row · Duration differs from the row\'s by more than 3 seconds',
     'Disc 1 · Track — · 02 Second.mp3 · No row · No Track Number']);
   // The rows stay outside the fold, before the paid Luna AI button, and Publish stays available.
@@ -762,7 +762,7 @@ test('an append to an Album with an expected tracklist lists the row each append
   rendered = mount(item, appendResponse(), { approval: { draft, changes: [{ path: `tracks.${slotTwo}.trackNumber`, base: null, value: 3 }] } });
   expect(rowItems(await rowsSection())).toEqual(['Disc 1 · Track 2 · First Song · Row Disc 1 · Track 2: Second Row · Duration differs from the row\'s by more than 3 seconds',
     'Disc 1 · Track 3 · 02 Second.mp3 · Row Disc 1 · Track 3: Third Row']);
-  expect(screen.getByText('These files fill 2 of the Album\'s 2 missing-file rows.')).toBeInTheDocument();
+  expect(screen.getByText('These files fill 2 of the Album\'s 2 rows without a file.')).toBeInTheDocument();
   cleanup();
   // Reused and skipped files are not appended, so they are not listed; a file on a row a member fills says it already has a file.
   mount(item, appendResponse(appendTracklist({ files: [{ slotId, durationMs: 1000, durationPrecisionMs: 0, appended: false }, { slotId: slotTwo, durationMs: null, durationPrecisionMs: 0, appended: true }] })),
@@ -806,7 +806,7 @@ test('a file without a Disc Number on a tracklist of several discs, and one at a
   const section = await rowsSection();
   expect(rowItems(section)).toEqual(['Disc 1 · Track 1 · First Song · Row Disc 1 · Track 1: Opening · No Disc Number, and the expected tracklist has several discs',
     'Disc 2 · Track 9 · Second Song · No row · Not in the expected tracklist']);
-  expect(within(section).getByText('These files fill 1 of the Album\'s 2 missing-file rows.')).toBeInTheDocument();
+  expect(within(section).getByText('These files fill 1 of the Album\'s 2 rows without a file.')).toBeInTheDocument();
   expect(await ready()).toBeEnabled();
 });
 

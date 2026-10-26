@@ -254,14 +254,14 @@ summary only presents it:
   proposal values that differ (title, Artist entries, label, date, tracks) and
   its barcode, catalogue number, country and medium, plus **Use none of
   these**; a conflict with the administrator's own value shows both values with
-  **Keep mine** and **Use lookup value** (`/lookup/resolve` bound to the saved
-  value); one that differs only in MusicBrainz IDs is headed "MusicBrainz ID
-  differs" and shows each entry's or the label's name with its ID. Identity
+  **Keep current** and **Use lookup value** (`/lookup/resolve` bound to the
+  saved value); one that differs only in MusicBrainz IDs is headed "MusicBrainz
+  ID differs" and shows each entry's or the label's name with its ID. Identity
   questions, including keeping or replacing a reused record's ID, stay in
   Review and the confirmation; the summary counts the rows the server says still
   need one. The candidate chooser discloses how many files have an unknown
   duration or Disc Number, which ranking never counts as agreement, and says
-  when not every release MusicBrainz found was compared with the files. It marks
+  when not every release found was compared with the files. It marks
   each iTunes-only candidate "iTunes only", and "Not checked against
   MusicBrainz" when it is `notChecked`.
 - **Offered, not needed.** The only matching group of a partial comparison
@@ -1321,13 +1321,17 @@ queued, running or retrying, the page reads the eligibility again every 5
 seconds, for at most 180 reads and never offline. Without a run, or without that
 key (a release before it), the note says only that the Album has an unfinished
 completion, as the dialog for starting another completion always does.
-The action's confirmation says lookup searches by the saved title and primary
-Artists and, when that does not settle the match, by up to two saved track
-titles; that it completes the title, release date, Artists, label, track
-titles, Disc and Track Numbers, each track's own Artists and the expected
-tracklist but not the cover; that nothing changes until the changes are
-confirmed and that Luna AI (paid) never starts; where lookup is not
-configured the action reads **Create Album completion for manual editing**. The separate
+The action's confirmation is short: a line **Will look up:** with the saved
+title and the first primary Artist's name, read with `GET /catalog/artist/:id`
+while the confirmation is open (the title alone until then, when the read fails,
+without a primary Artist or when the name is a placeholder such as Various
+Artists, which lookup never searches; a trailing slash and that name is left out
+of the title, as lookup leaves it out; no such line for a blank title), then
+that lookup runs on MusicBrainz (free) and puts what it finds into a private
+completion draft only, that Luna AI (paid) never starts, and that the original
+Album changes only after **Update original Album** is confirmed; where lookup is
+not configured the action reads **Create Album completion for manual editing**
+instead. The separate
 **Album completions** queue retains saved projects when the browser closes.
 **Unfinished** includes all unapplied reviews; **Album updated** confirms that
 this project's selected fields were applied. An unfinished card's first cell,
@@ -1345,8 +1349,9 @@ generation above 0); an applied card shows no lookup cell, nor does a card from
 a release before lookup briefs. **Lookup needs you (N)**, after the filters,
 narrows the cards loaded so far to unfinished completions whose lookup asks for
 an answer, a choice, Disc and Track Numbers or the free retry; N counts them
-among those cards, **Load more** can add to both, the chip shows only while N
-is above 0 or it is on, and choosing another filter turns it off. On this queue
+among those cards, **Load more** can add to both, the chip shows only while N is
+above 0 or it is on, it keeps the queue filter, **All** does not show as chosen
+while it is on, and choosing another filter turns it off. On this queue
 the needs-attention filter reads **Luna AI needs attention**. The queue reads
 itself again every 5 seconds while a loaded card's Luna AI, or an unfinished
 card's metadata lookup, is queued or running, every 10 seconds while such a
@@ -1444,16 +1449,38 @@ when the members pair in no single way a line saying so above every member
 unchanged as unpaired; the expected tracklist the review keeps, or the one an
 open conflict proposes, with each row's members, its rows without a file and the
 members outside it; the identity rows (one per artist shared by the Album and
-its tracks, naming every entry it covers, and the label) with **Save
-decisions**, which sends the whole decision set; and the values that need no
-answer, folded, each once. Once the release applied to the draft leaves nothing
-open (no active run, free retry, refined status, lookup answer or identity row
-that needs a record) and is neither an iTunes-only result nor an artist
-mismatch, whose values to check are never collapsed (so an iTunes-only result
-never folds), everything after the name box folds under
-**Lookup results and applied values**, which opens again on request and by
-itself as soon as something opens; it stays mounted, so unsaved identity choices
-survive it. Lookup controls are disabled while a command runs,
+its tracks, naming every entry it covers, and the label), each a group of radio
+cards that give the record's name, its visibility and why it is offered for that
+row (the same MusicBrainz ID, the name only, a MusicBrainz alias or an iTunes
+localized name), with a card to reuse a record and replace its MusicBrainz ID
+where that is allowed and a card to create it with the Album's visibility; the
+card that reuses the record holding the identity's MusicBrainz ID, creates
+without any candidate or keeps a bound record's own different ID is preselected,
+and a name, alias or localized-name match never is; choosing a card sends the
+whole decision set at once, the cards are dimmed and disabled whenever the
+lookup controls are, except that cards holding keyboard focus, as after a
+choice, stay focusable and ignore choices, so focus stays on the choice, a
+choice the server refused is marked unsaved with **Save decisions** to send it
+again, after a save with an unknown outcome the page's **Retry original
+operation** sends it again, a stored choice whose record changed since shows no
+card chosen, only a bound row that needs no answer is folded, and MusicBrainz
+IDs show only after **Show MusicBrainz IDs**, except where rows of one name need
+them, as do record ID endings except where records of one name need them; and
+the values that need no answer, folded, each once.
+Once the release applied to the draft leaves nothing open (no active run, free
+retry, refined status, lookup answer or identity row that needs a record, and no
+release applied for its Album values only whose tracks still pair in more than
+one way while the titles can fill their Disc and Track Numbers, so that card's
+**Fill Disc and Track Numbers from titles** stays in view, also offered as a
+plain button under the status after a line that the tracks do not pair with the
+applied release in one way, so track values and track Artists are not applied,
+and the hint that the numbers can be filled from the titles) and is neither an
+iTunes-only result nor an artist mismatch, whose values to check are never
+collapsed (so an iTunes-only result never folds), everything after the name box
+folds under **Lookup results and applied values**, which opens again on request
+and by itself as soon as something opens; it stays mounted, so unsaved identity
+choices survive it.
+Lookup controls are disabled while a command runs,
 offline, while the draft has unsaved or conflicting edits and while the source
 is not current, and answers also while a run is active; the summary polls while
 a run is active and reads the review detail again when its read shows a newer
@@ -1648,9 +1675,10 @@ Artist field is not empty, and refuses a link in either field in place,
 /catalog-reviews/:id/lookup/candidates/:key/artwork`, choosing a release or
 **Use none of these** sends `/lookup/choose`, and each answer, and each bulk
 answer covering every listed conflict, is one `/lookup/resolve` request, every
-answer in it bound to the saved value it was made against. **Save decisions**
-sends `POST /catalog-reviews/:id/decisions`; the review keeps them until an
-apply sends the identity items its confirmation showed, which the Web's
+answer in it bound to the saved value it was made against. Each identity
+choice sends `POST /catalog-reviews/:id/decisions` with the whole decision set
+(**Save decisions** sends it again after a refused save); the review keeps them
+until an apply sends the identity items its confirmation showed, which the Web's
 **Update original Album** does. A saved reuse or replace whose
 record the identity read lists at another revision, or no longer lists, is
 stale: the server refuses to keep it (`409 ADMIN_IMPORT_DUPLICATE_STALE`), so
@@ -1819,8 +1847,9 @@ too few audio tracks; members no track can pair with; members that cannot each
 take a different track; a tracklist over its bounds or invalid; or details that
 could not be fetched. The missing-file row count appears only when the pairing
 is single or the Album has no members; otherwise the card says that choosing
-brings in no expected tracklist or track details, and **Tracks paired** shows
-only for a single pairing of an Album with members. A card whose pairing the
+brings in no expected tracklist or track details, and **Where each track sits on
+the release** shows only for a single pairing of an Album with members. A card
+whose pairing the
 positions or the half-second tier made single (`pairedBy`) also says **Paired
 by the track numbers in the titles**, **Paired by the track numbers in the file
 names** or **Paired by the closest durations**, and while any candidate carries
@@ -3110,6 +3139,22 @@ roll back to:
   across them. After deploying them, a Web client's cached bundle from before
   them is refused once for lacking those keys, so it shows English until the new
   bundle loads.
+- The completion flow's plainer copy, the identity choice cards that save on
+  select, the creation dialog's **Will look up** line, the lookup results kept
+  open and the fill offered under the status, with why, for an Album-values-only
+  release, and the workbench's unpressed **All** chip need no floor of their
+  own; no route, collection, index or stored shape changes, and they store
+  nothing new. Every request they send, the creation dialog's
+  `GET /catalog/artist/:id` and each choice's
+  `POST /catalog-reviews/:id/decisions` included, exists in the release before
+  them, and they read no new view keys, so open tabs keep parsing every read.
+  They change message values and add message keys; every earlier key and its
+  variables are kept, so Web, iOS and Android clients accept this release's
+  remote bundles. A Web tab opened after them keeps its active bundle instead of
+  accepting a remote bundle from a release before them, which lacks the new
+  keys, so reload open workbench tabs after rolling back across them. After
+  deploying them, a Web client's cached bundle from before them is refused once
+  for lacking those keys, so it shows English until the new bundle loads.
 - Automatic covers need no floor of their own. A release before them shows and
   publishes only a stored, explicit `selectedCoverSlotId`, so an import whose
   choice is still automatic shows No cover there and publishes no cover unless

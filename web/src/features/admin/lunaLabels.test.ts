@@ -12,6 +12,7 @@
  *   - lookup status text lists the free step first and ends with paid Luna AI
  *   - the review's lookup status after a run found releases, its progress and its card copy name only free steps, never AI or Luna
  *   - metadata lookup controls never mention AI or Luna
+ *   - the review's identity rows and the Album page's search line never mention AI or Luna
  *   - the Album page's lookup entry names MusicBrainz and says it is free, and its confirmation says Luna AI (paid) never starts
  * @end-catalog */
 
@@ -111,6 +112,12 @@ test('the review\'s lookup status after a run found releases, its progress and i
 test('metadata lookup controls never mention AI or Luna', () => {
   const mentions: Record<string, RegExp> = { 'en-US': /\bAI\b|Luna/, 'zh-Hans': /AI|Luna/ };
   for (const [locale, key, message] of each(lookupControls)) expect(message, `${locale} ${key}`).not.toMatch(mentions[locale]);
+});
+
+test('the review\'s identity rows and the Album page\'s search line never mention AI or Luna', () => {
+  const mentions: Record<string, RegExp> = { 'en-US': /\bAI\b|Luna/, 'zh-Hans': /AI|Luna/ }, keys = [...family('admin.catalog_review.identit'), 'admin.catalog_review.create_search'];
+  expect(keys).toEqual(expect.arrayContaining(['admin.catalog_review.identities_copy', 'admin.catalog_review.identity_reuse', 'admin.catalog_review.identity_create_reason_none']));
+  for (const [locale, key, message] of each(keys)) expect(message, `${locale} ${key}`).not.toMatch(mentions[locale]);
 });
 
 test('the Album page\'s lookup entry names MusicBrainz and says it is free, and its confirmation says Luna AI (paid) never starts', () => {

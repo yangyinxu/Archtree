@@ -1229,7 +1229,7 @@
       "variables": {}
     },
     "admin.catalog_review.adds_precision": {
-      "description": "Administrator workbench: existing-Album review summary, a date conflict that only adds precision to the saved date.",
+      "description": "Administrator workbench: existing-Album review summary, after a release date conflict's heading: the lookup date only adds the month or day to the same saved year (and month).",
       "delivery": [
         "runtime"
       ],
@@ -1470,7 +1470,7 @@
       "variables": {}
     },
     "admin.catalog_review.create_copy": {
-      "description": "Album completion creation dialog where metadata lookup is available: what the free MusicBrainz lookup completes from the saved title and primary Artists and, when needed, up to two saved track titles, that it does not complete the cover, that the catalog changes only after confirmation and that paid Luna AI never starts.",
+      "description": "Album completion creation dialog where metadata lookup is available, two sentences on what happens next: lookup searches MusicBrainz (free) into a private completion draft, paid Luna AI never starts, and the catalog Album changes only once Update original Album is confirmed.",
       "delivery": [
         "runtime"
       ],
@@ -1489,6 +1489,15 @@
         "runtime"
       ],
       "variables": {}
+    },
+    "admin.catalog_review.create_search": {
+      "description": "Album completion creation dialog where metadata lookup is available, header line: what the automatic lookup searches first, the saved title and, once read, the primary Artist name it credits, joined by \" · \".",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "terms": "string"
+      }
     },
     "admin.catalog_review.credits_removed": {
       "description": "Album completion confirmation: the Credits a member loses.",
@@ -1633,14 +1642,14 @@
       "variables": {}
     },
     "admin.catalog_review.expected_copy": {
-      "description": "Administrator workbench: existing-Album review summary, explains that rows without a file are administrator information only and create no track.",
+      "description": "Administrator workbench: existing-Album review summary, explains that rows without a file (zh: tracks without audio) are administrator information only, not playable tracks, never shown to listeners.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.catalog_review.expected_rows": {
-      "description": "Administrator workbench: existing-Album review summary, expected tracklist preview, its row count and how many rows have no file.",
+      "description": "Administrator workbench: existing-Album review summary, expected tracklist preview, its row count and how many rows have no file (zh: tracks without audio).",
       "delivery": [
         "runtime"
       ],
@@ -1729,7 +1738,7 @@
       "variables": {}
     },
     "admin.catalog_review.identities_copy": {
-      "description": "Administrator workbench: existing-Album review summary, explains that one decision covers an artist across the Album and its tracks, and that name matches prove nothing.",
+      "description": "Administrator workbench: existing-Album review identity rows' introduction: each Artist is chosen once for the Album and every crediting track, a matching name proves nothing, and each choice saves at once.",
       "delivery": [
         "runtime"
       ],
@@ -1743,7 +1752,7 @@
       "variables": {}
     },
     "admin.catalog_review.identity_answers": {
-      "description": "Administrator workbench: existing-Album review summary, how many identity rows still need a record chosen, existing or new.",
+      "description": "Administrator workbench: existing-Album review summary, how many identity rows (Artists and the label) still need a choice between an existing record and a new one.",
       "delivery": [
         "runtime"
       ],
@@ -1776,6 +1785,45 @@
       ],
       "variables": {}
     },
+    "admin.catalog_review.identity_create": {
+      "description": "Administrator workbench: existing-Album review identity rows, title of the radio card that creates a new Artist or label Organization; names it as the entry does.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "name": "string"
+      }
+    },
+    "admin.catalog_review.identity_create_reason": {
+      "description": "Administrator workbench: existing-Album review identity rows, the create card's reason while reuse candidates are listed above it.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.identity_create_reason_none": {
+      "description": "Administrator workbench: existing-Album review identity rows, the create card's reason when no candidate exists (create is then the default choice).",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.identity_create_reason_without_id": {
+      "description": "Administrator workbench: existing-Album review identity rows, note on the create card while an existing record holds the MusicBrainz ID lookup found: creating a distinct record records no ID.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.identity_create_visibility": {
+      "description": "Administrator workbench: existing-Album review identity rows, the create card's line: a new Artist or label Organization takes the Album's visibility (the Public or Hidden field label).",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "visibility": "string"
+      }
+    },
     "admin.catalog_review.identity_creates": {
       "description": "Album completion confirmation: an Artist or label Organization the update creates.",
       "delivery": [
@@ -1801,6 +1849,20 @@
         "id": "string"
       }
     },
+    "admin.catalog_review.identity_keep_own": {
+      "description": "Administrator workbench: existing-Album review identity rows, radio card of a bound Artist or label whose record holds a different MusicBrainz ID than lookup found: keep the record's own ID (no decision; the default).",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.identity_keeps_own_id": {
+      "description": "Administrator workbench: existing-Album review identity rows, note on a reuse card whose record holds a MusicBrainz ID other than the one lookup found: reusing it keeps that ID (the IDs show only on demand).",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.catalog_review.identity_names": {
       "description": "Administrator workbench: existing-Album review summary, identity row, the other names credited for the same artist.",
       "delivery": [
@@ -1810,6 +1872,64 @@
         "names": "string"
       }
     },
+    "admin.catalog_review.identity_preselected": {
+      "description": "Administrator workbench: existing-Album review identity rows, mark on the card the rules preselect (the record keeping the found MusicBrainz ID, or create without any candidate); choosing it sends no decision for the row.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.identity_reason_alias": {
+      "description": "Administrator workbench: existing-Album review identity rows, why a reuse card is offered: the existing record's name is an alias lookup found on MusicBrainz for this identity.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.identity_reason_localized_name": {
+      "description": "Administrator workbench: existing-Album review identity rows, why a reuse card is offered: the existing record's name is a localized name lookup found on iTunes for this one.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.identity_reason_music_brainz_id": {
+      "description": "Administrator workbench: existing-Album review identity rows, why a reuse card is offered: the existing record holds the MusicBrainz ID lookup found (this card is the default choice).",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.identity_reason_name": {
+      "description": "Administrator workbench: existing-Album review identity rows, why a reuse card is offered: the existing record only has the same name, compared case-insensitively, which never decides the choice.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.identity_reason_sha256": {
+      "description": "Administrator workbench: existing-Album review identity rows, why a reuse card is offered for a candidate matched by identical verified bytes (an enum value the candidate schema allows; review rows do not produce it in practice).",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.identity_record_suffix": {
+      "description": "Administrator workbench: existing-Album review identity rows, the last characters of an existing record's own ID on its card, so same-name records stay distinguishable (not a MusicBrainz ID).",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "suffix": "string"
+      }
+    },
+    "admin.catalog_review.identity_records_found_id": {
+      "description": "Administrator workbench: existing-Album review identity rows, note for a bound or reused record that keeps no MusicBrainz ID: applying records the ID lookup found (the ID shows only on demand).",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.catalog_review.identity_records_id": {
       "description": "Administrator workbench: existing-Album review summary, identity row, the MusicBrainz ID applying records on its record.",
       "delivery": [
@@ -1817,6 +1937,47 @@
       ],
       "variables": {
         "id": "string"
+      }
+    },
+    "admin.catalog_review.identity_replace": {
+      "description": "Administrator workbench: existing-Album review identity rows, title of a radio card that reuses an existing record (a candidate, or a bound record) holding another MusicBrainz ID and replaces that ID with the one lookup found; names the record (the IDs show only on demand).",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "name": "string"
+      }
+    },
+    "admin.catalog_review.identity_reuse": {
+      "description": "Administrator workbench: existing-Album review identity rows, title of a radio card that reuses an existing Artist or label Organization; names it.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "name": "string"
+      }
+    },
+    "admin.catalog_review.identity_show_ids": {
+      "description": "Administrator workbench: existing-Album review identity rows, toggle (or disclosure) that shows the MusicBrainz IDs and record ID endings, which are hidden by default.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.identity_taken": {
+      "description": "Administrator workbench: existing-Album review identity rows, why a reuse card is disabled: another identity of the same Artist list is bound to or reuses that Artist.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.identity_visibility": {
+      "description": "Administrator workbench: existing-Album review identity rows, a reuse card's line naming the existing record's visibility (the Public or Hidden field label).",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "visibility": "string"
       }
     },
     "admin.catalog_review.ids_only": {
@@ -2333,7 +2494,7 @@
       "variables": {}
     },
     "admin.catalog_review.lookup_paired": {
-      "description": "Administrator workbench: existing-Album review summary, candidate chooser, how many of the Album's tracks pair with the release, out of all.",
+      "description": "Administrator workbench: existing-Album review candidate chooser, disclosure shown only for a single pairing: where each of the Album's tracks sits on the release, with how many of them pair out of all.",
       "delivery": [
         "runtime"
       ],
@@ -2925,7 +3086,7 @@
       }
     },
     "admin.catalog_review.lookup_unknown_durations": {
-      "description": "Administrator workbench: existing-Album review summary, candidate chooser, how many of the Album's tracks have an unknown duration.",
+      "description": "Administrator workbench: existing-Album review candidate chooser, disclosure: how many of the Album's tracks have no duration, so no release they fit is confirmed automatically.",
       "delivery": [
         "runtime"
       ],
@@ -3287,7 +3448,7 @@
       }
     },
     "admin.catalog_review.step_answers_identity": {
-      "description": "Administrator workbench: second completion step's state: how many Artist or label records (existing or new) still need to be chosen in the identity rows; shown beside the lookup answers count, or alone.",
+      "description": "Administrator workbench: second completion step's state: how many Artists or labels (existing or new) still need to be chosen in the identity rows; shown beside the lookup answers count, or alone.",
       "delivery": [
         "runtime"
       ],
@@ -5564,7 +5725,7 @@
       "variables": {}
     },
     "admin.lookup.active_itunes": {
-      "description": "Administrator workbench: import summary, lookup is searching the iTunes Search API (after MusicBrainz found no matching release or stayed unavailable).",
+      "description": "Administrator workbench: metadata lookup status while the iTunes fallback runs.",
       "delivery": [
         "runtime"
       ],
@@ -5691,7 +5852,7 @@
       "variables": {}
     },
     "admin.lookup.difference_disc_count": {
-      "description": "Administrator workbench: candidate chooser, disc counts differ.",
+      "description": "Administrator workbench: import candidate chooser, disc counts differ between the files and the release (an existing-Album review card shows its own reason instead).",
       "delivery": [
         "runtime"
       ],
@@ -5708,7 +5869,7 @@
       "variables": {}
     },
     "admin.lookup.difference_track_count": {
-      "description": "Administrator workbench: candidate chooser, track counts differ.",
+      "description": "Administrator workbench: import candidate chooser, track counts differ between the files and the release (an existing-Album review card shows its own reason instead).",
       "delivery": [
         "runtime"
       ],
@@ -6903,7 +7064,7 @@
       "variables": {}
     },
     "admin.summary.conflicts": {
-      "description": "Administrator workbench: import summary, heading of metadata lookup values that differ from the administrator's own.",
+      "description": "Administrator workbench: import Review and publish summary, heading of the lookup values that differ from the draft's current values and need an answer.",
       "delivery": [
         "runtime"
       ],
@@ -6949,14 +7110,14 @@
       }
     },
     "admin.summary.keep_mine": {
-      "description": "Administrator workbench: import summary, keep the administrator's value in a lookup conflict.",
+      "description": "Administrator workbench: import Review and publish summary, conflict answer that keeps the draft's current value.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.summary.kept_mine": {
-      "description": "Administrator workbench: import summary, an answered lookup conflict kept the administrator's value.",
+      "description": "Administrator workbench: import Review and publish summary, folded answered conflict: the draft's current value was kept.",
       "delivery": [
         "runtime"
       ],
@@ -7113,7 +7274,7 @@
       "variables": {}
     },
     "admin.summary.yours": {
-      "description": "Administrator workbench: import summary, the administrator's own value in a lookup conflict.",
+      "description": "Administrator workbench: import Review and publish summary, conflict card label of the draft's current value (beside the lookup value).",
       "delivery": [
         "runtime"
       ],

@@ -195,7 +195,7 @@ test('an identity line marks a hidden reused record, a replaced MusicBrainz ID a
   const lines = within((await screen.findByRole('heading', { name: 'Artists and label' })).closest('section')!);
   expect(lines.getByText('Reuse Synthetic catalog Artist and replace its MusicBrainz ID 00000000-0000-4000-8000-0000000000a2 with 00000000-0000-4000-8000-0000000000a1')).toBeVisible();
   expect(within(lines.getByText('Synthetic guest').closest('li')!).getByText('Needs a decision')).toBeVisible();
-  expect(screen.getByText('Choose records for Synthetic guest in Artists and label above, or deselect the changes that need them.')).toBeVisible();
+  expect(screen.getByText('Choose existing or new for Synthetic guest under Artists and label above, or deselect the changes that need them.')).toBeVisible();
   expect(screen.getByRole('button', { name: /^Update original Album/ })).toBeDisabled();
 });
 
@@ -223,7 +223,7 @@ test('hold notes are the checkboxes\' descriptions: a pairing-filled number wait
   view.choose({ [`track:${slotId}:trackNumber`]: true });
   const tracklist = await box('Update Album · Synthetic catalog Album · Expected tracklist');
   await waitFor(() => expect(tracklist).toBeDisabled());
-  expect(tracklist).toHaveAccessibleDescription('The expected tracklist cannot be applied while these tracks are off their rows: 1 · Synthetic first track');
+  expect(tracklist).toHaveAccessibleDescription('The expected tracklist cannot be applied while these tracks\' Disc or Track Numbers differ from their place in it: 1 · Synthetic first track');
   expect(screen.getByRole('checkbox', { name: 'Update Track · Synthetic first track · Track number' })).toBeChecked();
 });
 
@@ -232,7 +232,7 @@ test('a deselected pairing-filled number stays selectable while its tracklist wa
   const view = mount(item, { lookup, identity, choices: { [`track:${slotTwo}:trackNumber`]: false } });
   const tracklist = await box('Update Album · Synthetic catalog Album · Expected tracklist');
   await waitFor(() => expect(tracklist).toBeDisabled());
-  expect(tracklist).toHaveAccessibleDescription('The expected tracklist cannot be applied while these tracks are off their rows: 2 · Synthetic second track');
+  expect(tracklist).toHaveAccessibleDescription('The expected tracklist cannot be applied while these tracks\' Disc or Track Numbers differ from their place in it: 2 · Synthetic second track');
   const number = screen.getByRole('checkbox', { name });
   expect([number.matches(':checked'), number.matches(':disabled')]).toEqual([false, false]);
   expect(number).not.toHaveAccessibleDescription(/./);

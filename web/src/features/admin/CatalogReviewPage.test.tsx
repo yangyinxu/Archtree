@@ -47,7 +47,7 @@
  *   - a lookup submission, a choice and an answer are sent with the shown revision, and their receipts are read without a reload
  *   - a lookup refusal shows its own message and keeps no intent to retry
  *   - a lookup application at the same revision disables an open Apply confirmation once the summary notices its value revision
- *   - identity decisions are saved with the shown revision; a stale refusal reads the review, its summary and identity rows again, keeping the unsaved choice
+ *   - identity decisions are saved with the shown revision as soon as one is chosen; a stale refusal reads the review, its summary and identity rows again, keeping the unsaved choice to send again
  *   - a member deselected in Update original Album stays deselected after an identity decision is saved
  *   - a choice whose response was lost is offered again as the original operation with its operation ID, and lookup waits meanwhile
  *   - the free retry sends only the shown revision and its operation ID, and its receipt leads to a new summary read
@@ -159,8 +159,8 @@ test('creating a review confirms the frozen Album and only creates a private pro
   });
   mountStart();
   const dialog = await openStart();
-  expect(dialog.getByText('Synthetic catalog Album')).toBeVisible();
-  expect(dialog.getByText(/looks up this Album on MusicBrainz, a free service.*it does not complete the cover.*Luna AI \(paid\) never starts\./)).toBeVisible();
+  expect(dialog.getByText('Will look up: Synthetic catalog Album')).toBeVisible();
+  expect(dialog.getByText('Lookup runs on MusicBrainz (free) and puts what it finds into a private completion draft only; paid Luna AI never starts. The original Album changes only after you confirm Update original Album.')).toBeVisible();
   expect(writes).toEqual([]);
   fireEvent.click(dialog.getByRole('button', { name: create }));
   await screen.findByText('Opened private review');
@@ -184,7 +184,7 @@ test('an Album revision change leaves its open creation approval disabled instea
   const fetch = routeStart();
   const view = mountStart(), dialog = await openStart();
   view.update({ ...catalogAlbum(), revision: `cr_${'b'.repeat(43)}`, fields: { ...catalogAlbum().fields, title: 'A newer synthetic Album title' } });
-  expect(dialog.getByText('Synthetic catalog Album')).toBeVisible();
+  expect(dialog.getByText('Will look up: Synthetic catalog Album')).toBeVisible();
   expect(dialog.getByRole('button', { name: create })).toBeDisabled();
   fireEvent.click(dialog.getByRole('button', { name: create }));
   expect(writesOf(fetch)).toEqual([]);
@@ -198,7 +198,7 @@ test.each(['item', 'workspace'] as const)('same-revision editing capability loss
   const confirm = dialog.getByRole('button', { name: create });
   expect(confirm).toBeDisabled(); fireEvent.click(confirm); expect(writesOf(fetch)).toEqual([]);
   expect(startButton()).toBeDisabled();
-  expect(dialog.getByText('Synthetic catalog Album')).toBeVisible();
+  expect(dialog.getByText('Will look up: Synthetic catalog Album')).toBeVisible();
 });
 
 test('an unconfirmed review creation retries the original UUID and snapshot only when explicitly requested', async () => {
@@ -1126,7 +1126,7 @@ test('a lookup application at the same revision disables an open Apply confirmat
 /** How many routed reads ended with `suffix`. */
 const readsOf = (reads: string[], suffix: string) => reads.filter(path => path.endsWith(suffix)).length;
 
-test('identity decisions are saved with the shown revision; a stale refusal reads the review, its summary and identity rows again, keeping the unsaved choice', async () => {
+test('identity decisions are saved with the shown revision as soon as one is chosen; a stale refusal reads the review, its summary and identity rows again, keeping the unsaved choice to send again', async () => {
   let item = reviewAfterLookup(capturedCatalogReview()), refuse = true;
   const writes: Array<{ path: string; body: Record<string, unknown> }> = [];
   const reads = routeSummary(() => item, () => reviewLookupResponse(), (path, body) => {
@@ -1138,20 +1138,22 @@ test('identity decisions are saved with the shown revision; a stale refusal read
   });
   mountPage();
   const identities = await screen.findByRole('region', { name: 'Artists and label' });
-  const guest = await within(identities).findByRole('combobox', { name: 'Synthetic guest · Decision' });
+  const guest = await within(identities).findByRole('radio', { name: 'Create Synthetic guest as new' });
   await waitFor(() => expect(guest).toBeEnabled());
-  fireEvent.change(guest, { target: { value: 'create-distinct' } });
   const before = [readsOf(reads, reviewId), readsOf(reads, '/lookup'), readsOf(reads, '/candidates')];
-  fireEvent.click(within(identities).getByRole('button', { name: 'Save decisions' }));
+  fireEvent.click(guest);
   expect(await screen.findByText('This project changed elsewhere. Refresh its saved version and compare your changes before trying again.')).toBeVisible();
   const decision = { scope: 'artist', identity: guestHandle, boundName: 'Synthetic guest', action: 'create-distinct', candidateId: null, candidateRevision: null };
   expect(writes).toEqual([{ path: `/api/admin/v1/catalog-reviews/${reviewId}/decisions`, body: { expectedRevision: 1, decisions: [decision], operationId: expect.any(String) } }]);
   await waitFor(() => expect([readsOf(reads, reviewId), readsOf(reads, '/lookup'), readsOf(reads, '/candidates')].every((count, index) => count > before[index])).toBe(true));
   expect(screen.queryByRole('button', { name: 'Retry original operation' })).not.toBeInTheDocument();
-  // The choice still differs from the saved decisions, so it can be saved again; its receipt is read without a reload.
-  const save = within(screen.getByRole('region', { name: 'Artists and label' })).getByRole('button', { name: 'Save decisions' });
+  // The choice still differs from the saved decisions, so it is marked unsaved and can be saved again; its receipt is read without a
+  // reload.
+  const region = () => screen.getByRole('region', { name: 'Artists and label' });
+  const save = await within(region()).findByRole('button', { name: 'Save decisions' });
   await waitFor(() => expect(save).toBeEnabled());
-  expect(within(screen.getByRole('region', { name: 'Artists and label' })).getByRole('combobox', { name: 'Synthetic guest · Decision' })).toHaveValue('create-distinct');
+  expect(within(region()).getByRole('radio', { name: 'Create Synthetic guest as new' })).toBeChecked();
+  expect(within(region()).getByText('Unsaved changes')).toBeInTheDocument();
   fireEvent.click(save);
   await waitFor(() => expect(writes).toHaveLength(2));
   expect(writes[1].body).toEqual({ expectedRevision: 1, decisions: [decision], operationId: expect.any(String) });
@@ -1175,11 +1177,10 @@ test('a member deselected in Update original Album stays deselected after an ide
   fireEvent.click(screen.getByRole('checkbox', { name: member }));
   expect(screen.getByRole('checkbox', { name: member })).not.toBeChecked();
   // The step points at the record still needed; saving it there is a new revision with new reads.
-  const identities = screen.getByRole('region', { name: 'Artists and label' }), guest = within(identities).getByRole('combobox', { name: 'Synthetic guest · Decision' });
+  const identities = screen.getByRole('region', { name: 'Artists and label' }), guest = within(identities).getByRole('radio', { name: 'Create Synthetic guest as new' });
   await waitFor(() => expect(guest).toBeEnabled());
-  fireEvent.change(guest, { target: { value: 'create-distinct' } });
   const before = readsOf(reads, '/candidates');
-  fireEvent.click(within(identities).getByRole('button', { name: 'Save decisions' }));
+  fireEvent.click(guest);
   await waitFor(() => expect(writes).toEqual([`/api/admin/v1/catalog-reviews/${reviewId}/decisions`]));
   await waitFor(() => expect(readsOf(reads, '/candidates')).toBeGreaterThan(before));
   await waitFor(() => expect(screen.getByRole('checkbox', { name: 'Update Album · Synthetic catalog Album · Artists' })).toBeChecked());

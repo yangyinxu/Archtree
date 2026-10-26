@@ -101,7 +101,7 @@ test('a possible release that needs Disc and Track Numbers leads the first two s
 test('the second step counts the lookup answers as the summary does and the records to choose beside them, linking to the first open answer', async () => {
   const { step } = mount(reviewAfterLookup(capturedCatalogReview()), () => reviewLookupResponse());
   // Three open conflicts, as the summary counts them, and the guest's record to choose.
-  await waitFor(() => expect(step('② Answer questions')).toHaveTextContent('3 answers needed · 1 record to choose'));
+  await waitFor(() => expect(step('② Answer questions')).toHaveTextContent('3 answers needed · 1 Artist or label to choose'));
   expect(step('① Find release')).toHaveTextContent('Applied "Synthetic catalog Album (Complete)"');
   expect(within(step('① Find release')).getByRole('link')).toHaveAttribute('href', '#catalog-review-lookup');
   expect(within(step('② Answer questions')).getByRole('link')).toHaveAttribute('href', '#catalog-review-answers');
@@ -146,7 +146,7 @@ test('the button waits while the draft has unsaved edits and is not shown on the
 
 test('only the records left to choose: the second step names them alone and links to the identity rows', async () => {
   const { step } = mount(reviewAfterLookup(capturedCatalogReview()), answered);
-  await waitFor(() => expect(step('② Answer questions')).toHaveTextContent(/^1 record to choose$/));
+  await waitFor(() => expect(step('② Answer questions')).toHaveTextContent(/^1 Artist or label to choose$/));
   expect(within(step('② Answer questions')).getByRole('link')).toHaveAttribute('href', '#catalog-review-identities');
   expect(screen.queryByText('Everything is answered; you can update the original Album.')).not.toBeInTheDocument();
 });

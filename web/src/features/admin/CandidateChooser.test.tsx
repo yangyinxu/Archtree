@@ -66,7 +66,7 @@ test('the folded list gives each release its status, label, date and track count
     candidate(4, { status: 'unverified', title: null, artist: null })] }));
   const [matching, differing, incomplete, unverified] = screen.getAllByRole('listitem').filter(item => item.querySelector('strong'));
   expect(within(matching).getByText('Matches these files · Label 1 · 2021-05 · 2 tracks')).toBeInTheDocument();
-  expect(within(differing).getAllByRole('listitem').map(item => item.textContent)).toEqual(['Discs: — here, 2 on the release', 'Track durations differ']);
+  expect(within(differing).getAllByRole('listitem').map(item => item.textContent)).toEqual(['Discs: — in these files, 2 on the release', 'Track durations differ']);
   expect(within(incomplete).getByText(/^Details could not be fetched/)).toBeInTheDocument();
   expect(unverified.querySelector('strong')!.textContent).toBe('—');
   expect(within(unverified).getByText(/^Not verified: some durations are unknown/)).toBeInTheDocument();
@@ -124,19 +124,19 @@ test('files whose duration or disc number is unknown are disclosed beside the re
 test('one matching group of a partial comparison is offered in a region with the single-choice heading, every proposal value and Use none of these; the partial-comparison line is shown', () => {
   const onChoose = mount(view({ candidates: [candidate(1), candidate(2, { status: 'notMatching', groupKey: null, comparison: comparison(['duration']) })], groups: [group(1, [[1, 1, 'First'], [1, 2, 'Second']])],
     disclosure: { unknownLocalDurations: 0, unknownLocalDiscNumbers: 0, partialComparison: true } }));
-  const choice = screen.getByRole('region', { name: 'One release matches these files but was not applied, because not every release MusicBrainz found was compared. You can choose it, another release or none.' });
+  const choice = screen.getByRole('region', { name: 'One release matches these files but was not applied, because not every release found was compared. You can choose it, another release or none.' });
   expect(screen.getAllByRole('button', { name: 'Use none of these' })).toHaveLength(1);
   const [only] = within(choice).getAllByRole('listitem');
   // A single group shows every value it would write, since nothing differs from another group.
   expect([...only.querySelectorAll('dt')].map(term => term.textContent)).toEqual(['Title', 'Artists', 'Label', 'Release date', 'Disc and track order', 'Barcode', 'Catalogue number', 'Country', 'Medium']);
-  expect(within(choice).getByText('Not every release MusicBrainz found was compared with these files, so a matching release may be missing from this list.')).toBeInTheDocument();
+  expect(within(choice).getByText('Not every release found was compared with these files, so a matching release may be missing from this list.')).toBeInTheDocument();
   fireEvent.click(within(only).getByRole('button', { name: 'Use this release' }));
   fireEvent.click(within(choice).getByRole('button', { name: 'Use none of these' }));
   expect(onChoose.mock.calls).toEqual([[key(1)], [null]]);
   cleanup();
   // A complete comparison says nothing about it.
   mount(view({ candidates: [candidate(1)], disclosure: { unknownLocalDurations: 0, unknownLocalDiscNumbers: 0, partialComparison: false } }));
-  expect(screen.queryByText(/not every release MusicBrainz found/i)).not.toBeInTheDocument();
+  expect(screen.queryByText(/not every release found/i)).not.toBeInTheDocument();
   cleanup();
   // Once a release or none is applied for this run, nothing is offered: the release is marked in the folded list.
   for (const [choice, candidateKey] of [['chosen', key(1)], ['none', null]] as const) {
@@ -159,7 +159,7 @@ test('a release applied as a preselection stays choosable when a re-rank leaves 
 
 test('a tie from a partial comparison keeps the several-releases heading and says not every release was compared; without a choice the line stands beside the folded list', () => {
   const partial = { unknownLocalDurations: 0, unknownLocalDiscNumbers: 0, partialComparison: true };
-  const line = 'Not every release MusicBrainz found was compared with these files, so a matching release may be missing from this list.';
+  const line = 'Not every release found was compared with these files, so a matching release may be missing from this list.';
   mount(view({ candidates: [candidate(1), candidate(2)], groups: [group(1, [[1, 1, 'First']]), group(2, [[1, 1, 'Other']])], needsAnswer: { tie: true, conflicts: [] }, disclosure: partial }));
   const tie = screen.getByRole('region', { name: 'Several releases match these files. Choose one, or none.' });
   expect(within(tie).getByText(line)).toBeInTheDocument();
@@ -268,7 +268,7 @@ test('an existing-Album review candidate shows the members it pairs, the missing
   // One reason in place of the status sentence, and no differences list.
   expect(within(paired).getByText('Both tracks pair with this release, and their durations agree')).toBeInTheDocument();
   expect(within(paired).getByText('Label 1 · 2021-05 · 2 tracks')).toBeInTheDocument();
-  expect(within(paired).getByText('Tracks paired: 2 of 2')).toBeInTheDocument();
+  expect(within(paired).getByText('Where each track sits on the release (2 of 2)')).toBeInTheDocument();
   expect(within(paired).getByText('1 · Synthetic first track → Disc 1 · Track 1')).toBeInTheDocument();
   expect(within(paired).getByText('2 · — → Disc 1 · Track 3')).toBeInTheDocument();
   expect(within(paired).getByText('Choosing brings in the expected tracklist, with 1 row without a file (administrator only)')).toBeInTheDocument();
@@ -276,7 +276,7 @@ test('an existing-Album review candidate shows the members it pairs, the missing
   // A pairing that is not single lists no pairs and promises no rows: choosing brings in no tracklist.
   expect(within(unpairable).getByText('No track of this release can pair with: 2 · —')).toBeInTheDocument();
   expect(within(unpairable).getByText('Label 2 · 2021-05 · 2 tracks')).toBeInTheDocument();
-  expect(within(unpairable).queryByText(/Tracks paired/)).not.toBeInTheDocument();
+  expect(within(unpairable).queryByText(/Where each track sits on the release/)).not.toBeInTheDocument();
   expect(within(unpairable).queryByText(/rows? without a file/)).not.toBeInTheDocument();
   expect(within(unpairable).getByText('Choosing brings in no expected tracklist or track details: the tracks do not pair with this release in exactly one way.')).toBeInTheDocument();
   expect(within(unpairable).getByText('Video or data tracks left out: 3')).toBeInTheDocument();
@@ -293,10 +293,10 @@ test('a review tie, the offered single choice, unverified releases and the discl
     needsAnswer: { tie: true, conflicts: [] }, disclosure: { unknownLocalDurations: 1, unknownLocalDiscNumbers: 2, partialComparison: true } });
   const onChoose = mountReview(tie);
   const region = screen.getByRole('region', { name: 'Several releases match this Album\'s tracks. Choose one, or none.' });
-  expect(within(region).getByText('Tracks with an unknown duration: 1. A release they pair with stays unverified.')).toBeInTheDocument();
+  expect(within(region).getByText('1 track has no duration, so a release it fits cannot be confirmed automatically.')).toBeInTheDocument();
   expect(within(region).getByText('Tracks without a disc number: 2. They can pair with a track on any disc, so their positions may be unclear.')).toBeInTheDocument();
   expect(within(region).getByText('Not every release found was compared with this Album\'s tracks, so a matching release may be missing from this list.')).toBeInTheDocument();
-  expect(within(region).getAllByText('Tracks paired: 2 of 2')).toHaveLength(2);
+  expect(within(region).getAllByText('Where each track sits on the release (2 of 2)')).toHaveLength(2);
   fireEvent.click(within(region).getByRole('button', { name: 'Use none of these' })); expect(onChoose).toHaveBeenCalledWith(null);
   unfold(screen.getByText('Releases found: 2'));
   // The folded unverified release says why it was not confirmed: its tracks pair in one way, but a paired release track has no duration.
@@ -308,7 +308,7 @@ test('a review tie, the offered single choice, unverified releases and the discl
   cleanup();
   mount(view({ candidates: [candidate(1)], groups: [group(1, [[1, 1, 'First']])], disclosure: { unknownLocalDurations: 0, unknownLocalDiscNumbers: 0, partialComparison: true } }));
   expect(screen.getByRole('region', { name: /^One release matches these files but was not applied/ })).toBeInTheDocument();
-  expect(screen.queryByText(/Tracks paired/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/Where each track sits on the release/)).not.toBeInTheDocument();
 });
 
 test('a review release first found through a track title is marked so in the tie view, the offered single choice and the folded list; another release and any import candidate are not', () => {
@@ -350,7 +350,7 @@ test('while nothing matched as a group, a review lists possible matches open as 
   // Barcode and catalogue number are shared; country and medium are named per edition above.
   expect([...card.querySelectorAll('dt')].map(term => term.textContent)).toEqual(['Barcode', 'Catalogue number']);
   // No pair list and no rows promise for a pairing that is not single.
-  expect(within(card).queryByText(/Tracks paired/)).not.toBeInTheDocument();
+  expect(within(card).queryByText(/Where each track sits on the release/)).not.toBeInTheDocument();
   expect(within(card).queryByText(/rows? without a file/)).not.toBeInTheDocument();
   expect(within(card).getByText('Choosing brings in no expected tracklist or track details: the tracks do not pair with this release in exactly one way.')).toBeInTheDocument();
   // The ten that do not fit are one folded section; nothing else fits, so there is no other section and no flat list.
@@ -410,7 +410,7 @@ test('a possible match whose members pair in no single way offers the numbers fi
   expect(card.getByText('This Album has no tracks yet, so its tracks cannot confirm this release')).toBeInTheDocument();
   expect(card.getByText('Choosing brings in the expected tracklist, with 20 rows without a file (administrator only)')).toBeInTheDocument();
   // Its members pair trivially, so there is no pair list to show.
-  expect(card.queryByText(/^Tracks paired/)).not.toBeInTheDocument();
+  expect(card.queryByText(/^Where each track sits on the release/)).not.toBeInTheDocument();
   fireEvent.click(card.getByRole('button', { name: 'Use this release' })); expect(onChoose).toHaveBeenCalledWith(pairingEditions[0]);
 });
 

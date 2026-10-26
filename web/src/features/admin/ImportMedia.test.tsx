@@ -568,7 +568,7 @@ test('an append confirmation lists the missing-file rows the shown draft\'s new 
   fireEvent.click(screen.getByRole('button', { name: 'Publish Album' })); await approve();
   const rows = checklistValue('Album\'s expected tracklist');
   // The rows load on their own after the approval is ready; they are information only.
-  expect(await within(rows).findByText('These files fill 2 of the Album\'s 2 missing-file rows.')).toBeVisible();
+  expect(await within(rows).findByText('These files fill 2 of the Album\'s 2 rows without a file.')).toBeVisible();
   expect(within(rows).getAllByRole('listitem').map(entry => entry.textContent)).toEqual(['Disc 1 · Track 2 · First Disc Opening · Row Disc 1 · Track 2: Second Row',
     'Disc 2 · Track 1 · Second Disc Opening · Row Disc 2 · Track 1: Disc Two Opening']);
   expect(within(rows).queryByRole('button')).not.toBeInTheDocument();
@@ -605,14 +605,14 @@ test('Review decisions that append to another Album than the saved one show a no
   adminWorkspace.retain(`duplicate-edits:${item.id}`, { decisions: buffered }, captureAccountOperation(viewer));
   vi.stubGlobal('fetch', withLookup(candidatesEndpoint([target, other]), response)); mount(item, new AdminMutation(), 'publication');
   fireEvent.click(screen.getByRole('button', { name: 'Publish Album' })); await approve();
-  expect(checklistValue('Album\'s expected tracklist')).toHaveTextContent('Save the Review decisions to see which missing-file rows of the target Album these files fill.');
+  expect(checklistValue('Album\'s expected tracklist')).toHaveTextContent('Save the Review decisions to see which rows without a file of the target Album these files fill.');
   expect(within(checklistValue('Album\'s expected tracklist')).queryByRole('listitem')).not.toBeInTheDocument();
   cleanup(); adminWorkspace.reset(); adminWorkspace.authorize(captureAccountOperation(viewer), true, true); adminWorkspace.select('admin');
   // A saved new Album that Review's unsaved decisions turn into an append has no saved target either.
   adminWorkspace.retain(`duplicate-edits:${item.id}`, { decisions: item.decisions }, captureAccountOperation(viewer));
   vi.stubGlobal('fetch', withLookup(candidatesEndpoint([target]), response)); mount({ ...item, decisions: distinct() }, new AdminMutation(), 'publication');
   fireEvent.click(screen.getByRole('button', { name: 'Publish Album' })); await approve();
-  expect(checklistValue('Album\'s expected tracklist')).toHaveTextContent('Save the Review decisions to see which missing-file rows of the target Album these files fill.');
+  expect(checklistValue('Album\'s expected tracklist')).toHaveTextContent('Save the Review decisions to see which rows without a file of the target Album these files fill.');
 });
 
 test('an append confirmation whose summary read failed approves without rows, and reads it again when reopened, then lists the rows', async () => {

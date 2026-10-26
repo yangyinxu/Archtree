@@ -28,7 +28,8 @@ const CatalogReviewDiscard = lazy<ComponentType<ComponentProps<typeof Discard>>>
  * Separate private queues share filters; source navigation never admits analysis or catalog writes. An unfinished Album
  * completion's card leads with its metadata lookup status (the server's lookup brief; none from a server before it), then the
  * Original Album and, once Luna AI was used, its status; Lookup needs you counts and filters the loaded cards whose lookup asks
- * for an answer, a choice, numbers or the free retry; another filter turns it off. The queue reads itself every 5 seconds while a
+ * for an answer, a choice, numbers or the free retry; it keeps the queue filter, All does not show as chosen while it is on, and
+ * choosing a filter turns it off. The queue reads itself every 5 seconds while a
  * loaded card's Luna AI, or an unfinished card's lookup, is queued or running, every 10 while such a lookup only retries, and never
  * offline; it stops following lookups 15 minutes after it first saw one active (a run that never advances, such as one queued while
  * the worker is idle), until none is. Dates follow the interface language. An unfinished card offers Discard completion, naming
@@ -92,7 +93,7 @@ function Workbench() {
   // Lookup needs you narrows the loaded cards (at most 25 a page) on this side; Load more can add to it.
   const needing = reviewItems.filter(item => item.state === 'reviewing' && lookupBriefNeedsYou(item.lookup)), shownReviews = lookupOnly ? needing : reviewItems;
   const empty = source === 'imports' ? importItems.length === 0 : shownReviews.length === 0;
-  const unfiltered = filter === 'all' && !mine && !submitted && !(source === 'catalogReviews' && lookupOnly);
+  const lookupFilter = source === 'catalogReviews' && lookupOnly, unfiltered = filter === 'all' && !mine && !submitted && !lookupFilter;
   return <section className={styles.page}><AdminNav />
     <header className={styles.header}><div><h1 className={styles.title}>{t('workbench.title')}</h1><div className={styles.actions}>
       <button className={styles.button} type="button" disabled={query.isFetching || !online} onClick={() => void query.refetch()}>{t('common.refresh')}</button>
@@ -105,7 +106,7 @@ function Workbench() {
       <button className={styles.filter} type="button" aria-pressed={source === 'catalogReviews'} onClick={() => setSource('catalogReviews')}>{t('workbench.review_source')}</button>
     </div>
     <div className={styles.filters} aria-label={t('workbench.title')}>
-      {filters.map(value => <button type="button" className={styles.filter} aria-pressed={value === filter} key={value} onClick={() => { setFilter(value); setLookupOnly(false); }}>
+      {filters.map(value => <button type="button" className={styles.filter} aria-pressed={value === filter && !(lookupFilter && value === 'all')} key={value} onClick={() => { setFilter(value); setLookupOnly(false); }}>
         {t(source === 'catalogReviews' && value === 'awaitingReview' ? 'workbench.review_unfinished'
           : source === 'catalogReviews' && value === 'completed' ? 'workbench.review_completed'
             : source === 'catalogReviews' && value === 'needsAttention' ? 'workbench.review_luna_attention' : `workbench.${value}`)}{query.data && ` (${query.data.pages[0].counts[value]})`}</button>)}

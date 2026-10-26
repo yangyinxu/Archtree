@@ -59,10 +59,12 @@ const memberPath = (path: string) => /^tracks\.[^.]+\.artists$/.test(path);
  * answered one by one or all at once by buttons that name the applied candidate's source (MusicBrainz or iTunes), the values to check, each member's track
  * Artist row with its reason, the expected tracklist with its missing-file rows, the identity rows and the values that need no
  * answer. How many lookup answers and identity records are still needed follow the status line. Once a release this run applied
- * leaves nothing open (no active run, retry, refined status, lookup answer or identity row needing an answer) and flags no
- * iTunes-only value or artist mismatch, which are never collapsed, everything after the name box folds under one disclosure; it
- * stays mounted, so unsaved identity choices survive the fold. The panel carries the anchors the step bar links to: the panel
- * (`catalog-review-lookup`), its first open answer (`catalog-review-answers`) and its identity rows (`catalog-review-identities`).
+ * leaves nothing open (no active run, retry, refined status, lookup answer or identity row needing an answer, nor a release applied
+ * for its Album values only whose tracks still pair in more than one way while the titles can fill the numbers, whose card carries
+ * that fill, also offered under the status with why its tracks are not applied) and flags no iTunes-only value or artist mismatch, which are never collapsed,
+ * everything after the name box folds under one disclosure; it stays mounted, so unsaved identity choices survive the fold. The
+ * panel carries the anchors the step bar links to: the panel (`catalog-review-lookup`), its first open answer
+ * (`catalog-review-answers`) and its identity rows (`catalog-review-identities`).
  * Answers wait while a run is active. A read showing a newer revision or value revision (lookup applications change only
  * the latter) reads the review detail again; a refused answer reads this summary and the identity rows again. A chunk it loads
  * that cannot load asks for a reload in its place.
@@ -94,7 +96,7 @@ export function CatalogReviewSummary({ item, disabled, error, onRun, onFillNumbe
     {query.isError ? <><p role="alert">{t('common.error')}</p><button className={styles.button} type="button" disabled={query.isFetching} onClick={() => void query.refetch()}>{t('common.retry')}</button></>
       : <p role="status">{t('common.loading')}</p>}</section>;
   const { status, retry } = lookupNextStep(lookup, { available: summary.lookupAvailable, uploadsWaiting: false });
-  const release = lookup?.candidates.find(candidate => candidate.key === applied?.candidateKey)?.title ?? '—';
+  const appliedCandidate = lookup?.candidates.find(candidate => candidate.key === applied?.candidateKey), release = appliedCandidate?.title ?? '—';
   // The Album name the run searched (a song name never is: then the saved title) compares the titles, the saved draft's numbers
   // the fill; a poll's time moves the elapsed time.
   const submitted = lookup?.input.submitted, searched = submitted?.kind === 'album' ? submitted.text : item.draft.album.title;
@@ -154,8 +156,11 @@ export function CatalogReviewSummary({ item, disabled, error, onRun, onFillNumbe
     <h3 id={`${id}-${name}`}>{heading}</h3>{body}</section>;
   const identityNeeded = identity.data ? identity.data.identities.filter(row => row.needsAnswer).length + (identity.data.label?.needsAnswer ? 1 : 0) : 0;
   const identityOpen = !identity.data || identityNeeded > 0;
+  // A release this run applied for its Album values only, whose tracks still pair in more than one way, keeps its card's fill in
+  // view and offers it under the status, saying why: its tracks are not applied until the numbers pair them.
+  const numbersOpen = Boolean(fill && shown?.pairs === null && shown.run === lookup?.run && appliedCandidate?.comparison?.subset?.pairing === 'ambiguous');
   // iTunes-only values and an artist mismatch are flagged and never collapsed (owner rules), so they keep the results open.
-  const settled = Boolean(shown) && shown!.source !== 'itunes' && !mismatch && !lookupActive(lookup?.state) && answers === 0 && !retry && !refined && !identityOpen;
+  const settled = Boolean(shown) && shown!.source !== 'itunes' && !mismatch && !lookupActive(lookup?.state) && answers === 0 && !retry && !refined && !identityOpen && !numbersOpen;
   const body = <>
     {lookup?.state === 'complete' && lookup.candidates.length > 0 && <Suspense fallback={null}><CandidateChooser projectId={item.id} viewerId={access.viewerId} lookup={lookup}
       review={{ tracks: item.draft.tracks, searched, artists, fill }} disabled={busy} onChoose={candidateKey => onRun('lookup/choose', { run: lookup.run, candidateKey })} /></Suspense>}
@@ -196,10 +201,12 @@ export function CatalogReviewSummary({ item, disabled, error, onRun, onFillNumbe
     {identityNeeded > 0 && <p role="status">{t('catalog_review.identity_answers', { count: identityNeeded })}</p>}
     {retry && !closed && <div className={styles.actions}><button type="button" className={`${styles.button} ${styles.primary}`} disabled={busy} onClick={() => onRun('lookup/retry', {})}>{t('lookup.retry')}</button></div>}
     {refined?.fill === 'next' && fillButton(true)}
+    {numbersOpen && refined?.fill !== 'next' && <><p>{t('catalog_review.member_no_pairing')}</p>
+      <p>{t(appliedCandidate!.comparison!.unknownLocalDurations ? 'catalog_review.lookup_fill_hint_durations' : 'catalog_review.lookup_fill_hint', { count: fill!.count })}</p>{fillButton(false)}</>}
     {lookup && <Suspense fallback={null}><LookupProgress lookup={lookup} now={query.dataUpdatedAt || Date.now()} albumHref={closed && item.sourceStatus === 'changed' ? `/admin/catalog/album/${item.source.album.id}` : null} /></Suspense>}
     {summary.lookupAvailable && <Suspense fallback={null}><LookupBox key={box} lookup={lookup} rootLabel="" defaultText={item.draft.album.title} mode="review" disabled={busy}
       active={lookupActive(lookup?.state)} fold={lookup?.state === 'complete' && !boxNext} onSubmit={(kind, text, artist) => onRun('lookup', { kind, text, ...(artist ? { artist } : {}) })} /></Suspense>}
-    {refined?.fill === 'offer' && fillButton(false)}
+    {refined?.fill === 'offer' && !numbersOpen && fillButton(false)}
     {/* The fold keeps one element while a release is applied, so the identity rows never remount and keep unsaved choices. */}
     {shown ? <details style={{ marginTop: '.75rem' }} open={!settled}><summary style={{ cursor: 'pointer', padding: '.3rem 0' }}>{t('catalog_review.lookup_details')}</summary>{body}</details> : body}
   </section>;
