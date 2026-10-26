@@ -1306,7 +1306,7 @@
       "variables": {}
     },
     "admin.catalog_review.applied_members_note": {
-      "description": "Administrator workbench: note under an applied Album completion's list: any track Artist changes are not listed.",
+      "description": "Administrator workbench: note under an applied Album completion's list: track Artist changes are not in the list and can be checked on the original Album's tracks.",
       "delivery": [
         "runtime"
       ],
@@ -1336,6 +1336,16 @@
       ],
       "variables": {}
     },
+    "admin.catalog_review.applied_track_field": {
+      "description": "Administrator workbench: one line of an applied Album completion's list of what was updated: a track field, naming the track by its quoted title.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "field": "string",
+        "title": "string"
+      }
+    },
     "admin.catalog_review.applied_when": {
       "description": "Administrator workbench: when an applied Album completion updated the original Album, a date and time in the interface language.",
       "delivery": [
@@ -1362,14 +1372,14 @@
       "variables": {}
     },
     "admin.catalog_review.apply_confirm_copy": {
-      "description": "Album completion, Update original Album confirmation: only the changes listed update the Album, never its tracks, files, cover or visibility.",
+      "description": "Album completion, Update original Album confirmation: only the changes listed update the Album, never its audio files, cover or visibility, and no track with audio is added or removed.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.catalog_review.apply_copy": {
-      "description": "Album completion, Update original Album step: lookup values arrive selected and can be deselected; only selected changes update the Album, never its tracks, files, cover or visibility.",
+      "description": "Album completion, Update original Album step: lookup values arrive checked and can be unchecked; only checked changes update the Album, never its audio files, cover or visibility, and no track with audio is added or removed.",
       "delivery": [
         "runtime"
       ],
@@ -2454,7 +2464,7 @@
       }
     },
     "admin.catalog_review.lookup_log": {
-      "description": "Administrator workbench: existing-Album review summary, disclosure that folds a finished run's steps: how long the run took (whole minutes, 0 for under a minute, and seconds), how many searches the steps list as sent and how many releases it found.",
+      "description": "Administrator workbench: existing-Album review summary, disclosure that folds a finished run's steps: how long the run took (whole minutes, 0 for under a minute, and seconds), how many searches the steps list as sent (the MusicBrainz name searches and the iTunes searches) and how many releases it found.",
       "delivery": [
         "runtime"
       ],
@@ -2540,6 +2550,15 @@
       ],
       "variables": {}
     },
+    "admin.catalog_review.lookup_paired_by_positions": {
+      "description": "Administrator workbench: existing-Album review candidate card: the tracks pair with this release in exactly one way because of the track numbers their titles start with, naming those numbers (such as 1-01 and 1-02).",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "positions": "string"
+      }
+    },
     "admin.catalog_review.lookup_paired_by_title_positions": {
       "description": "Administrator workbench: existing-Album review candidate card: the tracks pair with this release in exactly one way because of the track numbers their titles start with.",
       "delivery": [
@@ -2554,6 +2573,13 @@
       ],
       "variables": {}
     },
+    "admin.catalog_review.lookup_partial_itunes": {
+      "description": "Administrator workbench: existing-Album review candidate chooser, after the offered or possible releases: iTunes returned more Albums than are kept and only the first four were checked on MusicBrainz, so a matching release may be missing.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.catalog_review.lookup_phase_aliases": {
       "description": "Administrator workbench: existing-Album review summary, lookup phase name inside the running line: reading other names of the credited Artists and labels. Starts lower case in English.",
       "delivery": [
@@ -2562,7 +2588,7 @@
       "variables": {}
     },
     "admin.catalog_review.lookup_phase_bridge": {
-      "description": "Administrator workbench: existing-Album review summary, lookup phase name inside the running line: searching MusicBrainz for the iTunes results. Starts lower case in English.",
+      "description": "Administrator workbench: existing-Album review summary, lookup phase name inside the running line: checking the Albums iTunes returned on MusicBrainz. Starts lower case in English.",
       "delivery": [
         "runtime"
       ],
@@ -2863,14 +2889,23 @@
       "variables": {}
     },
     "admin.catalog_review.lookup_step_bridge": {
-      "description": "Administrator workbench: existing-Album review lookup steps: searching MusicBrainz again for the titles iTunes showed.",
+      "description": "Administrator workbench: existing-Album review lookup steps: checking the Albums iTunes returned on MusicBrainz.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
+    "admin.catalog_review.lookup_step_bridge_note": {
+      "description": "Administrator workbench: existing-Album review lookup steps, second line of the row checking the Albums iTunes returned on MusicBrainz: the quoted titles are other Albums iTunes returned for the names searched, which is why their releases are among the releases found.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "titles": "string"
+      }
+    },
     "admin.catalog_review.lookup_step_bridge_titles": {
-      "description": "Administrator workbench: existing-Album review lookup steps: searching MusicBrainz again for the titles iTunes showed, with the quoted titles that are releases found.",
+      "description": "Administrator workbench: existing-Album review lookup steps: checking the Albums iTunes returned on MusicBrainz, with the quoted titles found.",
       "delivery": [
         "runtime"
       ],
@@ -2886,6 +2921,57 @@
       "variables": {
         "done": "number",
         "step": "string",
+        "total": "number"
+      }
+    },
+    "admin.catalog_review.lookup_step_counted_aliases": {
+      "description": "Administrator workbench: existing-Album review lookup steps: reading the other names of the credited Artists and labels, with how many of those lookups are done out of all.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "done": "number",
+        "total": "number"
+      }
+    },
+    "admin.catalog_review.lookup_step_counted_bridge": {
+      "description": "Administrator workbench: existing-Album review lookup steps: checking the Albums iTunes returned on MusicBrainz, with how many of those checks are done out of all.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "done": "number",
+        "total": "number"
+      }
+    },
+    "admin.catalog_review.lookup_step_counted_bridge_titles": {
+      "description": "Administrator workbench: existing-Album review lookup steps: checking the Albums iTunes returned on MusicBrainz, with how many of those checks are done out of all and the quoted titles found.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "done": "number",
+        "titles": "string",
+        "total": "number"
+      }
+    },
+    "admin.catalog_review.lookup_step_counted_details": {
+      "description": "Administrator workbench: existing-Album review lookup steps: reading the details of the releases found, with how many releases are read out of all.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "done": "number",
+        "total": "number"
+      }
+    },
+    "admin.catalog_review.lookup_step_counted_itunes": {
+      "description": "Administrator workbench: existing-Album review lookup steps: the iTunes fallback, with how many of its iTunes searches are done out of all.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "done": "number",
         "total": "number"
       }
     },
@@ -2907,6 +2993,13 @@
     },
     "admin.catalog_review.lookup_step_itunes": {
       "description": "Administrator workbench: existing-Album review lookup steps: the iTunes fallback.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_step_itunes_partial": {
+      "description": "Administrator workbench: existing-Album review lookup steps, second line of the iTunes fallback row: iTunes returned more Albums than are kept, so only the first four were checked on MusicBrainz.",
       "delivery": [
         "runtime"
       ],
@@ -3135,6 +3228,13 @@
         "elapsed": "string"
       }
     },
+    "admin.catalog_review.luna_failed_quiet": {
+      "description": "Administrator workbench: Album completion page, one quiet line for a Luna AI run that did not succeed while the metadata lookup leads: it can be ignored.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.catalog_review.manage_copy": {
       "description": "Artist attribution, cover and visibility are edited in the original Album. Changing that Album requires creating a new review before applying draft changes.",
       "delivery": [
@@ -3359,6 +3459,13 @@
     },
     "admin.catalog_review.original_value": {
       "description": "Original Album information",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.other_actions": {
+      "description": "Administrator workbench: Album completion page, label of the secondary actions after the metadata lookup summary (Luna AI and discarding the completion).",
       "delivery": [
         "runtime"
       ],
@@ -3680,6 +3787,20 @@
       ],
       "variables": {}
     },
+    "admin.catalog_review.step_update_after_choose": {
+      "description": "Administrator workbench: third completion step's state while the second step asks for a release choice: the update comes after it.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.step_update_after_numbers": {
+      "description": "Administrator workbench: third completion step's state while the second step asks for Disc and Track Numbers: the update comes after them.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.catalog_review.step_update_count": {
       "description": "Administrator workbench: third completion step's state: how many changes are selected in Update original Album.",
       "delivery": [
@@ -3792,6 +3913,13 @@
       "variables": {
         "source": "string"
       }
+    },
+    "admin.catalog_review.values_handled": {
+      "description": "Administrator workbench: existing-Album review summary, folded list of the lookup values applied or answered, which need nothing more.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
     },
     "admin.catalog_review.view_changes": {
       "description": "Review changes to apply ({count})",
@@ -4456,7 +4584,7 @@
       "variables": {}
     },
     "admin.common.last_updated": {
-      "description": "Administrator workbench: common last updated.",
+      "description": "Administrator workbench: when a project last changed.",
       "delivery": [
         "runtime"
       ],
@@ -7821,14 +7949,21 @@
       "variables": {}
     },
     "admin.workbench.review_luna_attention": {
-      "description": "Administrator workbench: filter of the Album completions queue for completions whose Luna AI run needs attention; the code appends the count.",
+      "description": "Administrator workbench: Album completions filter for completions whose Luna AI run did not succeed.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.workbench.review_luna_failed_quiet": {
+      "description": "Administrator workbench: Album completion card, Luna AI state for a run that did not succeed while the metadata lookup leads: it can be ignored.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.workbench.review_needs_attention": {
-      "description": "Needs attention",
+      "description": "Administrator workbench: Album completion card and page, Luna AI state for a run that did not succeed.",
       "delivery": [
         "runtime"
       ],

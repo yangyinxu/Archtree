@@ -40,10 +40,11 @@
  *   - an edit changed back to the saved value leaves nothing to save
  *   - a save refused because another administrator changed the value reloads the saved review and offers it
  *   - metadata lookup comes first: its controls precede the paid Luna AI button, which is never primary, and Luna AI suggestions arrive unticked
+ *   - a failed Luna AI run is one quiet line under Other actions while the lookup asks for numbers, which stay the only next step
  *   - an applied review shows no lookup summary and never reads it
  *   - filling numbers from the titles writes them into the unsaved draft, opens Edit draft and focuses Save, and the save sends only those numbers
  *   - filling numbers keeps a member's saved Track Number and sends only the empty ones, and fills nothing where a saved number disagrees with its title
- *   - lookup waits for unsaved draft edits, and the save-first message names metadata lookup
+ *   - lookup waits for unsaved draft edits, and a short message asks to save the completion draft first
  *   - a lookup submission, a choice and an answer are sent with the shown revision, and their receipts are read without a reload
  *   - a lookup refusal shows its own message and keeps no intent to retry
  *   - a lookup application at the same revision disables an open Apply confirmation once the summary notices its value revision
@@ -56,7 +57,7 @@
  *   - a number lookup filled through its pairing applies with its tracklist, and waits for it when the tracklist is deselected
  *   - a confirmation shows every selected change, member line and identity, and sends the identity items and members it showed
  *   - an apply refused because an identity needs an answer again reads the review, its summary and identity rows again and keeps nothing to retry
- *   - Discard completion follows the paid Luna AI action, is never primary, and is disabled with its reason while Luna AI runs
+ *   - Discard completion follows the paid Luna AI action under Other actions, is never primary, and is disabled with its reason while Luna AI runs
  *   - a review whose refreshed read is answered as discarded shows only the discarded notice with Back, and forgets its draft and stage
  *   - a review with Luna AI running whose poll is answered as discarded is never read again, by its poll or on window focus
  *   - a review change answered as discarded shows only the discarded notice
@@ -236,7 +237,7 @@ test('without catalog editing the Album page action stays disabled and says new 
 test('an open completion\'s note says what its lookup found, and the plain note stays when the server sends no brief', async () => {
   routeStart(undefined, reviewEligibility({ openReviewId: otherReviewId, openLookup: { state: 'complete', outcome: 'possible', answers: 0, next: 'numbers', releases: 1 } }));
   mountStart();
-  expect(await screen.findByText('This Album has an unfinished completion: found 1 release the tracks may fit; Disc and Track Numbers are needed.')).toBeVisible();
+  expect(await screen.findByText('This Album has an unfinished completion: found 1 possible release; Disc and Track Numbers are needed.')).toBeVisible();
   expect(screen.queryByText('This Album already has an unfinished completion. Open it, or start another one.')).not.toBeInTheDocument();
   expect(screen.getByRole('link', { name: 'Open Album completion' })).toHaveAttribute('href', `/admin/catalog-reviews/${otherReviewId}`);
   // The creation dialog keeps the plain note.
@@ -410,7 +411,7 @@ test('a durable unknown provider outcome prevents another paid generation while 
   expect(screen.getByRole('textbox', { name: 'Title' })).toBeEnabled();
   expect(screen.queryByRole('button', { name: 'Retry original operation' })).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('tab', { name: 'Review Luna AI suggestions' }));
-  expect(await within(screen.getByRole('tabpanel', { name: 'Review Luna AI suggestions' })).findByText('Luna AI needs attention. Check the issue above or continue editing manually.')).toBeVisible();
+  expect(await within(screen.getByRole('tabpanel', { name: 'Review Luna AI suggestions' })).findByText('Luna AI\'s last run did not succeed, so there are no suggestions to review. You can still edit the draft manually.')).toBeVisible();
   expect(fetch.mock.calls.every(([, init]) => !init?.method || init.method === 'GET')).toBe(true);
 });
 
@@ -983,6 +984,21 @@ test('metadata lookup comes first: its controls precede the paid Luna AI button,
   expect(screen.getByRole('button', { name: 'Apply selected' })).toBeDisabled();
 });
 
+test('a failed Luna AI run is one quiet line under Other actions while the lookup asks for numbers, which stay the only next step', async () => {
+  const item = pairingReview(); item.analysis = { ...item.analysis, state: 'needsAttention', generation: 1, issue: 'providerInvalidResponse' };
+  routeSummary(() => item, pairingLookupResponse);
+  mountPage();
+  const quiet = await screen.findByText('Luna AI (paid, optional): the last run did not succeed; you can ignore it.');
+  const other = screen.getByRole('region', { name: 'Other actions' }), lookup = screen.getByRole('region', { name: 'Metadata lookup' });
+  expect(other).toContainElement(quiet);
+  expect(lookup.compareDocumentPosition(other) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  // Its reason and a needs-attention state stay out; the paid button stays secondary and the fill is the only primary button.
+  expect(screen.queryByText(/could not be validated/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/needs attention/i)).not.toBeInTheDocument();
+  expect(within(other).getByRole('button', { name: 'Use Luna AI again (paid)' })).not.toHaveClass(styles.primary);
+  expect(within(lookup).getAllByRole('button', { name: 'Fill Disc and Track Numbers from titles' })[0]).toHaveClass(styles.primary);
+});
+
 test('an applied review shows no lookup summary and never reads it', async () => {
   const original = catalogReview(); original.draft.album.title = 'Reviewed saved Album';
   const item = applied(original, '30000000-0000-4000-8000-000000000003', [{ scope: 'album', slotId: null, field: 'title' }]);
@@ -1047,18 +1063,18 @@ test('filling numbers keeps a member\'s saved Track Number and sends only the em
   // A saved number that disagrees with its own title fills nothing, so no two members can claim one position.
   item = pairingReview(); item.draft.tracks[1].trackNumber = 7; item.source.tracks[1].trackNumber = 7;
   mountPage();
-  await screen.findByText(/^Found 1 possible release/);
+  await screen.findByText(/^Found 1 possible release, /);
   expect(screen.queryByRole('button', { name: 'Fill Disc and Track Numbers from titles' })).not.toBeInTheDocument();
 });
 
-test('lookup waits for unsaved draft edits, and the save-first message names metadata lookup', async () => {
+test('lookup waits for unsaved draft edits, and a short message asks to save the completion draft first', async () => {
   const item = catalogReview(); routeSummary(() => item, notStarted);
   mountPage();
   const box = await screen.findByRole('group', { name: 'Look up by name' });
   expect(box).toBeEnabled();
   fireEvent.change(screen.getByRole('textbox', { name: 'Title' }), { target: { value: 'An unsaved correction' } });
   expect(box).toBeDisabled();
-  expect(screen.getByText('Save your draft edits before looking up metadata, using Luna AI, adopting suggestions or updating the original Album.')).toBeVisible();
+  expect(screen.getByText('Save your completion draft edits before continuing.')).toBeVisible();
 });
 
 test('a lookup submission, a choice and an answer are sent with the shown revision, and their receipts are read without a reload', async () => {
@@ -1321,8 +1337,8 @@ test('a confirmation shows every selected change, member line and identity, and 
   for (const heading of ['Update Album · Synthetic catalog Album · Artists', 'Update Album · Synthetic catalog Album · Expected tracklist', 'Update Track · Synthetic second track · Track number',
     'Update Track · Synthetic second track · Artists']) expect(dialog.getByRole('heading', { name: heading })).toBeVisible();
   expect(dialog.queryByRole('heading', { name: 'Update Album · Synthetic catalog Album · Release date' })).not.toBeInTheDocument();
-  expect(dialog.getByText('Attribution: Unknown → Documented')).toBeVisible();
-  expect(dialog.getByText('Creates Synthetic guest')).toBeVisible();
+  expect(dialog.getByText('This track\'s Artist credits will be marked Documented (currently Unknown).')).toBeVisible();
+  expect(dialog.getByText('Creates Synthetic guest as new')).toBeVisible();
   expect(dialog.getByText(`Records MusicBrainz ID ${leadMusicBrainzId}`)).toBeVisible();
   expect(dialog.queryByRole('checkbox')).not.toBeInTheDocument();
   fireEvent.click(dialog.getByRole('button', { name: 'Update original Album (4)' }));
@@ -1363,11 +1379,15 @@ async function expectDiscardedPage() {
   for (const name of ['catalog-review-editor', 'catalog-review-stage', 'catalog-review-command']) await waitFor(() => expect(adminWorkspace.buffer(`${name}:${reviewId}`)).toBeUndefined());
 }
 
-test('Discard completion follows the paid Luna AI action, is never primary, and is disabled with its reason while Luna AI runs', async () => {
+test('Discard completion follows the paid Luna AI action under Other actions, is never primary, and is disabled with its reason while Luna AI runs', async () => {
   const item = catalogReview(); vi.stubGlobal('fetch', vi.fn(async () => reviewJson({ item, receipt: null })));
   mountPage();
   const discard = await screen.findByRole('button', { name: 'Discard completion' }), luna = screen.getByRole('button', { name: 'Use Luna AI again (paid)' });
   expect(luna.compareDocumentPosition(discard) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  // Both sit, visible, under their own label after the lookup summary.
+  const other = screen.getByRole('region', { name: 'Other actions' });
+  expect(within(other).getByRole('button', { name: 'Use Luna AI again (paid)' })).toBe(luna);
+  expect(within(other).getByRole('button', { name: 'Discard completion' })).toBe(discard);
   expect(discard).not.toHaveClass(styles.primary); expect(discard).toBeEnabled();
   cleanup();
   const running = catalogReview(); running.analysis = { ...running.analysis, state: 'running' };

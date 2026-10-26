@@ -69,8 +69,9 @@ export function CatalogReviewIdentities({ item, disabled, onSave }: { item: Cata
     const index = item.draft.tracks.findIndex(track => track.slotId === slotId);
     return slotId === null ? t('catalog_review.target_album') : `${index + 1} · ${item.draft.tracks[index]?.title || '—'}`;
   };
-  const hidden = (record: { visibility: string }) => record.visibility === 'hidden' ? ` · ${t('field.hidden')}` : '';
   const visibility = (record: { visibility: string }) => t('catalog_review.identity_visibility', { visibility: t(`field.${record.visibility}`) });
+  // A hidden record says so as its visibility, a status rather than an action.
+  const hidden = (record: { visibility: string }) => record.visibility === 'hidden' ? ` · ${visibility(record)}` : '';
   const answers = rows.filter(row => row.needsAnswer).length;
   // The preselected card is no decision (the preselection applies); the whole set is saved while any choice differs from the saved
   // ones.

@@ -188,8 +188,8 @@ export function CatalogReviewSummary({ item, disabled, error, onRun, onFillNumbe
     {albumOpen.length > 0 && section('conflicts', t('catalog_review.conflicts'), <ul className={styles.cards}>{albumOpen.map(conflict => card(conflict, conflictHeading(conflict)))}</ul>, open.length < 2)}
     {(itunes.length > 0 || mismatch || flagged.length > 0) && <ul aria-label={t('summary.flagged')}>
       {mismatch && <li>{t('catalog_review.artist_mismatch')}</li>}
-      {itunes.map(path => <li key={path}>{`${label(path)}: ${lookupValueText(lookupValueAt(item.draft, path))} · ${itunesMark}`}</li>)}
-      {flagged.map(flag => <li key={flag.path}>{`${label(flag.path)}: ${t(`catalog_review.flag_${flag.reason}`)}`}</li>)}</ul>}
+      {itunes.map(path => <li key={path}>{`${label(path)} · ${lookupValueText(lookupValueAt(item.draft, path))} · ${itunesMark}`}</li>)}
+      {flagged.map(flag => <li key={flag.path}>{`${label(flag.path)} · ${t(`catalog_review.flag_${flag.reason}`)}`}</li>)}</ul>}
     {members && (!members.paired || members.rows.length > 0) && section('members', t('catalog_review.members_title'), <>
       <p className={styles.muted}>{t('catalog_review.members_copy')}</p>
       {!members.paired && <p>{t(refined?.messages[0].key === 'catalog_review.lookup_applied_album_only' ? 'catalog_review.member_paired_since' : 'catalog_review.member_no_pairing')}</p>}
@@ -205,7 +205,7 @@ export function CatalogReviewSummary({ item, disabled, error, onRun, onFillNumbe
       {preview.outside.length > 0 && <p>{`${t('catalog.album_expected_outside')}: ${preview.outside.map(member).join(', ')}`}</p>}</>)}
     {item.draft.album.expectedTracklist !== undefined && shown && item.sourceStatus === 'current' && <div id="catalog-review-identities"><Suspense fallback={null}>
       <CatalogReviewIdentities item={item} disabled={busy} onSave={decisions => onRun('decisions', { decisions })} /></Suspense></div>}
-    {folded.length > 0 && <details className={styles.details}><summary>{t('summary.values')}</summary><dl>
+    {folded.length > 0 && <details className={styles.details}><summary>{t('catalog_review.values_handled')}</summary><dl>
       {folded.map(([path, text]) => <div key={path}><dt>{label(path)}</dt><dd>{text}</dd></div>)}</dl></details>}
   </>;
   // Focusable for the candidate chooser, which returns focus here once its pairing panel closes without its opener.

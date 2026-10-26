@@ -156,12 +156,12 @@ test('a looked-up review lists every change with its default, the member line, i
   expect(screen.getByRole('checkbox', { name: 'Update Track · Synthetic second track · Artists' })).toBeChecked();
   expect(member.getByText('—')).toBeVisible();
   expect(member.getByText('Synthetic guest')).toBeVisible();
-  expect(member.getByText('Attribution: Unknown → Documented')).toBeVisible();
+  expect(member.getByText('This track\'s Artist credits will be marked Documented (currently Unknown).')).toBeVisible();
   // The identities the selection owns: the lead reused (hidden) recording its ID, the guest created.
   const lines = within(screen.getByRole('heading', { name: 'Artists and label' }).closest('section')!);
-  expect(lines.getByText('Reuses Synthetic catalog Artist · Hidden')).toBeVisible();
+  expect(lines.getByText('Reuses the existing Synthetic catalog Artist · Visibility: Hidden')).toBeVisible();
   expect(lines.getByText('Records MusicBrainz ID 00000000-0000-4000-8000-0000000000a1')).toBeVisible();
-  expect(lines.getByText('Creates Synthetic guest')).toBeVisible();
+  expect(lines.getByText('Creates Synthetic guest as new')).toBeVisible();
   fireEvent.click(screen.getByRole('button', { name: 'Update original Album (4)' }));
   const sent = onConfirm.mock.calls[0][0] as ReviewApplySelection;
   expect([sent.fields, sent.memberCredits, sent.musicBrainzIds]).toEqual([[{ scope: 'album', slotId: null, field: 'artists' }, { scope: 'album', slotId: null, field: 'expectedTracklist' },
@@ -281,7 +281,7 @@ test('the confirmation repeats the frozen selection: each selected change, the A
   const dialog = screen.getByRole('dialog', { name: 'Confirm updating the original Album' }), inside = within(dialog);
   // Apply starts at the dialog itself, so a long summary is read from its start; its copy asks for no selection it cannot make.
   await waitFor(() => expect(dialog).toHaveFocus());
-  expect(dialog).toHaveAccessibleDescription('Only these changes update the original Album; tracks, their files, the cover and visibility stay in place.');
+  expect(dialog).toHaveAccessibleDescription('Only these changes update the original Album; audio files, cover and visibility stay the same, and no tracks with audio are added or removed.');
   expect(inside.getByText('Selected changes: 4')).toBeVisible();
   expect(inside.getAllByRole('heading', { level: 3 }).map(heading => heading.textContent)).toEqual(['Update Album · Synthetic catalog Album · Artists',
     'Update Album · Synthetic catalog Album · Expected tracklist', 'Update Track · Synthetic second track · Track number', 'Update Track · Synthetic second track · Artists', 'Artists and label']);
@@ -290,9 +290,9 @@ test('the confirmation repeats the frozen selection: each selected change, the A
   expect(artists.compareDocumentPosition(note) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(note.compareDocumentPosition(tracklist) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(inside.getByText('Tracks that still credit an Artist the Album no longer credits: 1 · Synthetic first track')).toBeVisible();
-  expect(inside.getByText('Attribution: Unknown → Documented')).toBeVisible();
-  expect(inside.getByText('Creates Synthetic guest')).toBeVisible();
-  expect(inside.getByText('Reuses Synthetic catalog Artist · Hidden')).toBeVisible();
+  expect(inside.getByText('This track\'s Artist credits will be marked Documented (currently Unknown).')).toBeVisible();
+  expect(inside.getByText('Creates Synthetic guest as new')).toBeVisible();
+  expect(inside.getByText('Reuses the existing Synthetic catalog Artist · Visibility: Hidden')).toBeVisible();
   expect(inside.queryByRole('checkbox')).not.toBeInTheDocument();
   fireEvent.click(inside.getByRole('button', { name: 'Update original Album (4)' }));
   expect(onConfirm).toHaveBeenCalledTimes(1);

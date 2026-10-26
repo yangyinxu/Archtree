@@ -154,11 +154,11 @@ const searchText = z.string().min(1).max(200);
 /**
  * One step of a review run's timeline: a title search (one text, and its Artist name when credited), the Track-title searches
  * (their titles), or a stage with its settled and total requests (both or neither, within 100); at most four texts. `unconfirmed`
- * is a search the run may not have sent.
+ * is a search the run may not have sent; `partial`, an iTunes step that left a result out of the comparison.
  */
 const stepSchema = z.object({ kind: z.enum(['albumArtist', 'album', 'songArtist', 'song', 'trackTitle', 'details', 'itunes', 'bridge', 'aliases']),
   state: z.enum(['done', 'unconfirmed', 'active', 'pending', 'skipped']), done: integer.max(100).optional(), total: integer.max(100).optional(),
-  texts: z.array(z.object({ text: searchText, artist: searchText.optional() }).strict()).min(1).max(4).optional() }).strict()
+  texts: z.array(z.object({ text: searchText, artist: searchText.optional() }).strict()).min(1).max(4).optional(), partial: z.literal(true).optional() }).strict()
   .refine(step => (step.done === undefined) === (step.total === undefined) && (step.done ?? 0) <= (step.total ?? 0), 'Invalid lookup step');
 /**
  * A review run's timeline: at most 12 steps, the Track-title search state where the server can say it, the run's start, last-step

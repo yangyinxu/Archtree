@@ -25,6 +25,7 @@
  *   - returning to the catalog review source reads that queue without querying imports or starting analysis
  *   - catalog review Unfinished filtering preserves the private queue contract without suggesting creation on no matches
  *   - an Album completion card leads with its metadata lookup status in plain words, and an older server's card has none
+ *   - a failed Luna AI run reads calmly, and as one to ignore while the card's lookup leads; it is never the card's thing to handle
  *   - Lookup needs you counts the loaded cards whose lookup asks for something and filters them, and an empty filtered list says no projects match
  *   - the queue reads again every 5 seconds while a lookup or Luna AI runs, every 10 while a lookup only retries, and stops once none does
  *   - the queue stops following a lookup that never advances 15 minutes after it first saw it active, and an applied card's lookup is never followed
@@ -454,7 +455,7 @@ test.each([
   { analysisState: 'running', pendingSuggestions: 1, applied: false, label: 'Luna AI running · 2/2' },
   { analysisState: 'complete', pendingSuggestions: 2, applied: false, label: 'Suggestions awaiting review · 2' },
   { analysisState: 'complete', pendingSuggestions: 0, applied: false, label: 'No pending suggestions' },
-  { analysisState: 'needsAttention', pendingSuggestions: 0, applied: false, label: 'Needs attention' },
+  { analysisState: 'needsAttention', pendingSuggestions: 0, applied: false, label: 'Last run did not succeed' },
   { analysisState: 'cancelled', pendingSuggestions: 0, applied: false, label: 'Cancelled' },
   { analysisState: 'complete', pendingSuggestions: 1, applied: true, label: 'Closed' }
 ])('catalog review status separates $analysisState analysis with $pendingSuggestions pending suggestions from applied=$applied', async ({ analysisState, pendingSuggestions, applied, label, generation }) => {
@@ -496,11 +497,28 @@ test('an Album completion card leads with its metadata lookup status in plain wo
   await screen.findByRole('heading', { name: 'Running completion' });
   const cells = (title: string) => [...cardOf(title).getAllByRole('term')].map(term => [term.textContent, term.nextElementSibling?.textContent]);
   expect(cells('Running completion')).toEqual([['Metadata lookup', 'Lookup running'], ['Original Album', 'Not updated']]);
-  expect(cells('Possible completion')[0]).toEqual(['Metadata lookup', 'Found 1 release the tracks may fit; Disc and Track Numbers needed']);
+  expect(cells('Possible completion')[0]).toEqual(['Metadata lookup', 'Found 1 possible release; Disc and Track Numbers needed']);
   expect(cells('Answers completion')[0]).toEqual(['Metadata lookup', 'Release applied; 2 lookup answers needed']);
   expect(cells('Unread completion')[0]).toEqual(['Metadata lookup', 'Lookup has not run']);
   expect(cells('Older server completion')).toEqual([['Original Album', 'Not updated']]);
   expect(cells('Applied completion')).toEqual([['Original Album', 'Updated']]);
+});
+
+test('a failed Luna AI run reads calmly, and as one to ignore while the card\'s lookup leads; it is never the card\'s thing to handle', async () => {
+  const failed = { analysis: { ...detail().analysis, state: 'needsAttention', generation: 1, issue: 'providerInvalidResponse' } };
+  stubFetch(vi.fn(async () => queue([reviewCard('a'.repeat(24), 'Possible completion', brief('complete', 'possible', 0, 'numbers', 1), failed),
+    reviewCard('b'.repeat(24), 'Applied completion', brief('complete', 'applied'), failed), reviewCard('c'.repeat(24), 'Unmatched completion', brief('complete', 'none'), failed),
+    reviewCard('d'.repeat(24), 'Older server completion', undefined, failed)])));
+  mount('/admin/imports?source=catalogReviews');
+  await screen.findByRole('heading', { name: 'Possible completion' });
+  const luna = (title: string) => [...cardOf(title).getAllByRole('term')].find(term => term.textContent === 'Luna AI (paid, optional)')!.nextElementSibling!.textContent;
+  // The lookup asks for numbers or found a release: the failed run can be ignored.
+  expect(luna('Possible completion')).toBe('Last run did not succeed; you can ignore it');
+  expect(luna('Applied completion')).toBe('Last run did not succeed; you can ignore it');
+  // Without a lookup that leads, it still reads calmly, never as needing attention.
+  expect(luna('Unmatched completion')).toBe('Last run did not succeed');
+  expect(luna('Older server completion')).toBe('Last run did not succeed');
+  expect(screen.queryByText(/needs attention/i)).not.toBeInTheDocument();
 });
 
 test('Lookup needs you counts the loaded cards whose lookup asks for something and filters them, and an empty filtered list says no projects match', async () => {
@@ -511,8 +529,8 @@ test('Lookup needs you counts the loaded cards whose lookup asks for something a
   mount('/admin/imports?source=catalogReviews');
   const chip = await screen.findByRole('button', { name: 'Lookup needs you (2)' });
   expect(chip).toHaveAttribute('aria-pressed', 'false');
-  // The Luna AI filter names its subject beside it.
-  expect(screen.getByRole('button', { name: /^Luna AI needs attention/ })).toBeVisible();
+  // The Luna AI filter names its subject beside it, in calm words.
+  expect(screen.getByRole('button', { name: /^Luna AI did not succeed/ })).toBeVisible();
   const before = reads.length;
   expect(pressed()).toEqual(['Album completions', 'All (4)']);
   fireEvent.click(chip);
@@ -617,7 +635,7 @@ test('card dates follow the interface language', async () => {
   stubFetch(vi.fn(async () => queue([reviewCard('a'.repeat(24), 'Dated completion', null)])));
   mount('/admin/imports?source=catalogReviews');
   await screen.findByRole('heading', { name: 'Dated completion' });
-  expect(cardOf('Dated completion').getByText(`Last confirmed: ${new Date('2026-10-01T00:00:00.000Z').toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' })}`)).toBeVisible();
+  expect(cardOf('Dated completion').getByText(`Last changed: ${new Date('2026-10-01T00:00:00.000Z').toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' })}`)).toBeVisible();
 });
 
 test('completed catalog reviews describe applied changes rather than an import publication', async () => {

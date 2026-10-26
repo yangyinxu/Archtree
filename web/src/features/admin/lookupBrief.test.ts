@@ -1,6 +1,6 @@
 import enBundle from '../../../../localization/generated/bundles/en-US.json';
 import zhBundle from '../../../../localization/generated/bundles/zh-Hans.json';
-import { lookupBriefMessage, lookupBriefNeedsYou, lookupBriefSchema, type LookupBrief } from './lookupBrief';
+import { lookupBriefLeads, lookupBriefMessage, lookupBriefNeedsYou, lookupBriefSchema, type LookupBrief } from './lookupBrief';
 
 /**
  * An Album completion's lookup brief in words: the message for each outcome and next step, in both families (a card's or step's
@@ -33,6 +33,12 @@ test('the lookup asks for something while answers, a choice, numbers or the free
     brief('applied', { next: 'retry' })].map(lookupBriefNeedsYou)).toEqual([true, true, true, true, true]);
   expect([brief('active', { state: 'running' }), brief('applied'), brief('matched'), brief('none'), brief('unavailable'), null, undefined].map(lookupBriefNeedsYou))
     .toEqual([false, false, false, false, false, false, false]);
+});
+
+test('the lookup leads while it asks for something, runs or applied a release; not after no match or none used, while unavailable or without a run', () => {
+  expect([brief('applied'), brief('applied', { answers: 1 }), brief('matched', { next: 'choose' }), brief('possible', { next: 'numbers' }), brief('possible', { next: 'choose' }),
+    brief('active', { state: 'running' }), brief('unavailable', { state: 'failed', next: 'retry' })].map(lookupBriefLeads)).toEqual([true, true, true, true, true, true, true]);
+  expect([brief('matched'), brief('none'), brief('unavailable', { state: 'failed' }), null, undefined].map(lookupBriefLeads)).toEqual([false, false, false, false, false]);
 });
 
 test('the brief schema accepts the server\'s brief and refuses an unknown outcome, an extra key or counts out of bounds', () => {

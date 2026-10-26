@@ -37,11 +37,12 @@ export type ViewSearchText = { text: string; artist?: string };
 /**
  * One step. A title search (`albumArtist`, `album`, `songArtist`, `song`) carries its one text; the Track-title step its titles;
  * `details`, `itunes`, `bridge` and `aliases` their settled and total requests (`done` at most `total`, both within 100), the
- * bridge also the answered searches' titles a shown candidate carries. The Track titles sent for certain and those that may not
- * have been sent are two `trackTitle` steps.
+ * bridge also the answered searches' titles a shown candidate carries. `partial` marks an iTunes step whose stage left a plausible
+ * result out of the comparison (its result bound, or a collection lookup iTunes never answered), which makes the run's comparison
+ * partial. The Track titles sent for certain and those that may not have been sent are two `trackTitle` steps.
  */
 export type ViewLookupStep = { kind: 'albumArtist' | 'album' | 'songArtist' | 'song' | 'trackTitle' | 'details' | 'itunes' | 'bridge' | 'aliases';
-    state: ViewLookupStepState; done?: number; total?: number; texts?: ViewSearchText[] };
+    state: ViewLookupStepState; done?: number; total?: number; texts?: ViewSearchText[]; partial?: true };
 /**
  * The run's Track-title searches: sent, not needed (the title searches preselected or matched), not yet decided, or skipped
  * because no title could be searched (the picker's reason) or MusicBrainz stayed unavailable.
@@ -145,7 +146,7 @@ export function catalogReviewLookupTimeline(raw: Record<string, unknown>, doc: A
     steps.push({ kind: 'details', state: stageState('details', settled, candidates.length), ...(candidates.length ? bounded(settled, candidates.length) : {}) });
     if (stage) {
         steps.push({ kind: 'itunes', state: running && phase === 'itunes' ? 'active' : stage.state === 'unavailable' ? 'skipped' : stage.requestIndex >= stage.requests.length ? 'done' : 'pending',
-            ...(stage.state === 'unavailable' ? {} : bounded(stage.requestIndex, stage.requests.length)) });
+            ...(stage.state === 'unavailable' ? {} : bounded(stage.requestIndex, stage.requests.length)), ...(stage.state !== 'unavailable' && !stage.complete ? { partial: true as const } : {}) });
         // Only an answered bridge search names its title: one left unsent when MusicBrainz's retries ran out checked nothing.
         const bridge = stage.bridge, titles = new Set(candidateTitles.map(comparableSearchText).filter(Boolean));
         const texts = [...new Set((bridge ?? []).filter((_query, index) => stage.bridgeOutcomes[index] === 'found' || stage.bridgeOutcomes[index] === 'none')

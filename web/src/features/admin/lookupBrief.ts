@@ -32,3 +32,9 @@ export function lookupBriefMessage(brief: LookupBrief | null | undefined, family
 
 /** Whether the lookup asks the administrator for something: an answer, a choice, numbers or the free retry. */
 export const lookupBriefNeedsYou = (brief: LookupBrief | null | undefined) => Boolean(brief && (brief.answers > 0 || brief.next !== null));
+/**
+ * Whether the lookup path leads the completion: it asks for something (an answer, a choice of an offered or possible release,
+ * numbers or the free retry), runs, or applied a release. A failed Luna AI run is then one quiet secondary line, never the thing
+ * to handle.
+ */
+export const lookupBriefLeads = (brief: LookupBrief | null | undefined) => Boolean(brief && (lookupBriefNeedsYou(brief) || brief.outcome === 'active' || brief.outcome === 'applied'));

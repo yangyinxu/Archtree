@@ -31,7 +31,7 @@ test('value views that cannot load ask for a reload in their place, while the ch
   await waitFor(() => expect(screen.getAllByRole('alert')).toHaveLength(screen.getAllByRole('checkbox').length + 1));
   for (const alert of screen.getAllByRole('alert')) expect(alert).toHaveTextContent('The administrator workbench was updated. Reload the page to continue');
   expect(adminWorkspace.getSnapshot().reloadRequired).toBe(false);
-  expect(screen.queryByText('Creates Synthetic guest')).not.toBeInTheDocument();
+  expect(screen.queryByText('Creates Synthetic guest as new')).not.toBeInTheDocument();
   expect(artists).toBeChecked();
   expect(screen.getByRole('checkbox', { name: 'Update Album · Synthetic catalog Album · Release date' })).toHaveAccessibleDescription('Answer its lookup conflict first');
   expect(screen.getByText('Selected changes: 4')).toBeVisible();

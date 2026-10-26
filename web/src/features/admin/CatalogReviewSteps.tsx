@@ -3,7 +3,7 @@
  *   Functions: CatalogReviewSteps, CatalogReviewLuna
  *   Re-exports: CatalogReviewApplied
  * Internal
- *   Functions: findMessage, LunaStatus
+ *   Functions: findMessage, useReviewBrief, LunaStatus
  *   Constants: ApplyCount
  * @end-catalog */
 
@@ -15,7 +15,7 @@ import type { CatalogReview } from './catalogReviewApi';
 import type { ApplyChoice } from './catalogReviewApplyModel';
 import type { CatalogReviewApplyCount as Count } from './CatalogReviewApply';
 import { catalogReviewSummaryQuery } from './catalogReviewSummaryQuery';
-import { lookupBriefMessage, type LookupBrief } from './lookupBrief';
+import { lookupBriefLeads, lookupBriefMessage, type LookupBrief } from './lookupBrief';
 import { reviewLookupBrief } from './reviewLookupBrief';
 import type { Message } from './reviewLookupStatus';
 import styles from './adminStyles';
@@ -37,9 +37,26 @@ function findMessage(brief: LookupBrief | null, title: string | null): Message {
   return lookupBriefMessage(brief);
 }
 
-/** Luna AI's status as one muted line, labelled Luna AI (paid, optional): beside its controls, or under an applied completion's steps. */
-function LunaStatus({ item }: { item: CatalogReview }) {
+/**
+ * The review's lookup brief from the summary's cached read (never polled from here; the review page's own brief,
+ * reviewLookupBrief.ts), as the steps and the Luna AI controls read it. A free retry is promised only while the source is current.
+ */
+function useReviewBrief(item: CatalogReview) {
+  const access = useAdminAccess(), captured = item.draft.album.expectedTracklist !== undefined;
+  const read = useQuery({ ...catalogReviewSummaryQuery(access, item, true), refetchInterval: false, enabled: captured });
+  const lookup = read.data?.lookup ?? null, submitted = lookup?.input.submitted;
+  const brief = reviewLookupBrief(lookup, { available: (read.data?.summary.lookupAvailable ?? false) && item.sourceStatus === 'current', members: item.draft.tracks.length,
+    searched: submitted?.kind === 'album' ? submitted.text : item.draft.album.title, artists: item.draft.album.artists.filter(entry => entry.role === 'primary').map(entry => entry.name) });
+  return { captured, read, lookup, brief };
+}
+
+/**
+ * Luna AI's status as one muted line, labelled Luna AI (paid, optional): beside its controls, or under an applied completion's
+ * steps. A failed run while the lookup path leads (`quiet`, only then) says calmly that it can be ignored.
+ */
+function LunaStatus({ item, quiet = false }: { item: CatalogReview; quiet?: boolean }) {
   const t = useAdminText(), pending = item.suggestions.filter(value => value.decision === 'pending').length;
+  if (quiet) return <p className={styles.muted}>{t('catalog_review.luna_failed_quiet')}</p>;
   const luna = item.state === 'applied' ? 'workbench.review_closed' : ['queued', 'running'].includes(item.analysis.state) ? 'workbench.review_analyzing'
     : item.analysis.state === 'needsAttention' ? 'workbench.review_needs_attention' : pending ? 'workbench.review_pending'
       : item.analysis.state === 'complete' ? 'workbench.review_handled' : item.analysis.state === 'cancelled' ? 'state.cancelled' : 'workbench.review_not_started';
@@ -52,27 +69,23 @@ function LunaStatus({ item }: { item: CatalogReview }) {
  * Administration, existing-Album reviews): find a release, answer questions, update the original Album, each with its state, the
  * first linking to the lookup summary and the second to its first open answer, its identity rows or the summary. A review
  * captured for lookup shows no state until its lookup read lands. The second step counts the lookup answers as the summary, the
- * workbench card and the Album page do, and the records to choose beside them. Once no lookup step is left (no active run, Disc and
- * Track Numbers, choice or free retry), nothing is left to answer, Luna AI is not queued or running and the Update step's
+ * workbench card and the Album page do, and the records to choose beside them. While it asks for Disc and Track Numbers or a release
+ * choice, the third step only says that the update follows it and offers no button, so the page shows one next step. Once no
+ * lookup step is left (no active run, Disc and Track Numbers, choice or free retry), nothing is left to answer, Luna AI is not
+ * queued or running and the Update step's
  * selection is ready to apply (CatalogReviewApplyCount), a polite line says so and Review changes to apply, with that step's
  * count, is the primary button; it is also primary, without a count, when that step lists changes none of which is selected
  * (manual values), and a plain one otherwise while it lists changes. When the last answer makes the changes ready and leaves the
  * focus on the page or in a folded section, the focus moves to that button. An applied completion offers what was updated
- * instead, and Luna AI's status once Luna AI was used. A free retry is promised only while the review's source is current. It
- * reads the summary's cached read (never polled from here; the review page's own brief, reviewLookupBrief.ts) and the Update
- * step's count (in that step's chunk), so its count is that step's. The chunk also holds the Luna AI controls and an applied
+ * instead, and Luna AI's status once Luna AI was used. It reads the review's brief (useReviewBrief) and the Update step's count (in
+ * that step's chunk), so its count is that step's. The chunk also holds the Luna AI controls and an applied
  * completion's list of what was updated (CatalogReviewApplied.tsx).
  */
 export function CatalogReviewSteps({ item, choices, stage, dirty, onNavigate }: { item: CatalogReview; choices: Readonly<Record<string, ApplyChoice>>;
   stage: 'draft' | 'review' | 'apply'; dirty: boolean; onNavigate: (stage: 'draft' | 'apply') => void }) {
-  const t = useAdminText(), access = useAdminAccess(), { locale } = useLocalization(), captured = item.draft.album.expectedTracklist !== undefined;
-  const read = useQuery({ ...catalogReviewSummaryQuery(access, item, true), refetchInterval: false, enabled: captured });
+  const t = useAdminText(), { locale } = useLocalization(), { captured, read, lookup, brief } = useReviewBrief(item);
   const [counted, setCounted] = useState<{ count: number; items: number; identityAnswers: number; ready: boolean } | null>(null);
   const button = useRef<HTMLButtonElement>(null), waited = useRef(false);
-  const lookup = read.data?.lookup ?? null, submitted = lookup?.input.submitted;
-  // The free retry is promised only while the source is current: a run that ended because it is not cannot be retried until then.
-  const brief = reviewLookupBrief(lookup, { available: (read.data?.summary.lookupAvailable ?? false) && item.sourceStatus === 'current', members: item.draft.tracks.length,
-    searched: submitted?.kind === 'album' ? submitted.text : item.draft.album.title, artists: item.draft.album.artists.filter(entry => entry.role === 'primary').map(entry => entry.name) });
   const release = lookup?.candidates.find(candidate => candidate.key === lookup.applied?.candidateKey)?.title ?? null;
   const applied = item.state === 'applied', active = ['queued', 'running'].includes(item.analysis.state), pending = captured && !applied && !read.data;
   const answers = brief?.answers ?? 0, records = counted?.identityAnswers ?? 0, count = counted?.count ?? 0, listed = counted?.items ?? 0;
@@ -83,8 +96,11 @@ export function CatalogReviewSteps({ item, choices, stage, dirty, onNavigate }: 
   const answer = pending || applied || brief?.outcome === 'active' ? null : brief?.next === 'numbers' ? t('catalog_review.step_answers_numbers') : choose ? t('catalog_review.step_answers_choose')
     : answers || records ? [counts && t('catalog_review.step_answers_count', { count: answers }), records && t('catalog_review.step_answers_identity', { count: records })].filter(Boolean).join(' · ')
       : brief?.next === 'choose' ? t('catalog_review.step_answers_choose') : t('catalog_review.step_answers_none');
-  // The Update step's own count of selected changes; manual values are listed there unselected.
-  const update = applied ? t('catalog_review.step_update_done', { date: when(item.applied!.at) }) : pending || counted === null ? null
+  // While the second step asks for numbers or a release choice, the update waits for it; otherwise the Update step's own count of
+  // selected changes (manual values are listed there unselected).
+  const numbers = brief?.next === 'numbers', waits = !applied && !pending && (numbers || choose || (brief?.next === 'choose' && !(answers || records)));
+  const update = applied ? t('catalog_review.step_update_done', { date: when(item.applied!.at) }) : pending ? null
+    : waits ? t(numbers ? 'catalog_review.step_update_after_numbers' : 'catalog_review.step_update_after_choose') : counted === null ? null
     : count > 0 ? t('catalog_review.step_update_count', { count }) : listed > 0 ? t('catalog_review.step_update_unselected', { count: listed }) : t('catalog_review.step_update_none');
   const clear = !applied && !pending && counted !== null && brief?.outcome !== 'active' && !brief?.next && answers + records === 0 && !active && item.capabilities.apply;
   const ready = clear && counted!.ready, primary = ready || (clear && count === 0 && listed > 0);
@@ -105,7 +121,7 @@ export function CatalogReviewSteps({ item, choices, stage, dirty, onNavigate }: 
       {cell(t('catalog_review.step_update'), update, null)}</dl></div>
     {applied && item.analysis.generation > 0 && <LunaStatus item={item} />}
     {stage === 'draft' && ready && <p role="status">{t('catalog_review.steps_ready')}</p>}
-    {stage === 'draft' && !applied && listed > 0 && <div className={styles.actions}><button ref={button} type="button" className={primary ? `${styles.button} ${styles.primary}` : styles.button}
+    {stage === 'draft' && !applied && listed > 0 && !waits && <div className={styles.actions}><button ref={button} type="button" className={primary ? `${styles.button} ${styles.primary}` : styles.button}
       disabled={dirty} onClick={() => onNavigate('apply')}>{count > 0 ? t('catalog_review.view_changes', { count }) : t('catalog_review.view_changes_plain')}</button></div>}
     {applied && stage !== 'apply' && <div className={styles.actions}><button type="button" className={styles.button} onClick={() => onNavigate('apply')}>{t('catalog_review.applied_title')}</button></div>}
   </>;
@@ -113,19 +129,21 @@ export function CatalogReviewSteps({ item, choices, stage, dirty, onNavigate }: 
 
 /**
  * Luna AI's controls on an unapplied completion: its status once Luna AI was used, Use Luna AI (paid), or Stop Luna AI while it
- * runs, then why it cannot run. Luna AI follows the metadata lookup summary as a paid, secondary action; never primary.
+ * runs, then why it cannot run. Luna AI follows the metadata lookup summary as a paid, secondary action; never primary. While the
+ * lookup path leads (lookupBriefLeads), a failed run is one quiet line that says it can be ignored, and of its issues only an
+ * unknown outcome, which keeps Luna AI from starting, is said, muted.
  */
 export function CatalogReviewLuna({ item, active, canAnalyze, busy, onAnalyze, onStop }: { item: CatalogReview; active: boolean; canAnalyze: boolean; busy: boolean;
   onAnalyze: () => void; onStop: () => void }) {
-  const t = useAdminText();
+  const t = useAdminText(), { brief } = useReviewBrief(item), issue = item.analysis.issue, quiet = item.analysis.state === 'needsAttention' && lookupBriefLeads(brief);
   return <>
-    {(item.analysis.generation > 0 || active) && <LunaStatus item={item} />}
+    {(item.analysis.generation > 0 || active) && <LunaStatus item={item} quiet={quiet} />}
     <div className={styles.actions}>{active
       ? <button className={styles.button} type="button" disabled={busy} onClick={onStop}>{t('analysis.stop')}</button>
       : <button className={styles.button} type="button" disabled={!canAnalyze} onClick={onAnalyze}>{t(item.analysis.generation ? 'catalog_review.analysis_again' : 'catalog_review.analysis_confirm')}</button>}</div>
     {active && <p role="status" className={styles.muted}>{t('catalog_review.analysis_running')}</p>}
     {!item.capabilities.analysis && <p>{t('analysis.unavailable')}</p>}
     {item.analysis.generation >= 2 && <p>{t('catalog_review.analysis_limit')}</p>}
-    {item.analysis.issue && <p role="status">{t(`issue.${item.analysis.issue}`)}</p>}
+    {issue && (!quiet || issue === 'providerOutcomeUnknown') && <p role="status" className={quiet ? styles.muted : undefined}>{t(`issue.${issue}`)}</p>}
   </>;
 }

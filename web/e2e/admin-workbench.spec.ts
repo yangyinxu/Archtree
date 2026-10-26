@@ -400,7 +400,7 @@ test('mobile administrator control and workbench remain accessible without horiz
   // The card's date reads in the interface language, as the page itself formats it.
   const date = await page.evaluate(value => new Date(value).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' }), detail().updatedAt);
   const card = page.getByRole('listitem').filter({ has: page.getByRole('link', { name: 'Synthetic Album', exact: true }) });
-  await expect(card.getByText(`Last confirmed: ${date}`, { exact: true })).toBeVisible();
+  await expect(card.getByText(`Last changed: ${date}`, { exact: true })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
   await page.screenshot({ path: '/tmp/finitude-admin-workbench-mobile.png', fullPage: true });

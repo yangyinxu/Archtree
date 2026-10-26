@@ -31,7 +31,7 @@ test('an applied completion lists the fields it wrote and when, in the interface
   const fetch = mount(applied(catalogReview(), fields));
   expect(screen.getByRole('heading', { name: 'What was updated' })).toBeVisible();
   expect(screen.getByText(`The original Album was updated on ${new Date(at).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' })}.`)).toBeVisible();
-  expect(screen.getAllByRole('listitem').map(item => item.textContent)).toEqual(['Title', 'Release date', 'Track 2 · Track number']);
+  expect(screen.getAllByRole('listitem').map(item => item.textContent)).toEqual(['Title', 'Release date', '"Synthetic second track" · Track number']);
   expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
   expect(screen.queryByRole('button')).not.toBeInTheDocument();
   // A completion never captured for lookup reads nothing.
@@ -42,7 +42,7 @@ test('a completion captured for lookup names the release its lookup applied, rea
   vi.useFakeTimers({ shouldAdvanceTime: true });
   const fetch = mount(applied(reviewAfterLookup(capturedCatalogReview()), fields));
   expect(await screen.findByText('Release used in this completion: "Synthetic catalog Album (Complete)" (MusicBrainz)')).toBeVisible();
-  expect(screen.getByText('Track Artist changes, if any, are not listed here.')).toBeVisible();
+  expect(screen.getByText('Track Artist changes, if any, are not in this list; check them on the original Album\'s tracks.')).toBeVisible();
   await vi.advanceTimersByTimeAsync(30_000);
   await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
 });
@@ -51,5 +51,5 @@ test('an apply that wrote only track Artists says so', async () => {
   mount(applied(reviewAfterLookup(capturedCatalogReview()), []));
   expect(screen.getByText('Only track Artists were updated.')).toBeVisible();
   expect(screen.queryByRole('listitem')).not.toBeInTheDocument();
-  expect(screen.queryByText('Track Artist changes, if any, are not listed here.')).not.toBeInTheDocument();
+  expect(screen.queryByText('Track Artist changes, if any, are not in this list; check them on the original Album\'s tracks.')).not.toBeInTheDocument();
 });

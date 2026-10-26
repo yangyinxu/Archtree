@@ -1115,7 +1115,7 @@ for (const variant of localizedViewports) {
     await expect(results).toHaveJSProperty('open', true);
     await expect(members.getByText(`Synthetic release track Artist · ${label('admin.catalog_review.used_lookup', { source: 'MusicBrainz' })}`, { exact: true })).toBeVisible();
     // The date answered with the lookup value is also an applied value; it folds away once, as answered, inside the results.
-    const folded = summary.locator('details details').filter({ has: page.getByText(label('admin.summary.values'), { exact: true }) });
+    const folded = summary.locator('details details').filter({ has: page.getByText(label('admin.catalog_review.values_handled'), { exact: true }) });
     await expect(folded.locator('dt').filter({ hasText: new RegExp(`^${label('admin.field.release_date')}$`) })).toHaveCount(1);
     expect(api.review().draft.album.releaseDate).toEqual({ year: 2020, month: 5, day: 1 });
     expect(api.writes.some(write => write.path.endsWith('/apply') || write.path.endsWith('/analyze'))).toBe(false);
@@ -1206,14 +1206,18 @@ for (const variant of localizedViewports) {
     await expect(application.getByRole('heading', { name: change('track', 'Synthetic first track', 'admin.field.artists'), exact: true })).toHaveCount(0);
     const lines = application.getByRole('heading', { name: label('admin.catalog_review.identities_title'), exact: true }).locator('..');
     await expect(lines.getByText(label('admin.catalog_review.identity_creates', { name: 'Synthetic guest' }), { exact: true })).toBeVisible();
-    await expect(lines.getByText(`${label('admin.catalog_review.identity_bound', { name: 'Synthetic catalog Artist' })} · ${label('admin.field.hidden')}`, { exact: true })).toBeVisible();
+    // A hidden record says so as its visibility, a status rather than an action.
+    await expect(lines.getByText(`${label('admin.catalog_review.identity_bound', { name: 'Synthetic catalog Artist' })} · ${label('admin.catalog_review.identity_visibility',
+      { visibility: label('admin.field.hidden') })}`, { exact: true })).toBeVisible();
     await capture(page, '35-completion-confirmation', width, false); await reflow(page);
     await application.getByRole('button', { name: label('admin.catalog_review.apply_action', { count: 6 }), exact: true }).click();
     await expect(page.getByRole('heading', { name: label('admin.catalog_review.applied') })).toBeVisible();
     // The Update step lists the five fields written, read-only; the steps say when; Luna AI never ran here, so no Luna AI line.
     await expect(panel.getByRole('heading', { name: label('admin.catalog_review.applied_title'), exact: true })).toBeVisible();
     await expect(panel.getByRole('listitem')).toHaveText([label('admin.field.title'), label('admin.field.release_date'), label('admin.field.artists'),
-      label('admin.field.expected_tracklist'), label('admin.summary.track_field', { position: 2, field: label('admin.field.track_number') })]);
+      label('admin.field.expected_tracklist'), label('admin.catalog_review.applied_track_field', { title: 'Synthetic second track', field: label('admin.field.track_number') })]);
+    // The sixth change, a track's Artist, is not in the list, and the note says so.
+    await expect(panel.getByText(label('admin.catalog_review.applied_members_note'), { exact: true })).toBeVisible();
     await expect(panel.getByRole('checkbox')).toHaveCount(0);
     await expect(page.getByRole('button', { name: label('admin.catalog_review.apply_action', { count: 0 }), exact: true })).toHaveCount(0);
     // The time reads in the interface language, as the page formats the apply's time.
@@ -1406,14 +1410,15 @@ for (const variant of localizedViewports) {
     await page.setViewportSize({ width, height: width === 1280 ? 720 : 844 });
     await setup(page);
     const updatedAt = '2026-10-20T12:00:00.000Z', idle = { ...catalogReview().analysis, state: 'idle', generation: 0, operationId: null, completedChunks: 0, totalChunks: 0, attemptsUsed: 0 };
-    const item = (id: string, title: string, lookup: Record<string, unknown>) => ({ id, revision: 1, createdAt: '2026-10-01T00:00:00.000Z', updatedAt, startedByMe: true,
-      state: 'reviewing', analysis: idle, albumId, title, albumTitle: 'Synthetic catalog Album', pendingSuggestions: 0, lookup });
+    const item = (id: string, title: string, lookup: Record<string, unknown>, analysis: Record<string, unknown> = idle) => ({ id, revision: 1, createdAt: '2026-10-01T00:00:00.000Z', updatedAt,
+      startedByMe: true, state: 'reviewing', analysis, albumId, title, albumTitle: 'Synthetic catalog Album', pendingSuggestions: 0, lookup });
+    const failed = { ...idle, state: 'needsAttention', generation: 1, issue: 'providerInvalidResponse' };
     let running: Record<string, unknown> = { state: 'running', outcome: 'active', answers: 0, next: null, releases: 0 }, reads = 0;
     await page.route(url => url.pathname === '/api/admin/v1/catalog-reviews', route => {
       reads++;
       const items = [item('a'.repeat(24), 'Synthetic running completion', running),
         item('b'.repeat(24), 'Synthetic possible completion', { state: 'complete', outcome: 'possible', answers: 0, next: 'numbers', releases: 1 }),
-        item('c'.repeat(24), 'Synthetic answered completion', { state: 'complete', outcome: 'applied', answers: 2, next: null, releases: 0 })];
+        item('c'.repeat(24), 'Synthetic answered completion', { state: 'complete', outcome: 'applied', answers: 2, next: null, releases: 0 }, failed)];
       return route.fulfill({ json: { items, counts: { all: 3, analyzing: 0, awaitingReview: 3, needsAttention: 0, completed: 0 }, nextCursor: null },
         headers: { 'X-Finitude-Account-Viewer': viewer, 'Cache-Control': 'no-store' } });
     });
@@ -1426,6 +1431,11 @@ for (const variant of localizedViewports) {
     // The lookup cell leads; Luna AI never ran, so it has no cell.
     await expect(card('Synthetic possible completion').getByRole('term').first()).toHaveText(label('admin.catalog_review.lookup_title'));
     await expect(card('Synthetic possible completion').getByText(label('admin.workbench.review_stage'), { exact: true })).toHaveCount(0);
+    // A failed Luna AI run on a card whose lookup needs the administrator reads calmly as one to ignore, never as the thing to handle;
+    // its filter keeps calm words too.
+    await expect(card('Synthetic answered completion').getByRole('term').filter({ hasText: label('admin.workbench.review_stage') }).locator('xpath=following-sibling::dd'))
+      .toHaveText(label('admin.workbench.review_luna_failed_quiet'));
+    await expect(page.getByRole('button', { name: new RegExp(`^${escapedText(label('admin.workbench.review_luna_attention'))} \\(`) })).toBeVisible();
     // Dates read in the interface language, as the page formats them.
     const date = await page.evaluate(([value, language]) => new Date(value).toLocaleString(language, { dateStyle: 'medium', timeStyle: 'short' }), [updatedAt, locale]);
     await expect(card('Synthetic possible completion').getByText(label('admin.common.last_updated', { date }), { exact: true })).toBeVisible();
@@ -1482,7 +1492,7 @@ test('an iTunes-only lookup result names iTunes on its answers and flags every v
   const flagged = summary.getByRole('list', { name: label('admin.summary.flagged'), exact: true }).getByRole('listitem');
   await expect(flagged).toHaveCount(5);
   for (const index of [0, 1, 2, 3]) await expect(flagged.nth(index)).toContainText(`${label('admin.lookup.itunes_only')} · ${label('admin.lookup.not_checked')}`);
-  await expect(flagged.nth(4)).toHaveText(`${label('admin.field.label')}: ${label('admin.catalog_review.flag_not_applicable')}`);
+  await expect(flagged.nth(4)).toHaveText(`${label('admin.field.label')} · ${label('admin.catalog_review.flag_not_applicable')}`);
   await capture(page, '33-review-lookup-itunes', 390); await reflow(page);
   expect(api.writes).toEqual([]);
 });
@@ -1594,10 +1604,19 @@ for (const variant of localizedViewports) {
     await expect(card.locator('strong')).toHaveText('Synthetic Live Album 2 · Synthetic Live Artist');
     await expect(card.getByText(message('admin.catalog_review.lookup_editions', { count: 2, editions: 'Digital Media (XW) · CD (JP)' }), { exact: true })).toBeVisible();
     await expect(card.getByText(message('admin.catalog_review.lookup_reason_ambiguous', { count: 2 }), { exact: true })).toBeVisible();
-    await expect(card.getByText(label('admin.catalog_review.lookup_no_tracklist'), { exact: true })).toBeVisible();
+    // Choosing it is under Other options, which says it writes Album values only; the card face does not say so again.
+    await expect(card.getByText(label('admin.catalog_review.lookup_no_tracklist'), { exact: true })).toHaveCount(0);
+    await expect(card.getByText(label('admin.catalog_review.lookup_album_only_copy'), { exact: true })).toHaveCount(1);
     await expect(card.getByText(message('admin.catalog_review.lookup_missing_rows', { count: 18 }), { exact: true })).toHaveCount(0);
     await expect(card.getByText(message('admin.catalog_review.lookup_fill_hint', { count: 2 }), { exact: true })).toBeVisible();
     expect(await classList(card.getByRole('button', { name: fillName, exact: true }))).not.toEqual(primary);
+    // The card's fill and Pair tracks by hand never touch.
+    const [cardFill, cardPair] = await Promise.all([card.getByRole('button', { name: fillName, exact: true }).boundingBox(),
+      card.getByRole('button', { name: label('admin.catalog_review.lookup_pair_by_hand'), exact: true }).boundingBox()]);
+    expect(cardPair!.y >= cardFill!.y + cardFill!.height || cardPair!.x >= cardFill!.x + cardFill!.width + 4).toBe(true);
+    // The third step waits for the numbers and offers no button of its own, so the fill stays the one next step.
+    await expect(steps.getByText(label('admin.catalog_review.step_update_after_numbers'), { exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: label('admin.catalog_review.view_changes_plain'), exact: true })).toHaveCount(0);
     await expect(card.getByRole('button', { name: label('admin.lookup.choose'), exact: true })).toHaveCount(0);
     await expect(card.getByText(label('admin.catalog_review.lookup_other_options'), { exact: true })).toBeVisible();
     await expect(card.getByText(label('admin.catalog_review.lookup_editions_choose'), { exact: true })).toBeVisible();
@@ -1614,8 +1633,10 @@ for (const variant of localizedViewports) {
     await expect(nameFold).toHaveCount(1);
     await expect(nameFold).not.toHaveAttribute('open');
     const none = summary.getByRole('button', { name: label('admin.lookup.choose_none'), exact: true });
-    const [possibleBox, foldBox, noneBox] = await Promise.all([possible.boundingBox(), folds.boundingBox(), none.boundingBox()]);
-    expect(possibleBox!.y).toBeLessThan(foldBox!.y); expect(foldBox!.y).toBeLessThan(noneBox!.y);
+    // The partial comparison is said after the possible match, never above it, and before the folded releases.
+    const partial = summary.getByText(label('admin.catalog_review.lookup_partial_comparison'), { exact: true });
+    const [possibleBox, partialBox, foldBox, noneBox] = await Promise.all([possible.boundingBox(), partial.boundingBox(), folds.boundingBox(), none.boundingBox()]);
+    expect(possibleBox!.y + possibleBox!.height).toBeLessThanOrEqual(partialBox!.y); expect(partialBox!.y).toBeLessThan(foldBox!.y); expect(foldBox!.y).toBeLessThan(noneBox!.y);
     await capture(page, '41b-review-possible-first-screen', width, false); await capture(page, '41-review-possible', width);
     await card.scrollIntoViewIfNeeded(); await capture(page, '41c-review-possible-card', width, false, false); await reflow(page);
     // Filling from another tab writes the titles' positions into Edit draft as unsaved values and focuses its Save; nothing is sent.
@@ -1650,6 +1671,15 @@ for (const variant of localizedViewports) {
     const primaries: (string | null)[] = [];
     for (const button of await summary.getByRole('button').all()) if ((await classList(button)).join() === primary.join()) primaries.push(await button.textContent());
     expect(primaries).toEqual([label('admin.lookup.choose')]);
+    // The partial comparison follows the offered release and Use none of these.
+    const [noneOffered, partialOffered] = await Promise.all([offered.getByRole('button', { name: label('admin.lookup.choose_none'), exact: true }).boundingBox(),
+      offered.getByText(label('admin.catalog_review.lookup_partial_comparison'), { exact: true }).boundingBox()]);
+    expect(noneOffered!.y).toBeLessThan(partialOffered!.y);
+    // The steps show one next step: choosing the release. The Update step waits for it, with no button, though the saved numbers
+    // are listed there.
+    await expect(steps.getByText(label('admin.catalog_review.step_answers_choose'), { exact: true })).toBeVisible();
+    await expect(steps.getByText(label('admin.catalog_review.step_update_after_choose'), { exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: label('admin.catalog_review.view_changes_plain'), exact: true })).toHaveCount(0);
     await offered.scrollIntoViewIfNeeded(); await capture(page, '43-review-offered', width, false, false); await reflow(page);
     // Using it writes its expected tracklist: 20 rows, the 18 the Album has no file for marked so.
     await use.click();
@@ -1793,8 +1823,13 @@ for (const variant of localizedViewports) {
     await expect(panel.getByText(message('admin.catalog_review.pairing_remaining', { count: 1 }), { exact: true })).toBeVisible();
     const save = panel.getByRole('button', { name: label('admin.catalog_review.pairing_save'), exact: true });
     await expect(save).toBeDisabled();
+    // A disabled primary drops the accent at full opacity, so it never reads as the live next step.
+    const look = () => save.evaluate(element => { const style = getComputedStyle(element); return [style.backgroundColor, style.opacity]; });
+    const [disabledBackground, disabledOpacity] = await look();
+    expect(disabledOpacity).toBe('1');
     await one.selectOption('1:1');
     await expect(save).toBeEnabled();
+    expect((await look())[0]).not.toBe(disabledBackground);
     await expect(panel.getByText(message('admin.catalog_review.pairing_remaining', { count: 1 }), { exact: true })).toHaveCount(0);
     await panel.scrollIntoViewIfNeeded(); await capture(page, '46-review-hand-pairing', width, false, false); await reflow(page);
     // Saving sends both tracks' Disc and Track Numbers in one save, then one choice of the release for the run the panel read.
@@ -1988,8 +2023,7 @@ for (const variant of localizedViewports) {
     await expect(rows.nth(0)).toHaveText(label('admin.catalog_review.lookup_step_done', { step: label('admin.catalog_review.lookup_step_album_artist', { text: 'Synthetic Live Album 2', artist: 'Synthetic Live Artist' }) }));
     await expect(rows.nth(1)).toHaveText(label('admin.catalog_review.lookup_step_done', { step: label('admin.catalog_review.lookup_step_album', { text: 'Synthetic Live Album 2' }) }));
     for (const title of ['Synthetic second song', 'Synthetic opening']) await expect(rows.nth(3)).toContainText(quoted(title, 'Synthetic Live Artist'));
-    await expect(rows.nth(4)).toHaveText(label('admin.catalog_review.lookup_step_active', { step: label('admin.catalog_review.lookup_step_counted',
-      { step: label('admin.catalog_review.lookup_step_details'), done: 5, total: 12 }) }));
+    await expect(rows.nth(4)).toHaveText(label('admin.catalog_review.lookup_step_active', { step: message('admin.catalog_review.lookup_step_counted_details', { done: 5, total: 12 }) }));
     await expect(rows.nth(5)).toHaveText(label('admin.catalog_review.lookup_step_pending', { step: label('admin.catalog_review.lookup_step_itunes') }));
     // Once the page has seen no new step for more than five seconds of its own clock (reads every 3 seconds), it says it waits for
     // MusicBrainz, and none of it is a live region. The stand-in seconds stay below 1000, which a plural formats without a group
@@ -2000,9 +2034,11 @@ for (const variant of localizedViewports) {
     await expect(steps.locator('[aria-live], [role="status"]')).toHaveCount(0);
     await steps.scrollIntoViewIfNeeded(); await capture(page, '47-review-steps-running', width, false, false); await reflow(page);
     // Once finished, the names searched lead, and the steps fold under the record; the name box, open while it ran and untouched,
-    // folds under Didn't find it? as filling the numbers is the next step.
-    api.seed(api.review(), { ...pairingLookupResponse().lookup!, timeline: pairingTimeline() });
-    const record = summary.getByText(message('admin.catalog_review.lookup_log', { minutes: 0, seconds: 22, searches: 5, releases: 12 }), { exact: true });
+    // folds under Didn't find it? as filling the numbers is the next step. Its iTunes fallback left results out, as CANDY LIVE 2's did.
+    const finished = pairingTimeline({ steps: pairingTimeline().steps.map(step => step.kind === 'itunes' ? { ...step, partial: true as const } : step) });
+    api.seed(api.review(), { ...pairingLookupResponse().lookup!, timeline: finished });
+    // Its searches are the five MusicBrainz name searches and the iTunes fallback's two.
+    const record = summary.getByText(message('admin.catalog_review.lookup_log', { minutes: 0, seconds: 22, searches: 7, releases: 12 }), { exact: true });
     await expect(record).toBeVisible({ timeout: 10_000 });
     const searched = label('admin.catalog_review.lookup_searched', { searches: quoted('Synthetic Live Album 2', 'Synthetic Live Artist')
       + label('admin.catalog_review.lookup_searched_then_alone', { item: quoted('Synthetic Live Album 2') })
@@ -2014,6 +2050,16 @@ for (const variant of localizedViewports) {
     await expect(rows.nth(3)).toHaveText(label('admin.catalog_review.lookup_step_done', { step: label('admin.catalog_review.lookup_step_track_title',
       { titles: await page.evaluate(([titles, language]) => new Intl.ListFormat(language, { type: 'conjunction' }).format(titles), [[quoted('Synthetic second song', 'Synthetic Live Artist'),
         quoted('Synthetic opening', 'Synthetic Live Artist')], locale] as const) }) }));
+    // Each count names what it counts. The iTunes row says only its first results were checked, and the bridge row names the title
+    // it found and why another title's releases were found.
+    await expect(rows.nth(5)).toContainText(label('admin.catalog_review.lookup_step_done', { step: message('admin.catalog_review.lookup_step_counted_itunes', { done: 2, total: 2 }) }));
+    await expect(rows.nth(5)).toContainText(label('admin.catalog_review.lookup_step_itunes_partial'));
+    await expect(rows.nth(6)).toContainText(label('admin.catalog_review.lookup_step_done', { step: message('admin.catalog_review.lookup_step_counted_bridge_titles',
+      { done: 4, total: 4, titles: quoted('Synthetic other Album 1') }) }));
+    await expect(rows.nth(6)).toContainText(label('admin.catalog_review.lookup_step_bridge_note', { titles: quoted('Synthetic other Album 1') }));
+    // Below the possible match, the partial comparison names the iTunes fallback and its bound.
+    await expect(summary.getByText(label('admin.catalog_review.lookup_partial_itunes'), { exact: true })).toBeVisible();
+    await expect(summary.getByText(label('admin.catalog_review.lookup_partial_comparison'), { exact: true })).toHaveCount(0);
     const box = summary.getByRole('group', { name: label('admin.lookup.box'), exact: true });
     const fold = summary.getByText(label('admin.catalog_review.lookup_try_another'), { exact: true });
     await expect(fold).toBeVisible();
@@ -2095,15 +2141,25 @@ test('a superseded lookup of an Album that changed offers opening the Album inst
 
 for (const variant of localizedViewports) {
   const { width } = variant;
-  test(`a release paired by its title positions says so on its card at ${width}px ${variant.locale}`, async ({ page }) => {
+  test(`a release paired by its title positions names them on its card, and an earlier failed Luna AI run stays one quiet line under Other actions at ${width}px ${variant.locale}`, async ({ page }) => {
     locale = variant.locale; test.setTimeout(60_000);
     await page.setViewportSize({ width, height: width === 1280 ? 720 : 844 });
     const paired = pairedLookupResponse().lookup!;
     const view: ReviewView = { ...paired, candidates: paired.candidates.map(entry => entry.status === 'matching'
       ? { ...entry, comparison: { ...entry.comparison!, subset: { ...entry.comparison!.subset!, pairedBy: 'titlePositions' } } } : entry) };
-    const api = await setup(page); api.seed(quietPairingReview(), view);
+    // An earlier Luna AI run that did not succeed stays one quiet line under Other actions, as the offered release leads.
+    const failed = quietPairingReview(); failed.analysis = { ...failed.analysis, state: 'needsAttention', generation: 1, issue: 'providerInvalidResponse' };
+    const api = await setup(page); api.seed(failed, view);
     await enter(page, `/finitude/admin/catalog-reviews/${reviewId}`);
-    const summary = page.getByRole('region', { name: label('admin.catalog_review.lookup_title'), exact: true }), line = label('admin.catalog_review.lookup_paired_by_title_positions');
+    const other = page.getByRole('region', { name: label('admin.catalog_review.other_actions'), exact: true });
+    await expect(other.getByText(label('admin.catalog_review.luna_failed_quiet'), { exact: true })).toBeVisible();
+    await expect(other.getByRole('button', { name: label('admin.catalog_review.analysis_again'), exact: true })).toBeVisible();
+    await expect(other.getByRole('button', { name: label('admin.catalog_review.discard'), exact: true })).toBeVisible();
+    await expect(page.getByText(label('admin.issue.provider_invalid_response'), { exact: true })).toHaveCount(0);
+    await expect(page.getByText(label('admin.workbench.review_needs_attention'), { exact: true })).toHaveCount(0);
+    // The card names the positions the titles start with.
+    const positions = await page.evaluate(language => new Intl.ListFormat(language, { type: 'conjunction' }).format(['1-01', '1-02']), locale);
+    const summary = page.getByRole('region', { name: label('admin.catalog_review.lookup_title'), exact: true }), line = label('admin.catalog_review.lookup_paired_by_positions', { positions });
     const offered = summary.getByRole('region', { name: label('admin.catalog_review.lookup_single_choice'), exact: true });
     await expect(offered.getByText(line, { exact: true })).toHaveCount(1);
     await expect(offered.getByText(line, { exact: true })).toBeVisible();

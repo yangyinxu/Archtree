@@ -203,15 +203,21 @@ partial comparison), shows at 1280 px in English and 390 px in Chinese the
 possible-pairing status, naming no paid step, with Fill Disc and Track Numbers
 from titles as its only primary button, in the first screen; Possible match (1
 release) open with one card naming both editions, the reason that the tracks fit
-in more than one way, no missing-file row count but the line that choosing
-brings in no expected tracklist, the fill again and Use Album values only under
-Other options; and the releases that do not fit as the only other section,
-folded, before Use none of these. Filling from another tab switches to Edit
+in more than one way, no missing-file row count and, on the card face, no line
+that choosing brings in no expected tracklist, which Other options says beside
+Use Album values only, and the fill again beside Pair tracks by hand, the two
+never touching; the partial-comparison line below the possible match; and the
+releases that do not fit as the only other section, folded, before Use none of
+these. The third step reads Update after entering Disc and Track Numbers, with no
+Review changes to apply. Filling from another tab switches to Edit
 draft with both Disc and Track Numbers filled and unsaved and Save completion
 draft focused, sending nothing; saving sends only those four values, after which
 the release is offered, said once, as the status, on a card naming both editions
 with its 18 missing-file rows and Use this release as the only primary button,
-which brings in the 20-row expected tracklist. At 1280 px, choosing Album values
+with Use none of these and then the partial-comparison line after it; the steps
+read Choose a release and Update after choosing a release, with no Review
+changes to apply, although the Update step lists the saved numbers. Use this
+release brings in the 20-row expected tracklist. At 1280 px, choosing Album values
 only first shows that track values are not applied, with the lookup results
 still open and Fill Disc and Track Numbers from titles on the card and as a
 plain button under the status, after why track values are not applied and the
@@ -224,32 +230,37 @@ if you leave this page, parted by dots and with no space before the dot after a
 Chinese full-width bracket; submitting the name box during the run asks first:
 Cancel sends nothing and Stop and look up again sends one lookup request. Each
 with an axe scan and no overflow, also at 320 px.
-From the same live-shaped lookup, the review page's three steps read 1 release
-may fit and Disc and Track Numbers needed, one step per row at 390 px and on one
+From the same live-shaped lookup, the review page's three steps read Found 1
+possible release and Disc and Track Numbers needed, one step per row at 390 px and on one
 row at 1280 px. An Album completion started from the Album page, once its title
 and date conflicts are answered and its identity decided, says Nothing left to
 answer and Everything is answered; you can update the original Album, with
 Review changes to apply (6) as the primary button, the same six as Update
 original Album (6), which opens the Update step and focuses its tab; after
-applying, that step lists What was updated (the five fields written) with the
-time in the interface language, offers no checkbox and no Update original Album,
+applying, that step lists What was updated (the five fields written, the track
+field named by the track's title) with the time in the interface language, a
+note that the sixth change, a track Artist, is not in the list, offers no
+checkbox and no Update original Album,
 the third step reads Updated with that time, and no Luna AI line shows, as Luna
 AI never ran. After a manual completion with Luna AI is applied, What was
 updated lists the one field written and the Luna AI line reads closed. After the
 last lookup answer and identity decision, the lookup results fold under Lookup
 results and applied values, which opens on request. The Album page's
 open-completion note, when the eligibility read carries the open completion's
-lookup brief, says in one sentence that it found 1 release the tracks may fit
-and needs Disc and Track Numbers, on its own row above Open Album completion.
+lookup brief, says in one sentence that it found 1 possible release and needs
+Disc and Track Numbers, on its own row above Open Album completion.
 The Album completions queue, at 1280 px in English and 390 px in Chinese, leads
-each card with Metadata lookup (running, 1 release the tracks may fit with Disc
-and Track Numbers needed, a release applied with 2 lookup answers needed), shows
-no Luna AI cell before Luna AI has run and dates in the interface language;
+each card with Metadata lookup (running, 1 possible release with Disc and Track
+Numbers needed, a release applied with 2 lookup answers needed), shows no Luna
+AI cell before Luna AI has run, reads a Luna AI run that did not succeed on the
+card whose lookup needs answers as Last run did not succeed; you can ignore it,
+names the Luna AI filter Luna AI did not succeed, and shows dates in the
+interface language;
 Lookup needs you (2) narrows it to the two cards that ask for something, with
 All no longer pressed or styled as chosen, and the running card turns into No
 matching release found on a later read without any action, after which the
 queue stops reading (checked at 1280 px). The mobile workbench shows an import
-card's Last confirmed date as the page formats it in English. Each with an axe
+card's Last changed date as the page formats it in English. Each with an axe
 scan and no overflow.
 From a review lookup shaped like the live Album, a running run shows its Lookup
 steps after the status at 1280 px in English and 390 px in Chinese: the searches
@@ -260,8 +271,15 @@ and, once the page has seen no new step for more than 5 seconds of its own
 clock, Waiting for MusicBrainz (last progress N seconds ago), none of it a live
 region. Once the run completes, the line This lookup searched for names the
 Album name with its Artist, then alone, then with the whole decorated name; the
-steps fold under Lookup log with the time taken (22 s), the searches sent and
-the releases found, and open on request; the name box, untouched while the run
+steps fold under Lookup log with the time taken (22 s), the searches sent (the
+five name searches and the two iTunes searches) and the releases found, and
+open on request, where each count names what it counts (releases, searches,
+checks, lookups), the iTunes row, whose stage left results out, says only the
+first 4 Albums iTunes returned were checked on MusicBrainz and the bridge row
+names the title it found and says it came back from iTunes as another Album for
+the names searched, while the partial-comparison line under the possible match
+names the iTunes fallback;
+the name box, untouched while the run
 ran, folds under Didn't find it? Look up another name, stays folded when the
 page is opened again, and opens from the keyboard. A retrying run says Too many
 requests to MusicBrainz right now with the retry time in the interface language
@@ -271,8 +289,11 @@ a lost administrator account, and MusicBrainz's retries running out each say so
 with Retry lookup. A run that ended after the Album changed offers Open the
 Album to start a new completion, which opens the Album page, shows no retry and
 leaves the step bar promising none. A matching release paired by the positions
-in its titles says Paired by the track numbers in the titles on its offered card
-and on both editions in Releases found. Each with an axe scan and no overflow,
+in its titles says Paired by: the track numbers in the titles (1-01 and 1-02)
+on its offered card and on both editions in Releases found, and an earlier Luna
+AI run that did not succeed shows only the quiet line Luna AI (paid, optional):
+the last run did not succeed; you can ignore it under Other actions, beside Use
+Luna AI again (paid) and Discard completion, without its reason. Each with an axe scan and no overflow,
 the steps and retry flows also at 320 px.
 From a review lookup shaped like the live Album but whose two track titles carry
 no positions (no Disc or Track Numbers; the first track within 3 seconds of
@@ -281,8 +302,8 @@ offers Pair tracks by hand as a plain button at 1280 px in English and 390 px in
 Chinese. Its panel names the release with 20 tracks on 2 discs, lists the first
 track's choices closest first (1-1 differs by 0.02 s, then 2-2 differs by 0.71
 s), starts the second on 1-2 with the line that only it can pair with that
-track, and keeps Save pairing and use this release disabled until the first
-track has a release track. Saving sends one review save carrying both tracks'
+track, and keeps Save pairing and use this release disabled, grey at full
+opacity rather than the accent, until the first track has a release track. Saving sends one review save carrying both tracks'
 Disc and Track Numbers and then one choice of that release, after which the
 summary shows it applied with the 20-row expected tracklist and focus on the
 lookup panel; a save whose re-rank already applied it sends no choice. A choice

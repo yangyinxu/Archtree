@@ -13,7 +13,7 @@ import { useLocalization } from '../../localization/LocalizationProvider';
 import { AdminGate, useAdminAccess, useAdminText } from './AdminAccess';
 import { adminEndpointRequest, adminRequest, filters, workbenchSchema, type WorkbenchFilter } from './adminApi';
 import { reviewWorkbenchSchema } from './catalogReviewWorkbenchApi';
-import { lookupBriefMessage, lookupBriefNeedsYou } from './lookupBrief';
+import { lookupBriefLeads, lookupBriefMessage, lookupBriefNeedsYou } from './lookupBrief';
 import { ImportStages, useOnline } from './AdminShared';
 import { AdminNav } from './AdminNav';
 import { adminWorkspace } from './adminWorkspace';
@@ -27,7 +27,8 @@ const CatalogReviewDiscard = lazy<ComponentType<ComponentProps<typeof Discard>>>
 /**
  * Separate private queues share filters; source navigation never admits analysis or catalog writes. An unfinished Album
  * completion's card leads with its metadata lookup status (the server's lookup brief; none from a server before it), then the
- * Original Album and, once Luna AI was used, its status; Lookup needs you counts and filters the loaded cards whose lookup asks
+ * Original Album and, once Luna AI was used, its status (a failed run calmly, and as ignorable while the lookup leads); Lookup needs
+ * you counts and filters the loaded cards whose lookup asks
  * for an answer, a choice, numbers or the free retry; it keeps the queue filter, All does not show as chosen while it is on, and
  * choosing a filter turns it off. The queue reads itself every 5 seconds while a
  * loaded card's Luna AI, or an unfinished card's lookup, is queued or running, every 10 while such a lookup only retries, and never
@@ -136,7 +137,8 @@ function Workbench() {
       // A finished analysis is not a catalog write; applied reviews close any historical suggestions.
       const stage = item.state === 'applied' ? 'workbench.review_closed'
         : ['queued', 'running'].includes(item.analysis.state) ? 'workbench.review_analyzing'
-        : item.analysis.state === 'needsAttention' ? 'workbench.review_needs_attention'
+        // A failed run where the lookup leads (it asks for something, runs or applied a release) is no thing to handle.
+        : item.analysis.state === 'needsAttention' ? lookupBriefLeads(item.lookup) ? 'workbench.review_luna_failed_quiet' : 'workbench.review_needs_attention'
         : item.pendingSuggestions > 0 ? 'workbench.review_pending'
         : item.analysis.state === 'complete' ? 'workbench.review_handled'
         : item.analysis.state === 'cancelled' ? 'state.cancelled' : 'workbench.review_not_started';

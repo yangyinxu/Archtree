@@ -10,6 +10,7 @@
  *   - a release applied for its Album values only, whose pairing is now single, is said to bring in its tracklist when used again
  *   - a queued or running run with progress says so with its phase and counts, its time beside it; retrying or no progress keeps the shared status
  *   - the track titles give Disc and Track Numbers only for positions of one form increasing in Album order, and only empty numbers fill
+ *   - a track title's position reads as written, of the forms the numbers are filled from, and a title without one has none
  *   - the track titles read the positions the server lookup removes, row by row of its table
  *   - each card gives one reason, the first that applies
  *   - the fit of a no-match run: an empty Album's same-title releases; else possible matches before other fits, with the cause in its order
@@ -21,7 +22,7 @@
 
 import type { ReviewLookupView } from './importLookupApi';
 import { pairedLookupResponse, pairingApplication, pairingEditions, pairingLookupResponse } from './catalogReviewLookupFixtures.testSupport';
-import { candidateReason, editionKey, elapsedText, normalizedTitle, releaseGroups, reviewAppliedAgain, reviewLookupFit, reviewLookupStatus, reviewSections, titleNumbers, titleTier } from './reviewLookupStatus';
+import { candidateReason, editionKey, elapsedText, normalizedTitle, releaseGroups, reviewAppliedAgain, reviewLookupFit, reviewLookupStatus, reviewSections, titleNumbers, titlePosition, titleTier } from './reviewLookupStatus';
 
 /**
  * The review's own reading of its lookup view, without rendering: normalized titles, releases and their editions, the sections,
@@ -221,6 +222,11 @@ test('the track titles give Disc and Track Numbers only for positions of one for
   // Titles on several discs fill nothing where a member's Disc Number was never captured.
   expect(titleNumbers(tracks(['1-01 A', '2-01 C']), new Set())).toBeNull();
   expect(titleNumbers(tracks(['1-01 A', '1-02 B']), new Set())).toEqual({ count: 2, disc: true, numbers: { 'slot-1': { trackNumber: 1 }, 'slot-2': { trackNumber: 2 } } });
+});
+
+test('a track title\'s position reads as written, of the forms the numbers are filled from, and a title without one has none', () => {
+  expect(['1-01 Synthetic opening (Live)', '1.01.合成の華', '01 - Synthetic', '  2-08   Synthetic', '7 Synthetic Rings'].map(titlePosition)).toEqual(['1-01', '1.01', '01', '2-08', '7']);
+  expect(['Synthetic opening', '01_Synthetic', '12) Synthetic', '01-Synthetic', ''].map(titlePosition)).toEqual([null, null, null, null, null]);
 });
 
 test('the track titles read the positions the server lookup removes, row by row of its table', () => {

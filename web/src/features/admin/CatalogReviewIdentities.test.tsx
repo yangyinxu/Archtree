@@ -77,7 +77,7 @@ test('a shared identity names its Album entry and each track entry and needs a c
   expect(within(guest).getByRole('radio', { name: 'Reuse the existing Synthetic guest' })).toHaveAccessibleDescription(`Visibility: Public · ${nameOnly}`);
   expect(within(guest).getByRole('radio', { name: 'Create Synthetic guest as new' })).toHaveAccessibleDescription('Created with the Album\'s visibility: Public · Choose this when none of the above is the same');
   expect(within(guest).queryByRole('combobox')).not.toBeInTheDocument();
-  expect(screen.getByText('Artists or labels to choose, existing or new: 1')).toHaveAttribute('role', 'status');
+  expect(screen.getByText('1 Artist or label still needs a choice: reuse an existing one or create a new one.')).toHaveAttribute('role', 'status');
   expect(screen.queryByRole('button', { name: 'Save decisions' })).not.toBeInTheDocument();
 });
 
@@ -131,7 +131,7 @@ test('while a choice saves, cards holding keyboard focus stay focusable and dimm
 test('a bound identity reuses its record, marks it hidden, and offers keeping or replacing its different ID, which saves with the record\'s captured revision', async () => {
   const { onSave } = mount();
   const lead = await row('Synthetic catalog Artist');
-  expect(lead.querySelector('summary')!.textContent).toBe('Synthetic catalog Artist · Reuses Synthetic catalog Artist · Hidden');
+  expect(lead.querySelector('summary')!.textContent).toBe('Synthetic catalog Artist · Reuses the existing Synthetic catalog Artist · Visibility: Hidden');
   expect(within(lead).getByRole('radiogroup', { name: 'Synthetic catalog Artist' })).toBeInTheDocument();
   expect(cards(lead)).toEqual([['Keep its current MusicBrainz ID', true, false], ['Reuse the existing Synthetic catalog Artist and give it the MusicBrainz ID the lookup found', false, false]]);
   expect(within(lead).getByRole('radio', { name: 'Keep its current MusicBrainz ID' })).toHaveAccessibleDescription('Default choice');
@@ -159,7 +159,7 @@ test('MusicBrainz IDs and record ID endings show only on request', async () => {
   expect(describedBy(radios(guest)[0])).toBe(`Visibility: Public · ${nameOnly} · It already has another MusicBrainz ID and keeps it`);
   fireEvent.click(toggle);
   expect(toggle).toHaveAttribute('aria-pressed', 'true');
-  expect(lead.querySelector('summary')!.textContent).toBe(`Synthetic catalog Artist · MusicBrainz ID ${leadMusicBrainzId} · Reuses Synthetic catalog Artist · Hidden`);
+  expect(lead.querySelector('summary')!.textContent).toBe(`Synthetic catalog Artist · MusicBrainz ID ${leadMusicBrainzId} · Reuses the existing Synthetic catalog Artist · Visibility: Hidden`);
   expect(cards(lead).map(([name]) => name)).toEqual([`Keep its MusicBrainz ID ${leadOtherMusicBrainzId}`,
     `Reuse Synthetic catalog Artist and replace its MusicBrainz ID ${leadOtherMusicBrainzId} with ${leadMusicBrainzId}`]);
   expect(describedBy(radios(lead)[1])).toBe(`Visibility: Hidden · ID ending ${leadRecordId.slice(-6)}`);
@@ -191,7 +191,7 @@ test('entries naming different Artists keep their own and offer reuse or create,
   const lead = await row('Synthetic catalog Artist');
   expect(lead.querySelector('details')).toBeNull();
   expect(within(lead).getByText(/^These credits name different Artists, so each keeps its own and no MusicBrainz ID is saved\./)).toBeInTheDocument();
-  expect(within(lead).getAllByRole('listitem').map(item => item.textContent)).toContain(`Synthetic catalog Artist · Hidden · ${leadRecordId.slice(-6)}`);
+  expect(within(lead).getAllByRole('listitem').map(item => item.textContent)).toContain(`Synthetic catalog Artist · Visibility: Hidden · ${leadRecordId.slice(-6)}`);
   expect(cards(lead).map(([name]) => name)).toEqual(['Reuse the existing Synthetic catalog Artist', 'Create Synthetic catalog Artist as new']);
   expect(describedBy(radios(lead)[0])).toBe(`Visibility: Public · ${nameOnly} · It already has another MusicBrainz ID and keeps it`);
 });

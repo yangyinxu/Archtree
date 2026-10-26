@@ -5,6 +5,7 @@
  *   Constants: started, stepped, plannedTitles
  * Tests
  *   - a review view's timeline lists its title searches with the review's own texts, its Track-title searches, release details, the iTunes fallback, its bridge and the alias lookups, each with its state and counts
+ *   - the iTunes step says when its stage left a plausible result out of the comparison; one that kept every result, or was unavailable, says nothing
  *   - a review view's timeline shows a search text only when it is the review's own title, Artist name, Track title or submitted name, and a bridge title only when a shown candidate carries it
  *   - a review view's timeline says why no Track title was searched, else whether they were sent, not needed or not yet decided
  *   - a search the record cannot vouch was sent reads as unconfirmed: past the candidate bound, after MusicBrainz's retries ran out, and Track titles the run may have stopped short of
@@ -105,6 +106,15 @@ test('a review view\'s timeline lists its title searches with the review\'s own 
     assert.deepEqual(steps(doc, { ...titlesOnly, state: 'running', phase: 'aliases', queryIndex: 2, candidates: found, itunesStage: stage({ state: 'unavailable', bridge: [] }),
         aliases: [alias(0), alias(1, 'pending')], outcome: null, completedAt: null }), [titleSteps('done')[0], titleSteps('done')[1], titleSteps('skipped')[2],
         ['details', 'done', '4/4', []], ['itunes', 'skipped', '', []], ['bridge', 'skipped', '', []], ['aliases', 'active', '1/2', []]]);
+});
+
+test('the iTunes step says when its stage left a plausible result out of the comparison; one that kept every result, or was unavailable, says nothing', () => {
+    const doc = candy(), { input, plan } = candyPlan(doc), planned = { input, queries: plan.queries, queryIndex: 5, trackTitleSearch: 'sent', creditFound: true };
+    const itunes = (extra: Record<string, unknown>) => timeline(doc, { ...planned, itunesStage: stage(extra) })!.steps.find(step => step.kind === 'itunes')!;
+    // CANDY LIVE 2's stage kept four of the albums iTunes returned, so its comparison is partial.
+    assert.deepEqual(itunes({}), { kind: 'itunes', state: 'done', done: 2, total: 2, partial: true });
+    assert.deepEqual(itunes({ complete: true }), { kind: 'itunes', state: 'done', done: 2, total: 2 });
+    assert.deepEqual(itunes({ state: 'unavailable', bridge: [] }), { kind: 'itunes', state: 'skipped' });
 });
 
 test('a review view\'s timeline shows a search text only when it is the review\'s own title, Artist name, Track title or submitted name, and a bridge title only when a shown candidate carries it', () => {

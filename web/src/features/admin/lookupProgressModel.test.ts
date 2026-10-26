@@ -15,11 +15,15 @@ test('the names searched are the done title searches whose text is shown, in ord
     .toEqual([{ text: 'Synthetic Live Album 2', artist: 'Synthetic Live Artist' }]);
 });
 
-test('the record counts whole minutes and seconds from the start to the end, else the last step, never below zero; Track titles count only once sent, and no search the run may not have sent', () => {
-  expect(lookupRecord(lookup())).toEqual({ minutes: 0, seconds: 22, searches: 5, releases: 12 });
+test('the record counts whole minutes and seconds from the start to the end, else the last step, never below zero; Track titles count only once sent, the iTunes searches done count too, and no search the run may not have sent', () => {
+  // Three title searches, two Track titles and the iTunes fallback's two searches; the bridge's four checks are not searches.
+  expect(lookupRecord(lookup())).toEqual({ minutes: 0, seconds: 22, searches: 7, releases: 12 });
   expect(lookupRecord(lookup({ timeline: pairingTimeline({ completedAt: null, updatedAt: '2026-10-22T01:30:00.000Z' }) }))).toMatchObject({ minutes: 5, seconds: 8 });
   expect(lookupRecord(lookup({ timeline: pairingTimeline({ completedAt: '2026-10-22T01:20:00.000Z' }) }))).toMatchObject({ minutes: 0, seconds: 0 });
-  expect(lookupRecord(lookup({ timeline: pairingTimeline({ trackTitleSearch: { state: 'notNeeded' } }) }))!.searches).toBe(3);
+  expect(lookupRecord(lookup({ timeline: pairingTimeline({ trackTitleSearch: { state: 'notNeeded' } }) }))!.searches).toBe(5);
+  // An iTunes fallback counts the searches it has done, also in a run that ended before its last; one that never ran counts none.
+  const itunes = (step: NonNullable<ReviewLookupView['timeline']>['steps'][number]) => lookupRecord(lookup({ timeline: pairingTimeline({ steps: [...pairingTimeline().steps.slice(0, 3), step] }) }))!.searches;
+  expect([itunes({ kind: 'itunes', state: 'done', done: 3, total: 3 }), itunes({ kind: 'itunes', state: 'pending', done: 1, total: 2 }), itunes({ kind: 'itunes', state: 'skipped' })]).toEqual([6, 4, 3]);
   expect(lookupRecord(lookup({ timeline: pairingRunningTimeline('2026-10-22T01:25:00.000Z'), candidates: [] }))).toEqual({ minutes: 0, seconds: 8, searches: 3, releases: 0 });
   // The search by the name alone and the second Track title may not have gone out.
   const steps = pairingTimeline().steps, titles = steps[3].texts!;

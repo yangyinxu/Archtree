@@ -260,8 +260,9 @@ summary only presents it:
   questions, including keeping or replacing a reused record's ID, stay in
   Review and the confirmation; the summary counts the rows the server says still
   need one. The candidate chooser discloses how many files have an unknown
-  duration or Disc Number, which ranking never counts as agreement, and says
-  when not every release found was compared with the files. It marks
+  duration or Disc Number, which ranking never counts as agreement, and, after
+  the releases it offers or lists, never above them, says when not every
+  release found was compared with the files. It marks
   each iTunes-only candidate "iTunes only", and "Not checked against
   MusicBrainz" when it is `notChecked`.
 - **Offered, not needed.** The only matching group of a partial comparison
@@ -1301,7 +1302,9 @@ completion** (primary) and **Start another completion**, with any reason the
 action is unavailable under the buttons. Each such reason (unsaved catalog
 edits, catalog editing turned off, or the Album's ineligibility) is the
 buttons' accessible description, and a disabled completion button loses the
-accent so it never reads as the live action. **Convert to MP3** and **Refresh
+accent so it never reads as the live action, as does every disabled primary
+button on the administrator pages (grey at full opacity), such as **Save pairing
+and use this release** while a track still needs a release track. **Convert to MP3** and **Refresh
 status** follow on a quieter row of their own, with fainter outlines, in the
 same keyboard order. On a single-column hero the completion buttons fill their
 row. The completion block keeps the primary button's place while its chunk and
@@ -1345,20 +1348,25 @@ matching release to choose, how many releases that may fit were found and
 whether Disc and Track Numbers are needed, no release used, or
 **No matching release found**. **Original Album** follows, then
 **Luna AI (paid, optional)** only once Luna AI was used (queued, running or a
-generation above 0); an applied card shows no lookup cell, nor does a card from
+generation above 0), where a run that did not succeed reads **Last run did not
+succeed**, or **Last run did not succeed; you can ignore it** while the card's
+lookup leads (it asks for an answer, a choice of an offered or possible
+release, numbers or the free retry, runs, or applied a release), so it never
+reads as the thing to handle; an applied card shows no lookup cell, nor does a card from
 a release before lookup briefs. **Lookup needs you (N)**, after the filters,
 narrows the cards loaded so far to unfinished completions whose lookup asks for
 an answer, a choice, Disc and Track Numbers or the free retry; N counts them
 among those cards, **Load more** can add to both, the chip shows only while N is
 above 0 or it is on, it keeps the queue filter, **All** does not show as chosen
 while it is on, and choosing another filter turns it off. On this queue
-the needs-attention filter reads **Luna AI needs attention**. The queue reads
+the needs-attention filter reads **Luna AI did not succeed**. The queue reads
 itself again every 5 seconds while a loaded card's Luna AI, or an unfinished
 card's metadata lookup, is queued or running, every 10 seconds while such a
 lookup only waits to retry, and stops when none is, while offline, and 15
 minutes after it first saw a lookup active (a run that never advances, such as
 one queued while imports are off); **Refresh status** and returning to the tab
-still read it. Card dates follow the interface language, as on the import page.
+still read it. Card dates (**Last changed:**) follow the interface language, as
+on the import page.
 **Save completion draft**
 changes only the private draft and sends only the values edited since the saved
 draft was loaded (an edit changed back is no change), so it never overwrites
@@ -1392,8 +1400,12 @@ dash while a run is active and once applied. **Update original Album** shows
 how many changes the Update step has selected as it stands (that step's own
 count), how many it lists to select (manual values are not selected by
 default), **No changes yet**, or, once applied, **Updated** with the date and
-time in the interface language. While that step lists changes,
-**Review changes to apply** opens it, with its count once something is
+time in the interface language; while **Answer questions** asks for Disc and
+Track Numbers or a release choice, it says only that the update follows
+(**Update after entering Disc and Track Numbers** or **Update after choosing a
+release**) and the steps offer no button, even where the Update step lists saved
+numbers, so the page shows one next step. Otherwise, while that step lists
+changes, **Review changes to apply** opens it, with its count once something is
 selected. Once no lookup step is left (no active run, Disc and Track Numbers,
 choice or free retry), nothing is left to answer, Luna AI is not queued or
 running and the Update step's selection is ready to apply (the source current,
@@ -1408,7 +1420,14 @@ unsaved edits. An applied review's steps offer **What was updated** instead,
 which opens the Update step. Once Luna AI was used (queued, running or a
 generation above 0), one muted line gives **Luna AI (paid, optional)** and its
 state: above the Luna AI controls on an unapplied review, under the steps on an
-applied one. Then an unapplied review shows its **Metadata lookup** summary,
+applied one. A run that did not succeed reads **Last run did not succeed**, with
+its issue below; while the lookup leads (as on the workbench card), it is
+instead the one quiet line **Luna AI (paid, optional): the last run did not
+succeed; you can ignore it.**, and of its issues only an unknown provider
+outcome, which keeps Luna AI from starting, is said, muted. On an unapplied
+review the Luna AI controls and **Discard completion** follow the lookup summary
+under **Other actions**, a visible label rather than a fold, so Luna AI stays
+visible and secondary. Then an unapplied review shows its **Metadata lookup** summary,
 above its tabs and loaded as its own chunk (a chunk that cannot load, the
 summary's or one it loads, asks for a reload in its place, leaving manual
 editing usable): the lookup status, refined for a review (see the review's
@@ -1416,8 +1435,8 @@ lookup summary below), with the free **Retry lookup** (or, for a run that
 ended because the Album changed, **Open the Album to start a new completion**)
 or, where entering the numbers is the next step, **Fill Disc and Track Numbers
 from titles** as its only primary button, or while a run is queued or running
-its progress line; right after the status, whether applying waits for an
-active run, how many lookup answers are still needed and how many records the
+its progress line; right after the status, while a run is active, that the
+original Album can be updated once metadata lookup finishes, how many lookup answers are still needed and how many records the
 identity rows still need; the run's steps, open while a run is queued, running
 or retrying and, once it ended, folded under its record after a line naming
 what a completed run searched; the name box prefilled with the last submitted
@@ -1439,9 +1458,10 @@ track title**),
 from two open conflicts **Keep all current** and **Use all MusicBrainz** (or
 iTunes), each answering every open conflict in one request, member conflicts
 included; the Album's conflicts with **Keep current** and **Use MusicBrainz**
-(**Use iTunes** for an iTunes-only result) per row; the values to check (iTunes
-only and not checked, an artist mismatch, a label not applicable, values lookup
-could not apply); **Track Artists**, one row per member filled from its own
+(**Use iTunes** for an iTunes-only result) per row; the values to check, each
+the field, a dot and its value or reason (iTunes only and not checked, an artist
+mismatch, a label this completion cannot change, which is edited on the original
+Album, values lookup could not apply); **Track Artists**, one row per member filled from its own
 release track, in conflict with the same answers per row, or unchanged with its
 reason (no usable track credit, a placeholder, not all its Credits shown, left
 out for its characters, length or format, over the review limits, unpaired), and
@@ -1463,13 +1483,15 @@ choice, stay focusable and ignore choices, so focus stays on the choice, a
 choice the server refused is marked unsaved with **Save decisions** to send it
 again, after a save with an unknown outcome the page's **Retry original
 operation** sends it again, a stored choice whose record changed since shows no
-card chosen, only a bound row that needs no answer is folded, and MusicBrainz
+card chosen, only a bound row that needs no answer is folded (its summary names
+the record it reuses and, for a hidden record, **Visibility: Hidden**, a status
+rather than an action), and MusicBrainz
 IDs show only after **Show MusicBrainz IDs**, except where rows of one name need
 them, as do record ID endings except where records of one name need them; that
 button is offered only while a row has a MusicBrainz ID of its own, since a
 record's shows only beside it, so there is none when neither the lookup nor the
 captured Album supplied one, as with an iTunes-only result for Artists without
-MusicBrainz IDs; and the values that need no answer, folded, each once.
+MusicBrainz IDs; and **Lookup values applied or answered**, folded, each once.
 Once the release applied to the draft leaves nothing open (no active run, free
 retry, refined status, lookup answer or identity row that needs a record, and no
 release applied for its Album values only whose tracks still pair in more than
@@ -1502,9 +1524,11 @@ Update step shows **What was updated** in place of the selection, with when the
 original Album was updated (in the interface language), each field the apply
 wrote (`applied.fields`, named as in the selection: the Album's title, date,
 Artists, label and expected tracklist, and each Track's title, Disc and Track
-Number), for a review captured for lookup a note that any track Artist changes
-are not listed, or that only track Artists were updated when the apply wrote no
-listed field, and the release its metadata lookup applied, if any, with its
+Number, a Track named by its quoted title as the selection names it, by its
+position only when untitled), for a review captured for lookup a note that
+track Artist changes, if any, are not in the list and can be checked on the
+original Album's tracks, or that only track Artists were updated when the apply
+wrote no listed field, and the release its metadata lookup applied, if any, with its
 source. It offers no **Update original Album** and no count.
 **Discard completion** (never primary) follows the Luna AI controls on an
 unapplied review page, whatever its source status, and ends each unfinished card
@@ -1614,7 +1638,8 @@ lists, in this order, the Album's title and date, its Artist entries and label
 tracklist (the rows kept and the rows it stores, with their missing-file rows
 after the selected changes), each Track's title, Disc Number and Track Number,
 and one line per member whose Credits change (current and new Credits, every
-Credit removed, and its attribution change, such as Unknown → Documented). It
+Credit removed, and its attribution change in a sentence: the track's Artist
+credits will be marked Documented, currently Unknown). It
 reads the review's lookup summary and its identity read (`GET /candidates`,
 whose `selection` names the Artist entry lists and label it shows and whose
 `keptTracklist` is the Album's captured tracklist): every review-only item (the
@@ -1802,10 +1827,17 @@ needed because the name searches found a matching release; skipped because the
 titles start with a track number like file names, equal or look like their file
 names, are generic, or none is distinctive enough; or not sent because
 MusicBrainz was unavailable. Reading release details, the iTunes fallback (or
-**not needed**, or **iTunes was unavailable**), checking iTunes results on
-MusicBrainz (with the titles of its answered searches that match a release
-found) and reading Artist and label aliases follow, with their done and total
-counts. While a run is queued, running or retrying the steps show open after the
+**not needed**, or **iTunes was unavailable**), checking the Albums iTunes
+returned on MusicBrainz (with the titles of its answered searches that match a
+release found) and reading Artist and label aliases follow, with their done and
+total counts, each naming what it counts: **Read release details (12 of 12
+releases)**, **iTunes fallback (2 of 2 searches)**, **Check the Albums iTunes
+returned on MusicBrainz (4 of 4 checks), found "X"** and **Read Artist and label
+aliases (4 of 4 lookups)**. An iTunes row whose stage left results out of the
+comparison (`partial`) adds a line that iTunes returned many Albums, so only the
+first 4 were checked on MusicBrainz, and a bridge row with titles adds that they
+came back from iTunes as other Albums for the names searched, so their
+MusicBrainz releases are among the releases found. While a run is queued, running or retrying the steps show open after the
 status; while it is running and the page has seen no new step
 (`timeline.updatedAt`) for more than 5 seconds of its own clock (from the read
 that first brought that step to the summary's last read), a line above them says
@@ -1815,9 +1847,11 @@ behind it never shows or hides the line, and a page opened during a long wait
 shows it from its first read more than 5 seconds later. Once a run ended, the
 steps fold under **Lookup log: took N s · N searches · N releases found**
 (**took N min N s** from a minute; from `timeline.startedAt` to `completedAt`,
-else the last step; the title searches done and the Track titles of a done row
-once sent, never a search the run may not have sent; every candidate, as
-**Releases found** counts them), which opens on request.
+else the last step; the title searches done, the Track titles of a done row
+once sent and the iTunes searches its iTunes row counts as done, never a search
+the run may not have sent nor the bridge's checks, so the count matches the
+rows; every candidate, as **Releases found** counts them), which opens on
+request.
 
 After a run that completed with no issue, a line before the folded steps names
 the searches it sent whose text is shown, in order (**This lookup searched for
@@ -1844,7 +1878,13 @@ editions' media and countries, then **Other releases the tracks may fit** (other
 unverified candidates: a similar title first, then a credit that agrees with the
 Album's primary Artists, then the server's order) and **Releases that do not fit
 or could not be read** (non-matching and incomplete candidates), both folded,
-and **Use none of these** after them. A release card acts for the edition this
+and **Use none of these** after them. A partial comparison is said after the
+possible matches and before the folded sections (in the offered or tie view,
+after **Use none of these**), never above the release it qualifies; where the
+run's timeline marks its iTunes step `partial`, it says that iTunes returned
+many Albums and only the first 4 were checked on MusicBrainz, so a matching
+release may not be listed, else that not every release found was compared. A release card
+acts for the edition this
 run chose, else its first, and lists each other edition under **Choose another
 edition**, so every candidate stays selectable; its previews load at once, a
 folded section's once it is opened. Each review card without a proposal shows
@@ -1855,19 +1895,24 @@ paired release track has no duration; the Album has no members; the release has
 too few audio tracks; members no track can pair with; members that cannot each
 take a different track; a tracklist over its bounds or invalid; or details that
 could not be fetched. The missing-file row count appears only when the pairing
-is single or the Album has no members; otherwise the card says that choosing
-brings in no expected tracklist or track details, and **Where each track sits on
+is single or the Album has no members (its rows without a file are shown only on
+admin pages); otherwise the card says that using the release writes Album values
+only, with no expected tracklist or track details, except on a possible match
+whose choice sits under **Other options**, which says so there, and **Where each track sits on
 the release** shows only for a single pairing of an Album with members. A card
 whose pairing the
-positions or the half-second tier made single (`pairedBy`) also says **Paired
-by the track numbers in the titles**, **Paired by the track numbers in the file
-names** or **Paired by the closest durations**, and while any candidate carries
+positions or the half-second tier made single (`pairedBy`) also says, as a
+labelled reason, **Paired by: the track numbers in the titles** (naming the
+positions the saved titles start with, as **(1-01 and 1-02)**, or the first and
+last when there are more than three), **Paired by: the track numbers in the file
+names** or **Paired by: the closest durations**, and while any candidate carries
 it the unknown-Disc-Number disclosure stays out. On a possible match with
 members whose pairing is not single, **Use this release** moves under **Other
 options** as **Use Album values only (title, Artists, label, release date)**
 with that warning, enabled exactly when the plain button would be, and each
 other edition in that state is offered for its Album values only too; the card
-also offers **Pair tracks by hand** (below) before **Other options**. While no
+also offers **Pair tracks by hand** (below), in one spaced row with the fill
+where the card offers it, before **Other options**. While no
 possible match pairs with the members in exactly one way, the first such card
 offers **Fill Disc and Track Numbers from titles** with a hint naming
 how many members get a number (saving then compares again for free or, where a
@@ -3272,6 +3317,23 @@ roll back to:
   keys, so reload open workbench tabs after rolling back across them. After
   deploying them, a Web client's cached bundle from before them is refused once
   for lacking those keys, so it shows English until the new bundle loads.
+- The completion flow's calmer copy, the partial comparison said after the
+  releases it qualifies, the lookup log's iTunes and bridge notes, the quiet
+  failed Luna AI line under **Other actions**, the third step that waits while a
+  release choice or numbers are needed and the clearly disabled primary buttons
+  need no floor of their own; no route, collection, index or stored shape
+  changes, and they store nothing. A review's lookup view adds `partial` to the
+  timeline's `itunes` step, which a release before them leaves out and this Web
+  reads as no iTunes note, saying the partial comparison without naming iTunes. A
+  Web tab opened before them cannot parse a review view carrying it, so reload
+  open admin Web tabs after deploying or rolling back across them. They change
+  message values and add message keys; every earlier key and its variables are
+  kept, so Web, iOS and Android clients accept this release's remote bundles. A
+  Web tab opened after them keeps its active bundle instead of accepting a
+  remote bundle from a release before them, which lacks the new keys, so reload
+  open workbench tabs after rolling back across them. After deploying them, a
+  Web client's cached bundle from before them is refused once for lacking those
+  keys, so it shows English until the new bundle loads.
 - Pairing tracks by hand needs no floor of its own; no collection, index, stored
   shape or view shape changes, and its read stores nothing. A release before it
   answers the pairing route as not found, so a Web tab opened after it shows the
@@ -4701,7 +4763,10 @@ on without sending it (the candidate bound). Then, where the plan holds
 Track-title searches or a reason can be given, one `trackTitle` step (or two,
 below); then `details`, `itunes`, `bridge` and `aliases` with `done` and `total`
 (settled and all requests: integers, both or neither, `done` at most `total` and
-`total` at most 100). `itunes` is `skipped`, without counts, when its stage is
+`total` at most 100). `itunes` also carries `partial: true` when its stage left a
+plausible result out of the comparison (its result bound of 4, or a collection
+lookup iTunes never answered; the stage's `complete` is false), which makes the
+run's comparison partial. `itunes` is `skipped`, without counts, when its stage is
 unavailable and in a complete run without a stage (the fallback was not needed,
 the review skip applied or the run had no iTunes request); `bridge` is listed
 only with a readable stage or while the run is not complete. A step's `texts` (1

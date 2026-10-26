@@ -70,8 +70,8 @@ const discardedError = (error: unknown) => error instanceof ApiError && error.ki
 /**
  * Existing-catalog suggestions stay private until a separately frozen field selection is approved. The page leads with the
  * completion's three steps (CatalogReviewSteps.tsx) above the lookup summary; an unapplied review offers its Luna AI controls
- * after the summary, then Discard completion; an applied one's Update original Album step lists what was updated, read-only. A
- * review discarded meanwhile shows only the discarded notice with Back.
+ * after the summary, then Discard completion, both under Other actions; an applied one's Update original Album step lists what was
+ * updated, read-only. A review discarded meanwhile shows only the discarded notice with Back.
  */
 function ReviewProject({ id }: { id: string }) {
   const t = useAdminText(), access = useAdminAccess(), online = useOnline();
@@ -175,14 +175,16 @@ function ReviewProject({ id }: { id: string }) {
           setEditor({ ...editor, draft, dirty: reviewDraftChanges(editor.base, draft).length > 0 }); setStage('draft'); setFilled(Object.keys(numbers).length);
           setTimeout(() => document.getElementById('catalog-review-save')?.focus());
         }} /></Suspense>}
-      {item.state !== 'applied' && <>
+      {/* Other actions: Luna AI and discarding, secondary to the lookup summary and always visible under their own label. */}
+      {item.state !== 'applied' && <section aria-labelledby="catalog-review-other">
+        <h2 id="catalog-review-other" className={styles.meta} style={{ margin: '1.5rem 0 0' }}>{t('catalog_review.other_actions')}</h2>
         <Suspense fallback={null}><CatalogReviewLuna item={item} active={active} canAnalyze={canAnalyze} busy={mutation.running || Boolean(mutation.intent) || !online}
           onAnalyze={() => setConfirmation({ kind: 'analyze', item })} onStop={() => mutate('cancel-analysis', {})} /></Suspense>
         {/* Never primary, whatever the source status; unsaved edits do not block it, since its confirmation says they are removed. */}
         <Suspense fallback={null}><CatalogReviewDiscard id={id} albumId={item.source.album.id} albumTitle={item.source.album.title} draftTitle={item.draft.album.title}
           expectedRevision={item.revision} disabled={mutation.running || Boolean(mutation.intent) || active} reason={active ? 'catalog_review.discard_luna' : null}
           onDiscarded={() => navigate(item.sourceStatus === 'unavailable' ? '/admin/imports?source=catalogReviews' : `/admin/catalog/album/${item.source.album.id}`)} /></Suspense>
-      </>}
+      </section>}
       <details className={styles.details}><summary>{t('catalog_review.context_title')}</summary><p>{t('catalog_review.context_copy')}</p><p>{t('catalog_review.manage_copy')}</p></details>
       <div className={styles.actions}><Link className={styles.link} to={originalHref}>{t('catalog_review.manage_original')}</Link></div>
       <div role="tablist" aria-label={t('catalog_review.title')} className={styles.filters}>

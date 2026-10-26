@@ -200,12 +200,12 @@ test('an iTunes-only application names iTunes on its answers and flags each valu
   expect(within(conflicts).getAllByText('iTunes')).toHaveLength(2);
   const flagged = within(section()).getByRole('list', { name: 'Values to check' });
   expect(within(flagged).getAllByRole('listitem').map(item => item.textContent)).toEqual([
-    'Artists: Synthetic catalog Artist feat. Synthetic guest · iTunes only · Not checked against MusicBrainz',
-    'Expected tracklist: 1.1 Synthetic first track · 1.2 Synthetic missing track · 1.3 Synthetic second track · iTunes only · Not checked against MusicBrainz',
-    'Track 2 · Track number: 3 · iTunes only · Not checked against MusicBrainz', 'Track 2 · Artists: Synthetic guest · iTunes only · Not checked against MusicBrainz',
-    'Label: Not applicable: this completion does not show every Credit this value would change']);
+    'Artists · Synthetic catalog Artist feat. Synthetic guest · iTunes only · Not checked against MusicBrainz',
+    'Expected tracklist · 1.1 Synthetic first track · 1.2 Synthetic missing track · 1.3 Synthetic second track · iTunes only · Not checked against MusicBrainz',
+    'Track 2 · Track number · 3 · iTunes only · Not checked against MusicBrainz', 'Track 2 · Artists · Synthetic guest · iTunes only · Not checked against MusicBrainz',
+    'Label · Not applied: this completion cannot change it; edit it on the original Album']);
   // Nothing an iTunes-only result wrote is folded away.
-  expect(within(section()).queryByText('Values that need no answer')).not.toBeInTheDocument();
+  expect(within(section()).queryByText('Lookup values applied or answered')).not.toBeInTheDocument();
 });
 
 test('the label flag, and an artist mismatch only for this run\'s preselection, are values to check; MusicBrainz values are folded', async () => {
@@ -213,8 +213,8 @@ test('the label flag, and an artist mismatch only for this run\'s preselection, 
   const flagged = await within(rendered.section()).findByRole('list', { name: 'Values to check' });
   expect(within(flagged).getAllByRole('listitem').map(item => item.textContent)).toEqual([
     'The applied release credits an artist that none of this Album\'s primary Artists names. Check the Artist entries before applying.',
-    'Label: Not applicable: this completion does not show every Credit this value would change']);
-  const fold = within(rendered.section()).getByText('Values that need no answer').closest('details')!;
+    'Label · Not applied: this completion cannot change it; edit it on the original Album']);
+  const fold = within(rendered.section()).getByText('Lookup values applied or answered').closest('details')!;
   expect([...fold.querySelectorAll('dt')].map(term => term.textContent)).toEqual(['Artists', 'Expected tracklist', 'Track 2 · Track number']);
   expect(within(fold).getByText('Synthetic catalog Artist feat. Synthetic guest')).toBeInTheDocument();
   cleanup();
@@ -235,7 +235,7 @@ test('Track Artists show a member filled from its own release track, one in conf
   expect(filled.textContent).toBe('2 · Synthetic second trackSynthetic guest · Filled from its own release track');
   // The member conflict is answered in its own row, never among the Album's.
   expect(within(screen.getByRole('region', { name: 'Lookup values that differ from the Album\'s' })).queryByText('1 · Synthetic first track')).not.toBeInTheDocument();
-  for (const [reason, text] of [['noTrackCredit', 'Unchanged: its own release track has no usable artist credit'], ['placeholder', /only a placeholder/], ['notApplicable', /^Not applicable/],
+  for (const [reason, text] of [['noTrackCredit', 'Unchanged: its own release track has no usable artist credit'], ['placeholder', /only a placeholder/], ['notApplicable', 'Not applied: this completion cannot change it; edit it on the original Album'],
     ['size', /over this completion's limits/], ['length', 'Not applied: the release\'s value is too long'], ['characters', 'Not applied: the release\'s value has characters that cannot be saved'],
     ['format', 'Not applied: the release\'s value cannot be read']] as const) {
     cleanup();
@@ -394,13 +394,13 @@ test('a value lookup could not apply reads as its own reason, Album values and t
   }));
   const flagged = await within(section()).findByRole('list', { name: 'Values to check' });
   expect(within(flagged).getAllByRole('listitem').map(item => item.textContent)).toEqual([
-    'Title: Not applied: the release\'s value has characters that cannot be saved', 'Artists: Not applied: the release credits only a placeholder such as Various Artists',
-    'Release date: Not applied: the release\'s value cannot be read', 'Expected tracklist: Not applied: the release\'s value is over this completion\'s limits',
-    'Label: Not applicable: this completion does not show every Credit this value would change', 'Track 1 · Title: Not applied: the release\'s value is too long']);
+    'Title · Not applied: the release\'s value has characters that cannot be saved', 'Artists · Not applied: the release credits only a placeholder such as Various Artists',
+    'Release date · Not applied: the release\'s value cannot be read', 'Expected tracklist · Not applied: the release\'s value is over this completion\'s limits',
+    'Label · Not applied: this completion cannot change it; edit it on the original Album', 'Track 1 · Title · Not applied: the release\'s value is too long']);
   const members = within(section()).getByRole('region', { name: 'Track Artists' });
   expect(within(members).getAllByRole('listitem').map(item => item.textContent)).toEqual(['2 · Synthetic second trackUnchanged: its own release track has no usable artist credit']);
   // Nothing was filled or answered, and nothing is waiting for an answer.
-  expect(within(section()).queryByText('Values that need no answer')).not.toBeInTheDocument();
+  expect(within(section()).queryByText('Lookup values applied or answered')).not.toBeInTheDocument();
   expect(within(section()).queryByText(/^Lookup answers still needed/)).not.toBeInTheDocument();
   // The tracklist was not applied, so the review's saved rows show.
   expect(within(within(section()).getByRole('region', { name: 'Expected tracklist' })).getByText('3 rows, 1 without a file')).toBeInTheDocument();
@@ -435,7 +435,7 @@ test('answered conflicts leave the conflicts and fold away once with the answer 
     lookup.applied!.values.push({ path: 'album.releaseDate', slotId: null }, { path: `tracks.${slotId}.artists`, slotId });
     lookup.needsAnswer.conflicts = [];
   }));
-  const fold = (await within(section()).findByText('Values that need no answer')).closest('details')!;
+  const fold = (await within(section()).findByText('Lookup values applied or answered')).closest('details')!;
   expect([...fold.querySelectorAll('dt')].map(term => term.textContent)).toEqual(['Artists', 'Expected tracklist', 'Track 2 · Track number', 'Title', 'Release date']);
   expect(errors.mock.calls.some(call => String(call[0]).includes('same key'))).toBe(false);
   expect([...fold.querySelectorAll('dd')].slice(-2).map(cell => cell.textContent)).toEqual(['Synthetic catalog Album (Complete) · Current value kept', '2020-05-01 · MusicBrainz value used']);
@@ -484,11 +484,11 @@ test('while a run is active or retried applying is said to wait for it', async (
   const response = withLookup(lookup => { Object.assign(lookup, { run: 2, state: 'retrying', issue: 'sourceBusy', candidates: [], groups: [], preselection: null }); });
   response.summary.waiting.lookup = true;
   const { section } = mount(applied(), response);
-  expect(await within(section()).findByText('Applying waits while metadata lookup runs or retries automatically.')).toHaveAttribute('role', 'status');
+  expect(await within(section()).findByText('The original Album can be updated once metadata lookup finishes.')).toHaveAttribute('role', 'status');
   cleanup();
   mount(applied());
   await screen.findByText('Applied release: Synthetic catalog Album (Complete)');
-  expect(screen.queryByText(/^Applying waits/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/^The original Album can be updated once metadata lookup finishes/)).not.toBeInTheDocument();
 });
 
 test('identity rows wait until the review\'s Album is current again, and are never read meanwhile', async () => {
@@ -605,7 +605,7 @@ test('once saved numbers make a possible release pair in one way while durations
 test('once saved numbers make the release match, its offer is said once, as the status, and Use this release on its card naming both editions is the only primary button', async () => {
   const saved = pairingReview(); saved.draft.tracks = saved.draft.tracks.map((track, index) => ({ ...track, discNumber: 1, trackNumber: index + 1 }));
   const { section, onRun } = mount(saved, pairedLookupResponse());
-  const offer = /^One release matches this Album's tracks but was not applied/;
+  const offer = /^A release whose tracks match was found/;
   expect(await within(section()).findByText(offer)).toHaveAttribute('role', 'status');
   const offered = await within(section()).findByRole('region', { name: offer });
   expect(within(section()).getAllByText(offer)).toHaveLength(1);
@@ -701,7 +701,7 @@ test('the open-answer counters follow the status line, before the candidates, an
   const counter = await within(section()).findByText('Lookup answers still needed: 3');
   expect(counter.previousElementSibling).toHaveTextContent('Applied release: Synthetic catalog Album (Complete)');
   // The records to choose follow it once the identity rows are read, as the identity rows below say too.
-  await waitFor(() => expect(counter.nextElementSibling).toHaveTextContent('Artists or labels to choose, existing or new: 1'));
+  await waitFor(() => expect(counter.nextElementSibling).toHaveTextContent('1 Artist or label still needs a choice: reuse an existing one or create a new one.'));
   expect(counter.nextElementSibling).toHaveAttribute('role', 'status');
   expect(counter.compareDocumentPosition(within(section()).getByRole('group', { name: 'Look up by name' })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(section()).toHaveAttribute('id', 'catalog-review-lookup');
@@ -721,7 +721,7 @@ test('an iTunes-only result checked against MusicBrainz, and an artist mismatch,
   itunes.applied!.notChecked = false; itunes.preselection!.notChecked = false; itunes.candidates = itunes.candidates.map(candidate => ({ ...candidate, notChecked: false }));
   const mismatch = settle(withLookup(lookup => { lookup.preselection!.artistMismatch = true; }));
   const decided = reviewIdentityResponse(); decided.identities = decided.identities.map(row => ({ ...row, needsAnswer: false }));
-  for (const [response, flag] of [[checked, 'Artists: Synthetic catalog Artist feat. Synthetic guest · iTunes only'], [mismatch, /credits an artist that none/]] as const) {
+  for (const [response, flag] of [[checked, 'Artists · Synthetic catalog Artist feat. Synthetic guest · iTunes only'], [mismatch, /credits an artist that none/]] as const) {
     const fetch = vi.fn(async (path: string) => reviewJson(path.endsWith('/lookup') ? response : decided));
     vi.stubGlobal('fetch', fetch);
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } }); client.setQueryData(['browser-session'], session);
@@ -853,7 +853,7 @@ test('while a run is active its steps follow the status, and after a completed r
     progress: { phase: 'details', done: 5, total: 12, startedAt: new Date(Date.now() - 30_000).toISOString(), updatedAt }, timeline: pairingRunningTimeline(updatedAt) }); }, pairingLookupResponse());
   const first = mount(pairingReview(), running);
   const steps = await within(first.section()).findByRole('list', { name: 'Lookup steps' });
-  expect(within(steps).getAllByRole('listitem')[4]).toHaveTextContent('● Read release details (5 of 12) (in progress)');
+  expect(within(steps).getAllByRole('listitem')[4]).toHaveTextContent('● Read release details (5 of 12 releases) (in progress)');
   // The wait counts on this page's clock from when it first saw the run's last step, so the first read shows none however old
   // the server says that step is, and a later read of the same step does.
   expect(within(first.section()).queryByText(/^Waiting for/)).not.toBeInTheDocument();
@@ -869,7 +869,7 @@ test('while a run is active its steps follow the status, and after a completed r
   const completed = withLookup(lookup => { lookup.timeline = pairingTimeline(); }, pairingLookupResponse());
   const { section } = mount(pairingReview(), completed);
   const searched = await within(section()).findByText(/^This lookup searched for "Synthetic Live Album 2" · Synthetic Live Artist, then "Synthetic Live Album 2" alone/);
-  const record = within(section()).getByText('Lookup log: took 22 s · 5 searches · 12 releases found');
+  const record = within(section()).getByText('Lookup log: took 22 s · 7 searches · 12 releases found');
   expect(record.closest('details')!.open).toBe(false);
   const box = await within(section()).findByRole('group', { name: 'Look up by name' });
   expect(searched.compareDocumentPosition(record) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -909,7 +909,7 @@ test('after a completed run the name box folds under Didn\'t find it? Look up an
     if (using) within(running).getByRole('textbox', { name: 'Name' }).focus();
     response = withLookup(lookup => { lookup.timeline = pairingTimeline(); }, pairingLookupResponse());
     await act(async () => { await watched.client.invalidateQueries(); });
-    await within(watched.section()).findByText('Lookup log: took 22 s · 5 searches · 12 releases found');
+    await within(watched.section()).findByText('Lookup log: took 22 s · 7 searches · 12 releases found');
     const after = within(watched.section()).getByRole('group', { name: 'Look up by name' });
     if (using) expect([after, after.closest('details'), document.activeElement]).toEqual([running, null, within(running).getByRole('textbox', { name: 'Name' })]);
     else expect([after.closest('details')?.open, within(watched.section()).getByText(fold).tagName]).toEqual([false, 'SUMMARY']);

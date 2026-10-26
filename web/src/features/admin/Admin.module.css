@@ -15,6 +15,8 @@
 .filter { background:transparent;border:1px solid transparent;color:var(--color-text-muted); }
 .filter[aria-pressed=true],.filter[aria-selected=true] { background:var(--color-surface-hover);border-color:var(--color-border-strong);color:var(--color-text); }
 .primary { background:var(--color-accent);border-color:var(--color-accent);color:var(--color-on-accent); }
+/* A disabled primary button drops the accent, as the Album page's completion button does, so it never reads as the live next step. */
+.button.primary:disabled { background:var(--color-surface-hover);border-color:var(--color-border);color:var(--color-text-subtle);opacity:1; }
 .cards,.files { list-style:none;margin:1rem 0;padding:0; }
 .card,.panel { padding:1rem;margin:1rem 0; }
 .row,.check,.date,.track,.artworkChoice { display:flex;align-items:center;gap:.75rem; }

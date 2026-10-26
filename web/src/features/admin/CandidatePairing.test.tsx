@@ -92,7 +92,7 @@ test('the panel reads the release\'s rows and lists each track with its duration
   expect(await screen.findByRole('heading', { name: heading })).toBe(title);
   expect(document.activeElement).toBe(title);
   expect(screen.getByRole('region', { name: heading })).toBeInTheDocument();
-  expect(screen.getByText(/^For each track of this Album, choose which track of this release it is\./)).toBeInTheDocument();
+  expect(screen.getByText(/^Choose which release track each track is; the closest durations come first\./)).toBeInTheDocument();
   expect(optionTexts(first)).toEqual(firstOptions);
   expect(optionTexts(second)).toEqual(['Choose a release track', '1-2 Synthetic live song 2 · 6:22.75 · differs by 0.01 s']);
   expect(screen.getByText(outcome)).toBeInTheDocument();

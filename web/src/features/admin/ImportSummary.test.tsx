@@ -234,7 +234,7 @@ test('a tie lists the values that differ with each release\'s barcode, catalogue
   // One matching release from a partial comparison is offered the same way, with its own heading, but never holds Publish.
   const single = mount(detail(), lookupResponse({ lookup: view({ candidates: [candidate(1)], groups: [group(1, 'Synthetic Album')],
     disclosure: { unknownLocalDurations: 0, unknownLocalDiscNumbers: 0, partialComparison: true } }) }));
-  const choice = await within(single.section()).findByRole('region', { name: /^One release matches these files/ });
+  const choice = await within(single.section()).findByRole('region', { name: /^A release that matches these files was found/ });
   fireEvent.click(within(choice).getByRole('button', { name: 'Use this release' }));
   expect(single.run.mock.calls.map(call => call[2])).toEqual([{ expectedRevision: 1, run: 1, candidateKey: key(1) }]);
   expect(await ready()).toBeEnabled(); expect(screen.queryByText(/Answers needed before publishing/)).not.toBeInTheDocument();
@@ -272,7 +272,7 @@ test('the only next-step button is a free retry while lookup is busy, unavailabl
     [{ candidates: [candidate(1)], groups: [group(1, 'Synthetic Album')], applied: applied() }, 'Applied release: Synthetic Album 1', luna],
     // The only matching release of a partial comparison is offered, never applied unasked: no next step, and no answer needed.
     [{ candidates: [candidate(1)], groups: [group(1, 'Synthetic Album')], disclosure: { unknownLocalDurations: 0, unknownLocalDiscNumbers: 0, partialComparison: true } },
-      'One release matches these files but was not applied, because not every release found was compared. You can choose it, another release or none.', luna],
+      'A release that matches these files was found. This lookup may not list every matching release (see the note below the release), so it was not applied automatically. Check it, then choose Use this release, or choose another release or none.', luna],
     // Once none is chosen for this run, it says so.
     [{ candidates: [candidate(1)], groups: [group(1, 'Synthetic Album')], applied: { ...applied(), candidateKey: null, choice: 'none' },
       disclosure: { unknownLocalDurations: 0, unknownLocalDiscNumbers: 0, partialComparison: true } }, 'No release is applied. Values from file tags are kept.', luna]
