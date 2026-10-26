@@ -29,7 +29,7 @@
  *   - a review's possible matches load their previews at once, and a folded section's only once it is opened
  *   - a review card says how its pairing was made single: by the titles' or file names' track numbers or the closest durations; without it, or on the import page, no such line shows
  *   - a possible match that pairs in one way is the next step, so no other possible match asks for numbers; the unknown Disc Numbers line stays unless the positions or durations made that pairing single
- *   - a possible match whose members pair in more than one way offers pairing by hand as a plain button that opens one panel after the sections; other choices wait while it saves
+ *   - a possible match whose members pair in more than one way offers pairing by hand as a plain button that opens one panel after the sections, which the summary hears is open; other choices wait while it saves
  *   - pairing by hand is offered only on possible matches that pair in more than one way
  *   - closing the pairing panel returns focus to its own opener after Cancel, and to the lookup panel once the release is used or its opener is gone
  * @end-catalog */
@@ -604,10 +604,11 @@ test('a possible match that pairs in one way is the next step, so no other possi
   }
 });
 
-test('a possible match whose members pair in more than one way offers pairing by hand as a plain button that opens one panel after the sections; other choices wait while it saves', async () => {
-  const onChoose = vi.fn(), element = (lookup: ReviewLookupView) => <CandidateChooser projectId={importId} viewerId={viewerId} lookup={lookup}
-    review={{ tracks: reviewTracks, fill: null, ...liveReview }} disabled={false} onChoose={onChoose} />;
+test('a possible match whose members pair in more than one way offers pairing by hand as a plain button that opens one panel after the sections, which the summary hears is open; other choices wait while it saves', async () => {
+  const onChoose = vi.fn(), onPairing = vi.fn(), element = (lookup: ReviewLookupView) => <CandidateChooser projectId={importId} viewerId={viewerId} lookup={lookup}
+    review={{ tracks: reviewTracks, fill: null, ...liveReview }} disabled={false} onChoose={onChoose} onPairing={onPairing} />;
   const view = render(element(live()));
+  expect(onPairing).toHaveBeenLastCalledWith(false);
   const card = within(screen.getByRole('region', { name: 'Possible match (1 release)' }));
   const opener = card.getByRole('button', { name: 'Pair tracks by hand' });
   expect(opener).toHaveClass(styles.button); expect(opener).not.toHaveClass(styles.primary);
@@ -620,6 +621,7 @@ test('a possible match whose members pair in more than one way offers pairing by
   fireEvent.click(opener);
   const panel = await screen.findByRole('region', { name: 'Synthetic pairing panel' });
   expect(opener).toHaveAttribute('aria-expanded', 'true');
+  expect(onPairing).toHaveBeenLastCalledWith(true);
   expect(within(panel).getByText(`${pairingEditions[0]} ${pairingEditions.join(',')} 3 Synthetic Live Album 2`)).toBeInTheDocument();
   // One panel, after the sections (the folded not-fit one included) and before Use none of these.
   const notFit = screen.getByText('Releases that do not fit or could not be read (10)').closest('details')!, none = screen.getByRole('button', { name: 'Use none of these' });
@@ -637,6 +639,7 @@ test('a possible match whose members pair in more than one way offers pairing by
   expect(screen.queryByRole('region', { name: 'Synthetic pairing panel' })).not.toBeInTheDocument();
   expect(document.activeElement).toBe(opener);
   expect(opener).toHaveAttribute('aria-expanded', 'false');
+  expect(onPairing).toHaveBeenLastCalledWith(false);
   // The opener also closes the panel it opened.
   fireEvent.click(opener);
   await screen.findByRole('region', { name: 'Synthetic pairing panel' });
@@ -657,11 +660,18 @@ test('a possible match whose members pair in more than one way offers pairing by
   view.rerender(element(live()));
   expect(within(screen.getByRole('region', { name: 'Synthetic pairing panel' })).getByRole('button', { name: 'picked 1' })).toBeInTheDocument();
   expect(pairingMounts.count).toBe(mounted);
+  expect(onPairing).toHaveBeenLastCalledWith(true);
   // A run without its release shows no panel, and nothing waits for it.
   view.rerender(element(live({ candidates: live().candidates.filter(entry => !(pairingEditions as readonly string[]).includes(entry.key)) })));
   expect(screen.queryByRole('region', { name: 'Synthetic pairing panel' })).not.toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Use none of these' })).toBeEnabled();
+  expect(onPairing).toHaveBeenLastCalledWith(false);
   expect(onChoose).not.toHaveBeenCalled();
+  // A chooser that leaves the page with its panel open says it is closed.
+  view.rerender(element(live()));
+  expect(onPairing).toHaveBeenLastCalledWith(true);
+  view.unmount();
+  expect(onPairing).toHaveBeenLastCalledWith(false);
 });
 
 test('pairing by hand is offered only on possible matches that pair in more than one way', () => {

@@ -7,7 +7,7 @@
  *   Constants: PREVIEWS_AT_ONCE, RETRY_MS, fields, fieldKeys, CandidatePairing
  * @end-catalog */
 
-import { lazy, Suspense, useEffect, useId, useRef, useState, type ComponentProps, type ComponentType, type ReactNode } from 'react';
+import { lazy, Suspense, useEffect, useId, useLayoutEffect, useRef, useState, type ComponentProps, type ComponentType, type ReactNode } from 'react';
 import { useAdminText } from './AdminAccess';
 import type { CandidatePairing as Pairing } from './CandidatePairing';
 import { entriesByline } from './artistEntriesByline';
@@ -68,7 +68,8 @@ const CandidatePairing = lazy<ComponentType<ComponentProps<typeof Pairing>>>(() 
  * unless another possible match pairs in one way (then that release is the next step and nothing asks for numbers). Each such
  * card also offers Pair tracks by hand, which opens the pairing panel (CandidatePairing.tsx, its own chunk) for that edition below
  * the sections, one at a time; it keeps one place in the tree whichever view a re-rank shows, so it stays open with its state when
- * the release leaves the possible matches. While it saves, the chooser's other choices wait; once it closes, focus returns to its
+ * the release leaves the possible matches, and `onPairing` hears whether it is open, so the summary never folds its results under
+ * it. While it saves, the chooser's other choices wait; once it closes, focus returns to its
  * opener after Cancel, else (or when the opener is gone) to the summary's lookup panel. A review card whose pairing the title or
  * filename positions or the closest durations made single says so (`pairedBy`), and the unknown Disc Numbers line then stays out.
  * The release this run applied without a pairing whose pairing is now single can be used again, a primary button where it is not
@@ -76,11 +77,13 @@ const CandidatePairing = lazy<ComponentType<ComponentProps<typeof Pairing>>>(() 
  * tie or offer sentence names its region without being printed again (the summary's status says it), and the offered release's
  * card names its editions like a possible match, with Use this release as the primary button, the next step.
  */
-export function CandidateChooser({ projectId, viewerId, lookup, review, disabled: locked, onChoose }: {
+export function CandidateChooser({ projectId, viewerId, lookup, review, disabled: locked, onChoose, onPairing }: {
   projectId: string; viewerId: string; lookup: ImportLookupView | ReviewLookupView; disabled: boolean;
   /** An existing-Album review: its saved tracks, the searched text, its primary Artists' names and an eligible fill (else null). */
   review?: { tracks: readonly { slotId: string; title: string }[]; searched: string; artists: readonly string[]; fill: { count: number; run: () => void } | null };
   onChoose: (candidateKey: string | null) => void;
+  /** Told whether the pairing panel is open, as it opens and closes and with false once the chooser leaves the page. */
+  onPairing?: (open: boolean) => void;
 }) {
   const t0 = useAdminText(), id = useId(), tie = lookup.needsAnswer.tie, single = lookup.groups.length === 1;
   // The open pairing panel (its candidate and the card's editions) and whether it is saving; an opener's ID follows its candidate, so
@@ -217,6 +220,9 @@ export function CandidateChooser({ projectId, viewerId, lookup, review, disabled
   // The pairing panel follows the sections. Focus returns to its opener after Cancel; once the release is used, or when the opener
   // is gone, to the summary's lookup panel, as a re-read usually removes the opener.
   const opened = panel && lookup.candidates.find(candidate => candidate.key === panel.key);
+  // A layout effect, so a summary deciding in the same commit whether its results fold already knows.
+  const showing = Boolean(opened);
+  useLayoutEffect(() => { onPairing?.(showing); return () => onPairing?.(false); }, [showing]);
   const pairing = panel && opened && <Suspense fallback={<p role="status">{t('common.loading')}</p>}><CandidatePairing key={panel.key} projectId={projectId}
     candidateKey={panel.key} editions={panel.editions} run={lookup.run} title={opened.title ?? '—'} disabled={locked} onBusy={setSaving}
     onClose={used => { setPanel(null); ((!used && document.getElementById(opener(panel.key))) || document.getElementById('catalog-review-lookup'))?.focus(); }} /></Suspense>;

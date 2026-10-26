@@ -23,9 +23,9 @@ import styles from './adminStyles';
  * Number only where the review captured one), which re-ranks, then chooses the release unless the re-rank applied it (owner rules,
  * next-step bullet). A failed choice keeps the saved numbers and offers choosing again alone. Its status says what is known: a
  * refusal, an outcome it could not confirm (sent again as the same operation), a reload request, or saved numbers that do not pair
- * the tracks with the release in exactly one way. Its own chunk, loaded by the candidate chooser on the review and import pages
- * alike, so it imports only modules both already load: the review schemas, its command hook and the summary query are not imported,
- * and the few lines it needs of them are repeated here.
+ * the tracks with the release in exactly one way; while a save or choice runs, focus is on its heading. Its own chunk, loaded by
+ * the candidate chooser on the review and import pages alike, so it imports only modules both already load: the review schemas,
+ * its command hook and the summary query are not imported, and the few lines it needs of them are repeated here.
  */
 const integer = z.number().int().nonnegative(), disc = z.number().int().min(1).max(999), track = z.number().int().min(1).max(9999);
 const duration = z.number().int().positive().nullable();
@@ -131,7 +131,8 @@ export function CandidatePairing({ projectId, candidateKey, editions, run, title
   // end even when the panel closes meanwhile, which only drops its state; the chooser waits until it ends, then closes it.
   async function sequence(first: Step, value: Pairing) {
     let active = first, saved = first.kind === 'choose', used = false;
-    onBusy(true); setStep(first); setPhase(saved ? 'choosing' : 'saving');
+    // Its button is disabled meanwhile, which would drop focus out of the panel, so focus moves to the heading.
+    heading.current?.focus(); onBusy(true); setStep(first); setPhase(saved ? 'choosing' : 'saving');
     try {
       const revision = await send(active);
       if (!saved) {
@@ -171,9 +172,11 @@ export function CandidatePairing({ projectId, candidateKey, editions, run, title
   // An outcome left unconfirmed (its intent kept) may have been stored, so Cancel has the page read the review again.
   const cancel = <button type="button" className={styles.button} disabled={busy} onClick={() => { if (step) refresh(true); onClose(false); }}>{t('common.cancel')}</button>;
   const primary = `${styles.button} ${styles.primary}`;
+  // A third-level heading, as the chooser's sections and the summary's other parts have, so it follows the lookup panel's heading in
+  // order whichever view of the chooser it follows.
   return <section aria-labelledby={`${id}-title`} className={styles.panel}>
-    <h4 id={`${id}-title`} tabIndex={-1} ref={heading}>{data ? t('catalog_review.pairing_title', { title, rows: data.rows.length, discs: new Set(data.rows.map(row => row.disc)).size })
-      : t('catalog_review.lookup_pair_by_hand')}</h4>
+    <h3 id={`${id}-title`} tabIndex={-1} ref={heading}>{data ? t('catalog_review.pairing_title', { title, rows: data.rows.length, discs: new Set(data.rows.map(row => row.disc)).size })
+      : t('catalog_review.lookup_pair_by_hand')}</h3>
     {query.isPending ? <p role="status">{t('common.loading')}</p>
       : query.isError || !data ? <><p role="alert">{t('catalog_review.pairing_load_error')}</p>
         <div className={styles.actions}><button type="button" className={styles.button} disabled={query.isFetching} onClick={() => void query.refetch()}>{t('common.retry')}</button>{cancel}</div></>

@@ -8,6 +8,7 @@
  *   - while a choice saves, cards holding keyboard focus stay focusable and dimmed and ignore choices until the section is enabled again
  *   - a bound identity reuses its record, marks it hidden, and offers keeping or replacing its different ID, which saves with the record's captured revision
  *   - MusicBrainz IDs and record ID endings show only on request
+ *   - rows without a MusicBrainz ID of their own, which neither the lookup nor the captured Album supplied, offer no ID toggle even where a record or candidate has one
  *   - entries naming different Artists keep their own and offer reuse or create, never a replace
  *   - a preselected create shows chosen, is not folded and needs no answer
  *   - a record holding the identity's MusicBrainz ID is preselected and listed first, the other name candidates stay visible, and choosing the preselected card again sends no decision for the row
@@ -170,6 +171,17 @@ test('MusicBrainz IDs and record ID endings show only on request', async () => {
   mount(() => { const data = reviewIdentityResponse(); data.identities[1].musicBrainzId = null; data.identities[1].bound[0].musicBrainzId = null; return data; });
   await row('Synthetic guest');
   expect(screen.queryByRole('button', { name: 'Show MusicBrainz IDs' })).not.toBeInTheDocument();
+});
+
+test('rows without a MusicBrainz ID of their own, which neither the lookup nor the captured Album supplied, offer no ID toggle even where a record or candidate has one', async () => {
+  const { section } = mount(() => { const data = reviewIdentityResponse(); data.identities = data.identities.map(identity => ({ ...identity, musicBrainzId: null }));
+    data.candidates.items[0] = { ...data.candidates.items[0], musicBrainzId: '00000000-0000-4000-8000-0000000000d1' }; return data; });
+  const guest = await row('Synthetic guest'), lead = await row('Synthetic catalog Artist');
+  expect(screen.queryByRole('button', { name: 'Show MusicBrainz IDs' })).not.toBeInTheDocument();
+  // The bound record keeps its own ID without a choice, and the candidate's ID is not offered for replacing.
+  expect(radios(lead)).toEqual([]);
+  expect(cards(guest).map(([name]) => name)).toEqual(['Reuse the existing Synthetic guest', 'Create Synthetic guest as new']);
+  expect(section().textContent).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-|MusicBrainz ID/);
 });
 
 test('entries naming different Artists keep their own and offer reuse or create, never a replace', async () => {

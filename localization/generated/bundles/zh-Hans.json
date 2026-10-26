@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "locale": "zh-Hans",
-  "revision": "sha256-aw0_fCv_vllspx9U9oCZniY-StCFEui7C2tRaV1pac0",
+  "revision": "sha256-LgoZBmsgDEodI_gVveBGVTtIVnsQr7swnuS-MpE_rqI",
   "messages": {
     "account.common.back_account": "← 返回账户",
     "account.common.checking": "正在检查你的账户…",
@@ -460,7 +460,7 @@
     "admin.catalog_review.pairing_duration_unknown": "时长未知",
     "admin.catalog_review.pairing_forced": "只有 {position}「{title}」能与这首曲目对应",
     "admin.catalog_review.pairing_load_error": "无法读取此发行的曲目。请重试，或取消后查看最新的查找结果。",
-    "admin.catalog_review.pairing_outcome": "{missing, plural, =0 {保存后，这些碟号和曲号会作为你自己填写的值存入补全草稿，然后使用此发行，带入它的完整曲目表和曲目信息。} other {保存后，这些碟号和曲号会作为你自己填写的值存入补全草稿，然后使用此发行，带入它的完整曲目表（其中 # 行缺文件）和曲目信息。}}原专辑要等你确认「更新原专辑」后才会改变。",
+    "admin.catalog_review.pairing_outcome": "{missing, plural, =0 {保存后，这些碟号和曲号会作为你自己填写的值存入补全草稿，然后使用此发行，带入它的完整曲目表和曲目信息。} other {保存后，这些碟号和曲号会作为你自己填写的值存入补全草稿，然后使用此发行，带入它的完整曲目表（其中 # 首没有音频）和曲目信息。}}原专辑要等你确认「更新原专辑」后才会改变。",
     "admin.catalog_review.pairing_remaining": "还有 {count} 首曲目没有选择发行中的曲目。",
     "admin.catalog_review.pairing_same_duration": "时长相同",
     "admin.catalog_review.pairing_save": "保存对应并使用此发行",

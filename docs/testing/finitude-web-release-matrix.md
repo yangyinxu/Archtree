@@ -289,7 +289,11 @@ lookup panel; a save whose re-rank already applied it sends no choice. A choice
 that fails with an unconfirmed outcome says so and keeps the panel open with its
 choices while the chooser shows the release offered; Use this release sends the
 same choice again without saving, and Cancel returns focus to the opener and
-sends nothing. Each with an axe scan and no overflow, also at 320 px.
+sends nothing. Where the save's re-rank instead applies another release for its
+Album values only, leaving nothing open, and the choice after it fails, the
+lookup results stay open under the panel, whose status, saved numbers and Use
+this release stay visible with focus in the panel. Each with an axe scan and no
+overflow, also at 320 px.
 
 The historical 2026-08-19 MediaTrack amendment passed
 304/304 server tests, 214/214 Web unit/component tests, 148/148 integration
@@ -831,8 +835,10 @@ player control still works.
   track, and enables Save pairing and use this release only once every track has
   a release track; that saving fills the Disc and Track Numbers in Edit draft as
   saved values and applies the release with its expected tracklist and rows
-  without a file; that Update original Album lists those numbers; and that
-  Cancel saves nothing. Repeat in Simplified Chinese (手动对应曲目, 已被曲目 1 使用,
+  without a file; that Update original Album lists those numbers; that focus
+  stays in the panel while it saves; that the lookup results never fold while
+  the panel is open; and that Cancel saves nothing. Repeat in Simplified Chinese
+  (手动对应曲目, 已被曲目 1 使用,
   保存对应并使用此发行) and with a screen reader at 320 CSS px.
 - As an administrator, with metadata lookup configured against MusicBrainz in a
   development environment, open an Album completion and look up its name with an
@@ -858,7 +864,9 @@ player control still works.
   each is offered; that the same-ID reuse is preselected and a name-only match
   never is; that creating says it takes the Album's visibility; that choosing a
   card saves it at once; and that no MusicBrainz ID shows until Show MusicBrainz
-  IDs. On a possible match whose track titles start with 1-01 and 1-02, choose
+  IDs, which is offered only while a row has a MusicBrainz ID of its own, so an
+  iTunes-only result whose Artists have no MusicBrainz ID offers none. On a
+  possible match whose track titles start with 1-01 and 1-02, choose
   Album values only and confirm the lookup results stay open with Fill Disc and
   Track Numbers from titles on its card and under the status, after a line that
   track values and track Artists are not applied; once filled, the unsaved draft

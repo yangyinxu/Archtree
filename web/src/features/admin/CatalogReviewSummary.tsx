@@ -2,11 +2,11 @@
  * Exports
  *   Functions: CatalogReviewSummary
  * Internal
- *   Functions: ChunkUnavailable, chunk, memberPath
+ *   Functions: ChunkUnavailable, chunk, memberPath, Results
  *   Constants: LookupBox, CandidateChooser, CatalogReviewIdentities, LookupProgress
  * @end-catalog */
 
-import { lazy, Suspense, useEffect, useId, type ComponentProps, type ComponentType, type ReactNode } from 'react';
+import { lazy, Suspense, useEffect, useId, useLayoutEffect, useRef, type ComponentProps, type ComponentType, type ReactNode, type RefObject } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useLocalization } from '../../localization/LocalizationProvider';
 import { useAdminAccess, useAdminText } from './AdminAccess';
@@ -39,6 +39,19 @@ const CatalogReviewIdentities = chunk<ComponentProps<typeof Identities>>(() => i
 const LookupProgress = lazy<ComponentType<ComponentProps<typeof Progress>>>(() => import('./LookupProgress').then(module => ({ default: module.LookupProgress }),
   () => ({ default: ({ albumHref }: ComponentProps<typeof Progress>) => albumHref ? <ChunkUnavailable /> : null })));
 const memberPath = (path: string) => /^tracks\.[^.]+\.artists$/.test(path);
+/**
+ * The results' one element, which never remounts, so the candidate chooser with its open pairing panel and the identity rows keep
+ * unsaved choices. Until a release is applied (`label` null) it is no fold: open with its summary hidden, browsers expose no
+ * disclosure control or expanded state, only an unnamed group, and nothing can close it. It folds as the results settle and opens
+ * as soon as they no longer are, but never folds under an open pairing panel (`pairing`), whose status and choices stay in view
+ * when its save's re-rank settles them; closing that panel leaves it as it is.
+ */
+function Results({ fold, pairing, label, children }: { fold: boolean; pairing: RefObject<boolean>; label: string | null; children: ReactNode }) {
+  const element = useRef<HTMLDetailsElement>(null);
+  useLayoutEffect(() => { if (!fold || !pairing.current) element.current!.open = !fold; }, [fold]);
+  return <details ref={element} style={label ? { marginTop: '.75rem' } : undefined}>{label
+    ? <summary style={{ cursor: 'pointer', padding: '.3rem 0' }}>{label}</summary> : <summary style={{ display: 'none' }} />}{children}</details>;
+}
 
 /**
  * The lookup-first summary of an existing-Album review (owner rules: docs/business-rules.md, Catalog Visibility and
@@ -62,7 +75,8 @@ const memberPath = (path: string) => /^tracks\.[^.]+\.artists$/.test(path);
  * leaves nothing open (no active run, retry, refined status, lookup answer or identity row needing an answer, nor a release applied
  * for its Album values only whose tracks still pair in more than one way while the titles can fill the numbers, whose card carries
  * that fill, also offered under the status with why its tracks are not applied) and flags no iTunes-only value or artist mismatch, which are never collapsed,
- * everything after the name box folds under one disclosure; it stays mounted, so unsaved identity choices survive the fold. The
+ * everything after the name box folds under one disclosure, never while the chooser's pairing panel is open (`Results`); it stays
+ * mounted, so unsaved identity choices survive the fold. The
  * panel carries the anchors the step bar links to: the panel (`catalog-review-lookup`), its first open answer
  * (`catalog-review-answers`) and its identity rows (`catalog-review-identities`).
  * Answers wait while a run is active. A read showing a newer revision or value revision (lookup applications change only
@@ -75,6 +89,8 @@ export function CatalogReviewSummary({ item, disabled, error, onRun, onFillNumbe
   onFillNumbers: (numbers: TitleNumbers['numbers']) => void;
 }) {
   const t = useAdminText(), access = useAdminAccess(), online = useOnline(), client = useQueryClient(), id = useId(), { locale } = useLocalization();
+  // Whether the candidate chooser's pairing panel is open, which the results never fold under.
+  const pairing = useRef(false);
   const query = useQuery(catalogReviewSummaryQuery(access, item, online)), data = query.data, lookup = data?.lookup ?? null, summary = data?.summary;
   const key = catalogReviewKey(access, item.id), applied = lookup?.applied ?? null, shown = applied && applied.choice !== 'none' ? applied : null;
   // The identity rows' own read (CatalogReviewIdentities, shown under the same condition), observed here only for the fold.
@@ -163,7 +179,8 @@ export function CatalogReviewSummary({ item, disabled, error, onRun, onFillNumbe
   const settled = Boolean(shown) && shown!.source !== 'itunes' && !mismatch && !lookupActive(lookup?.state) && answers === 0 && !retry && !refined && !identityOpen && !numbersOpen;
   const body = <>
     {lookup?.state === 'complete' && lookup.candidates.length > 0 && <Suspense fallback={null}><CandidateChooser projectId={item.id} viewerId={access.viewerId} lookup={lookup}
-      review={{ tracks: item.draft.tracks, searched, artists, fill }} disabled={busy} onChoose={candidateKey => onRun('lookup/choose', { run: lookup.run, candidateKey })} /></Suspense>}
+      review={{ tracks: item.draft.tracks, searched, artists, fill }} disabled={busy} onChoose={candidateKey => onRun('lookup/choose', { run: lookup.run, candidateKey })}
+      onPairing={open => { pairing.current = open; }} /></Suspense>}
     {/* The bulk answers cover every open conflict, the members' included, so they also serve member conflicts alone. */}
     {open.length >= 2 && <div className={styles.actions} id="catalog-review-answers">
       <button type="button" className={styles.button} disabled={answering} onClick={() => resolve(open, 'mine')}>{t('catalog_review.keep_all_current')}</button>
@@ -208,9 +225,6 @@ export function CatalogReviewSummary({ item, disabled, error, onRun, onFillNumbe
     {summary.lookupAvailable && <Suspense fallback={null}><LookupBox key={box} lookup={lookup} rootLabel="" defaultText={item.draft.album.title} mode="review" disabled={busy}
       active={lookupActive(lookup?.state)} fold={lookup?.state === 'complete' && !boxNext} onSubmit={(kind, text, artist) => onRun('lookup', { kind, text, ...(artist ? { artist } : {}) })} /></Suspense>}
     {refined?.fill === 'offer' && !numbersOpen && fillButton(false)}
-    {/* One element here, open with no visible summary until a release is applied, so the candidate chooser with its open pairing panel
-        and the identity rows never remount, keeping unsaved choices. */}
-    <details style={shown ? { marginTop: '.75rem' } : undefined} open={shown ? !settled : true}>{shown
-      ? <summary style={{ cursor: 'pointer', padding: '.3rem 0' }}>{t('catalog_review.lookup_details')}</summary> : <summary style={{ display: 'none' }} />}{body}</details>
+    <Results fold={settled} pairing={pairing} label={shown && t('catalog_review.lookup_details')}>{body}</Results>
   </section>;
 }

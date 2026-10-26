@@ -19,6 +19,7 @@
  *   - an Album that cannot have a completion shows the action disabled with its reason
  *   - an iTunes-only lookup result names iTunes on its answers and flags every value it wrote
  *   - pairing by hand sends no choice when the save's re-rank already applied the release, and a choice that fails after the save is offered again without saving
+ *   - an open pairing panel keeps the lookup results open when its save's re-rank applies another release that leaves nothing open and the choice after it fails
  *   - a superseded lookup of an Album that changed offers opening the Album instead of a retry that cannot run
  *   - a Luna label suggestion is only an identity hint: it is never a Review item, and Keep current rejects it without changing the label
  *   - a long direct catalog confirmation starts at the first old/new field and keeps its actions reachable at 390px
@@ -1454,14 +1455,30 @@ for (const variant of localizedViewports) {
 test('an iTunes-only lookup result names iTunes on its answers and flags every value it wrote', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   const api = await setup(page); api.ready(); api.looked(reviewItunesLookupResponse());
+  // iTunes names no MusicBrainz ID: the guest it appends has none, while the lead Artist's row keeps the ID of the record the
+  // captured Album credits, as the server captures it.
+  const identity = api.identities(), leadId = identity.identities[1].bound[0].musicBrainzId!;
+  identity.identities = identity.identities.map(row => ({ ...row, musicBrainzId: row.bound[0]?.musicBrainzId ?? null }));
   await enter(page, `/finitude/admin/catalog-reviews/${reviewId}`);
   const summary = page.getByRole('region', { name: label('admin.catalog_review.lookup_title'), exact: true });
   const release = reviewItunesLookupResponse().lookup!.candidates[0].title!;
+  const identities = summary.getByRole('region', { name: label('admin.catalog_review.identities_title'), exact: true });
+  await expect(identities).toBeVisible();
   await expect(summary.getByText(label('admin.lookup.applied_itunes_unchecked', { title: release }), { exact: true })).toBeVisible();
+  // The answers name iTunes, never MusicBrainz, one by one and all at once.
   const conflicts = summary.getByRole('region', { name: label('admin.catalog_review.conflicts'), exact: true });
   await expect(summary.getByRole('button', { name: label('admin.catalog_review.use_all_itunes'), exact: true })).toBeVisible();
   await expect(conflicts.getByRole('button', { name: label('admin.catalog_review.use_itunes'), exact: true })).toHaveCount(2);
-  await expect(summary.getByRole('button', { name: /MusicBrainz/ })).toHaveCount(0);
+  await expect(conflicts.getByRole('button', { name: /MusicBrainz/ })).toHaveCount(0);
+  for (const key of ['admin.catalog_review.use_musicbrainz', 'admin.catalog_review.use_all_musicbrainz'] as const)
+    await expect(summary.getByRole('button', { name: label(key), exact: true })).toHaveCount(0);
+  // The lead row's own ID is offered on request.
+  const ids = identities.getByRole('button', { name: label('admin.catalog_review.identity_show_ids'), exact: true });
+  await expect(identities.getByText(label('admin.lookup.musicbrainz_id', { id: leadId }))).toHaveCount(0);
+  await ids.click();
+  await expect(ids).toHaveAttribute('aria-pressed', 'true');
+  await expect(identities.getByText(label('admin.lookup.musicbrainz_id', { id: leadId }))).toBeVisible();
+  await ids.click();
   const flagged = summary.getByRole('list', { name: label('admin.summary.flagged'), exact: true }).getByRole('listitem');
   await expect(flagged).toHaveCount(5);
   for (const index of [0, 1, 2, 3]) await expect(flagged.nth(index)).toContainText(`${label('admin.lookup.itunes_only')} · ${label('admin.lookup.not_checked')}`);
@@ -1586,10 +1603,14 @@ for (const variant of localizedViewports) {
     await expect(card.getByText(label('admin.catalog_review.lookup_editions_choose'), { exact: true })).toBeVisible();
     for (const button of await summary.getByRole('button').all()) if (await button.textContent() !== fillName) expect(await classList(button)).not.toEqual(primary);
     // The releases the tracks do not fit fold on their own; the name box folds beside them, as filling the numbers is the next step.
-    const folds = summary.locator(':scope > details').filter({ has: page.locator(':scope > summary', { hasText: message('admin.catalog_review.lookup_section_not_fit', { count: 10 }) }) });
+    // Nothing is applied, so the results show no fold of their own: the only disclosures are the name box's, the card's two and that one.
+    await expect(summary.getByText(label('admin.catalog_review.lookup_details'), { exact: true })).toHaveCount(0);
+    await expect(summary.locator('summary:visible')).toHaveText([label('admin.catalog_review.lookup_try_another'), label('admin.catalog_review.lookup_other_options'),
+      label('admin.catalog_review.lookup_editions_choose'), message('admin.catalog_review.lookup_section_not_fit', { count: 10 })]);
+    const folds = summary.locator('details').filter({ has: page.locator(':scope > summary', { hasText: message('admin.catalog_review.lookup_section_not_fit', { count: 10 }) }) });
     await expect(folds).toHaveCount(1);
     await expect(folds).not.toHaveAttribute('open');
-    const nameFold = summary.locator(':scope > details').filter({ has: page.locator(':scope > summary', { hasText: label('admin.catalog_review.lookup_try_another') }) });
+    const nameFold = summary.locator('details').filter({ has: page.locator(':scope > summary', { hasText: label('admin.catalog_review.lookup_try_another') }) });
     await expect(nameFold).toHaveCount(1);
     await expect(nameFold).not.toHaveAttribute('open');
     const none = summary.getByRole('button', { name: label('admin.lookup.choose_none'), exact: true });
@@ -1846,6 +1867,44 @@ test('pairing by hand sends no choice when the save\'s re-rank already applied t
   await reflow(page);
 });
 
+test('an open pairing panel keeps the lookup results open when its save\'s re-rank applies another release that leaves nothing open and the choice after it fails', async ({ page }) => {
+  test.setTimeout(60_000);
+  await page.setViewportSize({ width: 1280, height: 720 });
+  const api = await setup(page); api.seed(quietUnnumberedReview(), pairingLookupResponse().lookup); handPairingServer(api);
+  api.pairing(item => handPairingResponse(item.revision));
+  // The save's re-rank applies another release for its Album values only, which leaves nothing open; the choice after it fails once.
+  const other = pairingLookupResponse().lookup!.candidates[0];
+  api.rerank(draft => draft.tracks.every(track => track.trackNumber !== null) ? pairedLookupResponse(pairingApplication(other.key, false)).lookup : undefined);
+  api.failNextChoose();
+  await enter(page, `/finitude/admin/catalog-reviews/${reviewId}`);
+  const summary = page.getByRole('region', { name: label('admin.catalog_review.lookup_title'), exact: true });
+  const name = message('admin.catalog_review.pairing_title', { title: 'Synthetic Live Album 2', rows: 20, discs: 2 });
+  await summary.getByRole('button', { name: label('admin.catalog_review.lookup_pair_by_hand'), exact: true }).click();
+  const panel = summary.getByRole('region', { name, exact: true }), track = panel.getByRole('combobox', { name: '1 · Synthetic opening (Live) · 3:35.66', exact: true });
+  await track.selectOption('1:1');
+  await panel.getByRole('button', { name: label('admin.catalog_review.pairing_save'), exact: true }).click();
+  const status = panel.getByText(label('admin.catalog_review.pairing_choose_unknown'), { exact: true });
+  await expect(status).toHaveAttribute('role', 'status');
+  await expect.poll(() => api.writes.map(write => write.method)).toEqual(['PATCH', 'POST']);
+  // The other release is applied and the results gain their summary, yet stay open under the panel: its status, its saved numbers and
+  // Use this release stay in view, and focus stays in it.
+  await expect(summary.getByText(label('admin.lookup.applied', { title: other.title! }), { exact: true })).toBeVisible();
+  const results = summary.locator('details').filter({ has: page.locator(':scope > summary', { hasText: label('admin.catalog_review.lookup_details') }) });
+  await expect(results).toHaveCount(1);
+  await expect(results).toHaveJSProperty('open', true);
+  const use = panel.getByRole('button', { name: label('admin.lookup.choose'), exact: true });
+  for (const shown of [panel, status, track, use]) await expect(shown).toBeVisible();
+  await expect(track).toHaveValue('1:1');
+  expect(await panel.evaluate(element => element.contains(document.activeElement))).toBe(true);
+  await reflow(page);
+  // Using the release from the panel closes it, brings focus to the lookup panel and applies the release through the pairing.
+  await use.click();
+  await expect(summary.getByText(label('admin.lookup.applied', { title: 'Synthetic Live Album 2' }), { exact: true })).toBeVisible();
+  await expect(panel).toHaveCount(0);
+  await expect(summary).toBeFocused();
+  expect(api.writes.map(write => write.method)).toEqual(['PATCH', 'POST', 'POST']);
+});
+
 for (const variant of localizedViewports) {
   const { width } = variant;
   test(`an active review lookup says which step runs with its counts and elapsed time, that it keeps running, and asks before a name replaces it at ${width}px ${variant.locale}`, async ({ page }) => {
@@ -2049,7 +2108,7 @@ for (const variant of localizedViewports) {
     await expect(offered.getByText(line, { exact: true })).toHaveCount(1);
     await expect(offered.getByText(line, { exact: true })).toBeVisible();
     // The folded list of every release found names it on both matching editions once opened.
-    const all = summary.locator(':scope > details').filter({ has: page.locator(':scope > summary', { hasText: message('admin.lookup.candidates', { count: 12 }) }) });
+    const all = summary.locator('details').filter({ has: page.locator(':scope > summary', { hasText: message('admin.lookup.candidates', { count: 12 }) }) });
     await all.locator(':scope > summary').click();
     await expect(all.getByText(line, { exact: true })).toHaveCount(2);
     await offered.scrollIntoViewIfNeeded(); await capture(page, '49-review-paired-by', width, false, false); await reflow(page);

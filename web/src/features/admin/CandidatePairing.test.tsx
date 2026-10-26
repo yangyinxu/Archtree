@@ -13,7 +13,7 @@
  *   - a re-rank that already applied this release or another of its editions through a pairing needs no choice, while one applied for its Album values only is chosen again
  *   - a save that leaves the tracks pairing in more than one way chooses nothing and says the numbers are saved but the release was not used
  *   - an unconfirmed save says so and is sent again as the same operation by Save; a refused save says it was not saved, keeps the choices and starts a new one after reading the review again
- *   - a choice that fails after the save keeps the numbers and offers Use this release, which chooses without saving again: an unconfirmed one as the same operation, a refused one as a new one
+ *   - a choice that fails after the save keeps the numbers, focus in the panel and offers Use this release, which chooses without saving again: an unconfirmed one as the same operation, a refused one as a new one
  *   - a read that fails says so with Try again, and a read for another run saves nothing
  *   - Cancel closes without a request; a disabled panel disables choosing and saving but keeps Cancel, and a running save disables every control
  *   - a reload request says to reload and leaves only Cancel; Cancel after an unconfirmed save has the page read the review again
@@ -258,13 +258,17 @@ test('an unconfirmed save says so and is sent again as the same operation by Sav
   expect(fresh.body!.changes).toEqual(rejected.body!.changes);
 });
 
-test('a choice that fails after the save keeps the numbers and offers Use this release, which chooses without saving again: an unconfirmed one as the same operation, a refused one as a new one', async () => {
+test('a choice that fails after the save keeps the numbers, focus in the panel and offers Use this release, which chooses without saving again: an unconfirmed one as the same operation, a refused one as a new one', async () => {
   const { onClose, writes, requests } = mount({ read: (_body, count) => reviewJson(handPairingResponse(count === 1 ? 1 : 2)), save: body => receipt(body, 2),
     lookup: () => reviewJson(pairedLookupResponse()),
     choose: (body, count) => count === 1 ? reviewJson({ code: 'ADMIN_CATALOG_REVIEW_UNAVAILABLE' }, 503) : count === 2 ? reviewJson({ code: 'ADMIN_IMPORT_LOOKUP_STALE' }, 409) : receipt(body, 3) });
   await chooseFirst();
+  saveButton().focus();
   fireEvent.click(saveButton());
+  // The save disables its button, so focus moves to the heading and stays in the panel.
+  expect(document.activeElement).toBe(screen.getByRole('heading', { name: heading }));
   expect(await screen.findByText(chooseUnknown)).toHaveAttribute('role', 'status');
+  expect(document.activeElement).toBe(screen.getByRole('heading', { name: heading }));
   expect(screen.queryByRole('button', { name: save })).not.toBeInTheDocument();
   const use = screen.getByRole('button', { name: 'Use this release' });
   expect(use).toHaveClass(styles.primary);

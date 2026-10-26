@@ -46,12 +46,12 @@ const cardStyle = { margin: '.5rem 0', padding: '.75rem', alignItems: 'flex-star
  * ID, or create without any candidate, is preselected, while a name, alias or localized-name candidate needs an explicit choice,
  * and an Artist another identity of the same list already names cannot be reused. A bound identity offers only keeping or
  * replacing its record's different MusicBrainz ID, and entries naming different Artists offer reuse or create, never a replace;
- * only a bound row that needs no answer is folded. MusicBrainz IDs show only on request, and so do record ID endings, except where
- * records or rows of one name need them to be told apart. A choice the server refused is marked unsaved with Save decisions to
- * send it again (after a save with an unknown outcome the page's retry sends it again); unsaved choices survive new reads until
- * their row vanishes, is renamed or equals the saved one. A saved reuse or replace whose record changed since is shown with no
- * card chosen, with a note, and left out of every save, since the server refuses to keep it; choosing the preselected card then
- * saves the set without it.
+ * only a bound row that needs no answer is folded. MusicBrainz IDs show only on request (offered only while a row has an ID of its
+ * own), and so do record ID endings, except where records or rows of one name need them to be told apart. A choice the server
+ * refused is marked unsaved with Save decisions to send it again (after a save with an unknown outcome the page's retry sends it
+ * again); unsaved choices survive new reads until their row vanishes, is renamed or equals the saved one. A saved reuse or replace
+ * whose record changed since is shown with no card chosen, with a note, and left out of every save, since the server refuses to
+ * keep it; choosing the preselected card then saves the set without it.
  */
 export function CatalogReviewIdentities({ item, disabled, onSave }: { item: CatalogReview; disabled: boolean; onSave: (decisions: ReviewDecisionItem[]) => void }) {
   const t = useAdminText(), { t: shared } = useLocalization(), access = useAdminAccess(), id = useId();
@@ -137,7 +137,9 @@ export function CatalogReviewIdentities({ item, disabled, onSave }: { item: Cata
     (ids || rows.some(other => other !== row && other.scope === row.scope && sameName(other.name, row.name))) && row.musicBrainzId && t('lookup.musicbrainz_id', { id: row.musicBrainzId }),
     row.names.length > 0 && t('catalog_review.identity_names', { names: row.names.join(', ') })].filter(Boolean).join(' · ');
   const head = (row: Row) => <span id={`${id}-${row.handle}`}>{heading(row)}</span>;
-  const named = data.candidates.items.some(candidate => candidate.musicBrainzId) || rows.some(row => row.musicBrainzId || row.bound.some(record => record.musicBrainzId));
+  // A record's MusicBrainz ID shows only beside its row's own (to keep or replace), so the toggle is offered only while a row has
+  // one of its own: none when neither the lookup nor the captured Album supplied one.
+  const named = rows.some(row => row.musicBrainzId || row.musicBrainzIdWrite);
   return <section aria-labelledby={`${id}-title`}>{header}
     {named && <div className={styles.actions}><button className={styles.filter} type="button" aria-pressed={ids} onClick={() => setIds(!ids)}>{t('catalog_review.identity_show_ids')}</button></div>}
     <ul className={styles.cards} onFocus={() => setFocused(true)} onBlur={event => setFocused(event.currentTarget.contains(event.relatedTarget))}>{rows.map(row => <li key={row.handle} className={styles.card}>{row.state === 'bound' && row.bound[0] && !row.needsAnswer

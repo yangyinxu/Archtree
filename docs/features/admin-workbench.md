@@ -1465,8 +1465,11 @@ again, after a save with an unknown outcome the page's **Retry original
 operation** sends it again, a stored choice whose record changed since shows no
 card chosen, only a bound row that needs no answer is folded, and MusicBrainz
 IDs show only after **Show MusicBrainz IDs**, except where rows of one name need
-them, as do record ID endings except where records of one name need them; and
-the values that need no answer, folded, each once.
+them, as do record ID endings except where records of one name need them; that
+button is offered only while a row has a MusicBrainz ID of its own, since a
+record's shows only beside it, so there is none when neither the lookup nor the
+captured Album supplied one, as with an iTunes-only result for Artists without
+MusicBrainz IDs; and the values that need no answer, folded, each once.
 Once the release applied to the draft leaves nothing open (no active run, free
 retry, refined status, lookup answer or identity row that needs a record, and no
 release applied for its Album values only whose tracks still pair in more than
@@ -1478,7 +1481,8 @@ and the hint that the numbers can be filled from the titles) and is neither an
 iTunes-only result nor an artist mismatch, whose values to check are never
 collapsed (so an iTunes-only result never folds), everything after the name box
 folds under **Lookup results and applied values**, which opens again on request
-and by itself as soon as something opens; it stays mounted, so unsaved identity
+and by itself as soon as something opens, but never folds while the pairing panel
+(**Pair tracks by hand**, below) is open; it stays mounted, so unsaved identity
 choices survive it.
 Lookup controls are disabled while a command runs,
 offline, while the draft has unsaved or conflicting edits and while the source
@@ -1914,7 +1918,12 @@ edition, below the chooser's sections and one at a time. It keeps one place in
 the tree whichever view the chooser shows, and the summary's results keep one
 element whether or not a release is applied, so a re-rank that moves the release
 out of **Possible matches**, or a first applied release, neither closes it nor
-clears its choices. It reads `GET
+clears its choices. Until a release is applied that element is open with its
+summary hidden, so it is no fold: browsers expose no disclosure control or
+expanded state for it, only an unnamed group. While the panel is open the
+results never fold, so when its save's re-rank applies a release that leaves
+nothing open, the panel with its status and **Use this release** stays in view;
+closing the panel leaves the results as they are. It reads `GET
 /catalog-reviews/:id/lookup/candidates/:key/pairing` (below) and is headed
 **Pair the tracks with "X" (20 tracks on 2 discs)**. Each member, in Album order
 with its saved title and duration, gets a list of the release tracks it can pair
@@ -1960,8 +1969,10 @@ without saving again: a refused choice as a new one, an unconfirmed one as the
 same choice again. A reload request says to reload and leaves only **Cancel**; a
 read that fails says so with **Try again**. **Cancel** closes the panel without
 saving; after an outcome the panel could not confirm, it also has the page read
-the review again. Focus returns to the opener after **Cancel**, and to the
-summary's lookup panel once the release is used or when the opener is gone. The
+the review again. While a save or choice runs, which disables its buttons,
+focus is on the panel's heading. Focus returns to the opener after **Cancel**,
+and to the summary's lookup panel once the release is used or when the opener
+is gone. The
 numbers behave like those filled from the titles: they constrain pairing, stay
 when another release is chosen and reach the catalog only when the review is
 applied. Like the chooser's other buttons, the opener and the save are disabled

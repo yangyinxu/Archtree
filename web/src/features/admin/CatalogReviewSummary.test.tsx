@@ -921,27 +921,41 @@ test('an open pairing panel keeps its saved state when its save\'s re-rank appli
   const item = unnumberedPairingReview(), other = pairingLookupResponse().lookup!.candidates[0];
   let lookup = pairingLookupResponse();
   const rendered = mount(item, () => reviewJson(lookup)), base = rendered.fetch.getMockImplementation()!, writes: string[] = [];
-  // The pairing read, the save (whose re-rank applies another release) and a refused choice; every other read is the summary's.
-  vi.stubGlobal('fetch', vi.fn(async (path: string, init: RequestInit = {}) => {
+  const decided = reviewIdentityResponse(); decided.identities = decided.identities.map(row => ({ ...row, needsAnswer: false }));
+  // The pairing read, identity rows that need no answer, the save (whose re-rank applies another release) and a refused choice;
+  // every other read is the summary's.
+  const fetch = vi.fn(async (path: string, init: RequestInit = {}) => {
     if (path.endsWith('/pairing')) return reviewJson(handPairingResponse(item.revision));
+    if (path.endsWith('/candidates')) return reviewJson(decided);
     if (init.method === 'PATCH') {
       writes.push('save'); lookup = pairedLookupResponse(pairingApplication(other.key, false));
       return reviewJson({ item: { id: item.id, revision: item.revision + 1 }, receipt: { operationId: JSON.parse(String(init.body)).operationId } });
     }
     if (path.endsWith('/lookup/choose')) { writes.push('choose'); return reviewJson({ code: 'ADMIN_IMPORT_LOOKUP_STALE' }, 409); }
     return base(path);
-  }));
+  });
+  vi.stubGlobal('fetch', fetch);
   const card = await within(rendered.section()).findByRole('region', { name: 'Possible match (1 release)' });
   expect(within(rendered.section()).queryByText('Lookup results and applied values')).not.toBeInTheDocument();
+  // Until a release is applied the results are no fold: their one element is open with its summary hidden.
+  const results = card.closest('details')!;
+  expect([results.open, results.querySelector<HTMLElement>(':scope > summary')!.style.display]).toEqual([true, 'none']);
   fireEvent.click(within(card).getByRole('button', { name: 'Pair tracks by hand' }));
   fireEvent.change(await screen.findByRole('combobox', { name: '1 · Synthetic opening (Live) · 3:35.66' }), { target: { value: '1:1' } });
   await waitFor(() => expect(screen.getByRole('button', { name: 'Save pairing and use this release' })).toBeEnabled());
   fireEvent.click(screen.getByRole('button', { name: 'Save pairing and use this release' }));
-  // The summary reads the applied release and folds its results, while the panel stays with its saved numbers and Use this release.
-  expect(await within(rendered.section()).findByText('Lookup results and applied values')).toBeInTheDocument();
+  // The summary reads the applied release and its identity rows, which leave nothing open, but its results stay open in the same
+  // element under the open panel, which keeps its saved numbers and Use this release.
+  expect((await within(rendered.section()).findByText('Lookup results and applied values')).closest('details')).toBe(results);
+  await waitFor(() => { expect(fetch.mock.calls.some(([path]) => String(path).endsWith('/candidates'))).toBe(true); expect(rendered.client.isFetching()).toBe(0); });
   expect(writes).toEqual(['save', 'choose']);
   const panel = screen.getByRole('region', { name: 'Pair the tracks with "Synthetic Live Album 2" (20 tracks on 2 discs)' });
   expect(within(panel).getByText('The Disc and Track Numbers are saved, but this release is not in use yet. Use it below.')).toHaveAttribute('role', 'status');
   expect(within(panel).getByRole('combobox', { name: '1 · Synthetic opening (Live) · 3:35.66' })).toHaveValue('1:1');
   expect(within(panel).getByRole('button', { name: 'Use this release' })).toBeInTheDocument();
+  expect(results.open).toBe(true);
+  // Cancel leaves the results as they are.
+  fireEvent.click(within(panel).getByRole('button', { name: 'Cancel' }));
+  expect(screen.queryByRole('region', { name: 'Pair the tracks with "Synthetic Live Album 2" (20 tracks on 2 discs)' })).not.toBeInTheDocument();
+  expect(results.open).toBe(true);
 });
