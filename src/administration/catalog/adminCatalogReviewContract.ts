@@ -19,6 +19,7 @@ import type { ImportArtistEntry, ImportDraftV2, ImportSuggestionV2 } from '../im
 import type { ExpectedTracklistRow } from '../../services/catalog/albumExpectedTracklist';
 import type { CatalogCreditRole } from '../../models/catalogCredit';
 import { REVIEW_LOOKUP_LIMITS } from '../lookup/lookupReviewValues';
+import type { CatalogReviewLookupBrief } from '../lookup/catalogReviewLookupBrief';
 
 /**
  * A private metadata review targets existing catalog identities, never upload/publication slots. The Album scope (slotId null)
@@ -71,10 +72,13 @@ export type CatalogReviewDetail = {
     receipts: CatalogReviewReceipt[];
 };
 export type CatalogReviewResponse = { item: CatalogReviewDetail; receipt: CatalogReviewReceipt | null };
-/** `albumTitle` is the catalog Album's title as the review captured it; `title` is the draft's. */
+/**
+ * `albumTitle` is the catalog Album's title as the review captured it; `title` is the draft's; `lookup` is the review's lookup
+ * brief (null without a readable run).
+ */
 export type CatalogReviewWorkbench = {
     items: Array<Pick<CatalogReviewDetail, 'id' | 'revision' | 'createdAt' | 'updatedAt' | 'startedByMe' | 'state' | 'analysis'> &
-        { albumId: string; albumTitle: string; title: string; pendingSuggestions: number }>;
+        { albumId: string; albumTitle: string; title: string; pendingSuggestions: number; lookup: CatalogReviewLookupBrief | null }>;
     counts: Record<ImportWorkbenchFilter, number>; nextCursor: string | null;
 };
 /** POST /catalog-reviews/:id/discard. */
@@ -102,9 +106,11 @@ export type CreateCatalogReview = { operationId: string; albumId: string; expect
 export type CatalogReviewIneligibility = 'albumNotReady' | 'tooManyTracks' | 'membershipInvalid' | 'membershipInconsistent' | 'videoTracks' | 'tracksNotReady' | 'valuesUnsupported';
 /**
  * GET /catalog-reviews/eligibility?albumId=: whether a review can be created (`reason` null when it can), the newest unapplied
- * review of the Album whose source is current, and whether metadata lookup runs on this server.
+ * review of the Album whose source is current, whether metadata lookup runs on this server, and the lookup brief of that open
+ * review (null without one or without a readable run).
  */
-export type CatalogReviewEligibility = { eligible: boolean; reason: CatalogReviewIneligibility | null; openReviewId: string | null; lookupAvailable: boolean };
+export type CatalogReviewEligibility = { eligible: boolean; reason: CatalogReviewIneligibility | null; openReviewId: string | null; lookupAvailable: boolean;
+    openLookup: CatalogReviewLookupBrief | null };
 /**
  * PATCH /catalog-reviews/:id: the changed editable values, each with the value the editor started from (`base`): the Album title
  * and date and each Track's title, Disc Number and Track Number. Artist entries, the label, visibility, the expected tracklist and
@@ -217,7 +223,10 @@ export type CatalogReviewCapture = {
 // selected `fields` and `memberCredits` with the preselections and ID writes it showed and the detail's `valueRevision` as
 // `expectedValueRevision`.
 // GET /:id/lookup/candidates/:key/artwork is a transient WebP preview (catalogReviewLookupRequests.ts, adminImportLookupCover.ts).
+// GET /:id/lookup/candidates/:key/pairing reads one candidate's rows and each member's options for pairing by hand
+// (lookupPairingView.ts); the Web's pairing panel saves the chosen numbers with PATCH /:id, then POST /:id/lookup/choose.
 // POST /:id/discard ({operationId, expectedRevision}, 96 KB) replaces an unapplied review with a tombstone and deletes its lookup
 // record (adminCatalogReviewDiscard.ts); every other /:id route answers a discarded review with 404 ADMIN_CATALOG_REVIEW_DISCARDED
-// (the artwork preview stays a bodiless 404). List items carry `albumTitle`.
+// (the artwork preview stays a bodiless 404). List items carry `albumTitle` and the review's lookup brief `lookup`; the eligibility read
+// carries `openLookup`.
 // Every endpoint returns private no-store data; no asset or publication endpoint exists.

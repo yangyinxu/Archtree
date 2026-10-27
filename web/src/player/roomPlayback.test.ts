@@ -526,7 +526,8 @@ test('late-join readiness prepares the current position without playing before s
 });
 
 test('shared trace ignores stale/duplicate frames and preserves one source across membership and seek changes', async () => {
-  const { audio, room, store, onIntent, factory } = setup();
+  // Every trace frame is anchored at 10 000 ms; a fixed clock keeps scheduling delays out of the asserted position.
+  const { audio, room, store, onIntent, factory } = setup(undefined, { now: () => 10_000 });
   for (const [index, value] of trace.snapshots.entries()) {
     const loads = audio.loadCalls;
     const plays = audio.playCalls;

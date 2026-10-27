@@ -29,9 +29,10 @@ export type ReviewEntryFixture = { name: string; role?: 'primary' | 'featured'; 
  * One member: its captured duration (null: none captured; `legacy`: whole seconds), its own numbers as the draft shows them, its
  * shown Artist entries (`artists`, none by default) and other captured Credits (an Artist as `composer`, an `organization` as
  * publisher), whether the draft shows every primary and featured Artist Credit (`complete`, true by default; `unreadable` captures
- * its Credits as unreadable) and its captured attribution state (null by default).
+ * its Credits as unreadable), its captured attribution state (null by default) and its retained original filename
+ * (`synthetic-<n>.flac` by default; null retains none).
  */
-export type ReviewMemberFixture = { durationMs?: number | null; legacy?: boolean; discNumber?: number | null; trackNumber?: number | null; title?: string;
+export type ReviewMemberFixture = { durationMs?: number | null; legacy?: boolean; discNumber?: number | null; trackNumber?: number | null; title?: string; originalFileName?: string | null;
     artists?: ReviewEntryFixture[]; otherCredits?: ('composer' | 'organization')[]; complete?: boolean | 'unreadable'; attributionStatus?: 'documented' | 'unknown' | null };
 /** Members with the given durations, numbered 1..n on no disc. */
 export const numberedMembers = (durations: (number | null)[]): ReviewMemberFixture[] => durations.map((durationMs, index) => ({ durationMs, trackNumber: index + 1 }));
@@ -67,6 +68,7 @@ export function reviewLookupDocument(options: { title?: string; primaryNames?: s
             subject: subject('Synthetic Label') }])
     ];
     const artists = shown.map(entryOf);
+    const fileNameOf = (member: ReviewMemberFixture, index: number) => member.originalFileName === undefined ? `synthetic-${index + 1}.flac` : member.originalFileName;
     /** A member's captured Credits: one per shown entry, then its other Credits; null when unreadable. */
     const memberCredits = (member: ReviewMemberFixture, index: number) => member.complete === 'unreadable' ? null : [
         ...(member.artists ?? []).map((entry, at) => creditOf({ ...entry, key: reviewMemberEntryKey(index, at) }, `member-${index}-${at}`, `0000000000000000000b${String(index + 1).padStart(2, '0')}${String(at + 1).padStart(2, '0')}`)),
@@ -78,7 +80,7 @@ export function reviewLookupDocument(options: { title?: string; primaryNames?: s
     ];
     return {
         _id: new ObjectId(options.id ?? reviewId), purpose: 'catalogReview', draftVersion: 3, actorId: reviewActor, revision: 2, createdAt: at, updatedAt: at,
-        manifest: { rootLabel: '', files: slots.map((slotId, index) => ({ slotId, filename: `synthetic-${index + 1}.flac`, relativePath: '', byteLength: null })) },
+        manifest: { rootLabel: '', files: slots.map((slotId, index) => ({ slotId, filename: fileNameOf(members[index], index) ?? '', relativePath: '', byteLength: null })) },
         draft: {
             album: { title, artists, label: label === 'none' ? null : { name: 'Synthetic Label', musicBrainzId: null }, releaseDate: options.releaseDate ?? null, visibility: 'public',
                 expectedTracklist: options.expectedTracklist ?? null },
@@ -89,7 +91,7 @@ export function reviewLookupDocument(options: { title?: string; primaryNames?: s
         catalogSource: {
             album: { id: '0000000000000000000000a1', revision: `cr_${'a'.repeat(43)}`, title, releaseDate: null, visibility: 'public' },
             tracks: members.map((member, index) => ({ slotId: slots[index], id: reviewTrackId(index), revision: `tr_${index}`, title: member.title ?? `Synthetic Track ${index + 1}`,
-                discNumber: member.discNumber ?? null, trackNumber: member.trackNumber ?? null, originalFileName: `synthetic-${index + 1}.flac` }))
+                discNumber: member.discNumber ?? null, trackNumber: member.trackNumber ?? null, originalFileName: fileNameOf(member, index) }))
         },
         catalogEvidence: Object.fromEntries(members.map((_member, index) => [reviewTrackId(index), `evidence-${index}`])),
         ...(options.capture === false ? {} : { catalogCapture: {

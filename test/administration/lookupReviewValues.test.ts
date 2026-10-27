@@ -5,6 +5,7 @@
  * Tests
  *   - review-only paths are the expected tracklist and member Artist entries; entry lists are the Album's and each member's
  *   - an entry agrees by name case-insensitively, by a name or alias found for its ID, or by the same ID under another name, whatever ID the saved entry keeps; never across roles
+ *   - a decorated saved name agrees when either part equals the lookup name or a name found for its ID; a decorated lookup name, a plain saved name or another role does not
  *   - join phrases compare as bylines: a missing or invalid one is `, `, and the last entry's is ignored
  *   - saved and lookup lists are the same, extended by appended entries, or different
  *   - member states read the capture: unreadable or incomplete Credits are not complete, and an Artist Credit of any role counts
@@ -56,6 +57,26 @@ test('an entry agrees by name case-insensitively, by a name or alias found for i
     // The role must match.
     assert.equal(reviewEntryAgrees(entry('Synthetic Lead', { role: 'featured' }), entry('Synthetic Lead'), none), false);
     assert.equal(reviewEntryAgrees(null as unknown as ImportArtistEntry, entry('Synthetic Lead'), none), false);
+});
+
+test('a decorated saved name agrees when either part equals the lookup name or a name found for its ID; a decorated lookup name, a plain saved name or another role does not', () => {
+    const decorated = 'ヰ世界情緒 -Isekaijoucho-';
+    assert.equal(reviewEntryAgrees(entry(decorated), entry('ヰ世界情緒', { musicBrainzId: syntheticMbid(1) }), none), true);
+    assert.equal(reviewEntryAgrees(entry(decorated), entry('isekaijoucho'), none), true);
+    assert.equal(reviewEntryAgrees(entry('ヰ世界情緒（Isekaijoucho）'), entry('ヰ世界情緒'), none), true);
+    assert.equal(reviewEntryAgrees(entry(decorated), entry(decorated), none), true);
+    // Through a name the run found for the lookup entry's ID.
+    assert.equal(reviewEntryAgrees(entry(decorated), entry('Synthetic Other', { musicBrainzId: syntheticMbid(1) }), new Map([[syntheticMbid(1), ['Isekaijoucho']]])), true);
+    // Only the saved side is read for parts, and the role must match.
+    assert.equal(reviewEntryAgrees(entry(decorated), entry('ヰ世界情緒 (Isekaijoucho)'), none), false);
+    assert.equal(reviewEntryAgrees(entry('ヰ世界情緒'), entry(decorated), none), false);
+    assert.equal(reviewEntryAgrees(entry(decorated, { role: 'featured' }), entry('ヰ世界情緒'), none), false);
+    // A list of that one entry is the same; with an appended entry, the saved name stays and takes the lookup ID.
+    assert.deepEqual(compareReviewEntries([entry(decorated, {}, 1)], [entry('ヰ世界情緒', { musicBrainzId: syntheticMbid(1) })], { found: none, append: false }), { kind: 'same' });
+    assert.deepEqual(compareReviewEntries([entry(decorated, {}, 1)], [entry('ヰ世界情緒', { joinPhrase: ' & ', musicBrainzId: syntheticMbid(1) }),
+        entry('Synthetic Guest', { musicBrainzId: syntheticMbid(2) }, 2)], { found: none, append: true }), { kind: 'append', value: [
+        { key: key(1), name: decorated, role: 'primary', joinPhrase: ' & ', musicBrainzId: syntheticMbid(1) },
+        { key: key(2), name: 'Synthetic Guest', role: 'primary', joinPhrase: null, musicBrainzId: syntheticMbid(2) }] });
 });
 
 test('join phrases compare as bylines: a missing or invalid one is `, `, and the last entry\'s is ignored', () => {

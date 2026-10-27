@@ -62,7 +62,13 @@ export const METADATA_LOOKUP_LIMITS = Object.freeze({
     termLength: 200,
     textLength: 1000,
     queryLength: 500,
-    durationToleranceMs: 3000
+    durationToleranceMs: 3000,
+    /**
+     * Existing-Album reviews: when more than one pairing exists and no position decides, the only pairing whose every paired
+     * duration is within this many milliseconds of its member's, both known to the millisecond, still counts as single
+     * (lookupResolvedPairing).
+     */
+    nearExactDurationMs: 500
 });
 
 /**

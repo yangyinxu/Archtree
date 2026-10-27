@@ -48,6 +48,7 @@
  *   - only a review admits the expected tracklist and member Artist entries as lookup value paths
  *   - a review choice fills an empty label, date, expected tracklist and missing Disc Numbers, records conflicts for differing titles, stores its pairing, stages no cover and reads no file tags
  *   - review Artist entries agree by an alias, by a stored ID under another credited name and by byline phrases; reordered entries are one conflict keeping the saved keys
+ *   - a decorated saved Album name agrees with a release credited to either part: it keeps its name, gains the ID and is no conflict; a member does the same
  *   - review entries appended after agreeing saved entries are written as the saved list extended; choosing none or another candidate restores the saved list
  *   - a changed join phrase and an added name equal to a saved one are each one conflict on the whole list; another MusicBrainz ID under the same name is an ID conflict
  *   - a lookup answer to an extended list's ID conflict keeps the saved list: none or another candidate restores it with its kept ID, and the same candidate again keeps the answer
@@ -70,6 +71,9 @@
  *   - a review's Artist entries are not applicable while not every Artist Credit is shown, nor its label while it is read-only
  *   - answering a review's expected tracklist conflict measures the review's capped draft, so a large draft still takes it
  *   - a review re-rank applies a new sole preselection over an application an earlier run left, and a run without a single pairing applies nothing
+ *   - a review choice through a pairing title positions decide writes the tracklist and automatic numbers, which never constrain a later pairing
+ *   - a stored review ranking without position hints or pairedBy reads as before: without positions it never re-ranks, with positions it re-ranks once and applies its now single pairing while nothing was applied
+ *   - a review choice follows the pairing the ranking it was shown listed: a stored ranking that pairs in more than one way brings in Album values only until it re-ranks
  * @end-catalog */
 
 /**
@@ -103,7 +107,7 @@ import {
 import { parseMusicBrainzRelease } from '../../src/administration/lookup/musicBrainzClient';
 import { itunesCandidate, type LookupItunesStage } from '../../src/administration/lookup/lookupItunesStage';
 import { fixtureRoot, loadLookupFixture } from '../support/metadataLookupFixtures';
-import { catalogReviewLookupFileSet } from '../../src/administration/lookup/lookupReviewEvidence';
+import { catalogReviewFileEvidence, catalogReviewLookupFileSet } from '../../src/administration/lookup/lookupReviewEvidence';
 import {
     credit, numberedMembers, reviewEntryKey, reviewId, reviewLookupDocument, reviewMemberEntryKey, reviewSlot, storedCandidate, syntheticMbid, syntheticRelease, type ReviewMemberFixture
 } from '../support/catalogReviewLookupFixtures';
@@ -1105,6 +1109,27 @@ test('review Artist entries agree by an alias, by a stored ID under another cred
     assert.deepEqual(reviewDraftOf(reordered).album.artists.map(item => item.name), ['Synthetic Lead', 'Synthetic Second']);
 });
 
+test('a decorated saved Album name agrees with a release credited to either part: it keeps its name, gains the ID and is no conflict; a member does the same', () => {
+    const decorated = '合成情緒 -Gouseijoucho-', one = [200_000];
+    for (const name of ['合成情緒', 'Gouseijoucho']) {
+        const doc = reviewLookupDocument({ albumEntries: [{ name: decorated }] });
+        const { application } = applyLookupCandidate(doc, null, reviewRelease(1, one, { releaseCredit: credit(name, syntheticMbid(1)) }), intent());
+        assert.deepEqual([application.conflicts, reviewDraftOf(doc).album.artists], [[], [lookupEntry(reviewEntryKey(0), decorated, syntheticMbid(1))]], name);
+        assert.deepEqual(application.musicBrainzIds?.filter(item => item.path === 'album.artists'),
+            [{ path: 'album.artists', entryKey: reviewEntryKey(0), musicBrainzId: syntheticMbid(1) }], name);
+    }
+    // Another name is still one conflict on the whole list.
+    const other = reviewLookupDocument({ albumEntries: [{ name: decorated }] });
+    assert.deepEqual(pathsOf(applyLookupCandidate(other, null, reviewRelease(1, one, { releaseCredit: credit('合成', syntheticMbid(2)) }), intent()).application.conflicts),
+        ['album.artists']);
+    // A member's decorated entry agrees with its own track's credit, keeps its key and name and gains the ID, recorded with its path.
+    const member = reviewLookupDocument({ albumEntries: [{ name: 'Synthetic Ensemble' }], members: [{ durationMs: 200_000, trackNumber: 1, artists: [{ name: decorated }] }] });
+    const path = `tracks.${reviewSlot(0)}.artists`;
+    const applied = applyLookupCandidate(member, null, reviewRelease(1, one, { credits: [credit('合成情緒', syntheticMbid(5))] }), intent()).application;
+    assert.deepEqual([pathsOf(applied.conflicts), reviewDraftOf(member).tracks[0].artists], [[], [lookupEntry(reviewMemberEntryKey(0, 0), decorated, syntheticMbid(5))]]);
+    assert.deepEqual(applied.musicBrainzIds?.filter(item => item.path === path), [{ path, entryKey: reviewMemberEntryKey(0, 0), musicBrainzId: syntheticMbid(5) }]);
+});
+
 test('review entries appended after agreeing saved entries are written as the saved list extended; choosing none or another candidate restores the saved list', () => {
     const doc = reviewLookupDocument({ albumEntries: [{ name: 'Synthetic Ensemble' }] }), saved = structuredClone(reviewDraftOf(doc).album.artists);
     const featuring = reviewRelease(1, [200_000], { releaseCredit: credit('Synthetic Ensemble', syntheticMbid(1), ['Synthetic Guest', syntheticMbid(2)]) });
@@ -1532,4 +1557,98 @@ test('a review re-rank applies a new sole preselection over an application an ea
         files: catalogReviewLookupFileSet(unpaired).files, exactSearchComplete: true });
     const kept = rerankStoredLookup(unpaired, { ...ambiguous, applied: earlier, ranking: { ...ambiguous.ranking!, files: [] } }, now, other)!;
     assert.deepEqual([kept.record.ranking!.preselection, kept.record.applied, unpaired.draft, unpaired.draftOrigins], [null, earlier, before.draft, before.draftOrigins]);
+});
+
+test('a review choice through a pairing title positions decide writes the tracklist and automatic numbers, which never constrain a later pairing', () => {
+    // The first member is within half a second of tracks 1 and 3, so durations alone cannot decide; its title's position does.
+    const members = (titles: string[]): ReviewMemberFixture[] => titles.map((title, index) => ({ durationMs: [215_659, 382_752][index], title }));
+    const doc = reviewLookupDocument({ albumEntries: [{ name: 'Synthetic Ensemble' }], members: members(['1-01 Synthetic A', '1-02 Synthetic B']) });
+    const candidate = reviewRelease(1, [215_640, 382_746, 215_300], { credits: 'release' }), [first, second] = [reviewSlot(0), reviewSlot(1)];
+    const { application } = applyLookupCandidate(doc, null, candidate, intent()), draft = reviewDraftOf(doc);
+    assert.deepEqual(application.pairs, [{ slotId: first, discNumber: 1, trackNumber: 1 }, { slotId: second, discNumber: 1, trackNumber: 2 }]);
+    assert.deepEqual([(draft.album.expectedTracklist as unknown[]).length, draft.tracks.map(track => [track.discNumber, track.trackNumber])], [3, [[1, 1], [1, 2]]]);
+    for (const path of [`tracks.${first}.discNumber`, `tracks.${first}.trackNumber`, `tracks.${second}.discNumber`, `tracks.${second}.trackNumber`, 'album.expectedTracklist']) {
+        assert.ok(pathsOf(application.values).includes(path), path);
+        assert.equal(doc.draftOrigins![path.replace(/\./g, ':')], 'automatic', path);
+    }
+    // The numbers written are lookup's: the evidence still has no own number, and the hints stay as captured.
+    assert.deepEqual(catalogReviewFileEvidence(doc).map(file => [file.discNumber, file.trackNumber, file.positionHint]),
+        [[null, null, { discNumber: 1, trackNumber: 1, from: 'title' }], [null, null, { discNumber: 1, trackNumber: 2, from: 'title' }]]);
+    // So another release pairs the members by its own tracks, and its numbers replace them.
+    const later = applyLookupCandidate(doc, application, reviewRelease(2, [100_000, 215_640, 382_746], { credits: 'release' }), intent()).application;
+    assert.deepEqual([later.pairs!.map(pair => pair.trackNumber), draft.tracks.map(track => track.trackNumber)], [[2, 3], [2, 3]]);
+    // Without positions the same release pairs in more than one way: choosing it writes Album values only.
+    const plain = reviewLookupDocument({ albumEntries: [{ name: 'Synthetic Ensemble' }], members: members(['Synthetic A', 'Synthetic B']) });
+    const values = applyLookupCandidate(plain, null, candidate, intent()).application;
+    assert.deepEqual([values.pairs, pathsOf(values.values).filter(path => path.startsWith('tracks.') || path === 'album.expectedTracklist'), reviewDraftOf(plain).album.expectedTracklist],
+        [null, [], null]);
+});
+
+test('a stored review ranking without position hints or pairedBy reads as before: without positions it never re-ranks, with positions it re-ranks once and applies its now single pairing while nothing was applied', () => {
+    const members = (titles: string[]): ReviewMemberFixture[] => titles.map((title, index) => ({ durationMs: [215_659, 382_752][index], title }));
+    const without = reviewLookupDocument({ albumEntries: [{ name: 'Synthetic Ensemble' }], members: members(['Synthetic A', 'Synthetic B']) });
+    const candidate = reviewRelease(1, [215_640, 382_746, 215_300], { credits: 'release' });
+    // A ranking stored before hints existed: its evidence has none, and no candidate records how a pairing was decided.
+    const stored = completed(without, [candidate], { input: { trigger: 'catalog', submitted: null }, grantSource: 'create', files: catalogReviewLookupFileSet(without).files });
+    const [entry] = stored.ranking!.candidates;
+    assert.deepEqual([entry.status, entry.comparison!.subset!.pairing, 'pairedBy' in entry.comparison!.subset!, stored.ranking!.files.some(file => 'positionHint' in file), stored.ranking!.preselection],
+        ['unverified', 'ambiguous', false, false, null]);
+    assert.deepEqual([lookupRerankNeeded(without, stored), rerankStoredLookup(without, stored, now)], [false, null]);
+    // The same review whose captured titles carry positions now has hints in its evidence, so it re-ranks once, and its sole
+    // preselection is applied while the run applied nothing.
+    const titled = reviewLookupDocument({ albumEntries: [{ name: 'Synthetic Ensemble' }], members: members(['1-01 Synthetic A', '1-02 Synthetic B']) });
+    assert.equal(lookupRerankNeeded(titled, stored), true);
+    const reranked = rerankStoredLookup(titled, stored, now, other)!, [matched] = reranked.record.ranking!.candidates;
+    assert.deepEqual([matched.status, matched.comparison!.subset!.pairedBy, reranked.record.ranking!.preselection?.basis, reranked.changed, reranked.record.applied?.choice,
+        reranked.record.applied?.pairs?.map(pair => [pair.discNumber, pair.trackNumber])], ['matching', 'titlePositions', 'onlyMatchingGroup', true, 'preselected', [[1, 1], [1, 2]]]);
+    assert.equal(lookupRerankNeeded(titled, reranked.record), false);
+    // A run that already applied something re-ranks without applying.
+    const applied: LookupApplication = { run: 1, candidateKey: null, releaseId: null, choice: 'none', basis: null, actorId: actor, operationId: mbid(700), at: now, paths: [], values: [],
+        conflicts: [], flagged: [], pairs: null };
+    const untouched = reviewLookupDocument({ albumEntries: [{ name: 'Synthetic Ensemble' }], members: members(['1-01 Synthetic A', '1-02 Synthetic B']) }), before = copy(untouched);
+    const kept = rerankStoredLookup(untouched, { ...stored, applied }, now, other)!;
+    assert.deepEqual([kept.changed, kept.record.applied, kept.record.ranking!.candidates[0].comparison!.subset!.pairedBy, untouched.draft], [false, applied, 'titlePositions', before.draft]);
+});
+
+test('a review choice follows the pairing the ranking it was shown listed: a stored ranking that pairs in more than one way brings in Album values only until it re-ranks', () => {
+    const members = (titles: string[]): ReviewMemberFixture[] => titles.map((title, index) => ({ durationMs: [215_659, 382_752][index], title }));
+    const plain = () => reviewLookupDocument({ albumEntries: [{ name: 'Synthetic Ensemble' }], members: members(['Synthetic A', 'Synthetic B']) });
+    const titled = () => reviewLookupDocument({ albumEntries: [{ name: 'Synthetic Ensemble' }], members: members(['1-01 Synthetic A', '1-02 Synthetic B']) });
+    const candidate = reviewRelease(1, [215_640, 382_746, 215_300], { credits: 'release' }), key = candidate.key;
+    const choice = { run: 1, candidateKey: key, actorId: other, operationId: mbid(701) };
+    const trackValues = (application: LookupApplication) => pathsOf(application.values).filter(path => path.startsWith('tracks.') || path === 'album.expectedTracklist');
+    // A ranking stored before position hints existed lists the candidate as pairing in more than one way.
+    const stored = completed(plain(), [candidate], { input: { trigger: 'catalog', submitted: null }, grantSource: 'create', files: catalogReviewLookupFileSet(plain()).files });
+    assert.equal(stored.ranking!.candidates[0].comparison!.subset!.pairing, 'ambiguous');
+    // Chosen as shown, it brings in the Album values only, although the members' positions would now pair them in one way.
+    const stale = titled(), chosen = chooseLookupCandidate(stale, stored, choice, now);
+    assert.deepEqual([chosen.applied!.pairs, trackValues(chosen.applied!), reviewDraftOf(stale).album.expectedTracklist], [null, [], null]);
+    assert.ok(chosen.applied!.values.length > 0 && chosen.applied!.values.every(item => item.path.startsWith('album.')), JSON.stringify(pathsOf(chosen.applied!.values)));
+    // Once re-ranked, the same choice brings in the tracklist and the members' numbers.
+    const fresh = titled(), reranked = rerankStoredLookup(fresh, stored, now, other)!;
+    assert.equal(reranked.record.ranking!.candidates[0].comparison!.subset!.pairedBy, 'titlePositions');
+    const again = chooseLookupCandidate(fresh, reranked.record, { ...choice, operationId: mbid(702) }, now);
+    assert.deepEqual(again.applied!.pairs!.map(pair => [pair.discNumber, pair.trackNumber]), [[1, 1], [1, 2]]);
+    assert.deepEqual(reviewDraftOf(fresh).tracks.map(track => [track.discNumber, track.trackNumber]), [[1, 1], [1, 2]]);
+    // A re-rank in the same request applies its preselection, which a choice following the ranking shown before it replaces.
+    const both = titled(), preselected = rerankStoredLookup(both, stored, now, other)!;
+    assert.equal(preselected.record.applied!.choice, 'preselected');
+    const replaced = chooseLookupCandidate(both, preselected.record, { ...choice, operationId: mbid(703), shown: stored }, now);
+    assert.deepEqual([replaced.applied!.choice, replaced.applied!.pairs, trackValues(replaced.applied!), reviewDraftOf(both).album.expectedTracklist,
+        reviewDraftOf(both).tracks.map(track => [track.discNumber, track.trackNumber])], ['chosen', null, [], null, [[null, null], [null, null]]]);
+    // A stored ranking whose only resolution would be near-exact durations never re-ranks, so its choice keeps following it.
+    const close = reviewRelease(2, [215_640, 382_746, 214_946], { credits: 'release' });
+    const before = completed(plain(), [close], { input: { trigger: 'catalog', submitted: null }, grantSource: 'create', files: catalogReviewLookupFileSet(plain()).files });
+    const [entry] = before.ranking!.candidates;
+    assert.equal(entry.comparison!.subset!.pairedBy, 'nearExactDuration');
+    const legacy: MetadataLookupRecord = { ...before, ranking: { ...before.ranking!, preselection: null, groups: [],
+        candidates: [{ ...entry, status: 'unverified', groupKey: null, comparison: { ...entry.comparison!, subset: { ...entry.comparison!.subset!, pairing: 'ambiguous', pairs: [], missingTracks: null } } }] } };
+    delete (legacy.ranking!.candidates[0].comparison!.subset as { pairedBy?: unknown }).pairedBy;
+    const untouched = plain();
+    assert.equal(lookupRerankNeeded(untouched, legacy), false);
+    const kept = chooseLookupCandidate(untouched, legacy, { ...choice, candidateKey: close.key, operationId: mbid(704) }, now);
+    assert.deepEqual([kept.applied!.pairs, trackValues(kept.applied!)], [null, []]);
+    // A current ranking that shows the pairing as single is chosen through it.
+    const current = chooseLookupCandidate(plain(), before, { ...choice, candidateKey: close.key, operationId: mbid(705) }, now);
+    assert.deepEqual(current.applied!.pairs!.map(pair => [pair.discNumber, pair.trackNumber]), [[1, 1], [1, 2]]);
 });

@@ -15,9 +15,10 @@
  *   - the iTunes status: not queried without a stage or once a run ended before it answered, running or retrying while an iTunes request waits, else as the stage ended
  *   - a review view shows the catalog trigger, the exact-count basis, subset differences and each candidate's subset comparison within bounds; foreign slots are dropped
  *   - the import view refuses a catalog input (no view) and keeps every import case unchanged
- *   - a review candidate says whether a Track-title search first found its release; the import view never carries the key, and no view shows the decision, credit marker or timing
+ *   - a review candidate says whether a Track-title search first found its release; the import view never carries the key, and the decision shows only as the timeline's derived state, never the stored decision, credit marker, timing or a title that is not the review's
  *   - a review view shows its applied pairing, review-only value paths, conflict precision and flag reasons within 406 values; the import view keeps them all out
  *   - a submitted run's Artist name is projected in import and review views only when it is a bounded string, otherwise the key is absent
+ *   - a review view shows an active run's progress from stored counters and times only, within bounds; a finished run and every import view carry no progress key
  * @end-catalog */
 
 /**
@@ -333,11 +334,13 @@ test('a review view shows the catalog trigger, the exact-count basis, subset dif
 test('the import view refuses a catalog input (no view) and keeps every import case unchanged', () => {
     const doc = project(), imported = record(doc, [stored(release(1))]);
     assert.equal(importLookupView({ ...imported, input: { trigger: 'catalog', submitted: null } }, doc), null);
-    // The review view of the same record differs only by its subset comparison key: a candidate no Track-title search found carries
-    // no `byTrackTitle`. The import view carries neither.
-    const view = importLookupView(imported, doc)!, review = catalogReviewLookupView(imported, doc)!;
+    // The review view of the same record differs only by its subset comparison key and, on the lookup read, its timeline: a
+    // candidate no Track-title search found carries no `byTrackTitle`. The import view carries none of them, and a review view not
+    // built for the lookup read (a brief's) no timeline.
+    const view = importLookupView(imported, doc)!, { timeline: _timeline, ...review } = catalogReviewLookupView(imported, doc, { timeline: true })!;
+    assert.deepEqual([Boolean(_timeline), 'timeline' in catalogReviewLookupView(imported, doc)!], [true, false]);
     assert.equal(JSON.stringify(view).includes('subset'), false);
-    assert.deepEqual(review.candidates.map(entry => [entry.comparison!.subset, 'byTrackTitle' in entry]), [[null, false]]);
+    assert.deepEqual([review.candidates.map(entry => [entry.comparison!.subset, 'byTrackTitle' in entry]), 'timeline' in view], [[[null, false]], false]);
     assert.deepEqual({ ...review, candidates: review.candidates.map(({ comparison, ...entry }) => {
         const { subset: _subset, ...rest } = comparison!; return { ...entry, comparison: rest }; }) }, view as unknown);
     // An exact-count basis applied to a review shows only in a review's view.
@@ -346,21 +349,24 @@ test('the import view refuses a catalog input (no view) and keeps every import c
     assert.deepEqual([importLookupView(applied, doc)!.applied?.basis, catalogReviewLookupView(applied, doc)!.applied?.basis], [null, 'exactTrackCount']);
 });
 
-test('a review candidate says whether a Track-title search first found its release; the import view never carries the key, and no view shows the decision, credit marker or timing', () => {
+test('a review candidate says whether a Track-title search first found its release; the import view never carries the key, and the decision shows only as the timeline\'s derived state, never the stored decision, credit marker, timing or a title that is not the review\'s', () => {
     const doc = reviewLookupDocument({ primaryNames: ['Synthetic Lead'], members: numberedMembers([210_000, 220_000]) });
     const byTitle: StoredLookupCandidate = { ...stored(release(3)), basis: 'trackTitle' };
     const queries = [{ kind: 'musicBrainzRecordingSearch', query: { recording: 'Synthetic Searched Title', artist: 'Synthetic Lead' }, basis: 'trackTitle', when: 'noMatchOrPartial' }] as never;
     const ranked = reviewRecord(doc, [stored(release(1)), byTitle, { ...stored(release(4), 'pending'), basis: 'trackTitle' }],
         { queries, trackTitleSearch: 'sent', creditFound: true });
-    const view = catalogReviewLookupView(ranked, doc)!;
+    const view = catalogReviewLookupView(ranked, doc, { timeline: true })!;
     // Only `true` is sent, so a Web tab opened before these searches still parses a view whose candidates none of them found.
     assert.deepEqual(view.candidates.map(entry => [entry.releaseId, 'byTrackTitle' in entry, entry.byTrackTitle]),
         [[mbid(1), false, undefined], [mbid(3), true, true], [mbid(4), true, true]]);
     const imported = importLookupView({ ...ranked, input: { trigger: 'submitted', submitted: { kind: 'album', text: 'Synthetic Album' } } }, project())!;
     assert.equal(imported.candidates.some(entry => 'byTrackTitle' in entry), false);
-    for (const shown of [view, imported]) {
+    // The review's timeline derives the state from the stored decision; the planned title is none of the review's, so it is not shown.
+    assert.deepEqual([view.timeline!.trackTitleSearch, view.timeline!.steps.find(step => step.kind === 'trackTitle')], [{ state: 'sent' }, { kind: 'trackTitle', state: 'done' }]);
+    for (const [shown, hidden] of [[view, ['creditFound', 'noMatchOrPartial', '"when"', 'Synthetic Searched Title', 'recording']],
+        [imported, ['trackTitleSearch', 'creditFound', 'noMatchOrPartial', '"when"', 'Synthetic Searched Title', 'recording']]] as const) {
         const text = JSON.stringify(shown);
-        for (const hidden of ['trackTitleSearch', 'creditFound', 'noMatchOrPartial', '"when"', 'Synthetic Searched Title', 'recording']) assert.equal(text.includes(hidden), false, hidden);
+        for (const word of hidden) assert.equal(text.includes(word), false, word);
     }
 });
 
@@ -412,4 +418,56 @@ test('a submitted run\'s Artist name is projected in import and review views onl
         assert.deepEqual(view(submitted(undefined), target), view(plain, target));
     }
     assert.deepEqual(importLookupView(plain, doc)!.input, { trigger: 'submitted', submitted: { kind: 'album', text: 'Synthetic Album' } });
+});
+
+test('a review view shows an active run\'s progress from stored counters and times only, within bounds; a finished run and every import view carry no progress key', () => {
+    const doc = reviewLookupDocument({ primaryNames: ['Synthetic Lead'], members: numberedMembers([210_000, 220_000]) });
+    const started = new Date('2026-10-19T00:00:00Z'), stepped = new Date('2026-10-19T00:00:14Z');
+    const query = { kind: 'musicBrainzReleaseSearch', query: { release: 'Synthetic Album' }, basis: 'albumText' } as never;
+    const base = reviewRecord(doc, [], { state: 'queued', phase: 'search', queryIndex: 0, queries: [query, query], candidates: [], ranking: null, createdAt: started, updatedAt: stepped });
+    const progress = (extra: Partial<MetadataLookupRecord>) => catalogReviewLookupView({ ...base, ...extra } as MetadataLookupRecord, doc)!.progress;
+    const times = { startedAt: started.toISOString(), updatedAt: stepped.toISOString() };
+    const request = { kind: 'itunesSearch', term: 'Synthetic Album', entity: 'album', storefront: 'jp' };
+    const item = (n: number, collection: string) => ({ key: `collection:${n}`, kind: 'collection', collectionId: String(1689358560 + n), names: [{ storefront: 'jp', title: 'Synthetic Album', artist: 'Synthetic Lead' }],
+        barcode: null, bridge: 'found', collection });
+    const stage = (extra: Record<string, unknown>) => ({ reason: 'noMatch', text: 'synthetic album', requests: [request, request, request], requestIndex: 0, items: [], bridge: null, bridgeIndex: 0,
+        bridgeOutcomes: [], state: 'running', complete: true, finalized: false, ...extra }) as never;
+    const bridge = (n: number) => Array.from({ length: n }, () => ({ ...(query as object), itemKeys: ['collection:1'] }));
+    const alias = (state: string) => ({ kind: 'artist', id: mbid(1), state, names: [] });
+    // A queued run reports its planned searches; a running or retrying one reports its stored phase's counts.
+    assert.deepEqual(progress({}), { phase: 'search', done: 0, total: 2, ...times });
+    assert.deepEqual([
+        progress({ state: 'running', queryIndex: 1 }),
+        progress({ state: 'running', phase: 'details', candidates: [stored(release(1)), stored(release(2), 'failed'), stored(release(3), 'pending')] }),
+        progress({ state: 'running', phase: 'itunes', itunesStage: stage({ requestIndex: 1 }) }),
+        progress({ state: 'running', phase: 'itunes', itunesStage: stage({ requestIndex: 3, items: [item(1, 'fetched'), item(2, 'pending'), item(3, 'notNeeded')] }) }),
+        progress({ state: 'running', phase: 'itunes', itunesStage: null }),
+        progress({ state: 'running', phase: 'bridge', itunesStage: stage({ requestIndex: 3, bridge: bridge(4), bridgeIndex: 2 }) }),
+        progress({ state: 'running', phase: 'aliases', aliases: [alias('fetched'), alias('failed'), alias('pending')] as never }),
+        progress({ state: 'retrying', phase: 'details', candidates: [stored(release(1)), stored(release(3), 'pending')] })
+    ].map(value => value && [value.phase, value.done, value.total]), [['search', 1, 2], ['details', 2, 3], ['itunes', 1, 3], ['itunes', 1, 2], ['itunes', 0, 0], ['bridge', 2, 4],
+        ['aliases', 2, 3], ['details', 1, 2]]);
+    // The trailing Track-title searches count only once the run sends them.
+    const titled = { kind: 'musicBrainzRecordingSearch', query: { recording: 'Synthetic Song' }, basis: 'trackTitle', when: 'noMatchOrPartial' } as never;
+    const planned = [query, query, titled, titled, titled];
+    assert.deepEqual([progress({ queries: planned }), progress({ queries: planned, trackTitleSearch: 'skipped' } as never), progress({ queries: planned, queryIndex: 3, trackTitleSearch: 'sent' } as never)]
+        .map(value => value && [value.done, value.total]), [[0, 2], [0, 2], [3, 5]]);
+    // Counts stay within 100 and never above their total; an unreadable counter counts nothing.
+    assert.deepEqual([progress({ queries: Array.from({ length: 150 }, () => query), queryIndex: 200 }), progress({ queryIndex: -1 }), progress({ queryIndex: 1.5 }), progress({ queryIndex: 5 })]
+        .map(value => value && [value.done, value.total]), [[100, 100], [0, 2], [0, 2], [2, 2]]);
+    // A finished run, the completed phase, an unknown phase and a start or last-step time that is unreadable or outside the years
+    // 0000-9999 (which the Web's strict date-time schema refuses) show no progress key at all.
+    for (const extra of [{ state: 'complete' }, { state: 'stopped' }, { state: 'unavailable' }, { state: 'superseded' }, { state: 'running', phase: 'done' }, { state: 'running', phase: 'other' },
+        { createdAt: undefined }, { createdAt: new Date(Number.NaN) }, { updatedAt: '2026-10-19T00:00:14Z' }, { createdAt: new Date('+010000-01-01T00:00:00Z') },
+        { updatedAt: new Date('-000001-01-01T00:00:00Z') }] as Partial<MetadataLookupRecord>[]) {
+        const view = catalogReviewLookupView({ ...base, ...extra } as MetadataLookupRecord, doc)!;
+        assert.equal('progress' in view, false, JSON.stringify(extra));
+    }
+    // Numbers and times only: exactly the five keys, and the view carries no stored query; the searched text, the review's own saved
+    // title, shows only in its timeline.
+    const { timeline, ...view } = catalogReviewLookupView(base, doc, { timeline: true })! as unknown as Record<string, unknown> & { timeline: { steps: { texts?: { text: string }[] }[] } };
+    assert.deepEqual([Object.keys(view.progress as object).sort(), 'queries' in view, JSON.stringify(view).includes('Synthetic Album'), timeline.steps[0].texts],
+        [['done', 'phase', 'startedAt', 'total', 'updatedAt'], false, false, [{ text: 'Synthetic Album' }]]);
+    // An import's view of the same active run never carries it.
+    assert.equal('progress' in (importLookupView({ ...record(project(), []), state: 'queued', phase: 'search', queryIndex: 0 }, project())! as object), false);
 });

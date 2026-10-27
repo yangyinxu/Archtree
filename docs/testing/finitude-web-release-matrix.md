@@ -163,10 +163,13 @@ applied after the review detail is read again, answers one conflict with Keep
 current and the rest, a track's Artists included, with Use all MusicBrainz in
 one request each made against the saved values, shows a member filled from its
 own release track, the expected tracklist with its row without a file, and the
-guest Artist shared by the Album and a track as one identity row saved as
-created, with axe scans and reflow down to 320 px. The full flow starts from the
-Album page: Complete from MusicBrainz (free) creates an Album completion whose
-automatic lookup is queued and then applied; after the conflicts and the guest
+guest Artist shared by the Album and a track as one identity row offering a card
+to reuse the existing Artist and one to create it, neither chosen, whose create
+card saves it as created at once, with no MusicBrainz ID shown until Show
+MusicBrainz IDs, with axe scans and reflow down to 320 px. The full flow starts
+from the Album page: Complete from MusicBrainz (free), whose confirmation reads
+Will look up: with the saved title, creates an Album completion whose automatic
+lookup is queued and then applied; after the conflicts and the guest
 identity are answered, Update original Album and its confirmation show the
 Album's values, Artist entries and label, each identity line, the expected
 tracklist with its row without a file, and the member stored as Unknown with
@@ -193,6 +196,125 @@ screen and shows the Artist hint; and at 1280 px in English and 390 px in
 Chinese its tie chooser marks only the release a track-title search found first
 as Found through a track title, as does the opened folded list of every release
 found, without sending anything; each with an axe scan and no overflow.
+Another, from a review lookup shaped like a live Album (two members without Disc
+or Track Numbers whose titles start with 1-01 and 1-02, two editions of one
+release they fit in more than one way, and ten releases they do not fit, with a
+partial comparison), shows at 1280 px in English and 390 px in Chinese the
+possible-pairing status, naming no paid step, with Fill Disc and Track Numbers
+from titles as its only primary button, in the first screen; Possible match (1
+release) open with one card naming both editions, the reason that the tracks fit
+in more than one way, no missing-file row count and, on the card face, no line
+that choosing brings in no expected tracklist, which Other options says beside
+Use Album values only, and the fill again beside Pair tracks by hand, the two
+never touching; the partial-comparison line below the possible match; and the
+releases that do not fit as the only other section, folded, before Use none of
+these. The third step reads Update after entering Disc and Track Numbers, with no
+Review changes to apply. Filling from another tab switches to Edit
+draft with both Disc and Track Numbers filled and unsaved and Save completion
+draft focused, sending nothing; saving sends only those four values, after which
+the release is offered, said once, as the status, on a card naming both editions
+with its 18 missing-file rows and Use this release as the only primary button,
+with Use none of these and then the partial-comparison line after it; the steps
+read Choose a release and Update after choosing a release, with no Review
+changes to apply, although the Update step lists the saved numbers. Use this
+release brings in the 20-row expected tracklist. At 1280 px, choosing Album values
+only first shows that track values are not applied, with the lookup results
+still open and Fill Disc and Track Numbers from titles on the card and as a
+plain button under the status, after why track values are not applied and the
+fill hint, before the name box; saving the numbers filled from it then offers
+Use this release again (with track details) above the folded list, which brings
+in the tracklist and, with nothing left open, folds the results again. A queued
+run shows its queued line and a running one its step with done and total counts,
+each with its elapsed time outside the status and the note Lookup keeps running
+if you leave this page, parted by dots and with no space before the dot after a
+Chinese full-width bracket; submitting the name box during the run asks first:
+Cancel sends nothing and Stop and look up again sends one lookup request. Each
+with an axe scan and no overflow, also at 320 px.
+From the same live-shaped lookup, the review page's three steps read Found 1
+possible release and Disc and Track Numbers needed, one step per row at 390 px and on one
+row at 1280 px. An Album completion started from the Album page, once its title
+and date conflicts are answered and its identity decided, says Nothing left to
+answer and Everything is answered; you can update the original Album, with
+Review changes to apply (6) as the primary button, the same six as Update
+original Album (6), which opens the Update step and focuses its tab; after
+applying, that step lists What was updated (the five fields written, the track
+field named by the track's title) with the time in the interface language, a
+note that the sixth change, a track Artist, is not in the list, offers no
+checkbox and no Update original Album,
+the third step reads Updated with that time, and no Luna AI line shows, as Luna
+AI never ran. After a manual completion with Luna AI is applied, What was
+updated lists the one field written and the Luna AI line reads closed. After the
+last lookup answer and identity decision, the lookup results fold under Lookup
+results and applied values, which opens on request. The Album page's
+open-completion note, when the eligibility read carries the open completion's
+lookup brief, says in one sentence that it found 1 possible release and needs
+Disc and Track Numbers, on its own row above Open Album completion.
+The Album completions queue, at 1280 px in English and 390 px in Chinese, leads
+each card with Metadata lookup (running, 1 possible release with Disc and Track
+Numbers needed, a release applied with 2 lookup answers needed), shows no Luna
+AI cell before Luna AI has run, reads a Luna AI run that did not succeed on the
+card whose lookup needs answers as Last run did not succeed; you can ignore it,
+names the Luna AI filter Luna AI did not succeed, and shows dates in the
+interface language;
+Lookup needs you (2) narrows it to the two cards that ask for something, with
+All no longer pressed or styled as chosen, and the running card turns into No
+matching release found on a later read without any action, after which the
+queue stops reading (checked at 1280 px). The mobile workbench shows an import
+card's Last changed date as the page formats it in English. Each with an axe
+scan and no overflow.
+From a review lookup shaped like the live Album, a running run shows its Lookup
+steps after the status at 1280 px in English and 390 px in Chinese: the searches
+by Album name and Artist and by Album name only, done, with the name and Artist
+name they sent, the Track-title row naming both titles, reading release details
+in progress with its done and total counts and the later steps not started yet,
+and, once the page has seen no new step for more than 5 seconds of its own
+clock, Waiting for MusicBrainz (last progress N seconds ago), none of it a live
+region. Once the run completes, the line This lookup searched for names the
+Album name with its Artist, then alone, then with the whole decorated name; the
+steps fold under Lookup log with the time taken (22 s), the searches sent (the
+five name searches and the two iTunes searches) and the releases found, and
+open on request, where each count names what it counts (releases, searches,
+checks, lookups), the iTunes row, whose stage left results out, says only the
+first 4 Albums iTunes returned were checked on MusicBrainz and the bridge row
+names the title it found and says it came back from iTunes as another Album for
+the names searched, while the partial-comparison line under the possible match
+names the iTunes fallback;
+the name box, untouched while the run
+ran, folds under Didn't find it? Look up another name, stays folded when the
+page is opened again, and opens from the keyboard. A retrying run says Too many
+requests to MusicBrainz right now with the retry time in the interface language
+and automatic retry 2 of 3, Retry lookup being its only primary button and
+sending one retry; an unreachable source, a run stopped by its time limit or by
+a lost administrator account, and MusicBrainz's retries running out each say so
+with Retry lookup. A run that ended after the Album changed offers Open the
+Album to start a new completion, which opens the Album page, shows no retry and
+leaves the step bar promising none. A matching release paired by the positions
+in its titles says Paired by: the track numbers in the titles (1-01 and 1-02)
+on its offered card and on both editions in Releases found, and an earlier Luna
+AI run that did not succeed shows only the quiet line Luna AI (paid, optional):
+the last run did not succeed; you can ignore it under Other actions, beside Use
+Luna AI again (paid) and Discard completion, without its reason. Each with an axe scan and no overflow,
+the steps and retry flows also at 320 px.
+From a review lookup shaped like the live Album but whose two track titles carry
+no positions (no Disc or Track Numbers; the first track within 3 seconds of
+release tracks 1-1 and 2-2, the second only of 1-2), the possible match's card
+offers Pair tracks by hand as a plain button at 1280 px in English and 390 px in
+Chinese. Its panel names the release with 20 tracks on 2 discs, lists the first
+track's choices closest first (1-1 differs by 0.02 s, then 2-2 differs by 0.71
+s), starts the second on 1-2 with the line that only it can pair with that
+track, and keeps Save pairing and use this release disabled, grey at full
+opacity rather than the accent, until the first track has a release track. Saving sends one review save carrying both tracks'
+Disc and Track Numbers and then one choice of that release, after which the
+summary shows it applied with the 20-row expected tracklist and focus on the
+lookup panel; a save whose re-rank already applied it sends no choice. A choice
+that fails with an unconfirmed outcome says so and keeps the panel open with its
+choices while the chooser shows the release offered; Use this release sends the
+same choice again without saving, and Cancel returns focus to the opener and
+sends nothing. Where the save's re-rank instead applies another release for its
+Album values only, leaving nothing open, and the choice after it fails, the
+lookup results stay open under the panel, whose status, saved numbers and Use
+this release stay visible with focus in the panel. Each with an axe scan and no
+overflow, also at 320 px.
 
 The historical 2026-08-19 MediaTrack amendment passed
 304/304 server tests, 214/214 Web unit/component tests, 148/148 integration
@@ -550,7 +672,7 @@ player control still works.
   none is chosen; and that the third offers an empty name box as the next step,
   with Use Luna AI (paid) after it as a secondary button. Type a name of your
   own for one Artist entry or the label before the lookup applies and confirm
-  Keep mine and Use lookup value appear and Publish waits for the answer. Make
+  Keep current and Use lookup value appear and Publish waits for it. Make
   lookup unavailable and confirm Retry lookup stays the next step, also once the
   automatic retries end, with Use Luna AI (paid) after the name box and never
   primary, and that Use Luna AI (paid) names a paid AI service, shows the
@@ -620,25 +742,65 @@ player control still works.
   conflict; a member whose track has no usable credit stays unchanged with its
   reason; choosing a release whose tracks pair with the members in no single way
   says that track values and track Artists are not applied and lists every
-  member as unpaired; each identity row names the members it covers; the
-  expected tracklist shows the missing tracks as No file yet; Use Luna AI (paid)
-  follows the lookup summary and is never primary; and Update original Album
-  lists every change with lookup values preselected: the Album's values,
-  Artist entries and label with each reused or created Artist and Organization
-  and each MusicBrainz ID recorded or replaced, the expected tracklist with its
-  missing-file rows, the track values (a number lookup filled through the
-  pairing selected only with the tracklist), and each member whose Credits
-  change with its current and new Credits, removed Credits and attribution
-  change; deselect one member, save an identity decision and confirm the member
-  stays deselected, then confirm it is left unchanged after applying; deselect a
-  number lookup filled through the pairing and confirm it can be selected
-  again.
-  Start from the Album page's Complete from MusicBrainz (free), confirm the
+  member as unpaired; each identity row names the members it covers and offers
+  its choices as cards with their name, visibility and reason, saving a choice
+  at once; the expected tracklist shows the missing tracks as No file yet; Use
+  Luna AI (paid) follows the lookup summary and is never primary; and Update
+  original Album lists every change with lookup values preselected: the Album's
+  values, Artist entries and label with each reused or created Artist and
+  Organization and each MusicBrainz ID recorded or replaced, the expected
+  tracklist with its missing-file rows, the track values (a number lookup filled
+  through the pairing selected only with the tracklist), and each member whose
+  Credits change with its current and new Credits, removed Credits and
+  attribution change; deselect one member, save an identity decision and confirm
+  the member stays deselected, then confirm it is left unchanged after applying;
+  deselect a number lookup filled through the pairing and confirm it can be
+  selected again.
+  Start from the Album page's Complete from MusicBrainz (free), confirm its
+  confirmation reads Will look up: with the Album's title and first primary
+  Artist and says the Album changes only after Update original Album, that the
   automatic lookup runs once, and that the Album page opens the unfinished
   completion instead of creating another. For an Album only iTunes knows,
   confirm the buttons read Use iTunes and the values are flagged iTunes only.
-  Repeat in Simplified Chinese (从 MusicBrainz 补全（免费）, 打开专辑补全, 保留当前,
-  使用 MusicBrainz) and with a screen reader at 320 CSS px.
+  Repeat in Simplified Chinese (从 MusicBrainz 补全（免费）, 将查找, 打开专辑补全,
+  保留当前, 使用 MusicBrainz, 没有音频) and with a screen reader at 320 CSS px.
+- As an administrator, with metadata lookup configured against MusicBrainz in a
+  development environment, open an Album completion for an Album whose track
+  titles start with 1-01, 1-02 and so on but whose tracks have no Disc or Track
+  Numbers. Confirm the summary names the possible release and says the track
+  positions are unclear, names no paid step in that sentence, offers Fill Disc
+  and Track Numbers from titles as its only primary button, and that Use Luna AI
+  (paid) still follows the lookup controls and is never primary; that the
+  release's card names its editions, does not promise missing-file rows and
+  offers Album values only under Other options; that filling only fills empty
+  numbers in Edit draft, focuses Save completion draft and saves nothing; and
+  that saving offers the release, said once, on a card naming its editions with
+  Use this release as the only primary button, or applies it, and that Use this
+  release brings in its expected tracklist. While a lookup is queued or runs,
+  confirm the queued or progress line and the note Lookup keeps running if you
+  leave this page, that a screen reader announces the status once rather than
+  every few seconds, and that a new name asks before replacing the run. Repeat
+  in Simplified Chinese (从标题填写碟号/曲号, 可能匹配, 离开页面后查找仍会继续。) and with a screen
+  reader at 320 CSS px.
+- As an administrator, with metadata lookup configured against MusicBrainz in a
+  development environment, open the Album completion of an Album whose primary
+  Artist is saved with its romanized name added, such as
+  ヰ世界情緒 -Isekaijoucho-, and whose track titles all start with their Disc
+  and Track Numbers, such as 1-01 and 1-02, and look it up again by its title
+  with the Artist field empty. Confirm the releases credited to ヰ世界情緒 are
+  listed; that choosing one shows no conflict on the Album's Artists (a
+  member whose Credits have another role only still gets one on its own
+  Artists), keeps the saved Artist name and, when that Artist keeps no
+  MusicBrainz ID, lists its ID among the IDs Update original Album records;
+  and that a release applied automatically shows no note that it credits an
+  artist none of the Album's primary Artists names. Repeat for an Album whose
+  title ends with a slash and its Artist, such as
+  雪の華15周年記念ベスト盤 BIBLE／中島美嘉 with track titles 1.01.雪の華 and
+  1.02.WILL, starting its completion with Complete from MusicBrainz (free)
+  on the Album page so the automatic lookup searches its saved title, and
+  confirm the release titled without that ending is listed and a release
+  that only a song title found is marked Found through a track title.
+  Repeat in Simplified Chinese (通过曲名找到).
 - As an administrator, open an unfinished Album completion and choose Discard
   completion. Confirm its confirmation names the Album and says the catalog
   does not change; Cancel keeps the completion; confirming returns to the Album
@@ -647,6 +809,94 @@ player control still works.
   before discarding this completion."; an applied completion offers no
   discard. Repeat from the workbench's Album completions queue, in Simplified
   Chinese (放弃补全), and with a screen reader at 320 CSS px.
+- As an administrator, with metadata lookup configured against MusicBrainz in a
+  development environment, open the Album completions queue while a completion's
+  lookup runs. Confirm its card leads with Metadata lookup and changes without a
+  reload once the run ends, that the queue then stops reading (no further list
+  requests in the network panel), that Lookup needs you counts and filters the
+  cards whose lookup asks for something and that All no longer looks chosen
+  while it is on, that Luna AI shows only on cards where it ran, and that dates
+  read in the interface language. Open a completion and
+  confirm the three steps, their links to the lookup summary, that Use Luna AI
+  (paid) still follows the lookup summary and is never primary, that Review
+  changes to apply and Update original Album show the same count, the ready line
+  once nothing is left to answer and Luna AI is not running (never while the
+  free retry is the next step), the lookup results folding once nothing is open
+  (never for an iTunes-only result or an artist mismatch), and, after applying,
+  What was updated with the time, the fields and the release used, and no Update
+  original Album. On the Album page, confirm the open-completion note says where
+  its lookup stands. Repeat in Simplified Chinese (元数据查找, 查找需处理,
+  ① 查找发行, 已更新的内容, 厂牌) and with a screen reader at 320 CSS px,
+  confirming the steps are announced as a group of three label and value pairs
+  and not on each refresh.
+- As an administrator, with metadata lookup configured against MusicBrainz in a
+  development environment, open the Album completion of an Album whose tracks
+  have exact durations but no Disc or Track Numbers, whose track titles start
+  with them, such as 1-01 and 1-02, and whose first track's duration is within 3
+  seconds of two tracks of its release, such as CANDY LIVE 2, and look it up
+  again by its title. Confirm the release is applied without entering any
+  numbers, that its card says Paired by the track numbers in the titles, that
+  the lookup steps say iTunes was not needed and no candidate is marked iTunes
+  only, and that Update original Album lists the Disc and Track Numbers lookup
+  filled with the expected tracklist. Repeat for an Album whose tracks
+  have no duration and whose titles start with their numbers, such as
+  雪の華15周年記念ベスト盤 BIBLE／中島美嘉 with 1.01.雪の華 and 1.02.WILL, and
+  confirm its releases of the same title are listed without iTunes-only releases
+  and that Use this release on one of them, before any number is saved, brings
+  in its expected tracklist and the members' numbers. Repeat in Simplified
+  Chinese (使用此发行, 更新原专辑, 仅来自 iTunes, 按标题中的曲号对应).
+- As an administrator, with metadata lookup configured against MusicBrainz in a
+  development environment, open the Album completion of an Album whose tracks
+  have durations but no Disc or Track Numbers and whose titles carry none, such
+  as アニメ「魔法少女まどか☆マギカ」Ultimate Best／Aniplex, once its lookup lists the release as
+  a possible match. Confirm the card offers Pair tracks by hand, never as the
+  primary button; that the panel lists each track's choices closest first with
+  how far each duration differs, never a release track whose duration is far
+  from the track's, marks a release track another track took as used by that
+  track, and enables Save pairing and use this release only once every track has
+  a release track; that saving fills the Disc and Track Numbers in Edit draft as
+  saved values and applies the release with its expected tracklist and rows
+  without a file; that Update original Album lists those numbers; that focus
+  stays in the panel while it saves; that the lookup results never fold while
+  the panel is open; and that Cancel saves nothing. Repeat in Simplified Chinese
+  (手动对应曲目, 已被曲目 1 使用,
+  保存对应并使用此发行) and with a screen reader at 320 CSS px.
+- As an administrator, with metadata lookup configured against MusicBrainz in a
+  development environment, open an Album completion and look up its name with an
+  Artist. While it runs, confirm the lookup steps list each search with the name
+  and Artist name it sent, then reading release details and any iTunes fallback
+  with done and total counts, that a long wait shows Waiting for MusicBrainz
+  with the seconds since the page saw the last progress, and that a screen
+  reader announces the status once rather than every few seconds and reads each
+  step with its state (in progress, not started yet, not run, skipped or may not
+  have been sent). Once it ends, confirm the steps fold under Lookup log with
+  the time taken, the searches and the releases found, that This lookup searched
+  for names the searches it sent, and that the name box folds under Didn't find
+  it? Look up another name when the run completes while you are not using it,
+  also when the page is opened again after a release was applied, and opens from
+  the keyboard, but stays open while you type in it and when no release was
+  found. Repeat in Simplified Chinese (查找记录, 本次查找, 没找到？换个名称查找) and with a screen
+  reader at 320 CSS px.
+- As an administrator, with metadata lookup configured against MusicBrainz in a
+  development environment, open an Album completion whose applied release
+  credits an Artist that an existing Artist matches only by name, and one whose
+  Artist an existing record with the same MusicBrainz ID matches. Confirm each
+  identity row shows its choices as cards with the name, the visibility and why
+  each is offered; that the same-ID reuse is preselected and a name-only match
+  never is; that creating says it takes the Album's visibility; that choosing a
+  card saves it at once; and that no MusicBrainz ID shows until Show MusicBrainz
+  IDs, which is offered only while a row has a MusicBrainz ID of its own, so an
+  iTunes-only result whose Artists have no MusicBrainz ID offers none. On a
+  possible match whose track titles start with 1-01 and 1-02, choose
+  Album values only and confirm the lookup results stay open with Fill Disc and
+  Track Numbers from titles on its card and under the status, after a line that
+  track values and track Artists are not applied; once filled, the unsaved draft
+  leaves the identity cards dimmed and unavailable until Save completion draft.
+  In Simplified Chinese, confirm the summary, the cards and the Album page say
+  没有音频的曲目 and never 缺文件, and that no status names the iTunes Search
+  API. Repeat in Simplified Chinese (复用已有的, 新建, 默认选择, 显示
+  MusicBrainz ID) and with a screen reader at 320 CSS px, confirming each row's
+  choices are announced as one radio group.
 - As an administrator, in English and then in Simplified Chinese, open an
   import's Draft section and Review and publish summary and an existing-Album
   review. Confirm every control that starts Luna reads "Use Luna AI (paid)" or

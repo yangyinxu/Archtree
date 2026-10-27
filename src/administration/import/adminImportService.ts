@@ -2,11 +2,11 @@
  * Exports
  *   Types: ProjectReceipt, AdminImportDocument, AdminProjectPolicy
  *   Functions: isDraftV2Document, importCollection, isImportProject, importDigest, importCreateHash,
- *              idleAnalysis, touchImportAdmin, withImportAdmin, importLookupRecord, importAppliedLookupRelease,
- *              initializeAdminImportStorage, adminImportDto, adminImportDetail, parseAdminProjectMutation,
- *              mutateAdminProject, mutateAdminImport, createAdminImport, getAdminImport, editAdminImport,
- *              listAdminImports, analyzeAdminImport, analyzeAdminProject, cancelAdminImportAnalysis,
- *              suggestionPath, acceptDraftV2Suggestion, adoptAdminImportSuggestions,
+ *              idleAnalysis, touchImportAdmin, withImportAdmin, importLookupRecord, importLookupRecords,
+ *              importAppliedLookupRelease, initializeAdminImportStorage, adminImportDto, adminImportDetail,
+ *              parseAdminProjectMutation, mutateAdminProject, mutateAdminImport, createAdminImport,
+ *              getAdminImport, editAdminImport, listAdminImports, analyzeAdminImport, analyzeAdminProject,
+ *              cancelAdminImportAnalysis, suggestionPath, acceptDraftV2Suggestion, adoptAdminImportSuggestions,
  *              adoptAdminProjectSuggestions, adminImportDuplicateCandidates, importSavedIdentity,
  *              reusesOneArtistTwice, parseImportDecisions, decideAdminImportDuplicates,
  *              dailyAnalysisAttemptsUsed, runAdminImportWorkerOnce, startAdminImportWorker
@@ -154,6 +154,14 @@ const withAdmin = withImportAdmin;
  */
 export const importLookupRecord = (id: ObjectId, session: ClientSession, projection?: Record<string, unknown>) =>
     getDb()!.collection<MetadataLookupRecord>(ADMIN_IMPORT_LOOKUP_COLLECTION).findOne({ _id: id }, projection ? { session, projection } : { session }) as Promise<MetadataLookupRecord | null>;
+/**
+ * The lookup records of several imports or reviews in one query, in the caller's transaction, by ID (an ID without a record has
+ * none in the map); `projection` leaves out fields the caller never reads.
+ */
+export const importLookupRecords = async (ids: readonly ObjectId[], session: ClientSession, projection?: Record<string, unknown>): Promise<Map<string, MetadataLookupRecord>> =>
+    ids.length ? new Map((await getDb()!.collection<MetadataLookupRecord>(ADMIN_IMPORT_LOOKUP_COLLECTION)
+        .find({ _id: { $in: [...ids] } }, projection ? { session, projection } : { session }).maxTimeMS(3_000).toArray())
+        .map(record => [record._id.toHexString(), record as MetadataLookupRecord])) : new Map();
 /**
  * The MusicBrainz release applied to the import or review and its stored candidate, read in the caller's transaction (the
  * application, then only that candidate): null unless a candidate other than none is applied and still holds fetched details of

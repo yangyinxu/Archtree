@@ -1229,7 +1229,7 @@
       "variables": {}
     },
     "admin.catalog_review.adds_precision": {
-      "description": "Administrator workbench: existing-Album review summary, a date conflict that only adds precision to the saved date.",
+      "description": "Administrator workbench: existing-Album review summary, after a release date conflict's heading: the lookup date only adds the month or day to the same saved year (and month).",
       "delivery": [
         "runtime"
       ],
@@ -1305,6 +1305,56 @@
       ],
       "variables": {}
     },
+    "admin.catalog_review.applied_members_note": {
+      "description": "Administrator workbench: note under an applied Album completion's list: track Artist changes are not in the list and can be checked on the original Album's tracks.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.applied_members_only": {
+      "description": "Administrator workbench: an applied Album completion that updated only its tracks' Artists, which the list does not name.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.applied_release": {
+      "description": "Administrator workbench: the release an applied Album completion's metadata lookup applied, by title, and its source (MusicBrainz or iTunes).",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "source": "string",
+        "title": "string"
+      }
+    },
+    "admin.catalog_review.applied_title": {
+      "description": "Administrator workbench: heading of an applied Album completion's read-only list of what was updated, and the button that opens it.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.applied_track_field": {
+      "description": "Administrator workbench: one line of an applied Album completion's list of what was updated: a track field, naming the track by its quoted title.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "field": "string",
+        "title": "string"
+      }
+    },
+    "admin.catalog_review.applied_when": {
+      "description": "Administrator workbench: when an applied Album completion updated the original Album, a date and time in the interface language.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "date": "string"
+      }
+    },
     "admin.catalog_review.apply_action": {
       "description": "Update original Album ({count})",
       "delivery": [
@@ -1322,14 +1372,14 @@
       "variables": {}
     },
     "admin.catalog_review.apply_confirm_copy": {
-      "description": "Album completion, Update original Album confirmation: only the changes listed update the Album, never its tracks, files, cover or visibility.",
+      "description": "Album completion, Update original Album confirmation: only the changes listed update the Album, never its audio files, cover or visibility, and no track with audio is added or removed.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.catalog_review.apply_copy": {
-      "description": "Album completion, Update original Album step: lookup values arrive selected and can be deselected; only selected changes update the Album, never its tracks, files, cover or visibility.",
+      "description": "Album completion, Update original Album step: lookup values arrive checked and can be unchecked; only checked changes update the Album, never its audio files, cover or visibility, and no track with audio is added or removed.",
       "delivery": [
         "runtime"
       ],
@@ -1430,7 +1480,7 @@
       "variables": {}
     },
     "admin.catalog_review.create_copy": {
-      "description": "Album completion creation dialog where metadata lookup is available: what the free MusicBrainz lookup completes from the saved title and primary Artists and, when needed, up to two saved track titles, that it does not complete the cover, that the catalog changes only after confirmation and that paid Luna AI never starts.",
+      "description": "Album completion creation dialog where metadata lookup is available, two sentences on what happens next: lookup searches MusicBrainz (free) into a private completion draft, paid Luna AI never starts, and the catalog Album changes only once Update original Album is confirmed.",
       "delivery": [
         "runtime"
       ],
@@ -1449,6 +1499,15 @@
         "runtime"
       ],
       "variables": {}
+    },
+    "admin.catalog_review.create_search": {
+      "description": "Album completion creation dialog where metadata lookup is available, header line: what the automatic lookup searches first, the saved title and, once read, the primary Artist name it credits, joined by \" · \".",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "terms": "string"
+      }
     },
     "admin.catalog_review.credits_removed": {
       "description": "Album completion confirmation: the Credits a member loses.",
@@ -1593,14 +1652,14 @@
       "variables": {}
     },
     "admin.catalog_review.expected_copy": {
-      "description": "Administrator workbench: existing-Album review summary, explains that rows without a file are administrator information only and create no track.",
+      "description": "Administrator workbench: existing-Album review summary, explains that rows without a file (zh: tracks without audio) are administrator information only, not playable tracks, never shown to listeners.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.catalog_review.expected_rows": {
-      "description": "Administrator workbench: existing-Album review summary, expected tracklist preview, its row count and how many rows have no file.",
+      "description": "Administrator workbench: existing-Album review summary, expected tracklist preview, its row count and how many rows have no file (zh: tracks without audio).",
       "delivery": [
         "runtime"
       ],
@@ -1615,6 +1674,22 @@
         "runtime"
       ],
       "variables": {}
+    },
+    "admin.catalog_review.fill_numbers": {
+      "description": "Administrator workbench: existing-Album review summary and candidate chooser, button that fills the empty Disc and Track Numbers of the Edit draft tab from the positions at the start of the track titles, unsaved, and opens that tab.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.fill_numbers_done": {
+      "description": "Album completion editor: status after Fill Disc and Track Numbers from titles, how many tracks got numbers; they are unsaved until Save completion draft.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
     },
     "admin.catalog_review.flag_characters": {
       "description": "Administrator workbench: existing-Album review summary, flag: a release value with characters that cannot be saved is not applied.",
@@ -1673,7 +1748,7 @@
       "variables": {}
     },
     "admin.catalog_review.identities_copy": {
-      "description": "Administrator workbench: existing-Album review summary, explains that one decision covers an artist across the Album and its tracks, and that name matches prove nothing.",
+      "description": "Administrator workbench: existing-Album review identity rows' introduction: each Artist is chosen once for the Album and every crediting track, a matching name proves nothing, and each choice saves at once.",
       "delivery": [
         "runtime"
       ],
@@ -1687,7 +1762,7 @@
       "variables": {}
     },
     "admin.catalog_review.identity_answers": {
-      "description": "Administrator workbench: existing-Album review summary, how many identity rows still need a record chosen, existing or new.",
+      "description": "Administrator workbench: existing-Album review summary, how many identity rows (Artists and the label) still need a choice between an existing record and a new one.",
       "delivery": [
         "runtime"
       ],
@@ -1720,6 +1795,45 @@
       ],
       "variables": {}
     },
+    "admin.catalog_review.identity_create": {
+      "description": "Administrator workbench: existing-Album review identity rows, title of the radio card that creates a new Artist or label Organization; names it as the entry does.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "name": "string"
+      }
+    },
+    "admin.catalog_review.identity_create_reason": {
+      "description": "Administrator workbench: existing-Album review identity rows, the create card's reason while reuse candidates are listed above it.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.identity_create_reason_none": {
+      "description": "Administrator workbench: existing-Album review identity rows, the create card's reason when no candidate exists (create is then the default choice).",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.identity_create_reason_without_id": {
+      "description": "Administrator workbench: existing-Album review identity rows, note on the create card while an existing record holds the MusicBrainz ID lookup found: creating a distinct record records no ID.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.identity_create_visibility": {
+      "description": "Administrator workbench: existing-Album review identity rows, the create card's line: a new Artist or label Organization takes the Album's visibility (the Public or Hidden field label).",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "visibility": "string"
+      }
+    },
     "admin.catalog_review.identity_creates": {
       "description": "Album completion confirmation: an Artist or label Organization the update creates.",
       "delivery": [
@@ -1745,6 +1859,20 @@
         "id": "string"
       }
     },
+    "admin.catalog_review.identity_keep_own": {
+      "description": "Administrator workbench: existing-Album review identity rows, radio card of a bound Artist or label whose record holds a different MusicBrainz ID than lookup found: keep the record's own ID (no decision; the default).",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.identity_keeps_own_id": {
+      "description": "Administrator workbench: existing-Album review identity rows, note on a reuse card whose record holds a MusicBrainz ID other than the one lookup found: reusing it keeps that ID (the IDs show only on demand).",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.catalog_review.identity_names": {
       "description": "Administrator workbench: existing-Album review summary, identity row, the other names credited for the same artist.",
       "delivery": [
@@ -1754,6 +1882,64 @@
         "names": "string"
       }
     },
+    "admin.catalog_review.identity_preselected": {
+      "description": "Administrator workbench: existing-Album review identity rows, mark on the card the rules preselect (the record keeping the found MusicBrainz ID, or create without any candidate); choosing it sends no decision for the row.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.identity_reason_alias": {
+      "description": "Administrator workbench: existing-Album review identity rows, why a reuse card is offered: the existing record's name is an alias lookup found on MusicBrainz for this identity.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.identity_reason_localized_name": {
+      "description": "Administrator workbench: existing-Album review identity rows, why a reuse card is offered: the existing record's name is a localized name lookup found on iTunes for this one.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.identity_reason_music_brainz_id": {
+      "description": "Administrator workbench: existing-Album review identity rows, why a reuse card is offered: the existing record holds the MusicBrainz ID lookup found (this card is the default choice).",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.identity_reason_name": {
+      "description": "Administrator workbench: existing-Album review identity rows, why a reuse card is offered: the existing record only has the same name, compared case-insensitively, which never decides the choice.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.identity_reason_sha256": {
+      "description": "Administrator workbench: existing-Album review identity rows, why a reuse card is offered for a candidate matched by identical verified bytes (an enum value the candidate schema allows; review rows do not produce it in practice).",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.identity_record_suffix": {
+      "description": "Administrator workbench: existing-Album review identity rows, the last characters of an existing record's own ID on its card, so same-name records stay distinguishable (not a MusicBrainz ID).",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "suffix": "string"
+      }
+    },
+    "admin.catalog_review.identity_records_found_id": {
+      "description": "Administrator workbench: existing-Album review identity rows, note for a bound or reused record that keeps no MusicBrainz ID: applying records the ID lookup found (the ID shows only on demand).",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.catalog_review.identity_records_id": {
       "description": "Administrator workbench: existing-Album review summary, identity row, the MusicBrainz ID applying records on its record.",
       "delivery": [
@@ -1761,6 +1947,47 @@
       ],
       "variables": {
         "id": "string"
+      }
+    },
+    "admin.catalog_review.identity_replace": {
+      "description": "Administrator workbench: existing-Album review identity rows, title of a radio card that reuses an existing record (a candidate, or a bound record) holding another MusicBrainz ID and replaces that ID with the one lookup found; names the record (the IDs show only on demand).",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "name": "string"
+      }
+    },
+    "admin.catalog_review.identity_reuse": {
+      "description": "Administrator workbench: existing-Album review identity rows, title of a radio card that reuses an existing Artist or label Organization; names it.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "name": "string"
+      }
+    },
+    "admin.catalog_review.identity_show_ids": {
+      "description": "Administrator workbench: existing-Album review identity rows, toggle (or disclosure) that shows the MusicBrainz IDs and record ID endings, which are hidden by default.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.identity_taken": {
+      "description": "Administrator workbench: existing-Album review identity rows, why a reuse card is disabled: another identity of the same Artist list is bound to or reuses that Artist.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.identity_visibility": {
+      "description": "Administrator workbench: existing-Album review identity rows, a reuse card's line naming the existing record's visibility (the Public or Hidden field label).",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "visibility": "string"
       }
     },
     "admin.catalog_review.ids_only": {
@@ -1840,6 +2067,29 @@
       ],
       "variables": {}
     },
+    "admin.catalog_review.lookup_add_artist": {
+      "description": "Administrator workbench: existing-Album review summary, below the status for an Album without tracks when the lookup used no Artist name; adding one in the name box narrows the results.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_album_only_copy": {
+      "description": "Administrator workbench: existing-Album review candidate chooser, under Other options, warning that using only the Album values brings in no expected tracklist or track details.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_applied_album_only": {
+      "description": "Administrator workbench: existing-Album review summary, status when the release applied without a pairing now pairs in exactly one way, so using it again brings in its tracklist; names that release.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "title": "string"
+      }
+    },
     "admin.catalog_review.lookup_applied_none": {
       "description": "Administrator workbench: existing-Album review summary, status when no release is applied and the Album's saved values are kept.",
       "delivery": [
@@ -1847,8 +2097,229 @@
       ],
       "variables": {}
     },
+    "admin.catalog_review.lookup_brief_applied": {
+      "description": "Administrator workbench: an Album completion's metadata lookup state when a release found is applied to the completion draft and nothing is left to answer, as a workbench card's Metadata lookup cell or the first completion step shows it; names no AI.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_brief_applied_again": {
+      "description": "Administrator workbench: an Album completion's metadata lookup state when a release was applied for its Album values only and using it again would bring in its tracklist, as a workbench card's Metadata lookup cell or the first completion step shows it; names no AI.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_brief_applied_answers": {
+      "description": "Administrator workbench: an Album completion's metadata lookup state when a release found is applied and lookup answers (differing values, a tie) are still needed, as a workbench card's Metadata lookup cell or the first completion step shows it; names no AI.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.catalog_review.lookup_brief_applied_retry": {
+      "description": "Administrator workbench: an Album completion's metadata lookup state when a release found on iTunes only is applied to the completion draft but was not checked against MusicBrainz, and retrying the lookup for free can check it, as a workbench card's Metadata lookup cell or the first completion step shows it; names no AI.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_brief_choose": {
+      "description": "Administrator workbench: an Album completion's metadata lookup state when matching releases wait for the administrator to choose one, as a workbench card's Metadata lookup cell or the first completion step shows it; names no AI.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_brief_no_match": {
+      "description": "Administrator workbench: an Album completion's metadata lookup state when no release fits, none was found or there was nothing to search, as a workbench card's Metadata lookup cell or the first completion step shows it; names no AI.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_brief_not_run": {
+      "description": "Administrator workbench: an Album completion's metadata lookup state when no lookup has run, as a workbench card's Metadata lookup cell or the first completion step shows it; names no AI.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_brief_not_used": {
+      "description": "Administrator workbench: an Album completion's metadata lookup state when matching releases were found but none was used, as a workbench card's Metadata lookup cell or the first completion step shows it; names no AI.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_brief_possible_choose": {
+      "description": "Administrator workbench: an Album completion's metadata lookup state when releases the tracks may fit (or, for an Album without tracks, releases) were found and one can be chosen, as a workbench card's Metadata lookup cell or the first completion step shows it; names no AI.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.catalog_review.lookup_brief_possible_numbers": {
+      "description": "Administrator workbench: an Album completion's metadata lookup state when releases the tracks may fit were found but Disc and Track Numbers are needed to pair them, as a workbench card's Metadata lookup cell or the first completion step shows it; names no AI.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.catalog_review.lookup_brief_queued": {
+      "description": "Administrator workbench: an Album completion's metadata lookup state while the run waits to start, as a workbench card's Metadata lookup cell or the first completion step shows it; names no AI.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_brief_retry": {
+      "description": "Administrator workbench: an Album completion's metadata lookup state when the run did not finish and the free retry is offered, as a workbench card's Metadata lookup cell or the first completion step shows it; names no AI.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_brief_retrying": {
+      "description": "Administrator workbench: an Album completion's metadata lookup state while the run waits for an automatic retry, as a workbench card's Metadata lookup cell or the first completion step shows it; names no AI.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_brief_running": {
+      "description": "Administrator workbench: an Album completion's metadata lookup state while the run searches, as a workbench card's Metadata lookup cell or the first completion step shows it; names no AI.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_brief_unavailable": {
+      "description": "Administrator workbench: an Album completion's metadata lookup state when the run did not finish and no retry is offered here, as a workbench card's Metadata lookup cell or the first completion step shows it; names no AI.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_cause_durations": {
+      "description": "Administrator workbench: existing-Album review summary, status cause after the found sentence: members have no duration; the next step is filling the Disc and Track Numbers from the titles, saving, then choosing the release.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "unknown": "number"
+      }
+    },
+    "admin.catalog_review.lookup_cause_durations_manual": {
+      "description": "Administrator workbench: existing-Album review summary, status cause after the found sentence: members have no duration and the titles give no Disc and Track Numbers to fill; another name or numbers entered by hand.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "unknown": "number"
+      }
+    },
+    "admin.catalog_review.lookup_cause_durations_pair": {
+      "description": "Administrator workbench: existing-Album review summary, status cause after the found sentence: members have no duration, filling numbers from the titles is not the next step and a possible match is listed; another name, pairing by hand or numbers entered in Edit draft (the tab name), the last two bringing in the tracklist.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "unknown": "number"
+      }
+    },
+    "admin.catalog_review.lookup_cause_paired_durations": {
+      "description": "Administrator workbench: existing-Album review summary, status cause after the found sentence: the tracks pair with a release in exactly one way but members have no duration; the next step is using that release.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "unknown": "number"
+      }
+    },
+    "admin.catalog_review.lookup_cause_pairing": {
+      "description": "Administrator workbench: existing-Album review summary, status cause after the found sentence: the tracks fit in more than one way; the next step is filling the Disc and Track Numbers from the titles and saving, which compares again for free.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_cause_pairing_manual": {
+      "description": "Administrator workbench: existing-Album review summary, status cause after the found sentence: the tracks fit in more than one way and the titles give no Disc and Track Numbers to fill; another name or numbers entered by hand.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_cause_pairing_pair": {
+      "description": "Administrator workbench: existing-Album review summary, status cause after the found sentence: the tracks fit in more than one way, filling numbers from the titles is not the next step and a possible match is listed; another name, pairing by hand or numbers entered in Edit draft (the tab name).",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_cause_release_durations": {
+      "description": "Administrator workbench: existing-Album review summary, status cause after the found sentence: the tracks pair in exactly one way but the release's paired tracks lack a duration; the next step is using that release.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_choose_again": {
+      "description": "Administrator workbench: existing-Album review candidate chooser, button on the release already applied without a track pairing, choosing it again now that the tracks pair in exactly one way.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_choose_again_copy": {
+      "description": "Administrator workbench: existing-Album review candidate chooser, explains that the applied release can now bring in its expected tracklist and track details.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_choose_album_only": {
+      "description": "Administrator workbench: existing-Album review candidate chooser, button under Other options that applies only the release's Album values to the completion draft.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_choose_edition": {
+      "description": "Administrator workbench: existing-Album review candidate chooser, button choosing one edition of a release, named by its media and country.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "edition": "string"
+      }
+    },
+    "admin.catalog_review.lookup_choose_edition_album_only": {
+      "description": "Administrator workbench: existing-Album review candidate chooser, button choosing one edition of a possible match for its Album values only, named by its media and country.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "edition": "string"
+      }
+    },
+    "admin.catalog_review.lookup_details": {
+      "description": "Administrator workbench: disclosure that folds an Album completion's lookup results and applied values once nothing is left open.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.catalog_review.lookup_difference_pairing": {
-      "description": "Administrator workbench: existing-Album review summary, candidate chooser difference, the Album's tracks do not pair with the release in exactly one way.",
+      "description": "Administrator workbench: existing-Album review summary, candidate chooser difference, the Album's tracks cannot each pair with a different track of the release.",
       "delivery": [
         "runtime"
       ],
@@ -1868,6 +2339,121 @@
       ],
       "variables": {}
     },
+    "admin.catalog_review.lookup_editions": {
+      "description": "Administrator workbench: existing-Album review candidate chooser, how many editions one release card groups, then each edition's medium and country.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number",
+        "editions": "string"
+      }
+    },
+    "admin.catalog_review.lookup_editions_choose": {
+      "description": "Administrator workbench: existing-Album review candidate chooser, folded group on a release card listing its other editions to choose.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_elapsed": {
+      "description": "Administrator workbench: existing-Album review summary, beside the running status, outside it: the time since the lookup started as m:ss.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "elapsed": "string"
+      }
+    },
+    "admin.catalog_review.lookup_empty_album": {
+      "description": "Administrator workbench: existing-Album review summary, status when nothing matches because the Album has no tracks, with how many releases have a matching name.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.catalog_review.lookup_exhausted_busy": {
+      "description": "Administrator workbench: existing-Album review summary, status when MusicBrainz answered with too many requests (or this server's request bound for it stayed busy) until the automatic retries ran out; the free retry button follows.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_exhausted_unavailable": {
+      "description": "Administrator workbench: existing-Album review summary, status when MusicBrainz failed or timed out until the automatic retries ran out; the free retry button follows.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_fill_hint": {
+      "description": "Administrator workbench: existing-Album review candidate chooser, beside Fill Disc and Track Numbers from titles, how many of the Album's tracks lack a Disc or Track Number.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.catalog_review.lookup_fill_hint_durations": {
+      "description": "Administrator workbench: existing-Album review candidate chooser, possible-match card hint when members without a duration have no numbers: they can be filled from the titles, then the release used.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.catalog_review.lookup_fill_unavailable": {
+      "description": "Administrator workbench: existing-Album review candidate chooser, possible-match card, in place of Fill Disc and Track Numbers from titles when nothing can be filled from the track titles: pairing by hand (the button that follows) or numbers entered in Edit draft (the tab name).",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_fill_unavailable_durations": {
+      "description": "Administrator workbench: existing-Album review candidate chooser, possible-match card when members without a duration have no numbers the titles can give: pairing by hand (the button that follows), or numbers entered in Edit draft, then the release used.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_fit_found": {
+      "description": "Administrator workbench: existing-Album review summary, first sentence of the status when releases the tracks may fit were found but none has a title that agrees with the searched Album name; names the first.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number",
+        "title": "string"
+      }
+    },
+    "admin.catalog_review.lookup_gate_wait": {
+      "description": "Administrator workbench: existing-Album review summary, above the lookup steps while a run is running and its last progress is more than 5 seconds old: the source it waits for (MusicBrainz or iTunes) and the seconds since.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "seconds": "number",
+        "source": "string"
+      }
+    },
+    "admin.catalog_review.lookup_itunes_note": {
+      "description": "Administrator workbench: existing-Album review summary, last sentence of a refined status when the iTunes fallback was unavailable.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_keeps_running": {
+      "description": "Administrator workbench: existing-Album review summary, under the queued, running or retrying lookup status.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.catalog_review.lookup_left_out": {
       "description": "Administrator workbench: existing-Album review summary, candidate chooser, how many video or data tracks of the release are left out.",
       "delivery": [
@@ -1877,8 +2463,20 @@
         "count": "number"
       }
     },
+    "admin.catalog_review.lookup_log": {
+      "description": "Administrator workbench: existing-Album review summary, disclosure that folds a finished run's steps: how long the run took (whole minutes, 0 for under a minute, and seconds), how many searches the steps list as sent (the MusicBrainz name searches and the iTunes searches) and how many releases it found.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "minutes": "number",
+        "releases": "number",
+        "searches": "number",
+        "seconds": "number"
+      }
+    },
     "admin.catalog_review.lookup_missing_rows": {
-      "description": "Administrator workbench: existing-Album review summary, candidate chooser, how many missing-file rows the release would add.",
+      "description": "Administrator workbench: existing-Album review summary, candidate chooser, for a single pairing or an Album without tracks: choosing brings in the expected tracklist with this many rows without a file.",
       "delivery": [
         "runtime"
       ],
@@ -1900,6 +2498,13 @@
       ],
       "variables": {}
     },
+    "admin.catalog_review.lookup_no_tracklist": {
+      "description": "Administrator workbench: existing-Album review candidate chooser, in place of the missing-file row count when the tracks do not pair with the release in exactly one way.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.catalog_review.lookup_not_started": {
       "description": "Administrator workbench: existing-Album review summary, status before any metadata lookup run, offering the name box or Luna AI (paid).",
       "delivery": [
@@ -1907,8 +2512,22 @@
       ],
       "variables": {}
     },
+    "admin.catalog_review.lookup_other_options": {
+      "description": "Administrator workbench: existing-Album review candidate chooser, folded group of less common choices on a release card.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_pair_by_hand": {
+      "description": "Administrator workbench: existing-Album review candidate chooser, plain button on a possible-match card whose tracks fit the release in more than one way: opens the panel that pairs each track with a track of that release by hand.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.catalog_review.lookup_paired": {
-      "description": "Administrator workbench: existing-Album review summary, candidate chooser, how many of the Album's tracks pair with the release, out of all.",
+      "description": "Administrator workbench: existing-Album review candidate chooser, disclosure shown only for a single pairing: where each of the Album's tracks sits on the release, with how many of them pair out of all.",
       "delivery": [
         "runtime"
       ],
@@ -1917,12 +2536,294 @@
         "paired": "number"
       }
     },
-    "admin.catalog_review.lookup_partial_comparison": {
-      "description": "Administrator workbench: existing-Album review summary, candidate chooser, not every release MusicBrainz found was compared.",
+    "admin.catalog_review.lookup_paired_by_file_name_positions": {
+      "description": "Administrator workbench: existing-Album review candidate card: the tracks pair with this release in exactly one way because of the track numbers their original file names start with.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
+    },
+    "admin.catalog_review.lookup_paired_by_near_exact_duration": {
+      "description": "Administrator workbench: existing-Album review candidate card: the tracks pair with this release in exactly one way because only one pairing has every duration within half a second.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_paired_by_positions": {
+      "description": "Administrator workbench: existing-Album review candidate card: the tracks pair with this release in exactly one way because of the track numbers their titles start with, naming those numbers (such as 1-01 and 1-02).",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "positions": "string"
+      }
+    },
+    "admin.catalog_review.lookup_paired_by_title_positions": {
+      "description": "Administrator workbench: existing-Album review candidate card: the tracks pair with this release in exactly one way because of the track numbers their titles start with.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_partial_comparison": {
+      "description": "Administrator workbench: existing-Album review summary, candidate chooser, not every release found was compared.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_partial_itunes": {
+      "description": "Administrator workbench: existing-Album review candidate chooser, after the offered or possible releases: iTunes returned more Albums than are kept and only the first four were checked on MusicBrainz, so a matching release may be missing.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_phase_aliases": {
+      "description": "Administrator workbench: existing-Album review summary, lookup phase name inside the running line: reading other names of the credited Artists and labels. Starts lower case in English.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_phase_bridge": {
+      "description": "Administrator workbench: existing-Album review summary, lookup phase name inside the running line: checking the Albums iTunes returned on MusicBrainz. Starts lower case in English.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_phase_details": {
+      "description": "Administrator workbench: existing-Album review summary, lookup phase name inside the running line: fetching each release found. Starts lower case in English.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_phase_itunes": {
+      "description": "Administrator workbench: existing-Album review summary, lookup phase name inside the running line: the iTunes fallback search. Starts lower case in English.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_phase_search": {
+      "description": "Administrator workbench: existing-Album review summary, lookup phase name inside the running line: MusicBrainz searches by Album or track name. Starts lower case in English.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_possible_found": {
+      "description": "Administrator workbench: existing-Album review summary, first sentence of the status when releases whose title agrees with the searched Album name could match the tracks; names the first such release.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number",
+        "title": "string"
+      }
+    },
+    "admin.catalog_review.lookup_queued_status": {
+      "description": "Administrator workbench: existing-Album review summary, status while the lookup waits to start (the time waited is shown beside it).",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_reason_ambiguous": {
+      "description": "Administrator workbench: existing-Album review candidate card reason: every track fits the release but in more than one way.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.catalog_review.lookup_reason_empty_album": {
+      "description": "Administrator workbench: existing-Album review candidate card reason: the Album has no tracks to confirm the release with.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_reason_matching": {
+      "description": "Administrator workbench: existing-Album review candidate card reason: every track pairs with the release and its duration agrees.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.catalog_review.lookup_reason_no_distinct": {
+      "description": "Administrator workbench: existing-Album review candidate card reason: each track fits some track of the release, but they cannot each pair with a different one.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_reason_no_durations": {
+      "description": "Administrator workbench: existing-Album review candidate card reason: some of the Album's tracks have no duration, so their positions cannot be confirmed.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.catalog_review.lookup_reason_paired_no_durations": {
+      "description": "Administrator workbench: existing-Album review candidate card reason: the tracks pair in exactly one way but some have no duration, so the match was not confirmed automatically.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.catalog_review.lookup_reason_release_durations": {
+      "description": "Administrator workbench: existing-Album review candidate card reason: the tracks pair in exactly one way but a paired release track has no duration.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_reason_too_few_tracks": {
+      "description": "Administrator workbench: existing-Album review candidate card reason: the release has fewer audio tracks than the Album has tracks.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "candidate": "number",
+        "local": "number"
+      }
+    },
+    "admin.catalog_review.lookup_replace_confirm": {
+      "description": "Administrator workbench: existing-Album review name box, button confirming a new lookup that replaces the queued, running or retrying one.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_replace_copy": {
+      "description": "Administrator workbench: existing-Album review name box, confirmation text when a lookup is queued, running or retrying.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_replace_ended": {
+      "description": "Administrator workbench: existing-Album review summary, name box question left open when the active lookup finished before the administrator answered.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_replace_now": {
+      "description": "Administrator workbench: existing-Album review summary, name box button confirming a lookup after the active lookup finished.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_retry_busy": {
+      "description": "Administrator workbench: existing-Album review summary, status while the run waits for an automatic retry because a source answered with too many requests (or this server's request bound for it was busy): the source (MusicBrainz or iTunes), the retry time, which automatic retry it is and how many there are at most; the free retry button follows.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "attempt": "number",
+        "limit": "number",
+        "source": "string",
+        "time": "string"
+      }
+    },
+    "admin.catalog_review.lookup_retry_unavailable": {
+      "description": "Administrator workbench: existing-Album review summary, status while the run waits for an automatic retry because a source failed or timed out: the source (MusicBrainz or iTunes), the retry time, which automatic retry it is and how many there are at most; the free retry button follows.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "attempt": "number",
+        "limit": "number",
+        "source": "string",
+        "time": "string"
+      }
+    },
+    "admin.catalog_review.lookup_running_count_status": {
+      "description": "Administrator workbench: existing-Album review summary, status while the lookup runs: the phase name and how many of its steps are done out of all (the elapsed time is shown beside it).",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "done": "number",
+        "phase": "string",
+        "total": "number"
+      }
+    },
+    "admin.catalog_review.lookup_running_status": {
+      "description": "Administrator workbench: existing-Album review summary, status while the lookup runs: the phase name (the elapsed time is shown beside it).",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "phase": "string"
+      }
+    },
+    "admin.catalog_review.lookup_searched": {
+      "description": "Administrator workbench: existing-Album review summary, after a completed run: the names it searched, the first quoted with any Artist name, then each later one (lookup_searched_then and lookup_searched_then_alone joined).",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "searches": "string"
+      }
+    },
+    "admin.catalog_review.lookup_searched_then": {
+      "description": "Administrator workbench: existing-Album review summary, after a completed run: a later name it searched, quoted, with its Artist name; joined directly after the previous one.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "item": "string"
+      }
+    },
+    "admin.catalog_review.lookup_searched_then_alone": {
+      "description": "Administrator workbench: existing-Album review summary, after a completed run: a later name it searched without an Artist name, quoted; joined directly after the previous one.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "item": "string"
+      }
+    },
+    "admin.catalog_review.lookup_section_not_fit": {
+      "description": "Administrator workbench: existing-Album review candidate chooser, folded section of releases whose tracks do not fit the Album's or whose details could not be read.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.catalog_review.lookup_section_other_fit": {
+      "description": "Administrator workbench: existing-Album review candidate chooser, folded section of other releases the Album's tracks may fit.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.catalog_review.lookup_section_possible": {
+      "description": "Administrator workbench: existing-Album review candidate chooser, open section of possible matches, counted as releases.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
     },
     "admin.catalog_review.lookup_single_choice": {
       "description": "Administrator workbench: existing-Album review summary, status and chooser heading when the only matching release of a partial comparison is offered, not applied.",
@@ -1952,8 +2853,319 @@
       ],
       "variables": {}
     },
+    "admin.catalog_review.lookup_step_active": {
+      "description": "Administrator workbench: existing-Album review lookup steps: the step in progress, after its mark.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "step": "string"
+      }
+    },
+    "admin.catalog_review.lookup_step_album": {
+      "description": "Administrator workbench: existing-Album review lookup steps: a MusicBrainz search by the Album name alone, with the name it sent.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "text": "string"
+      }
+    },
+    "admin.catalog_review.lookup_step_album_artist": {
+      "description": "Administrator workbench: existing-Album review lookup steps: a MusicBrainz search by the Album name credited to an Artist, with the name and Artist name it sent.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "artist": "string",
+        "text": "string"
+      }
+    },
+    "admin.catalog_review.lookup_step_aliases": {
+      "description": "Administrator workbench: existing-Album review lookup steps: reading the other names of the credited Artists and labels.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_step_bridge": {
+      "description": "Administrator workbench: existing-Album review lookup steps: checking the Albums iTunes returned on MusicBrainz.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_step_bridge_note": {
+      "description": "Administrator workbench: existing-Album review lookup steps, second line of the row checking the Albums iTunes returned on MusicBrainz: the quoted titles are other Albums iTunes returned for the names searched, which is why their releases are among the releases found.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "titles": "string"
+      }
+    },
+    "admin.catalog_review.lookup_step_bridge_titles": {
+      "description": "Administrator workbench: existing-Album review lookup steps: checking the Albums iTunes returned on MusicBrainz, with the quoted titles found.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "titles": "string"
+      }
+    },
+    "admin.catalog_review.lookup_step_counted": {
+      "description": "Administrator workbench: existing-Album review lookup steps: a step with how many of its requests are settled out of all.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "done": "number",
+        "step": "string",
+        "total": "number"
+      }
+    },
+    "admin.catalog_review.lookup_step_counted_aliases": {
+      "description": "Administrator workbench: existing-Album review lookup steps: reading the other names of the credited Artists and labels, with how many of those lookups are done out of all.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "done": "number",
+        "total": "number"
+      }
+    },
+    "admin.catalog_review.lookup_step_counted_bridge": {
+      "description": "Administrator workbench: existing-Album review lookup steps: checking the Albums iTunes returned on MusicBrainz, with how many of those checks are done out of all.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "done": "number",
+        "total": "number"
+      }
+    },
+    "admin.catalog_review.lookup_step_counted_bridge_titles": {
+      "description": "Administrator workbench: existing-Album review lookup steps: checking the Albums iTunes returned on MusicBrainz, with how many of those checks are done out of all and the quoted titles found.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "done": "number",
+        "titles": "string",
+        "total": "number"
+      }
+    },
+    "admin.catalog_review.lookup_step_counted_details": {
+      "description": "Administrator workbench: existing-Album review lookup steps: reading the details of the releases found, with how many releases are read out of all.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "done": "number",
+        "total": "number"
+      }
+    },
+    "admin.catalog_review.lookup_step_counted_itunes": {
+      "description": "Administrator workbench: existing-Album review lookup steps: the iTunes fallback, with how many of its iTunes searches are done out of all.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "done": "number",
+        "total": "number"
+      }
+    },
+    "admin.catalog_review.lookup_step_details": {
+      "description": "Administrator workbench: existing-Album review lookup steps: reading the details of the releases found.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_step_done": {
+      "description": "Administrator workbench: existing-Album review lookup steps: a finished step, after its mark.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "step": "string"
+      }
+    },
+    "admin.catalog_review.lookup_step_itunes": {
+      "description": "Administrator workbench: existing-Album review lookup steps: the iTunes fallback.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_step_itunes_partial": {
+      "description": "Administrator workbench: existing-Album review lookup steps, second line of the iTunes fallback row: iTunes returned more Albums than are kept, so only the first four were checked on MusicBrainz.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_step_itunes_skipped": {
+      "description": "Administrator workbench: existing-Album review lookup steps: the iTunes fallback did not run because iTunes was unavailable, or was not needed.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "reason": "string"
+      }
+    },
+    "admin.catalog_review.lookup_step_not_run": {
+      "description": "Administrator workbench: existing-Album review lookup steps: a step a run that ended (stopped, unavailable or superseded) never reached, after its mark.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "step": "string"
+      }
+    },
+    "admin.catalog_review.lookup_step_not_taken": {
+      "description": "Administrator workbench: existing-Album review lookup steps: a step the run did not take, whose own text already says why (not needed, skipped or unavailable), after its mark.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "step": "string"
+      }
+    },
+    "admin.catalog_review.lookup_step_pending": {
+      "description": "Administrator workbench: existing-Album review lookup steps: a step the active run has not started yet, after its mark.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "step": "string"
+      }
+    },
+    "admin.catalog_review.lookup_step_quoted": {
+      "description": "Administrator workbench: existing-Album review lookup steps: one searched text, quoted.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "text": "string"
+      }
+    },
+    "admin.catalog_review.lookup_step_quoted_artist": {
+      "description": "Administrator workbench: existing-Album review lookup steps: one searched text, quoted, with the Artist name its search was credited to.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "artist": "string",
+        "text": "string"
+      }
+    },
+    "admin.catalog_review.lookup_step_search": {
+      "description": "Administrator workbench: existing-Album review lookup steps: a MusicBrainz search by name whose text is not shown.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_step_skipped": {
+      "description": "Administrator workbench: existing-Album review lookup steps: a step the run skipped, such as a search the release bound left unsent, after its mark.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "step": "string"
+      }
+    },
+    "admin.catalog_review.lookup_step_song": {
+      "description": "Administrator workbench: existing-Album review lookup steps: a MusicBrainz search by the submitted song name alone, with the name it sent.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "text": "string"
+      }
+    },
+    "admin.catalog_review.lookup_step_song_artist": {
+      "description": "Administrator workbench: existing-Album review lookup steps: a MusicBrainz search by the submitted song name credited to an Artist, with the name and Artist name it sent.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "artist": "string",
+        "text": "string"
+      }
+    },
+    "admin.catalog_review.lookup_step_track_title": {
+      "description": "Administrator workbench: existing-Album review lookup steps: the MusicBrainz searches by the Album's track titles, with the quoted titles (and Artist names) they sent.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "titles": "string"
+      }
+    },
+    "admin.catalog_review.lookup_step_track_title_not_needed": {
+      "description": "Administrator workbench: existing-Album review lookup steps: the track titles were not searched because the name searches found a matching release.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_step_track_title_plain": {
+      "description": "Administrator workbench: existing-Album review lookup steps: the MusicBrainz searches by the Album's track titles, without the titles.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_step_track_title_skipped": {
+      "description": "Administrator workbench: existing-Album review lookup steps: why the track titles were not searched: they start with track numbers like file names, equal or look like their file names, are generic, none is distinctive enough, or MusicBrainz was unavailable.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "reason": "string"
+      }
+    },
+    "admin.catalog_review.lookup_step_unconfirmed": {
+      "description": "Administrator workbench: existing-Album review lookup steps: a search the run counted past but may never have sent (it reached its candidate limit, came back partial, ran out of MusicBrainz retries or ended while sending), after its mark.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "step": "string"
+      }
+    },
+    "admin.catalog_review.lookup_steps": {
+      "description": "Administrator workbench: existing-Album review summary, accessible name of the list of the lookup run's steps.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_stopped_permission": {
+      "description": "Administrator workbench: existing-Album review summary, status when the run stopped because the account that started it lost administrator access; the free retry button follows.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_stopped_time": {
+      "description": "Administrator workbench: existing-Album review summary, status when the run stopped because it ran past the time its start allowed; the free retry button follows.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.catalog_review.lookup_superseded": {
       "description": "Administrator workbench: existing-Album review summary, status when the run ended because the Album or its tracks changed or are no longer ready.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_superseded_open": {
+      "description": "Administrator workbench: existing-Album review summary, link to the Album page shown instead of the retry when the run ended because the Album changed since the review was created.",
       "delivery": [
         "runtime"
       ],
@@ -1973,6 +3185,13 @@
       ],
       "variables": {}
     },
+    "admin.catalog_review.lookup_try_another": {
+      "description": "Administrator workbench: existing-Album review summary, disclosure that folds the name box after a completed run when the status does not make it the next step.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.catalog_review.lookup_unknown_discs": {
       "description": "Administrator workbench: existing-Album review summary, candidate chooser, how many of the Album's tracks have no Disc Number.",
       "delivery": [
@@ -1983,7 +3202,7 @@
       }
     },
     "admin.catalog_review.lookup_unknown_durations": {
-      "description": "Administrator workbench: existing-Album review summary, candidate chooser, how many of the Album's tracks have an unknown duration.",
+      "description": "Administrator workbench: existing-Album review candidate chooser, disclosure: how many of the Album's tracks have no duration, so no release they fit is confirmed automatically.",
       "delivery": [
         "runtime"
       ],
@@ -1999,6 +3218,22 @@
       "variables": {
         "tracks": "string"
       }
+    },
+    "admin.catalog_review.lookup_waited": {
+      "description": "Administrator workbench: existing-Album review summary, beside the queued status, outside it: the time waited as m:ss.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "elapsed": "string"
+      }
+    },
+    "admin.catalog_review.luna_failed_quiet": {
+      "description": "Administrator workbench: Album completion page, one quiet line for a Luna AI run that did not succeed while the metadata lookup leads: it can be ignored.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
     },
     "admin.catalog_review.manage_copy": {
       "description": "Artist attribution, cover and visibility are edited in the original Album. Changing that Album requires creating a new review before applying draft changes.",
@@ -2030,6 +3265,13 @@
     },
     "admin.catalog_review.member_no_pairing": {
       "description": "Administrator workbench: existing-Album review summary, the Album's tracks do not pair with the applied release in exactly one way, so no track value is applied.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.member_paired_since": {
+      "description": "Administrator workbench: existing-Album review summary, track Artists section when the release was applied without a pairing that is now single, so using it again brings track values in.",
       "delivery": [
         "runtime"
       ],
@@ -2111,12 +3353,271 @@
       ],
       "variables": {}
     },
+    "admin.catalog_review.open_lookup_applied": {
+      "description": "Administrator Album page: the note about the Album's unfinished completion when its metadata lookup applied a release found and nothing is left to answer; one complete sentence; names no AI.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.open_lookup_applied_again": {
+      "description": "Administrator Album page: the note about the Album's unfinished completion when its metadata lookup applied a release for its Album values only, which can be used again to bring in its tracklist; one complete sentence; names no AI.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.open_lookup_applied_answers": {
+      "description": "Administrator Album page: the note about the Album's unfinished completion when its metadata lookup applied a release found and lookup answers are still needed; one complete sentence; names no AI.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.catalog_review.open_lookup_applied_retry": {
+      "description": "Administrator Album page: the note about the Album's unfinished completion when its metadata lookup applied a release found on iTunes only that was not checked against MusicBrainz, and retrying the lookup for free can check it; one complete sentence; names no AI.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.open_lookup_choose": {
+      "description": "Administrator Album page: the note about the Album's unfinished completion when its metadata lookup found matching releases that wait for a choice; one complete sentence; names no AI.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.open_lookup_no_match": {
+      "description": "Administrator Album page: the note about the Album's unfinished completion when its metadata lookup found no matching release; one complete sentence; names no AI.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.open_lookup_not_used": {
+      "description": "Administrator Album page: the note about the Album's unfinished completion when its metadata lookup found matching releases but none was used; one complete sentence; names no AI.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.open_lookup_possible_choose": {
+      "description": "Administrator Album page: the note about the Album's unfinished completion when its metadata lookup found releases the tracks may fit (or releases for an Album without tracks) that can be chosen; one complete sentence; names no AI.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.catalog_review.open_lookup_possible_numbers": {
+      "description": "Administrator Album page: the note about the Album's unfinished completion when its metadata lookup found releases the tracks may fit that need Disc and Track Numbers; one complete sentence; names no AI.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.catalog_review.open_lookup_queued": {
+      "description": "Administrator Album page: the note about the Album's unfinished completion when its metadata lookup waits to start; one complete sentence; names no AI.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.open_lookup_retry": {
+      "description": "Administrator Album page: the note about the Album's unfinished completion when its metadata lookup did not finish and can be retried for free; one complete sentence; names no AI.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.open_lookup_retrying": {
+      "description": "Administrator Album page: the note about the Album's unfinished completion when its metadata lookup waits for an automatic retry; one complete sentence; names no AI.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.open_lookup_running": {
+      "description": "Administrator Album page: the note about the Album's unfinished completion when its metadata lookup is searching; one complete sentence; names no AI.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.open_lookup_unavailable": {
+      "description": "Administrator Album page: the note about the Album's unfinished completion when its metadata lookup did not finish and cannot be retried here; one complete sentence; names no AI.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.catalog_review.original_value": {
       "description": "Original Album information",
       "delivery": [
         "runtime"
       ],
       "variables": {}
+    },
+    "admin.catalog_review.other_actions": {
+      "description": "Administrator workbench: Album completion page, label of the secondary actions after the metadata lookup summary (Luna AI and discarding the completion).",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.pairing_choose_failed": {
+      "description": "Administrator workbench: existing-Album review pairing panel, after the numbers were saved but the server refused using the release; followed by the Use this release button, which uses it without saving again.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.pairing_choose_track": {
+      "description": "Administrator workbench: existing-Album review pairing panel, empty first choice of a track's list of release tracks.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.pairing_choose_unknown": {
+      "description": "Administrator workbench: existing-Album review pairing panel, after the numbers were saved but using the release failed without a confirmed outcome (a network failure, a server error or an unreadable answer; it may have been used); followed by the Use this release button, which sends the same choice again.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.pairing_choosing": {
+      "description": "Administrator workbench: existing-Album review pairing panel status after the numbers were saved, while the release is being used.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.pairing_copy": {
+      "description": "Administrator workbench: existing-Album review pairing panel, how the choices are listed: only release tracks the track can pair with by duration, closest first; every release track for a track without a duration; a track with its own Disc or Track Number (captured from the catalog or saved by the administrator) lists only release tracks at that number, which only Edit draft changes.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.pairing_delta": {
+      "description": "Administrator workbench: existing-Album review pairing panel, after a release track's duration in a track's choices: how far it is from the track's duration, in seconds with two decimals, formatted by the page.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "seconds": "string"
+      }
+    },
+    "admin.catalog_review.pairing_duration_unknown": {
+      "description": "Administrator workbench: existing-Album review pairing panel, in place of a track's or a release track's duration when it is unknown.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.pairing_forced": {
+      "description": "Administrator workbench: existing-Album review pairing panel, under a track that every complete pairing gives the same release track: its position (disc-track, such as 1-2) and title.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "position": "string",
+        "title": "string"
+      }
+    },
+    "admin.catalog_review.pairing_load_error": {
+      "description": "Administrator workbench: existing-Album review pairing panel, when the release's tracks could not be read (for example after a newer lookup replaced this result); followed by Try again and Cancel.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.pairing_outcome": {
+      "description": "Administrator workbench: existing-Album review pairing panel, what saving does: the numbers become the administrator's own draft values, then the release is used with its expected tracklist (how many rows have no file) and track details; Update original Album is the tab name.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "missing": "number"
+      }
+    },
+    "admin.catalog_review.pairing_remaining": {
+      "description": "Administrator workbench: existing-Album review pairing panel, beside the disabled save button: how many tracks have no release track chosen yet.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.catalog_review.pairing_same_duration": {
+      "description": "Administrator workbench: existing-Album review pairing panel, in place of the difference when the durations differ by less than 0.005 seconds.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.pairing_save": {
+      "description": "Administrator workbench: existing-Album review pairing panel, primary button: saves the chosen positions as the tracks' Disc and Track Numbers, then uses this release.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.pairing_save_failed": {
+      "description": "Administrator workbench: existing-Album review pairing panel, after the server refused the save of the chosen numbers; nothing was saved or used, and saving again starts a new save.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.pairing_save_unknown": {
+      "description": "Administrator workbench: existing-Album review pairing panel, after the save of the chosen numbers failed without a confirmed outcome (a network failure, a server error or an unreadable answer; it may have been stored); the save button sends the same save again.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.pairing_saved_not_single": {
+      "description": "Administrator workbench: existing-Album review pairing panel, after the numbers were saved but the latest lookup result does not pair the tracks with this release in exactly one way (for example after a newer run), so the release was not used.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.pairing_saving": {
+      "description": "Administrator workbench: existing-Album review pairing panel status while the chosen numbers are being saved.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.pairing_taken": {
+      "description": "Administrator workbench: existing-Album review pairing panel, after a release track that another track already took (its position in the Album); that choice is disabled.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "track": "number"
+      }
+    },
+    "admin.catalog_review.pairing_title": {
+      "description": "Administrator workbench: existing-Album review pairing panel heading: the release's title, how many audio tracks it has and on how many discs.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "discs": "number",
+        "rows": "number",
+        "title": "string"
+      }
     },
     "admin.catalog_review.review_copy": {
       "description": "Adopting suggestions saves them to the draft. Then choose which changes to apply to the original Album.",
@@ -2201,6 +3702,153 @@
       ],
       "variables": {}
     },
+    "admin.catalog_review.step_answer": {
+      "description": "Administrator workbench: label of an Album completion's second step, answering what lookup and the identity rows ask.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.step_answers_choose": {
+      "description": "Administrator workbench: second completion step's state: a release must be chosen in the lookup summary.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.step_answers_count": {
+      "description": "Administrator workbench: second completion step's state: how many lookup answers are still needed, as the lookup summary, the workbench card and the Album page count them.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.catalog_review.step_answers_identity": {
+      "description": "Administrator workbench: second completion step's state: how many Artists or labels (existing or new) still need to be chosen in the identity rows; shown beside the lookup answers count, or alone.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.catalog_review.step_answers_none": {
+      "description": "Administrator workbench: second completion step's state: nothing is left waiting for an answer.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.step_answers_numbers": {
+      "description": "Administrator workbench: second completion step's state: Disc and Track Numbers must be entered before a release can be used.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.step_find": {
+      "description": "Administrator workbench: label of an Album completion's first step, finding a release with metadata lookup.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.step_find_applied": {
+      "description": "Administrator workbench: first completion step's state: the release metadata lookup applied, by title.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "title": "string"
+      }
+    },
+    "admin.catalog_review.step_find_matching": {
+      "description": "Administrator workbench: first completion step's state: matching releases were found and wait for a choice.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.step_find_possible": {
+      "description": "Administrator workbench: first completion step's state: how many releases the tracks may fit (for an Album without tracks, releases with its name) were found.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.catalog_review.step_update": {
+      "description": "Administrator workbench: label of an Album completion's third step, updating the original Album.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.step_update_after_choose": {
+      "description": "Administrator workbench: third completion step's state while the second step asks for a release choice: the update comes after it.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.step_update_after_numbers": {
+      "description": "Administrator workbench: third completion step's state while the second step asks for Disc and Track Numbers: the update comes after them.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.step_update_count": {
+      "description": "Administrator workbench: third completion step's state: how many changes are selected in Update original Album.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.catalog_review.step_update_done": {
+      "description": "Administrator workbench: third completion step's state once applied: when the original Album was updated, a date and time in the interface language.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "date": "string"
+      }
+    },
+    "admin.catalog_review.step_update_none": {
+      "description": "Administrator workbench: third completion step's state: the completion draft has no change to apply yet.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.step_update_unselected": {
+      "description": "Administrator workbench: third completion step's state: changes are listed in Update original Album but none is selected yet (manual values are not selected by default), so they are to be selected there.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.catalog_review.steps_label": {
+      "description": "Administrator workbench: accessible name of an Album completion's three steps above its metadata lookup summary.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.steps_ready": {
+      "description": "Administrator workbench: line under the completion steps once nothing is left to answer and changes are ready to apply.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.catalog_review.target_album": {
       "description": "Album",
       "delivery": [
@@ -2266,6 +3914,13 @@
         "source": "string"
       }
     },
+    "admin.catalog_review.values_handled": {
+      "description": "Administrator workbench: existing-Album review summary, folded list of the lookup values applied or answered, which need nothing more.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.catalog_review.view_changes": {
       "description": "Review changes to apply ({count})",
       "delivery": [
@@ -2274,6 +3929,13 @@
       "variables": {
         "count": "number"
       }
+    },
+    "admin.catalog_review.view_changes_plain": {
+      "description": "Administrator workbench: button from the Review step's empty state to the Update original Album step, without a count.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
     },
     "admin.catalog_review.waiting_lookup": {
       "description": "Administrator workbench: existing-Album review summary, applying waits while metadata lookup runs or retries automatically.",
@@ -2922,7 +4584,7 @@
       "variables": {}
     },
     "admin.common.last_updated": {
-      "description": "Administrator workbench: common last updated.",
+      "description": "Administrator workbench: when a project last changed.",
       "delivery": [
         "runtime"
       ],
@@ -4362,7 +6024,7 @@
       "variables": {}
     },
     "admin.lookup.active_itunes": {
-      "description": "Administrator workbench: import summary, lookup is searching the iTunes Search API (after MusicBrainz found no matching release or stayed unavailable).",
+      "description": "Administrator workbench: metadata lookup status while the iTunes fallback runs.",
       "delivery": [
         "runtime"
       ],
@@ -4489,7 +6151,7 @@
       "variables": {}
     },
     "admin.lookup.difference_disc_count": {
-      "description": "Administrator workbench: candidate chooser, disc counts differ.",
+      "description": "Administrator workbench: import candidate chooser, disc counts differ between the files and the release (an existing-Album review card shows its own reason instead).",
       "delivery": [
         "runtime"
       ],
@@ -4506,7 +6168,7 @@
       "variables": {}
     },
     "admin.lookup.difference_track_count": {
-      "description": "Administrator workbench: candidate chooser, track counts differ.",
+      "description": "Administrator workbench: import candidate chooser, track counts differ between the files and the release (an existing-Album review card shows its own reason instead).",
       "delivery": [
         "runtime"
       ],
@@ -5701,7 +7363,7 @@
       "variables": {}
     },
     "admin.summary.conflicts": {
-      "description": "Administrator workbench: import summary, heading of metadata lookup values that differ from the administrator's own.",
+      "description": "Administrator workbench: import Review and publish summary, heading of the lookup values that differ from the draft's current values and need an answer.",
       "delivery": [
         "runtime"
       ],
@@ -5747,14 +7409,14 @@
       }
     },
     "admin.summary.keep_mine": {
-      "description": "Administrator workbench: import summary, keep the administrator's value in a lookup conflict.",
+      "description": "Administrator workbench: import Review and publish summary, conflict answer that keeps the draft's current value.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.summary.kept_mine": {
-      "description": "Administrator workbench: import summary, an answered lookup conflict kept the administrator's value.",
+      "description": "Administrator workbench: import Review and publish summary, folded answered conflict: the draft's current value was kept.",
       "delivery": [
         "runtime"
       ],
@@ -5911,7 +7573,7 @@
       "variables": {}
     },
     "admin.summary.yours": {
-      "description": "Administrator workbench: import summary, the administrator's own value in a lookup conflict.",
+      "description": "Administrator workbench: import Review and publish summary, conflict card label of the draft's current value (beside the lookup value).",
       "delivery": [
         "runtime"
       ],
@@ -6279,8 +7941,29 @@
       ],
       "variables": {}
     },
+    "admin.workbench.review_lookup": {
+      "description": "Administrator workbench: filter of the Album completions queue that narrows the loaded cards to those whose metadata lookup asks for an answer, a choice, numbers or a retry; the code appends the count.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.workbench.review_luna_attention": {
+      "description": "Administrator workbench: Album completions filter for completions whose Luna AI run did not succeed.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.workbench.review_luna_failed_quiet": {
+      "description": "Administrator workbench: Album completion card, Luna AI state for a run that did not succeed while the metadata lookup leads: it can be ignored.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.workbench.review_needs_attention": {
-      "description": "Needs attention",
+      "description": "Administrator workbench: Album completion card and page, Luna AI state for a run that did not succeed.",
       "delivery": [
         "runtime"
       ],

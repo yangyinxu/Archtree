@@ -63,7 +63,7 @@ export function ApplyAlbumNote({ item, namingReplaced }: { item: CatalogReview; 
 /** The Artists and label Organization applying reuses or creates, each MusicBrainz ID it records or replaces, and those still undecided. */
 export function ApplyIdentityLines({ lines }: { lines: ApplyIdentityLine[] }) {
   const t = useAdminText();
-  const hidden = (record: { hidden: boolean }) => record.hidden ? ` · ${t('field.hidden')}` : '';
+  const hidden = (record: { hidden: boolean }) => record.hidden ? ` · ${t('catalog_review.identity_visibility', { visibility: t('field.hidden') })}` : '';
   const outcome = (line: ApplyIdentityLine) => line.outcome === 'reuse' ? `${t('catalog_review.identity_bound', { name: line.records[0].name })}${hidden(line.records[0])}`
     : line.outcome === 'create' ? `${t('catalog_review.identity_creates', { name: line.records[0].name })}${hidden(line.records[0])}`
       : line.outcome === 'conflicting' ? `${t('catalog_review.identity_conflicting')} ${line.records.map(record => `${record.name}${hidden(record)}`).join(', ')}` : '';

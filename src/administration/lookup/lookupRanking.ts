@@ -19,10 +19,11 @@ import {
     METADATA_LOOKUP_LIMITS, SAME_AS_RELEASE_CREDIT, type LookupArtistCredit, type LookupDate, type MusicBrainzRelease, type MusicBrainzReleaseSummary,
     type MusicBrainzTrack
 } from './lookupContract';
+import { decoratedNameParts } from './lookupDecoratedNames';
 import { isPlaceholderCredit, normalizeGtin, normalizeItunesId, normalizeMusicBrainzId } from './lookupIdentifiers';
 import {
-    LOOKUP_EXPECTED_TRACKLIST_BOUNDS, expectedTracklistFromRelease, lookupAudioTrackCount, lookupDurationMs, lookupSubsetPairing, lookupSubsetTrackCountPlausible,
-    lookupUnpairableMembers, releaseAudioTracks, type LookupSubsetPair
+    LOOKUP_EXPECTED_TRACKLIST_BOUNDS, expectedTracklistFromRelease, lookupAudioTrackCount, lookupDurationMs, lookupResolvedPairing, lookupSubsetPairing,
+    lookupSubsetTrackCountPlausible, lookupUnpairableMembers, releaseAudioTracks, type LookupPairedBy, type LookupPositionHint, type LookupSubsetPair
 } from './lookupSubset';
 import { keepableMusicBrainzId } from '../../utils/musicBrainzId';
 
@@ -36,7 +37,9 @@ import { keepableMusicBrainzId } from '../../utils/musicBrainzId';
  * could match may hide another matching group, so the comparison is disclosed as partial and only an
  * embedded identifier still preselects. An iTunes-only candidate never shares a group with a
  * MusicBrainz one, and is preselected only when MusicBrainz answered without a release for it or
- * stayed unavailable (then flagged `notChecked`).
+ * stayed unavailable (then flagged `notChecked`). In subset mode a pairing that is not single may
+ * still resolve through the members' position hints or near-exact durations (lookupResolvedPairing),
+ * recorded as the comparison's `pairedBy`.
  */
 export type LocalFileEvidence = {
     slotId: string; order: number;
@@ -46,6 +49,8 @@ export type LocalFileEvidence = {
     discNumber: number | null; trackNumber: number | null;
     artistTags: string[];
     identifiers: { releaseId: string | null; barcode: string | null; catalogNumber: string | null };
+    /** An existing-Album review member's position hint (lookupReviewEvidence.ts); absent elsewhere and never an own number. */
+    positionHint?: LookupPositionHint;
 };
 export type LookupCandidate = {
     /** For an iTunes-only candidate `releaseId` is its collection ID and `itunesCheck` why it was not checked against MusicBrainz. */
@@ -76,9 +81,11 @@ export type LookupFileComparison = { slotId: string; localMs: number | null; can
  * What a subset comparison found: tracks left out as video, data or pregap; the pairing (null when the track count or the
  * tracklist already rules the release out) and its pairs in member order; the release tracks no member pairs with (only for a
  * single pairing) and how many missing-file rows the release would add; and the members no audio track can pair with.
+ * `pairedBy` says how a pairing that was not single became single (lookupResolvedPairing); absent otherwise; a review's lookup
+ * view shows it on that candidate's subset comparison (lookupView.ts).
  */
 export type LookupSubsetComparison = {
-    leftOutTracks: number; pairing: 'unique' | 'ambiguous' | 'none' | null; pairs: LookupSubsetPair[];
+    leftOutTracks: number; pairing: 'unique' | 'ambiguous' | 'none' | null; pairedBy?: LookupPairedBy; pairs: LookupSubsetPair[];
     missingTracks: { discNumber: number; trackNumber: number }[] | null; missingTrackCount: number | null; unpairableSlotIds: string[];
 };
 export type LookupComparison = {
@@ -251,14 +258,16 @@ export const lookupTrackAssignment = (release: MusicBrainzRelease, files: readon
 
 /**
  * The expected-tracklist row and track Artist entries each member takes in a subset comparison, in the ranking's member order:
- * only when the release offers an expected tracklist (so at least one audio row) and exactly one pairing exists (lookupSubset.ts);
- * `[]` without members. Pure.
+ * only when the release offers an expected tracklist (so at least one audio row) and the pairing is single, as
+ * lookupResolvedPairing resolves it (lookupSubset.ts), so a choice writes what a current ranking paired; with `resolve` false, only
+ * when the strict pairing is single (lookupSubsetPairing), for a candidate a stored ranking listed as pairing in more than one way
+ * (chooseLookupCandidate). `[]` without members. Pure.
  */
-export function lookupSubsetAssignment(release: MusicBrainzRelease, files: readonly LocalFileEvidence[], toleranceMs: number = METADATA_LOOKUP_LIMITS.durationToleranceMs):
-    { slotId: string; discNumber: number; trackNumber: number; title: string; durationMs: number | null; artists: LookupTrackArtists }[] | null {
+export function lookupSubsetAssignment(release: MusicBrainzRelease, files: readonly LocalFileEvidence[], toleranceMs: number = METADATA_LOOKUP_LIMITS.durationToleranceMs,
+    resolve = true): { slotId: string; discNumber: number; trackNumber: number; title: string; durationMs: number | null; artists: LookupTrackArtists }[] | null {
     const tracklist = expectedTracklistFromRelease(release);
     if (!('rows' in tracklist)) return null;
-    const pairing = lookupSubsetPairing(tracklist.rows, orderedFiles(files), toleranceMs);
+    const pairing = (resolve ? lookupResolvedPairing : lookupSubsetPairing)(tracklist.rows, orderedFiles(files), toleranceMs);
     if (pairing.kind !== 'unique') return null;
     const tracks = releaseAudioTracks(release).tracks, rowAt = new Map(tracklist.rows.map((row, index) => [`${row.discNumber}:${row.trackNumber}`, index]));
     return pairing.pairs.map(pair => {
@@ -305,9 +314,11 @@ const compareRelease = (release: MusicBrainzRelease, files: readonly LocalFileEv
  * Subset comparison of one release with an existing Album's members (`files`, in ranking order): only audio tracks count, and the
  * release may have more tracks and discs than the Album has members. Fewer audio tracks than members (or none), or no expected
  * tracklist within its bounds, does not match; otherwise members pair with the rows (lookupSubset.ts): no pairing does not match,
- * several pairings, no members or a member or paired row without a duration leave it unverified, and a single pairing with every
- * duration known matches. A member duration that is not positive and finite is unknown, and only a precision of 1000 widens the
- * tolerance, as in pairing. `group` holds what a matching candidate's group key adds to its proposal's Album values.
+ * several pairings that neither the members' position hints nor near-exact durations decide (lookupResolvedPairing), no members or
+ * a member or paired row without a duration leave it unverified, and a single pairing with every duration known matches. How a
+ * resolved pairing was decided (`pairedBy`) never enters the group key. A member duration that is not positive and finite is
+ * unknown, and only a precision of 1000 widens the tolerance, as in pairing. `group` holds what a matching candidate's group key
+ * adds to its proposal's Album values.
  */
 const compareSubset = (release: MusicBrainzRelease, files: readonly LocalFileEvidence[], toleranceMs: number) => {
     const audio = releaseAudioTracks(release), tracklist = expectedTracklistFromRelease(release), audioCount = audio.tracks.length;
@@ -317,7 +328,7 @@ const compareSubset = (release: MusicBrainzRelease, files: readonly LocalFileEvi
     if (audioCount < files.length) differences.push('trackCount');
     // A release without audio tracks offers no tracklist for the same reason (`trackCount`), which is listed once.
     if ('reason' in tracklist && !differences.includes(tracklist.reason)) differences.push(tracklist.reason);
-    const pairing = differences.length ? null : lookupSubsetPairing(rows, files, toleranceMs);
+    const pairing = differences.length ? null : lookupResolvedPairing(rows, files, toleranceMs);
     if (pairing?.kind === 'none') differences.push('pairing');
     const pairs = pairing?.kind === 'unique' ? pairing.pairs : null;
     const rowAt = new Map(rows.map((row, index) => [`${row.discNumber}:${row.trackNumber}`, index]));
@@ -336,7 +347,8 @@ const compareSubset = (release: MusicBrainzRelease, files: readonly LocalFileEvi
         unknownLocalDurations: fileRows.filter(row => row.localMs === null).length,
         unknownCandidateDurations: audio.tracks.filter(track => track.durationMs === null).length,
         subset: {
-            leftOutTracks: audio.leftOutTracks, pairing: pairing?.kind ?? null, pairs: pairs ?? [],
+            leftOutTracks: audio.leftOutTracks, pairing: pairing?.kind ?? null,
+            ...(pairing?.kind === 'unique' && pairing.pairedBy ? { pairedBy: pairing.pairedBy } : {}), pairs: pairs ?? [],
             missingTracks: pairedRows ? rows.filter((_row, index) => !paired.has(index)).map(row => ({ discNumber: row.discNumber, trackNumber: row.trackNumber })) : null,
             missingTrackCount: 'rows' in tracklist && audioCount >= files.length ? audioCount - files.length : null,
             // Bounded like the tracklist, so a box set's tracks are not paired member by member.
@@ -356,13 +368,14 @@ const compareSubset = (release: MusicBrainzRelease, files: readonly LocalFileEvi
 };
 
 /**
- * True when artist tags exist and none equals the joined credit, a credited name, a canonical artist name, an alias the lookup
- * found for a credited artist (`aliases`, by MusicBrainz ID) or another name of an iTunes localized name group (`localized`) that
- * holds one of those names.
+ * True when artist tags exist and none, nor either part of a decorated one (lookupDecoratedNames.ts), equals the joined credit, a
+ * credited name, a canonical artist name, an alias the lookup found for a credited artist (`aliases`, by MusicBrainz ID) or another
+ * name of an iTunes localized name group (`localized`) that holds one of those names. Only the tag side is read for parts.
  */
 const artistMismatchFor = (release: MusicBrainzRelease, files: readonly LocalFileEvidence[], aliases?: ReadonlyMap<string, readonly string[]>,
     localized?: readonly (readonly string[])[]) => {
-    const tags = new Set(files.flatMap(file => file.artistTags).filter(tag => typeof tag === 'string').map(folded).filter(Boolean));
+    const tags = new Set(files.flatMap(file => file.artistTags).filter((tag): tag is string => typeof tag === 'string')
+        .flatMap(tag => [tag, ...(decoratedNameParts(tag) ?? [])]).map(folded).filter(Boolean));
     if (!tags.size) return false;
     const names = new Set([
         folded(release.artistCredit.map(credit => credit.name + credit.joinPhrase).join('')),

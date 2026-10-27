@@ -16,13 +16,14 @@
  *   - a failed identity read keeps the update disabled and offers a retry, after which the review-only items appear
  *   - while the identity read is pending a captured review says it is loading and cannot update, and lists its review-only items once it answers
  *   - the confirmation repeats the frozen selection: each selected change, the Album note after the Artist entries, the identity lines and the count it sends
+ *   - the headless count reports the step's count, the changes it lists, the identity rows needing an answer and whether it is ready, and follows a deselection
  * @end-catalog */
 
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { captureAccountOperation } from '../../api/accountEpoch';
 import { adminWorkspace } from './adminWorkspace';
-import { CatalogReviewApply } from './CatalogReviewApply';
+import { CatalogReviewApply, CatalogReviewApplyCount } from './CatalogReviewApply';
 import { ApplyItemSummary } from './CatalogReviewApplyItems';
 import { CatalogReviewConfirmation } from './CatalogReviewConfirmation';
 import { memberKey, reviewApplyModel, type ReviewApplySelection } from './catalogReviewApplyModel';
@@ -155,12 +156,12 @@ test('a looked-up review lists every change with its default, the member line, i
   expect(screen.getByRole('checkbox', { name: 'Update Track · Synthetic second track · Artists' })).toBeChecked();
   expect(member.getByText('—')).toBeVisible();
   expect(member.getByText('Synthetic guest')).toBeVisible();
-  expect(member.getByText('Attribution: Unknown → Documented')).toBeVisible();
+  expect(member.getByText('This track\'s Artist credits will be marked Documented (currently Unknown).')).toBeVisible();
   // The identities the selection owns: the lead reused (hidden) recording its ID, the guest created.
   const lines = within(screen.getByRole('heading', { name: 'Artists and label' }).closest('section')!);
-  expect(lines.getByText('Reuses Synthetic catalog Artist · Hidden')).toBeVisible();
+  expect(lines.getByText('Reuses the existing Synthetic catalog Artist · Visibility: Hidden')).toBeVisible();
   expect(lines.getByText('Records MusicBrainz ID 00000000-0000-4000-8000-0000000000a1')).toBeVisible();
-  expect(lines.getByText('Creates Synthetic guest')).toBeVisible();
+  expect(lines.getByText('Creates Synthetic guest as new')).toBeVisible();
   fireEvent.click(screen.getByRole('button', { name: 'Update original Album (4)' }));
   const sent = onConfirm.mock.calls[0][0] as ReviewApplySelection;
   expect([sent.fields, sent.memberCredits, sent.musicBrainzIds]).toEqual([[{ scope: 'album', slotId: null, field: 'artists' }, { scope: 'album', slotId: null, field: 'expectedTracklist' },
@@ -194,7 +195,7 @@ test('an identity line marks a hidden reused record, a replaced MusicBrainz ID a
   const lines = within((await screen.findByRole('heading', { name: 'Artists and label' })).closest('section')!);
   expect(lines.getByText('Reuse Synthetic catalog Artist and replace its MusicBrainz ID 00000000-0000-4000-8000-0000000000a2 with 00000000-0000-4000-8000-0000000000a1')).toBeVisible();
   expect(within(lines.getByText('Synthetic guest').closest('li')!).getByText('Needs a decision')).toBeVisible();
-  expect(screen.getByText('Choose records for Synthetic guest in Artists and label above, or deselect the changes that need them.')).toBeVisible();
+  expect(screen.getByText('Choose existing or new for Synthetic guest under Artists and label above, or deselect the changes that need them.')).toBeVisible();
   expect(screen.getByRole('button', { name: /^Update original Album/ })).toBeDisabled();
 });
 
@@ -222,7 +223,7 @@ test('hold notes are the checkboxes\' descriptions: a pairing-filled number wait
   view.choose({ [`track:${slotId}:trackNumber`]: true });
   const tracklist = await box('Update Album · Synthetic catalog Album · Expected tracklist');
   await waitFor(() => expect(tracklist).toBeDisabled());
-  expect(tracklist).toHaveAccessibleDescription('The expected tracklist cannot be applied while these tracks are off their rows: 1 · Synthetic first track');
+  expect(tracklist).toHaveAccessibleDescription('The expected tracklist cannot be applied while these tracks\' Disc or Track Numbers differ from their place in it: 1 · Synthetic first track');
   expect(screen.getByRole('checkbox', { name: 'Update Track · Synthetic first track · Track number' })).toBeChecked();
 });
 
@@ -231,7 +232,7 @@ test('a deselected pairing-filled number stays selectable while its tracklist wa
   const view = mount(item, { lookup, identity, choices: { [`track:${slotTwo}:trackNumber`]: false } });
   const tracklist = await box('Update Album · Synthetic catalog Album · Expected tracklist');
   await waitFor(() => expect(tracklist).toBeDisabled());
-  expect(tracklist).toHaveAccessibleDescription('The expected tracklist cannot be applied while these tracks are off their rows: 2 · Synthetic second track');
+  expect(tracklist).toHaveAccessibleDescription('The expected tracklist cannot be applied while these tracks\' Disc or Track Numbers differ from their place in it: 2 · Synthetic second track');
   const number = screen.getByRole('checkbox', { name });
   expect([number.matches(':checked'), number.matches(':disabled')]).toEqual([false, false]);
   expect(number).not.toHaveAccessibleDescription(/./);
@@ -280,7 +281,7 @@ test('the confirmation repeats the frozen selection: each selected change, the A
   const dialog = screen.getByRole('dialog', { name: 'Confirm updating the original Album' }), inside = within(dialog);
   // Apply starts at the dialog itself, so a long summary is read from its start; its copy asks for no selection it cannot make.
   await waitFor(() => expect(dialog).toHaveFocus());
-  expect(dialog).toHaveAccessibleDescription('Only these changes update the original Album; tracks, their files, the cover and visibility stay in place.');
+  expect(dialog).toHaveAccessibleDescription('Only these changes update the original Album; audio files, cover and visibility stay the same, and no tracks with audio are added or removed.');
   expect(inside.getByText('Selected changes: 4')).toBeVisible();
   expect(inside.getAllByRole('heading', { level: 3 }).map(heading => heading.textContent)).toEqual(['Update Album · Synthetic catalog Album · Artists',
     'Update Album · Synthetic catalog Album · Expected tracklist', 'Update Track · Synthetic second track · Track number', 'Update Track · Synthetic second track · Artists', 'Artists and label']);
@@ -289,9 +290,9 @@ test('the confirmation repeats the frozen selection: each selected change, the A
   expect(artists.compareDocumentPosition(note) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(note.compareDocumentPosition(tracklist) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(inside.getByText('Tracks that still credit an Artist the Album no longer credits: 1 · Synthetic first track')).toBeVisible();
-  expect(inside.getByText('Attribution: Unknown → Documented')).toBeVisible();
-  expect(inside.getByText('Creates Synthetic guest')).toBeVisible();
-  expect(inside.getByText('Reuses Synthetic catalog Artist · Hidden')).toBeVisible();
+  expect(inside.getByText('This track\'s Artist credits will be marked Documented (currently Unknown).')).toBeVisible();
+  expect(inside.getByText('Creates Synthetic guest as new')).toBeVisible();
+  expect(inside.getByText('Reuses the existing Synthetic catalog Artist · Visibility: Hidden')).toBeVisible();
   expect(inside.queryByRole('checkbox')).not.toBeInTheDocument();
   fireEvent.click(inside.getByRole('button', { name: 'Update original Album (4)' }));
   expect(onConfirm).toHaveBeenCalledTimes(1);
@@ -299,4 +300,23 @@ test('the confirmation repeats the frozen selection: each selected change, the A
   expect(within(screen.getByRole('dialog')).getByRole('button', { name: 'Update original Album (4)' })).toBeDisabled();
   fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }));
   expect(onClose).toHaveBeenCalledTimes(1);
+});
+
+test('the headless count reports the step\'s count, the changes it lists, the identity rows needing an answer and whether it is ready, and follows a deselection', async () => {
+  const { item, lookup } = lookedUp(), identity = reviewIdentityResponse(), client = new QueryClient({ defaultOptions: { queries: { retry: false } } }), onCount = vi.fn();
+  client.setQueryData(['browser-session'], session);
+  vi.stubGlobal('fetch', vi.fn(async (path: string) => reviewJson(path.endsWith('/lookup') ? lookup : identity)));
+  const model = (choices: Record<string, { checked: boolean; basis: string }>) => reviewApplyModel({ item, lookup: lookup.lookup, summary: lookup, waiting: lookup.summary.waiting, identity, choices });
+  const expected = model({}), element = (choices: Record<string, { checked: boolean; basis: string }>) => <QueryClientProvider client={client}>
+    <CatalogReviewApplyCount item={item} choices={choices} onCount={onCount} /></QueryClientProvider>;
+  const view = render(element({}));
+  // It renders nothing; once the reads arrive it reports what the step shows: its selected count, its items, the guest to answer
+  // and, since the guest blocks applying, that the selection is not ready.
+  expect(view.container).toBeEmptyDOMElement();
+  const count = expected.selection.fields.length + expected.selection.memberCredits.length;
+  expect(expected.ready).toBe(false);
+  await waitFor(() => expect(onCount).toHaveBeenLastCalledWith({ count, items: expected.items.length, identityAnswers: 1, ready: false }));
+  const first = expected.items.find(entry => entry.selected && entry.hold === null)!;
+  view.rerender(element({ [first.key]: { checked: false, basis: first.basis } }));
+  await waitFor(() => expect(onCount).toHaveBeenLastCalledWith({ count: count - 1, items: expected.items.length, identityAnswers: 1, ready: false }));
 });

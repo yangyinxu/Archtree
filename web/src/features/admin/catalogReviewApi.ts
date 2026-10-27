@@ -70,7 +70,10 @@ export const reviewDetailSchema = z.object({ id, revision: integer, valueRevisio
 });
 export const reviewResponseSchema = z.object({ item: reviewDetailSchema, receipt: receipt.nullable() }).strict();
 export const reviewMutationSchema = z.object({ item: reviewDetailSchema, receipt }).strict();
-/** A queue item: `title` is the draft's, `albumTitle` the catalog Album's as the review captured it (its discard names that). */
+/**
+ * A queue item: `title` is the draft's, `albumTitle` the catalog Album's as the review captured it (its discard names that). The
+ * workbench reads it with each item's lookup brief (catalogReviewWorkbenchApi.ts).
+ */
 export const reviewWorkbenchSchema = z.object({
   items: z.array(z.object({ id, revision: integer, createdAt: z.string(), updatedAt: z.string(), startedByMe: z.boolean(), state: z.enum(['reviewing', 'applied']), analysis, albumId: id, title: z.string().max(300), albumTitle: z.string().max(300), pendingSuggestions: integer }).strict()).max(25),
   counts: z.object({ all: integer, analyzing: integer, awaitingReview: integer, needsAttention: integer, completed: integer }).strict(), nextCursor: z.string().max(500).nullable()

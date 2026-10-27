@@ -308,6 +308,22 @@ gate document (one request at a time, 3 seconds apart). The release before the
 fallback ignores these fields (see
 [Rollback floors](../features/admin-workbench.md#rollback-floors)).
 
+Automatic pairing resolution adds no collection, index or
+`requiredIndexRevision` change: a review's stored ranking may hold each member's
+`positionHint` in its `files` (a bounded Disc and Track Number and its source,
+read from the capture) and, on a candidate's subset comparison, `pairedBy`, the
+step that decided its pairing (a bounded value that only a review's lookup view
+projects); a review run that skips the iTunes fallback stores no `itunesStage`.
+The release before it ignores both (see
+[Rollback floors](../features/admin-workbench.md#rollback-floors)).
+
+Pairing tracks by hand adds no collection, index or `requiredIndexRevision`
+change: its read (`GET /catalog-reviews/:id/lookup/candidates/:key/pairing`)
+reads the review document and its lookup record in one snapshot, storing nothing
+in either (only the administrator fence every review read writes), and the
+numbers it saves go through the ordinary review save, whose re-rank writes the
+ranking and the gate as described above.
+
 MusicBrainz IDs add two required unique partial indexes, `artist_musicbrainz_id`
 on `artists` and `organization_musicbrainz_id` on `organizations`, each
 `{ musicBrainzId: 1 }` with the partial filter
@@ -368,7 +384,12 @@ eligibility read and the creation check) scans catalog reviews newest first
 through `admin_project_purpose_inventory` (its `purpose` prefix only), keeping
 unapplied reviews of that captured Album ID and revision, and returns at most
 25, each then source-checked, within the usual 3-second bound: its cost grows
-with the number of stored reviews, applied ones included. No index changes.
+with the number of stored reviews, applied ones included. To compute each
+review's text-free lookup brief, the review queue reads the lookup records of
+the reviews on its page (at most 25) in one more query by `_id`, and the
+eligibility read takes the open review and then its lookup record by `_id`; both
+lookup reads leave out ranking evidence and candidate proposals and run within
+the same 3-second bound. No index changes.
 
 Discarding an unapplied review (`discardCatalogReview` in
 `src/administration/catalog/adminCatalogReviewDiscard.ts`) replaces its

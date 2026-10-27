@@ -5,9 +5,9 @@
  *              sent, aliasLookups, one, fixture, creditedAnswer, aliasAnswer, recordedReleases,
  *              recordingAnswer, songSearch, albumSearch, collectionAnswer, itunesPaths, genericTitledMembers,
  *              reviewRunOf, titledMembers, titledReview, recordingSearches, recordingUrls, isTrackTitleSearch,
- *              failTrackTitles, unansweredTitle
+ *              failTrackTitles, unansweredTitle, discsAnswer, liveReview, liveExchanges
  *   Constants: guard, importId, actor, start, recorded, blueArchiveTag, creditedAlbum, bareAlbum, firstTitle,
- *              secondTitle, firstAlone, secondAlone
+ *              secondTitle, firstAlone, secondAlone, liveDiscs, liveDecorated, liveFirst, liveBare, liveWhole
  * Tests
  *   - fallback queries are sent together only when the searches before them found nothing; a skipped folder fallback spends no folder allowance
  *   - a comparison is partial when a search returned fewer hits than it reported, the bound left a hit out or stopped a planned query, a search was refused, or the record predates the field
@@ -43,6 +43,7 @@
  *   - a typed Artist is never evidence: the preselection's artist flag compares the release with the tags or primary names
  *   - Track-title searches are skipped, sending no recording search and keeping both completeness flags, when the title searches preselect or a credited complete comparison ties
  *   - Track-title searches are sent when no group matches, the comparison is partial, or, without a primary Artist, any tie; alone when the credited title searches returned no release
+ *   - a review whose primary name is decorated searches its first part, then bare, then the whole name, and its Track titles and iTunes term carry the first part
  *   - while Track-title searches are undecided, title searches admit at most 15 releases, and a bound stop moves to the decision, which sends them
  *   - each Track-title search admits at most five releases, fewest extra tracks first, never past 25 candidates, and a release already found counts as admitted
  *   - a Track-title search sent alone must weigh at least eight: a lighter one is passed over without making the comparison partial
@@ -57,6 +58,12 @@
  *   - a run resumed at its second Track-title search, as after a lost lease, sends only that one and keeps what the first found
  *   - a re-rank pairs a release first found through a Track title again against renumbered members without a request, keeping the decision, the credit marker and its basis
  *   - MusicBrainz exhausted while fetching releases a Track title found still starts the iTunes stage when only such a release matches
+ *   - a review run whose release pairs only by its members' title positions matches and is preselected without the iTunes stage; near-exact durations decide alike
+ *   - a review run whose pairing stays unsettled skips the iTunes fallback for a same-title release whose credit agrees and whose tracks fit, and its comparison stays complete
+ *   - an Album without durations whose titles carry positions pairs each release once by them and skips the iTunes fallback for its same-title release
+ *   - the iTunes fallback still runs for another credit, another title or an Album without members, and imports never skip it
+ *   - MusicBrainz exhausted while fetching details still skips the iTunes fallback for a same-title release that fits
+ *   - a review run submitted as an Album name compares the release title with the submitted name, so a fitting release of the saved title alone still asks iTunes
  * @end-catalog */
 
 /**
@@ -1130,6 +1137,30 @@ test('Track-title searches are sent when no group matches, the comparison is par
     for (const client of [nothing, truncated, partial, tying]) assert.equal(client.itunesCalls.some(call => call.includes('Distinct')), false);
 });
 
+test('a review whose primary name is decorated searches its first part, then bare, then the whole name, and its Track titles and iTunes term carry the first part', async () => {
+    const decorated = '合成情緒 -Gouseijoucho-';
+    const doc = reviewLookupDocument({ title: 'Synthetic Live 2', primaryNames: [decorated], members: [{ durationMs: 200_000, title: '1-01 Synthetic Night(Live)' },
+        { durationMs: 210_000, title: '1-02 Synthetic Goose(Live)' }] });
+    const record = reviewRunOf(doc), first = { release: 'Synthetic Live 2', artist: '合成情緒' }, whole = { release: 'Synthetic Live 2', artist: decorated };
+    const bare = { release: 'Synthetic Live 2' }, night = { recording: 'Synthetic Night', artist: '合成情緒' }, goose = { recording: 'Synthetic Goose', artist: '合成情緒' };
+    assert.deepEqual(record.queries.map(query => (query as { query: unknown }).query), [first, bare, whole, night, goose]);
+    // The release credits the first part: its exact count is preselected without a flag, and no Track title or iTunes request is sent.
+    const matching = clientOf([searchAnswer(first, [[mbid(1), 2]]), searchAnswer(bare, [[mbid(1), 2]]), searchAnswer(whole, []), creditedAnswer(mbid(1), [['合成情緒', mbid(30)]]),
+        aliasAnswer('artist', mbid(30), ['合成情緒'])]);
+    const matched = await drive(record, doc, matching);
+    assert.deepEqual([matched.state, matched.ranking!.preselection?.basis, matched.ranking!.preselection?.artistMismatch, matched.trackTitleSearch, recordingSearches(matching),
+        matching.itunesCalls, sent(matching).searches], ['complete', 'exactTrackCount', false, 'skipped', [], [], 3]);
+    // Nothing matches: the first-part search found a release, so the Track titles keep their credit to the first part, and the
+    // iTunes term carries the first part, never the romanized one.
+    const missing = clientOf([searchAnswer(first, [[mbid(1), 2]]), searchAnswer(bare, [[mbid(1), 2]]), searchAnswer(whole, []), releaseAnswer(mbid(1), [100_000, 110_000]),
+        recordingAnswer(night), recordingAnswer(goose)]);
+    const done = await drive(record, doc, missing);
+    assert.deepEqual([done.state, done.trackTitleSearch, done.creditFound, recordingSearches(missing)], ['complete', 'sent', true, recordingUrls(night, goose)]);
+    assert.ok(missing.itunesCalls.length > 0);
+    for (const call of missing.itunesCalls) assert.ok(call.endsWith('Synthetic Live 2 合成情緒') && !call.includes('Gouseijoucho'), call);
+    assert.equal(JSON.stringify(missing.requests.map(request => decodeURIComponent(request.url))).includes('1-0'), false);
+});
+
 test('while Track-title searches are undecided, title searches admit at most 15 releases, and a bound stop moves to the decision, which sends them', async () => {
     const doc = titledReview(), record = reviewRunOf(doc);
     // The credited search offers 16 plausible releases: 15 are admitted, the bare search is not sent, both flags clear and the run
@@ -1396,4 +1427,129 @@ test('MusicBrainz exhausted while fetching releases a Track title found still st
     const stopped = await drive(record, doc, titled, [], failing);
     assert.deepEqual([stopped.state, stopped.issue, stopped.trackTitleSearch, stopped.ranking!.groups.length, stopped.itunesStage, titled.itunesCalls],
         ['complete', 'sourceUnavailable', 'skipped', 1, null, []]);
+});
+
+/**
+ * A release lookup answer titled `title`, crediting `credits` ([name, artist ID]), with one CD per entry of `discs` (its track
+ * lengths), each track titled `Synthetic Track <disc>-<n>`, so two editions with equal lengths share every value.
+ */
+const discsAnswer = (id: string, title: string, credits: [string, string][], discs: number[][]) => json(musicBrainzUrls.release(id).href, {
+    id, title, 'artist-credit': credits.map(([name, artistId], index) => ({ name, joinphrase: index < credits.length - 1 ? ' & ' : '', artist: { id: artistId, name } })),
+    media: discs.map((lengths, medium) => ({ position: medium + 1, format: 'CD', tracks: lengths.map((length, index) => ({ position: index + 1, number: String(index + 1),
+        title: `Synthetic Track ${medium + 1}-${index + 1}`, length, recording: { id: mbid(900 + medium * 100 + index), length } })) })) });
+/**
+ * A live Album's two members without numbers: the first is within 3 seconds of Disc 1 Track 1 (19 ms off) and Disc 2 Track 2
+ * (713 ms off) of its 20-track release, the second only of Disc 1 Track 2; every other track is more than 5 seconds from both.
+ */
+const liveDiscs = [[215_640, 382_746, 120_000, 130_000, 140_000, 150_000, 160_000, 170_000, 180_000, 190_000],
+    [300_000, 214_946, 310_000, 320_000, 330_000, 340_000, 350_000, 360_000, 370_000, 250_000]];
+const liveDecorated = '合成情緒 -Gouseijoucho-';
+const liveReview = (titles = ['1-01 Synthetic Night(Live)', '1-02 Synthetic Goose(Live)'], durations = [215_659, 382_752], legacy = false) =>
+    reviewLookupDocument({ title: 'Synthetic Live 2', primaryNames: [liveDecorated], members: titles.map((title, index) => ({ durationMs: durations[index], legacy, title })) });
+const liveFirst = { release: 'Synthetic Live 2', artist: '合成情緒' }, liveBare = { release: 'Synthetic Live 2' }, liveWhole = { release: 'Synthetic Live 2', artist: liveDecorated };
+/** Both editions found by the title searches, credited `name`, with the alias lookup a run asks for. */
+const liveExchanges = (title = 'Synthetic Live 2', name = '合成情緒') => [searchAnswer(liveFirst, [[mbid(1), 20], [mbid(2), 20]]), searchAnswer(liveBare, [[mbid(1), 20], [mbid(2), 20]]),
+    searchAnswer(liveWhole, []), discsAnswer(mbid(1), title, [[name, mbid(30)]], liveDiscs), discsAnswer(mbid(2), title, [[name, mbid(30)]], liveDiscs), aliasAnswer('artist', mbid(30), [name])];
+
+test('a review run whose release pairs only by its members\' title positions matches and is preselected without the iTunes stage; near-exact durations decide alike', async () => {
+    for (const [titles, pairedBy] of [[['1-01 Synthetic Night(Live)', '1-02 Synthetic Goose(Live)'], 'titlePositions'], [['Synthetic Night(Live)', 'Synthetic Goose(Live)'], 'nearExactDuration']] as const) {
+        const doc = liveReview([...titles]), client = clientOf(liveExchanges());
+        const done = await drive(reviewRunOf(doc), doc, client);
+        assert.deepEqual([done.state, done.ranking!.groups.map(group => group.memberKeys), done.ranking!.preselection],
+            ['complete', [[`musicbrainz:${mbid(1)}`, `musicbrainz:${mbid(2)}`]], { candidateKey: `musicbrainz:${mbid(1)}`, groupKey: done.ranking!.groups[0].groupKey, basis: 'onlyMatchingGroup', artistMismatch: false }], pairedBy);
+        assert.deepEqual(done.ranking!.candidates.map(candidate => [candidate.status, candidate.comparison!.subset!.pairedBy, candidate.comparison!.subset!.pairs.map(pair => [pair.discNumber, pair.trackNumber])]),
+            [['matching', pairedBy, [[1, 1], [1, 2]]], ['matching', pairedBy, [[1, 1], [1, 2]]]]);
+        assert.deepEqual([done.trackTitleSearch, done.itunesStage, client.itunesCalls, done.searchComplete, done.ranking!.disclosure.partialComparison], ['skipped', null, [], true, false]);
+        const urls = JSON.stringify(client.requests.map(request => decodeURIComponent(request.url)));
+        for (const text of ['1-0', '.flac', 'recording?']) assert.equal(urls.includes(text), false, text);
+        // The view projects the subset comparison field by field; it shows how the pairing was made single.
+        for (const candidate of catalogReviewLookupView(done, doc)!.candidates) {
+            const subset = (candidate.comparison as { subset: { pairedBy?: string } }).subset;
+            assert.deepEqual([Object.keys(subset).sort(), subset.pairedBy], [['leftOutTracks', 'missingTrackCount', 'pairedBy', 'pairing', 'pairs', 'unpairableSlotIds'], pairedBy]);
+        }
+    }
+});
+
+test('a review run whose pairing stays unsettled skips the iTunes fallback for a same-title release whose credit agrees and whose tracks fit, and its comparison stays complete', async () => {
+    // Legacy whole-second durations and generic titles: no position, no near-exact tier, no Track-title search.
+    const doc = liveReview(['Track 1', 'Track 2'], [216_000, 383_000], true), record = reviewRunOf(doc);
+    assert.deepEqual(record.queries.map(query => (query as { query: unknown }).query), [liveFirst, liveBare, liveWhole]);
+    const client = clientOf(liveExchanges()), done = await drive(record, doc, client);
+    assert.deepEqual(done.ranking!.candidates.map(candidate => [candidate.status, candidate.comparison!.subset!.pairing, 'pairedBy' in candidate.comparison!.subset!]),
+        [['unverified', 'ambiguous', false], ['unverified', 'ambiguous', false]]);
+    assert.deepEqual([done.state, done.itunesStage, client.itunesCalls, done.searchComplete, done.exactSearchComplete, done.ranking!.disclosure.partialComparison, done.ranking!.preselection],
+        ['complete', null, [], true, true, false, null]);
+    assert.equal(catalogReviewLookupView(done, doc)!.itunes, 'notQueried');
+});
+
+test('an Album without durations whose titles carry positions pairs each release once by them and skips the iTunes fallback for its same-title release', async () => {
+    const doc = reviewLookupDocument({ title: 'Synthetic Best／合成美嘉', primaryNames: ['合成美嘉'],
+        members: ['1.01.Track 1', '1.02.Track 2', '1.03.Track 3'].map(title => ({ durationMs: null, title })) });
+    const record = reviewRunOf(doc), credited = { release: 'Synthetic Best', artist: '合成美嘉' }, bare = { release: 'Synthetic Best' };
+    assert.deepEqual(record.queries.map(query => (query as { query: unknown }).query), [credited, bare]);
+    const client = clientOf([searchAnswer(credited, [[mbid(1), 5]]), searchAnswer(bare, [[mbid(1), 5]]),
+        discsAnswer(mbid(1), 'Synthetic Best', [['合成美嘉', mbid(31)]], [[200_000, 210_000, 220_000, 230_000, 240_000]]), aliasAnswer('artist', mbid(31), ['合成美嘉'])]);
+    const done = await drive(record, doc, client), [entry] = done.ranking!.candidates;
+    assert.deepEqual([entry.status, entry.comparison!.subset!.pairing, entry.comparison!.subset!.pairedBy, entry.comparison!.subset!.missingTrackCount, entry.artistMismatch],
+        ['unverified', 'unique', 'titlePositions', 2, false]);
+    assert.deepEqual([done.state, done.itunesStage, client.itunesCalls, done.ranking!.preselection, done.ranking!.disclosure.partialComparison], ['complete', null, [], null, false]);
+});
+
+test('the iTunes fallback still runs for another credit, another title or an Album without members, and imports never skip it', async () => {
+    const best = reviewLookupDocument({ title: 'Synthetic Best／合成美嘉', primaryNames: ['合成美嘉'],
+        members: ['1.01.Track 1', '1.02.Track 2', '1.03.Track 3'].map(title => ({ durationMs: null, title })) });
+    const credited = { release: 'Synthetic Best', artist: '合成美嘉' }, bare = { release: 'Synthetic Best' }, lengths = [[200_000, 210_000, 220_000, 230_000, 240_000]];
+    for (const [title, name] of [['Synthetic Best', 'Synthetic Other'], ['Synthetic Best Live', '合成美嘉']]) {
+        const client = clientOf([searchAnswer(credited, [[mbid(1), 5]]), searchAnswer(bare, [[mbid(1), 5]]), discsAnswer(mbid(1), title, [[name, mbid(32)]], lengths),
+            aliasAnswer('artist', mbid(32), [name])]);
+        const done = await drive(reviewRunOf(best), best, client);
+        assert.deepEqual([done.state, done.ranking!.candidates[0].status, done.itunesStage?.reason], ['complete', 'unverified', 'noMatch'], `${title} ${name}`);
+        assert.ok(client.itunesCalls.length > 0, `${title} ${name}`);
+    }
+    // An Album without members pairs every release trivially but never skips: no member fits a track.
+    const empty = reviewLookupDocument(), emptyClient = clientOf([searchAnswer(creditedAlbum, [[mbid(1), 2]]), searchAnswer(bareAlbum, [[mbid(1), 2]]),
+        creditedAnswer(mbid(1), [['Synthetic Ensemble', mbid(30)]]), aliasAnswer('artist', mbid(30), ['Synthetic Ensemble'])]);
+    const ended = await drive(reviewRunOf(empty), empty, emptyClient);
+    assert.deepEqual([ended.ranking!.candidates[0].status, ended.ranking!.candidates[0].artistMismatch, ended.itunesStage?.reason], ['unverified', false, 'noMatch']);
+    assert.ok(emptyClient.itunesCalls.length > 0);
+    // An import compares in exact mode: its same-title release with the agreeing credit, unverified for unknown durations, still asks iTunes.
+    const imported = project(2, () => tags({ album: 'Synthetic Album', albumArtists: ['Synthetic Ensemble'] })), record = runOf(imported);
+    const importClient = clientOf([...(record.queries as { query: MusicBrainzReleaseQuery }[]).map(query => searchAnswer(query.query, [[mbid(1), 2]])),
+        creditedAnswer(mbid(1), [['Synthetic Ensemble', mbid(30)]]), aliasAnswer('artist', mbid(30), ['Synthetic Ensemble'])]);
+    const importDone = await drive(record, imported, importClient);
+    assert.deepEqual([importDone.ranking!.candidates[0].status, importDone.ranking!.candidates[0].artistMismatch, importDone.itunesStage?.reason], ['unverified', false, 'noMatch']);
+    assert.ok(importClient.itunesCalls.length > 0);
+});
+
+test('MusicBrainz exhausted while fetching details still skips the iTunes fallback for a same-title release that fits', async () => {
+    const doc = reviewLookupDocument({ title: 'Synthetic Best／合成美嘉', primaryNames: ['合成美嘉'],
+        members: ['1.01.Track 1', '1.02.Track 2', '1.03.Track 3'].map(title => ({ durationMs: null, title })) });
+    const credited = { release: 'Synthetic Best', artist: '合成美嘉' }, bare = { release: 'Synthetic Best' };
+    // The second release's lookup never succeeds, so MusicBrainz is exhausted while the details are fetched.
+    const failing = (action: LookupAction): LookupStepResult | null => action.kind === 'details' && action.releaseId === mbid(8)
+        ? { kind: 'failed', source: 'musicbrainz', failure: 'unavailable', retryAfterMs: null } : null;
+    const client = clientOf([searchAnswer(credited, [[mbid(1), 5], [mbid(8), 5]]), searchAnswer(bare, []),
+        discsAnswer(mbid(1), 'Synthetic Best', [['合成美嘉', mbid(31)]], [[200_000, 210_000, 220_000, 230_000, 240_000]])]);
+    const done = await drive(reviewRunOf(doc), doc, client, [], failing);
+    assert.deepEqual([done.state, done.issue, done.exhausted?.musicbrainz, done.candidates.map(candidate => [candidate.releaseId, candidate.details]), done.itunesStage, client.itunesCalls],
+        ['complete', 'sourceUnavailable', 'sourceUnavailable', [[mbid(1), 'fetched'], [mbid(8), 'failed']], null, []]);
+    assert.equal(done.ranking!.candidates.find(candidate => candidate.key === `musicbrainz:${mbid(1)}`)!.comparison!.subset!.pairedBy, 'titlePositions');
+});
+
+test('a review run submitted as an Album name compares the release title with the submitted name, so a fitting release of the saved title alone still asks iTunes', async () => {
+    const doc = reviewLookupDocument({ title: 'Synthetic Best／合成美嘉', primaryNames: ['合成美嘉'],
+        members: ['1.01.Track 1', '1.02.Track 2', '1.03.Track 3'].map(title => ({ durationMs: null, title })) });
+    const lengths = [[200_000, 210_000, 220_000, 230_000, 240_000]];
+    for (const [text, skipped] of [['synthetic best', true], ['Synthetic Best Live', false]] as const) {
+        const record = reviewRunOf(doc, { submitted: { kind: 'album', text } });
+        const queries = record.queries.map(query => (query as { query: MusicBrainzReleaseQuery }).query);
+        assert.deepEqual(queries, [{ release: text, artist: '合成美嘉' }, { release: text }], text);
+        // Every search finds the release titled as the Album is saved, credited to its primary Artist, with tracks that fit.
+        const client = clientOf([...queries.map(query => searchAnswer(query, [[mbid(1), 5]])),
+            discsAnswer(mbid(1), 'Synthetic Best', [['合成美嘉', mbid(31)]], lengths), aliasAnswer('artist', mbid(31), ['合成美嘉'])]);
+        const done = await drive(record, doc, client), [entry] = done.ranking!.candidates;
+        assert.deepEqual([done.state, entry.status, entry.comparison!.subset!.pairedBy, entry.artistMismatch], ['complete', 'unverified', 'titlePositions', false], text);
+        assert.deepEqual([done.itunesStage === null, client.itunesCalls.length === 0], [skipped, skipped], text);
+        if (!skipped) assert.equal(done.itunesStage!.reason, 'noMatch');
+    }
 });

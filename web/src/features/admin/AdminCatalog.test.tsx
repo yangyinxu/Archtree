@@ -33,6 +33,8 @@
  *   - the Tracks section mounts after the first Album read and is reread once per Refresh, newer revision and refused clear
  *   - a clear confirmation without a read summary still names the expected tracklist, and a disabled one cannot be confirmed
  *   - the Album page completes the Album from MusicBrainz (free), or creates a completion for manual editing where lookup is not configured
+ *   - the completion confirmation names the saved title and the first primary Artist it will look up, read only once it opens, leaves the name out when it cannot be read, and shows a blank title as untitled
+ *   - the completion confirmation names what lookup sends: never a placeholder Artist name, and the title without a trailing slash and that name
  *   - an Album with an unfinished completion opens it, and starting another one is an explicit choice that sends another
  *   - a pending eligibility read leaves the action disabled, and a failed one offers a retry
  *   - a refused creation reads the eligibility again, which offers the completion opened meanwhile
@@ -998,13 +1000,14 @@ test.each([['editing', 'blocks'], ['visibility', 'keeps']] as const)('an open cl
 
 /** The Album page with its eligibility read answered by `eligibility` and a creation by `create`; returns the creation bodies. */
 function albumPage(eligibility: (path: string) => Response | Promise<Response>, create: () => Response = () => json({ code: 'unexpected' }, 500)) {
-  const item = album(), writes: Array<Record<string, unknown>> = [];
+  const item = album(), writes: Array<Record<string, unknown>> = [], reads: string[] = [];
   vi.stubGlobal('fetch', vi.fn(async (path: string, init: RequestInit = {}) => {
     if (init.method === 'POST' && path.endsWith('/catalog-reviews')) { writes.push(JSON.parse(String(init.body))); return create(); }
+    reads.push(path);
     return path.endsWith('/cover-operations') ? json({ items: [] }) : json({ item });
   }));
   mount(<AdminCatalogPage kind="album" id={item.id} />, '/', eligibility);
-  return { item, writes };
+  return { item, writes, reads };
 }
 const reasonText = {
   albumNotReady: 'This Album is not ready, so it cannot be completed.', tooManyTracks: 'This Album has more than 100 tracks, so it cannot be completed.',
@@ -1016,18 +1019,118 @@ const reasonText = {
 
 test('the Album page completes the Album from MusicBrainz (free), or creates a completion for manual editing where lookup is not configured', async () => {
   const paths: string[] = [];
-  albumPage(path => { paths.push(path); return json(reviewEligibility()); });
+  const { reads } = albumPage(path => { paths.push(path); return json(reviewEligibility()); });
   const action = await screen.findByRole('button', { name: 'Complete from MusicBrainz (free)' });
   await waitFor(() => expect(action).toBeEnabled());
   expect(paths).toEqual([`/api/admin/v1/catalog-reviews/eligibility?albumId=${album().id}`]);
   fireEvent.click(action);
   const dialog = within(screen.getByRole('dialog', { name: 'Complete from MusicBrainz (free)' }));
-  expect(dialog.getByText(/^Creates a private Album completion and looks up this Album on MusicBrainz, a free service/)).toBeVisible();
+  // Without primary Artist Credits it names the saved title alone and reads no Artist.
+  expect(dialog.getByText('Will look up: Synthetic catalog Album')).toBeVisible();
+  expect(dialog.getByText('Lookup runs on MusicBrainz (free) and puts what it finds into a private completion draft only; paid Luna AI never starts. The original Album changes only after you confirm Update original Album.')).toBeVisible();
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); });
+  expect(reads.filter(path => path.includes('/catalog/artist/'))).toEqual([]);
   cleanup();
   albumPage(() => json(reviewEligibility({ lookupAvailable: false })));
   const manual = await screen.findByRole('button', { name: 'Create Album completion for manual editing' });
   await waitFor(() => expect(manual).toBeEnabled());
   expect(screen.queryByRole('button', { name: 'Complete from MusicBrainz (free)' })).not.toBeInTheDocument();
+});
+
+test('the completion confirmation names the saved title and the first primary Artist it will look up, read only once it opens, leaves the name out when it cannot be read, and shows a blank title as untitled', async () => {
+  const ids = { first: 'a1'.repeat(12), second: 'b2'.repeat(12), featured: 'c3'.repeat(12), label: 'd4'.repeat(12) };
+  const names: Record<string, string> = { [ids.first]: 'Synthetic first primary', [ids.second]: 'Synthetic second primary', [ids.featured]: 'Synthetic featured', [ids.label]: 'Synthetic label' };
+  const credit = (subjectType: 'artist' | 'organization', subjectId: string, role: 'primary' | 'featured' | 'label', order: number) => ({ creditId: `credit-${subjectId.slice(0, 8)}`, subjectType, subjectId, role, order });
+  // Listed out of Credit order: the first primary Artist is the one at order 0.
+  const item = { ...album(), fields: { ...album().fields, attributionStatus: 'documented' as const, credits: [credit('artist', ids.second, 'primary', 1), credit('artist', ids.first, 'primary', 0),
+    credit('artist', ids.featured, 'featured', 2), credit('organization', ids.label, 'label', 3)] } };
+  const reads: string[] = [];
+  let missing = false;
+  const page = (lookupAvailable = true, shown = item) => {
+    vi.stubGlobal('fetch', vi.fn(async (path: string) => {
+      const subject = /\/catalog\/(artist|organization)\/([a-f0-9]{24})$/.exec(path);
+      if (!subject) return path.endsWith('/cover-operations') ? json({ items: [] }) : json({ item: shown });
+      reads.push(subject[2]);
+      if (missing) return json({ code: 'ADMIN_CATALOG_NOT_FOUND' }, 404);
+      return json({ item: subject[1] === 'artist' ? { ...album(), id: subject[2], kind: 'artist', fields: { name: names[subject[2]], bio: '', birthDate: null, musicBrainzId: null } }
+        : { ...album(), id: subject[2], kind: 'organization', fields: { name: names[subject[2]], description: '', organizationType: 'label', musicBrainzId: null } } });
+    }));
+    mount(<AdminCatalogPage kind="album" id={item.id} />, '/', () => json(reviewEligibility({ lookupAvailable })));
+  };
+  const readsOf = (id: string) => reads.filter(read => read === id).length;
+  const open = async (name: string) => {
+    const action = await screen.findByRole('button', { name });
+    await waitFor(() => expect(action).toBeEnabled());
+    const before = { first: readsOf(ids.first), second: readsOf(ids.second) };
+    fireEvent.click(action);
+    return { dialog: within(screen.getByRole('dialog', { name })), before };
+  };
+  page();
+  const { dialog, before } = await open('Complete from MusicBrainz (free)');
+  expect(await dialog.findByText('Will look up: Synthetic catalog Album · Synthetic first primary')).toBeVisible();
+  // One read for the confirmation, of the first primary Artist only.
+  expect([readsOf(ids.first), readsOf(ids.second)]).toEqual([before.first + 1, before.second]);
+  cleanup();
+  // An Artist that cannot be read leaves its name out, and asks for no reload.
+  missing = true;
+  page();
+  const unread = await open('Complete from MusicBrainz (free)');
+  await waitFor(() => expect(readsOf(ids.first)).toBe(unread.before.first + 1));
+  await waitFor(() => expect(unread.dialog.getByText('Will look up: Synthetic catalog Album')).toBeVisible());
+  expect(adminWorkspace.getSnapshot().reloadRequired).toBe(false);
+  cleanup();
+  // Where lookup is not configured, the confirmation shows the title alone and reads no Artist for it.
+  missing = false;
+  page(false);
+  const manual = await open('Create Album completion for manual editing');
+  expect(manual.dialog.getByText('Synthetic catalog Album', { selector: 'strong' })).toBeVisible();
+  expect(manual.dialog.queryByText(/^Will look up/)).not.toBeInTheDocument();
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); });
+  expect(readsOf(ids.first)).toBe(manual.before.first);
+  cleanup();
+  // A blank saved title names nothing to look up: the confirmation shows the untitled name, never a search line.
+  page(true, { ...item, fields: { ...item.fields, title: '' } });
+  const untitled = await open('Complete from MusicBrainz (free)');
+  expect(untitled.dialog.getByText('Untitled Album', { selector: 'strong' })).toBeVisible();
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); });
+  expect(untitled.dialog.queryByText(/^Will look up/)).not.toBeInTheDocument();
+});
+
+test('the completion confirmation names what lookup sends: never a placeholder Artist name, and the title without a trailing slash and that name', async () => {
+  const artistId = 'a1'.repeat(12);
+  const show = async (title: string, name: string) => {
+    const item = { ...album(), fields: { ...album().fields, title, attributionStatus: 'documented' as const, credits: [{ creditId: 'credit-a1', subjectType: 'artist' as const, subjectId: artistId, role: 'primary' as const, order: 0 }] } };
+    const reads: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (path: string) => {
+      if (path.endsWith(`/catalog/artist/${artistId}`)) { reads.push(path); return json({ item: { ...album(), id: artistId, kind: 'artist', fields: { name, bio: '', birthDate: null, musicBrainzId: null } } }); }
+      return path.endsWith('/cover-operations') ? json({ items: [] }) : json({ item });
+    }));
+    mount(<AdminCatalogPage kind="album" id={item.id} />, '/', () => json(reviewEligibility()));
+    const action = await screen.findByRole('button', { name: 'Complete from MusicBrainz (free)' });
+    await waitFor(() => expect(action).toBeEnabled());
+    // The page may read the Artist for its own Credits; the confirmation reads it once more.
+    const before = reads.length;
+    fireEvent.click(action);
+    await waitFor(() => expect(reads.length).toBe(before + 1));
+    const dialog = within(screen.getByRole('dialog', { name: 'Complete from MusicBrainz (free)' }));
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); });
+    return dialog.getByText(/^Will look up: /).textContent;
+  };
+  // A placeholder credit is never searched, so the confirmation names the title alone.
+  expect(await show('Synthetic compilation', 'Various Artists')).toBe('Will look up: Synthetic compilation');
+  cleanup();
+  expect(await show('Synthetic compilation', ' [unknown] ')).toBe('Will look up: Synthetic compilation');
+  cleanup();
+  // A bracketed name that is not a placeholder is searched.
+  expect(await show('Synthetic compilation', '[Synthetic band]')).toBe('Will look up: Synthetic compilation · [Synthetic band]');
+  cleanup();
+  // A trailing slash and the Artist's name, which the search sends beside it, is left out of the title, the shortest ending first.
+  expect(await show('Synthetic best of BIBLE／Synthetic singer', 'Synthetic singer')).toBe('Will look up: Synthetic best of BIBLE · Synthetic singer');
+  cleanup();
+  expect(await show('Synthetic back in black/SYN/DC', 'Syn/DC')).toBe('Will look up: Synthetic back in black · Syn/DC');
+  cleanup();
+  // Any other ending stays.
+  expect(await show('Synthetic either/or', 'Synthetic singer')).toBe('Will look up: Synthetic either/or · Synthetic singer');
 });
 
 test.each(Object.keys(reasonText) as (keyof typeof reasonText)[])('an Album that cannot have a completion shows the action disabled with its reason (%s)', async reason => {
@@ -1053,7 +1156,7 @@ test('an Album with an unfinished completion opens it, and starting another one 
   await waitFor(() => expect(another).toBeEnabled());
   fireEvent.click(another);
   const dialog = within(screen.getByRole('dialog', { name: 'Start another completion' }));
-  expect(dialog.getByText(/^This Album already has an unfinished completion\. Open it, or start another one\. Creates a private Album completion/)).toBeVisible();
+  expect(dialog.getByText(/^This Album already has an unfinished completion\. Open it, or start another one\. Lookup runs on MusicBrainz \(free\)/)).toBeVisible();
   fireEvent.click(dialog.getByRole('button', { name: 'Complete from MusicBrainz (free)' }));
   await waitFor(() => expect(writes).toHaveLength(1));
   expect(writes[0]).toEqual({ albumId: album().id, expectedRevision: album().revision, another: true, operationId: expect.any(String) });

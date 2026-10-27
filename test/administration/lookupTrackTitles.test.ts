@@ -11,21 +11,24 @@
  *   - a title and its noted version give one entry, the earlier in Album order, and a title repeated in another case is skipped for both members
  *   - a title equal to the Album title or the submitted text is skipped, also with a note on either side
  *   - file-name-shaped titles are skipped, while a title with digits that reads as a name is kept
+ *   - numbered titles lose their position when every member has one, in one form, distinct and increasing, and the rest is checked like any title, its filename included
  *   - weights count Han, kana and Hangul twice and other letters and digits once, a title below four is skipped, and heavier titles rank first
  *   - the whole ranked list comes back, never capped, with each member's own Artist name as given
  *   - an empty Album gives no title, and malformed or unsendable members never throw and give none
+ *   - the positions a review's pairing reads are those Track-title searches read: each title cleaned, then counted under the Album guard
+ *   - the picker says why it keeps no title: titles starting with a track number like file names, titles equal to or shaped like their file names, generic titles, or none distinctive, a specific reason only when every skipped member shares it; none once a title is kept or for no members
  * @end-catalog */
 
 /**
  * The pure picker of an existing Album's distinctive saved Track titles (lookupTrackTitles.ts): generic, version-marked,
- * file-name-shaped, repeated and light titles skipped, trailing notes removed, weights and the ranked order, and totality on
- * malformed members. Titles are synthetic or common song-title shapes; no network.
+ * file-name-shaped, repeated and light titles skipped, trailing notes removed, weights and the ranked order, totality on
+ * malformed members, and the positions a review's pairing reads from the same titles. Titles are synthetic or common song-title shapes; no network.
  */
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { after, test } from 'node:test';
 import {
-    distinctiveTrackTitles, GENERIC_TRACK_TITLES, TRACK_TITLE_MIN_WEIGHT, trackTitleText, trackTitleWeight, UNCREDITED_TRACK_TITLE_MIN_WEIGHT
+    distinctiveTrackTitles, GENERIC_TRACK_TITLES, TRACK_TITLE_MIN_WEIGHT, trackTitlePositions, trackTitleSkipReason, trackTitleText, trackTitleWeight, UNCREDITED_TRACK_TITLE_MIN_WEIGHT
 } from '../../src/administration/lookup/lookupTrackTitles';
 import { installNetworkGuard } from '../support/networkGuard';
 
@@ -135,6 +138,45 @@ test('file-name-shaped titles are skipped, while a title with digits that reads 
     }
 });
 
+test('numbered titles lose their position when every member has one, in one form, distinct and increasing, and the rest is checked like any title, its filename included', () => {
+    /** Each picked text with its weight, for titles with optional retained filenames. */
+    const weighted = (titles: string[], files: (string | null)[] = [], albumTitle = 'Synthetic Album') =>
+        distinctiveTrackTitles(titles.map((title, index) => member(title, files[index] ?? null)), { albumTitle }).map(entry => `${entry.text}:${entry.weight}`);
+    // Titles named like their files: the rest is compared with the filename, and the filename itself is never returned.
+    const snow = ['1.01.雪の華', '1.02.WILL', '1.03.彩恋 ～SAI_REN～'];
+    assert.deepEqual(weighted(snow, snow.map(title => `${title}.flac`), '雪の華15周年記念ベスト盤 BIBLE／中島美嘉'), ['彩恋 ～SAI_REN～:10', '雪の華:6', 'WILL:4']);
+    const live = ['1-01 Yorugaonokokuhaku(Live)', '1-02 Unknown Mother Goose(Live)'];
+    assert.deepEqual(weighted(live, live.map(title => `${title}.wav`)), ['Unknown Mother Goose:18', 'Yorugaonokokuhaku:17']);
+    // A rest equal to the member's filename, with or without its extension, is still skipped.
+    assert.deepEqual(weighted(['01 Synthetic Song', '02 Other Synthetic Song'], ['Synthetic Song.flac', '02 Other Synthetic Song.flac']), ['Other Synthetic Song:18']);
+    // The rest goes through the generic, version, Album-title, digits, file-name-shape and repeat checks.
+    assert.deepEqual(picked(['01 Intro', '02 Synthetic Song']), ['Synthetic Song']);
+    assert.deepEqual(picked(['1.01. 創生(Instrumental)', '1.02. 物語りのワルツ']), ['物語りのワルツ']);
+    assert.deepEqual(picked(['1.01.Hotel California', '1.02.Life In The Fast Lane', '1.03.New Kid In Town'], 'Hotel California'), ['Life In The Fast Lane', 'New Kid In Town']);
+    assert.deepEqual(picked(['1-05 Synthetic Song', '2-05 Synthetic Song', '2-06 Other Synthetic Song']), ['Other Synthetic Song']);
+    assert.deepEqual(picked(['01 02 - Synthetic Song', '02 Other Synthetic Song']), ['Other Synthetic Song']);
+    assert.deepEqual(picked(['01 1999', '02 Synthetic Song']), ['Synthetic Song']);
+    assert.deepEqual(picked(['01 . Synthetic Song', '02 . Other Synthetic Song']), ['Other Synthetic Song', 'Synthetic Song']);
+    assert.deepEqual(picked(['1-01 \u2013 Synthetic Song', '1-02 \u2013 Other Synthetic Song']), ['Other Synthetic Song', 'Synthetic Song']);
+    // Positions of both forms never count, so each title stays as it is and one shaped like a file name is skipped.
+    assert.deepEqual(picked(['1-01 Synthetic Song', '02 Other Synthetic Song']), ['02 Other Synthetic Song']);
+    // The guard fails, so titles stay as they are: a number not on every title, not increasing, or not a leading position.
+    assert.deepEqual(picked(['7 Rings', 'thank u, next']), ['thank u, next', '7 Rings']);
+    assert.deepEqual(picked(['7 Rings', '99 Luftballons', '24 Hours']), ['99 Luftballons', '24 Hours', '7 Rings']);
+    assert.deepEqual(picked(['Room404', 'Room405']), ['Room404', 'Room405']);
+    assert.deepEqual(picked(['02 Synthetic Song', '01 Other Synthetic Song']), ['01 Other Synthetic Song', '02 Synthetic Song']);
+    assert.deepEqual(picked(['01 - Synthetic Song', 'Synthetic Anchor Title']), ['Synthetic Anchor Title']);
+    // A lone member keeps a leading Track Number, so a single equal to its Album title stays skipped; a Disc and Track position goes.
+    assert.deepEqual(picked(['7 Rings'], '7 Rings'), []);
+    assert.deepEqual(picked(['7 Rings']), ['7 Rings']);
+    assert.deepEqual(picked(['1-01 Synthetic Song']), ['Synthetic Song']);
+    // A lone decimal is no position, so a single equal to its Album title stays skipped.
+    assert.deepEqual(picked(['1.21 Gigawatts'], '1.21 Gigawatts'), []);
+    assert.deepEqual(picked(['1.5 Seconds'], '1.5 Seconds'), []);
+    // A member without a usable title fails the guard as well, so the file-name-shaped title stays skipped.
+    assert.deepEqual(picked(['01 - Synthetic Song', 'https://example.test/02']), []);
+});
+
 test('weights count Han, kana and Hangul twice and other letters and digits once, a title below four is skipped, and heavier titles rank first', () => {
     assert.deepEqual([trackTitleWeight('A-1'), trackTitleWeight('さくら'), trackTitleWeight('東京夜景'), trackTitleWeight('Seventh'), trackTitleWeight(' -!, ·'),
         trackTitleWeight('사랑해'), trackTitleWeight('Café'), trackTitleWeight('e\u0301'), trackTitleWeight(null)], [2, 6, 8, 7, 0, 6, 4, 1, 0]);
@@ -167,4 +209,42 @@ test('an empty Album gives no title, and malformed or unsendable members never t
         { title: 'Synthetic\u200b Song\u0007 Title', artist: 'Synthetic Band' }];
     assert.deepEqual(distinctiveTrackTitles(members, { albumTitle: { title: 'x' } as never, submittedText: ['x'] as never }), [
         { text: 'Valid Synthetic Song', artist: null, weight: 18 }, { text: 'Synthetic Song Title', artist: 'Synthetic Band', weight: 18 }]);
+});
+
+test('the positions a review\'s pairing reads are those Track-title searches read: each title cleaned, then counted under the Album guard', () => {
+    const at = (discNumber: number | null, trackNumber: number, rest: string) => ({ discNumber, trackNumber, rest });
+    // A format character is removed and a control character read as a space before the position is read.
+    assert.deepEqual(trackTitlePositions(['\u200b1-01 Synthetic A', '1-02\u0007Synthetic B']), [at(1, 1, 'Synthetic A'), at(1, 2, 'Synthetic B')]);
+    assert.deepEqual(trackTitlePositions(['01 Synthetic A', '02 - Synthetic B', '03.Synthetic C']), [at(null, 1, 'Synthetic A'), at(null, 2, 'Synthetic B'), at(null, 3, 'Synthetic C')]);
+    // A title that does not clean (over 200 characters, a link, a lone surrogate, not a string) reads as none, so no title counts.
+    for (const second of [`02 ${'x'.repeat(200)}`, '02 https://example.test/song', '02 Synthetic \ud800', 7, null]) {
+        assert.equal(trackTitlePositions(['01 Synthetic A', second]), null, String(second).slice(0, 20));
+    }
+    // The guard is that of lookupTitlePositions.ts: one form, distinct and increasing; a lone title needs a padded Disc and Track.
+    for (const titles of [['01 A', '1-02 B'], ['02 A', '01 B'], ['7 Rings', 'thank u, next'], ['01 A'], ['7 Rings'], []]) {
+        assert.equal(trackTitlePositions(titles), null, JSON.stringify(titles));
+    }
+    assert.deepEqual(trackTitlePositions(['1-01 Synthetic Single']), [at(1, 1, 'Synthetic Single')]);
+    assert.equal(trackTitlePositions('01 A' as never), null);
+});
+
+test('the picker says why it keeps no title: titles starting with a track number like file names, titles equal to or shaped like their file names, generic titles, or none distinctive, a specific reason only when every skipped member shares it; none once a title is kept or for no members', () => {
+    const why = (titles: unknown[], files: unknown[] = [], album: unknown = 'Synthetic Album') =>
+        trackTitleSkipReason(titles.map((title, index) => member(title, files[index] ?? null)), { albumTitle: album });
+    // Unordered positions fail the guard, so the titles keep them and look like file names.
+    assert.equal(why(['01.Synthetic One', '03.Synthetic Three', '02.Synthetic Two']), 'positionsStart');
+    assert.equal(why(['Synthetic Take Seven', 'synthetic_take_eight'], ['Synthetic Take Seven.wav']), 'fileName');
+    assert.equal(why(['Intro', 'Interlude 2', 'Synthetic Song (Instrumental)', '1999']), 'generic');
+    assert.equal(why(['Synthetic Album', 'Synthetic Album (Live)', 'Ab', 'Echo', 'Echo']), 'noneDistinct');
+    assert.equal(why([7, null, { title: 'x' }]), 'noneDistinct');
+    // The reason is said of every title, so members skipped for different reasons give none distinctive, which is true of all.
+    assert.equal(why(['Intro', 'Outro', '03_synthetic']), 'noneDistinct');
+    assert.equal(why(['Intro', '03_synthetic']), 'noneDistinct');
+    assert.equal(why(['Intro', 'Ab']), 'noneDistinct');
+    // A kept title, or no member at all, gives no reason, and the picker's own result is unchanged for the same inputs.
+    for (const titles of [['Intro', 'Synthetic Distinct Song'], ['1-01 Synthetic Night(Live)', '1-02 Synthetic Goose(Live)'], []]) {
+        assert.equal(why(titles), null, JSON.stringify(titles));
+    }
+    assert.deepEqual(picked(['Intro', 'Synthetic Distinct Song', '03_synthetic', 'Synthetic Distinct Song']), []);
+    assert.deepEqual(picked(['1-01 Synthetic Night(Live)', '1-02 Synthetic Goose(Live)']), ['Synthetic Night', 'Synthetic Goose']);
 });

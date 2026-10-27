@@ -215,12 +215,13 @@ export async function queueCatalogReviewLookup(doc: AdminImportDocument, actorId
 }
 
 /**
- * Re-ranks a format-3 review's completed run inside the caller's save or Luna acceptance transaction when its ranking evidence
- * changed (a member's own Disc or Track Number), without any request, as `actorId`: while the run has applied nothing, a sole
- * preselection is applied to `doc` (rerankStoredLookup). It sets `doc.lookupGate` (the caller persists `doc`, which it never writes
- * itself) and replaces the record for the run it read, else 409 ADMIN_IMPORT_REVISION_CONFLICT. An import, an older format, a review
- * without a run or one whose evidence is unchanged (a title save) changes nothing, and so does a review that lookup no longer admits
- * (unavailable lookup, or admitMetadataLookup's refusal: its Album deleted, not ready or changed); the change itself proceeds.
+ * Re-ranks a format-3 review's completed run inside the caller's save, Luna acceptance or choice transaction when its ranking
+ * evidence changed (a member's own Disc or Track Number), without any request, as `actorId`: while the run has applied nothing, a
+ * sole preselection is applied to `doc` (rerankStoredLookup). It sets `doc.lookupGate` (the caller persists `doc`, which it never
+ * writes itself) and replaces the record for the run it read, else 409 ADMIN_IMPORT_REVISION_CONFLICT. An import, an older format,
+ * a review without a run or one whose evidence is unchanged (a title save; a ranking stored before position hints existed differs
+ * once when its members carry them) changes nothing, and so does a review that lookup no longer admits (unavailable lookup, or
+ * admitMetadataLookup's refusal: its Album deleted, not ready or changed); the change itself proceeds.
  */
 export async function rerankCatalogReviewLookup(doc: AdminImportDocument, actorId: string, session: ClientSession, now = new Date()): Promise<void> {
     if (!isCatalogReviewLookup(doc) || importDraftVersion(doc) !== CATALOG_REVIEW_DRAFT_V3 || !lookupConfiguration().available) return;

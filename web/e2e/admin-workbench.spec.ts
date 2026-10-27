@@ -397,6 +397,10 @@ test('mobile administrator control and workbench remain accessible without horiz
   await page.goto('/finitude/admin/imports'); await page.getByRole('button', { name: 'Switch to Admin view' }).click();
   await expectStandaloneAdministration(page, 'Current view: Admin');
   await expect(page.getByRole('link', { name: 'Synthetic Album', exact: true })).toBeVisible();
+  // The card's date reads in the interface language, as the page itself formats it.
+  const date = await page.evaluate(value => new Date(value).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' }), detail().updatedAt);
+  const card = page.getByRole('listitem').filter({ has: page.getByRole('link', { name: 'Synthetic Album', exact: true }) });
+  await expect(card.getByText(`Last changed: ${date}`, { exact: true })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
   await page.screenshot({ path: '/tmp/finitude-admin-workbench-mobile.png', fullPage: true });
@@ -983,20 +987,20 @@ test('a lookup value that differs from the administrator\'s own is answered from
   server.lookup = lookupView({ candidates: [lookupCandidate(1)], groups: [lookupGroup(1)], preselection: { candidateKey: releaseKey(1), basis: 'onlyMatchingGroup', artistMismatch: false },
     applied: appliedRelease(1, 'preselected', { conflicts: [{ path: 'album.label', slotId: null, lookup: labelEntry('Label 1'), answer: null }] }), needsAnswer: { tie: false, conflicts: ['album.label'] } });
   await page.goto(`/finitude/admin/imports/${projectId}`); await page.getByRole('button', { name: 'Switch to Admin view' }).click();
-  const conflicts = summaryRegion(page).getByRole('region', { name: 'Lookup values that differ from yours', exact: true });
+  const conflicts = summaryRegion(page).getByRole('region', { name: 'Lookup values that differ from the current ones', exact: true });
   await expect(conflicts.getByRole('listitem')).toHaveCount(1);
   await expect(conflicts.getByRole('definition')).toHaveText(['Mine', 'Label 1']);
   await expect(publishFromSummary(page)).toBeDisabled();
   for (const width of [320, 768, 1440]) {
     await page.setViewportSize({ width, height: 900 });
     expect(await noOverflow(page)).toBe(true);
-    await expect(conflicts.getByRole('button', { name: 'Keep mine', exact: true })).toBeVisible();
+    await expect(conflicts.getByRole('button', { name: 'Keep current', exact: true })).toBeVisible();
   }
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
-  const keep = conflicts.getByRole('button', { name: 'Keep mine', exact: true });
+  const keep = conflicts.getByRole('button', { name: 'Keep current', exact: true });
   await keep.focus(); await expect(keep).toBeFocused(); await page.keyboard.press('Enter');
   await expect(conflicts).toHaveCount(0);
-  await expect(summaryRegion(page).getByText('Label 1 · Kept yours', { exact: true })).toBeAttached();
+  await expect(summaryRegion(page).getByText('Label 1 · Current value kept', { exact: true })).toBeAttached();
   await expect(publishFromSummary(page)).toBeEnabled();
   expect(server.writes.map(write => write.action)).toEqual(['lookup/resolve']);
 });
@@ -1291,7 +1295,7 @@ test('an append to an Album with an expected tracklist shows each file\'s row an
   server.summary = { append: true, appendTracklist: tracklist };
   await page.goto(`/finitude/admin/imports/${projectId}`); await page.getByRole('button', { name: 'Switch to Admin view' }).click();
   const rows = summaryRegion(page).getByRole('region', { name: 'Album\'s expected tracklist', exact: true });
-  await expect(rows.getByText('These files fill 0 of the Album\'s 2 missing-file rows.', { exact: true })).toBeVisible();
+  await expect(rows.getByText('These files fill 0 of the Album\'s 2 rows without a file.', { exact: true })).toBeVisible();
   await expect(rows.getByRole('listitem')).toHaveText(['Disc 1 · Track — · First · No row · No Track Number', 'Disc 1 · Track — · 02 Second.mp3 · No row · No Track Number']);
   // Flags never hold Publish.
   await expect(publishFromSummary(page)).toBeEnabled();
@@ -1305,7 +1309,7 @@ test('an append to an Album with an expected tracklist shows each file\'s row an
   await number.click();
   await expect.poll(() => server.writes.map(write => write.action)).toEqual(['']);
   await expect(rows.getByRole('listitem')).toHaveText(['Disc 1 · Track 2 · First · Row Disc 1 · Track 2: Second Row', 'Disc 1 · Track 3 · Third Row · Row Disc 1 · Track 3: Third Row']);
-  await expect(rows.getByText('These files fill 2 of the Album\'s 2 missing-file rows.', { exact: true })).toBeVisible();
+  await expect(rows.getByText('These files fill 2 of the Album\'s 2 rows without a file.', { exact: true })).toBeVisible();
   await expect(number).toHaveCount(0);
   await expect(publishFromSummary(page)).toBeEnabled();
   await publishFromSummary(page).click();

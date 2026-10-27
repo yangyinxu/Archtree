@@ -3,7 +3,7 @@
  *   Types: Change
  *   Functions: db, mutation, code, deferred, createBody, create, current, edit, apply, save, admitLookup,
  *              request, downgrade, capturedAlbumFixture, completedReview, post, catalogSnapshot,
- *              memberCreditedReview, lookupState
+ *              handPairingReview, memberCreditedReview, lookupState
  *   Constants: actor, other, user, album, artist, first, second, albumTitle, provider
  *   Variables: harness, server, base, token, userToken
  * Tests
@@ -61,6 +61,9 @@
  *   - choosing applies a candidate or none to the review draft only, a member stored with unknown attribution and no Credits takes its own track's artist, and answers bind their tracklist and member bases
  *   - review choose and resolve routes guard authentication, the current admin and the viewer, keep their body limits in any letter case, answer with replaying receipts, and every refusal writes nothing
  *   - renumbering a member re-ranks the review's completed run in the save, without a request, and applies a sole preselection only while the run applied nothing; a title save re-ranks nothing
+ *   - a release chosen while its pairing is not single writes only Album values, keeps that application through a renumbering save, and choosing it again writes its tracklist and member values
+ *   - a review candidate's pairing read is guarded like the review's other reads, lists each member's tracks within the tolerance closest first with its forced track from the stored release and the saved draft, refuses unknown, stale and unreadable candidates and unconfigured lookup, and stores nothing
+ *   - saving a hand pairing as the members' own Disc and Track Numbers, a farther track included, re-ranks the run to that single pairing and applies it as the sole preselection, after which the pairing read offers each member only its saved track
  *   - a failed write inside a choice, an answer or a re-ranking save stores nothing, and the same request is then admitted once and replays
  *   - applying a review refuses a selected value with an unanswered lookup conflict until it is answered, never for a tie or an unselected conflict, and refuses a number a pairing filled without its tracklist
  *   - pairing-filled Disc Numbers apply together with the expected tracklist that places them, which is stored with the Album
@@ -80,6 +83,7 @@
  *   - two administrators creating a review of one Album at once store one review and one run: the later creation runs again and is refused as open
  *   - while a review is open, a stale Album revision keeps its own refusal, and replaying a creation with another `another` is an operation conflict
  *   - a creation whose transaction meets a transient error runs again and stores one review with its one automatic run
+ *   - Album completion cards carry a text-free lookup brief from one read of the page's lookup records, and the Album page's eligibility the open completion's
  * @end-catalog */
 
 import assert from 'node:assert/strict';
@@ -109,6 +113,7 @@ import {
     chooseCatalogReviewLookup, createCatalogReviewWithLookup, getCatalogReviewLookup, resolveCatalogReviewLookup, retryCatalogReviewLookup, saveCatalogReview, submitCatalogReviewLookup
 } from '../../src/administration/lookup/catalogReviewLookupRequests';
 import { installNetworkGuard } from '../support/networkGuard';
+import { CATALOG_REVIEW_LOOKUP_BRIEF_PROJECTION, catalogReviewLookupBrief } from '../../src/administration/lookup/catalogReviewLookupBrief';
 import { queueCatalogReviewLookup, runMetadataLookupOnce } from '../../src/administration/lookup/metadataLookupService';
 import type { LookupExchange } from '../support/metadataLookupFixtures';
 import { creditedRelease, drainLookup, lookupContact, lookupMbid, pairableRelease, reviewSearches, trackCreditedRelease, withLookup, type CreditedArtist } from '../support/catalogReviewRunFixtures';
@@ -1560,6 +1565,124 @@ test('renumbering a member re-ranks the review\'s completed run in the save, wit
     assert.deepEqual([again.applied, (await current(id)).item.draft.album.expectedTracklist?.length], [reranked.applied, 2]);
 }));
 
+test('a release chosen while its pairing is not single writes only Album values, keeps that application through a renumbering save, and choosing it again writes its tracklist and member values', () => withLookup(async () => {
+    const review = await create(), id = review.item.id, _id = new ObjectId(id), slots = review.item.source.tracks.map(track => track.slotId), candidateKey = `musicbrainz:${lookupMbid(1)}`;
+    const record = async () => (await db().collection('adminImportLookups').findOne({ _id }))!;
+    const patch = async (changes: Change[]) => { const response = await request(`/catalog-reviews/${id}`, 'PATCH', { ...mutation((await current(id)).item.revision), changes }); return { status: response.status, body: await response.json() }; };
+    await submitCatalogReviewLookup(String(actor), id, { ...mutation(1), kind: 'album', text: 'Existing Album' });
+    // Without their own Track Numbers either member fits either one-minute track, so the release is unverified and nothing is applied.
+    assert.equal((await patch(slots.map((slotId, index) => ({ path: `tracks.${slotId}.trackNumber`, base: index + 1, value: null })))).status, 200);
+    await drainLookup([...reviewSearches([[lookupMbid(1), 2]]), ...pairableRelease(lookupMbid(1))]);
+    const unpaired = (await current(id)).item;
+    // Chosen now, it writes Album values only: no pairing, no member values and no expected tracklist.
+    const chosen = await chooseCatalogReviewLookup(String(actor), id, { ...mutation(unpaired.revision), run: 1, candidateKey });
+    const first = (await record()).applied!;
+    assert.deepEqual([first.choice, first.candidateKey, first.pairs, first.values.some(value => value.path === 'album.expectedTracklist' || value.path.startsWith('tracks.'))],
+        ['chosen', candidateKey, null, false]);
+    assert.deepEqual([chosen.item.draft.album.expectedTracklist, chosen.item.draft.tracks.map(track => track.trackNumber)], [unpaired.draft.album.expectedTracklist, [null, null]]);
+    // Saving the numbers re-ranks the run but keeps its application; the view shows the now single pairing beside the unpaired application.
+    assert.equal((await patch(slots.map((slotId, index) => ({ path: `tracks.${slotId}.trackNumber`, base: null, value: index + 1 })))).status, 200);
+    assert.deepEqual((await record()).applied, first);
+    const view = (await getCatalogReviewLookup(String(actor), id)).lookup!, shown = view.candidates.find(candidate => candidate.key === candidateKey)!;
+    assert.deepEqual([view.applied?.choice, view.applied?.pairs, shown.status, shown.comparison && 'subset' in shown.comparison ? shown.comparison.subset?.pairing : undefined],
+        ['chosen', null, 'matching', 'unique']);
+    // Choosing the same release again computes its values anew: the pairing, the members' numbers and the expected tracklist are written.
+    const saved = (await current(id)).item;
+    const again = await chooseCatalogReviewLookup(String(actor), id, { ...mutation(saved.revision), run: 1, candidateKey });
+    const second = (await record()).applied!;
+    assert.deepEqual([again.receipt?.kind, second.choice, second.pairs, second.values.some(value => value.path === 'album.expectedTracklist')],
+        ['lookup-choose', 'chosen', slots.map((slotId, index) => ({ slotId, discNumber: 1, trackNumber: index + 1 })), true]);
+    assert.deepEqual([again.item.draft.album.expectedTracklist?.map(row => row.title), again.item.draft.tracks.map(track => [track.discNumber, track.trackNumber])],
+        [['Looked Up Track 1', 'Looked Up Track 2'], [[1, 1], [1, 2]]]);
+    assert.ok(again.item.valueRevision > saved.valueRevision);
+    assert.deepEqual((await importCollection().findOne({ _id }))!.receipts.map(receipt => receipt.kind).slice(-4), ['edit', 'lookup-choose', 'edit', 'lookup-choose']);
+}));
+
+/**
+ * A completed review run whose one candidate the members fit in more than one way: the second member lasts two minutes (both legacy
+ * whole seconds, so near-exact durations never decide), neither has its own Track Number, and the release's three tracks last one
+ * minute, 62.5 seconds and two minutes, so the first member fits tracks 1 and 2 and the second only track 3.
+ */
+async function handPairingReview() {
+    await db().collection('audioTracks').updateOne({ _id: second }, { $set: { duration: '2:00' } });
+    const review = await create(), id = review.item.id, _id = new ObjectId(id), slots = review.item.source.tracks.map(track => track.slotId);
+    await submitCatalogReviewLookup(String(actor), id, { ...mutation(1), kind: 'album', text: 'Existing Album' });
+    await save(await current(id), slots.map((slotId, index) => ({ path: `tracks.${slotId}.trackNumber`, base: index + 1, value: null })));
+    await drainLookup([...reviewSearches([[lookupMbid(1), 3]]), ...creditedRelease(lookupMbid(1), { lengths: [60_000, 62_500, 120_000] })]);
+    const state = async () => [await importCollection().findOne({ _id }), await db().collection('adminImportLookups').findOne({ _id })];
+    return { id, _id, slots, state, candidateKey: `musicbrainz:${lookupMbid(1)}` };
+}
+
+test('a review candidate\'s pairing read is guarded like the review\'s other reads, lists each member\'s tracks within the tolerance closest first with its forced track from the stored release and the saved draft, refuses unknown, stale and unreadable candidates and unconfigured lookup, and stores nothing', () => withLookup(async () => {
+    const { id, _id, slots, state, candidateKey } = await handPairingReview(), path = (key: string, review = id) => `/catalog-reviews/${review}/lookup/candidates/${encodeURIComponent(key)}/pairing`;
+    // Every answer, a refusal included, is private and never stored.
+    const read = async (key = candidateKey, review = id) => { const response = await request(path(key, review)); return { status: response.status, cache: /no-store/.test(response.headers.get('cache-control') ?? ''), body: await response.json() }; };
+    const before = await state(), revision = (await current(id)).item.revision;
+    const answer = await read();
+    assert.deepEqual([answer.status, answer.cache], [200, true]);
+    assert.deepEqual(answer.body, {
+        run: 1, revision,
+        rows: [{ disc: 1, track: 1, title: 'Looked Up Track 1', durationMs: 60_000 }, { disc: 1, track: 2, title: 'Looked Up Track 2', durationMs: 62_500 },
+            { disc: 1, track: 3, title: 'Looked Up Track 3', durationMs: 120_000 }],
+        members: [
+            { slotId: slots[0], title: 'Track 1', durationMs: 60_000, saved: { disc: null, track: null }, discSavable: true,
+                options: [{ disc: 1, track: 1, deltaMs: 0 }, { disc: 1, track: 2, deltaMs: 2500 }], forced: null },
+            { slotId: slots[1], title: 'Track 2', durationMs: 120_000, saved: { disc: null, track: null }, discSavable: true,
+                options: [{ disc: 1, track: 3, deltaMs: 0 }], forced: { disc: 1, track: 3 } }
+        ]
+    });
+    const text = JSON.stringify(answer.body);
+    for (const identifier of [lookupMbid(1), lookupMbid(30), lookupMbid(40), lookupMbid(900), lookupMbid(901), lookupMbid(902)]) assert.ok(!text.includes(identifier), identifier);
+    // The guards of every review read: credentials, an administrator and the current viewer (no `viewer` query outside the artwork preview).
+    const anonymous = await fetch(base + '/api/admin/v1' + path(candidateKey));
+    assert.deepEqual([anonymous.status, anonymous.headers.get('cache-control')], [401, 'private, no-store']);
+    assert.equal((await request(path(candidateKey), 'GET', undefined, userToken)).status, 403);
+    assert.equal((await fetch(base + '/api/admin/v1' + path(candidateKey), { headers: { Cookie: `session_token=${token}`, 'X-Finitude-Account-Viewer': String(other) } })).status, 409);
+    assert.equal((await fetch(`${base}/api/admin/v1${path(candidateKey)}?viewer=${actor}`, { headers: { Cookie: `session_token=${token}` } })).status, 409);
+    // Refusals: a malformed ID or key, a key that is no candidate of the run, an incomplete or out-of-bounds candidate and unconfigured lookup.
+    const notFound = { code: 'ADMIN_CATALOG_REVIEW_NOT_FOUND' };
+    for (const [key, review] of [[candidateKey, 'not-an-id'], ['musicbrainz:not-a-uuid', id], [`musicbrainz:${lookupMbid(2)}`, id], [candidateKey, String(new ObjectId())]] as const) {
+        const refused = await read(key, review);
+        assert.deepEqual([refused.status, refused.cache, refused.body], [404, true, notFound], `${review} ${key}`);
+    }
+    await db().collection('adminImportLookups').updateOne({ _id }, { $set: { 'candidates.0.details': 'failed' } });
+    assert.deepEqual(await read(), { status: 409, cache: true, body: { code: 'ADMIN_IMPORT_LOOKUP_CANDIDATE_INCOMPLETE' } });
+    await db().collection('adminImportLookups').updateOne({ _id }, { $set: { 'candidates.0.details': 'fetched' } });
+    // A stored release beyond the expected tracklist's 100 rows offers no pairing.
+    const media = (await db().collection('adminImportLookups').findOne({ _id }))!.candidates[0].release.media;
+    await db().collection('adminImportLookups').updateOne({ _id }, { $set: { 'candidates.0.release.media.0.tracks':
+        Array.from({ length: 101 }, (_unused, index) => ({ ...media[0].tracks[0], position: index + 1, title: `Looked Up Track ${index + 1}` })) } });
+    assert.deepEqual(await read(), { status: 409, cache: true, body: { code: 'ADMIN_IMPORT_LOOKUP_CANDIDATE_INCOMPLETE' } });
+    await db().collection('adminImportLookups').updateOne({ _id }, { $set: { 'candidates.0.release.media': media } });
+    delete process.env.FINITUDE_ADMIN_METADATA_LOOKUP_CONTACT;
+    try { assert.deepEqual(await read(), { status: 503, cache: true, body: { code: 'ADMIN_IMPORT_LOOKUP_UNAVAILABLE' } }); } finally { process.env.FINITUDE_ADMIN_METADATA_LOOKUP_CONTACT = lookupContact; }
+    assert.deepEqual(await state(), before, 'no read stored anything');
+    // A newer submission queues another run, so the old candidate is no longer one of its own.
+    await submitCatalogReviewLookup(String(actor), id, { ...mutation(revision), kind: 'album', text: 'Existing Album' });
+    assert.deepEqual((await read()).body, notFound);
+    // A demoted administrator is refused.
+    await db().collection('users').updateOne({ _id: actor }, { $set: { role: 'user' } });
+    assert.equal((await request(path(candidateKey))).status, 403);
+}));
+
+test('saving a hand pairing as the members\' own Disc and Track Numbers, a farther track included, re-ranks the run to that single pairing and applies it as the sole preselection, after which the pairing read offers each member only its saved track', () => withLookup(async () => {
+    const { id, _id, slots, candidateKey } = await handPairingReview(), revision = (await current(id)).item.revision;
+    const saved = await request(`/catalog-reviews/${id}`, 'PATCH', { ...mutation(revision), changes: [
+        { path: `tracks.${slots[0]}.discNumber`, base: null, value: 1 }, { path: `tracks.${slots[0]}.trackNumber`, base: null, value: 2 },
+        { path: `tracks.${slots[1]}.discNumber`, base: null, value: 1 }, { path: `tracks.${slots[1]}.trackNumber`, base: null, value: 3 }] });
+    const body = await saved.json(), applied = (await db().collection('adminImportLookups').findOne({ _id }))!.applied;
+    assert.deepEqual([saved.status, body.receipt.kind, applied?.choice, applied?.candidateKey, applied?.pairs], [200, 'edit', 'preselected', candidateKey,
+        [{ slotId: slots[0], discNumber: 1, trackNumber: 2 }, { slotId: slots[1], discNumber: 1, trackNumber: 3 }]]);
+    const stored = (await importCollection().findOne({ _id }))!;
+    assert.deepEqual((stored.draft as { album: { expectedTracklist: { title: string }[] } }).album.expectedTracklist.map(row => row.title), ['Looked Up Track 1', 'Looked Up Track 2', 'Looked Up Track 3']);
+    for (const slotId of slots) for (const field of ['discNumber', 'trackNumber']) assert.notEqual(stored.draftOrigins?.[`tracks:${slotId}:${field}`], 'automatic', `${slotId} ${field}`);
+    const read = await (await request(`/catalog-reviews/${id}/lookup/candidates/${encodeURIComponent(candidateKey)}/pairing`)).json();
+    assert.deepEqual(read.members.map((member: { saved: unknown; options: unknown; forced: unknown }) => [member.saved, member.options, member.forced]), [
+        [{ disc: 1, track: 2 }, [{ disc: 1, track: 2, deltaMs: 2500 }], { disc: 1, track: 2 }],
+        [{ disc: 1, track: 3 }, [{ disc: 1, track: 3, deltaMs: 0 }], { disc: 1, track: 3 }]]);
+    assert.equal(read.revision, body.item.revision);
+}));
+
 test('a failed write inside a choice, an answer or a re-ranking save stores nothing, and the same request is then admitted once and replays', () => withLookup(async () => {
     const { id, slots, state, revision } = await completedReview(), candidateKey = `musicbrainz:${lookupMbid(1)}`;
     const original = Collection.prototype.replaceOne;
@@ -1857,8 +1980,8 @@ test('a second creation for an Album with an open review is refused unless the a
 
 test('eligibility tells the Album page why a review cannot be created, the open review whose source is current and whether lookup runs', async () => {
     const read = (albumId = String(album)) => getCatalogReviewEligibility(String(actor), { albumId });
-    const eligible = { eligible: true, reason: null, openReviewId: null, lookupAvailable: false };
-    const refusal = (reason: string) => ({ eligible: false, reason, openReviewId: null, lookupAvailable: false });
+    const eligible = { eligible: true, reason: null, openReviewId: null, lookupAvailable: false, openLookup: null };
+    const refusal = (reason: string) => ({ eligible: false, reason, openReviewId: null, lookupAvailable: false, openLookup: null });
     assert.deepEqual(await read(), eligible);
     assert.deepEqual(await read(String(new ObjectId())), refusal('albumNotReady'));
     const albumBefore = (await db().collection('albums').findOne({ _id: album }))!, ids = albumBefore.audioTrackIds as string[];
@@ -1963,11 +2086,13 @@ test('every Album the eligibility read refuses is one creation refuses, storing 
         await db().collection('audioTracks').replaceOne({ _id: second }, memberBefore);
     }
     await db().collection('albums').updateOne({ _id: album }, { $set: { audioTrackIds: [] } });
-    assert.deepEqual(await eligibility(), { eligible: true, reason: null, openReviewId: null, lookupAvailable: true });
+    assert.deepEqual(await eligibility(), { eligible: true, reason: null, openReviewId: null, lookupAvailable: true, openLookup: null });
     const created = await request('/catalog-reviews', 'POST', await createBody(null)), value = await created.json() as CatalogReviewResponse;
     const { record, doc } = await lookupState(value.item.id);
     assert.deepEqual([created.status, value.item.source.tracks, doc?.draftVersion, record?.run, record?.automaticRuns, record?.input], [201, [], 3, 1, 1, { trigger: 'catalog', submitted: null }]);
-    assert.deepEqual(await eligibility(), { eligible: true, reason: null, openReviewId: value.item.id, lookupAvailable: true });
+    // The open completion's automatic run is queued: its brief says so.
+    assert.deepEqual(await eligibility(), { eligible: true, reason: null, openReviewId: value.item.id, lookupAvailable: true,
+        openLookup: { state: 'queued', outcome: 'active', answers: 0, next: null, releases: 0 } });
 }));
 
 test('an Album whose retained filenames exceed what a review holds is refused by the eligibility read and by creation alike, storing nothing, and is created once they fit', () => withLookup(async () => {
@@ -1979,12 +2104,12 @@ test('an Album whose retained filenames exceed what a review holds is refused by
     const eligibility = () => getCatalogReviewEligibility(String(actor), { albumId: String(album) });
     const stored = async () => [await importCollection().countDocuments({ purpose: 'catalogReview' }), await db().collection('adminImportLookups').countDocuments()];
     // 100 filenames of 220 characters take more than the 24,000 bytes a review retains.
-    assert.deepEqual(await eligibility(), { eligible: false, reason: 'valuesUnsupported', openReviewId: null, lookupAvailable: true });
+    assert.deepEqual(await eligibility(), { eligible: false, reason: 'valuesUnsupported', openReviewId: null, lookupAvailable: true, openLookup: null });
     const refused = await request('/catalog-reviews', 'POST', await createBody(null));
     assert.deepEqual([refused.status, await refused.json(), await stored()], [400, { code: 'ADMIN_IMPORT_INVALID_INPUT' }, [0, 0]]);
     // Filenames of 100 characters fit: the read admits the Album, and creation stores it with its automatic run.
     for (const track of members(100)) await db().collection('audioTracks').updateOne({ _id: track._id }, { $set: { originalFileName: track.originalFileName } });
-    assert.deepEqual(await eligibility(), { eligible: true, reason: null, openReviewId: null, lookupAvailable: true });
+    assert.deepEqual(await eligibility(), { eligible: true, reason: null, openReviewId: null, lookupAvailable: true, openLookup: null });
     const created = await request('/catalog-reviews', 'POST', await createBody(null));
     assert.deepEqual([created.status, await stored()], [201, [1, 1]]);
 }));
@@ -2041,4 +2166,39 @@ test('a creation whose transaction meets a transient error runs again and stores
     // A replay afterwards answers the stored response and queues nothing.
     assert.deepEqual(await createCatalogReviewWithLookup(String(actor), body), created);
     assert.deepEqual((await lookupState(created.item.id)).record?.updatedAt, record?.updatedAt);
+}));
+
+test('Album completion cards carry a text-free lookup brief from one read of the page\'s lookup records, and the Album page\'s eligibility the open completion\'s', () => withLookup(async () => {
+    const eligibility = () => getCatalogReviewEligibility(String(actor), { albumId: String(album) });
+    const created = await request('/catalog-reviews', 'POST', await createBody(null)), id = (await created.json() as CatalogReviewResponse).item.id;
+    // The automatic run is queued.
+    const queued = { state: 'queued', outcome: 'active', answers: 0, next: null, releases: 0 };
+    assert.deepEqual([(await listCatalogReviews(String(actor), {})).items.map(item => item.lookup), (await eligibility()).openLookup], [[queued], queued]);
+    // It completes with a release applied whose values differ from the saved ones: lookup answers are needed.
+    await drainLookup([...reviewSearches([[lookupMbid(1), 2]]), ...pairableRelease(lookupMbid(1))]);
+    const { record, doc } = await lookupState(id), list = await listCatalogReviews(String(actor), {}), brief = list.items[0].lookup!;
+    assert.deepEqual([brief.state, brief.outcome, brief.next, brief.releases, brief.answers > 0], ['complete', 'applied', null, 0, true]);
+    // The lean read gives the brief the whole stored record gives, and the Album page's eligibility the same.
+    assert.deepEqual(brief, catalogReviewLookupBrief(record as never, doc!, true));
+    assert.deepEqual((await eligibility()).openLookup, brief);
+    assert.deepEqual(Object.keys(brief), ['state', 'outcome', 'answers', 'next', 'releases']);
+    assert.equal(JSON.stringify(list).includes('Looked Up'), false);
+    // A completion created without lookup has no brief; as the newest open one, the Album page's note has none either.
+    const manual = await create();
+    // The page's two cards read their lookup records in one find, by ID, without ranking evidence or proposals.
+    const since = new Date();
+    await db().command({ profile: 2 });
+    let both: Awaited<ReturnType<typeof listCatalogReviews>>;
+    try { both = await listCatalogReviews(String(actor), {}); } finally { await db().command({ profile: 0 }); }
+    const lookupReads = await db().collection('system.profile').find({ ts: { $gte: since }, ns: `${db().databaseName}.adminImportLookups` }).toArray();
+    assert.deepEqual(lookupReads.map(entry => [entry.op, entry.command.find, (entry.command.filter._id.$in as ObjectId[]).map(String).sort(), entry.command.projection]),
+        [['query', 'adminImportLookups', [manual.item.id, id].sort(), { ...CATALOG_REVIEW_LOOKUP_BRIEF_PROJECTION }]]);
+    assert.deepEqual(both.items.map(item => [item.id, item.lookup]), [[manual.item.id, null], [id, brief]]);
+    assert.deepEqual([(await eligibility()).openReviewId, (await eligibility()).openLookup], [manual.item.id, null]);
+    // The route answers the same items.
+    const routed = await request('/catalog-reviews');
+    assert.deepEqual([routed.status, await routed.json()], [200, JSON.parse(JSON.stringify(both))]);
+    // An applied completion keeps its brief.
+    await importCollection().updateOne({ _id: new ObjectId(id) }, { $set: { catalogApplied: { operationId: randomUUID(), at: new Date().toISOString(), fields: [albumTitle] } } });
+    assert.deepEqual((await listCatalogReviews(String(actor), { filter: 'completed' })).items.map(item => [item.id, item.state, item.lookup]), [[id, 'applied', brief]]);
 }));

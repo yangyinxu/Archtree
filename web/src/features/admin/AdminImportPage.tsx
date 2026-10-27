@@ -11,6 +11,7 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router';
+import { useLocalization } from '../../localization/LocalizationProvider';
 import { AdminGate, useAdminAccess, useAdminText } from './AdminAccess';
 import { adminRequest, duplicateEditsKey, importPath, newerImport, responseSchema, type ImportDetail, type ImportDraftV2 } from './adminApi';
 import { artistByline, draftChanges } from './importDraftPatch';
@@ -36,7 +37,7 @@ const stages = ['draft', 'review', 'files', 'publication'] as const;
 interface EditorBuffer { draft: ImportDraftV2; base: ImportDraftV2; revision: number; valueRevision: number; dirty: boolean; selected: string[] }
 const saved = (item: ImportDetail, selected: string[] = []): EditorBuffer => ({ draft: item.draft, base: item.draft, revision: item.revision, valueRevision: item.valueRevision, dirty: false, selected });
 function ImportProject({ id }: { id: string }) {
-  const t = useAdminText();
+  const t = useAdminText(), { locale } = useLocalization();
   const access = useAdminAccess();
   const online = useOnline();
   const path = importPath(id);
@@ -124,7 +125,7 @@ function ImportProject({ id }: { id: string }) {
     <MutationStatus mutation={mutation} />
     {item && editor && <>
       <ImportStages item={item} />
-      <p className={styles.meta}>{t('common.last_updated', { date: new Date(item.updatedAt).toLocaleString() })}</p>
+      <p className={styles.meta}>{t('common.last_updated', { date: new Date(item.updatedAt).toLocaleString(locale, { dateStyle: 'medium', timeStyle: 'short' }) })}</p>
       {media('summary')}
       <div role="tablist" aria-label={t('workbench.title')} className={styles.filters}>{stages.map(value => <button key={value} id={`import-tab-${value}`} role="tab" type="button" className={styles.filter} aria-selected={stage === value} tabIndex={stage === value ? 0 : -1} onKeyDown={event => { const index = stages.indexOf(value); const next = event.key === 'ArrowRight' ? stages[(index + 1) % stages.length] : event.key === 'ArrowLeft' ? stages[(index + stages.length - 1) % stages.length] : event.key === 'Home' ? stages[0] : event.key === 'End' ? stages[3] : null; if (next) { event.preventDefault(); setStage(next); document.getElementById(`import-tab-${next}`)?.focus(); } }} aria-controls={`import-panel-${value}`} onClick={() => setStage(value)}>{t(`section.${value}`)}</button>)}</div>
       {conflict && <section role="alert" className={styles.error}><p>{t('common.conflict')}</p>

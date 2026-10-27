@@ -19,6 +19,7 @@ import { storedJoinPhrase } from '../../models/catalogCredit';
 import { keepableMusicBrainzId } from '../../utils/musicBrainzId';
 import { foldImportName, type ImportArtistEntry } from '../import/adminImportDraft';
 import type { AdminImportDocument } from '../import/adminImportService';
+import { decoratedNameParts } from './lookupDecoratedNames';
 
 /**
  * Review bounds: distinct Artist identities across the Album's and every member's lookup entries, and conflict answers per request
@@ -38,16 +39,17 @@ const fold = (value: string) => foldImportName(value.trim());
 
 /**
  * Whether a lookup entry names the Artist a saved entry shows: the same role, and the saved entry's Artist keeps the lookup entry's
- * MusicBrainz ID, or the saved name equals, case-insensitively, the lookup name or a credited name, canonical name or alias the run
- * found for the lookup entry's ID (`found`). A saved entry keeping another ID still agrees by name: its Artist keeps that ID unless
- * the administrator replaces it (an ID conflict), so the entry keeps its Artist.
+ * MusicBrainz ID, or the saved name, or either part of a decorated one (lookupDecoratedNames.ts; the lookup name is never split),
+ * equals, case-insensitively, the lookup name or a credited name, canonical name or alias the run found for the lookup entry's ID
+ * (`found`). A saved entry keeping another ID still agrees by name: its Artist keeps that ID unless the administrator replaces it
+ * (an ID conflict), so the entry keeps its Artist.
  */
 export function reviewEntryAgrees(saved: ImportArtistEntry, lookup: Pick<ImportArtistEntry, 'name' | 'role' | 'musicBrainzId'>, found: ReadonlyMap<string, readonly string[]>): boolean {
     if (!isRecord(saved) || !isRecord(lookup) || typeof saved.name !== 'string' || typeof lookup.name !== 'string' || saved.role !== lookup.role) return false;
     const mine = keepableMusicBrainzId(saved.musicBrainzId), theirs = keepableMusicBrainzId(lookup.musicBrainzId);
     if (mine !== null && mine === theirs) return true;
-    const name = fold(saved.name);
-    return name === fold(lookup.name) || (theirs !== null && (found.get(theirs) ?? []).some(other => typeof other === 'string' && fold(other) === name));
+    const names = [saved.name, ...(decoratedNameParts(saved.name) ?? [])].map(fold);
+    return names.includes(fold(lookup.name)) || (theirs !== null && (found.get(theirs) ?? []).some(other => typeof other === 'string' && names.includes(fold(other))));
 }
 
 /** The outcome of compareReviewEntries; `append` carries the merged list. */

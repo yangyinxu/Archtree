@@ -881,9 +881,11 @@ The wire protocol and operational bounds are documented in
   entry, never split. A track's credit is usable when an entry remains after
   placeholders and repeats are dropped and the list is not left out for its
   format or a review bound; a left-out list is shown. An entry names a
-  captured Artist when that Artist's saved name equals, case-insensitively,
-  the entry's name or a name or alias lookup found for its MusicBrainz ID, or
-  when that Artist already keeps the entry's MusicBrainz ID. A paired member
+  captured Artist when that Artist's saved name, or either part of a
+  decorated one (see Administrator Metadata Lookup), equals,
+  case-insensitively, the entry's name or a name or alias lookup found for
+  its MusicBrainz ID, or when that Artist already keeps the entry's
+  MusicBrainz ID. A paired member
   without any Artist Credit receives a usable proposal as automatic values,
   whether its attribution is unknown or not stored. A member whose track
   Artist entries agree with the proposal, as many entries, each naming the
@@ -1987,10 +1989,24 @@ The wire protocol and operational bounds are documented in
   repeat it, and the box shows it again until another run replaces it; it
   never becomes an Artist entry or other draft value, never counts as
   evidence for an identity or a preselection, and is never given to Luna.
+- An artist tag or saved Artist name is decorated when a name without Latin
+  letters is followed by its romanized form, in Latin letters with only
+  digits, spaces and simple punctuation besides, between hyphens after a
+  space, as in `ヰ世界情緒 -Isekaijoucho-`, or in round brackets, full-width
+  forms included. Its first part is that name and its other part the
+  romanized form. A search for an Album or song name credited to a
+  decorated name, other than a Track-title search, is sent credited to its
+  first part and then to the whole name; the added search counts among the
+  run's planned searches, so it may leave room for only one Track-title
+  search. A saved Album title that ends in `／` or `/` and one of the Album's
+  primary Artist names, or either part of a decorated one, is searched
+  without that ending. A submitted name or Artist name is sent as typed and
+  never read this way.
 - Metadata lookup uses these sources in order:
   - MusicBrainz is the primary source, with Cover Art Archive for artwork.
-  - Unless MusicBrainz returns a matching candidate, the Apple iTunes Search API
-    is queried in several fixed storefronts. Titles and names found there, such
+  - Unless MusicBrainz returns a matching candidate, or an existing-Album review
+    skips it as described below, the Apple iTunes Search API is queried in
+    several fixed storefronts. Titles and names found there, such
     as the Japanese title for a romanized query or the romanized title for a
     Japanese one, are looked up again in MusicBrainz, and an embedded barcode
     may be looked up in iTunes to find them. An iTunes result becomes a
@@ -1998,13 +2014,26 @@ The wire protocol and operational bounds are documented in
     or cannot run; in the latter case it is marked as not checked against
     MusicBrainz.
   - Deezer, Spotify and other services are not used.
-- An existing-Album review uses the same sources in the same order. Its iTunes
-  fallback, MusicBrainz bridge and iTunes-only candidates follow the import
-  rules with the review's comparison: an iTunes-only candidate is preselected
-  only under the same conditions, its values and expected tracklist are
-  flagged as iTunes only and never collapsed, and its single artist string,
-  like each of its tracks' artist strings, is one Artist entry that is never
-  split.
+- An existing-Album review uses the same sources in the same order, except that
+  it skips the iTunes fallback when MusicBrainz returned a release, first found
+  other than through a Track title, that is unverified only because its pairing
+  is not single or a member or paired track has no duration, whose credited
+  artist agrees directly with one of the Album's primary Artist names, or either
+  part of a decorated one, while none of those names is a placeholder credit,
+  and whose title equals the Album name the run searched: a submitted Album
+  name, else the Album's saved title; a run submitted with a song name never
+  skips it. Titles are compared without a trailing segment after `／`, after `/`
+  with spaces on both sides, or after `/` followed only by one of those Artist
+  names or parts, in NFKC form and lower case, with the brackets `「」『』()[]`
+  read as spaces and whitespace collapsed, and without one of those Artist names
+  or parts at their start or end. A skipped fallback leaves no release out of
+  the comparison, which stays as complete as MusicBrainz's searches left it.
+  Otherwise its iTunes fallback, MusicBrainz bridge and iTunes-only candidates
+  follow the import rules with the review's comparison: an iTunes-only candidate
+  is preselected only under the same conditions, its values and expected
+  tracklist are flagged as iTunes only and never collapsed, and its single
+  artist string, like each of its tracks' artist strings, is one Artist entry
+  that is never split.
 - Metadata lookup responses are untrusted data. Each source is bounded in time
   and size, and its request-rate and concurrency bounds apply across the whole
   deployment; automatic lookups wait for them, and a submitted lookup that
@@ -2036,16 +2065,28 @@ The wire protocol and operational bounds are documented in
   Number equal the member's own where it has them, a missing Disc Number
   matching any disc. A member's own numbers are those captured from the
   catalog or saved by the administrator; numbers that lookup wrote never
-  constrain pairing. A candidate matches only when exactly one such pairing
-  exists and every paired duration is known. A release with fewer tracks than
-  the Album has members never matches; more than one pairing, or a member or
-  paired track without a duration, leaves it unverified; an Album without
-  members matches no candidate, so nothing is preselected, but any candidate
-  it chooses pairs trivially. The release tracks that no member pairs with are
-  the missing-file rows the candidate would add, and the view of differences
-  names each member that no track of the release can pair with. Saving a
-  review Disc or Track Number re-ranks the stored candidates without new
-  requests; a re-rank is not a lookup run. While no candidate was chosen, a
+  constrain pairing. The pairing is single when exactly one such pairing exists.
+  When more exist, it is still single when exactly one of them gives every
+  member the track at the position its Track title starts with, as the review
+  captured it, read and counted as for Track-title searches below, or, when
+  those titles' positions do not count, at the position its retained original
+  filename starts with, read and counted the same way, a position without a Disc
+  Number matching any disc; failing that, when exactly one of them, or of those
+  that give every member its position where several do, pairs every member with
+  a track whose duration is within half a second of its own, both known to the
+  millisecond, which a release track length in whole seconds is not taken to be.
+  Those positions are never sent, are not the member's own numbers and become
+  values only as the numbers lookup writes through that pairing; the ranking
+  records what decided it. A candidate matches only when its pairing is single
+  and every paired duration is known. A release with fewer tracks than the Album
+  has members never matches; a pairing that is not single, or a member or paired
+  track without a duration, leaves it unverified; an Album without members
+  matches no candidate, so nothing is preselected, but any candidate it chooses
+  pairs trivially. The release tracks that no member pairs with are the
+  missing-file rows the candidate would add, and the view of differences names
+  each member that no track of the release can pair with. Saving a review Disc
+  or Track Number re-ranks the stored candidates without new requests; a re-rank
+  is not a lookup run. While no candidate was chosen, a
   re-rank that leaves exactly one preselectable group applies it as a
   preselection would. A re-rank never removes values already applied, and the
   expected tracklist then follows the placement check of applying the review.
@@ -2061,8 +2102,9 @@ The wire protocol and operational bounds are documented in
   when not every release the search found could be compared; the only
   matching group of a partial comparison is offered, not applied, and needs no
   answer. A preselection whose credited artist agrees with no
-  non-empty artist tag of the files, directly or through a MusicBrainz alias or
-  iTunes localized name that the lookup found, is flagged and never collapsed. A
+  non-empty artist tag of the files, or either part of a decorated one,
+  directly or through a MusicBrainz alias or iTunes localized name that the
+  lookup found, is flagged and never collapsed. A
   preselection is a proposal that the publication approval confirms. An
   incomplete or unranked candidate is never preselected. An iTunes-only
   candidate is preselected only after MusicBrainz answered without a release or
@@ -2093,7 +2135,16 @@ The wire protocol and operational bounds are documented in
   no Artist because the Album shows no primary Artist name usable for search
   and none was submitted; otherwise only because no candidate matches or the
   comparison is partial. Track titles are compared and searched without a
-  trailing version or featuring note. The most distinctive titles are
+  trailing version or featuring note and, when every member's title starts
+  with a position, all of one form, either a Track Number or a Disc Number,
+  `-` or `.` and a Track Number, followed by a period, spaces, or a spaced
+  period, hyphen or dash, as in `1-01 Song`, `1.01.Song` or `01 - Song`,
+  and those positions are distinct and increase in Album order, without
+  that position. A Track Number alone counts only on an Album of two or
+  more members, and a lone member's title only with a Disc Number and a
+  Track Number written with a leading zero. The rest is checked like any
+  other title, so `1.01.雪の華` is searched as `雪の華`, even when its file
+  was named `1.01.雪の華.flac`. The most distinctive titles are
   picked: a title must occur once in the Album and differ from the Album
   title, the submitted name and a title already picked. Generic titles of the
   fixed list in docs/features/admin-workbench.md, an instrumental, off-vocal
@@ -2107,7 +2158,8 @@ The wire protocol and operational bounds are documented in
   then Album order. Each title is searched once, credited to the submitted
   Artist name when one was given, else to the member's own first primary
   Artist name that is not a placeholder credit, as the review captured it,
-  else to the Album's first such name, else alone. When the title searches
+  else to the Album's first such name, else alone; a decorated name is used
+  by its first part. When the title searches
   credited to an Artist returned no release, each title is searched alone
   instead. A title searched alone must weigh at least eight.
   These searches count among the run's planned searches, follow its title
@@ -2117,8 +2169,8 @@ The wire protocol and operational bounds are documented in
   run's bounded release lookups for them, and each Track-title search admits
   at most 5 releases its recordings appear on, fewest extra tracks first; a
   release it found that is already a candidate counts as found by it. These
-  releases match only through the subset pairing, so the members' durations
-  and own numbers decide; no value comes from a recording a title found. A
+  releases match only through the subset pairing, so the members' durations, own
+  numbers and positions decide; no value comes from a recording a title found. A
   Track-title search that reports more recordings than it returns leaves the
   comparison partial, so a release found that way is usually offered, not
   applied. Track-title searches that are not sent never make the comparison
@@ -2162,8 +2214,9 @@ The wire protocol and operational bounds are documented in
   preselected. Because pairing keeps every Disc and Track Number that is the
   member's own, lookup fills only missing ones and never contradicts them. An
   entry agrees with a captured entry, wherever it stands, when its role is the
-  same and its name equals, case-insensitively, that entry's saved name or a
-  name or alias lookup found for its MusicBrainz ID, or the Artist that
+  same and that entry's saved name, or either part of a decorated one,
+  equals, case-insensitively, its name or a name or alias lookup found for
+  its MusicBrainz ID, or the Artist that
   captured Credit names already keeps the entry's MusicBrainz ID; an agreeing
   entry keeps the captured Credit's Artist and saved name, gains the ID, and
   needs no identity decision. Join phrases compare as bylines present them: a
@@ -2220,28 +2273,44 @@ The wire protocol and operational bounds are documented in
   Administration.
 - When metadata lookup finds no release or no matching release, or cannot run
   because no usable tags, folder name or submitted name exist, the summary
-  offers the name box as the next step. When lookup is unavailable, busy or
-  stopped, the next step is the free retry, also after the automatic retries
-  are exhausted. In every lookup state, also after a release was applied, the
-  summary offers Luna as a secondary choice after the lookup controls, never
-  as the next step. An existing-Album review offers Luna the same way. Luna
-  remains an explicitly confirmed paid step that shows the remaining project
-  and daily budget; offering it starts nothing, a lookup result never starts
-  it, and it may also run beside applied lookup values. In an import, Luna
-  suggestions return to the summary labelled as Luna AI and are never
-  collapsed: those for empty values or values from file tags arrive ticked,
-  the others arrive unticked and keep the current value unless ticked,
+  offers the name box as the next step. In an existing-Album review where lookup
+  finds no matching release, the summary says why: the Album has no members,
+  members have no duration, or the members fit a release in more than one way.
+  When the members pair with a release in exactly one way, which a missing
+  duration left unconfirmed, using that release is the next step and the name
+  box stays available. Otherwise, when their saved titles start with the
+  positions that Track-title lookup reads, the review offers filling the Disc
+  and Track Numbers the draft lacks from them, for the administrator to check
+  and save, which compares again. This is the next step when the titles give
+  both Disc and Track Numbers, and is otherwise offered after the name box,
+  which stays available. After the name box, the review also offers pairing the
+  members by hand with a release that they fit in more than one way and whose
+  title makes it a possible match: the administrator gives each member a
+  distinct track of that release it can pair with, and saving stores those
+  positions as the administrator's own Disc and Track Numbers, which compares
+  again, and then uses that release. When lookup is unavailable, busy or
+  stopped, the next step is the free retry, also after the automatic retries are
+  exhausted. While a review's source is no longer current, a run that ended for
+  that reason offers no retry; when the Album changed, the summary offers
+  opening the Album to start a new review. In every lookup state, also after a
+  release was applied, the summary offers Luna as a secondary choice after the
+  lookup controls, never as the next step. An existing-Album review offers Luna
+  the same way. Luna remains an explicitly confirmed paid step that shows the
+  remaining project and daily budget; offering it starts nothing, a lookup
+  result never starts it, and it may also run beside applied lookup values. In
+  an import, Luna suggestions return to the summary labelled as Luna AI and are
+  never collapsed: those for empty values or values from file tags arrive
+  ticked, the others arrive unticked and keep the current value unless ticked,
   unticking rejects one, and none is applied until the administrator accepts it
   or approves the publication with it ticked. A ticked suggestion for the Album
-  title, a track title, the Artist entries or the label gets identity
-  candidates and preselections as if it were applied, and the approval
-  includes their decisions. Luna receives the current draft values whatever
-  their source. Only the MusicBrainz release applied to the import or review,
-  if any, is given to Luna, as untrusted context labelled with its source, and
-  each Luna suggestion records it. Other candidates and all iTunes evidence and
-  identifiers are never sent to Luna. Luna never chooses an identity, supplies
-  a MusicBrainz ID, selects a release or presents its values as lookup
-  evidence.
+  title, a track title, the Artist entries or the label gets identity candidates
+  and preselections as if it were applied, and the approval includes their
+  decisions. Luna receives the current draft values whatever their source. Only
+  the MusicBrainz release applied to the import or review, if any, is given to
+  Luna, as untrusted context labelled with its source, and each Luna suggestion
+  records it. Other candidates and all iTunes evidence and identifiers are never
+  sent to Luna. Luna never chooses an identity, supplies a MusicBrainz ID,
+  selects a release or presents its values as lookup evidence.
 - Metadata lookup artwork is Cover Art Archive artwork, or iTunes artwork for an
   iTunes-only candidate, from a fixed allowlist of artwork hosts. The server
   fetches artwork only from those hosts, including after every redirect, and

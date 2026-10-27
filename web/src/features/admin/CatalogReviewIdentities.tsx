@@ -4,6 +4,7 @@
  * Internal
  *   Types: Identity, Bound, Row
  *   Functions: valueOf
+ *   Constants: cardStyle
  * @end-catalog */
 
 import { useEffect, useId, useState, type ReactNode } from 'react';
@@ -12,7 +13,7 @@ import { useLocalization } from '../../localization/LocalizationProvider';
 import type { MessageKey } from '../../localization/contract';
 import { useAdminAccess, useAdminText } from './AdminAccess';
 import type { CatalogReview } from './catalogReviewApi';
-import { reviewCandidateText, reviewRowCandidates } from './catalogReviewCandidates';
+import { reviewRowCandidates, sameName } from './catalogReviewCandidates';
 import type { ReviewCandidate, ReviewDecisionItem, ReviewIdentityResponse } from './catalogReviewLookupApi';
 import { effectiveDecisions, pruneDecisionEdits, rowDecision, takenCandidates, type DecisionEdit } from './catalogReviewSummaryModel';
 import { catalogReviewCandidatesQuery } from './catalogReviewSummaryQuery';
@@ -24,24 +25,38 @@ type Bound = Identity['bound'][number];
 type Row = Pick<Identity, 'name' | 'musicBrainzId' | 'decision' | 'preselection' | 'needsAnswer' | 'musicBrainzIdWrite'> & {
   handle: string; scope: 'artist' | 'label'; kind: 'artist' | 'organization'; state: Identity['state']; bound: Bound[]; names: string[]; entries: Identity['entries'];
 };
-/** A select value: '' for none, `create-distinct`, a candidate's ID to reuse, or `replace:<ID>` to reuse it and replace its MusicBrainz ID. */
+/**
+ * A choice's value: '' for none (a preselection or the bound record's own MusicBrainz ID applies), `create-distinct`, a record's ID
+ * to reuse, or `replace:<ID>` to reuse it and replace its MusicBrainz ID.
+ */
 const valueOf = (decision: ReviewDecisionItem | null) => !decision ? '' : decision.action === 'create-distinct' ? 'create-distinct'
   : decision.action === 'replace' ? `replace:${decision.candidateId}` : decision.candidateId ?? '';
+/** A choice card's layout, inline because only this chunk shows such cards. */
+const cardStyle = { margin: '.5rem 0', padding: '.75rem', alignItems: 'flex-start', cursor: 'pointer' } as const;
 
 /**
  * Identity rows of the review's default selection: one row per artist shared by the Album and its tracks, naming every entry it
- * covers, and the label; saving replaces the review's whole decision set (POST /decisions). Matches by name never prove identity:
- * a name, alias or localized-name candidate needs an explicit choice, a record holding the identity's MusicBrainz ID or create
- * without any candidate is preselected and its row folded, and an Artist another identity of the same list already names cannot be
- * reused. A bound identity offers only replacing its record's different MusicBrainz ID, and entries naming different Artists offer
- * reuse or create, never a replace. Unsaved choices survive new reads until their row vanishes, is renamed or equals the saved one. A
- * saved reuse or replace whose record changed since is shown undecided with a note and left out of the next save, since the server
- * refuses to keep it.
+ * covers, and the label. Each row offers its choices as radio cards naming the record, its visibility and why it is offered for
+ * that row (the same MusicBrainz ID, the name only, a MusicBrainz alias or an iTunes localized name; the server lists a record
+ * once, by its strongest match over every row), and a card to create it with the Album's visibility. Choosing a card saves the
+ * review's whole decision set at once (POST /decisions); choosing the preselected card sends no decision for its row, and choosing
+ * the saved answer again sends nothing. While the section is disabled or a newer read loads, its cards are dimmed and disabled,
+ * except while keyboard focus is on them, as after a choice: they then stay focusable and ignore choices until the section is
+ * enabled again, so focus stays on the choice. Matches by name never prove identity: the record holding the identity's MusicBrainz
+ * ID, or create without any candidate, is preselected, while a name, alias or localized-name candidate needs an explicit choice,
+ * and an Artist another identity of the same list already names cannot be reused. A bound identity offers only keeping or
+ * replacing its record's different MusicBrainz ID, and entries naming different Artists offer reuse or create, never a replace;
+ * only a bound row that needs no answer is folded. MusicBrainz IDs show only on request (offered only while a row has an ID of its
+ * own), and so do record ID endings, except where records or rows of one name need them to be told apart. A choice the server
+ * refused is marked unsaved with Save decisions to send it again (after a save with an unknown outcome the page's retry sends it
+ * again); unsaved choices survive new reads until their row vanishes, is renamed or equals the saved one. A saved reuse or replace
+ * whose record changed since is shown with no card chosen, with a note, and left out of every save, since the server refuses to
+ * keep it; choosing the preselected card then saves the set without it.
  */
 export function CatalogReviewIdentities({ item, disabled, onSave }: { item: CatalogReview; disabled: boolean; onSave: (decisions: ReviewDecisionItem[]) => void }) {
   const t = useAdminText(), { t: shared } = useLocalization(), access = useAdminAccess(), id = useId();
   const query = useQuery(catalogReviewCandidatesQuery(access, item)), data = query.data;
-  const [stored, setEdits] = useState<ReadonlyMap<string, DecisionEdit>>(() => new Map());
+  const [stored, setEdits] = useState<ReadonlyMap<string, DecisionEdit>>(() => new Map()), [ids, setIds] = useState(false), [focused, setFocused] = useState(false);
   useEffect(() => { if (data && !query.isPlaceholderData) setEdits(previous => { const next = pruneDecisionEdits(previous, data); return next.size === previous.size ? previous : next; }); }, [data]);
   const header = <header><h3 id={`${id}-title`}>{t('catalog_review.identities_title')}</h3><p className={styles.muted}>{t('catalog_review.identities_copy')}</p></header>;
   if (!data) return <section aria-labelledby={`${id}-title`}>{header}{query.isError ? <><p role="alert">{t('common.error')}</p>
@@ -54,56 +69,84 @@ export function CatalogReviewIdentities({ item, disabled, onSave }: { item: Cata
     const index = item.draft.tracks.findIndex(track => track.slotId === slotId);
     return slotId === null ? t('catalog_review.target_album') : `${index + 1} · ${item.draft.tracks[index]?.title || '—'}`;
   };
-  const hidden = (record: { visibility: string }) => record.visibility === 'hidden' ? ` · ${t('field.hidden')}` : '';
+  const visibility = (record: { visibility: string }) => t('catalog_review.identity_visibility', { visibility: t(`field.${record.visibility}`) });
+  // A hidden record says so as its visibility, a status rather than an action.
+  const hidden = (record: { visibility: string }) => record.visibility === 'hidden' ? ` · ${visibility(record)}` : '';
   const answers = rows.filter(row => row.needsAnswer).length;
+  // The preselected card is no decision (the preselection applies); the whole set is saved while any choice differs from the saved
+  // ones.
+  const choose = (row: Row, value: string, preselected: string | null, records: readonly { id: string; revision: string }[]) => {
+    if (busy) return;
+    const target = value === preselected ? '' : value, replacing = target.startsWith('replace:'), record = records.find(entry => entry.id === (replacing ? target.slice(8) : target));
+    const decision: ReviewDecisionItem | null = !target ? null : { scope: row.scope, identity: row.scope === 'artist' ? row.handle : null, boundName: row.name,
+      action: target === 'create-distinct' ? 'create-distinct' : replacing ? 'replace' : 'reuse', candidateId: record?.id ?? null, candidateRevision: record?.revision ?? null };
+    const next = pruneDecisionEdits(new Map(edits).set(row.handle, { name: row.name, decision }), data);
+    setEdits(next);
+    if (next.size) onSave(effectiveDecisions(data, next));
+  };
   const body = (row: Row) => {
     const { decision: current, stale } = rowDecision(data, row.handle, edits);
-    const candidates = reviewRowCandidates(row.kind, row.name, row.musicBrainzId, data.candidates.items), taken = row.scope === 'artist' ? takenCandidates(data, row.handle, edits) : new Set<string>();
+    // The server lists a record once, by its strongest match over every row; say why it is offered for this one.
+    const why = (candidate: ReviewCandidate) => row.musicBrainzId !== null && candidate.musicBrainzId === row.musicBrainzId ? 'musicBrainzId'
+      : row.musicBrainzId !== null && candidate.aliasOf === row.musicBrainzId ? 'alias'
+        : candidate.localizedOf !== undefined && sameName(candidate.localizedOf, row.name) ? 'localizedName' : candidate.match === 'sha256' ? 'sha256' : 'name';
+    const reason = (candidate: ReviewCandidate) => t(`catalog_review.identity_reason_${why(candidate)}`);
+    // The record holding the identity's MusicBrainz ID first, then the server's order.
+    const candidates = reviewRowCandidates(row.kind, row.name, row.musicBrainzId, data.candidates.items).sort((left, right) => Number(why(right) === 'musicBrainzId') - Number(why(left) === 'musicBrainzId'));
+    const taken = row.scope === 'artist' ? takenCandidates(data, row.handle, edits) : new Set<string>();
     // A record holding a different MusicBrainz ID keeps it when reused; replacing it is offered while no listed record holds the row's.
     const keepsId = (candidate: ReviewCandidate) => row.musicBrainzId !== null && candidate.musicBrainzId !== undefined && candidate.musicBrainzId !== row.musicBrainzId;
-    const holderListed = row.musicBrainzId !== null && candidates.some(candidate => candidate.match === 'musicBrainzId' && candidate.musicBrainzId === row.musicBrainzId);
-    const replaceText = (record: { label: string; musicBrainzId: string; id: string }) =>
-      `${t('duplicates.replace_id', { name: record.label, previous: record.musicBrainzId, id: row.musicBrainzId ?? '' })} · ${record.id.slice(-6)}`;
-    const decide = (value: string) => {
-      const replacing = value.startsWith('replace:'), target = replacing ? value.slice(8) : value;
-      const record = candidates.find(candidate => candidate.id === target) ?? row.bound.find(candidate => candidate.id === target);
-      const decision: ReviewDecisionItem | null = !value ? null : { scope: row.scope, identity: row.scope === 'artist' ? row.handle : null, boundName: row.name,
-        action: value === 'create-distinct' ? 'create-distinct' : replacing ? 'replace' : 'reuse', candidateId: record?.id ?? null, candidateRevision: record?.revision ?? null };
-      setEdits(new Map(edits).set(row.handle, { name: row.name, decision }));
+    const holderListed = candidates.some(candidate => why(candidate) === 'musicBrainzId');
+    const preselected = row.preselection ? row.preselection.action === 'create-distinct' ? 'create-distinct' : row.preselection.candidateId : null;
+    // A stale stored decision shows no card chosen, so choosing the preselected card still saves.
+    const checked = current ? valueOf(current) : stale ? null : preselected ?? '', records = [...candidates, ...row.bound];
+    const ending = (recordId: string, name: string) => (ids || candidates.filter(candidate => candidate.label === name).length > 1) && t('catalog_review.identity_record_suffix', { suffix: recordId.slice(-6) });
+    const replaceTitle = (name: string, previous: string) => ids ? t('duplicates.replace_id', { name, previous, id: row.musicBrainzId ?? '' }) : t('catalog_review.identity_replace', { name });
+    // A card's title names it; its facts describe it. An unavailable card is dimmed; a busy section's cards stay focusable only
+    // while keyboard focus is on them (disabling the focused card would drop focus), and then ignore choices.
+    const card = (value: string, title: string, facts: (string | false | null | undefined)[], off = false) => {
+      const text = facts.filter(Boolean).join(' · '), described = `${id}-${row.handle}-${value}`;
+      return <label key={value} className={`${styles.card} ${styles.check}`} style={busy || off ? { ...cardStyle, opacity: .62, cursor: 'default' } : cardStyle}>
+        <input type="radio" name={`${id}-${row.handle}`} value={value} checked={checked === value} disabled={off || (busy && !focused)} aria-disabled={busy || undefined} aria-label={title}
+          aria-describedby={text ? described : undefined} onChange={() => choose(row, value, preselected, records)} />
+        <span><strong>{title}</strong>{text && <span id={described} className={styles.muted} style={{ display: 'block' }}>{text}</span>}</span></label>;
     };
+    const group = (cards: ReactNode) => <div role="radiogroup" aria-labelledby={`${id}-${row.handle}`}>{cards}</div>;
     const bound = row.bound[0], replaceBound = row.state === 'bound' && bound && row.musicBrainzId !== null && bound.musicBrainzId !== null && bound.musicBrainzId !== row.musicBrainzId;
-    const select = (options: ReactNode) => <label className={styles.field}>{t('duplicates.decision')}<select className={styles.input} disabled={busy} value={valueOf(current)} aria-label={`${row.name} · ${t('duplicates.decision')}`}
-      onChange={event => decide(event.target.value)}>{options}</select></label>;
     return <>
+      {edits.has(row.handle) && !busy && <p className={styles.muted}>{t('common.unsaved')}</p>}
       {row.entries.length > 0 && <ul>{row.entries.map(entry => <li key={`${entry.path}:${entry.entryKey}`}>{[member(entry.slotId), entry.name, shared(`catalog.credit.${entry.role}` as MessageKey)].join(' · ')}</li>)}</ul>}
       {row.state === 'conflicting' && <><p>{t('catalog_review.identity_conflicting')}</p><ul>{row.bound.map(record => <li key={record.id}>{`${record.name}${hidden(record)} · ${record.id.slice(-6)}`}</li>)}</ul></>}
       {row.state === 'bound' && bound && <p>{`${t('catalog_review.identity_bound', { name: bound.name })}${hidden(bound)}`}</p>}
       {stale && <p>{t('catalog_review.identity_decision_stale')}</p>}
-      {row.musicBrainzIdWrite?.replaces === null && <p>{t('catalog_review.identity_records_id', { id: row.musicBrainzIdWrite.musicBrainzId })}</p>}
-      {replaceBound && select(<><option value="">{t('catalog_review.identity_keep_id', { id: bound.musicBrainzId! })}</option>
-        <option value={`replace:${bound.id}`}>{replaceText({ label: bound.name, musicBrainzId: bound.musicBrainzId!, id: bound.id })}</option></>)}
-      {row.state !== 'bound' && select(<>
-        <option value="">{t(row.preselection ? 'duplicates.keep_preselected' : 'duplicates.undecided')}</option>
-        <option value="create-distinct">{t('duplicates.distinct')}</option>
-        {candidates.map(candidate => <option key={candidate.id} value={candidate.id} disabled={taken.has(candidate.id)}>{reviewCandidateText(t, candidate, keepsId(candidate) ? candidate.musicBrainzId! : null)}</option>)}
-        {row.state === 'unbound' && !holderListed && candidates.filter(keepsId).map(candidate => <option key={`replace:${candidate.id}`} value={`replace:${candidate.id}`} disabled={taken.has(candidate.id)}>
-          {replaceText({ label: candidate.label, musicBrainzId: candidate.musicBrainzId!, id: candidate.id })}</option>)}</>)}
+      {row.musicBrainzIdWrite?.replaces === null && <p>{ids ? t('catalog_review.identity_records_id', { id: row.musicBrainzIdWrite.musicBrainzId }) : t('catalog_review.identity_records_found_id')}</p>}
+      {replaceBound && group(<>{card('', ids ? t('catalog_review.identity_keep_id', { id: bound.musicBrainzId! }) : t('catalog_review.identity_keep_own'), [t('catalog_review.identity_preselected')])}
+        {card(`replace:${bound.id}`, replaceTitle(bound.name, bound.musicBrainzId!), [visibility(bound), ending(bound.id, bound.name)])}</>)}
+      {row.state !== 'bound' && group(<>
+        {candidates.map(candidate => card(candidate.id, t('catalog_review.identity_reuse', { name: candidate.label }), [visibility(candidate), reason(candidate),
+          preselected === candidate.id && t('catalog_review.identity_preselected'), keepsId(candidate) && (ids ? t('duplicates.keeps_id', { id: candidate.musicBrainzId! }) : t('catalog_review.identity_keeps_own_id')),
+          ending(candidate.id, candidate.label), taken.has(candidate.id) && t('catalog_review.identity_taken')], taken.has(candidate.id)))}
+        {row.state === 'unbound' && !holderListed && candidates.filter(keepsId).map(candidate => card(`replace:${candidate.id}`, replaceTitle(candidate.label, candidate.musicBrainzId!),
+          [visibility(candidate), reason(candidate), ending(candidate.id, candidate.label), taken.has(candidate.id) && t('catalog_review.identity_taken')], taken.has(candidate.id)))}
+        {card('create-distinct', t('catalog_review.identity_create', { name: row.name }), [t('catalog_review.identity_create_visibility', { visibility: t(`field.${item.source.album.visibility}`) }),
+          t(holderListed ? 'catalog_review.identity_create_reason_without_id' : candidates.length ? 'catalog_review.identity_create_reason' : 'catalog_review.identity_create_reason_none'),
+          preselected === 'create-distinct' && t('catalog_review.identity_preselected')])}</>)}
     </>;
   };
-  // A row that needs no answer is folded behind what answers it: its bound record, its preselection or its saved decision.
-  const folded = (row: Row) => {
-    const reused = row.preselection?.action === 'reuse' ? data.candidates.items.find(candidate => candidate.id === row.preselection!.candidateId)?.label ?? '' : null;
-    const decided = rowDecision(data, row.handle, edits).decision;
-    return row.state === 'bound' && row.bound[0] ? `${t('catalog_review.identity_bound', { name: row.bound[0].name })}${hidden(row.bound[0])}`
-      : decided ? t(decided.action === 'create-distinct' ? 'duplicates.distinct' : 'duplicates.reuse') : reused !== null ? t('duplicates.preselected_reuse_id', { name: reused }) : t('duplicates.preselected_new');
-  };
-  const heading = (row: Row) => [row.scope === 'label' ? `${t('duplicates.label')} · ${row.name}` : row.name, row.musicBrainzId && t('lookup.musicbrainz_id', { id: row.musicBrainzId }),
+  // Rows of one name (one name with two MusicBrainz IDs is two identities) show their IDs to be told apart.
+  const heading = (row: Row) => [row.scope === 'label' ? `${t('duplicates.label')} · ${row.name}` : row.name,
+    (ids || rows.some(other => other !== row && other.scope === row.scope && sameName(other.name, row.name))) && row.musicBrainzId && t('lookup.musicbrainz_id', { id: row.musicBrainzId }),
     row.names.length > 0 && t('catalog_review.identity_names', { names: row.names.join(', ') })].filter(Boolean).join(' · ');
+  const head = (row: Row) => <span id={`${id}-${row.handle}`}>{heading(row)}</span>;
+  // A record's MusicBrainz ID shows only beside its row's own (to keep or replace), so the toggle is offered only while a row has
+  // one of its own: none when neither the lookup nor the captured Album supplied one.
+  const named = rows.some(row => row.musicBrainzId || row.musicBrainzIdWrite);
   return <section aria-labelledby={`${id}-title`}>{header}
-    <ul className={styles.cards}>{rows.map(row => <li key={row.handle} className={styles.card}>{row.needsAnswer
-      ? <><strong>{heading(row)}</strong><p>{t('catalog_review.needs_decision')}</p>{body(row)}</>
-      : <details className={styles.details}><summary>{`${heading(row)} · ${folded(row)}`}</summary>{body(row)}</details>}</li>)}</ul>
-    <div className={styles.actions}><button className={styles.button} type="button" disabled={busy || edits.size === 0} onClick={() => onSave(effectiveDecisions(data, edits))}>{t('action.save_decisions')}</button></div>
+    {named && <div className={styles.actions}><button className={styles.filter} type="button" aria-pressed={ids} onClick={() => setIds(!ids)}>{t('catalog_review.identity_show_ids')}</button></div>}
+    <ul className={styles.cards} onFocus={() => setFocused(true)} onBlur={event => setFocused(event.currentTarget.contains(event.relatedTarget))}>{rows.map(row => <li key={row.handle} className={styles.card}>{row.state === 'bound' && row.bound[0] && !row.needsAnswer
+      ? <details className={styles.details}><summary>{head(row)}{` · ${t('catalog_review.identity_bound', { name: row.bound[0].name })}${hidden(row.bound[0])}`}</summary>{body(row)}</details>
+      : <><strong>{head(row)}</strong>{row.needsAnswer && <p>{t('catalog_review.needs_decision')}</p>}{body(row)}</>}</li>)}</ul>
+    {edits.size > 0 && !busy && <div className={styles.actions}><button className={styles.button} type="button" onClick={() => onSave(effectiveDecisions(data, edits))}>{t('action.save_decisions')}</button></div>}
     {answers > 0 && <p role="status">{t('catalog_review.identity_answers', { count: answers })}</p>}
   </section>;
 }
