@@ -249,6 +249,31 @@ child process open still exits instead of keeping the gate alive. To find such a
 leaked handle, run with `npm run test:server -- --no-test-force-exit`; the run
 then stays open on the affected file.
 
+node:test bounds each test with `--test-timeout` but never a test file's
+process, so a process that blocks before its first test, inside a native call,
+or while it exits would keep the runner waiting until the CI job times out,
+and the runner holds back every later file's results meanwhile. The server test
+runner therefore adds a second reporter,
+`scripts/lib/server-test-progress-reporter.mjs`, which records each test as it
+starts and finishes, and `scripts/lib/server-test-watchdog.mjs` follows it.
+When a running file reports nothing for the test timeout plus one minute (three
+minutes by default), the watchdog prints the file, how many of its tests had
+reported finishing and the last thing it reported, the runner's process tree
+and, on Linux, each stuck process's threads with their state and wait channel
+(with kernel stacks in GitHub Actions). It then ends that file's processes, so
+node:test fails the file and prints the results it was holding. The run fails;
+nothing is retried. A file's process sends its reports asynchronously, so one
+that blocks inside a synchronous test may never send its last ones: a count of
+0 does not prove the file stopped while loading, and the thread states are the
+evidence of where it stopped. With `--no-test-force-exit`, a file left open by
+a leaked handle is named and ended after the same bound. `--test-timeout=0` or
+a forwarded `--inspect` flag turns the watchdog off for a debugger session;
+forwarding your own `--test-reporter`, running on Windows, and Node before
+24.20.0 (whose reports do not name a test's file) also run unwatched. Output read
+through a pager that is left paused stops the runner's reporting as well, so
+the watchdog may end such a run. In CI the unit step also has a 10-minute
+limit, which bounds the Web suite and any hang the watchdog cannot end.
+
 The server test runner starts unit, Linux, and integration test processes in an
 isolated environment so a private root `.env` never reaches them. It points
 `DOTENV_CONFIG_PATH` at the null device, so the app and operational script entries
