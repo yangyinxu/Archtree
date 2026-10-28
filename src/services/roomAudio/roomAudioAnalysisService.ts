@@ -28,6 +28,7 @@ import { ROOM_AUDIO_ANALYSIS_VERSION, type MediaRepresentation } from '../../mod
 import { readyAudioStorageFilter } from '../../utils/audioStorageKey';
 import { activeMediaObjectKeyForTrack, activeMediaTypeForTrack } from '../../utils/mediaStorageKey';
 import { roomAudioRepresentationForTrack, storedMediaRepresentationForTrack } from '../media/mediaRepresentationService';
+import { probeAudioDurationMs } from './audioDurationProbe';
 import { inspectRoomAudioFile, RoomAudioInspectionError } from './roomAudioInspection';
 
 export { ROOM_AUDIO_ANALYSIS_VERSION } from '../../models/mediaRepresentation';
@@ -65,6 +66,8 @@ export interface RoomAudioAnalysisDependencies {
     database: () => Db;
     storage: () => S3Client;
     inspect: typeof inspectRoomAudioFile;
+    /** Measures audio that rooms cannot play, so an unsupported result still records its duration. */
+    probeDuration: typeof probeAudioDurationMs;
     now: () => number;
 }
 
@@ -133,7 +136,7 @@ const projection = (track: any, now: number): RoomAudioAnalysisItem => {
 /** Explicit source-scoped analysis never uploads, deletes, or mutates media bytes. */
 export const createRoomAudioAnalysisService = (overrides: Partial<RoomAudioAnalysisDependencies> = {}) => {
     const dependencies: RoomAudioAnalysisDependencies = { database: () => getDb()!, storage: getS3,
-        inspect: inspectRoomAudioFile, now: Date.now, ...overrides };
+        inspect: inspectRoomAudioFile, probeDuration: probeAudioDurationMs, now: Date.now, ...overrides };
     let active = false;
     const tracks = () => dependencies.database().collection('audioTracks');
     const assertAdmin = async (actorId: string) => {
@@ -261,8 +264,10 @@ export const createRoomAudioAnalysisService = (overrides: Partial<RoomAudioAnaly
             } });
             await pipeline(object.Body as any, bound, createWriteStream(filePath, { flags: 'wx', mode: 0o600 }), { signal: controller.signal });
             if (received !== size) return finish('stale', 'source_changed');
-            const inspected = await dependencies.inspect({ path: filePath, size, buffer: undefined } as unknown as Express.Multer.File,
-                { signal: controller.signal });
+            const downloaded = { path: filePath, size, buffer: undefined } as unknown as Express.Multer.File;
+            const inspected = await dependencies.inspect(downloaded, { signal: controller.signal });
+            checkAbort();
+            const durationMs = inspected?.durationMs ?? await dependencies.probeDuration(downloaded, { signal: controller.signal });
             checkAbort();
             // Legacy sources had no pinned version. Recheck the current key before adopting the bytes read above.
             const confirmed = await dependencies.storage().send(new HeadObjectCommand({ ...params, IfMatch: etag }),
@@ -271,7 +276,7 @@ export const createRoomAudioAnalysisService = (overrides: Partial<RoomAudioAnaly
                 return finish('stale', 'source_changed');
             await assertAdmin(input.actorId); checkAbort();
             const representation: MediaRepresentation = { revision: `mr_${randomBytes(16).toString('hex')}`,
-                objectKey: source.objectKey, byteLength: size!, durationMs: inspected?.durationMs ?? null,
+                objectKey: source.objectKey, byteLength: size!, durationMs,
                 seekable: inspected !== null, format: inspected?.format ?? 'unsupported', etag, versionId,
                 analysisVersion: ROOM_AUDIO_ANALYSIS_VERSION };
             return finish(inspected ? 'complete' : 'unsupported', inspected ? null : 'unsupported_audio', representation);

@@ -11,6 +11,7 @@ import { randomBytes } from 'node:crypto';
 import { ObjectId, type ClientSession } from 'mongodb';
 import { getDb } from '../../infrastructure/database';
 import { ROOM_AUDIO_ANALYSIS_VERSION, type MediaRepresentation, type RoomAudioRepresentation } from '../../models/mediaRepresentation';
+import { probeAudioDurationMs } from '../roomAudio/audioDurationProbe';
 import { inspectRoomAudioFile, RoomAudioInspectionError } from '../roomAudio/roomAudioInspection';
 import { readyAudioStorageFilter } from '../../utils/audioStorageKey';
 import { activeMediaObjectKeyForTrack, activeMediaTypeForTrack } from '../../utils/mediaStorageKey';
@@ -26,7 +27,10 @@ export const isMediaRepresentationRevision = (value: unknown): value is string =
 /** Inspects bytes rather than extensions; operational failures are distinct from unsupported audio. */
 export const inspectRoomAudioUpload = inspectRoomAudioFile;
 
-/** Generates a fresh identity before upload; validators are attached only after S3 succeeds. */
+/**
+ * Generates a fresh identity before upload; validators are attached only after S3 succeeds. Audio that rooms cannot play
+ * still records its probed duration, while `format` and `seekable` keep it out of rooms.
+ */
 export const prepareMediaRepresentation = async (
     file: Express.Multer.File,
     objectKey: string,
@@ -34,9 +38,14 @@ export const prepareMediaRepresentation = async (
     signal?: AbortSignal
 ): Promise<MediaRepresentation> => {
     let inspected: Awaited<ReturnType<typeof inspectRoomAudioUpload>> = null;
+    let durationMs: number | null = null;
     let analysisFailure: MediaRepresentation['analysisFailure'];
-    try { inspected = mediaType === 'audio' ? await inspectRoomAudioUpload(file, { signal }) : null; }
-    catch (error) {
+    try {
+        if (mediaType === 'audio') {
+            inspected = await inspectRoomAudioUpload(file, { signal });
+            durationMs = inspected?.durationMs ?? await probeAudioDurationMs(file, { signal });
+        }
+    } catch (error) {
         signal?.throwIfAborted();
         if (!(error instanceof RoomAudioInspectionError)) throw error;
         // A missing or busy decoder must not prevent ordinary uploads; explicit analysis can recover later.
@@ -46,7 +55,7 @@ export const prepareMediaRepresentation = async (
         revision: `mr_${randomBytes(16).toString('hex')}`,
         objectKey,
         byteLength: file.size,
-        durationMs: inspected?.durationMs ?? null,
+        durationMs,
         seekable: inspected !== null,
         format: inspected?.format ?? 'unsupported',
         etag: null,

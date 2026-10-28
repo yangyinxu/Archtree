@@ -216,7 +216,7 @@ export const createAudioTrackWeb = async (req: Request, res: Response, next: Nex
             albumId,
             parseDateInput(String(req.body.releaseDate ?? '')),
             String(req.body.duration ?? '')
-                || formatDuration(videoMetadata?.durationSeconds),
+                || formatDuration(videoMetadata?.durationSeconds ?? audioMetadata?.format?.duration),
             new AudioFormat(formatType, Number.isNaN(bitrate as number) ? undefined : bitrate),
             String(req.body.coverArtUrl ?? ''),
             authReq.auth.userId,
