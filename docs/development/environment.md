@@ -120,7 +120,10 @@ invalid ports, and application initialization failures.
 ## Room audio analysis runtime
 
 Compressed room audio requires FFmpeg with AAC/MP3 decoders, MOV/MP3 demuxers and
-the null muxer, the PCM s16le encoder and file/pipe protocols. Use a maintained distribution package and verify its capabilities:
+the null muxer, the PCM s16le encoder and file/pipe protocols. Lossless
+durations (FLAC, ALAC, AIFF, high-resolution WAV) also use those formats'
+decoders and demuxers, the `pan` and `asetnsamples` filters and the `framecrc` muxer; any
+FFmpeg version from these packages measures them exactly. Use a maintained distribution package and verify its capabilities:
 
 ```sh
 # macOS with Homebrew
@@ -135,7 +138,8 @@ On Windows, install a trusted FFmpeg distribution linked by the
 [official FFmpeg download page](https://ffmpeg.org/download.html), add its bin
 directory to PATH or set `ROOM_AUDIO_FFMPEG_PATH` to the absolute `ffmpeg.exe` path.
 The override is an executable path, not a shell command. FFmpeg always reads a
-bounded local file and decodes to the null muxer; it never opens an audio device.
+bounded local file and decodes to the null muxer, or for a lossless duration to a
+packet listing on its standard output; it never opens an audio device.
 Verify the distribution's published SHA-256 before extracting it. A portable
 installation outside the checkout avoids committing workstation executables.
 For a persistent user override, open a new shell after saving it, or load it into
@@ -247,7 +251,37 @@ explicitly when diagnosing a slow test, for example
 `--test-force-exit`, so a test file that finishes but leaves a socket, timer, or
 child process open still exits instead of keeping the gate alive. To find such a
 leaked handle, run with `npm run test:server -- --no-test-force-exit`; the run
-then stays open on the affected file.
+then stays open on the affected file. A forced exit discards whatever results a
+test file's process has not yet written into the pipe to the runner, so a
+runner too busy to read used to lose a file's last results while the run still
+passed with fewer tests. Every test file's process therefore preloads
+`scripts/lib/server-test-report-guard.mjs`, which makes those writes blocking
+and fails the file if any results are still queued when it exits.
+
+node:test bounds each test with `--test-timeout` but never a test file's
+process, so a process that blocks before its first test, inside a native call,
+or while it exits would keep the runner waiting until the CI job times out,
+and the runner holds back every later file's results meanwhile. The server test
+runner therefore adds a second reporter,
+`scripts/lib/server-test-progress-reporter.mjs`, which records each test as it
+starts and finishes, and `scripts/lib/server-test-watchdog.mjs` follows it.
+When a running file reports nothing for the test timeout plus one minute (three
+minutes by default), the watchdog prints the file, how many of its tests had
+reported finishing and the last thing it reported, the runner's process tree
+and, on Linux, each stuck process's threads with their state and wait channel
+(with kernel stacks in GitHub Actions). It then ends that file's processes, so
+node:test fails the file and prints the results it was holding. The run fails;
+nothing is retried. A file's process sends its reports asynchronously, so one
+that blocks inside a synchronous test may never send its last ones: a count of
+0 does not prove the file stopped while loading, and the thread states are the
+evidence of where it stopped. With `--no-test-force-exit`, a file left open by
+a leaked handle is named and ended after the same bound. `--test-timeout=0` or
+a forwarded `--inspect` flag turns the watchdog off for a debugger session;
+forwarding your own `--test-reporter`, running on Windows, and Node before
+24.20.0 (whose reports do not name a test's file) also run unwatched. Output read
+through a pager that is left paused stops the runner's reporting as well, so
+the watchdog may end such a run. In CI the unit step also has a 10-minute
+limit, which bounds the Web suite and any hang the watchdog cannot end.
 
 The server test runner starts unit, Linux, and integration test processes in an
 isolated environment so a private root `.env` never reaches them. It points

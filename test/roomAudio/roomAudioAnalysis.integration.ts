@@ -9,6 +9,7 @@
  *   - historical MP3 and AAC use pinned reads to publish verified duration without changing or uploading their source
  *   - an existing unsupported representation keeps exact validators while analysis makes the original bytes eligible
  *   - unsupported bytes retain durable analysis evidence and identical retries do not read storage again
+ *   - unsupported lossless bytes record their decoded duration while a probe outage stays retryable
  *   - upload-time unsupported evidence is terminal while decoder infrastructure failures remain retryable
  *   - list pagination advances across excluded Video and refuses analysis during pending replacement
  *   - conditional storage reads reject substituted bytes with stale source evidence instead of a retryable outage
@@ -197,6 +198,27 @@ test('unsupported bytes retain durable analysis evidence and identical retries d
         { $set: { s3Key: replacementKey }, $unset: { mediaRepresentation: '' } });
     assert.equal((await api.list({ actorId: admin.toHexString() })).items[0].status, 'notAnalyzed');
     assert.equal((await api.analyze(await intentFor(api, track.id))).outcome, 'complete', 'Replacing the source permits new analysis.');
+});
+
+test('unsupported lossless bytes record their decoded duration while a probe outage stays retryable', async () => {
+    const track = await legacyTrack(await readFile(new URL('../fixtures/room-audio/tone.flac', import.meta.url)), { duration: '' });
+    const seeded = storage.requests.length;
+    const outage = service({ probeDuration: async () => { throw new RoomAudioInspectionError('decoder_unavailable'); } });
+    const input = await intentFor(outage, track.id);
+    assert.deepEqual(await outage.analyze(input), { mediaTrackId: track.id, attemptId: input.attemptId, outcome: 'failed', reason: 'decoder_unavailable' });
+    assert.equal((await readTrack(track.id))!.mediaRepresentation, undefined);
+    const row = (await outage.list({ actorId: admin.toHexString() })).items[0];
+    assert.equal(row.status, 'retryable'); assert.equal(row.attemptId, input.attemptId);
+
+    const api = service();
+    assert.deepEqual(await api.analyze(input), { mediaTrackId: track.id, attemptId: input.attemptId, outcome: 'unsupported', reason: 'unsupported_audio' });
+    const updated = (await readTrack(track.id))!;
+    assert.deepEqual([updated.mediaRepresentation.format, updated.mediaRepresentation.seekable, updated.mediaRepresentation.durationMs,
+        updated.mediaRepresentation.etag], ['unsupported', false, 2000, track.etag]);
+    assert.equal(roomAudioRepresentationForTrack(updated), null);
+    assert.equal((await api.list({ actorId: admin.toHexString() })).items[0].status, 'unsupported');
+    assert.equal(updated.duration, '', 'Analysis writes its representation only, never the display duration.');
+    assertNoStorageMutation(storage.requests.slice(seeded));
 });
 
 test('upload-time unsupported evidence is terminal while decoder infrastructure failures remain retryable', async () => {

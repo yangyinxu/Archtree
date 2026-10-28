@@ -149,6 +149,7 @@ jobs:
 
       - name: Run server and Web unit tests (including Linux platform suites)
         id: unit
+        timeout-minutes: 10
         run: npm test
 
       - name: Run Mongo-backed lifecycle integration tests

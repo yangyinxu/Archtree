@@ -33,6 +33,7 @@
     "localization:sync-native": "node scripts/sync-native-localizations.mjs",
     "analyze:room-audio": "tsx scripts/analyze-room-audio.ts",
     "backfill:room-audio-analysis": "tsx scripts/backfill-room-audio-analysis.ts",
+    "backfill:audio-durations": "tsx scripts/backfill-audio-durations.ts",
     "migrate:catalog-credits": "tsx scripts/migrate-catalog-credits.ts",
     "record:metadata-lookup-fixtures": "tsx scripts/record-metadata-lookup-fixtures.ts",
     "stage:eb-artifact": "node scripts/check-runtime.mjs --linux && node scripts/stage-eb-artifact.mjs",

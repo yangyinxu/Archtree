@@ -475,8 +475,15 @@ Playlist access retain their existing rules.
   PCM16 WAV, MP3, and single-track unencrypted AAC-LC in M4A; compressed sources
   require complete structure and decode validation. Unverified, unsupported or
   failed analysis never prevents ordinary playback and never grants room
-  eligibility. Native download preference is unchanged until native room adoption
-  explicitly supports the pinned-source contract.
+  eligibility. Audio that rooms do not support still has its duration measured
+  from the completely decoded file for catalog use such as metadata lookup when its
+  container is FLAC, AIFF/AIFC, RIFF WAVE or MP4 (for example FLAC, ALAC, AIFF,
+  high-resolution WAV or HE-AAC); that measurement never makes it seekable or
+  eligible for rooms. Other containers, such as Ogg, and a file the decoder
+  reports any error for, such as a FLAC with a trailing ID3v1 or APE tag, get
+  no measured duration. Native download preference is
+  unchanged until native room adoption explicitly supports the pinned-source
+  contract.
 - Administrators can explicitly analyze existing ready Audio without re-uploading
   or changing its stored bytes. Viewing the analysis list never starts work.
   Results belong to the exact source and cannot replace evidence for a changed,

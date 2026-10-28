@@ -87,7 +87,7 @@ of the domain it changes, not into the root.
 | `content/` | Pages, page items, and content-reference reconciliation. |
 | `listener/` | Listener content projections, telemetry, artist follows, followed-artist releases. |
 | `playlists/` | Playlist feature flag, lifecycle, and projections. |
-| `roomAudio/` | Room audio inspection and loudness analysis. |
+| `roomAudio/` | Room audio inspection and loudness analysis, and the decoded duration probe for audio rooms cannot play. |
 | `platform/` | Process lifecycle, operational summaries, runtime resources, localization delivery. |
 
 If a service fits no domain, add a new domain folder and a row here rather than
