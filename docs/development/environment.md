@@ -120,7 +120,10 @@ invalid ports, and application initialization failures.
 ## Room audio analysis runtime
 
 Compressed room audio requires FFmpeg with AAC/MP3 decoders, MOV/MP3 demuxers and
-the null muxer, the PCM s16le encoder and file/pipe protocols. Use a maintained distribution package and verify its capabilities:
+the null muxer, the PCM s16le encoder and file/pipe protocols. Lossless
+durations (FLAC, ALAC, AIFF, high-resolution WAV) also use those formats'
+decoders and demuxers, the `pan` and `asetnsamples` filters and the `framecrc` muxer; any
+FFmpeg version from these packages measures them exactly. Use a maintained distribution package and verify its capabilities:
 
 ```sh
 # macOS with Homebrew
@@ -135,7 +138,8 @@ On Windows, install a trusted FFmpeg distribution linked by the
 [official FFmpeg download page](https://ffmpeg.org/download.html), add its bin
 directory to PATH or set `ROOM_AUDIO_FFMPEG_PATH` to the absolute `ffmpeg.exe` path.
 The override is an executable path, not a shell command. FFmpeg always reads a
-bounded local file and decodes to the null muxer; it never opens an audio device.
+bounded local file and decodes to the null muxer, or for a lossless duration to a
+packet listing on its standard output; it never opens an audio device.
 Verify the distribution's published SHA-256 before extracting it. A portable
 installation outside the checkout avoids committing workstation executables.
 For a persistent user override, open a new shell after saving it, or load it into

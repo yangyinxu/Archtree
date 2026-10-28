@@ -24,6 +24,7 @@ const missingRuntimeCapability = (diagnostic: string) => [
     /could not find (?:decoder|encoder)\b/i,
     /requested (?:input|output) format [^\r\n]{1,100} is not known\b/i,
     /automatic encoder selection failed\b/i,
+    /no such filter\b/i,
     /option [^\r\n]{1,80} not found\b/i,
     /error while loading shared libraries\b|library not loaded\b/i
 ].some(pattern => pattern.test(diagnostic));
@@ -59,12 +60,20 @@ export const measureDecodedAudio = (
     file: Pick<Express.Multer.File, 'size' | 'path' | 'buffer'>,
     demuxer: DecodedAudioDemuxer,
     signal?: AbortSignal
-) => decodeToNull(file, { demuxer, formatWhitelist: demuxer, maxStreams: 8, limitMs: maximumRoomAudioDurationMs }, signal);
+) => decodeToNull(file, { demuxer, formatWhitelist: demuxer, maxStreams: 8, limitMs: maximumRoomAudioDurationMs, countSamples: true }, signal);
 
-/** Rejects a timeline longer than `limitMs` as soon as progress passes it, so lying sources cannot hold a decode slot. */
+/**
+ * Rejects a timeline longer than `limitMs` as soon as output passes it, so lying sources cannot hold a decode slot.
+ * FFmpeg before 7.0 reports progress at the start of the last packet, a decoded frame short of the end; room inspection
+ * still reads progress and allows 100 ms, which covers one frame except AAC below about 10.24 kHz. `countSamples`
+ * instead adds up the length of every decoded packet, exact in every version and unaffected by timestamp gaps. Only the
+ * first channel is kept (pan accepts up to 64, so a source with more gets no duration) and re-chunked into 262144-sample
+ * frames, so each frame stays far below `-max_alloc` and the listing stays small (a day at 192 kHz is under 4 MiB).
+ */
 const decodeToNull = async (
     file: Pick<Express.Multer.File, 'size' | 'path' | 'buffer'>,
-    { demuxer, formatWhitelist, maxStreams, limitMs }: { demuxer: DecodedAudioDemuxer; formatWhitelist: string; maxStreams: number; limitMs: number },
+    { demuxer, formatWhitelist, maxStreams, limitMs, countSamples = false }:
+        { demuxer: DecodedAudioDemuxer; formatWhitelist: string; maxStreams: number; limitMs: number; countSamples?: boolean },
     signal?: AbortSignal
 ): Promise<number> => {
     signal?.throwIfAborted();
@@ -86,15 +95,19 @@ const decodeToNull = async (
             '-max_alloc', '33554432', '-threads', '1', '-filter_threads', '1',
             '-protocol_whitelist', 'file,pipe', '-format_whitelist', formatWhitelist, '-max_streams', String(maxStreams),
             '-err_detect', 'crccheck+bitstream+buffer+explode', '-f', demuxer, '-i', input,
-            '-map', '0:a:0', '-vn', '-sn', '-dn', '-threads', '1', '-progress', 'pipe:1', '-f', 'null', '-'
+            '-map', '0:a:0', '-vn', '-sn', '-dn', '-threads', '1',
+            ...countSamples ? ['-af', 'pan=mono|c0=c0,asetnsamples=n=262144:p=0', '-f', 'framecrc', '-'] : ['-progress', 'pipe:1', '-f', 'null', '-']
         ];
+        const outputLimit = countSamples ? 8 * 1024 * 1024 : 256 * 1024;
         return await new Promise<number>((resolve, reject) => {
             const child = spawn(binary, args, {
                 shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
                 env: { PATH: process.env.PATH, LANG: 'C', LC_ALL: 'C' }
             });
             let failure: Error | undefined; let pending = ''; let outputBytes = 0; let diagnosticBytes = 0;
-            let finalDurationMs = 0; let completed = false; let unavailable = false; let diagnosticTail = '';
+            // A packet listing has no end marker; its successful exit is the end.
+            let finalDurationMs = 0; let completed = countSamples; let unavailable = false; let diagnosticTail = '';
+            let timeBase: [number, number] | undefined; let listedTicks = 0;
             const stop = (error: Error) => { failure ??= error; child.kill('SIGKILL'); };
             const onAbort = () => stop(signal?.reason instanceof Error ? signal.reason : new DOMException('Aborted', 'AbortError'));
             const timer = setTimeout(() => stop(new RoomAudioInspectionError('analysis_timeout')), 60_000);
@@ -102,19 +115,30 @@ const decodeToNull = async (
             if (signal?.aborted) onAbort();
             child.stdout.on('data', (buffer: Buffer) => {
                 outputBytes += buffer.length;
-                if (outputBytes > 256 * 1024) { stop(new RoomAudioInspectionError('analysis_failed')); return; }
+                if (outputBytes > outputLimit) { stop(new RoomAudioInspectionError('analysis_failed')); return; }
                 pending += buffer.toString('utf8');
-                if (pending.length > 8192) { stop(new RoomAudioInspectionError('analysis_failed')); return; }
                 let newline: number;
                 while ((newline = pending.indexOf('\n')) >= 0) {
                     const line = pending.slice(0, newline).trim(); pending = pending.slice(newline + 1);
-                    if (line.startsWith('out_time_us=')) {
+                    if (countSamples) {
+                        const base = /^#tb 0: (\d{1,10})\/(\d{1,10})$/.exec(line);
+                        if (base) { timeBase = [Number(base[1]), Number(base[2])]; continue; }
+                        if (!line || line.startsWith('#')) continue;
+                        // stream, dts, pts, duration, size, checksum; the duration is in the time base.
+                        const packet = /^0, *-?\d{1,15}, *-?\d{1,15}, *(\d{1,15}), /.exec(line);
+                        if (!packet || !timeBase?.[0] || !timeBase[1]) { stop(new InvalidRoomAudio()); return; }
+                        listedTicks += Number(packet[1]);
+                        finalDurationMs = listedTicks * timeBase[0] * 1000 / timeBase[1];
+                        if (finalDurationMs > limitMs) { stop(new InvalidRoomAudio()); return; }
+                    } else if (line.startsWith('out_time_us=')) {
                         const value = line.slice(12);
                         if (!/^\d{1,15}$/.test(value)) { stop(new InvalidRoomAudio()); return; }
                         finalDurationMs = Number(value) / 1000;
                         if (finalDurationMs > limitMs) { stop(new InvalidRoomAudio()); return; }
                     } else if (line === 'progress=end') completed = true;
                 }
+                // Only an unterminated line is bounded here; outputLimit bounds the whole output.
+                if (pending.length > 8192) stop(new RoomAudioInspectionError('analysis_failed'));
             });
             // Inspect at most 8 KiB and retain only a short overlap until close, so split messages stay classifiable without logging payloads.
             child.stderr.on('data', (buffer: Buffer) => {

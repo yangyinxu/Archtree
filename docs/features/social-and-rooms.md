@@ -222,7 +222,14 @@ demuxer (`-f` and `-format_whitelist` name only it) and admitting up to seven
 embedded pictures (`-max_streams 8`; room decoding keeps 2), and records the decoded
 timeline as `mediaRepresentation.durationMs`. Header durations are never
 trusted, so a FLAC with an unknown or overstated STREAMINFO sample count is
-measured correctly. The representation keeps `format: 'unsupported'` and
+measured correctly. The duration is the length of the decoded audio itself: the
+probe keeps the first channel, lists each decoded packet's length
+(`-af pan=mono|c0=c0,asetnsamples=n=262144:p=0 -f framecrc`) and adds them up,
+instead of reading FFmpeg's progress, which before FFmpeg 7.0 stops at the start
+of the last packet; timestamp gaps in a damaged file do not count. Any decoder
+diagnostic still rejects the file, so a FLAC with a trailing ID3v1 or APE tag
+gets no probed duration, nor do sources with more than 64 channels (the `pan`
+limit), Ogg and other containers. The representation keeps `format: 'unsupported'` and
 `seekable: false`, so rooms, streaming content types and listener playback are
 unchanged; metadata lookup reads the duration for Album completion. Upload
 inspection and explicit analysis both probe; a decoder fault while probing is
