@@ -1790,7 +1790,10 @@ revision and `valueRevision`. Its name box, candidate chooser and identity rows
 load as their own chunks, the first two shared with the import page, and the
 chooser loads its pairing panel (`CandidatePairing.tsx`) as another only when it
 is opened. The name box sends `POST /catalog-reviews/:id/lookup`, with `artist`
-only when the Artist field is not empty, and refuses a link in either field in
+only when the Artist field is not empty and is not the prefilled primary
+Artists' byline while those Artists are the names the server searches without
+one (the summary's `primaryArtists`, or any before the review is captured), so a
+lookup never searches Artists other than the ones shown, and refuses a link in either field in
 place, **Retry lookup** sends `/lookup/retry`, candidate previews load from `GET
 /catalog-reviews/:id/lookup/candidates/:key/artwork`, choosing a release or
 **Use none of these** sends `/lookup/choose`, the pairing panel reads `GET
@@ -2369,7 +2372,7 @@ Catalog review routes (relative to `/api/admin/v1`):
   see [Lookup routes](#lookup-routes)), `valueRevision` is the detail's (the
   Web reads the detail again when it is newer; reload admin Web tabs across
   deploy or rollback), and `summary` is
-  `{waiting: {lookup, analysis}, needsAnswer: {tie, conflicts}, lookupAvailable}`:
+  `{waiting: {lookup, analysis}, needsAnswer: {tie, conflicts}, lookupAvailable, primaryArtists}`:
   `waiting.lookup` while the run can still send a request (queued, running or
   retrying, within its grant, while lookup is available; read from the run
   itself, never from the review's gate), `waiting.analysis` while Luna is
@@ -2377,8 +2380,12 @@ Catalog review routes (relative to `/api/admin/v1`):
   lookup answers the view's `needsAnswer` lists (a tie and each unanswered
   conflict of the applied candidate that still differs, those on member Artist
   entries and the expected tracklist included; identity rows are read from
-  `GET /catalog-reviews/:id/candidates`), and
-  whether this server's configuration lets lookup run. An applied review reads
+  `GET /catalog-reviews/:id/candidates`),
+  whether this server's configuration lets lookup run, and the names of the
+  Album's shown primary Artist Credits as the review captured them, which a
+  name submitted without `artist` is searched with (empty before the review is
+  captured for lookup, and when there are more than 100 or one is longer than
+  1000 characters; the only part of the capture the read sends). An applied review reads
   too; an import or a bad id is `404 ADMIN_CATALOG_REVIEW_NOT_FOUND`, and the
   import lookup routes never find a review.
 - `POST /catalog-reviews/:id/lookup` `{operationId, expectedRevision, kind,

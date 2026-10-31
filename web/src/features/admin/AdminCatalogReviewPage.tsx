@@ -5,8 +5,8 @@
  *   Types: ReviewBuffer, Stage
  *   Functions: hint, SummaryUnavailable, steps, discardedError, ReviewProject
  *   Constants: ImportReview, CatalogReviewHints, CatalogReviewEmptyState, CatalogReviewApply,
- *              CatalogReviewConfirmation, CatalogReviewDiscard, CatalogReviewSummary, CatalogReviewSteps,
- *              CatalogReviewLuna, CatalogReviewApplied
+ *              CatalogReviewConfirmation, CatalogReviewDiscard, CatalogReviewSummary, CatalogReviewLuna,
+ *              CatalogReviewSteps, CatalogReviewApplied
  *   Variables: stepsChunk
  * @end-catalog */
 
@@ -23,7 +23,8 @@ import { reviewChanges, reviewDraftChanges, reviewResponseSchema, type CatalogRe
 import type { ApplyChoice } from './catalogReviewApplyModel';
 import type { Confirmation } from './CatalogReviewConfirmation';
 import type { CatalogReviewDiscard as Discard } from './CatalogReviewDiscard';
-import type { CatalogReviewApplied as Applied, CatalogReviewLuna as Luna, CatalogReviewSteps as Steps } from './CatalogReviewSteps';
+import type { CatalogReviewLuna as Luna } from './CatalogReviewLuna';
+import type { CatalogReviewApplied as Applied, CatalogReviewSteps as Steps } from './CatalogReviewSteps';
 import type { CatalogReviewSummary as Summary } from './CatalogReviewSummary';
 import { useCatalogReviewCommand } from './useCatalogReviewCommand';
 import { useOnline } from './useAdminOnline';
@@ -51,17 +52,19 @@ const CatalogReviewDiscard = lazy<ComponentType<ComponentProps<typeof Discard>>>
 function SummaryUnavailable() { const t = useAdminText(); return <p role="alert">{t('common.reload')}</p>; }
 const CatalogReviewSummary = lazy<ComponentType<ComponentProps<typeof Summary>>>(() => import('./CatalogReviewSummary')
   .then(module => ({ default: module.CatalogReviewSummary }), () => ({ default: SummaryUnavailable })));
+/** The Luna AI controls and their inline confirmation, their own chunk; one that cannot load asks for a reload in their place. */
+const CatalogReviewLuna = lazy<ComponentType<ComponentProps<typeof Luna>>>(() => import('./CatalogReviewLuna')
+  .then(module => ({ default: module.CatalogReviewLuna }), () => ({ default: SummaryUnavailable })));
 /**
- * The step bar, the Luna AI controls and an applied completion's list of what was updated share a chunk, loaded once for all three
- * (a failed load can be tried again). When it cannot load, the step bar is left out, while the Luna AI controls and the list of
- * what was updated ask for a reload in their place, so neither disappears unexplained.
+ * The step bar and an applied completion's list of what was updated share a chunk, loaded once for both (a failed load can be
+ * tried again). When it cannot load, the step bar is left out, while the list of what was updated asks for a reload in its place,
+ * so it does not disappear unexplained.
  */
 let stepsChunk: Promise<typeof import('./CatalogReviewSteps')> | undefined;
 const steps = <P extends object>(pick: (module: typeof import('./CatalogReviewSteps')) => ComponentType<P>, fallback: ComponentType<P> = () => null) =>
   lazy<ComponentType<P>>(() => (stepsChunk ??= import('./CatalogReviewSteps').catch(error => { stepsChunk = undefined; throw error; }))
     .then(module => ({ default: pick(module) }), () => ({ default: fallback })));
 const CatalogReviewSteps = steps<ComponentProps<typeof Steps>>(module => module.CatalogReviewSteps);
-const CatalogReviewLuna = steps<ComponentProps<typeof Luna>>(module => module.CatalogReviewLuna, SummaryUnavailable);
 const CatalogReviewApplied = steps<ComponentProps<typeof Applied>>(module => module.CatalogReviewApplied, SummaryUnavailable);
 
 /** A read or change of a review answered as discarded (another tab, or this one, discarded it). */
@@ -179,7 +182,7 @@ function ReviewProject({ id }: { id: string }) {
       {item.state !== 'applied' && <section aria-labelledby="catalog-review-other">
         <h2 id="catalog-review-other" className={styles.meta} style={{ margin: '1.5rem 0 0' }}>{t('catalog_review.other_actions')}</h2>
         <Suspense fallback={null}><CatalogReviewLuna item={item} active={active} canAnalyze={canAnalyze} busy={mutation.running || Boolean(mutation.intent) || !online}
-          onAnalyze={() => setConfirmation({ kind: 'analyze', item })} onStop={() => mutate('cancel-analysis', {})} /></Suspense>
+          onAnalyze={() => mutate('analyze', {})} onStop={() => mutate('cancel-analysis', {})} /></Suspense>
         {/* Never primary, whatever the source status; unsaved edits do not block it, since its confirmation says they are removed. */}
         <Suspense fallback={null}><CatalogReviewDiscard id={id} albumId={item.source.album.id} albumTitle={item.source.album.title} draftTitle={item.draft.album.title}
           expectedRevision={item.revision} disabled={mutation.running || Boolean(mutation.intent) || active} reason={active ? 'catalog_review.discard_luna' : null}

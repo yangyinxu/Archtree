@@ -7,9 +7,9 @@ import { AdminCatalogReviewPage } from './AdminCatalogReviewPage';
 import { catalogReview, reviewId, reviewJson, session, viewer } from './catalogReviewFixtures.testSupport';
 
 /**
- * A deploy removed the step bar's chunk before the review page loaded it: the steps are left out, the Luna AI controls and an
- * applied completion's list of what was updated, which share that chunk, ask for a reload in their place, and the draft editor,
- * its save, the lookup summary and Discard completion stay usable. All names and identifiers are synthetic.
+ * A deploy removed the step bar's chunk before the review page loaded it: the steps are left out, an applied completion's list
+ * of what was updated, which shares that chunk, asks for a reload in its place, and the draft editor, its save, the lookup
+ * summary, the Luna AI controls (their own chunk) and Discard completion stay usable. All names and identifiers are synthetic.
  */
 const stepsChunk = vi.hoisted(() => ({ attempts: 0 }));
 vi.mock('./CatalogReviewSteps', () => { stepsChunk.attempts += 1; throw new TypeError('Failed to fetch dynamically imported module'); });
@@ -31,7 +31,7 @@ function mountPage(item: ReturnType<typeof catalogReview>, writes: string[] = []
     <Route path="/admin/catalog-reviews/:reviewId" element={<AdminCatalogReviewPage />} /></Routes></MemoryRouter></QueryClientProvider>);
 }
 
-test('a review page whose step bar chunk cannot load asks for a reload in place of the Luna AI controls and keeps its editor, save, lookup summary and Discard completion', async () => {
+test('a review page whose step bar chunk cannot load leaves the steps out and keeps its editor, save, lookup summary, Luna AI controls and Discard completion', async () => {
   const writes: string[] = [];
   mountPage(catalogReview(), writes);
   expect(await screen.findByText('Synthetic lookup summary')).toBeVisible();
@@ -39,8 +39,9 @@ test('a review page whose step bar chunk cannot load asks for a reload in place 
   await waitFor(() => expect(stepsChunk.attempts).toBeGreaterThan(0));
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 600)); });
   expect(screen.queryByRole('group', { name: 'Completion steps' })).not.toBeInTheDocument();
-  expect(screen.queryByRole('button', { name: /Luna AI/ })).not.toBeInTheDocument();
-  expect(await screen.findByText(/Reload the page to continue/)).toHaveAttribute('role', 'alert');
+  // The Luna AI controls load from their own chunk; nothing asks for a reload, as only the steps are missing.
+  expect(await screen.findByRole('button', { name: 'Use Luna AI again (paid)' })).toBeEnabled();
+  expect(screen.queryByText(/Reload the page to continue/)).not.toBeInTheDocument();
   expect(await screen.findByRole('button', { name: 'Discard completion' })).toBeEnabled();
   fireEvent.change(screen.getByRole('textbox', { name: 'Title' }), { target: { value: 'A manual correction' } });
   fireEvent.click(screen.getByRole('button', { name: 'Save completion draft' }));

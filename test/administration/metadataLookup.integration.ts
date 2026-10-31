@@ -1443,7 +1443,8 @@ test('a review run end to end on fixtures: only the saved title and primary Arti
     const read = await getCatalogReviewLookup(by, id);
     assert.deepEqual([read.revision, read.valueRevision, read.lookup!.input, read.lookup!.preselection?.basis, read.lookup!.candidates.map(candidate => [candidate.status, candidate.comparison?.subset?.missingTrackCount]),
         read.summary], [doc.revision, 1, { trigger: 'catalog', submitted: null }, 'exactTrackCount', [['matching', 0], ['matching', 1], ['notMatching', null]],
-        { waiting: { lookup: false, analysis: false }, needsAnswer: { tie: false, conflicts: slots.map(slot => `tracks.${slot}.title`) }, lookupAvailable: true }]);
+        { waiting: { lookup: false, analysis: false }, needsAnswer: { tie: false, conflicts: slots.map(slot => `tracks.${slot}.title`) }, lookupAvailable: true,
+            primaryArtists: ['Synthetic Ensemble'] }]);
     // Its timeline names the title search by the review's own title and Artist name; the Track titles were not needed, so their row
     // shows none of them, and no filename ever shows.
     assert.deepEqual([read.lookup!.timeline!.steps[0], read.lookup!.timeline!.trackTitleSearch, read.lookup!.timeline!.steps.find(step => step.kind === 'trackTitle')],
@@ -1731,7 +1732,7 @@ test('the review lookup summary reads a tie between matching groups, analysis in
         creditedRelease(mbid(1), [200_000, 210_000]), retitled(creditedRelease(mbid(2), [200_000, 210_000]), 'Synthetic Album (Deluxe)'), aliasAnswer(mbid(30), 'Synthetic Ensemble')]).musicBrainz });
     const tied = await getCatalogReviewLookup(by, id);
     assert.deepEqual([tied.lookup!.state, tied.lookup!.preselection, tied.lookup!.candidates.map(candidate => candidate.status), tied.summary], ['complete', null, ['matching', 'matching'],
-        { waiting: { lookup: false, analysis: false }, needsAnswer: { tie: true, conflicts: [] }, lookupAvailable: true }]);
+        { waiting: { lookup: false, analysis: false }, needsAnswer: { tie: true, conflicts: [] }, lookupAvailable: true, primaryArtists: ['Synthetic Ensemble'] }]);
     // The read is allowlisted: no fence, grant, bound file set, stored query, capture or source evidence. It reads the capture's
     // credits so the timeline can name the Artist its first search sent, yet nothing else of the capture (its Credit and record
     // IDs, completeness, attribution or time) reaches the wire.
@@ -1753,6 +1754,10 @@ test('the review lookup summary reads a tie between matching groups, analysis in
     await projects().updateOne({ _id: new ObjectId(id) }, { $set: { 'analysis.chunks': [{ ...inflight, state: 'unknown' }] } });
     assert.equal((await getCatalogReviewLookup(by, id)).summary.waiting.analysis, false);
     assert.deepEqual((await getCatalogReviewLookup(by, id, unconfigured)).summary, { ...tied.summary, lookupAvailable: false });
+    // A captured primary Artist name beyond the summary's bound sends no names at all, never a partial list.
+    await projects().updateOne({ _id: new ObjectId(id) }, { $set: { 'catalogCapture.album.credits.$[credit].subject.name': 'S'.repeat(1001) } },
+        { arrayFilters: [{ 'credit.role': 'primary', 'credit.subjectType': 'artist' }] });
+    assert.deepEqual((await getCatalogReviewLookup(by, id)).summary.primaryArtists, []);
 });
 
 test('a review saved in a newer format admits no lookup request and its queued run ends superseded without a request, while its lookup still reads', async () => {

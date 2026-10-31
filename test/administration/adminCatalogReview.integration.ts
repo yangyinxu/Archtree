@@ -1268,11 +1268,11 @@ test('review lookup routes guard authentication, the current admin and the viewe
         assert.deepEqual([response.status, await response.json()], [400, { code: 'ADMIN_IMPORT_INVALID_INPUT' }], JSON.stringify(value).slice(0, 60));
     }
     assert.deepEqual(await importCollection().findOne({ _id }), before, 'no refusal wrote anything');
-    // Before any run the view is null and lookup is available.
+    // Before any run the view is null and lookup is available; the review is not captured yet, so it names no primary Artists.
     const empty = await request(path);
     assert.match(empty.headers.get('cache-control')!, /no-store/);
     assert.deepEqual([empty.status, await empty.json()], [200,
-        { lookup: null, revision: 1, valueRevision: 0, summary: { waiting: { lookup: false, analysis: false }, needsAnswer: { tie: false, conflicts: [] }, lookupAvailable: true } }]);
+        { lookup: null, revision: 1, valueRevision: 0, summary: { waiting: { lookup: false, analysis: false }, needsAnswer: { tie: false, conflicts: [] }, lookupAvailable: true, primaryArtists: [] } }]);
     // A submission is a 202 receipt (the review's conversion advanced the revision once before it) that replays.
     const body = { ...mutation(1), kind: 'album', text: 'Existing Album' };
     const submitted = await request(path, 'POST', body), value = await submitted.json();

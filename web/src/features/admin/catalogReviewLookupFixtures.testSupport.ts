@@ -75,7 +75,7 @@ export function reviewLookupResponse(overrides: Overrides = {}): ReviewLookupRes
     staleFiles: [], needsAnswer: { tie: false, conflicts }, blocking: true, itunes: 'notQueried', ...overrides
   };
   return { lookup, revision: 1, valueRevision: 1, summary: { waiting: { lookup: false, analysis: false }, needsAnswer: { tie: lookup.needsAnswer.tie, conflicts: lookup.needsAnswer.conflicts },
-    lookupAvailable: true } };
+    lookupAvailable: true, primaryArtists: ['Synthetic catalog Artist'] } };
 }
 
 /** The same application from an iTunes-only candidate not checked against MusicBrainz: its values are flagged and its answers say iTunes. */
@@ -179,7 +179,8 @@ export function pairingLookupResponse(): ReviewLookupResponse {
     input: { trigger: 'submitted', submitted: { kind: 'album', text: 'Synthetic Live Album 2' } }, candidates: [...others, pairingEdition(0), pairingEdition(1)], groups: [],
     preselection: null, disclosure: { unknownLocalDurations: 0, unknownLocalDiscNumbers: 2, partialComparison: true }, applied: null, staleFiles: [],
     needsAnswer: { tie: false, conflicts: [] }, blocking: false, itunes: 'answered' };
-  return { lookup, revision: 1, valueRevision: 0, summary: { waiting: { lookup: false, analysis: false }, needsAnswer: { tie: false, conflicts: [] }, lookupAvailable: true } };
+  return { lookup, revision: 1, valueRevision: 0, summary: { waiting: { lookup: false, analysis: false }, needsAnswer: { tie: false, conflicts: [] }, lookupAvailable: true,
+    primaryArtists: ['Synthetic Live Artist -Romanized-'] } };
 }
 /**
  * An application of `key` from that run: with `paired`, through the single pairing the saved numbers make (the label, date,

@@ -2475,6 +2475,20 @@
         "seconds": "number"
       }
     },
+    "admin.catalog_review.lookup_log_hide": {
+      "description": "Administrator workbench: existing-Album review lookup status row, button that hides the lookup's steps and record again.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_log_show": {
+      "description": "Administrator workbench: existing-Album review lookup status row, button that shows the lookup's steps and record below the status.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.catalog_review.lookup_missing_rows": {
       "description": "Administrator workbench: existing-Album review summary, candidate chooser, for a single pairing or an Album without tracks: choosing brings in the expected tracklist with this many rows without a file.",
       "delivery": [
@@ -2699,6 +2713,31 @@
         "local": "number"
       }
     },
+    "admin.catalog_review.lookup_records_alike": {
+      "description": "Administrator workbench: existing-Album review candidate chooser, note on a release card whose records show identical details.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.catalog_review.lookup_releases": {
+      "description": "Administrator workbench: existing-Album review candidate chooser, disclosure label naming how many release records the tracks may fit.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.catalog_review.lookup_releases_copy": {
+      "description": "Administrator workbench: existing-Album review candidate chooser, what using a release does, under the reference releases disclosure.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.catalog_review.lookup_replace_confirm": {
       "description": "Administrator workbench: existing-Album review name box, button confirming a new lookup that replaces the queued, running or retrying one.",
       "delivery": [
@@ -2738,6 +2777,13 @@
         "source": "string",
         "time": "string"
       }
+    },
+    "admin.catalog_review.lookup_retry_free": {
+      "description": "Administrator workbench: existing-Album review lookup summary, button that retries the free metadata lookup run.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
     },
     "admin.catalog_review.lookup_retry_unavailable": {
       "description": "Administrator workbench: existing-Album review summary, status while the run waits for an automatic retry because a source failed or timed out: the source (MusicBrainz or iTunes), the retry time, which automatic retry it is and how many there are at most; the free retry button follows.",
@@ -3157,6 +3203,20 @@
       ],
       "variables": {}
     },
+    "admin.catalog_review.lookup_submit_free": {
+      "description": "Administrator workbench: existing-Album review name box, submit button that starts a free metadata lookup for the typed name.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_subtitle_hint": {
+      "description": "Administrator workbench: existing-Album review name box, hint under the name after a completed lookup found no release to use.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.catalog_review.lookup_superseded": {
       "description": "Administrator workbench: existing-Album review summary, status when the run ended because the Album or its tracks changed or are no longer ready.",
       "delivery": [
@@ -3228,8 +3288,50 @@
         "elapsed": "string"
       }
     },
+    "admin.catalog_review.luna_concurrent_copy": {
+      "description": "Administrator workbench: existing-Album review Luna AI confirmation, warning text while the free metadata lookup is still running.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.luna_concurrent_title": {
+      "description": "Administrator workbench: existing-Album review Luna AI confirmation, warning title while the free metadata lookup is queued, running or retrying.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.catalog_review.luna_failed_quiet": {
       "description": "Administrator workbench: Album completion page, one quiet line for a Luna AI run that did not succeed while the metadata lookup leads: it can be ignored.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.luna_last_run": {
+      "description": "Administrator workbench: existing-Album review Luna AI confirmation, note when the project has exactly one Luna AI run left.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.luna_start": {
+      "description": "Administrator workbench: existing-Album review Luna AI confirmation, button that starts paid Luna AI.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.luna_start_anyway": {
+      "description": "Administrator workbench: existing-Album review Luna AI confirmation, button that starts paid Luna AI while the free lookup still runs.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.luna_wait": {
+      "description": "Administrator workbench: existing-Album review Luna AI confirmation, button that closes it without starting Luna AI while the free lookup runs.",
       "delivery": [
         "runtime"
       ],

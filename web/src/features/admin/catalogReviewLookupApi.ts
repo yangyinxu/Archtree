@@ -18,10 +18,15 @@ const name = z.string().max(200);
 const scope = z.enum(['artist', 'label']);
 const creditId = z.string().regex(/^[A-Za-z0-9_-]{8,100}$/);
 
-/** What the review waits for (a lookup run or Luna analysis), the answers lookup needs, and whether this server offers lookup. */
+/**
+ * What the review waits for (a lookup run or Luna analysis), the answers lookup needs, whether this server offers lookup, and the
+ * captured primary Artist names a name submitted without an Artist name is searched with (empty before the review is captured
+ * for lookup, and from a server that sends none).
+ */
 const reviewSummarySchema = z.object({
   waiting: z.object({ lookup: z.boolean(), analysis: z.boolean() }).strict(),
-  needsAnswer: z.object({ tie: z.boolean(), conflicts: z.array(reviewValuePathSchema).max(406) }).strict(), lookupAvailable: z.boolean()
+  needsAnswer: z.object({ tie: z.boolean(), conflicts: z.array(reviewValuePathSchema).max(406) }).strict(), lookupAvailable: z.boolean(),
+  primaryArtists: z.array(z.string().max(1000)).max(100).default([])
 }).strict();
 /**
  * The review's lookup view (null before any run), its revision, its value revision and its summary; lookup applications never

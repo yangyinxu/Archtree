@@ -30,9 +30,9 @@ test('a step list chunk that cannot load leaves the summary, its retry and its n
   const summary = await screen.findByRole('region', { name: 'Metadata lookup' });
   expect(await within(summary).findByText(/^Lookup stopped because it ran past its time limit/)).toHaveAttribute('role', 'status');
   const box = await within(summary).findByRole('group', { name: 'Look up by name' });
-  fireEvent.click(within(summary).getByRole('button', { name: 'Retry lookup' }));
+  fireEvent.click(within(summary).getByRole('button', { name: 'Retry lookup (free)' }));
   expect(onRun).toHaveBeenCalledWith('lookup/retry', {});
-  expect(within(box).getByRole('button', { name: 'Look up' })).toBeEnabled();
+  expect(within(box).getByRole('button', { name: 'Look up metadata (free)' })).toBeEnabled();
   // The failed chunk renders nothing in its place: no steps, record or alert.
   await waitFor(() => expect(within(summary).queryByRole('list', { name: 'Lookup steps' })).not.toBeInTheDocument());
   expect(within(summary).queryByText(/^Lookup log:/)).not.toBeInTheDocument();
@@ -51,6 +51,6 @@ test('a step list chunk that cannot load asks for a reload where it carried the 
   const summary = await screen.findByRole('region', { name: 'Metadata lookup' });
   expect(await within(summary).findByText('This lookup ended because the Album or its tracks changed or are no longer ready.')).toHaveAttribute('role', 'status');
   expect(await within(summary).findByRole('alert')).toHaveTextContent(/^The administrator workbench was updated\. Reload the page to continue/);
-  expect(within(summary).queryByRole('button', { name: 'Retry lookup' })).not.toBeInTheDocument();
+  expect(within(summary).queryByRole('button', { name: 'Retry lookup (free)' })).not.toBeInTheDocument();
   expect(within(summary).queryByRole('link', { name: 'Open the Album to start a new completion' })).not.toBeInTheDocument();
 });

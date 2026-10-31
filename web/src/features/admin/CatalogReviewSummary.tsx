@@ -33,11 +33,12 @@ const LookupBox = chunk<ComponentProps<typeof Box>>(() => import('./LookupBox').
 const CandidateChooser = chunk<ComponentProps<typeof Chooser>>(() => import('./CandidateChooser').then(module => module.CandidateChooser));
 const CatalogReviewIdentities = chunk<ComponentProps<typeof Identities>>(() => import('./CatalogReviewIdentities').then(module => module.CatalogReviewIdentities));
 /**
- * The lookup steps are supplementary: a chunk that cannot load leaves them out and asks for nothing, unless it carried the only
- * next step, the Album link of a run that ended because the Album changed; then it asks for a reload.
+ * The lookup steps are supplementary: a chunk that cannot load leaves them out (keeping the status line it lays out) and asks for
+ * nothing, unless it carried the only next step, the Album link of a run that ended because the Album changed; then it asks for a
+ * reload.
  */
 const LookupProgress = lazy<ComponentType<ComponentProps<typeof Progress>>>(() => import('./LookupProgress').then(module => ({ default: module.LookupProgress }),
-  () => ({ default: ({ albumHref }: ComponentProps<typeof Progress>) => albumHref ? <ChunkUnavailable /> : null })));
+  () => ({ default: ({ albumHref }: ComponentProps<typeof Progress>) => albumHref && <div><ChunkUnavailable /></div> })));
 const memberPath = (path: string) => /^tracks\.[^.]+\.artists$/.test(path);
 /**
  * The results' one element, which never remounts, so the candidate chooser with its open pairing panel and the identity rows keep
@@ -57,21 +58,25 @@ function Results({ fold, pairing, label, children }: { fold: boolean; pairing: R
  * The lookup-first summary of an existing-Album review (owner rules: docs/business-rules.md, Catalog Visibility and
  * Administration, existing-Album reviews; Administrator Metadata Lookup). It presents what the server decides and never starts
  * Luna: the lookup status, refined for the review (reviewLookupStatus.ts: also when a retrying run retries and which retry, and
- * why MusicBrainz's retries ran out or a run stopped), with the free retry, or filling the Disc and Track Numbers from the track
+ * why MusicBrainz's retries ran out or a run stopped), with the free retry (labelled free), or filling the Disc and Track Numbers from the track
  * titles (`onFillNumbers`, into the unsaved draft) where that is the next step, as its only primary button; a run that ended
  * because the review's source was no longer current (superseded) offers no retry, which could not run while it is not, as the
  * review's brief offers none (where the Album changed, the step list's chunk links to the Album instead); an active run's
  * progress, whose elapsed time and the note that it keeps running after the page is left sit beside the polite status, outside
- * it, so each poll does not announce them; the run's steps (LookupProgress.tsx, its own chunk, which renders nothing when it
- * cannot load, or asks for a reload where it would carry the Album link): open while a run is active, with a note while a
- * running run waits for its source, and after it the names searched and the steps folded under the run's record; the name box
- * prefilled with the saved Album title and its optional Artist field, which asks before it replaces an active run, folded under
+ * it, so each poll does not announce them; the status row, which keeps that status mounted in one place whether or not a run
+ * exists or its steps' chunk has loaded; the run's steps (LookupProgress.tsx, its own chunk, which adds a Details button to the
+ * status row and leaves it alone when it cannot load, or asks for a reload where it would carry the Album link): shown
+ * under the status while a run is active or after it failed, with a note while a running run waits for its source, else behind
+ * Details, and after a completed run the names searched; the name box prefilled with the saved Album title and its optional Artist
+ * field prefilled with the primary Artists' byline (sent as none only while they are the captured names the server searches
+ * without one), with a hint to try the name without its subtitle when a completed run found
+ * nothing, a free submit, and which asks before it replaces an active run, folded under
  * Didn't find it? Look up another name after a completed run unless the status points at it (also when the run completes while
  * the page is open, unless the administrator is using the box), followed by the fill as a plain button where it is only offered;
  * the candidate chooser with each candidate's subset facts and reason, and its sections while nothing matched as a group, conflicts
  * answered one by one or all at once by buttons that name the applied candidate's source (MusicBrainz or iTunes), the values to check, each member's track
  * Artist row with its reason, the expected tracklist with its missing-file rows, the identity rows and the values that need no
- * answer. How many lookup answers and identity records are still needed follow the status line. Once a release this run applied
+ * answer. How many lookup answers and identity records are still needed follow the status row. Once a release this run applied
  * leaves nothing open (no active run, retry, refined status, lookup answer or identity row needing an answer, nor a release applied
  * for its Album values only whose tracks still pair in more than one way while the titles can fill the numbers, whose card carries
  * that fill, also offered under the status with why its tracks are not applied) and flags no iTunes-only value or artist mismatch, which are never collapsed,
@@ -161,8 +166,13 @@ export function CatalogReviewSummary({ item, disabled, error, onRun, onFillNumbe
     .map(value => [value.path, lookupValueText(lookupValueAt(item.draft, value.path))]) : []),
     ...(applied?.conflicts ?? []).filter(conflict => !needed.has(conflict.path) && conflict.answer && !memberPath(conflict.path) && !itunes.includes(conflict.path))
       .map(conflict => [conflict.path, `${lookupValueText(conflict.lookup)} · ${answered(conflict)}`])];
-  // The name box starts from the last submitted name, else the saved title, so a saved title change refills it.
-  const box = lookup?.input.submitted ? String(lookup.run) : `${lookup?.run ?? 0}:${item.draft.album.title}`;
+  // The name box starts from the last submitted name, else the saved title, and its Artist field from the primary Artists' byline,
+  // so a saved title or a changed byline refills it and a stale prefill is never sent as typed. That byline is sent as none only
+  // while the draft's primary Artists are the names the server searches without one: those it captured (`primaryArtists`), or,
+  // before the review is captured for lookup (no expected tracklist key), the ones the submission's capture reads them from.
+  const byline = entriesByline(item.draft.album.artists.filter(entry => entry.role === 'primary'));
+  const implicit = item.draft.album.expectedTracklist === undefined || JSON.stringify(artists) === JSON.stringify(summary.primaryArtists);
+  const box = `${lookup?.input.submitted ? String(lookup.run) : `${lookup?.run ?? 0}:${item.draft.album.title}`}:${byline}`;
   // A run superseded because the source was no longer current offers no retry (the server refuses it while it is not; the name
   // box stays open to look up again); the name box is the next step where the status says so, or where nothing was found or matched.
   const closed = lookup?.state === 'superseded';
@@ -208,21 +218,26 @@ export function CatalogReviewSummary({ item, disabled, error, onRun, onFillNumbe
     {folded.length > 0 && <details className={styles.details}><summary>{t('catalog_review.values_handled')}</summary><dl>
       {folded.map(([path, text]) => <div key={path}><dt>{label(path)}</dt><dd>{text}</dd></div>)}</dl></details>}
   </>;
+  // A full-width bracket or full stop carries its own space, and a dot parts the time from the keeps-running note.
+  const statusRow = <p><span role="status">{statusText}</span>{refined?.elapsed && `${/[）」』]$/u.test(statusText) ? '' : ' '}· ${say(refined.elapsed)}`}
+    {lookupActive(lookup?.state) && <>{refined?.elapsed ? ' · ' : statusText.endsWith('。') ? '' : ' '}<span className={styles.muted}>{t('catalog_review.lookup_keeps_running')}</span></>}</p>;
   // Focusable for the candidate chooser, which returns focus here once its pairing panel closes without its opener.
   return <section id="catalog-review-lookup" aria-labelledby={`${id}-title`} className={styles.panel} tabIndex={-1}>
     <h2 id={`${id}-title`}>{t('catalog_review.lookup_title')}</h2>
-    {/* A full-width bracket or full stop carries its own space, and a dot parts the time from the keeps-running note. */}
-    <p><span role="status">{statusText}</span>{refined?.elapsed && `${/[）」』]$/u.test(statusText) ? '' : ' '}· ${say(refined.elapsed)}`}
-      {lookupActive(lookup?.state) && <>{refined?.elapsed ? ' · ' : statusText.endsWith('。') ? '' : ' '}<span className={styles.muted}>{t('catalog_review.lookup_keeps_running')}</span></>}</p>
+    {/* The status row keeps its live region mounted in one place, before the step list's Details button and the steps or record,
+      which wrap under it. */}
+    <div className={styles.statusRow}>{statusRow}
+      {lookup && <Suspense fallback={null}><LookupProgress lookup={lookup} now={query.dataUpdatedAt || Date.now()}
+        albumHref={closed && item.sourceStatus === 'changed' ? `/admin/catalog/album/${item.source.album.id}` : null} /></Suspense>}</div>
     {summary.waiting.lookup && <p role="status">{t('catalog_review.waiting_lookup')}</p>}
     {answers > 0 && <p role="status">{t('catalog_review.needs_answers', { count: answers })}</p>}
     {identityNeeded > 0 && <p role="status">{t('catalog_review.identity_answers', { count: identityNeeded })}</p>}
-    {retry && !closed && <div className={styles.actions}><button type="button" className={`${styles.button} ${styles.primary}`} disabled={busy} onClick={() => onRun('lookup/retry', {})}>{t('lookup.retry')}</button></div>}
+    {retry && !closed && <div className={styles.actions}><button type="button" className={`${styles.button} ${styles.primary}`} disabled={busy} onClick={() => onRun('lookup/retry', {})}>{t('catalog_review.lookup_retry_free')}</button></div>}
     {refined?.fill === 'next' && fillButton(true)}
     {numbersOpen && refined?.fill !== 'next' && <><p>{t('catalog_review.member_no_pairing')}</p>
       <p>{t(appliedCandidate!.comparison!.unknownLocalDurations ? 'catalog_review.lookup_fill_hint_durations' : 'catalog_review.lookup_fill_hint', { count: fill!.count })}</p>{fillButton(false)}</>}
-    {lookup && <Suspense fallback={null}><LookupProgress lookup={lookup} now={query.dataUpdatedAt || Date.now()} albumHref={closed && item.sourceStatus === 'changed' ? `/admin/catalog/album/${item.source.album.id}` : null} /></Suspense>}
     {summary.lookupAvailable && <Suspense fallback={null}><LookupBox key={box} lookup={lookup} rootLabel="" defaultText={item.draft.album.title} mode="review" disabled={busy}
+      defaultArtist={byline} defaultArtistImplicit={implicit} hint={['lookup.no_match', 'lookup.no_release'].includes(status)}
       active={lookupActive(lookup?.state)} fold={lookup?.state === 'complete' && !boxNext} onSubmit={(kind, text, artist) => onRun('lookup', { kind, text, ...(artist ? { artist } : {}) })} /></Suspense>}
     {refined?.fill === 'offer' && !numbersOpen && fillButton(false)}
     <Results fold={settled} pairing={pairing} label={shown && t('catalog_review.lookup_details')}>{body}</Results>

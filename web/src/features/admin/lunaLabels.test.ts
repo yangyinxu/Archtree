@@ -14,6 +14,7 @@
  *   - metadata lookup controls never mention AI or Luna
  *   - the review's identity rows and the Album page's search line never mention AI or Luna
  *   - the Album page's lookup entry names MusicBrainz and says it is free, and its confirmation says Luna AI (paid) never starts
+ *   - the review's Luna AI confirmation names the free lookup in its warning, offers waiting for it as free, and its free lookup controls say they are free
  * @end-catalog */
 
 import enBundle from '../../../../localization/generated/bundles/en-US.json';
@@ -29,7 +30,7 @@ const locales = { 'en-US': enBundle.messages, 'zh-Hans': zhBundle.messages } as 
 const paid: Record<string, RegExp> = { 'en-US': /\bpaid\b/, 'zh-Hans': /付费/ };
 const starts = ['admin.action.analyze', 'admin.action.reanalyze', 'admin.analysis.start', 'admin.analysis.reanalyze', 'admin.lookup.luna',
   'admin.catalog_review.analysis_confirm', 'admin.catalog_review.analysis_again', 'admin.analysis.confirm_action', 'admin.analysis.confirm_title',
-  'admin.catalog_review.analysis_confirm_title'];
+  'admin.catalog_review.analysis_confirm_title', 'admin.catalog_review.luna_start', 'admin.catalog_review.luna_start_anyway'];
 const shipped = Object.keys(enBundle.messages);
 /** The keys of a family, read from the shipped bundle so that a key added to it later is checked too. */
 const family = (prefix: string, except: string[] = []) => shipped.filter(key => key.startsWith(prefix) && !except.includes(key));
@@ -41,14 +42,16 @@ const status = [...family('admin.analysis.'),
   'admin.review.baseline', 'admin.review.changed', 'admin.review.conflict', 'admin.review.suggested',
   ...family('admin.summary.luna', suggestionControls), 'admin.summary.waiting_analysis', 'admin.stage.analysis',
   ...family('admin.workbench.').filter(key => key.includes('analyzing')), 'admin.workbench.review_stage', 'admin.workbench.review_luna_attention',
-  ...['analysis_limit', 'analysis_running', 'empty_attention', 'empty_cancelled', 'empty_no_suggestions'].map(copy => `admin.catalog_review.${copy}`)];
+  ...['analysis_limit', 'analysis_running', 'empty_attention', 'empty_cancelled', 'empty_no_suggestions'].map(copy => `admin.catalog_review.${copy}`),
+  // The review's inline Luna AI confirmation (its concurrent-lookup warning and its last run) and why discarding waits for Luna AI.
+  ...['luna_concurrent_copy', 'luna_last_run', 'discard_luna'].map(copy => `admin.catalog_review.${copy}`)];
 const lookupProse = [...['incomplete', 'itunes_unavailable', 'no_match', 'no_query', 'no_release', 'not_configured', 'not_started', 'stopped', 'unavailable'].map(state => `admin.lookup.${state}`),
   'admin.common.lookup_unavailable', ...['not_started', 'no_query'].map(state => `admin.catalog_review.lookup_${state}`)];
 // The review's own lookup status, progress and card copy after a run found releases: the free steps only, as the page's paid Luna AI
 // button already follows the lookup controls.
 const reviewLookupProse = [...['no_match', 'empty_album', 'add_artist', 'possible_found', 'fit_found', 'applied_album_only', 'itunes_note', 'queued_status', 'running_status',
   'running_count_status', 'elapsed', 'waited', 'keeps_running', 'fill_hint', 'fill_hint_durations', 'fill_unavailable', 'fill_unavailable_durations', 'no_tracklist', 'album_only_copy',
-  'choose_again_copy', 'replace_copy', 'replace_ended'].map(copy => `admin.catalog_review.lookup_${copy}`), ...family('admin.catalog_review.lookup_reason_'),
+  'choose_again_copy', 'replace_copy', 'replace_ended', 'subtitle_hint', 'releases', 'releases_copy', 'records_alike'].map(copy => `admin.catalog_review.lookup_${copy}`), ...family('admin.catalog_review.lookup_reason_'),
   ...family('admin.catalog_review.lookup_cause_'), ...family('admin.catalog_review.lookup_phase_'), ...family('admin.catalog_review.lookup_section_'),
   'admin.catalog_review.member_paired_since', 'admin.catalog_review.fill_numbers_done',
   // The lookup status on workbench cards, the Album page's note, the completion steps and the applied view.
@@ -56,7 +59,8 @@ const reviewLookupProse = [...['no_match', 'empty_album', 'add_artist', 'possibl
 const lookupControls = [...['retry', 'submit', 'box', 'name', 'kind_album', 'kind_song', 'choose', 'choose_none'].map(control => `admin.lookup.${control}`),
   'admin.summary.keep_mine', 'admin.summary.use_lookup',
   ...['keep_current', 'use_musicbrainz', 'use_itunes', 'keep_all_current', 'use_all_musicbrainz', 'use_all_itunes', 'create', 'fill_numbers', 'lookup_choose_album_only',
-    'lookup_choose_again', 'lookup_replace_confirm', 'lookup_replace_now', 'lookup_other_options', 'lookup_editions_choose', 'lookup_choose_edition', 'lookup_choose_edition_album_only']
+    'lookup_choose_again', 'lookup_replace_confirm', 'lookup_replace_now', 'lookup_other_options', 'lookup_editions_choose', 'lookup_choose_edition', 'lookup_choose_edition_album_only',
+    'lookup_retry_free', 'lookup_submit_free', 'lookup_log_show', 'lookup_log_hide']
     .map(control => `admin.catalog_review.${control}`), 'admin.workbench.review_lookup', 'admin.catalog_review.view_changes_plain', 'admin.catalog_review.lookup_details'];
 const generic = ['Analyze', 'Analyze again', 'Review', 'Proofread', 'Complete', '分析', '校对', '重新校对', '补全'];
 /** Every [locale, key, message] for the keys, in both shipped locales. */
@@ -130,5 +134,14 @@ test('the Album page\'s lookup entry names MusicBrainz and says it is free, and 
     expect(message, `${locale} ${key}`).toMatch(/MusicBrainz/);
     expect(message, `${locale} ${key}`).toMatch(/Luna AI/);
     expect(message, `${locale} ${key}`).toMatch(paid[locale]);
+  }
+});
+
+test('the review\'s Luna AI confirmation names the free lookup in its warning, offers waiting for it as free, and its free lookup controls say they are free', () => {
+  const free: Record<string, RegExp> = { 'en-US': /\bfree\b/i, 'zh-Hans': /免费/ };
+  for (const [locale, key, message] of each(['admin.catalog_review.luna_concurrent_title', 'admin.catalog_review.luna_wait', 'admin.catalog_review.lookup_retry_free',
+    'admin.catalog_review.lookup_submit_free'])) {
+    expect(message, `${locale} ${key}`).toMatch(free[locale]);
+    expect(message, `${locale} ${key}`).not.toMatch(/Luna|\bAI\b|AI/);
   }
 });

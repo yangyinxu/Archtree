@@ -6,8 +6,8 @@
  * Tests
  *   - while a run is active its steps read in order with what each searched, their states and counts, without a live region
  *   - a running run that shows no new step for more than five seconds of this page's clock says it waits for MusicBrainz, iTunes in the iTunes phase, and a queued or retrying run never does
- *   - after a run it says what it searched, then folds its steps under the record with the time taken, searches and releases
- *   - a stopped run folds its record without the names searched, and the steps it never reached read as not run
+ *   - after a run it says what it searched, then keeps its record with the time taken, searches and releases and its steps behind Details
+ *   - a stopped run shows its record without the names searched, and the steps it never reached read as not run
  *   - a search the run may not have sent reads as such, and is neither named as searched nor counted
  *   - a run that completed after MusicBrainz's retries ran out names no search, as it may not have sent them
  *   - each Track-title state reads in its own words: sent with its titles, not needed, not yet, and every skip reason
@@ -15,9 +15,10 @@
  *   - a search whose text is not shown reads as a search by name, and a song search names its song
  *   - a run ended because its Album changed offers opening the Album, with or without a timeline
  *   - a view without a timeline renders nothing
+ *   - in the summary's status row Details follows the status, which it leaves mounted; the choice holds through an active run's polls, and a run that completes starts hidden again
  * @end-catalog */
 
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import type { ReviewLookupView } from './importLookupApi';
 import { pairingLookupResponse, pairingRunningTimeline, pairingTimeline } from './catalogReviewLookupFixtures.testSupport';
@@ -25,16 +26,21 @@ import { LookupProgress } from './LookupProgress';
 
 /**
  * The review lookup's step list on its own: the steps in order with what each searched, their states and counts, the wait for a
- * source, the names searched and the folded record after a run, each Track-title and iTunes state in its own words, and the link
- * to open an Album that changed. All names and identifiers are synthetic.
+ * source, the names searched and the record after a run behind Details, each Track-title and iTunes state in its own words, the
+ * Details button it adds to the summary's status row, and the link to open an Album that changed. All names and identifiers are synthetic.
  */
 type Timeline = NonNullable<ReviewLookupView['timeline']>;
 const startedAt = '2026-10-22T01:24:52.000Z';
 const lookup = (extra: Partial<ReviewLookupView> = {}): ReviewLookupView => ({ ...pairingLookupResponse().lookup!, timeline: pairingTimeline(), ...extra });
 const running = (updatedAt: string, extra: Partial<ReviewLookupView> = {}) => lookup({ state: 'running', outcome: null, timeline: pairingRunningTimeline(updatedAt),
   progress: { phase: 'details', done: 5, total: 12, startedAt, updatedAt }, ...extra });
-const show = (view: ReviewLookupView, now = Date.parse('2026-10-22T01:25:30.000Z'), albumHref: string | null = null) =>
-  render(<MemoryRouter><LookupProgress lookup={view} now={now} albumHref={albumHref} /></MemoryRouter>);
+/** Renders the steps; unless `folded`, opens a hidden log with its Details button, as the administrator would to read it. */
+const show = (view: ReviewLookupView, now = Date.parse('2026-10-22T01:25:30.000Z'), albumHref: string | null = null, folded = false) => {
+  const rendered = render(<MemoryRouter><LookupProgress lookup={view} now={now} albumHref={albumHref} /></MemoryRouter>);
+  const details = screen.queryByRole('button', { name: 'Details' });
+  if (details && !folded) fireEvent.click(details);
+  return rendered;
+};
 const items = () => within(screen.getByRole('list', { name: 'Lookup steps' })).getAllByRole('listitem');
 /** Each row's own words, and the line a row adds below them (empty when it adds none). */
 const rows = () => items().map(item => item.firstChild!.textContent);
@@ -86,20 +92,32 @@ test('a running run that shows no new step for more than five seconds of this pa
   }
 });
 
-test('after a run it says what it searched, then folds its steps under the record with the time taken, searches and releases', () => {
-  const { container } = show(lookup());
-  expect(screen.getByText('This lookup searched for "Synthetic Live Album 2" · Synthetic Live Artist, then "Synthetic Live Album 2" alone, '
-    + 'then "Synthetic Live Album 2" · Synthetic Live Artist -Romanized-.')).toBeInTheDocument();
-  const details = container.querySelector('details')!;
-  expect(details.open).toBe(false);
-  expect(within(details).getByText('Lookup log: took 22 s · 7 searches · 12 releases found').tagName).toBe('SUMMARY');
+test('after a run it says what it searched, then keeps its record with the time taken, searches and releases and its steps behind Details', () => {
+  const { container } = show(lookup(), undefined, null, true);
+  const searched = screen.getByText('This lookup searched for "Synthetic Live Album 2" · Synthetic Live Artist, then "Synthetic Live Album 2" alone, '
+    + 'then "Synthetic Live Album 2" · Synthetic Live Artist -Romanized-.');
+  expect(searched).toBeVisible();
+  // A completed run starts with its record and steps hidden, still mounted; Details shows them under the searched line.
+  const toggle = screen.getByRole('button', { name: 'Details' }), record = screen.getByText('Lookup log: took 22 s · 7 searches · 12 releases found');
+  expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  expect(record).not.toBeVisible();
+  expect(screen.queryByRole('list', { name: 'Lookup steps' })).not.toBeInTheDocument();
+  fireEvent.click(toggle);
+  expect(toggle).toHaveAccessibleName('Hide details'); expect(toggle).toHaveAttribute('aria-expanded', 'true');
+  expect(document.getElementById(toggle.getAttribute('aria-controls')!)).toContainElement(record);
+  expect(record).toBeVisible();
+  expect(searched.compareDocumentPosition(record) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(rows()).toEqual([...searches, `✓ Search by track title: ${titles}`, '✓ Read release details (12 of 12 releases)', '✓ iTunes fallback (2 of 2 searches)',
     '✓ Check the Albums iTunes returned on MusicBrainz (4 of 4 checks), found "Synthetic other Album 1"', '✓ Read Artist and label aliases (4 of 4 lookups)']);
   // The bridge row says why a release of another title was found: it is what iTunes returned for the names searched.
   expect(notes()).toEqual(['', '', '', '', '', '',
     '"Synthetic other Album 1" came back from iTunes as other Albums for the names searched, so their releases on MusicBrainz are among the releases found too.', '']);
-  // The searched line comes before the record; without an end time the record counts to the last step.
-  expect(container.firstElementChild!.tagName).toBe('P');
+  // Details comes first, then the full-width rest led by the searched line; without an end time the record counts to the last step.
+  expect(container.firstElementChild).toBe(toggle);
+  expect(container.firstElementChild!.nextElementSibling!.tagName).toBe('DIV');
+  expect(container.firstElementChild!.nextElementSibling!.firstElementChild).toBe(searched);
+  fireEvent.click(toggle);
+  expect(record).not.toBeVisible();
   cleanup();
   show(lookup({ timeline: pairingTimeline({ completedAt: null, updatedAt: '2026-10-22T01:26:01.000Z', steps: pairingTimeline().steps.slice(1, 2), trackTitleSearch: undefined }),
     candidates: pairingLookupResponse().lookup!.candidates.slice(0, 1) }));
@@ -107,11 +125,13 @@ test('after a run it says what it searched, then folds its steps under the recor
   expect(screen.getByText('This lookup searched for "Synthetic Live Album 2".')).toBeInTheDocument();
 });
 
-test('a stopped run folds its record without the names searched, and the steps it never reached read as not run', () => {
+test('a stopped run shows its record without the names searched, and the steps it never reached read as not run', () => {
   const stopped = pairingRunningTimeline('2026-10-22T01:25:10.000Z');
-  const { container } = show(lookup({ state: 'stopped', issue: 'grantExpired', timeline: stopped }));
+  show(lookup({ state: 'stopped', issue: 'grantExpired', timeline: stopped }), undefined, null, true);
   expect(screen.queryByText(/^This lookup searched/)).not.toBeInTheDocument();
-  expect(container.querySelector('details summary')!.textContent).toBe('Lookup log: took 18 s · 3 searches · 12 releases found');
+  // A run that did not complete starts with its record and steps shown.
+  expect(screen.getByRole('button', { name: 'Hide details' })).toHaveAttribute('aria-expanded', 'true');
+  expect(screen.getByText('Lookup log: took 18 s · 3 searches · 12 releases found')).toBeVisible();
   expect(rows().slice(3)).toEqual([`○ Search by track title: ${titles} (not run)`, '● Read release details (5 of 12 releases) (in progress)', '○ iTunes fallback (not run)',
     '○ Check the Albums iTunes returned on MusicBrainz (not run)', '○ Read Artist and label aliases (not run)']);
 });
@@ -201,4 +221,25 @@ test('a run ended because its Album changed offers opening the Album, with or wi
 test('a view without a timeline renders nothing', () => {
   const { container } = show({ ...lookup(), timeline: undefined });
   expect(container).toBeEmptyDOMElement();
+});
+
+test('in the summary\'s status row Details follows the status, which it leaves mounted; the choice holds through an active run\'s polls, and a run that completes starts hidden again', () => {
+  const element = (view: ReviewLookupView) => <MemoryRouter><div data-testid="row"><p><span role="status">Synthetic status</span></p>
+    <LookupProgress lookup={view} now={Date.parse('2026-10-22T01:25:30.000Z')} albumHref={null} /></div></MemoryRouter>;
+  const { rerender } = render(element(running('2026-10-22T01:25:28.000Z')));
+  const toggle = screen.getByRole('button', { name: 'Hide details' }), status = screen.getByRole('status');
+  expect(toggle.parentElement).toBe(screen.getByTestId('row'));
+  expect(status.parentElement!.nextElementSibling).toBe(toggle);
+  expect(screen.getByRole('list', { name: 'Lookup steps' })).toBeVisible();
+  fireEvent.click(toggle);
+  expect(screen.queryByRole('list', { name: 'Lookup steps' })).not.toBeInTheDocument();
+  // A later poll of the same run, retrying now, keeps the choice.
+  rerender(element(running('2026-10-22T01:25:29.000Z', { state: 'retrying' })));
+  expect(screen.getByRole('button', { name: 'Details' })).toHaveAttribute('aria-expanded', 'false');
+  rerender(element(lookup()));
+  expect(screen.getByRole('button', { name: 'Details' })).toHaveAttribute('aria-expanded', 'false');
+  // Without a timeline there is nothing to show: the status alone, no button; the status was never remounted.
+  rerender(element({ ...lookup(), timeline: undefined }));
+  expect(screen.getByRole('status')).toBe(status);
+  expect(screen.queryByRole('button')).not.toBeInTheDocument();
 });

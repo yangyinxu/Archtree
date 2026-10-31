@@ -300,7 +300,9 @@ async function setup(page: Page, administrator = true, initialReleaseDate: { yea
       }
       const active = Boolean(lookup && ['queued', 'running', 'retrying'].includes(lookup.state));
       return route.fulfill({ json: { lookup, revision: review.revision, valueRevision: review.valueRevision, summary: { waiting: { lookup: active, analysis: ['queued', 'running'].includes(review.analysis.state) },
-        needsAnswer: { tie: lookup?.needsAnswer.tie ?? false, conflicts: lookup?.needsAnswer.conflicts ?? [] }, lookupAvailable } }, headers });
+        needsAnswer: { tie: lookup?.needsAnswer.tie ?? false, conflicts: lookup?.needsAnswer.conflicts ?? [] }, lookupAvailable,
+        // The captured primary Artist names, which these fixtures' drafts keep; none before the review is captured.
+        primaryArtists: review.draft.album.expectedTracklist === undefined ? [] : review.draft.album.artists.filter(entry => entry.role === 'primary').map(entry => entry.name) } }, headers });
     }
     const pairing = new RegExp(`^/api/admin/v1/catalog-reviews/${reviewId}/lookup/candidates/([^/]+)/pairing$`).exec(path);
     if (pairing) {
@@ -530,7 +532,7 @@ async function expectInFirstMainScreen(page: Page, action: Locator) {
  * (production builds hash class names, so the two buttons' class lists are compared).
  */
 async function expectLookupFirst(page: Page) {
-  const submit = page.getByRole('region', { name: label('admin.catalog_review.lookup_title'), exact: true }).getByRole('button', { name: label('admin.lookup.submit'), exact: true });
+  const submit = page.getByRole('region', { name: label('admin.catalog_review.lookup_title'), exact: true }).getByRole('button', { name: label('admin.catalog_review.lookup_submit_free'), exact: true });
   await expectInFirstMainScreen(page, submit);
   const start = page.getByRole('button', { name: label('admin.catalog_review.analysis_confirm'), exact: true });
   const firstTrack = page.getByRole('textbox', { name: `1 · ${label('admin.field.title')}`, exact: true });
@@ -927,11 +929,12 @@ for (const variant of localizedViewports) {
     await start.click();
     const analysis = page.getByRole('dialog', { name: label('admin.catalog_review.analysis_confirm_title') });
     await expect(analysis.getByRole('heading', { name: label('admin.catalog_review.analysis_confirm_title'), exact: true })).toBeVisible();
-    await expect(analysis.getByText('Manually corrected synthetic Album', { exact: true })).toBeVisible();
-    await expect(analysis.getByRole('button', { name: label('admin.catalog_review.analysis_confirm'), exact: true })).toBeVisible();
+    // The inline confirmation describes the paid service and starts it from its own button.
+    await expect(analysis.getByText(label('admin.catalog_review.analysis_copy'), { exact: true })).toBeVisible();
+    await expect(analysis.getByRole('button', { name: label('admin.catalog_review.luna_start'), exact: true })).toBeVisible();
     expect(api.writes.filter(value => value.path.endsWith('/analyze'))).toHaveLength(0);
     await capture(page, '06-luna-confirmation', width, false);
-    await analysis.getByRole('button', { name: label('admin.catalog_review.analysis_confirm') }).click();
+    await analysis.getByRole('button', { name: label('admin.catalog_review.luna_start') }).click();
     await expect(page.getByRole('button', { name: label('admin.analysis.stop') })).toBeVisible();
     expect(api.writes.filter(value => value.path.endsWith('/analyze'))).toHaveLength(1);
     await page.reload(); await page.getByRole('button', { name: label('admin.view.switch_admin') }).click();
@@ -1051,7 +1054,7 @@ for (const variant of localizedViewports) {
     await expect(summary.getByRole('textbox', { name: label('admin.lookup.name'), exact: true })).toHaveValue('Synthetic catalog Album');
     await expectLookupFirst(page);
     await capture(page, '30-review-lookup-not-started', width); await reflow(page);
-    await summary.getByRole('button', { name: label('admin.lookup.submit'), exact: true }).click();
+    await summary.getByRole('button', { name: label('admin.catalog_review.lookup_submit_free'), exact: true }).click();
     await expect(summary.getByText(label('admin.lookup.active'), { exact: true })).toBeVisible();
     expect(api.writes.filter(write => write.path.endsWith('/lookup')).map(write => write.body)).toEqual([
       { expectedRevision: 1, kind: 'album', text: 'Synthetic catalog Album', operationId: expect.any(String) }]);
@@ -1265,9 +1268,10 @@ test('an existing-Album review looks up a typed name with an optional Artist and
   const box = summary.getByRole('group', { name: label('admin.lookup.box'), exact: true });
   const name = box.getByRole('textbox', { name: label('admin.lookup.name'), exact: true }), artist = box.getByRole('textbox', { name: label('admin.lookup.artist'), exact: true });
   await expect(box.getByText(label('admin.lookup.artist_hint_review'), { exact: true })).toBeVisible();
-  await expect(artist).toHaveValue(''); await expect(artist).toHaveAttribute('autocomplete', 'off');
+  // The Artist field starts with the Album's primary Artists.
+  await expect(artist).toHaveValue('Synthetic catalog Artist'); await expect(artist).toHaveAttribute('autocomplete', 'off');
   await name.fill('Synthetic Typed Name'); await artist.fill('Synthetic Typed Artist');
-  await box.getByRole('button', { name: label('admin.lookup.submit'), exact: true }).click();
+  await box.getByRole('button', { name: label('admin.catalog_review.lookup_submit_free'), exact: true }).click();
   await expect(summary.getByText(label('admin.lookup.active'), { exact: true })).toBeVisible();
   expect(api.writes.filter(write => write.path.endsWith('/lookup')).map(write => write.body)).toEqual([
     { expectedRevision: 1, kind: 'album', text: 'Synthetic Typed Name', artist: 'Synthetic Typed Artist', operationId: expect.any(String) }]);
@@ -1652,7 +1656,7 @@ for (const variant of localizedViewports) {
     // The summary waits for the save: its name box, opened from its fold, is disabled (a fieldset's own disabled state is read
     // through its controls).
     await summary.getByText(label('admin.catalog_review.lookup_try_another'), { exact: true }).click();
-    await expect(summary.getByRole('group', { name: label('admin.lookup.box'), exact: true }).getByRole('button', { name: label('admin.lookup.submit'), exact: true })).toBeDisabled();
+    await expect(summary.getByRole('group', { name: label('admin.lookup.box'), exact: true }).getByRole('button', { name: label('admin.catalog_review.lookup_submit_free'), exact: true })).toBeDisabled();
     expect(api.writes).toEqual([]);
     await save.scrollIntoViewIfNeeded(); await capture(page, '42-review-filled-draft', width, false, false);
     await numberInputs(page)[0].scrollIntoViewIfNeeded(); await capture(page, '42b-review-filled-numbers', width, false, false); await reflow(page);
@@ -1975,7 +1979,7 @@ for (const variant of localizedViewports) {
     const box = summary.getByRole('group', { name: label('admin.lookup.box'), exact: true });
     await expect(box).toBeEnabled();
     await box.getByRole('textbox', { name: label('admin.lookup.name'), exact: true }).fill('Synthetic Live Album');
-    const submit = box.getByRole('button', { name: label('admin.lookup.submit'), exact: true });
+    const submit = box.getByRole('button', { name: label('admin.catalog_review.lookup_submit_free'), exact: true });
     await submit.click();
     await expect(box.getByRole('alert')).toHaveText(label('admin.catalog_review.lookup_replace_copy'));
     await capture(page, '46b-review-running-status', width, false);
@@ -2033,20 +2037,22 @@ for (const variant of localizedViewports) {
     await expect(steps).not.toHaveAttribute('aria-live');
     await expect(steps.locator('[aria-live], [role="status"]')).toHaveCount(0);
     await steps.scrollIntoViewIfNeeded(); await capture(page, '47-review-steps-running', width, false, false); await reflow(page);
-    // Once finished, the names searched lead, and the steps fold under the record; the name box, open while it ran and untouched,
+    // Once finished, the names searched lead, and the record and steps wait behind Details; the name box, open while it ran and untouched,
     // folds under Didn't find it? as filling the numbers is the next step. Its iTunes fallback left results out, as CANDY LIVE 2's did.
     const finished = pairingTimeline({ steps: pairingTimeline().steps.map(step => step.kind === 'itunes' ? { ...step, partial: true as const } : step) });
     api.seed(api.review(), { ...pairingLookupResponse().lookup!, timeline: finished });
     // Its searches are the five MusicBrainz name searches and the iTunes fallback's two.
     const record = summary.getByText(message('admin.catalog_review.lookup_log', { minutes: 0, seconds: 22, searches: 7, releases: 12 }), { exact: true });
-    await expect(record).toBeVisible({ timeout: 10_000 });
+    const details = summary.getByRole('button', { name: label('admin.catalog_review.lookup_log_show'), exact: true });
+    await expect(details).toBeVisible({ timeout: 10_000 });
+    await expect(record).toBeHidden();
     const searched = label('admin.catalog_review.lookup_searched', { searches: quoted('Synthetic Live Album 2', 'Synthetic Live Artist')
       + label('admin.catalog_review.lookup_searched_then_alone', { item: quoted('Synthetic Live Album 2') })
       + label('admin.catalog_review.lookup_searched_then', { item: quoted('Synthetic Live Album 2', 'Synthetic Live Artist -Romanized-') }) });
     await expect(summary.getByText(searched, { exact: true })).toBeVisible();
     await expect(steps).toBeHidden();
-    await record.click();
-    await expect(steps).toBeVisible();
+    await details.click();
+    await expect(record).toBeVisible(); await expect(steps).toBeVisible();
     await expect(rows.nth(3)).toHaveText(label('admin.catalog_review.lookup_step_done', { step: label('admin.catalog_review.lookup_step_track_title',
       { titles: await page.evaluate(([titles, language]) => new Intl.ListFormat(language, { type: 'conjunction' }).format(titles), [[quoted('Synthetic second song', 'Synthetic Live Artist'),
         quoted('Synthetic opening', 'Synthetic Live Artist')], locale] as const) }) }));
@@ -2063,14 +2069,14 @@ for (const variant of localizedViewports) {
     const box = summary.getByRole('group', { name: label('admin.lookup.box'), exact: true });
     const fold = summary.getByText(label('admin.catalog_review.lookup_try_another'), { exact: true });
     await expect(fold).toBeVisible();
-    await expect(box.getByRole('button', { name: label('admin.lookup.submit'), exact: true })).toBeHidden();
+    await expect(box.getByRole('button', { name: label('admin.catalog_review.lookup_submit_free'), exact: true })).toBeHidden();
     await capture(page, '47b-review-steps-record', width, false); await reflow(page);
     // Opened again, the finished run's name box still sits folded under Didn't find it?, and Enter on its summary opens it.
     await reenter(page);
     await expect(fold).toBeVisible();
-    await expect(box.getByRole('button', { name: label('admin.lookup.submit'), exact: true })).toBeHidden();
+    await expect(box.getByRole('button', { name: label('admin.catalog_review.lookup_submit_free'), exact: true })).toBeHidden();
     await fold.focus(); await page.keyboard.press('Enter');
-    await expect(box.getByRole('button', { name: label('admin.lookup.submit'), exact: true })).toBeVisible();
+    await expect(box.getByRole('button', { name: label('admin.catalog_review.lookup_submit_free'), exact: true })).toBeVisible();
     await reflow(page);
     await page.setViewportSize({ width: 320, height: 844 });
     await reflow(page);
@@ -2094,10 +2100,10 @@ for (const variant of localizedViewports) {
     const busy = summary.getByRole('status').filter({ hasText: message('admin.catalog_review.lookup_retry_busy', { source: 'MusicBrainz', time, attempt: 2, limit: 3 }) });
     await expect(busy).toHaveText(message('admin.catalog_review.lookup_retry_busy', { source: 'MusicBrainz', time, attempt: 2, limit: 3 }));
     const primary = await classList(page.locator('#catalog-review-save'));
-    const retry = summary.getByRole('button', { name: label('admin.lookup.retry'), exact: true });
+    const retry = summary.getByRole('button', { name: label('admin.catalog_review.lookup_retry_free'), exact: true });
     const primaries: (string | null)[] = [];
     for (const button of await summary.getByRole('button').all()) if ((await classList(button)).join() === primary.join()) primaries.push(await button.textContent());
-    expect(primaries).toEqual([label('admin.lookup.retry')]);
+    expect(primaries).toEqual([label('admin.catalog_review.lookup_retry_free')]);
     await capture(page, '48-review-retrying', width, false); await reflow(page);
     await retry.click();
     await expect.poll(() => api.writes.filter(write => write.path.endsWith('/lookup/retry')).length).toBe(1);
@@ -2111,7 +2117,7 @@ for (const variant of localizedViewports) {
       api.seed(api.review(), view);
       await reenter(page);
       await expect(summary.getByRole('status').filter({ hasText: text })).toHaveText(text);
-      await expect(summary.getByRole('button', { name: label('admin.lookup.retry'), exact: true })).toBeEnabled();
+      await expect(summary.getByRole('button', { name: label('admin.catalog_review.lookup_retry_free'), exact: true })).toBeEnabled();
     }
     await page.setViewportSize({ width: 320, height: 844 });
     await reflow(page);
@@ -2129,7 +2135,7 @@ test('a superseded lookup of an Album that changed offers opening the Album inst
   await expect(summary.getByText(label('admin.catalog_review.lookup_superseded'), { exact: true })).toHaveAttribute('role', 'status');
   const open = summary.getByRole('link', { name: label('admin.catalog_review.lookup_superseded_open'), exact: true });
   await expect(open).toBeVisible();
-  await expect(summary.getByRole('button', { name: label('admin.lookup.retry'), exact: true })).toHaveCount(0);
+  await expect(summary.getByRole('button', { name: label('admin.catalog_review.lookup_retry_free'), exact: true })).toHaveCount(0);
   // The step bar promises no free retry either.
   const steps = page.getByRole('group', { name: label('admin.catalog_review.steps_label'), exact: true });
   await expect(steps.getByText(label('admin.catalog_review.lookup_brief_unavailable'), { exact: true })).toBeVisible();

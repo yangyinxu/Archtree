@@ -5,6 +5,7 @@
  *   Constants: possiblePairing, keepsRunning
  * Tests
  *   - before any run the summary says so and prefills the name box with the saved Album title, which submits as a lookup of that kind
+ *   - a completed run that found nothing to use suggests the name without its subtitle, describing the name field; a run that found releases does not
  *   - where lookup is not configured there is no name box and no retry
  *   - the free retry is the only primary control while lookup retries, is unavailable or stopped, it retries the run, and no Luna AI control is ever in the summary
  *   - conflict answers name the applied source and answer one conflict against its saved value; precision and ID-only conflicts say so
@@ -40,7 +41,9 @@
  *   - once an applied release leaves nothing open the results fold under one disclosure, which stays open while an answer, an identity row or an active run waits
  *   - a release applied for its Album values only keeps the results open while its tracks pair in more than one way and the titles can fill the numbers, with the fill on its card and under the status with why
  *   - a retrying run says when it retries in the interface language and which retry of how many, with the free retry as its only primary button
- *   - while a run is active its steps follow the status, and after a completed run the names searched and the folded record follow it, before the name box
+ *   - while a run is active its steps follow the status, and after a completed run the names searched and the record behind Details follow it, before the name box
+ *   - the name box sends its prefilled Artists as none only while they are the captured names the server searches, and refills when they change
+ *   - the status stays one mounted live region as the first run appears and its steps load beside it
  *   - after a completed run the name box folds under Didn't find it? Look up another name unless the status points at it, also when the run completes while the page is open, unless the box is in use
  *   - an open pairing panel keeps its saved state when its save's re-rank applies another release and the choice after it fails
  * @end-catalog */
@@ -67,7 +70,7 @@ import styles from './adminStyles';
 type Lookup = NonNullable<ReviewLookupResponse['lookup']>;
 const applied = () => reviewAfterLookup(capturedCatalogReview());
 const withLookup = (edit: (lookup: Lookup) => void, response = reviewLookupResponse()) => { edit(response.lookup!); return response; };
-const notStarted = (lookupAvailable = true): ReviewLookupResponse => ({ lookup: null, revision: 1, valueRevision: 0, summary: { waiting: { lookup: false, analysis: false }, needsAnswer: { tie: false, conflicts: [] }, lookupAvailable } });
+const notStarted = (lookupAvailable = true): ReviewLookupResponse => ({ lookup: null, revision: 1, valueRevision: 0, summary: { waiting: { lookup: false, analysis: false }, needsAnswer: { tie: false, conflicts: [] }, lookupAvailable, primaryArtists: [] } });
 
 /** Renders the summary; `lookup` answers its read (a body, or a function for each read), and the identity read is the fixture's. */
 function mount(item: CatalogReview = applied(), lookup: ReviewLookupResponse | (() => Response | Promise<Response>) = reviewLookupResponse(), props: { disabled?: boolean; error?: string | null } = {}) {
@@ -99,17 +102,21 @@ test('before any run the summary says so and prefills the name box with the save
   const box = await within(section()).findByRole('group', { name: 'Look up by name' });
   await waitFor(() => expect(within(box).getByRole('textbox', { name: 'Name' })).toHaveValue('Synthetic catalog Album'));
   fireEvent.click(within(box).getByRole('radio', { name: 'Song name' }));
-  fireEvent.click(within(box).getByRole('button', { name: 'Look up' }));
-  // Without an Artist name the body has no `artist` key; the hint says an empty one uses the primary Artists.
+  fireEvent.click(within(box).getByRole('button', { name: 'Look up metadata (free)' }));
+  // The Artist field starts with the primary Artists' byline, which the server uses anyway: sent unchanged, the body has no
+  // `artist` key, as the hint says.
   expect(onRun).toHaveBeenLastCalledWith('lookup', { kind: 'song', text: 'Synthetic catalog Album' });
   const artist = within(box).getByRole('textbox', { name: 'Artist (optional)' });
-  expect(artist).toHaveValue(''); expect(within(box).getByText("Leave empty to use the Album's primary Artists.")).toBeVisible();
+  expect(artist).toHaveValue('Synthetic catalog Artist');
+  expect(within(box).getByText("Starts with the Album's primary Artists, which are also used when it is left empty.")).toBeVisible();
+  // Before any run there is nothing that found nothing: no subtitle hint.
+  expect(within(box).queryByText(/without its subtitle/)).not.toBeInTheDocument();
   fireEvent.change(artist, { target: { value: ' Synthetic Typed Artist ' } });
-  fireEvent.click(within(box).getByRole('button', { name: 'Look up' }));
+  fireEvent.click(within(box).getByRole('button', { name: 'Look up metadata (free)' }));
   expect(onRun).toHaveBeenLastCalledWith('lookup', { kind: 'song', text: 'Synthetic catalog Album', artist: 'Synthetic Typed Artist' });
   // A blank Artist field is sent as none.
   fireEvent.change(artist, { target: { value: '   ' } });
-  fireEvent.click(within(box).getByRole('button', { name: 'Look up' }));
+  fireEvent.click(within(box).getByRole('button', { name: 'Look up metadata (free)' }));
   expect(onRun).toHaveBeenLastCalledWith('lookup', { kind: 'song', text: 'Synthetic catalog Album' });
   // A review not captured for lookup has no identity rows to read.
   expect(screen.queryByRole('region', { name: 'Artists and label' })).not.toBeInTheDocument();
@@ -119,6 +126,23 @@ test('before any run the summary says so and prefills the name box with the save
   const shown = await within(typed.section()).findByRole('group', { name: 'Look up by name' });
   expect(within(shown).getByRole('textbox', { name: 'Name' })).toHaveValue('Synthetic Typed Name');
   expect(within(shown).getByRole('textbox', { name: 'Artist (optional)' })).toHaveValue('Synthetic Typed Artist');
+});
+
+test('a completed run that found nothing to use suggests the name without its subtitle, describing the name field; a run that found releases does not', async () => {
+  const hint = 'No usable release was found under this name; try it without its subtitle.';
+  const noMatch = withLookup(lookup => { Object.assign(lookup, { applied: null, groups: [], preselection: null }); lookup.candidates[0] = { ...lookup.candidates[0], status: 'notMatching', groupKey: null };
+    lookup.needsAnswer.conflicts = []; });
+  const noRelease = withLookup(lookup => { Object.assign(lookup, { outcome: 'noRelease', applied: null, candidates: [], groups: [], preselection: null }); lookup.needsAnswer.conflicts = []; });
+  for (const response of [noMatch, noRelease]) {
+    const { section } = mount(applied(), response);
+    const box = await within(section()).findByRole('group', { name: 'Look up by name' });
+    expect(within(box).getByText(hint)).toBeVisible();
+    expect(within(box).getByRole('textbox', { name: 'Name' })).toHaveAccessibleDescription(hint);
+    cleanup();
+  }
+  const { section } = mount(applied());
+  await within(section()).findByRole('group', { name: 'Look up by name' });
+  expect(within(section()).queryByText(hint)).not.toBeInTheDocument();
 });
 
 test('where lookup is not configured there is no name box and no retry', async () => {
@@ -137,7 +161,7 @@ test('the free retry is the only primary control while lookup retries, is unavai
     expect(await screen.findByText(text)).toBeInTheDocument();
     await within(section()).findByRole('group', { name: 'Look up by name' });
     const primary = [...section().querySelectorAll('button')].filter(button => button.classList.contains(styles.primary));
-    expect(primary.map(button => button.textContent)).toEqual(['Retry lookup']);
+    expect(primary.map(button => button.textContent)).toEqual(['Retry lookup (free)']);
     fireEvent.click(primary[0]); expect(onRun).toHaveBeenCalledWith('lookup/retry', {});
     expect(within(section()).queryByRole('button', { name: /Luna/ })).not.toBeInTheDocument();
     cleanup();
@@ -458,7 +482,7 @@ test('each lookup outcome reads in the review\'s own words, with the retry only 
     const { section } = mount(applied(), withLookup(lookup => { edit(lookup); lookup.needsAnswer.conflicts = []; }));
     expect(await within(section()).findByText(text)).toHaveAttribute('role', 'status');
     await within(section()).findByRole('group', { name: 'Look up by name' });
-    expect(within(section()).queryAllByRole('button', { name: 'Retry lookup' })).toHaveLength(retry ? 1 : 0);
+    expect(within(section()).queryAllByRole('button', { name: 'Retry lookup (free)' })).toHaveLength(retry ? 1 : 0);
     for (const name of ['Track Artists', 'Artists and label', 'Lookup values that differ from the Album\'s'])
       expect(within(section()).queryByRole('region', { name })).not.toBeInTheDocument();
     cleanup();
@@ -472,7 +496,7 @@ test('each lookup outcome reads in the review\'s own words, with the retry only 
     const item = { ...applied(), sourceStatus }, { section } = mount(item, superseded());
     await within(section()).findByText('This lookup ended because the Album or its tracks changed or are no longer ready.');
     await within(section()).findByRole('group', { name: 'Look up by name' });
-    expect(within(section()).queryByRole('button', { name: 'Retry lookup' })).not.toBeInTheDocument();
+    expect(within(section()).queryByRole('button', { name: 'Retry lookup (free)' })).not.toBeInTheDocument();
     if (sourceStatus === 'changed') expect(await within(section()).findByRole('link', { name: 'Open the Album to start a new completion' }))
       .toHaveAttribute('href', `/admin/catalog/album/${item.source.album.id}`);
     else expect(within(section()).queryByRole('link', { name: 'Open the Album to start a new completion' })).not.toBeInTheDocument();
@@ -654,7 +678,7 @@ test('an active run says whether it is queued or which step runs, with its count
     if (elapsed) expect(line.textContent).toMatch(elapsed);
     // The time is parted from the status and from the keeps-running note by a dot.
     if (elapsed) expect(line.textContent).toMatch(/[^ ] · \d+:\d{2} (elapsed|in queue) · Lookup keeps running if you leave this page\.$/);
-    expect(primaries(section()).map(button => button.textContent)).toEqual(state === 'retrying' ? ['Retry lookup'] : []);
+    expect(primaries(section()).map(button => button.textContent)).toEqual(state === 'retrying' ? ['Retry lookup (free)'] : []);
     cleanup();
   }
   const { section } = mount(pairingReview(), pairingLookupResponse());
@@ -684,13 +708,13 @@ test('while a run is active, a name is looked up only after confirming that it s
   const { section, onRun } = mount(pairingReview(), queued);
   const box = await within(section()).findByRole('group', { name: 'Look up by name' });
   expect(box).toBeEnabled();
-  fireEvent.click(within(box).getByRole('button', { name: 'Look up' }));
+  fireEvent.click(within(box).getByRole('button', { name: 'Look up metadata (free)' }));
   expect(within(box).getByRole('alert')).toHaveTextContent('This stops the current lookup and starts a new one with the name above.');
   expect(onRun).not.toHaveBeenCalled();
   fireEvent.click(within(box).getByRole('button', { name: 'Cancel' }));
   expect(within(box).queryByRole('alert')).not.toBeInTheDocument();
   expect(onRun).not.toHaveBeenCalled();
-  fireEvent.click(within(box).getByRole('button', { name: 'Look up' }));
+  fireEvent.click(within(box).getByRole('button', { name: 'Look up metadata (free)' }));
   fireEvent.click(within(box).getByRole('button', { name: 'Stop and look up again' }));
   expect(onRun.mock.calls).toEqual([['lookup', { kind: 'album', text: 'Synthetic Live Album 2' }]]);
   expect(within(box).queryByRole('alert')).not.toBeInTheDocument();
@@ -837,7 +861,7 @@ test('a retrying run says when it retries in the interface language and which re
   const { section, onRun } = mount(pairingReview(), retrying('sourceBusy', 'musicbrainz', 2));
   const status = await within(section()).findByText(`Too many requests to MusicBrainz right now, so lookup retries automatically at ${time} (automatic retry 2 of 3). You can also retry now at no cost.`);
   expect(status).toHaveAttribute('role', 'status');
-  expect(primaries(section()).map(button => button.textContent)).toEqual(['Retry lookup']);
+  expect(primaries(section()).map(button => button.textContent)).toEqual(['Retry lookup (free)']);
   fireEvent.click(primaries(section())[0]); expect(onRun).toHaveBeenCalledWith('lookup/retry', {});
   // A retrying run never shows the request-interval wait, whatever its last step's age.
   expect(within(section()).queryByText(/^Waiting for/)).not.toBeInTheDocument();
@@ -847,7 +871,7 @@ test('a retrying run says when it retries in the interface language and which re
     .toHaveAttribute('role', 'status');
 });
 
-test('while a run is active its steps follow the status, and after a completed run the names searched and the folded record follow it, before the name box', async () => {
+test('while a run is active its steps follow the status, and after a completed run the names searched and the record behind Details follow it, before the name box', async () => {
   const updatedAt = new Date(Date.now() - 12_000).toISOString();
   const running = withLookup(lookup => { Object.assign(lookup, { run: 4, state: 'running', outcome: null, candidates: [], applied: null,
     progress: { phase: 'details', done: 5, total: 12, startedAt: new Date(Date.now() - 30_000).toISOString(), updatedAt }, timeline: pairingRunningTimeline(updatedAt) }); }, pairingLookupResponse());
@@ -869,11 +893,55 @@ test('while a run is active its steps follow the status, and after a completed r
   const completed = withLookup(lookup => { lookup.timeline = pairingTimeline(); }, pairingLookupResponse());
   const { section } = mount(pairingReview(), completed);
   const searched = await within(section()).findByText(/^This lookup searched for "Synthetic Live Album 2" · Synthetic Live Artist, then "Synthetic Live Album 2" alone/);
+  // The record and steps of a completed run wait behind Details on the status row.
   const record = within(section()).getByText('Lookup log: took 22 s · 7 searches · 12 releases found');
-  expect(record.closest('details')!.open).toBe(false);
+  const details = within(section()).getByRole('button', { name: 'Details' });
+  expect(record).not.toBeVisible(); expect(details).toHaveAttribute('aria-expanded', 'false');
+  expect(details.parentElement).toContainElement(within(section()).getByRole('status'));
+  fireEvent.click(details);
+  expect(record).toBeVisible();
   const box = await within(section()).findByRole('group', { name: 'Look up by name' });
   expect(searched.compareDocumentPosition(record) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(record.compareDocumentPosition(box) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+});
+
+test('the name box sends its prefilled Artists as none only while they are the captured names the server searches, and refills when they change', async () => {
+  const item = applied(), { onRun, rerender, section } = mount(item);
+  const box = async () => within(await within(section()).findByRole('group', { name: 'Look up by name' }));
+  const submit = async () => fireEvent.click((await box()).getByRole('button', { name: 'Look up metadata (free)' }));
+  expect((await box()).getByRole('textbox', { name: 'Artist (optional)' })).toHaveValue('Synthetic catalog Artist');
+  // The draft's primary Artist is the captured one the server searches without an Artist name: the body names none.
+  await submit();
+  expect(onRun.mock.lastCall![1]).not.toHaveProperty('artist');
+  // A release applied other primary Artists: the box refills with them and sends them as typed, never the captured names.
+  const changed = { ...item, draft: { ...item.draft, album: { ...item.draft.album, artists: item.draft.album.artists.map(entry => entry.role === 'primary'
+    ? { ...entry, name: 'Synthetic applied Artist' } : entry) } } };
+  rerender({ item: changed });
+  await waitFor(async () => expect((await box()).getByRole('textbox', { name: 'Artist (optional)' })).toHaveValue('Synthetic applied Artist'));
+  await submit();
+  expect(onRun.mock.lastCall![1]).toMatchObject({ artist: 'Synthetic applied Artist' });
+  // Back to the captured names, the refilled box sends none again.
+  rerender({ item });
+  await waitFor(async () => expect((await box()).getByRole('textbox', { name: 'Artist (optional)' })).toHaveValue('Synthetic catalog Artist'));
+  await submit();
+  expect(onRun.mock.lastCall![1]).not.toHaveProperty('artist');
+});
+
+test('the status stays one mounted live region as the first run appears and its steps load beside it', async () => {
+  const updatedAt = new Date(Date.now() - 2_000).toISOString();
+  const running = withLookup(lookup => { Object.assign(lookup, { run: 1, state: 'running', outcome: null, candidates: [], applied: null,
+    progress: { phase: 'details', done: 5, total: 12, startedAt: new Date(Date.now() - 30_000).toISOString(), updatedAt }, timeline: pairingRunningTimeline(updatedAt) }); }, pairingLookupResponse());
+  let response: ReviewLookupResponse = { ...notStarted(), summary: { ...notStarted().summary, primaryArtists: ['Synthetic Live Artist -Romanized-'] } };
+  const { client, section } = mount(pairingReview(), () => reviewJson(response));
+  const status = await within(section()).findByText(/^Metadata lookup has not run for this Album/);
+  expect(status).toHaveAttribute('role', 'status');
+  // A run submitted elsewhere appears with its steps: the same status element now says it runs, and Details joins its row.
+  response = running;
+  await act(async () => { await client.invalidateQueries(); });
+  const details = await within(section()).findByRole('button', { name: 'Hide details' });
+  expect(within(section()).getByRole('status')).toBe(status);
+  expect(status).toHaveTextContent(/^Lookup running/);
+  expect(status.parentElement!.parentElement).toBe(details.parentElement);
 });
 
 test('after a completed run the name box folds under Didn\'t find it? Look up another name unless the status points at it, also when the run completes while the page is open, unless the box is in use', async () => {
@@ -937,8 +1005,10 @@ test('an open pairing panel keeps its saved state when its save\'s re-rank appli
   vi.stubGlobal('fetch', fetch);
   const card = await within(rendered.section()).findByRole('region', { name: 'Possible match (1 release)' });
   expect(within(rendered.section()).queryByText('Lookup results and applied values')).not.toBeInTheDocument();
-  // Until a release is applied the results are no fold: their one element is open with its summary hidden.
-  const results = card.closest('details')!;
+  // Until a release is applied the results are no fold: their one element is open with its summary hidden. The card itself sits in
+  // the open Reference releases disclosure inside them.
+  const releases = card.closest('details')!, results = releases.parentElement!.closest('details')!;
+  expect([releases.open, releases.querySelector(':scope > summary')!.textContent]).toEqual([true, 'Reference releases · 2 possible editions']);
   expect([results.open, results.querySelector<HTMLElement>(':scope > summary')!.style.display]).toEqual([true, 'none']);
   fireEvent.click(within(card).getByRole('button', { name: 'Pair tracks by hand' }));
   fireEvent.change(await screen.findByRole('combobox', { name: '1 · Synthetic opening (Live) · 3:35.66' }), { target: { value: '1:1' } });

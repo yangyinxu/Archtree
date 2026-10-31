@@ -32,6 +32,9 @@
  *   - a possible match whose members pair in more than one way offers pairing by hand as a plain button that opens one panel after the sections, which the summary hears is open; other choices wait while it saves
  *   - pairing by hand is offered only on possible matches that pair in more than one way
  *   - closing the pairing panel returns focus to its own opener after Cancel, and to the lookup panel once the release is used or its opener is gone
+ *   - a review's chooser sits in one Reference releases disclosure that counts the records the tracks may fit and says what using one does, open while something is to choose and folded once a matching release is applied; an import has none
+ *   - the Reference releases disclosure never folds under an open pairing panel whose save's re-rank applies the release, and closing the panel leaves it open
+ *   - a release card whose records show the same details says nothing tells them apart and numbers their edition buttons, never taking them for one edition
  * @end-catalog */
 
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
@@ -454,10 +457,11 @@ test('a possible match whose members pair in no single way offers the numbers fi
 test('the release this run applied without a pairing can be used again once its pairing is single, above the folded list; with a pairing it stays applied', () => {
   let onChoose = mountReview(pairedLookupResponse(pairingApplication(pairingEditions[0], false)).lookup!, liveReview);
   const again = screen.getAllByRole('button', { name: 'Use this release again (with track details)' });
-  // The card above the folded list, before anything is opened.
+  // The card above the folded list, before anything is opened: only the open Reference releases disclosure holds it.
   expect(again).toHaveLength(2);
-  expect(again[0].closest('details')).toBeNull();
-  expect(screen.getAllByText('The tracks now pair with this release in exactly one way; using it again brings in its expected tracklist and track details.')[0].closest('details')).toBeNull();
+  const releases = again[0].closest('details')!;
+  expect([releases.open, releases.querySelector(':scope > summary')!.textContent]).toEqual([true, 'Reference releases · 2 possible editions']);
+  expect(screen.getAllByText('The tracks now pair with this release in exactly one way; using it again brings in its expected tracklist and track details.')[0].closest('details')).toBe(releases);
   expect(again[0].compareDocumentPosition(screen.getByText('Releases found: 12')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   // Above the folded list it is the primary button; folded, a plain one.
   expect(again[0]).toHaveClass(styles.primary); expect(again[1]).not.toHaveClass(styles.primary);
@@ -765,4 +769,85 @@ test('closing the pairing panel returns focus to its own opener after Cancel, an
   expect(screen.queryByRole('button', { name: 'Pair tracks by hand' })).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'close' }));
   expect(document.activeElement).toBe(screen.getByRole('region', { name: 'Synthetic lookup panel' }));
+});
+
+test('a review\'s chooser sits in one Reference releases disclosure that counts the records the tracks may fit and says what using one does, open while something is to choose and folded once a matching release is applied; an import has none', () => {
+  // Nothing matched as a group: open, counting the two editions that fit, never the ten that do not.
+  mountReview(live(), liveReview);
+  const releases = screen.getByText('Reference releases · 2 possible editions').closest('details')!;
+  expect(releases.open).toBe(true);
+  expect(within(releases).getByText(/^Using a release applies its Album values, and the tracklist and track details where its tracks pair, to this completion's draft\./)).toBeVisible();
+  // The choice applies the whole release (values, tracklist and pairs where they pair), never the Album values alone.
+  expect(within(releases).getByText(/^Using a release/).textContent).not.toMatch(/values only/);
+  cleanup();
+  // An offered release needs a choice: open.
+  mountReview(pairedLookupResponse().lookup!, liveReview);
+  expect(screen.getByText(/^Reference releases ·/).closest('details')!.open).toBe(true);
+  cleanup();
+  // A matching release this run applied: folded, every choice still inside; a run that no longer has it opens it again.
+  const applied = pairedLookupResponse(pairingApplication(pairingEditions[0], true)).lookup!;
+  const onChoose = vi.fn(), element = (lookup: ReviewLookupView) => <CandidateChooser projectId={importId} viewerId={viewerId} lookup={lookup}
+    review={{ tracks: reviewTracks, searched: 'Synthetic Live Album 2', artists: [], fill: null }} disabled={false} onChoose={onChoose} />;
+  const { rerender } = render(element(applied));
+  const folded = screen.getByText(/^Reference releases ·/).closest('details')!;
+  expect(folded.open).toBe(false);
+  expect(within(folded).getByRole('button', { name: 'Applied' })).toBeDisabled();
+  rerender(element({ ...applied, applied: null }));
+  expect(folded.open).toBe(true);
+  cleanup();
+  // An import keeps its chooser unfolded.
+  mount(view({ input: { trigger: 'folder', submitted: null }, groups: [group(1, [[1, 1, 'First']])], candidates: [candidate(1)] }));
+  expect(screen.queryByText(/^Reference releases/)).not.toBeInTheDocument();
+  expect(document.querySelector('details > summary')?.textContent ?? '').not.toMatch(/^Reference releases/);
+});
+
+test('the Reference releases disclosure never folds under an open pairing panel whose save\'s re-rank applies the release, and closing the panel leaves it open', async () => {
+  const applied = pairedLookupResponse(pairingApplication(pairingEditions[0], true)).lookup!;
+  const element = (lookup: ReviewLookupView) => <CandidateChooser projectId={importId} viewerId={viewerId} lookup={lookup}
+    review={{ tracks: reviewTracks, fill: null, ...liveReview }} disabled={false} onChoose={vi.fn()} />;
+  const view = render(element(live()));
+  const releases = screen.getByText(/^Reference releases ·/).closest('details')!;
+  fireEvent.click(screen.getByRole('button', { name: 'Pair tracks by hand' }));
+  const panel = await screen.findByRole('region', { name: 'Synthetic pairing panel' });
+  // The panel's save re-ranks and the re-read shows the release applied for this run: the results stay open around the panel.
+  view.rerender(element(applied));
+  expect(releases.open).toBe(true);
+  expect(within(releases).getByRole('region', { name: 'Synthetic pairing panel' })).toBe(panel);
+  // Closing the panel leaves the disclosure as it is; a later read of the same settled run does not fold it either.
+  fireEvent.click(within(panel).getByRole('button', { name: 'used' }));
+  expect(screen.queryByRole('region', { name: 'Synthetic pairing panel' })).not.toBeInTheDocument();
+  expect(releases.open).toBe(true);
+  view.rerender(element({ ...applied }));
+  expect(releases.open).toBe(true);
+  // Without a panel open, a run that settles folds it as before.
+  view.rerender(element(live()));
+  view.rerender(element(applied));
+  expect(releases.open).toBe(false);
+});
+
+test('a release card whose records show the same details says nothing tells them apart and numbers their edition buttons, never taking them for one edition', () => {
+  // Both editions read Digital Media (XW): the barcode, catalogue number and every other value shown are shared too.
+  const alike = live({ candidates: live().candidates.map(entry => entry.key === pairingEditions[1] ? { ...entry, country: 'XW', formats: ['Digital Media', 'Digital Media'] } : entry) });
+  const onChoose = mountReview(alike, liveReview);
+  const card = within(screen.getByRole('region', { name: 'Possible match (1 release)' }));
+  expect(card.getByText('2 records show the same details as another, so the available data cannot tell them apart; they are listed separately and are not known to be the same edition.')).toBeVisible();
+  // The catalogue number and barcode stay in view on the card.
+  expect(card.getByText('Barcode')).toBeInTheDocument(); expect(card.getByText('Catalogue number')).toBeInTheDocument();
+  fireEvent.click(card.getByRole('button', { name: 'Use Album values only from the Digital Media (XW) · 2 edition' }));
+  expect(onChoose).toHaveBeenCalledWith(pairingEditions[1]);
+  cleanup();
+  // Editions that differ by media or country say nothing of the kind.
+  mountReview(live(), liveReview);
+  expect(screen.queryByText(/cannot tell them apart/)).not.toBeInTheDocument();
+  cleanup();
+  // Records of the same media and country that differ by barcode are separate releases, each card showing its own barcode, never
+  // records said to be alike.
+  const [first, second] = live().candidates.filter(entry => (pairingEditions as readonly string[]).includes(entry.key));
+  const barcoded = live({ candidates: live().candidates.map(entry => entry.key === first.key ? { ...entry, barcode: '0000000000017' }
+    : entry.key === second.key ? { ...entry, country: first.country, formats: first.formats, barcode: '0000000000024' } : entry) });
+  mountReview(barcoded, liveReview);
+  const cards = within(screen.getByRole('region', { name: 'Possible matches (2 releases)' }));
+  expect(cards.getByText('0000000000017')).toBeInTheDocument(); expect(cards.getByText('0000000000024')).toBeInTheDocument();
+  expect(screen.queryByText(/cannot tell them apart/)).not.toBeInTheDocument();
+  expect(screen.queryByText('Choose another edition')).not.toBeInTheDocument();
 });

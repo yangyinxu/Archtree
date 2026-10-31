@@ -79,7 +79,10 @@ const CandidatePairing = lazy<ComponentType<ComponentProps<typeof Pairing>>>(() 
  * The release this run applied without a pairing whose pairing is now single can be used again, a primary button where it is not
  * folded, which brings in its tracklist and track details; with groups it is also listed above the folded list. In a review, the
  * tie or offer sentence names its region without being printed again (the summary's status says it), and the offered release's
- * card names its editions like a possible match, with Use this release as the primary button, the next step.
+ * card names its editions like a possible match, with Use this release as the primary button, the next step. A review's chooser
+ * sits in one Reference releases disclosure (see its return), which never folds under the open pairing panel, and a release card
+ * whose records show the same media and country (a card's records share every other value shown) says nothing tells them apart,
+ * numbering their edition buttons, so they never read as one edition.
  */
 export function CandidateChooser({ projectId, viewerId, lookup, review, disabled: locked, onChoose, onPairing }: {
   projectId: string; viewerId: string; lookup: ImportLookupView | ReviewLookupView; disabled: boolean;
@@ -153,6 +156,11 @@ export function CandidateChooser({ projectId, viewerId, lookup, review, disabled
   const position = (disc: number, track: number) => t('publication.track_position', { disc: String(disc), track: String(track) });
   // An edition's media and country, as a release card names its editions.
   const edition = (entry: Candidate) => [[...new Set(entry.formats)].join(', ') || '—', entry.country && `(${entry.country})`].filter(Boolean).join(' ');
+  // A release card's records that show the same media and country as another, and an edition's name for its button, numbered by
+  // its place on the card where another record shows the same. A card's records (releaseGroups) already share every other value
+  // shown (title, Artist, label, date, barcode, catalogue number and track count), so such records are ones nothing tells apart.
+  const alike = (group: readonly Candidate[]) => group.filter(entry => group.some(other => other !== entry && edition(other) === edition(entry)));
+  const editionName = (entry: Candidate, group: readonly Candidate[]) => alike(group).includes(entry) ? `${edition(entry)} · ${group.indexOf(entry) + 1}` : edition(entry);
   // A review candidate's subset facts: the members it pairs (only for a single pairing), the expected tracklist and its missing-file
   // rows where choosing brings them in (else that it brings in none), tracks left out and unpairable members (unless the reason says so).
   const subsetFacts = (subset: Subset, members: number, unpairable: boolean, albumOnly: boolean) => <>
@@ -184,6 +192,8 @@ export function CandidateChooser({ projectId, viewerId, lookup, review, disabled
         {candidate.source === 'itunes' && <p className={styles.muted}>{[t('lookup.itunes_only'), candidate.notChecked && t('lookup.not_checked')].filter(Boolean).join(' · ')}</p>}
         {'byTrackTitle' in candidate && candidate.byTrackTitle && review && <p className={styles.muted}>{t('lookup.found_by_track_title')}</p>}
         {group.length > 1 && <p className={styles.muted}>{t('catalog_review.lookup_editions', { count: group.length, editions: group.map(edition).join(' · ') })}</p>}
+        {/* Records nothing tells apart are said to be so, never taken for one edition. */}
+        {review && alike(group).length > 0 && <p className={styles.muted}>{t('catalog_review.lookup_records_alike', { count: alike(group).length })}</p>}
         {reason && <p>{t(reason.key, reason.values)}</p>}
         {review && subset?.pairedBy && <p className={styles.muted}>{subset.pairedBy === 'titlePositions' && positions
           ? t('catalog_review.lookup_paired_by_positions', { positions }) : t(`catalog_review.lookup_paired_by_${subset.pairedBy}`)}</p>}
@@ -211,7 +221,7 @@ export function CandidateChooser({ projectId, viewerId, lookup, review, disabled
           : choose(t('lookup.choose'))}
         {group.length > 1 && <details className={styles.details}><summary>{t('catalog_review.lookup_editions_choose')}</summary><div className={styles.actions}>
           {group.filter(entry => entry !== candidate).map(entry => choose(t(albumOnly(entry) ? 'catalog_review.lookup_choose_edition_album_only' : 'catalog_review.lookup_choose_edition',
-            { edition: edition(entry) }), entry))}</div></details>}
+            { edition: editionName(entry, group) }), entry))}</div></details>}
       </li>;
     })}</ul>;
   };
@@ -251,5 +261,16 @@ export function CandidateChooser({ projectId, viewerId, lookup, review, disabled
       {sections.others.length > 0 && fold('o', t('catalog_review.lookup_section_other_fit', { count: sections.others.length }), list('o', releases(sections.others)))}
       {sections.rest.length > 0 && fold('n', t('catalog_review.lookup_section_not_fit', { count: sections.rest.length }), list('n', releases(sections.rest)))}</>, none]
     : [<>{disclosed}{rechoose.length > 0 && list('r', rechoose.map(candidate => ({ candidate, proposal: null })))}{partial}</>, all];
-  return <>{head}{pairing}{tail}</>;
+  // A review's chooser sits in one Reference releases disclosure naming how many records the tracks may fit (matching or
+  // unverified), with what using one does. It stays open while anything is to choose: a tie, an offered release, the sections
+  // (nothing matched as a group, where the pairing panel opens) or a release to use again; it folds once this run applied a
+  // release or none from matching groups, and opens again as soon as that no longer holds. It never folds under an open pairing
+  // panel, whose status and choices stay in view when its save's re-rank settles the run; closing that panel leaves it as it is.
+  const settled = !tie && !offered && !sections && lookup.applied?.run === lookup.run && rechoose.length === 0;
+  const releasesFold = useRef<HTMLDetailsElement>(null);
+  useLayoutEffect(() => { if (releasesFold.current && (!settled || !showing)) releasesFold.current.open = !settled; }, [settled]);
+  if (!review) return <>{head}{pairing}{tail}</>;
+  const possible = lookup.candidates.filter(candidate => candidate.status === 'matching' || candidate.status === 'unverified').length;
+  return <details ref={releasesFold} className={styles.details}><summary>{t('catalog_review.lookup_releases', { count: possible })}</summary>
+    <p className={styles.muted}>{t('catalog_review.lookup_releases_copy')}</p>{head}{pairing}{tail}</details>;
 }

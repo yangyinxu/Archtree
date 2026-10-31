@@ -3,12 +3,12 @@
  *   Functions: mount, route, discarded, confirm, retain, expectCleanedUp
  *   Constants: buffers, props
  * Tests
- *   - the confirmation names the catalog Album, shows a different draft title only as secondary text, focuses Cancel and sends nothing until confirmed
+ *   - the inline confirmation names the catalog Album, shows a different draft title only as secondary text, says once that the Album does not change, focuses Cancel and sends nothing until confirmed
  *   - a confirmed discard sends only the shown revision and its operation ID, forgets the review's buffers, removes its reads, reads the rest again and calls back once
  *   - a discard refused because another tab discarded the review runs the same cleanup
  *   - Luna active and an applied review are refused with their own messages and no retry, and read the review again
  *   - a revision conflict shows the conflict message, and an unknown outcome retries only the original intent, kept across a remount
- *   - the action is disabled offline and while disabled, with its reason as the button's description
+ *   - the action is disabled offline and while disabled, with its reason as visible text beside it that describes it
  * @end-catalog */
 
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
@@ -39,7 +39,7 @@ function route(answer: (body: Record<string, unknown>) => Response) {
   return { bodies, paths };
 }
 const discarded = (body: Record<string, unknown>) => reviewJson({ discarded: { id: reviewId, albumId }, receipt: { operationId: body.operationId, kind: 'discard', revision: 4 } });
-const confirm = () => { fireEvent.click(screen.getByRole('button', { name: 'Discard completion' })); fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Discard completion' })); };
+const confirm = () => { fireEvent.click(screen.getByRole('button', { name: 'Discard completion' })); fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Confirm discard' })); };
 const retain = () => { for (const key of buffers.slice(0, 3)) adminWorkspace.retain(key, { kept: key }, adminWorkspace.capture()); };
 /** The review's own reads are gone, the queue is read again and nothing of the review stays buffered. */
 function expectCleanedUp(view: ReturnType<typeof mount>) {
@@ -52,18 +52,24 @@ function expectCleanedUp(view: ReturnType<typeof mount>) {
 beforeEach(() => { adminWorkspace.reset(); adminWorkspace.authorize(captureAccountOperation(viewer), true, true, undefined, { editing: true, visibility: true }); adminWorkspace.select('admin'); });
 afterEach(() => { cleanup(); adminWorkspace.reset(); vi.unstubAllGlobals(); });
 
-test('the confirmation names the catalog Album, shows a different draft title only as secondary text, focuses Cancel and sends nothing until confirmed', async () => {
+test('the inline confirmation names the catalog Album, shows a different draft title only as secondary text, says once that the Album does not change, focuses Cancel and sends nothing until confirmed', async () => {
   const { bodies } = route(discarded); mount();
   const action = screen.getByRole('button', { name: 'Discard completion' });
-  expect(action).not.toHaveClass(styles.primary);
+  expect(action).not.toHaveClass(styles.primary); expect(action).toHaveAttribute('aria-expanded', 'false');
   fireEvent.click(action);
-  const dialog = within(screen.getByRole('dialog', { name: 'Discard this Album completion?' }));
+  // Inline and non-modal: it follows the action, which stays on the page and says it is expanded.
+  const shown = screen.getByRole('dialog', { name: 'Discard this Album completion?' }), dialog = within(shown);
+  expect(shown).toHaveAttribute('aria-modal', 'false'); expect(action).toHaveAttribute('aria-expanded', 'true');
+  expect(action.compareDocumentPosition(shown) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(dialog.getByRole('strong')).toHaveTextContent('Synthetic catalog Album'); expect(dialog.getByText('Synthetic draft title')).toBeVisible();
-  expect(dialog.getByText(/Luna AI suggestions and unsaved edits\. The Album in the catalog does not change\./)).toBeVisible();
+  expect(shown).toHaveAccessibleDescription(/Luna AI suggestions and unsaved edits; the original Album does not change\./);
+  expect(shown.textContent!.match(/does not change/g)).toHaveLength(1);
   await waitFor(() => expect(dialog.getByRole('button', { name: 'Cancel' })).toHaveFocus());
-  expect(dialog.getByRole('button', { name: 'Discard completion' })).not.toHaveClass(styles.primary);
+  expect(dialog.getByRole('button', { name: 'Confirm discard' })).not.toHaveClass(styles.primary);
   fireEvent.click(dialog.getByRole('button', { name: 'Cancel' })); expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-  fireEvent.click(action); fireEvent.keyDown(document, { key: 'Escape' }); expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  expect(action).toHaveFocus();
+  fireEvent.click(action); fireEvent.keyDown(screen.getByRole('button', { name: 'Cancel' }), { key: 'Escape' }); expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  expect(action).toHaveFocus();
   expect(bodies).toEqual([]);
   // A draft title equal to the catalog title is not repeated.
   cleanup(); mount({ draftTitle: 'Synthetic catalog Album' }); fireEvent.click(screen.getByRole('button', { name: 'Discard completion' }));
@@ -76,7 +82,7 @@ test('a confirmed discard sends only the shown revision and its operation ID, fo
   fireEvent.click(screen.getByRole('button', { name: 'Discard completion' }));
   // A newer revision read while the confirmation is open never changes the revision it binds.
   view.rerender({ expectedRevision: 4 });
-  fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Discard completion' }));
+  fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Confirm discard' }));
   await waitFor(() => expect(view.onDiscarded).toHaveBeenCalled());
   expect(paths).toEqual([`/api/admin/v1/catalog-reviews/${reviewId}/discard`]);
   expect(bodies).toEqual([{ expectedRevision: 3, operationId: expect.any(String) }]);
@@ -93,7 +99,7 @@ test('a discard refused because another tab discarded the review runs the same c
 });
 
 test('Luna active and an applied review are refused with their own messages and no retry, and read the review again', async () => {
-  for (const [code, message] of [['ADMIN_IMPORT_ANALYSIS_ACTIVE', 'Stop Luna AI before discarding this completion.'],
+  for (const [code, message] of [['ADMIN_IMPORT_ANALYSIS_ACTIVE', 'Stop Luna AI first'],
     ['ADMIN_CATALOG_REVIEW_APPLIED', 'This completion was already applied to the Album, so it cannot be discarded.']]) {
     adminWorkspace.forget(buffers[3]); route(() => reviewJson({ code }, 409)); retain();
     const view = mount(); confirm();
@@ -124,11 +130,13 @@ test('a revision conflict shows the conflict message, and an unknown outcome ret
   expect(bodies).toHaveLength(3); expect(bodies[2]).toEqual(bodies[1]); expect(bodies[1].operationId).not.toBe(bodies[0].operationId);
 });
 
-test('the action is disabled offline and while disabled, with its reason as the button\'s description', () => {
+test('the action is disabled offline and while disabled, with its reason as visible text beside it that describes it', () => {
   route(discarded);
   const view = mount({ disabled: true, reason: 'catalog_review.discard_luna' });
   const action = screen.getByRole('button', { name: 'Discard completion' });
-  expect(action).toBeDisabled(); expect(action).toHaveAccessibleDescription('Stop Luna AI before discarding this completion.');
+  expect(action).toBeDisabled(); expect(action).toHaveAccessibleDescription('Stop Luna AI first');
+  expect(screen.getByText('Stop Luna AI first')).toBeVisible();
+  expect(action.parentElement).toContainElement(screen.getByText('Stop Luna AI first'));
   view.rerender({ disabled: true, reason: null }); expect(action).toBeDisabled(); expect(action).toHaveAccessibleDescription('');
   view.rerender({ disabled: false, reason: null }); expect(action).toBeEnabled();
   vi.stubGlobal('navigator', { ...navigator, onLine: false }); act(() => { window.dispatchEvent(new Event('offline')); });

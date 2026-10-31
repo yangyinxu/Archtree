@@ -364,7 +364,7 @@ test('Luna analysis requires its own confirmation and a lost acknowledgement nev
   const dialog = within(await screen.findByRole('dialog', { name: 'Use Luna AI? This is a paid AI service' }));
   expect(dialog.getByText(/It is a paid AI service and may incur a charge/)).toBeVisible();
   expect(bodies).toEqual([]);
-  fireEvent.click(dialog.getByRole('button', { name: 'Use Luna AI (paid)' }));
+  fireEvent.click(dialog.getByRole('button', { name: 'Start Luna AI analysis (paid)' }));
   const retry = await screen.findByRole('button', { name: 'Retry original operation' });
   fireEvent.click(screen.getByRole('tab', { name: 'Review Luna AI suggestions' }));
   fireEvent.click(screen.getByRole('tab', { name: 'Edit draft' }));
@@ -398,7 +398,7 @@ test.each([['without saved changes', false], ['with a saved change', true]] as c
   }
   fireEvent.click(luna);
   const dialog = within(await screen.findByRole('dialog', { name: 'Use Luna AI? This is a paid AI service' }));
-  expect(dialog.getByRole('button', { name: 'Use Luna AI (paid)' })).toHaveClass(styles.primary);
+  expect(dialog.getByRole('button', { name: 'Start Luna AI analysis (paid)' })).toHaveClass(styles.primary);
   expect(dialog.getByRole('button', { name: 'Cancel' })).not.toHaveClass(styles.primary);
 });
 
@@ -969,14 +969,14 @@ function routeSummary(item: () => CatalogReview, lookup: () => ReviewLookupRespo
   }));
   return reads;
 }
-const notStarted = (): ReviewLookupResponse => ({ lookup: null, revision: 1, valueRevision: 0, summary: { waiting: { lookup: false, analysis: false }, needsAnswer: { tie: false, conflicts: [] }, lookupAvailable: true } });
+const notStarted = (): ReviewLookupResponse => ({ lookup: null, revision: 1, valueRevision: 0, summary: { waiting: { lookup: false, analysis: false }, needsAnswer: { tie: false, conflicts: [] }, lookupAvailable: true, primaryArtists: [] } });
 
 test('metadata lookup comes first: its controls precede the paid Luna AI button, which is never primary, and Luna AI suggestions arrive unticked', async () => {
   const item = catalogReview(); routeSummary(() => item, notStarted);
   mountPage();
   const box = await screen.findByRole('group', { name: 'Look up by name' }), luna = screen.getByRole('button', { name: 'Use Luna AI again (paid)' });
   expect(screen.getByRole('textbox', { name: 'Name' })).toHaveValue('Synthetic catalog Album');
-  for (const control of [screen.getByRole('heading', { name: 'Metadata lookup' }), box, within(box).getByRole('button', { name: 'Look up' })])
+  for (const control of [screen.getByRole('heading', { name: 'Metadata lookup' }), box, within(box).getByRole('button', { name: 'Look up metadata (free)' })])
     expect(control.compareDocumentPosition(luna) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(luna).not.toHaveClass(styles.primary);
   fireEvent.click(screen.getByRole('tab', { name: 'Review Luna AI suggestions' }));
@@ -1101,7 +1101,7 @@ test('a lookup submission, a choice and an answer are sent with the shown revisi
   await waitFor(() => expect(screen.queryByRole('button', { name: 'Retry original operation' })).not.toBeInTheDocument());
   expect(screen.queryByText(/^The administrator workbench was updated/)).not.toBeInTheDocument();
   expect(adminWorkspace.getSnapshot().reloadRequired).toBe(false);
-  fireEvent.click(screen.getByRole('button', { name: 'Look up' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Look up metadata (free)' }));
   await waitFor(() => expect(writes).toHaveLength(3));
   expect(writes[2]).toMatchObject({ path: `/api/admin/v1/catalog-reviews/${reviewId}/lookup`, body: { expectedRevision: 3, kind: 'album', text: 'Synthetic catalog Album' } });
 });
@@ -1110,11 +1110,11 @@ test('a lookup refusal shows its own message and keeps no intent to retry', asyn
   const item = catalogReview(); let posts = 0;
   routeSummary(() => item, notStarted, () => { posts++; return reviewJson({ code: 'ADMIN_IMPORT_LOOKUP_ACTIVE' }, 409); });
   mountPage();
-  fireEvent.click(await screen.findByRole('button', { name: 'Look up' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Look up metadata (free)' }));
   expect(await screen.findByText('Metadata lookup or its cover staging is still running. Wait for it to finish, then try again.')).toBeVisible();
   expect(screen.queryByRole('button', { name: 'Retry original operation' })).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Discard local edits and load saved version' })).not.toBeInTheDocument();
-  await waitFor(() => expect(screen.getByRole('button', { name: 'Look up' })).toBeEnabled());
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Look up metadata (free)' })).toBeEnabled());
   expect(posts).toBe(1);
 });
 
@@ -1245,7 +1245,7 @@ test('the free retry sends only the shown revision and its operation ID, and its
     return reviewJson({ item, receipt }, 202);
   });
   mountPage();
-  const retry = await within(await screen.findByRole('region', { name: 'Metadata lookup' })).findByRole('button', { name: 'Retry lookup' });
+  const retry = await within(await screen.findByRole('region', { name: 'Metadata lookup' })).findByRole('button', { name: 'Retry lookup (free)' });
   await waitFor(() => expect(retry).toBeEnabled());
   const before = readsOf(reads, '/lookup');
   fireEvent.click(retry);
@@ -1399,7 +1399,8 @@ test('Discard completion follows the paid Luna AI action under Other actions, is
   vi.stubGlobal('fetch', vi.fn(async () => reviewJson({ item: running, receipt: null })));
   mountPage();
   const busy = await screen.findByRole('button', { name: 'Discard completion' });
-  expect(busy).toBeDisabled(); expect(busy).toHaveAccessibleDescription('Stop Luna AI before discarding this completion.');
+  expect(busy).toBeDisabled(); expect(busy).toHaveAccessibleDescription('Stop Luna AI first');
+  expect(screen.getByText('Stop Luna AI first')).toBeVisible();
   expect(screen.getByRole('button', { name: 'Stop Luna AI' }).compareDocumentPosition(busy) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 });
 
@@ -1414,7 +1415,7 @@ test.each([['current', 'Album page'], ['changed', 'Album page'], ['unavailable',
   fireEvent.click(await screen.findByRole('button', { name: 'Discard completion' }));
   const dialog = within(screen.getByRole('dialog', { name: 'Discard this Album completion?' }));
   expect(dialog.getByText('Synthetic catalog Album', { selector: 'strong' })).toBeVisible();
-  fireEvent.click(dialog.getByRole('button', { name: 'Discard completion' }));
+  fireEvent.click(dialog.getByRole('button', { name: 'Confirm discard' }));
   expect(await screen.findByText(landing)).toBeVisible();
   expect(writes).toEqual([{ path: `/api/admin/v1/catalog-reviews/${reviewId}/discard`, body: { expectedRevision: 2, operationId: expect.any(String) } }]);
   for (const name of ['catalog-review-editor', 'catalog-review-stage', 'catalog-review-command', 'catalog-review-discard']) expect(adminWorkspace.buffer(`${name}:${reviewId}`)).toBeUndefined();

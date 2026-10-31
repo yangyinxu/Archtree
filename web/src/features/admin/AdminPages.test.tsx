@@ -672,14 +672,15 @@ test('an unfinished Album completion card offers Discard completion naming its c
   expect(action).not.toHaveClass(styles.primary);
   // A running Luna AI disables the action with its reason as its description; an applied completion offers none.
   const busy = await waitFor(() => card('Album completion with Luna AI').getByRole('button', { name: 'Discard completion' }));
-  expect(busy).toBeDisabled(); expect(busy).toHaveAccessibleDescription('Stop Luna AI before discarding this completion.');
+  expect(busy).toBeDisabled(); expect(busy).toHaveAccessibleDescription('Stop Luna AI first');
   expect(card('Applied Album completion').queryByRole('button', { name: 'Discard completion' })).not.toBeInTheDocument();
   fireEvent.click(action);
-  const dialog = within(screen.getByRole('dialog', { name: 'Discard this Album completion?' }));
+  // The confirmation opens inline, in the card.
+  const dialog = within(card('Draft Album title').getByRole('dialog', { name: 'Discard this Album completion?' }));
   expect(dialog.getByText('Catalog Album title')).toBeVisible();
   expect(dialog.getByText('Draft Album title')).toBeVisible();
   expect(writes).toEqual([]);
-  fireEvent.click(dialog.getByRole('button', { name: 'Discard completion' }));
+  fireEvent.click(dialog.getByRole('button', { name: 'Confirm discard' }));
   await waitFor(() => expect(screen.queryByRole('heading', { name: 'Draft Album title' })).not.toBeInTheDocument());
   expect(writes).toEqual([{ path: `/api/admin/v1/catalog-reviews/${open.id}/discard`, body: { expectedRevision: 3, operationId: expect.any(String) } }]);
   expect(screen.getByRole('heading', { name: 'Album completion with Luna AI' })).toBeVisible();
