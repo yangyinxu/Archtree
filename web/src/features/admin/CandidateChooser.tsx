@@ -66,10 +66,10 @@ const CandidatePairing = lazy<ComponentType<ComponentProps<typeof Pairing>>>(() 
  * open (previews at once), the other releases the tracks may fit and those that do not fit or could not be read, both folded
  * (previews once opened). A release card acts for one edition and lets each other edition be chosen under Choose another edition,
  * so every candidate stays selectable. A possible match whose members pair in no single way keeps choosing it under Other options
- * as Album values only (each other edition likewise); the first such card offers filling the Disc and Track Numbers from the
- * titles (`review.fill`) or says they can be entered in Edit draft, then used where a member has no duration, else compared again,
- * unless another possible match pairs in one way (then that release is the next step and nothing asks for numbers). Each such
- * card also offers Pair tracks by hand, in one row with the fill, which opens the pairing panel (CandidatePairing.tsx, its own
+ * as Album values only (each other edition likewise); the first such card says how many members the numbers proposed from the
+ * titles give a number (`review.numbers`, on the review page's proposal table) or that they can be entered by manual editing, then
+ * used where a member has no duration, else compared again, unless another possible match pairs in one way (then that release is
+ * the next step and nothing asks for numbers). Each such card also offers Pair tracks by hand, which opens the pairing panel (CandidatePairing.tsx, its own
  * chunk) for that edition below the sections, one at a time; it keeps one place in the tree whichever view a re-rank shows, so it stays open with its state when
  * the release leaves the possible matches, and `onPairing` hears whether it is open, so the summary never folds its results under
  * it. While it saves, the chooser's other choices wait; once it closes, focus returns to its
@@ -86,8 +86,8 @@ const CandidatePairing = lazy<ComponentType<ComponentProps<typeof Pairing>>>(() 
  */
 export function CandidateChooser({ projectId, viewerId, lookup, review, disabled: locked, onChoose, onPairing }: {
   projectId: string; viewerId: string; lookup: ImportLookupView | ReviewLookupView; disabled: boolean;
-  /** An existing-Album review: its saved tracks, the searched text, its primary Artists' names and an eligible fill (else null). */
-  review?: { tracks: readonly { slotId: string; title: string }[]; searched: string; artists: readonly string[]; fill: { count: number; run: () => void } | null };
+  /** An existing-Album review: its saved tracks, the searched text, its primary Artists' names and how many members the titles propose numbers for. */
+  review?: { tracks: readonly { slotId: string; title: string }[]; searched: string; artists: readonly string[]; numbers: number };
   onChoose: (candidateKey: string | null) => void;
   /** Told whether the pairing panel is open, as it opens and closes and with false once the chooser leaves the page. */
   onPairing?: (open: boolean) => void;
@@ -209,11 +209,9 @@ export function CandidateChooser({ projectId, viewerId, lookup, review, disabled
         {again(candidate) ? <><p>{t('catalog_review.lookup_choose_again_copy')}</p>{choose(t('catalog_review.lookup_choose_again'))}</>
           // A possible match whose members pair in no single way: the numbers come first, and choosing it writes Album values only.
           : albumOnly(candidate) ? <>
-            {index === hinted && <p>{t(review!.fill ? unknown ? 'catalog_review.lookup_fill_hint_durations' : 'catalog_review.lookup_fill_hint'
-              : unknown ? 'catalog_review.lookup_fill_unavailable_durations' : 'catalog_review.lookup_fill_unavailable', { count: review!.fill?.count ?? 0 })}</p>}
-            <div className={styles.actions}>{index === hinted && review!.fill && <button type="button" className={styles.button} disabled={disabled} aria-describedby={title}
-              onClick={review!.fill.run}>{t('catalog_review.fill_numbers')}</button>}
-              <button id={opener(candidate.key)} type="button" className={styles.button} disabled={disabled} aria-expanded={panel?.key === candidate.key} aria-describedby={title}
+            {index === hinted && <p>{t(review!.numbers ? unknown ? 'catalog_review.lookup_fill_hint_durations' : 'catalog_review.lookup_fill_hint'
+              : unknown ? 'catalog_review.lookup_fill_unavailable_durations' : 'catalog_review.lookup_fill_unavailable', { count: review!.numbers })}</p>}
+            <div className={styles.actions}><button id={opener(candidate.key)} type="button" className={styles.button} disabled={disabled} aria-expanded={panel?.key === candidate.key} aria-describedby={title}
                 onClick={() => setPanel(panel?.key === candidate.key ? null : { key: candidate.key, editions: group.map(entry => entry.key) })}>
                 {t('catalog_review.lookup_pair_by_hand')}</button></div>
             <details className={styles.details}><summary>{t('catalog_review.lookup_other_options')}</summary><p className={styles.muted}>{t('catalog_review.lookup_album_only_copy')}</p>
@@ -225,9 +223,9 @@ export function CandidateChooser({ projectId, viewerId, lookup, review, disabled
       </li>;
     })}</ul>;
   };
-  // A possible match's fill hint stands in for the unknown Disc Numbers line, and a pairing the positions or durations made single
-  // (its card says how) leaves no position unclear.
-  const fillHinted = Boolean(review?.fill) && !paired && Boolean(sections?.possible.map(acting).some(candidate => candidate.comparison?.trackCount.local && subsetOf(candidate)?.pairing !== 'unique'
+  // A possible match's proposed-numbers hint stands in for the unknown Disc Numbers line, and a pairing the positions or durations
+  // made single (its card says how) leaves no position unclear.
+  const fillHinted = Boolean(review?.numbers) && !paired && Boolean(sections?.possible.map(acting).some(candidate => candidate.comparison?.trackCount.local && subsetOf(candidate)?.pairing !== 'unique'
     && !again(candidate)));
   const resolved = lookup.candidates.some(candidate => subsetOf(candidate)?.pairedBy);
   const disclosure = lookup.disclosure, unknown = disclosure ? ([['lookup.unknown_durations', disclosure.unknownLocalDurations], ['lookup.unknown_discs', disclosure.unknownLocalDiscNumbers]] as const)

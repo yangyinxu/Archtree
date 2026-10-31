@@ -40,7 +40,8 @@ test('a Luna AI chunk that cannot load asks for a reload in place of its control
   expect(adminWorkspace.getSnapshot().reloadRequired).toBe(false);
   expect(await screen.findByRole('group', { name: 'Completion steps' })).toBeVisible();
   expect(await screen.findByRole('button', { name: 'Discard completion' })).toBeEnabled();
-  fireEvent.change(screen.getByRole('textbox', { name: 'Title' }), { target: { value: 'A manual correction' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Edit manually' }));
+  fireEvent.change(await screen.findByRole('textbox', { name: 'Title' }), { target: { value: 'A manual correction' } });
   fireEvent.click(screen.getByRole('button', { name: 'Save completion draft' }));
   await waitFor(() => expect(writes).toEqual([`/api/admin/v1/catalog-reviews/${reviewId}`]));
 });

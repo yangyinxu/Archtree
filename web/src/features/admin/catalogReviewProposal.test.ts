@@ -11,6 +11,7 @@
  *   - each number cell fills, keeps, equals or replaces the stored value, and a Disc cell exists only where the review captured one
  *   - the cleanup removes exactly the position from titles still as captured, only for an accepted proposal, and never touches an edited title
  *   - the selection defaults carry every number an accepted Disc and Track proposal gives, the same once any number is saved, and each cleaned title with the numbers it needs
+ *   - turning the cleanup off restores only the titles it wrote; when none is known, saved cleaned titles and never an unsaved edit
  *   - a 44-track Album on three discs proposes every Disc and Track Number, and one mistyped title stops it while naming only its own row
  * @end-catalog */
 
@@ -22,7 +23,7 @@
  */
 import { leadingTitlePosition, leadingTitlePositions } from '../../../../src/administration/lookup/lookupTitlePositions';
 import { longAlbumDiscs, longAlbumReview } from './catalogReviewLookupFixtures.testSupport';
-import { proposalCells, titleCleanup, titleDefaults, titleProposal, withTitleProposal, type TitleProposalFlag } from './catalogReviewProposal';
+import { proposalCells, titleCleanup, titleDefaults, titleProposal, toggleCleanup, withTitleProposal, type TitleProposalFlag } from './catalogReviewProposal';
 import { titleLeadingPosition } from './reviewLookupStatus';
 
 /** A stored Disc and Track Number; an undefined Disc Number was never captured. */
@@ -152,6 +153,9 @@ test('the selection defaults carry every number an accepted Disc and Track propo
   // A stored number that disagrees with its title stops them, as it stops the proposal.
   const disagreeing = source(['1-01 A', '1-02 B'], [[null, 3], [undefined, null]]);
   expect(titleDefaults(disagreeing, saved(disagreeing)).titles.size).toBe(0);
+  // Corrected and saved, the proposal the table shows over the saved draft gives them as the table does.
+  const corrected = titleDefaults(disagreeing, saved(disagreeing, [[null, 1], [null, null]]));
+  expect([[...corrected.numbers], corrected.titles.size]).toEqual([[...defaults.numbers], 2]);
   // Where the review captured no Disc Number, the saved one (lookup's, never the administrator's) is what the guard reads.
   const uncaptured = source(['1-01 A', '2-01 B'], [[undefined, null], [undefined, null]]);
   expect(titleDefaults(uncaptured, saved(uncaptured)).titles.size).toBe(0);
@@ -161,6 +165,19 @@ test('the selection defaults carry every number an accepted Disc and Track propo
   expect([plain.numbers.size, [...plain.titles.values()]]).toEqual([0, [{ title: '序曲', numbers: ['trackNumber'] }, { title: '終曲', numbers: ['trackNumber'] }]]);
   const rejected = source(['01 A', '1999 X']), nothing = titleDefaults(rejected, saved(rejected));
   expect([nothing.numbers.size, nothing.titles.size]).toEqual([0, 0]);
+});
+
+test('turning the cleanup off restores only the titles it wrote; when none is known, saved cleaned titles and never an unsaved edit', () => {
+  const tracks = source(['1-01 A', '1-02 B', '1-03 C']), proposal = titleProposal(tracks, saved(tracks));
+  const base = { album: {} as never, tracks: saved(tracks).map(track => ({ ...track, artists: [] })) }, typed = { tracks: { 'slot-2': { title: 'B' } } };
+  const on = toggleCleanup(proposal, base, typed, true);
+  expect([on.edits.tracks, on.keys, on.cleaned]).toEqual([{ 'slot-2': { title: 'B' }, 'slot-1': { title: 'A' }, 'slot-3': { title: 'C' } },
+    ['track:slot-1:title', 'track:slot-3:title'], ['slot-1', 'slot-3']]);
+  const off = toggleCleanup(proposal, base, on.edits, false, on.cleaned);
+  expect([off.edits.tracks, off.keys, off.cleaned]).toEqual([{ 'slot-2': { title: 'B' }, 'slot-1': {}, 'slot-3': {} }, [], []]);
+  // Saved cleaned (the page's record of them lost), turning it off restores them as edits, still leaving the typed title alone.
+  const savedClean = { ...base, tracks: base.tracks.map(track => track.slotId === 'slot-2' ? track : { ...track, title: track.title.slice(5) }) };
+  expect(toggleCleanup(proposal, savedClean, typed, false).edits.tracks).toEqual({ 'slot-2': { title: 'B' }, 'slot-1': { title: '1-01 A' }, 'slot-3': { title: '1-03 C' } });
 });
 
 test('a 44-track Album on three discs proposes every Disc and Track Number, and one mistyped title stops it while naming only its own row', () => {

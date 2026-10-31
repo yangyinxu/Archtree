@@ -50,7 +50,8 @@ test('a review page whose summary and discard chunks cannot load asks for a relo
   await settle(before);
   expect(screen.queryByRole('button', { name: 'Discard completion' })).not.toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Use Luna AI (paid)' })).toBeEnabled();
-  fireEvent.change(screen.getByRole('textbox', { name: 'Title' }), { target: { value: 'A manual correction' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Edit manually' }));
+  fireEvent.change(await screen.findByRole('textbox', { name: 'Title' }), { target: { value: 'A manual correction' } });
   fireEvent.click(screen.getByRole('button', { name: 'Save completion draft' }));
   await waitFor(() => expect(writes).toEqual([`/api/admin/v1/catalog-reviews/${reviewId}`]));
   expect(screen.getByRole('textbox', { name: 'Title' })).toBeVisible();

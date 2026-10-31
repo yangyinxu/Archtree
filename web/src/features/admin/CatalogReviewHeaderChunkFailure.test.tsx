@@ -1,0 +1,42 @@
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { MemoryRouter, Route, Routes } from 'react-router';
+import { captureAccountOperation } from '../../api/accountEpoch';
+import { adminWorkspace } from './adminWorkspace';
+import { AdminCatalogReviewPage } from './AdminCatalogReviewPage';
+import { catalogReview, reviewId, reviewJson, session, viewer } from './catalogReviewFixtures.testSupport';
+
+/**
+ * A deploy removed the review page's header chunk before the page loaded it: the plain heading with the Album title and the page's
+ * Refresh status stays in its place, asking for no reload, and manual editing and its save stay usable. All names and identifiers
+ * are synthetic.
+ */
+const headerChunk = vi.hoisted(() => ({ attempts: 0 }));
+vi.mock('./CatalogReviewHeader', () => { headerChunk.attempts += 1; throw new TypeError('Failed to fetch dynamically imported module'); });
+vi.mock('./CatalogReviewSummary', () => ({ CatalogReviewSummary: () => <section aria-label="Metadata lookup">Synthetic lookup summary</section> }));
+
+beforeEach(() => {
+  adminWorkspace.reset(); adminWorkspace.authorize(captureAccountOperation(viewer), true, true, undefined, { editing: true, visibility: true }); adminWorkspace.select('admin');
+});
+afterEach(() => { cleanup(); adminWorkspace.reset(); vi.unstubAllGlobals(); });
+
+test('a header chunk that cannot load leaves the plain heading and Refresh status in its place, and manual editing and its save stay usable', async () => {
+  const item = catalogReview(), writes: string[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (path: string, init?: RequestInit) => {
+    if (init?.method === 'PATCH') { writes.push(path); return reviewJson({ code: 'unexpected' }, 500); }
+    return reviewJson({ item, receipt: null });
+  }));
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } }); client.setQueryData(['browser-session'], session);
+  render(<QueryClientProvider client={client}><MemoryRouter initialEntries={[`/admin/catalog-reviews/${reviewId}`]}><Routes>
+    <Route path="/admin/catalog-reviews/:reviewId" element={<AdminCatalogReviewPage />} /></Routes></MemoryRouter></QueryClientProvider>);
+  expect(await screen.findByText('Synthetic lookup summary')).toBeVisible();
+  await waitFor(() => expect(headerChunk.attempts).toBeGreaterThan(0));
+  expect(screen.getByRole('heading', { level: 1, name: 'Synthetic catalog Album' })).toBeVisible();
+  expect(screen.getByRole('button', { name: 'Refresh status' })).toBeEnabled();
+  expect(screen.queryByRole('img', { name: /cover/ })).not.toBeInTheDocument();
+  expect(screen.queryByText(/Reload the page to continue/)).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Edit manually' }));
+  fireEvent.change(await screen.findByRole('textbox', { name: 'Title' }), { target: { value: 'A manual correction' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Save completion draft' }));
+  await waitFor(() => expect(writes).toEqual([`/api/admin/v1/catalog-reviews/${reviewId}`]));
+});

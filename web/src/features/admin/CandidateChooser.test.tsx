@@ -20,11 +20,11 @@
  *   - a review tie, the offered single choice, unverified releases and the disclosures speak of the Album's tracks; an import keeps its file wording
  *   - a review release first found through a track title is marked so in the tie view, the offered single choice and the folded list; another release and any import candidate are not
  *   - while nothing matched as a group, a review lists possible matches open as one card per release with its editions, then the partial comparison, naming the iTunes fallback where it left results out, then the other sections folded, then none
- *   - a possible match whose members pair in no single way offers the numbers first and keeps choosing it, as Album values only, under Other options
+ *   - a possible match whose members pair in no single way points at the proposed numbers first and keeps choosing it, as Album values only, under Other options
  *   - the release this run applied without a pairing can be used again once its pairing is single, above the folded list; with a pairing it stays applied
  *   - a review says its offer or tie only as the summary's status: the region keeps it as its name, the offered card names its editions and Use this release is primary; an import keeps its heading
  *   - every edition of a grouped release stays choosable in the review sections, for its Album values only where the card writes no tracklist
- *   - among several possible releases only the first offers the numbers, and a release whose members have no duration is then used rather than compared again
+ *   - among several possible releases only the first points at the proposed numbers, and a release whose members have no duration is then used rather than compared again
  *   - an import view keeps its flat folded list and status sentences even with unverified candidates of the same title
  *   - a review's possible matches load their previews at once, and a folded section's only once it is opened
  *   - a review card says how its pairing was made single: by the titles' track numbers, naming them, or the file names' or the closest durations; without it, or on the import page, no such line shows
@@ -278,7 +278,7 @@ const reviewView = (extra: Partial<ReviewLookupView> = {}): ReviewLookupView => 
 type ReviewProps = NonNullable<Parameters<typeof CandidateChooser>[0]['review']>;
 function mountReview(lookup: ReviewLookupView, review: Partial<ReviewProps> = {}, disabled = false) {
   const onChoose = vi.fn();
-  render(<CandidateChooser projectId={importId} viewerId={viewerId} lookup={lookup} review={{ tracks: reviewTracks, searched: 'Synthetic Album', artists: [], fill: null, ...review }} disabled={disabled} onChoose={onChoose} />);
+  render(<CandidateChooser projectId={importId} viewerId={viewerId} lookup={lookup} review={{ tracks: reviewTracks, searched: 'Synthetic Album', artists: [], numbers: 0, ...review }} disabled={disabled} onChoose={onChoose} />);
   return onChoose;
 }
 
@@ -362,7 +362,7 @@ test('a review release first found through a track title is marked so in the tie
 const live = (extra: Partial<ReviewLookupView> = {}): ReviewLookupView => ({ ...pairingLookupResponse().lookup!, ...extra });
 const liveReview = { searched: 'Synthetic Live Album 2', artists: ['Synthetic Live Artist -Romanized-'] };
 const ambiguousReason = 'Both tracks fit this release, but in more than one way, so their positions are unclear';
-const fillHint = '2 tracks have no Disc or Track Number. The track titles start with track numbers, so the numbers can be filled from them; saving the completion draft compares again for free.';
+const fillHint = '2 tracks have no Disc or Track Number. This page proposes the numbers from the track titles; saving them compares again for free.';
 
 test('while nothing matched as a group, a review lists possible matches open as one card per release with its editions, then the partial comparison, naming the iTunes fallback where it left results out, then the other sections folded, then none', () => {
   const onChoose = mountReview(live(), liveReview);
@@ -404,19 +404,17 @@ test('while nothing matched as a group, a review lists possible matches open as 
   expect(screen.queryByText(/^Not every release found/)).not.toBeInTheDocument();
 });
 
-test('a possible match whose members pair in no single way offers the numbers first and keeps choosing it, as Album values only, under Other options', () => {
-  const run = vi.fn();
-  let onChoose = mountReview(live(), { ...liveReview, fill: { count: 2, run } });
+test('a possible match whose members pair in no single way points at the proposed numbers first and keeps choosing it, as Album values only, under Other options', () => {
+  let onChoose = mountReview(live(), { ...liveReview, numbers: 2 });
   let card = within(screen.getByRole('region', { name: 'Possible match (1 release)' }));
   expect(card.queryByRole('button', { name: 'Use this release' })).not.toBeInTheDocument();
-  expect(card.getByText(fillHint)).toBeInTheDocument();
-  const fill = card.getByRole('button', { name: 'Fill Disc and Track Numbers from titles' });
-  expect(fill).toHaveClass(styles.button); expect(fill).not.toHaveClass(styles.primary);
-  // The fill and Pair tracks by hand share one row of actions, which spaces them apart.
-  expect(fill.parentElement).toHaveClass(styles.actions);
-  expect(card.getByRole('button', { name: 'Pair tracks by hand' }).parentElement).toBe(fill.parentElement);
-  fireEvent.click(fill); expect(run).toHaveBeenCalledTimes(1);
-  // The fill hint stands in for the unknown Disc Numbers line.
+  // The numbers are proposed on the review page, so the card only says so: it offers no fill of its own, and Pair tracks by hand
+  // follows the hint in its own row of actions.
+  const hint = card.getByText(fillHint), pair = card.getByRole('button', { name: 'Pair tracks by hand' });
+  expect(card.queryByRole('button', { name: /^Fill/ })).not.toBeInTheDocument();
+  expect(pair.parentElement).toHaveClass(styles.actions);
+  expect(hint.compareDocumentPosition(pair) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  // The proposed-numbers hint stands in for the unknown Disc Numbers line.
   expect(screen.queryByText(/^Tracks without a disc number/)).not.toBeInTheDocument();
   const options = card.getByText('Other options').closest('details')!;
   expect(options.open).toBe(false);
@@ -428,12 +426,11 @@ test('a possible match whose members pair in no single way offers the numbers fi
   // Without numbers in the titles the card says they can be entered by hand; the unknown Disc Numbers line stays.
   mountReview(live(), liveReview);
   card = within(screen.getByRole('region', { name: /^Possible match/ }));
-  expect(card.getByText('You can pair the tracks with this release by hand, or enter or correct Disc and Track Numbers in Edit draft, where saving the completion draft compares again for free.')).toBeInTheDocument();
-  expect(card.queryByRole('button', { name: /^Fill/ })).not.toBeInTheDocument();
+  expect(card.getByText('You can pair the tracks with this release by hand, or enter or correct Disc and Track Numbers by editing manually, where saving the completion draft compares again for free.')).toBeInTheDocument();
   expect(screen.getByText('Tracks without a disc number: 2. They can pair with a track on any disc, so their positions may be unclear.')).toBeInTheDocument();
   cleanup();
-  // A disabled chooser disables both.
-  mountReview(live(), { ...liveReview, fill: { count: 2, run } }, true);
+  // A disabled chooser disables every button.
+  mountReview(live(), { ...liveReview, numbers: 2 }, true);
   for (const button of screen.getAllByRole('button')) expect(button).toBeDisabled();
   cleanup();
   // Once chosen for its Album values, the edition this run applied acts for the card and is marked as applied.
@@ -540,27 +537,26 @@ test('every edition of a grouped release stays choosable in the review sections,
   fireEvent.click(within(fold).getByRole('button', { name: 'Use the CD (JP) edition' })); expect(onChoose).toHaveBeenCalledWith(pairingEditions[1]);
 });
 
-test('among several possible releases only the first offers the numbers, and a release whose members have no duration is then used rather than compared again', () => {
-  const run = vi.fn(), two = live({ candidates: live().candidates.map(entry => entry.key === pairingEditions[1] ? { ...entry, barcode: '4006381339999' } : entry) });
-  mountReview(two, { ...liveReview, fill: { count: 2, run } });
+test('among several possible releases only the first points at the proposed numbers, and a release whose members have no duration is then used rather than compared again', () => {
+  const two = live({ candidates: live().candidates.map(entry => entry.key === pairingEditions[1] ? { ...entry, barcode: '4006381339999' } : entry) });
+  mountReview(two, { ...liveReview, numbers: 2 });
   const possible = screen.getByRole('region', { name: 'Possible matches (2 releases)' });
   const cards = within(possible).getAllByRole('listitem').filter(item => item.querySelector('strong'));
   expect(cards).toHaveLength(2);
-  const fill = within(cards[0]).getByRole('button', { name: 'Fill Disc and Track Numbers from titles' });
-  expect(fill).toHaveAccessibleDescription('Synthetic Live Album 2 · Synthetic Live Artist');
-  expect(within(possible).getAllByRole('button', { name: 'Fill Disc and Track Numbers from titles' })).toHaveLength(1);
+  expect(within(cards[0]).getByText(fillHint)).toBeInTheDocument();
+  expect(within(possible).getAllByText(fillHint)).toHaveLength(1);
   expect(within(cards[1]).queryByText(fillHint)).not.toBeInTheDocument();
   expect(within(cards[1]).getByRole('button', { name: 'Use Album values only (title, Artists, label, release date)' })).toBeInTheDocument();
   cleanup();
   const durations = live({ candidates: live().candidates.map(entry => entry.status === 'unverified' ? { ...entry, comparison: { ...entry.comparison!, unknownLocalDurations: 2 } } : entry),
     disclosure: { unknownLocalDurations: 2, unknownLocalDiscNumbers: 2, partialComparison: true } });
-  mountReview(durations, { ...liveReview, fill: { count: 2, run } });
-  expect(screen.getByText('2 tracks have no Disc or Track Number. The track titles start with track numbers, so the numbers can be filled from them; after saving the completion draft, '
+  mountReview(durations, { ...liveReview, numbers: 2 });
+  expect(screen.getByText('2 tracks have no Disc or Track Number. This page proposes the numbers from the track titles; after saving them, '
     + 'use this release to bring in its expected tracklist.')).toBeInTheDocument();
   expect(screen.queryByText(fillHint)).not.toBeInTheDocument();
   cleanup();
   mountReview(durations, liveReview);
-  expect(screen.getByText('You can pair the tracks with this release by hand, or enter Disc and Track Numbers in Edit draft; after saving the completion draft, use this release to bring in its expected tracklist.')).toBeInTheDocument();
+  expect(screen.getByText('You can pair the tracks with this release by hand, or enter Disc and Track Numbers by editing manually; after saving the completion draft, use this release to bring in its expected tracklist.')).toBeInTheDocument();
 });
 
 test('an import view keeps its flat folded list and status sentences even with unverified candidates of the same title', () => {
@@ -617,19 +613,18 @@ test('a review card says how its pairing was made single: by the titles\' track 
 });
 
 test('a possible match that pairs in one way is the next step, so no other possible match asks for numbers; the unknown Disc Numbers line stays unless the positions or durations made that pairing single', () => {
-  const run = vi.fn(), unknownDiscs = 'Tracks without a disc number: 2. They can pair with a track on any disc, so their positions may be unclear.';
+  const unknownDiscs = 'Tracks without a disc number: 2. They can pair with a track on any disc, so their positions may be unclear.';
   const mixed = (pairedBy?: 'nearExactDuration' | 'titlePositions') => live({ candidates: live().candidates.map(entry => entry.key === pairingEditions[1]
     ? { ...entry, barcode: '4006381339999', comparison: { ...entry.comparison!, subset: { ...entry.comparison!.subset!, pairing: 'unique' as const, ...(pairedBy ? { pairedBy } : {}) } } } : entry) });
-  mountReview(mixed(), { ...liveReview, fill: { count: 2, run } });
+  mountReview(mixed(), { ...liveReview, numbers: 2 });
   const possible = screen.getByRole('region', { name: 'Possible matches (2 releases)' });
-  expect(within(possible).queryByRole('button', { name: 'Fill Disc and Track Numbers from titles' })).not.toBeInTheDocument();
   expect(screen.queryByText(fillHint)).not.toBeInTheDocument();
   expect(within(possible).getByRole('button', { name: 'Use this release' })).toBeEnabled();
   expect(screen.getByText(unknownDiscs)).toBeInTheDocument();
   cleanup();
   // Made single by the titles' track numbers or the closest durations, its card says so and no position is called unclear.
   for (const [pairedBy, line] of [['titlePositions', 'Paired by: the track numbers in the titles'], ['nearExactDuration', 'Paired by: the closest durations']] as const) {
-    mountReview(mixed(pairedBy), { ...liveReview, fill: { count: 2, run } });
+    mountReview(mixed(pairedBy), { ...liveReview, numbers: 2 });
     expect(within(screen.getByRole('region', { name: 'Possible matches (2 releases)' })).getByText(line)).toBeInTheDocument();
     expect(screen.queryByText(unknownDiscs)).not.toBeInTheDocument();
     cleanup();
@@ -638,7 +633,7 @@ test('a possible match that pairs in one way is the next step, so no other possi
 
 test('a possible match whose members pair in more than one way offers pairing by hand as a plain button that opens one panel after the sections, which the summary hears is open; other choices wait while it saves', async () => {
   const onChoose = vi.fn(), onPairing = vi.fn(), element = (lookup: ReviewLookupView) => <CandidateChooser projectId={importId} viewerId={viewerId} lookup={lookup}
-    review={{ tracks: reviewTracks, fill: null, ...liveReview }} disabled={false} onChoose={onChoose} onPairing={onPairing} />;
+    review={{ tracks: reviewTracks, numbers: 0, ...liveReview }} disabled={false} onChoose={onChoose} onPairing={onPairing} />;
   const view = render(element(live()));
   expect(onPairing).toHaveBeenLastCalledWith(false);
   const card = within(screen.getByRole('region', { name: 'Possible match (1 release)' }));
@@ -742,7 +737,7 @@ test('closing the pairing panel returns focus to its own opener after Cancel, an
   const candidates = live().candidates, [first, second] = candidates.filter(entry => (pairingEditions as readonly string[]).includes(entry.key));
   const others = candidates.filter(entry => entry !== first && entry !== second), relabeled = { ...second, label: 'Synthetic Other Label' };
   const element = (lookup: ReviewLookupView) => <section id="catalog-review-lookup" tabIndex={-1} aria-label="Synthetic lookup panel">
-    <CandidateChooser projectId={importId} viewerId={viewerId} lookup={lookup} review={{ tracks: reviewTracks, fill: null, ...liveReview }} disabled={false} onChoose={vi.fn()} /></section>;
+    <CandidateChooser projectId={importId} viewerId={viewerId} lookup={lookup} review={{ tracks: reviewTracks, numbers: 0, ...liveReview }} disabled={false} onChoose={vi.fn()} /></section>;
   const view = render(element(live({ candidates: [...others, first, relabeled] })));
   const openers = () => screen.getAllByRole('button', { name: 'Pair tracks by hand' });
   const card = (button: Element) => button.closest('li')!.textContent!;
@@ -787,7 +782,7 @@ test('a review\'s chooser sits in one Reference releases disclosure that counts 
   // A matching release this run applied: folded, every choice still inside; a run that no longer has it opens it again.
   const applied = pairedLookupResponse(pairingApplication(pairingEditions[0], true)).lookup!;
   const onChoose = vi.fn(), element = (lookup: ReviewLookupView) => <CandidateChooser projectId={importId} viewerId={viewerId} lookup={lookup}
-    review={{ tracks: reviewTracks, searched: 'Synthetic Live Album 2', artists: [], fill: null }} disabled={false} onChoose={onChoose} />;
+    review={{ tracks: reviewTracks, searched: 'Synthetic Live Album 2', artists: [], numbers: 0 }} disabled={false} onChoose={onChoose} />;
   const { rerender } = render(element(applied));
   const folded = screen.getByText(/^Reference releases ·/).closest('details')!;
   expect(folded.open).toBe(false);
@@ -804,7 +799,7 @@ test('a review\'s chooser sits in one Reference releases disclosure that counts 
 test('the Reference releases disclosure never folds under an open pairing panel whose save\'s re-rank applies the release, and closing the panel leaves it open', async () => {
   const applied = pairedLookupResponse(pairingApplication(pairingEditions[0], true)).lookup!;
   const element = (lookup: ReviewLookupView) => <CandidateChooser projectId={importId} viewerId={viewerId} lookup={lookup}
-    review={{ tracks: reviewTracks, fill: null, ...liveReview }} disabled={false} onChoose={vi.fn()} />;
+    review={{ tracks: reviewTracks, numbers: 0, ...liveReview }} disabled={false} onChoose={vi.fn()} />;
   const view = render(element(live()));
   const releases = screen.getByText(/^Reference releases ·/).closest('details')!;
   fireEvent.click(screen.getByRole('button', { name: 'Pair tracks by hand' }));

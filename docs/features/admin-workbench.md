@@ -1638,7 +1638,7 @@ their join phrases and its label read-only, and offers a Disc Number field only
 for Tracks whose review captured one. Metadata lookup values and conflict
 answers change the Artist entries, the label, each member's track Artist entries
 and the expected tracklist only in the review's private draft. The update range
-(`CatalogReviewApply.tsx`, its pure model `catalogReviewApplyModel.ts`) is a
+(`CatalogReviewRange.tsx`, its own chunk, with the pure model `catalogReviewApplyModel.ts`) is a
 disclosure in the editing section whose summary counts the selected changes
 (in "项", items, since member lines are not fields) and opens to adjust them:
 one group for the numbers (one per disc on a long Album), the Track titles
@@ -2054,7 +2054,7 @@ Numbers from titles giving both are selected in the update range; Track Numbers
 from titles giving them alone are unselected and marked as read from the titles
 only, to be checked (owner rules, Catalog Visibility and Administration).
 
-The editing section's table lists each member with its captured title (a cleaned
+The editing section's table (`CatalogReviewProposalTable.tsx`, its own chunk) lists each member with its captured title (a cleaned
 or edited draft title after an arrow), and its Disc and Track Number inputs,
 each showing the draft value, else the proposal. When any captured number is not
 empty, a column gives the original numbers and each cell is marked as filling an
@@ -2070,7 +2070,7 @@ run; from then on they are the administrator's own numbers: they constrain
 pairing and reach the catalog only when the review is applied. An unselected
 proposal, such as a Track Number read from titles giving it alone, is never
 saved: it stays a proposal, derived again on the next render, and never
-constrains pairing or the re-rank. On a long Album (dozens of members, up to the
+constrains pairing or the re-rank. On a long Album (25 members or more, up to the
 review's 100), one line sums up the members, discs and proposed range of
 positions; rows with a flag, a replacing value or an edit stay open first, and
 uniform fills sit in one disclosure per disc naming its disc and track count,

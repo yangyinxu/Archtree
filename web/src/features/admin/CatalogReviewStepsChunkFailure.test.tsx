@@ -43,7 +43,8 @@ test('a review page whose step bar chunk cannot load leaves the steps out and ke
   expect(await screen.findByRole('button', { name: 'Use Luna AI again (paid)' })).toBeEnabled();
   expect(screen.queryByText(/Reload the page to continue/)).not.toBeInTheDocument();
   expect(await screen.findByRole('button', { name: 'Discard completion' })).toBeEnabled();
-  fireEvent.change(screen.getByRole('textbox', { name: 'Title' }), { target: { value: 'A manual correction' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Edit manually' }));
+  fireEvent.change(await screen.findByRole('textbox', { name: 'Title' }), { target: { value: 'A manual correction' } });
   fireEvent.click(screen.getByRole('button', { name: 'Save completion draft' }));
   await waitFor(() => expect(writes).toEqual([`/api/admin/v1/catalog-reviews/${reviewId}`]));
 });

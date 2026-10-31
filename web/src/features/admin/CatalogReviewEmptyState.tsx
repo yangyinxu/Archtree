@@ -1,15 +1,16 @@
 import { useAdminText } from './AdminAccess';
 import type { CatalogReview } from './catalogReviewApi';
+import { reviewChanges } from './catalogReviewChanges';
 import styles from './adminStyles';
 
 /**
  * An empty suggestion list has different next steps depending on analysis and saved draft changes; the step to the changes names
  * no count, which only the step bar and the Update original Album step show.
  */
-export function CatalogReviewEmptyState({ item, changeCount, onNavigate }: {
-  item: CatalogReview; changeCount: number; onNavigate: (stage: 'draft' | 'apply') => void;
+export function CatalogReviewEmptyState({ item, onNavigate }: {
+  item: CatalogReview; onNavigate: (stage: 'draft' | 'apply') => void;
 }) {
-  const t = useAdminText();
+  const t = useAdminText(), changeCount = reviewChanges(item).length;
   const active = ['queued', 'running'].includes(item.analysis.state);
   const key = item.state === 'applied' ? 'catalog_review.applied_copy' : active ? 'catalog_review.analysis_running'
     : item.analysis.state === 'needsAttention' ? 'catalog_review.empty_attention'

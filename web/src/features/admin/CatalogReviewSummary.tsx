@@ -20,7 +20,7 @@ import type { LookupBox as Box } from './LookupBox';
 import type { LookupProgress as Progress } from './LookupProgress';
 import { lookupActive, lookupNextStep, reviewLookupKey } from './lookupNextStep';
 import { lookupIdText, lookupValueAt, lookupValueText } from './lookupValueText';
-import { progressPhaseKey, reviewLookupStatus, titleNumbers, type Message, type TitleNumbers } from './reviewLookupStatus';
+import { progressPhaseKey, reviewLookupStatus, titleNumbers, type Message } from './reviewLookupStatus';
 import { useOnline } from './useAdminOnline';
 import styles from './adminStyles';
 
@@ -58,8 +58,8 @@ function Results({ fold, pairing, label, children }: { fold: boolean; pairing: R
  * The lookup-first summary of an existing-Album review (owner rules: docs/business-rules.md, Catalog Visibility and
  * Administration, existing-Album reviews; Administrator Metadata Lookup). It presents what the server decides and never starts
  * Luna: the lookup status, refined for the review (reviewLookupStatus.ts: also when a retrying run retries and which retry, and
- * why MusicBrainz's retries ran out or a run stopped), with the free retry (labelled free), or filling the Disc and Track Numbers from the track
- * titles (`onFillNumbers`, into the unsaved draft) where that is the next step, as its only primary button; a run that ended
+ * why MusicBrainz's retries ran out or a run stopped, and, where numbers are needed, whether the captured titles propose them: the
+ * review page's proposal table, never a button here), with the free retry (labelled free) as its only primary button; a run that ended
  * because the review's source was no longer current (superseded) offers no retry, which could not run while it is not, as the
  * review's brief offers none (where the Album changed, the step list's chunk links to the Album instead); an active run's
  * progress, whose elapsed time and the note that it keeps running after the page is left sit beside the polite status, outside
@@ -72,14 +72,14 @@ function Results({ fold, pairing, label, children }: { fold: boolean; pairing: R
  * without one), with a hint to try the name without its subtitle when a completed run found
  * nothing, a free submit, and which asks before it replaces an active run, folded under
  * Didn't find it? Look up another name after a completed run unless the status points at it (also when the run completes while
- * the page is open, unless the administrator is using the box), followed by the fill as a plain button where it is only offered;
+ * the page is open, unless the administrator is using the box);
  * the candidate chooser with each candidate's subset facts and reason, and its sections while nothing matched as a group, conflicts
  * answered one by one or all at once by buttons that name the applied candidate's source (MusicBrainz or iTunes), the values to check, each member's track
  * Artist row with its reason, the expected tracklist with its missing-file rows, the identity rows and the values that need no
  * answer. How many lookup answers and identity records are still needed follow the status row. Once a release this run applied
  * leaves nothing open (no active run, retry, refined status, lookup answer or identity row needing an answer, nor a release applied
- * for its Album values only whose tracks still pair in more than one way while the titles can fill the numbers, whose card carries
- * that fill, also offered under the status with why its tracks are not applied) and flags no iTunes-only value or artist mismatch, which are never collapsed,
+ * for its Album values only whose tracks still pair in more than one way while the titles propose the numbers, which a line under
+ * the status says, with why its tracks are not applied) and flags no iTunes-only value or artist mismatch, which are never collapsed,
  * everything after the name box folds under one disclosure, never while the chooser's pairing panel is open (`Results`); it stays
  * mounted, so unsaved identity choices survive the fold. The
  * panel carries the anchors the step bar links to: the panel (`catalog-review-lookup`), its first open answer
@@ -88,10 +88,8 @@ function Results({ fold, pairing, label, children }: { fold: boolean; pairing: R
  * the latter) reads the review detail again; a refused answer reads this summary and the identity rows again. A chunk it loads
  * that cannot load asks for a reload in its place.
  */
-export function CatalogReviewSummary({ item, disabled, error, onRun, onFillNumbers }: {
+export function CatalogReviewSummary({ item, disabled, error, onRun }: {
   item: CatalogReview; disabled: boolean; error: string | null; onRun: (action: string, payload: object) => void;
-  /** Writes the Disc and Track Numbers the titles give into the unsaved draft, opens Edit draft and focuses its save. */
-  onFillNumbers: (numbers: TitleNumbers['numbers']) => void;
 }) {
   const t = useAdminText(), access = useAdminAccess(), online = useOnline(), client = useQueryClient(), id = useId(), { locale } = useLocalization();
   // Whether the candidate chooser's pairing panel is open, which the results never fold under.
@@ -118,12 +116,16 @@ export function CatalogReviewSummary({ item, disabled, error, onRun, onFillNumbe
       : <p role="status">{t('common.loading')}</p>}</section>;
   const { status, retry } = lookupNextStep(lookup, { available: summary.lookupAvailable, uploadsWaiting: false });
   const appliedCandidate = lookup?.candidates.find(candidate => candidate.key === applied?.candidateKey), release = appliedCandidate?.title ?? '—';
-  // The Album name the run searched (a song name never is: then the saved title) compares the titles, the saved draft's numbers
-  // the fill; a poll's time moves the elapsed time.
+  // The Album name the run searched (a song name never is: then the saved title) compares the titles; the captured titles over the
+  // saved numbers give the numbers the review page proposes (catalogReviewProposal.ts reads them the same way); a poll's time moves
+  // the elapsed time.
   const submitted = lookup?.input.submitted, searched = submitted?.kind === 'album' ? submitted.text : item.draft.album.title;
   const artists = item.draft.album.artists.filter(entry => entry.role === 'primary').map(entry => entry.name);
-  const numbers = titleNumbers(item.draft.tracks, new Set(item.source.tracks.filter(track => track.discNumber !== undefined).map(track => track.slotId)));
-  const fill = numbers?.count ? { count: numbers.count, run: () => onFillNumbers(numbers.numbers) } : null;
+  const numbers = titleNumbers(item.source.tracks.map(track => ({ ...item.draft.tracks.find(value => value.slotId === track.slotId)!, title: track.title })),
+    new Set(item.source.tracks.filter(track => track.discNumber !== undefined).map(track => track.slotId)));
+  // Only Disc and Track positions arrive selected, so only they are what a save writes; Track Numbers alone wait to be checked
+  // and ticked, and the copy offers manual editing and pairing by hand for them instead.
+  const proposed = numbers?.disc ? numbers.count : 0;
   const refined = lookup && reviewLookupStatus(lookup, status, { members: item.draft.tracks.length, searched, artists, now: query.dataUpdatedAt || Date.now(), numbers,
     time: at => new Date(at).toLocaleTimeString(locale, { timeStyle: 'medium' }) });
   const say = (message: Message) => t(message.key, message.values?.phase ? { ...message.values, phase: t(progressPhaseKey(String(message.values.phase))) } : message.values);
@@ -132,8 +134,6 @@ export function CatalogReviewSummary({ item, disabled, error, onRun, onFillNumbe
     : t(reviewLookupKey(status), { title: release });
   // A previous revision's read shown while the current one loads takes no answer.
   const busy = disabled || query.isPlaceholderData, answering = busy || lookupActive(lookup?.state);
-  const fillButton = (next: boolean) => fill && <div className={styles.actions}><button type="button" className={next ? `${styles.button} ${styles.primary}` : styles.button}
-    disabled={busy} onClick={fill.run}>{t('catalog_review.fill_numbers')}</button></div>;
   const { needed, open, answers } = openLookupAnswers(lookup);
   const albumOpen = open.filter(conflict => !memberPath(conflict.path)), conflictPaths = new Set((applied?.conflicts ?? []).map(conflict => conflict.path));
   const source = applied?.source === 'itunes' ? 'iTunes' : 'MusicBrainz', use = applied?.source === 'itunes' ? 'itunes' : 'musicbrainz';
@@ -182,14 +182,14 @@ export function CatalogReviewSummary({ item, disabled, error, onRun, onFillNumbe
     <h3 id={`${id}-${name}`}>{heading}</h3>{body}</section>;
   const identityNeeded = identity.data ? identity.data.identities.filter(row => row.needsAnswer).length + (identity.data.label?.needsAnswer ? 1 : 0) : 0;
   const identityOpen = !identity.data || identityNeeded > 0;
-  // A release this run applied for its Album values only, whose tracks still pair in more than one way, keeps its card's fill in
-  // view and offers it under the status, saying why: its tracks are not applied until the numbers pair them.
-  const numbersOpen = Boolean(fill && shown?.pairs === null && shown.run === lookup?.run && appliedCandidate?.comparison?.subset?.pairing === 'ambiguous');
+  // A release this run applied for its Album values only, whose tracks still pair in more than one way while the titles propose
+  // the numbers, says so under the status: its tracks are not applied until saved numbers pair them.
+  const numbersOpen = Boolean(numbers?.count && shown?.pairs === null && shown.run === lookup?.run && appliedCandidate?.comparison?.subset?.pairing === 'ambiguous');
   // iTunes-only values and an artist mismatch are flagged and never collapsed (owner rules), so they keep the results open.
   const settled = Boolean(shown) && shown!.source !== 'itunes' && !mismatch && !lookupActive(lookup?.state) && answers === 0 && !retry && !refined && !identityOpen && !numbersOpen;
   const body = <>
     {lookup?.state === 'complete' && lookup.candidates.length > 0 && <Suspense fallback={null}><CandidateChooser projectId={item.id} viewerId={access.viewerId} lookup={lookup}
-      review={{ tracks: item.draft.tracks, searched, artists, fill }} disabled={busy} onChoose={candidateKey => onRun('lookup/choose', { run: lookup.run, candidateKey })}
+      review={{ tracks: item.draft.tracks, searched, artists, numbers: proposed }} disabled={busy} onChoose={candidateKey => onRun('lookup/choose', { run: lookup.run, candidateKey })}
       onPairing={open => { pairing.current = open; }} /></Suspense>}
     {/* The bulk answers cover every open conflict, the members' included, so they also serve member conflicts alone. */}
     {open.length >= 2 && <div className={styles.actions} id="catalog-review-answers">
@@ -233,13 +233,11 @@ export function CatalogReviewSummary({ item, disabled, error, onRun, onFillNumbe
     {answers > 0 && <p role="status">{t('catalog_review.needs_answers', { count: answers })}</p>}
     {identityNeeded > 0 && <p role="status">{t('catalog_review.identity_answers', { count: identityNeeded })}</p>}
     {retry && !closed && <div className={styles.actions}><button type="button" className={`${styles.button} ${styles.primary}`} disabled={busy} onClick={() => onRun('lookup/retry', {})}>{t('catalog_review.lookup_retry_free')}</button></div>}
-    {refined?.fill === 'next' && fillButton(true)}
-    {numbersOpen && refined?.fill !== 'next' && <><p>{t('catalog_review.member_no_pairing')}</p>
-      <p>{t(appliedCandidate!.comparison!.unknownLocalDurations ? 'catalog_review.lookup_fill_hint_durations' : 'catalog_review.lookup_fill_hint', { count: fill!.count })}</p>{fillButton(false)}</>}
+    {numbersOpen && <><p>{t('catalog_review.member_no_pairing')}</p>
+      <p>{t(`catalog_review.lookup_fill_${proposed ? 'hint' : 'unavailable'}${appliedCandidate!.comparison!.unknownLocalDurations ? '_durations' : ''}`, { count: proposed })}</p></>}
     {summary.lookupAvailable && <Suspense fallback={null}><LookupBox key={box} lookup={lookup} rootLabel="" defaultText={item.draft.album.title} mode="review" disabled={busy}
       defaultArtist={byline} defaultArtistImplicit={implicit} hint={['lookup.no_match', 'lookup.no_release'].includes(status)}
       active={lookupActive(lookup?.state)} fold={lookup?.state === 'complete' && !boxNext} onSubmit={(kind, text, artist) => onRun('lookup', { kind, text, ...(artist ? { artist } : {}) })} /></Suspense>}
-    {refined?.fill === 'offer' && !numbersOpen && fillButton(false)}
     <Results fold={settled} pairing={pairing} label={shown && t('catalog_review.lookup_details')}>{body}</Results>
   </section>;
 }

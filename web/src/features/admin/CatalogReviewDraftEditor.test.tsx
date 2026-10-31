@@ -10,13 +10,15 @@
  *   - a Disc Number input appears only on a track whose source captured one
  *   - a disabled editor locks every field while the original Album links stay available
  *   - edits of a captured review keep its expected tracklist and each Track's Artist entries untouched
+ *   - manual editing records each changed value as an edit over the draft shown, so a proposed value it shows stays a proposal
  * @end-catalog */
 
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
-import { CatalogReviewDraftEditor } from './CatalogReviewDraftEditor';
+import { CatalogReviewDraftEditor, CatalogReviewManualEdit } from './CatalogReviewDraftEditor';
 import { capturedCatalogReview, catalogReview, legacyCatalogReview, slotId, slotTwo } from './catalogReviewFixtures.testSupport';
 import type { ReviewDraft } from './catalogReviewApi';
+import type { ReviewEdits } from './catalogReviewEdits';
 
 afterEach(cleanup);
 
@@ -114,4 +116,19 @@ test('edits of a captured review keep its expected tracklist and each Track\'s A
   expect(drafts[2].tracks[1]).toEqual({ ...item.draft.tracks[1], trackNumber: 7 });
   // The member entries are never shown as editable values.
   expect(screen.queryByDisplayValue('Synthetic track Artist')).not.toBeInTheDocument();
+});
+
+test('manual editing records each changed value as an edit over the draft shown, so a proposed value it shows stays a proposal', () => {
+  const item = catalogReview(), onEdit = vi.fn<(edits: ReviewEdits, draft: ReviewDraft) => void>();
+  const shown = { ...item.draft, tracks: item.draft.tracks.map(track => track.slotId === slotTwo ? { ...track, discNumber: 1, trackNumber: 2 } : track) };
+  render(<MemoryRouter><CatalogReviewManualEdit base={item.draft} edits={{ tracks: { [slotId]: { title: 'An earlier edit' } } }} draft={shown} source={item.source} filenames={[]}
+    disabled={false} manageAlbumHref={href} onEdit={onEdit} /></MemoryRouter>);
+  expect(screen.getByRole('spinbutton', { name: '2 · Track number' })).toHaveValue(2);
+  fireEvent.change(screen.getByRole('textbox', { name: 'Title' }), { target: { value: 'Edited Album' } });
+  const [edits, draft] = onEdit.mock.lastCall!;
+  expect(edits).toEqual({ album: { title: 'Edited Album' }, tracks: { [slotId]: { title: 'An earlier edit' } } });
+  // The saved draft with the edits: the proposed numbers it showed are not written into it.
+  expect([draft.album.title, draft.tracks[0].title, draft.tracks[1].discNumber, draft.tracks[1].trackNumber]).toEqual(['Edited Album', 'An earlier edit', null, null]);
+  fireEvent.change(screen.getByRole('spinbutton', { name: '2 · Track number' }), { target: { value: '' } });
+  expect(onEdit.mock.lastCall![0].tracks).toEqual({ [slotId]: { title: 'An earlier edit' }, [slotTwo]: { trackNumber: null } });
 });

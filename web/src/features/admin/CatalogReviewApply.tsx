@@ -1,7 +1,7 @@
 import { Fragment, lazy, Suspense, useEffect, useId, type ComponentProps, type ComponentType } from 'react';
 import { useAdminText } from './AdminAccess';
 import type { CatalogReview } from './catalogReviewApi';
-import type { ApplyChoice, ApplyItem, ReviewApplySelection } from './catalogReviewApplyModel';
+import type { ApplyChoice, ApplyItem, ProposedValues, ReviewApplySelection } from './catalogReviewApplyModel';
 import type * as Items from './CatalogReviewApplyItems';
 import { useReviewApplyModel } from './useReviewApplyModel';
 import styles from './adminStyles';
@@ -21,12 +21,13 @@ const ApplyAlbumNote = view<ComponentProps<typeof Items.ApplyAlbumNote>>(module 
  * saved and new value, selected by default as the rules say and deselectable unless a hold explains why it cannot be selected yet,
  * the identities the selection owns and, for a captured review, the lookup summary and identity reads it rests on (the summary's
  * cached read, never polled from here; useReviewApplyModel.ts, which the step bar's count shares). The parent keeps the explicit
- * choices, each with the basis of the item it was made on, and freezes the confirmed selection.
+ * choices, each with the basis of the item it was made on, passes the title proposal's defaults (`proposed`, once the proposal
+ * table derived them) and freezes the confirmed selection.
  */
-export function CatalogReviewApply({ item, choices, disabled, onChoose, onConfirm }: { item: CatalogReview; choices: Readonly<Record<string, ApplyChoice>>; disabled: boolean;
-  onChoose: (key: string, choice: ApplyChoice) => void; onConfirm: (selection: ReviewApplySelection) => void }) {
+export function CatalogReviewApply({ item, choices, proposed, disabled, onChoose, onConfirm }: { item: CatalogReview; choices: Readonly<Record<string, ApplyChoice>>;
+  proposed?: ProposedValues; disabled: boolean; onChoose: (key: string, choice: ApplyChoice) => void; onConfirm: (selection: ReviewApplySelection) => void }) {
   const t = useAdminText(), id = useId();
-  const { model, count, reads } = useReviewApplyModel(item, choices);
+  const { model, count, reads } = useReviewApplyModel(item, choices, { proposed });
   const track = (slotId: string) => { const index = item.draft.tracks.findIndex(value => value.slotId === slotId); return `${index + 1} · ${item.draft.tracks[index]?.title || '—'}`; };
   const hold = (entry: ApplyItem) => entry.hold === 'conflict' ? t('catalog_review.answer_conflict_first') : entry.hold === 'tracklist' ? t('catalog_review.number_with_tracklist')
     : t('catalog_review.off_row', { tracks: entry.offSlotIds.map(track).join(', ') });
@@ -59,9 +60,9 @@ export function CatalogReviewApply({ item, choices, disabled, onChoose, onConfir
  * whether its selection is ready to apply (no lookup or Luna AI wait, identity block or outdated read), reported to the step bar
  * without rendering anything, from the same model and reads as this step; it shares this step's chunk.
  */
-export function CatalogReviewApplyCount({ item, choices, onCount }: { item: CatalogReview; choices: Readonly<Record<string, ApplyChoice>>;
+export function CatalogReviewApplyCount({ item, choices, proposed, onCount }: { item: CatalogReview; choices: Readonly<Record<string, ApplyChoice>>; proposed?: ProposedValues;
   onCount: (value: { count: number; items: number; identityAnswers: number; ready: boolean }) => void }) {
-  const { model, count, identity } = useReviewApplyModel(item, choices), items = model.items.length, ready = model.ready;
+  const { model, count, identity } = useReviewApplyModel(item, choices, { proposed }), items = model.items.length, ready = model.ready;
   const identityAnswers = identity ? identity.identities.filter(row => row.needsAnswer).length + (identity.label?.needsAnswer ? 1 : 0) : 0;
   useEffect(() => onCount({ count, items, identityAnswers, ready }), [count, items, identityAnswers, ready]);
   return null;

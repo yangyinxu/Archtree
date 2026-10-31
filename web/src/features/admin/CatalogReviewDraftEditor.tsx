@@ -3,6 +3,7 @@ import { useLocalization } from '../../localization/LocalizationProvider';
 import type { MessageKey } from '../../localization/contract';
 import { useAdminText } from './AdminAccess';
 import type { CatalogReview, ReviewDraft } from './catalogReviewApi';
+import { recordEdits, withEdits, type ReviewEdits } from './catalogReviewEdits';
 import { entriesByline } from './artistEntriesByline';
 import styles from './adminStyles';
 
@@ -59,4 +60,14 @@ export function CatalogReviewDraftEditor({ draft, source, filenames, disabled, m
       </div>;
     })}
   </fieldset>;
+}
+
+/**
+ * Manual editing on the review page, loaded with the editor as its own chunk: the editor shows `draft` (the saved draft `base` with
+ * the numbers proposed from titles and the `edits` written in) and each change it makes is recorded as an edit, so a value left
+ * alone stays a proposal; `onEdit` gets the edits and the saved draft with them.
+ */
+export function CatalogReviewManualEdit({ base, edits, draft, onEdit, ...props }: Omit<Parameters<typeof CatalogReviewDraftEditor>[0], 'onChange'> & {
+  base: ReviewDraft; edits: ReviewEdits; onEdit: (edits: ReviewEdits, draft: ReviewDraft) => void }) {
+  return <CatalogReviewDraftEditor {...props} draft={draft} onChange={next => { const recorded = recordEdits(edits, draft, next); onEdit(recorded, withEdits(base, recorded)); }} />;
 }

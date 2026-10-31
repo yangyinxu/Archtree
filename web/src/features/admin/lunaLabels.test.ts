@@ -55,12 +55,15 @@ const reviewLookupProse = [...['no_match', 'empty_album', 'add_artist', 'possibl
   'running_count_status', 'elapsed', 'waited', 'keeps_running', 'fill_hint', 'fill_hint_durations', 'fill_unavailable', 'fill_unavailable_durations', 'no_tracklist', 'album_only_copy',
   'choose_again_copy', 'replace_copy', 'replace_ended', 'subtitle_hint', 'releases', 'releases_copy', 'records_alike'].map(copy => `admin.catalog_review.lookup_${copy}`), ...family('admin.catalog_review.lookup_reason_'),
   ...family('admin.catalog_review.lookup_cause_'), ...family('admin.catalog_review.lookup_phase_'), ...family('admin.catalog_review.lookup_section_'),
-  'admin.catalog_review.member_paired_since', 'admin.catalog_review.fill_numbers_done',
+  'admin.catalog_review.member_paired_since',
+  // The header, the numbers proposed from titles and the update range: free, the draft's own values.
+  'admin.catalog_review.local_tracks', 'admin.catalog_review.number_label', 'admin.catalog_review.title_needs_numbers', 'admin.catalog_review.manual_edit',
+  ...family('admin.catalog_review.proposal_'), ...family('admin.catalog_review.range_'), ...family('admin.catalog_review.positions_'),
   // The lookup status on workbench cards, the Album page's note, the completion steps and the applied view.
   ...family('admin.catalog_review.lookup_brief_'), ...family('admin.catalog_review.open_lookup_'), ...family('admin.catalog_review.step'), ...family('admin.catalog_review.applied_')];
 const lookupControls = [...['retry', 'submit', 'box', 'name', 'kind_album', 'kind_song', 'choose', 'choose_none'].map(control => `admin.lookup.${control}`),
   'admin.summary.keep_mine', 'admin.summary.use_lookup',
-  ...['keep_current', 'use_musicbrainz', 'use_itunes', 'keep_all_current', 'use_all_musicbrainz', 'use_all_itunes', 'create', 'fill_numbers', 'lookup_choose_album_only',
+  ...['keep_current', 'use_musicbrainz', 'use_itunes', 'keep_all_current', 'use_all_musicbrainz', 'use_all_itunes', 'create', 'lookup_choose_album_only',
     'lookup_choose_again', 'lookup_replace_confirm', 'lookup_replace_now', 'lookup_other_options', 'lookup_editions_choose', 'lookup_choose_edition', 'lookup_choose_edition_album_only',
     'lookup_retry_free', 'lookup_submit_free', 'lookup_log_show', 'lookup_log_hide']
     .map(control => `admin.catalog_review.${control}`), 'admin.workbench.review_lookup', 'admin.catalog_review.view_changes_plain', 'admin.catalog_review.lookup_details'];

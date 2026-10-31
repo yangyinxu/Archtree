@@ -1675,22 +1675,6 @@
       ],
       "variables": {}
     },
-    "admin.catalog_review.fill_numbers": {
-      "description": "Administrator workbench: existing-Album review summary and candidate chooser, button that fills the empty Disc and Track Numbers of the Edit draft tab from the positions at the start of the track titles, unsaved, and opens that tab.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
-    "admin.catalog_review.fill_numbers_done": {
-      "description": "Album completion editor: status after Fill Disc and Track Numbers from titles, how many tracks got numbers; they are unsaved until Save completion draft.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {
-        "count": "number"
-      }
-    },
     "admin.catalog_review.flag_characters": {
       "description": "Administrator workbench: existing-Album review summary, flag: a release value with characters that cannot be saved is not applied.",
       "delivery": [
@@ -2067,6 +2051,15 @@
       ],
       "variables": {}
     },
+    "admin.catalog_review.local_tracks": {
+      "description": "Administrator workbench: existing-Album review page, header line after the primary Artist names: how many local tracks the review captured.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
     "admin.catalog_review.lookup_add_artist": {
       "description": "Administrator workbench: existing-Album review summary, below the status for an Album without tracks when the lookup used no Artist name; adding one in the name box narrows the results.",
       "delivery": [
@@ -2209,7 +2202,7 @@
       "variables": {}
     },
     "admin.catalog_review.lookup_cause_durations": {
-      "description": "Administrator workbench: existing-Album review summary, status cause after the found sentence: members have no duration; the next step is filling the Disc and Track Numbers from the titles, saving, then choosing the release.",
+      "description": "Administrator workbench: existing-Album review summary, status cause after the found sentence: tracks without a duration; the page has proposed Disc and Track Numbers from the titles, which are saved, then a release is chosen for its tracklist.",
       "delivery": [
         "runtime"
       ],
@@ -2218,7 +2211,7 @@
       }
     },
     "admin.catalog_review.lookup_cause_durations_manual": {
-      "description": "Administrator workbench: existing-Album review summary, status cause after the found sentence: members have no duration and the titles give no Disc and Track Numbers to fill; another name or numbers entered by hand.",
+      "description": "Administrator workbench: existing-Album review summary, status cause after the found sentence: tracks without a duration and no Disc and Track Numbers proposed from the titles; another name, or numbers checked or entered by manual editing, then a release chosen.",
       "delivery": [
         "runtime"
       ],
@@ -2227,7 +2220,7 @@
       }
     },
     "admin.catalog_review.lookup_cause_durations_pair": {
-      "description": "Administrator workbench: existing-Album review summary, status cause after the found sentence: members have no duration, filling numbers from the titles is not the next step and a possible match is listed; another name, pairing by hand or numbers entered in Edit draft (the tab name), the last two bringing in the tracklist.",
+      "description": "Administrator workbench: existing-Album review summary, status cause after the found sentence: tracks without a duration and no Disc and Track Numbers proposed from the titles; another name, pairing by hand with a possible match, or numbers checked or entered by manual editing.",
       "delivery": [
         "runtime"
       ],
@@ -2245,21 +2238,21 @@
       }
     },
     "admin.catalog_review.lookup_cause_pairing": {
-      "description": "Administrator workbench: existing-Album review summary, status cause after the found sentence: the tracks fit in more than one way; the next step is filling the Disc and Track Numbers from the titles and saving, which compares again for free.",
+      "description": "Administrator workbench: existing-Album review summary, status cause after the found sentence: the tracks fit in more than one way; the page has proposed Disc and Track Numbers from the titles, and updating with them (which saves first) or saving compares again for free.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.catalog_review.lookup_cause_pairing_manual": {
-      "description": "Administrator workbench: existing-Album review summary, status cause after the found sentence: the tracks fit in more than one way and the titles give no Disc and Track Numbers to fill; another name or numbers entered by hand.",
+      "description": "Administrator workbench: existing-Album review summary, status cause after the found sentence: the tracks fit in more than one way and the titles propose no Disc and Track Numbers; another name or numbers checked or entered by manual editing.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.catalog_review.lookup_cause_pairing_pair": {
-      "description": "Administrator workbench: existing-Album review summary, status cause after the found sentence: the tracks fit in more than one way, filling numbers from the titles is not the next step and a possible match is listed; another name, pairing by hand or numbers entered in Edit draft (the tab name).",
+      "description": "Administrator workbench: existing-Album review summary, status cause after the found sentence: the tracks fit in more than one way and the titles propose no Disc and Track Numbers; another name, pairing by hand with a possible match, or numbers checked or entered by manual editing.",
       "delivery": [
         "runtime"
       ],
@@ -2389,7 +2382,7 @@
       "variables": {}
     },
     "admin.catalog_review.lookup_fill_hint": {
-      "description": "Administrator workbench: existing-Album review candidate chooser, beside Fill Disc and Track Numbers from titles, how many of the Album's tracks lack a Disc or Track Number.",
+      "description": "Administrator workbench: existing-Album review candidate chooser and summary: how many of the Album's tracks lack a Disc or Track Number, which the page proposes from the titles; saving them compares again.",
       "delivery": [
         "runtime"
       ],
@@ -2398,7 +2391,7 @@
       }
     },
     "admin.catalog_review.lookup_fill_hint_durations": {
-      "description": "Administrator workbench: existing-Album review candidate chooser, possible-match card hint when members without a duration have no numbers: they can be filled from the titles, then the release used.",
+      "description": "Administrator workbench: existing-Album review candidate chooser and summary, when members without a duration have no numbers: the page proposes them from the titles; after saving them, the release is used.",
       "delivery": [
         "runtime"
       ],
@@ -2407,14 +2400,14 @@
       }
     },
     "admin.catalog_review.lookup_fill_unavailable": {
-      "description": "Administrator workbench: existing-Album review candidate chooser, possible-match card, in place of Fill Disc and Track Numbers from titles when nothing can be filled from the track titles: pairing by hand (the button that follows) or numbers entered in Edit draft (the tab name).",
+      "description": "Administrator workbench: existing-Album review candidate chooser, possible-match card, when the titles propose no numbers: pairing by hand (the button that follows) or numbers entered by manual editing (the Edit manually control).",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.catalog_review.lookup_fill_unavailable_durations": {
-      "description": "Administrator workbench: existing-Album review candidate chooser, possible-match card when members without a duration have no numbers the titles can give: pairing by hand (the button that follows), or numbers entered in Edit draft, then the release used.",
+      "description": "Administrator workbench: existing-Album review candidate chooser, possible-match card with members without a duration, when the titles propose no numbers: pairing by hand or numbers entered by manual editing, then the release used.",
       "delivery": [
         "runtime"
       ],
@@ -3432,6 +3425,16 @@
       ],
       "variables": {}
     },
+    "admin.catalog_review.number_label": {
+      "description": "Administrator workbench: existing-Album review page, proposal table: accessible name of a Disc or Track Number input; field is the field name, position the track's Album position.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "field": "string",
+        "position": "number"
+      }
+    },
     "admin.catalog_review.number_with_tracklist": {
       "description": "Administrator workbench: existing-Album review, Update original Album step; a Disc or Track Number metadata lookup filled through its pairing cannot be selected because it applies only with the expected tracklist.",
       "delivery": [
@@ -3602,7 +3605,7 @@
       "variables": {}
     },
     "admin.catalog_review.pairing_copy": {
-      "description": "Administrator workbench: existing-Album review pairing panel, how the choices are listed: only release tracks the track can pair with by duration, closest first; every release track for a track without a duration; a track with its own Disc or Track Number (captured from the catalog or saved by the administrator) lists only release tracks at that number, which only Edit draft changes.",
+      "description": "Administrator workbench: existing-Album review pairing panel, how the choices are listed: only release tracks the track can pair with by duration, closest first; every release track for a track without a duration; a track with its own Disc or Track Number (captured from the catalog or saved by the administrator) lists only release tracks at that number, which only manual editing changes.",
       "delivery": [
         "runtime"
       ],
@@ -3719,6 +3722,247 @@
         "discs": "number",
         "rows": "number",
         "title": "string"
+      }
+    },
+    "admin.catalog_review.positions_duplicate": {
+      "description": "Administrator workbench: existing-Album review page, update range: the tracks the selected numbers would leave at one Disc and Track position.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "tracks": "string"
+      }
+    },
+    "admin.catalog_review.positions_range": {
+      "description": "Administrator workbench: existing-Album review page, update range: the tracks whose selected numbers are out of range.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "tracks": "string"
+      }
+    },
+    "admin.catalog_review.proposal_cleanup": {
+      "description": "Administrator workbench: existing-Album review page, optional checkbox, off by default, that also removes the position from the draft titles still as captured.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.proposal_copy": {
+      "description": "Administrator workbench: existing-Album review page, under the proposal table heading while titles giving Disc and Track Numbers propose numbers, which the update selects.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.proposal_disc": {
+      "description": "Administrator workbench: existing-Album review page, long Album proposal table: disclosure of one disc's uniform proposed rows, with its track count.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number",
+        "disc": "number"
+      }
+    },
+    "admin.catalog_review.proposal_empty_originals": {
+      "description": "Administrator workbench: existing-Album review page, proposal table note in place of the original-numbers column, when every captured Disc and Track Number is empty.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.proposal_fill": {
+      "description": "Administrator workbench: existing-Album review page, text marker on a number or value that fills an empty catalog value.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.proposal_flag_disagrees": {
+      "description": "Administrator workbench: existing-Album review page, proposal table reason: the track's own Disc or Track Number (captured, saved or filled by lookup) differs from its title's position.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.proposal_flag_disc_not_captured": {
+      "description": "Administrator workbench: existing-Album review page, proposal table reason: the review captured no Disc Number for the track while the titles name several discs.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.proposal_flag_duplicate": {
+      "description": "Administrator workbench: existing-Album review page, proposal table reason: an earlier track's title gives the same position.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.proposal_flag_form_mismatch": {
+      "description": "Administrator workbench: existing-Album review page, proposal table reason: the title gives a Track Number alone while the others give Disc and Track Numbers, or the reverse.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.proposal_flag_gap": {
+      "description": "Administrator workbench: existing-Album review page, proposal table note that does not stop the proposal: the Track Numbers on this disc skip before this track.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.proposal_flag_lone_track_only": {
+      "description": "Administrator workbench: existing-Album review page, proposal table reason: an Album with one track reads only a Disc and zero-padded Track Number, such as 1-01.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.proposal_flag_no_position": {
+      "description": "Administrator workbench: existing-Album review page, proposal table reason: the captured title starts with no position (such as 1999 X or Disc2-03).",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.proposal_flag_not_increasing": {
+      "description": "Administrator workbench: existing-Album review page, proposal table reason: the position is not after the previous track's in Album order.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.proposal_long": {
+      "description": "Administrator workbench: existing-Album review page, long Album proposal table summary: how many tracks on how many discs.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "discs": "number",
+        "tracks": "number"
+      }
+    },
+    "admin.catalog_review.proposal_long_range": {
+      "description": "Administrator workbench: existing-Album review page, long Album proposal table summary, after the counts: the first and last positions as the titles write them.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "first": "string",
+        "last": "string"
+      }
+    },
+    "admin.catalog_review.proposal_original": {
+      "description": "Administrator workbench: existing-Album review page, proposal table row: the Disc and Track Number the catalog stores, slash-separated, a dash for an empty one.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "numbers": "string"
+      }
+    },
+    "admin.catalog_review.proposal_overwrite": {
+      "description": "Administrator workbench: existing-Album review page, text marker on a number or value that replaces a non-empty catalog value, shown before the struck-through original.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.proposal_stopped": {
+      "description": "Administrator workbench: existing-Album review page, proposal table: introduces the tracks whose titles stop the whole proposal, each listed with its reason.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.proposal_title": {
+      "description": "Administrator workbench: existing-Album review page, heading of the table of Disc and Track Numbers proposed from the captured track titles.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.proposal_track_only": {
+      "description": "Administrator workbench: existing-Album review page, proposal table row marker: a Track Number proposed from titles giving Track Numbers alone, proposed unselected for checking.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.range_album_title": {
+      "description": "Administrator workbench: existing-Album review page, update range group of the Album title.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.range_credits": {
+      "description": "Administrator workbench: existing-Album review page, update range group of the Album's Artist entries, label, member Credits and expected tracklist.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.range_group_count": {
+      "description": "Administrator workbench: existing-Album review page, update range group: how many of its items are selected.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "selected": "number",
+        "total": "number"
+      }
+    },
+    "admin.catalog_review.range_identities_link": {
+      "description": "Administrator workbench: existing-Album review page, update range: link to the identity rows, after the names that still need a record chosen.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.range_items": {
+      "description": "Administrator workbench: existing-Album review page, update range group: disclosure listing each item with its original and new value.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.range_numbers": {
+      "description": "Administrator workbench: existing-Album review page, update range group of Disc and Track Numbers.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.range_numbers_disc": {
+      "description": "Administrator workbench: existing-Album review page, update range group of one disc's Disc and Track Numbers on a long Album.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "disc": "number"
+      }
+    },
+    "admin.catalog_review.range_summary": {
+      "description": "Administrator workbench: existing-Album review page, update range disclosure summary: how many changes are selected, as items, and that it opens to adjust them.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.catalog_review.range_titles": {
+      "description": "Administrator workbench: existing-Album review page, update range group of Track titles, with how many it lists.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
       }
     },
     "admin.catalog_review.review_copy": {
@@ -3967,6 +4211,13 @@
     },
     "admin.catalog_review.title": {
       "description": "Administrator workbench: the name of an existing-Album review project (an Album completion).",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.title_needs_numbers": {
+      "description": "Administrator workbench: existing-Album review page, update range: why a Track title cleaned of its position cannot be selected: it applies only with its track's Disc and Track Number.",
       "delivery": [
         "runtime"
       ],

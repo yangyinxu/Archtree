@@ -14,7 +14,7 @@ test('a pairing panel whose chunk cannot load asks for a reload after the sectio
   const onChoose = vi.fn();
   render(<CandidateChooser projectId="aaaaaaaaaaaaaaaaaaaaaaaa" viewerId="bbbbbbbbbbbbbbbbbbbbbbbb" lookup={pairingLookupResponse().lookup!} disabled={false} onChoose={onChoose}
     review={{ tracks: [{ slotId: '10000000-0000-4000-8000-000000000001', title: 'Synthetic opening (Live)' }, { slotId: '10000000-0000-4000-8000-000000000002', title: 'Synthetic second song (Live)' }],
-      searched: 'Synthetic Live Album 2', artists: ['Synthetic Live Artist -Romanized-'], fill: null }} />);
+      searched: 'Synthetic Live Album 2', artists: ['Synthetic Live Artist -Romanized-'], numbers: 0 }} />);
   fireEvent.click(screen.getByRole('button', { name: 'Pair tracks by hand' }));
   await waitFor(() => expect(pairingChunk.attempts).toBeGreaterThan(0));
   // React reveals a failed lazy child only after its Suspense throttle (about 300 ms).

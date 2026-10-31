@@ -2,7 +2,7 @@ import { lazy, Suspense, useEffect, useRef, useState, type ComponentProps, type 
 import { useLocalization } from '../../localization/LocalizationProvider';
 import { useAdminText } from './AdminAccess';
 import type { CatalogReview } from './catalogReviewApi';
-import type { ApplyChoice } from './catalogReviewApplyModel';
+import type { ApplyChoice, ProposedValues } from './catalogReviewApplyModel';
 import type { CatalogReviewApplyCount as Count } from './CatalogReviewApply';
 import { LunaStatus, useReviewBrief } from './catalogReviewBrief';
 import { lookupBriefMessage, type LookupBrief } from './lookupBrief';
@@ -40,11 +40,11 @@ function findMessage(brief: LookupBrief | null, title: string | null): Message {
  * (manual values), and a plain one otherwise while it lists changes. When the last answer makes the changes ready and leaves the
  * focus on the page or in a folded section, the focus moves to that button. An applied completion offers what was updated
  * instead, and Luna AI's status once Luna AI was used. It reads the review's brief (useReviewBrief) and the Update step's count (in
- * that step's chunk), so its count is that step's. The chunk also holds an applied completion's list of what was updated
+ * that step's chunk, with the title proposal's defaults), so its count is that step's. The chunk also holds an applied completion's list of what was updated
  * (CatalogReviewApplied.tsx); the Luna AI controls are their own chunk (CatalogReviewLuna.tsx).
  */
-export function CatalogReviewSteps({ item, choices, stage, dirty, onNavigate }: { item: CatalogReview; choices: Readonly<Record<string, ApplyChoice>>;
-  stage: 'draft' | 'review' | 'apply'; dirty: boolean; onNavigate: (stage: 'draft' | 'apply') => void }) {
+export function CatalogReviewSteps({ item, choices, proposed, stage, dirty, onNavigate }: { item: CatalogReview; choices: Readonly<Record<string, ApplyChoice>>;
+  proposed?: ProposedValues; stage: 'draft' | 'review' | 'apply'; dirty: boolean; onNavigate: (stage: 'draft' | 'apply') => void }) {
   const t = useAdminText(), { locale } = useLocalization(), { captured, read, lookup, brief } = useReviewBrief(item);
   const [counted, setCounted] = useState<{ count: number; items: number; identityAnswers: number; ready: boolean } | null>(null);
   const button = useRef<HTMLButtonElement>(null), waited = useRef(false);
@@ -75,7 +75,7 @@ export function CatalogReviewSteps({ item, choices, stage, dirty, onNavigate }: 
   const cell = (label: string, value: string | null, link: string | null) => <div><dt>{label}</dt>
     <dd>{value === null ? '—' : link ? <a href={`#${link}`}>{value}</a> : value}</dd></div>;
   return <>
-    {item.state === 'reviewing' && <Suspense fallback={null}><ApplyCount item={item} choices={choices} onCount={setCounted} /></Suspense>}
+    {item.state === 'reviewing' && <Suspense fallback={null}><ApplyCount item={item} choices={choices} proposed={proposed} onCount={setCounted} /></Suspense>}
     {/* At least 11rem per step: three columns from about 768 px, one step per row on a phone. */}
     <div role="group" aria-label={t('catalog_review.steps_label')}><dl className={styles.statusRow} style={{ gridTemplateColumns: 'repeat(auto-fit,minmax(11rem,1fr))' }}>
       {cell(t('catalog_review.step_find'), find, applied ? null : 'catalog-review-lookup')}

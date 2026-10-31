@@ -21,7 +21,8 @@ import { advanceAccountEpoch, captureAccountOperation } from '../../api/accountE
 import { adminEndpointRequest } from './adminApi';
 import { adminWorkspace } from './adminWorkspace';
 import { expectedTracklistRowSchema, importDraftV2Schema } from './adminNamingSchema';
-import { reviewChanges, reviewDetailSchema, reviewDraftChanges, reviewMutationSchema, reviewResponseSchema } from './catalogReviewApi';
+import { reviewDetailSchema, reviewDraftChanges, reviewMutationSchema, reviewResponseSchema } from './catalogReviewApi';
+import { reviewChanges } from './catalogReviewChanges';
 import { reviewWorkbenchSchema } from './catalogReviewWorkbenchApi';
 import { artistEntryKey, capturedCatalogReview, catalogReview, deferred, legacyCatalogReview, reviewJson, slotId, slotTwo, viewer } from './catalogReviewFixtures.testSupport';
 import { reviewValueText } from './ImportReview';

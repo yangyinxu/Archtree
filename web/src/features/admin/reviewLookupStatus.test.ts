@@ -111,7 +111,7 @@ test('where nothing matched, the review says which cause applies, in order: no m
   const empty = { members: 0, searched: 'Synthetic Number Ones', artists: [], now: 0, numbers: null };
   // An Album without members names how many releases have its name, and that an Artist narrows a run that named none; the name
   // box stays its next step.
-  expect(reviewLookupStatus(numberOnes(), 'lookup.no_match', empty)).toEqual({ fill: null, box: true,
+  expect(reviewLookupStatus(numberOnes(), 'lookup.no_match', empty)).toEqual({ box: true,
     messages: [{ key: 'catalog_review.lookup_empty_album', values: { count: 6 } }, { key: 'catalog_review.lookup_add_artist', values: undefined }] });
   expect(reviewLookupStatus(numberOnes(), 'lookup.no_match', { ...empty, artists: ['Synthetic Singer'] })!.box).toBe(true);
   expect(reviewLookupStatus(numberOnes(), 'lookup.no_match', { ...empty, artists: ['Synthetic Singer'] })!.messages).toHaveLength(1);
@@ -119,40 +119,40 @@ test('where nothing matched, the review says which cause applies, in order: no m
     empty)!.messages).toHaveLength(1);
   expect(reviewLookupStatus(numberOnes(), 'lookup.no_match', { ...empty, searched: 'Unrelated' })!.messages[0]).toEqual({ key: 'catalog_review.lookup_empty_album', values: { count: 0 } });
   // Members without a duration come before the pairing, which they also leave ambiguous: saving numbers alone would not match. The
-  // titles' Disc and Track Numbers make entering them the next step; Track Numbers alone are only offered; without any, by hand,
-  // where a possible match is listed also by pairing the tracks with it.
+  // captured titles' Disc and Track Numbers make checking the proposed ones the next step; with Track Numbers alone or none, the
+  // numbers are checked or entered by hand, where a possible match is listed also by pairing the tracks with it.
   const found = (count: number, title: string) => ({ key: 'catalog_review.lookup_possible_found', values: { count, title } });
-  expect(reviewLookupStatus(bestOf(), 'lookup.no_match', bestOfContext)).toEqual({ fill: 'next',
+  expect(reviewLookupStatus(bestOf(), 'lookup.no_match', bestOfContext)).toEqual({
     messages: [found(4, 'Synthetic Best BIBLE'), { key: 'catalog_review.lookup_cause_durations', values: { unknown: 3 } }] });
-  expect(reviewLookupStatus(bestOf(), 'lookup.no_match', { ...bestOfContext, numbers: trackNumbers(3) })).toEqual({ fill: 'offer', box: true,
+  expect(reviewLookupStatus(bestOf(), 'lookup.no_match', { ...bestOfContext, numbers: trackNumbers(3) })).toEqual({ box: true,
     messages: [found(4, 'Synthetic Best BIBLE'), { key: 'catalog_review.lookup_cause_durations_pair', values: { unknown: 3 } }] });
-  expect(reviewLookupStatus(bestOf(), 'lookup.no_match', { ...bestOfContext, numbers: null })!.fill).toBeNull();
+  expect(reviewLookupStatus(bestOf(), 'lookup.no_match', { ...bestOfContext, numbers: null })!.box).toBe(true);
   // Once saved numbers make a possible release pair in one way, the step is using it, never saving again.
   const paired = view(bestOf().candidates.map(entry => entry.title === 'Synthetic Best BIBLE'
     ? { ...entry, comparison: { ...entry.comparison!, subset: { ...entry.comparison!.subset!, pairing: 'unique' as const } } } : entry), { disclosure: bestOf().disclosure });
-  expect(reviewLookupStatus(paired, 'lookup.no_match', { ...bestOfContext, numbers: discNumbers(0) })).toEqual({ fill: null,
+  expect(reviewLookupStatus(paired, 'lookup.no_match', { ...bestOfContext, numbers: discNumbers(0) })).toEqual({
     messages: [found(4, 'Synthetic Best BIBLE'), { key: 'catalog_review.lookup_cause_paired_durations', values: { unknown: 3 } }] });
-  expect(reviewLookupStatus(live(), 'lookup.no_match', liveContext)).toEqual({ fill: 'next',
+  expect(reviewLookupStatus(live(), 'lookup.no_match', liveContext)).toEqual({
     messages: [found(1, 'Synthetic Live Album 2'), { key: 'catalog_review.lookup_cause_pairing', values: undefined }] });
-  expect(reviewLookupStatus(live(), 'lookup.no_match', { ...liveContext, numbers: discNumbers(0) })).toEqual({ fill: null, box: true,
+  expect(reviewLookupStatus(live(), 'lookup.no_match', { ...liveContext, numbers: discNumbers(0) })).toEqual({ box: true,
     messages: [found(1, 'Synthetic Live Album 2'), { key: 'catalog_review.lookup_cause_pairing_pair', values: undefined }] });
-  expect(reviewLookupStatus(live(), 'lookup.no_match', { ...liveContext, numbers: trackNumbers(2) })!.fill).toBe('offer');
-  // Only releases whose titles differ fit, so there is no possible match to pair with by hand: the numbers are entered in Edit draft.
-  expect(reviewLookupStatus(live(), 'lookup.no_match', { ...liveContext, searched: 'Synthetic Budokan', numbers: discNumbers(0) })).toEqual({ fill: null, box: true,
+  expect(reviewLookupStatus(live(), 'lookup.no_match', { ...liveContext, numbers: trackNumbers(2) })!.messages[1].key).toBe('catalog_review.lookup_cause_pairing_pair');
+  // Only releases whose titles differ fit, so there is no possible match to pair with by hand: the numbers are entered by manual editing.
+  expect(reviewLookupStatus(live(), 'lookup.no_match', { ...liveContext, searched: 'Synthetic Budokan', numbers: discNumbers(0) })).toEqual({ box: true,
     messages: [{ key: 'catalog_review.lookup_fit_found', values: { count: 1, title: 'Synthetic Live Album 2' } }, { key: 'catalog_review.lookup_cause_pairing_manual', values: undefined }] });
   expect(reviewLookupStatus(view(bestOf().candidates, { disclosure: bestOf().disclosure }), 'lookup.no_match', { ...bestOfContext, searched: 'Synthetic Unrelated', numbers: null })!.messages.map(message => message.key))
     .toEqual(['catalog_review.lookup_fit_found', 'catalog_review.lookup_cause_durations_manual']);
   // A single pairing a release track without a duration left unconfirmed is a cause of its own.
-  expect(reviewLookupStatus(reshaped('unique'), 'lookup.no_match', liveContext)).toEqual({ fill: null,
+  expect(reviewLookupStatus(reshaped('unique'), 'lookup.no_match', liveContext)).toEqual({
     messages: [found(1, 'Synthetic Live Album 2'), { key: 'catalog_review.lookup_cause_release_durations', values: undefined }] });
-  // With every duration known, a possible release that pairs in one way comes before one that does not: it is used, never filled.
+  // With every duration known, a possible release that pairs in one way comes before one that does not: it is used, no numbers asked.
   const mixed = view(live().candidates.map((entry, index, all) => entry.status === 'unverified' && index === all.findIndex(other => other.status === 'unverified')
     ? { ...entry, comparison: { ...entry.comparison!, subset: { ...entry.comparison!.subset!, pairing: 'unique' as const } } } : entry), { disclosure: live().disclosure });
   expect(mixed.candidates.filter(entry => entry.status === 'unverified').map(entry => entry.comparison?.subset?.pairing)).toEqual(['unique', 'ambiguous']);
-  expect(reviewLookupStatus(mixed, 'lookup.no_match', liveContext)).toEqual({ fill: null,
+  expect(reviewLookupStatus(mixed, 'lookup.no_match', liveContext)).toEqual({
     messages: [found(1, 'Synthetic Live Album 2'), { key: 'catalog_review.lookup_cause_release_durations', values: undefined }] });
   // Releases the tracks fit whose titles differ from the name searched still name the cause.
-  expect(reviewLookupStatus(live(), 'lookup.no_match', { ...liveContext, searched: 'Synthetic Budokan' })).toEqual({ fill: 'next',
+  expect(reviewLookupStatus(live(), 'lookup.no_match', { ...liveContext, searched: 'Synthetic Budokan' })).toEqual({
     messages: [{ key: 'catalog_review.lookup_fit_found', values: { count: 1, title: 'Synthetic Live Album 2' } }, { key: 'catalog_review.lookup_cause_pairing', values: undefined }] });
   // Without iTunes the same causes apply, and the status adds that a match may be missing.
   expect(reviewLookupStatus(live(), 'lookup.itunes_unavailable', liveContext)!.messages.map(message => message.key)).toEqual(['catalog_review.lookup_possible_found',
@@ -165,7 +165,7 @@ test('where nothing matched, the review says which cause applies, in order: no m
 
 test('a release applied for its Album values only, whose pairing is now single, is said to bring in its tracklist when used again', () => {
   const applied = pairedLookupResponse(pairingApplication(pairingEditions[0], false)).lookup!;
-  expect(reviewLookupStatus(applied, 'lookup.applied', liveContext)).toEqual({ fill: null,
+  expect(reviewLookupStatus(applied, 'lookup.applied', liveContext)).toEqual({
     messages: [{ key: 'catalog_review.lookup_applied_album_only', values: { title: 'Synthetic Live Album 2' } }] });
   // Not while the pairing is still not single, nor under another status.
   expect(reviewLookupStatus(live({ applied: pairingApplication(pairingEditions[0], false) }), 'lookup.applied', liveContext)).toBeNull();
@@ -176,9 +176,9 @@ test('a queued or running run with progress says so with its phase and counts, i
   const startedAt = '2026-10-25T00:00:00.000Z', start = Date.parse(startedAt), progress = (extra: object) => ({ phase: 'details' as const, done: 3, total: 5, startedAt, updatedAt: startedAt, ...extra });
   const status = (state: ReviewLookupView['state'], extra: object | null, now: number) => reviewLookupStatus(view([], { state, ...(extra ? { progress: progress(extra) } : {}) }), 'lookup.active',
     { ...liveContext, now });
-  expect(status('queued', { phase: 'search', done: 0, total: 2 }, start + 20_000)).toEqual({ fill: null, messages: [{ key: 'catalog_review.lookup_queued_status', values: undefined }],
+  expect(status('queued', { phase: 'search', done: 0, total: 2 }, start + 20_000)).toEqual({ messages: [{ key: 'catalog_review.lookup_queued_status', values: undefined }],
     elapsed: { key: 'catalog_review.lookup_waited', values: { elapsed: '0:20' } } });
-  expect(status('running', {}, start + 14_000)).toEqual({ fill: null, messages: [{ key: 'catalog_review.lookup_running_count_status', values: { phase: 'details', done: 3, total: 5 } }],
+  expect(status('running', {}, start + 14_000)).toEqual({ messages: [{ key: 'catalog_review.lookup_running_count_status', values: { phase: 'details', done: 3, total: 5 } }],
     elapsed: { key: 'catalog_review.lookup_elapsed', values: { elapsed: '0:14' } } });
   expect(status('running', { phase: 'itunes', done: 0, total: 0 }, start + 5_000)!.messages[0]).toEqual({ key: 'catalog_review.lookup_running_status', values: { phase: 'itunes', done: 0, total: 0 } });
   // A client clock behind the server's counts to the run's last step instead.
@@ -339,9 +339,9 @@ test('a retrying run says when it retries and which retry of how many, busy apar
   const status = (issue: ReviewLookupView['issue'], retry: object | null, time?: (value: string) => string) =>
     reviewLookupStatus(view([], { state: 'retrying', issue, timeline: timeline(retry) }), 'lookup.retrying', { ...liveContext, ...(time ? { time } : {}) });
   const musicBrainz = { at, source: 'musicbrainz', attempt: 2, limit: 3 };
-  expect(status('sourceBusy', musicBrainz, value => `time of ${value}`)).toEqual({ fill: null,
+  expect(status('sourceBusy', musicBrainz, value => `time of ${value}`)).toEqual({
     messages: [{ key: 'catalog_review.lookup_retry_busy', values: { source: 'MusicBrainz', time: `time of ${at}`, attempt: 2, limit: 3 } }] });
-  expect(status('sourceUnavailable', { ...musicBrainz, source: 'itunes', attempt: 1 })).toEqual({ fill: null,
+  expect(status('sourceUnavailable', { ...musicBrainz, source: 'itunes', attempt: 1 })).toEqual({
     messages: [{ key: 'catalog_review.lookup_retry_unavailable', values: { source: 'iTunes', time: at, attempt: 1, limit: 3 } }] });
   // Any other issue reads as busy (a refused own request bound is busy too).
   expect(status(null, musicBrainz)!.messages[0].key).toBe('catalog_review.lookup_retry_busy');
@@ -352,10 +352,10 @@ test('a retrying run says when it retries and which retry of how many, busy apar
 
 test('a run whose MusicBrainz retries ran out, and a stopped run, say why by issue; a not configured, superseded or other run keeps the shared status', () => {
   const status = (state: ReviewLookupView['state'], issue: ReviewLookupView['issue'], shared: string) => reviewLookupStatus(view([], { state, issue }), shared, liveContext);
-  expect(status('unavailable', 'sourceBusy', 'lookup.unavailable')).toEqual({ fill: null, messages: [{ key: 'catalog_review.lookup_exhausted_busy', values: undefined }] });
-  expect(status('complete', 'sourceUnavailable', 'lookup.unavailable')).toEqual({ fill: null, messages: [{ key: 'catalog_review.lookup_exhausted_unavailable', values: undefined }] });
-  expect(status('stopped', 'grantExpired', 'lookup.stopped')).toEqual({ fill: null, messages: [{ key: 'catalog_review.lookup_stopped_time', values: undefined }] });
-  expect(status('stopped', 'permissionLost', 'lookup.stopped')).toEqual({ fill: null, messages: [{ key: 'catalog_review.lookup_stopped_permission', values: undefined }] });
+  expect(status('unavailable', 'sourceBusy', 'lookup.unavailable')).toEqual({ messages: [{ key: 'catalog_review.lookup_exhausted_busy', values: undefined }] });
+  expect(status('complete', 'sourceUnavailable', 'lookup.unavailable')).toEqual({ messages: [{ key: 'catalog_review.lookup_exhausted_unavailable', values: undefined }] });
+  expect(status('stopped', 'grantExpired', 'lookup.stopped')).toEqual({ messages: [{ key: 'catalog_review.lookup_stopped_time', values: undefined }] });
+  expect(status('stopped', 'permissionLost', 'lookup.stopped')).toEqual({ messages: [{ key: 'catalog_review.lookup_stopped_permission', values: undefined }] });
   for (const [state, issue, shared] of [['unavailable', 'notConfigured', 'lookup.not_configured'], ['superseded', 'projectClosed', 'lookup.superseded'], ['stopped', null, 'lookup.stopped'],
     ['complete', 'sourceBusy', 'lookup.incomplete']] as const) expect(status(state, issue, shared), `${state} ${issue}`).toBeNull();
 });
@@ -365,6 +365,6 @@ test('after automatic pairing a possible release that pairs in one way while dur
     ? { ...entry, comparison: { ...entry.comparison!, subset: { ...entry.comparison!.subset!, pairing: 'unique' as const, pairedBy: 'titlePositions' as const } } } : entry),
   { disclosure: bestOf().disclosure });
   // The titles still give every number, yet nothing asks for them, and the name box is not the next step.
-  expect(reviewLookupStatus(paired, 'lookup.no_match', bestOfContext)).toEqual({ fill: null, messages: [{ key: 'catalog_review.lookup_possible_found', values: { count: 4, title: 'Synthetic Best BIBLE' } },
+  expect(reviewLookupStatus(paired, 'lookup.no_match', bestOfContext)).toEqual({ messages: [{ key: 'catalog_review.lookup_possible_found', values: { count: 4, title: 'Synthetic Best BIBLE' } },
     { key: 'catalog_review.lookup_cause_paired_durations', values: { unknown: 3 } }] });
 });

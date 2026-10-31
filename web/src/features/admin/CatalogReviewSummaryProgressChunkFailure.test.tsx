@@ -26,7 +26,7 @@ test('a step list chunk that cannot load leaves the summary, its retry and its n
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } }); client.setQueryData(['browser-session'], session);
   const onRun = vi.fn();
   render(<QueryClientProvider client={client}><MemoryRouter>
-    <CatalogReviewSummary item={pairingReview()} disabled={false} error={null} onRun={onRun} onFillNumbers={vi.fn()} /></MemoryRouter></QueryClientProvider>);
+    <CatalogReviewSummary item={pairingReview()} disabled={false} error={null} onRun={onRun} /></MemoryRouter></QueryClientProvider>);
   const summary = await screen.findByRole('region', { name: 'Metadata lookup' });
   expect(await within(summary).findByText(/^Lookup stopped because it ran past its time limit/)).toHaveAttribute('role', 'status');
   const box = await within(summary).findByRole('group', { name: 'Look up by name' });
@@ -47,7 +47,7 @@ test('a step list chunk that cannot load asks for a reload where it carried the 
   vi.stubGlobal('fetch', vi.fn(async () => reviewJson(response)));
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } }); client.setQueryData(['browser-session'], session);
   render(<QueryClientProvider client={client}><MemoryRouter>
-    <CatalogReviewSummary item={{ ...pairingReview(), sourceStatus: 'changed' }} disabled={false} error={null} onRun={vi.fn()} onFillNumbers={vi.fn()} /></MemoryRouter></QueryClientProvider>);
+    <CatalogReviewSummary item={{ ...pairingReview(), sourceStatus: 'changed' }} disabled={false} error={null} onRun={vi.fn()} /></MemoryRouter></QueryClientProvider>);
   const summary = await screen.findByRole('region', { name: 'Metadata lookup' });
   expect(await within(summary).findByText('This lookup ended because the Album or its tracks changed or are no longer ready.')).toHaveAttribute('role', 'status');
   expect(await within(summary).findByRole('alert')).toHaveTextContent(/^The administrator workbench was updated\. Reload the page to continue/);

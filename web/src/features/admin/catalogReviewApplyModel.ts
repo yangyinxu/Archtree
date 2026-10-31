@@ -8,7 +8,8 @@
  *   Functions: pathOf, sameCredits, artistEntries, firstLabel, positionOf, numeric
  * @end-catalog */
 
-import { reviewChanges, reviewFieldKey, type CatalogReview, type ReviewChange, type ReviewDraft, type ReviewField } from './catalogReviewApi';
+import type { CatalogReview, ReviewDraft, ReviewField } from './catalogReviewApi';
+import { reviewChanges, reviewFieldKey, type ReviewChange } from './catalogReviewChanges';
 import type { ReviewIdentityResponse, ReviewLookupResponse } from './catalogReviewLookupApi';
 import { expectedRowMembers, pairingFilledNumbers } from './catalogReviewSummaryModel';
 import type { ReviewLookupView } from './importLookupApi';
