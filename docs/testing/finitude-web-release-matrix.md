@@ -200,48 +200,45 @@ Another, from a review lookup shaped like a live Album (two members without Disc
 or Track Numbers whose titles start with 1-01 and 1-02, two editions of one
 release they fit in more than one way, and ten releases they do not fit, with a
 partial comparison), shows at 1280 px in English and 390 px in Chinese the
-possible-pairing status, naming no paid step, with Fill Disc and Track Numbers
-from titles as its only primary button, in the first screen; Possible match (1
+possible-pairing status, naming no paid step, with no button of the summary
+styled as the primary one, in the first screen; Possible match (1
 release) open with one card naming both editions, the reason that the tracks fit
 in more than one way, no missing-file row count and, on the card face, no line
 that choosing brings in no expected tracklist, which Other options says beside
-Use Album values only, and the fill again beside Pair tracks by hand, the two
+Use Album values only, and the fill hint beside Pair tracks by hand, the two
 never touching; the partial-comparison line below the possible match; and the
 releases that do not fit as the only other section, folded, before Use none of
-these. The third step reads Update after entering Disc and Track Numbers, with no
-Review changes to apply. Filling from another tab switches to Edit
-draft with both Disc and Track Numbers filled and unsaved and Save completion
-draft focused, sending nothing; saving sends only those four values, after which
-the release is offered, said once, as the status, on a card naming both editions
-with its 18 missing-file rows and Use this release as the only primary button,
-with Use none of these and then the partial-comparison line after it; the steps
-read Choose a release and Update after choosing a release, with no Review
-changes to apply, although the Update step lists the saved numbers. Use this
-release brings in the 20-row expected tracklist. At 1280 px, choosing Album values
-only first shows that track values are not applied, with the lookup results
-still open and Fill Disc and Track Numbers from titles on the card and as a
-plain button under the status, after why track values are not applied and the
-fill hint, before the name box; saving the numbers filled from it then offers
-Use this release again (with track details) above the folded list, which brings
-in the tracklist and, with nothing left open, folds the results again. A queued
+these. The page has no tabs and no step bar: the proposal table shows both Disc
+and Track Numbers proposed from the titles, unsaved and selected, sending
+nothing, and the action bar's Update original Album (4) is the page's primary
+button. Save draft only sends only those four values, after which it goes away
+and the release is offered, said once, as the status, on a card naming both
+editions with its 18 missing-file rows and Use this release as the summary's
+only button styled as primary, with Use none of these and then the
+partial-comparison line after it, while the bar still counts the four saved
+numbers. Use this release brings in the 20-row expected tracklist. At 1280 px,
+choosing Album values only first shows that track values are not applied, with
+the lookup results still open and the fill hint on the card and under the
+status, after why track values are not applied, before the name box; saving the
+proposed numbers alone then offers Use this release again (with track details)
+above the folded list, styled as the primary button, which brings in the
+tracklist and, with nothing left open, folds the results again. A queued
 run shows its queued line and a running one its step with done and total counts,
 each with its elapsed time outside the status and the note Lookup keeps running
 if you leave this page, parted by dots and with no space before the dot after a
 Chinese full-width bracket; submitting the name box during the run asks first:
 Cancel sends nothing and Stop and look up again sends one lookup request. Each
 with an axe scan and no overflow, also at 320 px.
-From the same live-shaped lookup, the review page's three steps read Found 1
-possible release and Disc and Track Numbers needed, one step per row at 390 px and on one
-row at 1280 px. An Album completion started from the Album page, once its title
-and date conflicts are answered and its identity decided, says Nothing left to
-answer and Everything is answered; you can update the original Album, with
-Review changes to apply (6) as the primary button, the same six as Update
-original Album (6), which opens the Update step and focuses its tab; after
-applying, that step lists What was updated (the five fields written, the track
-field named by the track's title) with the time in the interface language, a
-note that the sixth change, a track Artist, is not in the list, offers no
-checkbox and no Update original Album,
-the third step reads Updated with that time, and no Luna AI line shows, as Luna
+An Album completion started from the Album page, once its title and date
+conflicts are answered and its identity decided, offers Update original Album
+(6) in the sticky action bar as the primary button, the six selected in the
+update range; pressing it shows the inline confirmation of the six changes
+(their full values behind a disclosure) with the focus on Back to adjust, and
+Confirm update (6) shows the applied view with its heading focused: 5 fields
+updated, What was updated (the five fields written, the track field named by
+the track's title) with the time in the interface language, a note that the
+sixth change, a track Artist, is not in the list, that the edition was
+matched, no checkbox and no Update original Album, and no Luna AI line, as Luna
 AI never ran. After a manual completion with Luna AI is applied, What was
 updated lists the one field written and the Luna AI line reads closed. After the
 last lookup answer and identity decision, the lookup results fold under Lookup
@@ -287,13 +284,16 @@ and automatic retry 2 of 3, Retry lookup being its only primary button and
 sending one retry; an unreachable source, a run stopped by its time limit or by
 a lost administrator account, and MusicBrainz's retries running out each say so
 with Retry lookup. A run that ended after the Album changed offers Open the
-Album to start a new completion, which opens the Album page, shows no retry and
-leaves the step bar promising none. A matching release paired by the positions
+Album to start a new completion; a review whose Album changed shows the stale
+view instead, with its old draft read-only, Discard completion and the action
+bar's View the latest original Album, which opens the Album page, and no retry.
+A matching release paired by the positions
 in its titles says Paired by: the track numbers in the titles (1-01 and 1-02)
 on its offered card and on both editions in Releases found, and an earlier Luna
 AI run that did not succeed shows only the quiet line Luna AI (paid, optional):
 the last run did not succeed; you can ignore it under Other actions, beside Use
-Luna AI again (paid) and Discard completion, without its reason. Each with an axe scan and no overflow,
+Luna AI again (paid), with Discard completion in the row of alternatives,
+without its reason. Each with an axe scan and no overflow,
 the steps and retry flows also at 320 px.
 From a review lookup shaped like the live Album but whose two track titles carry
 no positions (no Disc or Track Numbers; the first track within 3 seconds of

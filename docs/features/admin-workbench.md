@@ -1381,8 +1381,9 @@ catalog Album read the Album page uses, `GET /catalog/album/:id`, loaded in its
 own chunk, with the artwork placeholder while that read is pending, fails or
 finds none), the captured Album title as stored (a trailing credit is never
 stripped), the draft's primary Artist names and how many local tracks the review
-captured. One status row follows, a polite status naming the first that applies:
-the update being prepared, metadata lookup and Luna AI both running, Luna AI
+captured. One status row follows, a polite status naming the first that applies
+(while the update is being prepared, the action bar says so instead, below):
+metadata lookup and Luna AI both running, Luna AI
 running, a lookup queued, running or retrying with its progress, a lookup that
 did not finish, no release found, a release used, or the completed lookup's
 result (the review's lookup summary below words each); a quieter line under it
@@ -1392,11 +1393,13 @@ lookup view, never a client timer. A details toggle beside the status shows or
 hides the lookup steps and log. The editing section follows: the numbers
 proposed from titles (see **Numbers proposed from titles** below) with the
 optional title-prefix cleanup, the update range (see below), the identity rows, the reference releases and any conflict notes. A row
-of alternatives comes next: looking up another name (the name box), manual
+of alternatives comes next, labelled "不对？" (**Not right?**): manual
 editing, which opens the draft editor (`CatalogReviewDraftEditor.tsx`, its own
-chunk) in place for the Album title and date and each Track's title, Disc
-Number and Track Number, and **Discard completion**. An applied review shows
-its outcome view instead (below).
+chunk) in place below the row for the Album title and date and each Track's
+title, Disc Number and Track Number, and **Discard completion**; looking up
+another name stays in the lookup summary, as the name box's own fold. A review
+whose source is not current shows its stale view, and an applied review its
+outcome view, instead (below).
 Once Luna AI was used (queued, running or a
 generation above 0), one muted line gives **Luna AI (paid, optional)** and its
 state: above the Luna AI controls on an unapplied review, under the header on
@@ -1425,7 +1428,7 @@ name and Artist name or else the
 saved Album title and the draft's primary Artist names (its **Artist
 (optional)** hint says that an empty field uses the Album's primary Artists),
 which asks before it replaces a queued, running or retrying run, folded behind
-the alternatives row's look-up-another-name control after a completed run
+its look-up-another-name control (**Didn't find it? Look up another name**) after a completed run
 unless the status makes it the next step (see below), and which, after a run
 that found no release, hints that a shorter name may help ("可尝试去掉副标题");
 the candidate chooser, shown as the reference releases with how many possible
@@ -1518,10 +1521,12 @@ unticked in the Luna AI section and change the draft only when adopted; an
 adopted suggestion is listed in the update range unselected. An applied review
 is read-only: its outcome view gives what was updated in place of the
 selection, one compact row per affected Track (its title with its new Disc and
-Track Number, and that its title was updated) and per Album value, the full
-original and new values behind a disclosure, with when the
-original Album was updated (in the interface language), each field the apply
-wrote (`applied.fields`, named as in the selection: the Album's title, date,
+Track Number, and that its title was updated) and per Album value, grouped on a
+long Album as the confirmation groups them, under a heading counting the fields
+written that takes the focus when this page's update led there, with when the
+original Album was updated (in the interface language), and, behind the **What
+was updated** disclosure (an applied review keeps no original values), each field
+the apply wrote (`applied.fields`, named as in the selection: the Album's title, date,
 Artists, label and expected tracklist, and each Track's title, Disc and Track
 Number, a Track named by its quoted title as the selection names it, by its
 position only when untitled), for a review captured for lookup a note that
@@ -1698,16 +1703,31 @@ MusicBrainz ID recorded or replaced.
 
 The action bar (`CatalogReviewActionBar.tsx`, its own chunk) sticks to the
 bottom of the viewport on an unapplied review and on its outcome views, with
-buttons at least 44 px high and its heading hidden at narrow widths; while it is
-shown the page keeps that much bottom scroll padding, so a focused field is
-never hidden behind it. It is absent from the discarded notice and the
+buttons at least 44 px high and its heading (**Current step**, "当前操作", or
+**Final confirmation**, "最后确认", while the confirmation shows) hidden at
+narrow widths. It reads the update model of the saved review and of the draft as
+edited, and runs the prepare and apply state machine
+(`useCatalogReviewPrepare.ts`) in a chunk of its own
+(`CatalogReviewPrepareControl.tsx`); the confirmation and the unknown view share
+another (`CatalogReviewConfirmation.tsx`, with the compact rows of
+`CatalogReviewCompactRows.tsx`), and the stale and applied views are their own
+(`CatalogReviewStale.tsx`, `CatalogReviewApplied.tsx`). A bar or state-machine
+chunk that cannot load asks for a reload in the bar's place, with nothing to
+press; a confirmation chunk that cannot load asks for a reload in its place and
+holds the confirm button with that reason, as nothing may be confirmed unseen. While it is
+shown the page keeps that much bottom scroll padding, following the bar's height
+as it grows (an alert, a wrapped reason), so a focused field is never hidden
+behind it. It is absent from the discarded notice and the
 Admin view gate. Its primary **Update original Album (N)**, N being the range's
 count, waits while lookup runs and while Luna AI runs (it names both when both
 run; stopping Luna AI leaves the lookup reason), while a Disc or Track Number is
 out of range (Disc 1–999, Track 1–9999, as the review save accepts) or two
 members would sit at one Disc and Track position after the selected numbers (a
 missing Disc Number counting as 1; it names them), while nothing is selected,
-and while a selected list's identity needs a record (it names them); it never
+and while a selected list's identity needs a record (it names them); it also
+waits offline, while the draft has conflicting edits, while another change of
+the review runs or waits for its outcome, and while the reads the update rests
+on catch up with the saved review (**Loading…**). It never
 waits for unselected work, nor for a lookup that failed or found nothing. The
 reason shows as text under the bar, which describes the button
 (`aria-disabled`), so it stays reachable by keyboard. Pressing it prepares the
@@ -1717,15 +1737,20 @@ proposals, never an unselected one, as one ordinary review save (`PATCH
 when a member's own number changed, and waits until the detail, the lookup
 summary and the identity read are all at the saved revision and value revision.
 Meanwhile the bar says the draft is being saved, then that the saved numbers and
-the update range are being checked; it says the stored candidates were compared
-again only when the save changed a number and the run completed with
-candidates. When the save advanced the value revision (its re-rank applied
+the update range are being checked, as its only live status; the confirmation
+says the stored candidates were compared again only when the save changed a
+number and the run completed with candidates, and otherwise that the saved
+numbers and the update range were checked. When the save advanced the value revision (its re-rank applied
 release values), every item that was not noted is kept unselected by an
 explicit choice and the confirmation says that extra release data was found and
 not added; when a noted item gained a hold or an identity row that needs an
 answer, the page returns to editing with that row shown instead (owner rules,
 Catalog Visibility and Administration). A refused save keeps the unsaved values
-and shows its message as an alert at the bar, whose primary retries the
+and shows its message as an alert at the bar (said there only, never again at
+the top of the page; when another administrator's save made the edits
+conflicting, the editing section keeps only its button to load the saved
+version), whose primary, relabelled **Retry preparing the
+confirmation** ("重试准备确认") and keeping the focus, retries the
 preparation; a save whose outcome is unknown keeps its intent, and the bar's
 **Retry original operation** sends the same save again, after which the page
 returns to editing with the draft saved, so the update is requested again.
@@ -1734,16 +1759,24 @@ preparing.
 
 The confirmation is inline above the bar, a region named as a dialog but not
 modal, with the focus on its back button, which its summary sentence describes,
-and the page's other controls disabled. It names the Album, says the draft is
+and the page's other controls disabled. Shown after the editing section, it
+scrolls into view when it opens (to its nearest edge, clear of the bar, so a tall
+one shows its top). It names the Album, says the draft is
 saved and checked and how many changes update the original Album after the
 final confirmation, lists one compact row per affected Track (its title with its
-new Disc and Track Number, and a neutral title change) and per Album value, the
-full original and new values behind a disclosure (rendered when opened), the
+new Disc and Track Number, and a neutral title change, "标题修改") and per Album
+value, then one line for the members whose Credits change; on a long Album (25
+or more tracks) the numbers that fill empty values and the title changes are one
+line each ("填写 44 首曲目的碟号与曲号"), while a number that replaces a stored
+value keeps its own row. The full original and new values follow behind a
+disclosure (**Full original / new values · N**, rendered when opened), then the
 Artists and Organizations to be reused or created, and that artwork, audio and
-visibility stay unchanged. It stays in view, disabled, while applying. Going
+visibility stay unchanged. The bar then holds **Back to adjust** ("返回调整")
+and **Confirm update (N)** ("确认更新（N 项）"). It stays in view, disabled, while applying. Going
 back keeps the saved draft, says that it does and that the original Album is
-unchanged, and focuses the primary button. The bar's primary then confirms the
-update with its count and sends, from the frozen item,
+unchanged, and focuses the primary button. The bar's primary confirms the
+update with its count, waiting with its reason once the detail moved past the
+frozen item, and sends, from the frozen item,
 `{expectedRevision, fields, memberCredits, preselections, musicBrainzIds,
 expectedValueRevision}`: the selected fields and members, and only the
 preselections and ID writes of the identities a selected list or label owns. A
@@ -1760,17 +1793,24 @@ date and cannot overwrite content saved later, the old draft read-only behind a
 disclosure, **Discard completion**, and as the bar's only button opening the
 latest Album to start a new completion, or the queue when the source is
 unavailable; the stale draft is never submitted again. An apply whose outcome is
-unknown shows the unknown view: that a lost connection does not mean the update
-failed, the frozen compact rows, and the note that it checks the same operation
+unknown shows the unknown view in place of the editing section: that a lost
+connection does not mean the update failed, the frozen compact rows (kept in the
+workspace buffer, so a remount shows them too), and the note that it checks the same operation
 and never updates twice ("不会重复更新"). The bar's primary checks the result by
 reading the review again; when the review shows the update applied by this
 operation, the same operation is sent again, which replays its stored receipt,
 and the applied view follows; when it shows the review applied by another
 operation (another tab), the applied view follows without sending anything;
-when its source is no longer current, the stale view follows. Only while the
-review is still unapplied and current does its secondary send the same
-operation again. On the stale, unknown and applied views the focus moves to the view's
-heading. Luna's Artist and label suggestions appear only in a hint panel of the
+when its source is no longer current, the stale view follows. Any other read of
+the review (refreshing its status, returning to the tab) that shows it applied or
+its source no longer current settles an unknown save or apply the same way,
+without sending anything, so Discard completion is available again in the stale
+view. Only while the
+review is still unapplied and current does its secondary, **Retry the same
+operation** ("重试同一次操作"), send the same operation again, and the view then
+says the original Album is not updated yet. When the page's own update leads to
+the stale, unknown or applied view, the focus moves to the view's heading; a
+review opened in one of them leaves the focus where it is. Luna's Artist and label suggestions appear only in a hint panel of the
 Luna AI section, which can keep the current values (rejecting a suggestion) but
 never adopts one or changes a Credit; acting on a hint is a separate catalog
 Credit edit.
@@ -1951,7 +1991,7 @@ the searches it sent whose text is shown, in order (**This lookup searched for
 "X" · Artist, then "X" alone, then …**), never one the run may not have sent; a
 run that completed after MusicBrainz's retries ran out (issue `sourceBusy` or
 `sourceUnavailable`) may not have sent its searches and shows no such line.
-After a completed run the name box also folds behind the alternatives row's
+After a completed run the name box also folds behind its
 look-up-another-name control, a disclosure reachable by keyboard that keeps the
 box mounted and prefilled, unless the status makes the box the next step: no
 release (where the box opens with the hint "可尝试去掉副标题"), nothing to
@@ -3234,6 +3274,23 @@ roll back to:
   eligibility route as not found and refuses a creation body with `another` as
   invalid input; its strict Web schema refuses the identity read's `selection`
   and `keptTracklist`. Reload open admin Web tabs across deploy or rollback.
+- The review page's action bar, inline confirmation and outcome views (the v3
+  review page) raise no floor: they call only the routes and send only the
+  bodies the release before them already admits. They retire the Web-only
+  `admin.catalog_review.*` keys of the removed step bar and modal confirmation
+  (`view_changes_plain`, `steps_label`, `steps_ready`, every `step_*` key and
+  `apply_confirm_copy`), which no native client packages. The other keys the
+  removed tabs, Update tab, modal confirmation, draft form and suggestion empty
+  states used (`draft_tab`, `review_tab`, `apply_tab`, `view_changes`,
+  `save_draft`, `save_draft_first`, `draft_saved`, `apply_title`, `apply_copy`,
+  `apply_confirm`, `no_changes`, `selected` and every `empty_*` key) stay
+  in the bundles, unused on the Web, because the iOS and Android packaged
+  bundles still contain them (see [Localization](localization.md)). A Web tab
+  opened before this release keeps its active bundle instead of accepting this
+  release's remote bundle, which lacks the retired keys; after a rollback, a Web
+  client's cached bundle from this release is refused once for lacking the
+  newer keys, so it shows English until the older bundle loads. Reload open
+  admin Web tabs across deploy or rollback.
 - Discarding Album completions raises no floor. The release before it has no
   discard route (its Web shows a generic error), never reads tombstones, because
   its review, import and lookup queries filter `purpose` and its Luna claim

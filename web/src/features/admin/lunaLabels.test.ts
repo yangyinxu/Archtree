@@ -42,7 +42,10 @@ const status = [...family('admin.analysis.'),
   'admin.review.baseline', 'admin.review.changed', 'admin.review.conflict', 'admin.review.suggested',
   ...family('admin.summary.luna', suggestionControls), 'admin.summary.waiting_analysis', 'admin.stage.analysis',
   ...family('admin.workbench.').filter(key => key.includes('analyzing')), 'admin.workbench.review_stage', 'admin.workbench.review_luna_attention',
+  // The empty states are unused on the Web since the v3 review page, but still ship while native clients package them.
   ...['analysis_limit', 'analysis_running', 'empty_attention', 'empty_cancelled', 'empty_no_suggestions'].map(copy => `admin.catalog_review.${copy}`),
+  // Why the action bar's update waits for Luna AI, and the section of Luna AI suggestions.
+  ...['bar_wait_luna', 'bar_wait_both', 'suggestions_title'].map(copy => `admin.catalog_review.${copy}`),
   // The review's inline Luna AI confirmation (its concurrent-lookup warning and its last run) and why discarding waits for Luna AI.
   ...['luna_concurrent_copy', 'luna_last_run', 'discard_luna'].map(copy => `admin.catalog_review.${copy}`),
   // A review change refused while Luna AI analyzes the completion.
@@ -59,14 +62,18 @@ const reviewLookupProse = [...['no_match', 'empty_album', 'add_artist', 'possibl
   // The header, the numbers proposed from titles and the update range: free, the draft's own values.
   'admin.catalog_review.local_tracks', 'admin.catalog_review.number_label', 'admin.catalog_review.title_needs_numbers', 'admin.catalog_review.manual_edit',
   ...family('admin.catalog_review.proposal_'), ...family('admin.catalog_review.range_'), ...family('admin.catalog_review.positions_'),
-  // The lookup status on workbench cards, the Album page's note, the completion steps and the applied view.
-  ...family('admin.catalog_review.lookup_brief_'), ...family('admin.catalog_review.open_lookup_'), ...family('admin.catalog_review.step'), ...family('admin.catalog_review.applied_')];
+  // The lookup status on workbench cards, the Album page's note, the applied view, the inline confirmation, the compact rows and the
+  // stale and unknown views.
+  ...family('admin.catalog_review.lookup_brief_'), ...family('admin.catalog_review.open_lookup_'), ...family('admin.catalog_review.applied_'),
+  ...family('admin.catalog_review.confirm_'), ...family('admin.catalog_review.compact_'), ...family('admin.catalog_review.stale_'), ...family('admin.catalog_review.unknown_')];
 const lookupControls = [...['retry', 'submit', 'box', 'name', 'kind_album', 'kind_song', 'choose', 'choose_none'].map(control => `admin.lookup.${control}`),
   'admin.summary.keep_mine', 'admin.summary.use_lookup',
   ...['keep_current', 'use_musicbrainz', 'use_itunes', 'keep_all_current', 'use_all_musicbrainz', 'use_all_itunes', 'create', 'lookup_choose_album_only',
     'lookup_choose_again', 'lookup_replace_confirm', 'lookup_replace_now', 'lookup_other_options', 'lookup_editions_choose', 'lookup_choose_edition', 'lookup_choose_edition_album_only',
     'lookup_retry_free', 'lookup_submit_free', 'lookup_log_show', 'lookup_log_hide']
-    .map(control => `admin.catalog_review.${control}`), 'admin.workbench.review_lookup', 'admin.catalog_review.view_changes_plain', 'admin.catalog_review.lookup_details'];
+    .map(control => `admin.catalog_review.${control}`), 'admin.workbench.review_lookup', 'admin.catalog_review.lookup_details',
+  // The action bar's controls other than its Luna AI wait reasons.
+  ...family('admin.catalog_review.bar_', ['admin.catalog_review.bar_wait_luna', 'admin.catalog_review.bar_wait_both'])];
 const generic = ['Analyze', 'Analyze again', 'Review', 'Proofread', 'Complete', '分析', '校对', '重新校对', '补全'];
 /** Every [locale, key, message] for the keys, in both shipped locales. */
 const each = (keys: string[]) => Object.entries(locales).flatMap(([locale, messages]) => keys.map(key => [locale, key, messages[key]] as const));
@@ -80,7 +87,8 @@ test('every listed key exists in both shipped locales, and each family read by p
   expect(family('admin.summary.luna', suggestionControls)).toEqual(expect.arrayContaining(['admin.summary.luna', 'admin.summary.luna_mark']));
   expect(status).toEqual(expect.arrayContaining(['admin.workbench.analyzing', 'admin.workbench.review_analyzing']));
   expect(reviewLookupProse).toEqual(expect.arrayContaining(['admin.catalog_review.lookup_brief_possible_numbers', 'admin.catalog_review.open_lookup_applied_answers',
-    'admin.catalog_review.step_answers_count', 'admin.catalog_review.steps_ready', 'admin.catalog_review.applied_release']));
+    'admin.catalog_review.applied_release', 'admin.catalog_review.applied_edition_unconfirmed', 'admin.catalog_review.confirm_summary', 'admin.catalog_review.compact_title']));
+  expect(lookupControls).toEqual(expect.arrayContaining(['admin.catalog_review.bar_save_only', 'admin.catalog_review.bar_back', 'admin.catalog_review.bar_query']));
 });
 
 test('every control that starts or confirms Luna names Luna AI and says it is paid in every shipped locale, never with a generic label alone', () => {

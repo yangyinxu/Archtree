@@ -1242,6 +1242,13 @@
       ],
       "variables": {}
     },
+    "admin.catalog_review.alternatives": {
+      "description": "Administrator workbench: existing-Album review page, label of the row of alternatives (manual editing, Discard completion) after the update range.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.catalog_review.analysis_again": {
       "description": "Existing-Album review: starts another paid Luna AI run; names Luna, AI and paid.",
       "delivery": [
@@ -1300,6 +1307,40 @@
     },
     "admin.catalog_review.applied_copy": {
       "description": "This review is complete and read-only. Open the Album to make further edits or create a new review.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.applied_count": {
+      "description": "Administrator workbench: existing-Album review page, heading of the applied view with the number of fields the update wrote.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.catalog_review.applied_edition_chosen": {
+      "description": "Administrator workbench: existing-Album review page, applied view: the administrator chose the release used without a match.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "title": "string"
+      }
+    },
+    "admin.catalog_review.applied_edition_matched": {
+      "description": "Administrator workbench: existing-Album review page, applied view: lookup preselected the release it used on a match.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "title": "string"
+      }
+    },
+    "admin.catalog_review.applied_edition_unconfirmed": {
+      "description": "Administrator workbench: existing-Album review page, applied view: no release was matched; checking the edition takes a new completion.",
       "delivery": [
         "runtime"
       ],
@@ -1365,35 +1406,28 @@
       }
     },
     "admin.catalog_review.apply_confirm": {
-      "description": "Confirm updating the original Album",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
-    "admin.catalog_review.apply_confirm_copy": {
-      "description": "Album completion, Update original Album confirmation: only the changes listed update the Album, never its audio files, cover or visibility, and no track with audio is added or removed.",
+      "description": "Unused on the Web since the v3 review page; kept while native clients package it. Confirm updating the original Album",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.catalog_review.apply_copy": {
-      "description": "Album completion, Update original Album step: lookup values arrive checked and can be unchecked; only checked changes update the Album, never its audio files, cover or visibility, and no track with audio is added or removed.",
+      "description": "Unused on the Web since the v3 review page; kept while native clients package it. Album completion, Update original Album step: lookup values arrive checked and can be unchecked; only checked changes update the Album, never its audio files, cover or visibility, and no track with audio is added or removed.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.catalog_review.apply_tab": {
-      "description": "Update original Album",
+      "description": "Unused on the Web since the v3 review page; kept while native clients package it. Update original Album",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.catalog_review.apply_title": {
-      "description": "Choose changes for the existing Album",
+      "description": "Unused on the Web since the v3 review page; kept while native clients package it. Choose changes for the existing Album",
       "delivery": [
         "runtime"
       ],
@@ -1432,6 +1466,330 @@
     },
     "admin.catalog_review.attribution_none": {
       "description": "Album completion confirmation: a member whose attribution state is not stored.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.bar_applied": {
+      "description": "Administrator workbench: existing-Album review page, action bar note on an applied completion.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.bar_applying": {
+      "description": "Administrator workbench: existing-Album review page, action bar progress while the update is applied.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.bar_back": {
+      "description": "Administrator workbench: existing-Album review page, action bar button that leaves the inline update confirmation; the saved draft stays.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.bar_changed": {
+      "description": "Administrator workbench: existing-Album review page, preparing returned to editing because the review changed past its save.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.bar_checking": {
+      "description": "Administrator workbench: existing-Album review page, action bar progress while the saved review is read again before the confirmation.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.bar_confirm": {
+      "description": "Administrator workbench: existing-Album review page, action bar primary button that confirms the update with its count of changes.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.catalog_review.bar_confirm_note": {
+      "description": "Administrator workbench: existing-Album review page, action bar note while the inline update confirmation shows.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.bar_heading": {
+      "description": "Administrator workbench: existing-Album review page, action bar heading (hidden at narrow widths).",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.bar_heading_confirm": {
+      "description": "Administrator workbench: existing-Album review page, action bar heading while the inline update confirmation shows.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.bar_nothing": {
+      "description": "Administrator workbench: existing-Album review page, why the update waits: nothing is selected.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.bar_open_album": {
+      "description": "Administrator workbench: existing-Album review page, action bar link to the original Album once the update is applied.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.bar_open_latest": {
+      "description": "Administrator workbench: existing-Album review page, action bar link to the latest Album from an out-of-date completion.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.bar_outdated": {
+      "description": "Administrator workbench: existing-Album review page, why the confirmation cannot be confirmed: the review changed since it was frozen.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.bar_preparing": {
+      "description": "Administrator workbench: existing-Album review page, action bar primary button label while the update is prepared.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.bar_query": {
+      "description": "Administrator workbench: existing-Album review page, action bar primary button that reads the outcome of an update whose response was lost.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.bar_querying": {
+      "description": "Administrator workbench: existing-Album review page, action bar progress while the outcome of an unknown update is read.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.bar_retry_prepare": {
+      "description": "Administrator workbench: existing-Album review page, action bar primary button after the save that prepares the update was refused.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.bar_retry_same": {
+      "description": "Administrator workbench: existing-Album review page, action bar secondary button that sends the same update operation again.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.bar_review_items": {
+      "description": "Administrator workbench: existing-Album review page, preparing returned to editing: the changes that are no longer selected or now wait.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "items": "string"
+      }
+    },
+    "admin.catalog_review.bar_save_failed": {
+      "description": "Administrator workbench: existing-Album review page, action bar alert when a save was refused.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.bar_save_only": {
+      "description": "Administrator workbench: existing-Album review page, action bar secondary button that saves the draft without preparing the update.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.bar_saving": {
+      "description": "Administrator workbench: existing-Album review page, action bar progress while the draft saves.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.bar_wait_both": {
+      "description": "Administrator workbench: existing-Album review page, why the update waits: metadata lookup and Luna AI both run.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.bar_wait_luna": {
+      "description": "Administrator workbench: existing-Album review page, why the update waits: Luna AI is queued or running.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.bar_wait_operation": {
+      "description": "Administrator workbench: existing-Album review page, why the update waits: another change of this review runs or waits for its outcome.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.compact_change": {
+      "description": "Administrator workbench: existing-Album review page, compact row before the update: the value changes.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.compact_done": {
+      "description": "Administrator workbench: existing-Album review page, compact row after the update: the value was updated.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.compact_members": {
+      "description": "Administrator workbench: existing-Album review page, compact row: the members whose track Artists change.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.catalog_review.compact_numbers": {
+      "description": "Administrator workbench: existing-Album review page, grouped compact row of a long Album before the update.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.catalog_review.compact_numbers_done": {
+      "description": "Administrator workbench: existing-Album review page, grouped compact row of a long Album after the update.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.catalog_review.compact_position": {
+      "description": "Administrator workbench: existing-Album review page, compact row: a track's new Disc and Track Number.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "disc": "number",
+        "track": "string"
+      }
+    },
+    "admin.catalog_review.compact_title": {
+      "description": "Administrator workbench: existing-Album review page, compact row before the update: the track title changes.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.compact_title_done": {
+      "description": "Administrator workbench: existing-Album review page, compact row after the update: the track title was updated.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.compact_titles": {
+      "description": "Administrator workbench: existing-Album review page, grouped compact row of a long Album before the update.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.catalog_review.compact_titles_done": {
+      "description": "Administrator workbench: existing-Album review page, grouped compact row of a long Album after the update.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.catalog_review.compact_track": {
+      "description": "Administrator workbench: existing-Album review page, compact row: a track's new Track Number.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "track": "string"
+      }
+    },
+    "admin.catalog_review.confirm_checked": {
+      "description": "Administrator workbench: existing-Album review page, inline update confirmation: the saved review was read again.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.confirm_compared": {
+      "description": "Administrator workbench: existing-Album review page, inline update confirmation: the save changed a number, so the stored candidates were compared again.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.confirm_extra": {
+      "description": "Administrator workbench: existing-Album review page, inline update confirmation: the save found release values that are left unselected.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.confirm_full": {
+      "description": "Administrator workbench: existing-Album review page, disclosure with every selected change and its original and new value.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.catalog_review.confirm_summary": {
+      "description": "Administrator workbench: existing-Album review page, inline update confirmation summary with its count of changes.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.catalog_review.confirm_title": {
+      "description": "Administrator workbench: existing-Album review page, title of the inline update confirmation.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.confirm_unchanged": {
+      "description": "Administrator workbench: existing-Album review page, inline update confirmation: what the update never changes.",
       "delivery": [
         "runtime"
       ],
@@ -1575,14 +1933,14 @@
       "variables": {}
     },
     "admin.catalog_review.draft_saved": {
-      "description": "Album completion editor: status after the private completion draft is saved.",
+      "description": "Unused on the Web since the v3 review page; kept while native clients package it. Album completion editor: status after the private completion draft is saved.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.catalog_review.draft_tab": {
-      "description": "Edit draft",
+      "description": "Unused on the Web since the v3 review page; kept while native clients package it. Edit draft",
       "delivery": [
         "runtime"
       ],
@@ -1603,49 +1961,49 @@
       "variables": {}
     },
     "admin.catalog_review.empty_artist": {
-      "description": "Administrator catalog review: Review is empty except for Artist and label identity hints, which are shown below and confirmed in the original Album.",
+      "description": "Unused on the Web since the v3 review page; kept while native clients package it. Administrator catalog review: Review is empty except for Artist and label identity hints, which are shown below and confirmed in the original Album.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.catalog_review.empty_attention": {
-      "description": "Existing-Album review: Luna AI needs attention; check the issue shown or keep editing by hand.",
+      "description": "Unused on the Web since the v3 review page; kept while native clients package it. Existing-Album review: Luna AI needs attention; check the issue shown or keep editing by hand.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.catalog_review.empty_cancelled": {
-      "description": "Existing-Album review: Luna AI was stopped; the draft stays editable by hand.",
+      "description": "Unused on the Web since the v3 review page; kept while native clients package it. Existing-Album review: Luna AI was stopped; the draft stays editable by hand.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.catalog_review.empty_handled": {
-      "description": "Suggestions have been handled. The saved review draft has no changes to apply.",
+      "description": "Unused on the Web since the v3 review page; kept while native clients package it. Suggestions have been handled. The saved review draft has no changes to apply.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.catalog_review.empty_idle": {
-      "description": "Existing-Album review: Luna AI has not run yet; editing by hand comes first, then paid Luna AI.",
+      "description": "Unused on the Web since the v3 review page; kept while native clients package it. Existing-Album review: Luna AI has not run yet; editing by hand comes first, then paid Luna AI.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.catalog_review.empty_no_suggestions": {
-      "description": "Existing-Album review: Luna AI suggested no changes; the draft stays editable by hand.",
+      "description": "Unused on the Web since the v3 review page; kept while native clients package it. Existing-Album review: Luna AI suggested no changes; the draft stays editable by hand.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.catalog_review.empty_ready": {
-      "description": "Changes are saved to the draft. The original Album has not been updated yet.",
+      "description": "Unused on the Web since the v3 review page; kept while native clients package it. Changes are saved to the draft. The original Album has not been updated yet.",
       "delivery": [
         "runtime"
       ],
@@ -3419,7 +3777,7 @@
       "variables": {}
     },
     "admin.catalog_review.no_changes": {
-      "description": "Existing-Album review: the saved draft has no changes to apply; edit it or review Luna AI suggestions first.",
+      "description": "Unused on the Web since the v3 review page; kept while native clients package it. Existing-Album review: the saved draft has no changes to apply; edit it or review Luna AI suggestions first.",
       "delivery": [
         "runtime"
       ],
@@ -3973,21 +4331,21 @@
       "variables": {}
     },
     "admin.catalog_review.review_tab": {
-      "description": "Existing-Album review: tab that lists the Luna AI suggestions to review.",
+      "description": "Unused on the Web since the v3 review page; kept while native clients package it. Existing-Album review: tab that lists the Luna AI suggestions to review.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.catalog_review.save_draft": {
-      "description": "Album completion editor: button saving the private completion draft.",
+      "description": "Unused on the Web since the v3 review page; kept while native clients package it. Album completion editor: button saving the private completion draft.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.catalog_review.save_draft_first": {
-      "description": "Existing-Album review: unsaved draft edits must be saved before looking up metadata, using Luna AI, adopting suggestions or updating the original Album.",
+      "description": "Unused on the Web since the v3 review page; kept while native clients package it. Existing-Album review: unsaved draft edits must be saved before looking up metadata, using Luna AI, adopting suggestions or updating the original Album.",
       "delivery": [
         "runtime"
       ],
@@ -4026,7 +4384,7 @@
       }
     },
     "admin.catalog_review.selected": {
-      "description": "count changes selected",
+      "description": "Unused on the Web since the v3 review page; kept while native clients package it. count changes selected",
       "delivery": [
         "runtime"
       ],
@@ -4048,148 +4406,29 @@
       ],
       "variables": {}
     },
-    "admin.catalog_review.step_answer": {
-      "description": "Administrator workbench: label of an Album completion's second step, answering what lookup and the identity rows ask.",
+    "admin.catalog_review.stale_copy": {
+      "description": "Administrator workbench: existing-Album review page, stale view: why nothing can be updated.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
-    "admin.catalog_review.step_answers_choose": {
-      "description": "Administrator workbench: second completion step's state: a release must be chosen in the lookup summary.",
+    "admin.catalog_review.stale_draft": {
+      "description": "Administrator workbench: existing-Album review page, stale view disclosure with the old draft, read-only.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
-    "admin.catalog_review.step_answers_count": {
-      "description": "Administrator workbench: second completion step's state: how many lookup answers are still needed, as the lookup summary, the workbench card and the Album page count them.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {
-        "count": "number"
-      }
-    },
-    "admin.catalog_review.step_answers_identity": {
-      "description": "Administrator workbench: second completion step's state: how many Artists or labels (existing or new) still need to be chosen in the identity rows; shown beside the lookup answers count, or alone.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {
-        "count": "number"
-      }
-    },
-    "admin.catalog_review.step_answers_none": {
-      "description": "Administrator workbench: second completion step's state: nothing is left waiting for an answer.",
+    "admin.catalog_review.stale_title": {
+      "description": "Administrator workbench: existing-Album review page, heading of the stale view.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
-    "admin.catalog_review.step_answers_numbers": {
-      "description": "Administrator workbench: second completion step's state: Disc and Track Numbers must be entered before a release can be used.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
-    "admin.catalog_review.step_find": {
-      "description": "Administrator workbench: label of an Album completion's first step, finding a release with metadata lookup.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
-    "admin.catalog_review.step_find_applied": {
-      "description": "Administrator workbench: first completion step's state: the release metadata lookup applied, by title.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {
-        "title": "string"
-      }
-    },
-    "admin.catalog_review.step_find_matching": {
-      "description": "Administrator workbench: first completion step's state: matching releases were found and wait for a choice.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
-    "admin.catalog_review.step_find_possible": {
-      "description": "Administrator workbench: first completion step's state: how many releases the tracks may fit (for an Album without tracks, releases with its name) were found.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {
-        "count": "number"
-      }
-    },
-    "admin.catalog_review.step_update": {
-      "description": "Administrator workbench: label of an Album completion's third step, updating the original Album.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
-    "admin.catalog_review.step_update_after_choose": {
-      "description": "Administrator workbench: third completion step's state while the second step asks for a release choice: the update comes after it.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
-    "admin.catalog_review.step_update_after_numbers": {
-      "description": "Administrator workbench: third completion step's state while the second step asks for Disc and Track Numbers: the update comes after them.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
-    "admin.catalog_review.step_update_count": {
-      "description": "Administrator workbench: third completion step's state: how many changes are selected in Update original Album.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {
-        "count": "number"
-      }
-    },
-    "admin.catalog_review.step_update_done": {
-      "description": "Administrator workbench: third completion step's state once applied: when the original Album was updated, a date and time in the interface language.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {
-        "date": "string"
-      }
-    },
-    "admin.catalog_review.step_update_none": {
-      "description": "Administrator workbench: third completion step's state: the completion draft has no change to apply yet.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
-    "admin.catalog_review.step_update_unselected": {
-      "description": "Administrator workbench: third completion step's state: changes are listed in Update original Album but none is selected yet (manual values are not selected by default), so they are to be selected there.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {
-        "count": "number"
-      }
-    },
-    "admin.catalog_review.steps_label": {
-      "description": "Administrator workbench: accessible name of an Album completion's three steps above its metadata lookup summary.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
-    "admin.catalog_review.steps_ready": {
-      "description": "Administrator workbench: line under the completion steps once nothing is left to answer and changes are ready to apply.",
+    "admin.catalog_review.suggestions_title": {
+      "description": "Administrator workbench: existing-Album review page, heading of the section listing Luna AI suggestions while some wait.",
       "delivery": [
         "runtime"
       ],
@@ -4225,6 +4464,34 @@
     },
     "admin.catalog_review.unavailable": {
       "description": "Catalog editing and new reviews are currently turned off. You can view saved information and recover existing operations.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.unknown_copy": {
+      "description": "Administrator workbench: existing-Album review page, unknown view: what a lost response means.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.unknown_note": {
+      "description": "Administrator workbench: existing-Album review page, unknown view: checking or retrying never updates twice.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.unknown_pending": {
+      "description": "Administrator workbench: existing-Album review page, unknown view once a read found the review still unapplied.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.unknown_title": {
+      "description": "Administrator workbench: existing-Album review page, heading of the view of an update whose response was lost.",
       "delivery": [
         "runtime"
       ],
@@ -4275,20 +4542,13 @@
       "variables": {}
     },
     "admin.catalog_review.view_changes": {
-      "description": "Review changes to apply ({count})",
+      "description": "Unused on the Web since the v3 review page; kept while native clients package it. Review changes to apply ({count})",
       "delivery": [
         "runtime"
       ],
       "variables": {
         "count": "number"
       }
-    },
-    "admin.catalog_review.view_changes_plain": {
-      "description": "Administrator workbench: button from the Review step's empty state to the Update original Album step, without a count.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
     },
     "admin.catalog_review.waiting_lookup": {
       "description": "Administrator workbench: existing-Album review summary, applying waits while metadata lookup runs or retries automatically.",

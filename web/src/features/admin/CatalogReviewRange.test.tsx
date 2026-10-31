@@ -6,6 +6,11 @@
  *   - a held item is a disabled box with its reason, and members the selected numbers would leave at one position are named
  *   - choices survive a save: a deselected proposal stays deselected and unsaved, and the saved proposals stay selected
  *   - a stored number that disagreed with its title, corrected and saved, lets the proposal the table shows arrive selected, its cleaned titles too
+ *   - a review captured for lookup
+ *     - it lists every change with its default: review-only items and lookup-filled values selected, a conflict held, the member line and the identities it owns
+ *     - a member line lists removed Credits
+ *     - an identity still needing a record is marked and named, with a link to the identity rows
+ *     - when the Album's primary Artists change, it says Album Credits are never copied and names the tracks still crediting a replaced Artist
  * @end-catalog */
 
 import { useState } from 'react';
@@ -14,9 +19,11 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { captureAccountOperation } from '../../api/accountEpoch';
 import { adminWorkspace } from './adminWorkspace';
 import type { CatalogReview, ReviewDraft } from './catalogReviewApi';
-import type { ApplyChoice } from './catalogReviewApplyModel';
+import { memberKey, reviewApplyModel, type ApplyChoice } from './catalogReviewApplyModel';
 import type { ReviewEditorDerived, ReviewEdits } from './catalogReviewEdits';
-import { catalogReview, session, slotId, slotTwo, viewer } from './catalogReviewFixtures.testSupport';
+import { capturedCatalogReview, catalogReview, reviewJson, session, slotId, slotTwo, viewer } from './catalogReviewFixtures.testSupport';
+import { guestHandle, leadHandle, reviewAfterLookup, reviewIdentityResponse, reviewLookupResponse } from './catalogReviewLookupFixtures.testSupport';
+import type { ReviewIdentityResponse, ReviewLookupResponse } from './catalogReviewLookupApi';
 import { reviewEditor } from './catalogReviewProposal';
 import { CatalogReviewRange } from './CatalogReviewRange';
 
@@ -144,4 +151,76 @@ test('a stored number that disagreed with its title, corrected and saved, lets t
   expect(item(/^Title · 1-01 Synthetic first/)).toBeChecked();
   expect(item(/^Title · 1-02 Synthetic second/)).toBeChecked();
   expect(range().querySelector('summary')).toHaveTextContent('This update · 4 selected');
+});
+
+describe('a review captured for lookup', () => {
+  /** The looked-up review with the guest answered, so nothing waits, and its lookup and identity reads. */
+  function lookedUp() {
+    const item = reviewAfterLookup(capturedCatalogReview()), identity = reviewIdentityResponse();
+    identity.identities[0] = { ...identity.identities[0], needsAnswer: false, decision: { scope: 'artist', identity: guestHandle, boundName: 'Synthetic guest', boundMusicBrainzId: null,
+      action: 'create-distinct', candidateId: null, candidateRevision: null } };
+    return { item, identity, lookup: reviewLookupResponse() };
+  }
+  /** Mounts the range on `item` with no edits, answering its lookup and identity reads; returns the choices it reported. */
+  async function mountRead(item: CatalogReview, lookup: ReviewLookupResponse, identity: ReviewIdentityResponse) {
+    vi.stubGlobal('fetch', vi.fn(async (path: string) => reviewJson(path.endsWith('/lookup') ? lookup : identity)));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } }), onChoose = vi.fn();
+    client.setQueryData(['browser-session'], session);
+    render(<QueryClientProvider client={client}><CatalogReviewRange item={item} base={item.draft} edits={{}} view={null} choices={{}} disabled={false} onChoose={onChoose}
+      onDerived={() => undefined} /></QueryClientProvider>);
+    await screen.findByRole('checkbox', { name: /^Artists · Synthetic second track/ });
+    return onChoose;
+  }
+  afterEach(() => vi.unstubAllGlobals());
+
+  test('it lists every change with its default: review-only items and lookup-filled values selected, a conflict held, the member line and the identities it owns', async () => {
+    const { item: review, identity, lookup } = lookedUp();
+    identity.identities[1] = { ...identity.identities[1], musicBrainzIdWrite: { scope: 'artist', identity: leadHandle, musicBrainzId: '00000000-0000-4000-8000-0000000000a1', replaces: null } };
+    identity.musicBrainzIds = [identity.identities[1].musicBrainzIdWrite!];
+    const onChoose = await mountRead(review, lookup, identity);
+    expect(screen.getByText(/^This update · 4 selected/)).toBeInTheDocument();
+    for (const name of [/^Artists · Synthetic catalog Album/, /^Expected tracklist · Synthetic catalog Album/, /^Track number · Synthetic second track/, /^Artists · Synthetic second track/])
+      expect(item(name)).toBeChecked();
+    const date = item(/^Release date · Synthetic catalog Album/);
+    expect([date.checked, date.disabled]).toEqual([false, true]);
+    expect(date).toHaveAccessibleDescription('Answer its lookup conflict first');
+    // The member stored as Unknown gains its own track's artist and becomes documented.
+    expect(await screen.findByText('This track\'s Artist credits will be marked Documented (currently Unknown).')).toBeInTheDocument();
+    const lines = within((await screen.findByRole('heading', { name: 'Artists and label' })).closest('section')!);
+    expect(lines.getByText('Reuses the existing Synthetic catalog Artist · Visibility: Hidden')).toBeInTheDocument();
+    expect(lines.getByText('Records MusicBrainz ID 00000000-0000-4000-8000-0000000000a1')).toBeInTheDocument();
+    expect(lines.getByText('Creates Synthetic guest as new')).toBeInTheDocument();
+    fireEvent.click(item(/^Artists · Synthetic second track/));
+    expect(onChoose).toHaveBeenCalledWith({ [memberKey(slotTwo)]: { checked: false, basis: JSON.stringify(review.draft.tracks[1].artists) } });
+  });
+
+  test('a member line lists removed Credits', async () => {
+    const { item, identity, lookup } = lookedUp(), old = { creditId: 'synthetic_old_credit', subjectType: 'artist' as const, subjectId: '151515151515151515151515', identity: null,
+      name: 'Synthetic old Artist', role: 'primary' as const, joinPhrase: null };
+    identity.members[0] = { ...identity.members[0], current: [old], removedCreditIds: [old.creditId], attribution: null };
+    await mountRead(item, lookup, identity);
+    expect(await screen.findByText('Credits removed: Synthetic old Artist')).toBeInTheDocument();
+  });
+
+  test('an identity still needing a record is marked and named, with a link to the identity rows', async () => {
+    const { item, lookup } = lookedUp(), identity = reviewIdentityResponse();
+    vi.stubGlobal('fetch', vi.fn(async (path: string) => reviewJson(path.endsWith('/lookup') ? lookup : identity)));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } }); client.setQueryData(['browser-session'], session);
+    // The guest's lists arrive unselected while it needs an answer; chosen, they bring its line in, which needs a decision.
+    const albumArtists = reviewApplyModel({ item, lookup: lookup.lookup, summary: null, waiting: null, identity, choices: {} }).items.find(entry => entry.key === 'album::artists')!;
+    render(<QueryClientProvider client={client}><CatalogReviewRange item={item} base={item.draft} edits={{}} view={null} choices={{ 'album::artists': { checked: true, basis: albumArtists.basis } }}
+      disabled={false} onChoose={() => undefined} onDerived={() => undefined} /></QueryClientProvider>);
+    const lines = within((await screen.findByRole('heading', { name: 'Artists and label' })).closest('section')!);
+    expect(within(lines.getByText('Synthetic guest').closest('li')!).getByText('Needs a decision')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Choose the records under Artists and label' })).toHaveAttribute('href', '#catalog-review-identities');
+  });
+
+  test('when the Album\'s primary Artists change, it says Album Credits are never copied and names the tracks still crediting a replaced Artist', async () => {
+    const { item, identity, lookup } = lookedUp(), lead = identity.album!.current[0];
+    identity.album = { ...identity.album!, next: [{ ...lead, creditId: null, subjectId: null, identity: guestHandle, name: 'Synthetic guest' }], replacedPrimaryArtistIds: [lead.subjectId!],
+      membersNamingReplaced: [slotId] };
+    await mountRead(item, lookup, identity);
+    expect(await screen.findByText('Album Credits are never copied to tracks: each track\'s Artists change only from its own release track.')).toBeInTheDocument();
+    expect(screen.getByText('Tracks that still credit an Artist the Album no longer credits: 1 · Synthetic first track')).toBeInTheDocument();
+  });
 });

@@ -40,6 +40,6 @@ test('a candidate chooser or identity chunk that cannot load asks for a reload i
   expect(within(summary).getAllByRole('button', { name: 'Keep current' }).length).toBeGreaterThan(0);
   fireEvent.click(screen.getByRole('button', { name: 'Edit manually' }));
   fireEvent.change(await screen.findByRole('textbox', { name: 'Title' }), { target: { value: 'A manual correction' } });
-  fireEvent.click(screen.getByRole('button', { name: 'Save completion draft' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Save draft only' }));
   await waitFor(() => expect(writes).toEqual([`/api/admin/v1/catalog-reviews/${reviewId}`]));
 });

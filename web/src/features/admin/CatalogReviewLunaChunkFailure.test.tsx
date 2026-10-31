@@ -8,7 +8,7 @@ import { catalogReview, reviewId, reviewJson, session, viewer } from './catalogR
 
 /**
  * A deploy removed the Luna AI controls' chunk before the review page loaded it: the page asks for a reload in their place, and
- * the steps, the draft editor, its save, the lookup summary and Discard completion stay usable. All names and identifiers are
+ * the draft editor, its save, the lookup summary, Discard completion and the action bar stay usable. All names and identifiers are
  * synthetic.
  */
 const lunaChunk = vi.hoisted(() => ({ attempts: 0 }));
@@ -20,7 +20,7 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); adminWorkspace.reset(); vi.unstubAllGlobals(); });
 
-test('a Luna AI chunk that cannot load asks for a reload in place of its controls, and the steps, editor, save, lookup summary and Discard completion stay usable', async () => {
+test('a Luna AI chunk that cannot load asks for a reload in place of its controls, and the editor, save, lookup summary, Discard completion and action bar stay usable', async () => {
   const item = catalogReview(), writes: string[] = [];
   vi.stubGlobal('fetch', vi.fn(async (path: string, init?: RequestInit) => {
     if (init?.method === 'PATCH') { writes.push(path); return reviewJson({ code: 'unexpected' }, 500); }
@@ -38,10 +38,10 @@ test('a Luna AI chunk that cannot load asks for a reload in place of its control
   expect(other).toContainElement(screen.getByText(/Reload the page to continue/));
   expect(screen.queryByRole('button', { name: /Luna AI/ })).not.toBeInTheDocument();
   expect(adminWorkspace.getSnapshot().reloadRequired).toBe(false);
-  expect(await screen.findByRole('group', { name: 'Completion steps' })).toBeVisible();
+  expect(await screen.findByRole('region', { name: 'Current step' })).toBeVisible();
   expect(await screen.findByRole('button', { name: 'Discard completion' })).toBeEnabled();
   fireEvent.click(screen.getByRole('button', { name: 'Edit manually' }));
   fireEvent.change(await screen.findByRole('textbox', { name: 'Title' }), { target: { value: 'A manual correction' } });
-  fireEvent.click(screen.getByRole('button', { name: 'Save completion draft' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Save draft only' }));
   await waitFor(() => expect(writes).toEqual([`/api/admin/v1/catalog-reviews/${reviewId}`]));
 });

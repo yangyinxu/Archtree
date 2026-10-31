@@ -174,8 +174,12 @@ export function useCatalogReviewPrepare({ id, command, item, model, reads, refet
   }), [owner]);
 
   // Reading: freeze once the detail and every read are at the saved revisions and the choices keep the save's additions out.
+  // A detail read (a refresh, a refocus) that shows the review applied or its source no longer current also settles an unknown save
+  // or apply: nothing is left to send, so its intent is dropped and the page's other controls (Discard completion) are released.
   useEffect(() => {
-    if (!item || (state.phase !== 'reading' && state.phase !== 'frozen')) return;
+    const unknown = state.phase === 'unknown' || state.phase === 'save_unknown';
+    if (!item || (state.phase !== 'reading' && state.phase !== 'frozen' && !unknown)) return;
+    if (unknown && (item.state === 'applied' || item.sourceStatus !== 'current')) { done(); command.settle(); }
     if (item.state === 'applied') { setState({ ...idle, phase: 'success', applied: item }); return; }
     if (item.sourceStatus !== 'current') { setState({ ...idle, phase: 'stale', notice: 'stale' }); return; }
     if (state.phase !== 'reading' || !model) return;

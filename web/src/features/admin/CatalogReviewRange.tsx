@@ -15,6 +15,7 @@ const view = <P extends object>(pick: (module: typeof Items) => ComponentType<P>
   lazy<ComponentType<P>>(() => import('./CatalogReviewApplyItems').then(module => ({ default: pick(module) }), () => ({ default: ItemsUnavailable })));
 const ApplyItemValues = view<ComponentProps<typeof Items.ApplyItemValues>>(module => module.ApplyItemValues);
 const ApplyIdentityLines = view<ComponentProps<typeof Items.ApplyIdentityLines>>(module => module.ApplyIdentityLines);
+const ApplyAlbumNote = view<ComponentProps<typeof Items.ApplyAlbumNote>>(module => module.ApplyAlbumNote);
 
 /**
  * The review page's update range (owner rules: docs/business-rules.md, Catalog Visibility and Administration, applying an
@@ -25,7 +26,9 @@ const ApplyIdentityLines = view<ComponentProps<typeof Items.ApplyIdentityLines>>
  * Album date, the Album title, and the Artist entries, label, member Credits and expected tracklist; each group's checkbox is mixed
  * while only some of its items are selected, and a nested disclosure lists each item with its original and new value, a value that
  * fills or replaces a catalog value marked so in text. An item a hold keeps out is a disabled box with its reason. Below, the
- * Artist and label records the selection owns and, while one needs an answer, a link to the identity rows; then members the
+ * Album Credits note when the selected Artist entries replace a primary Artist (never copied to tracks, naming the tracks still
+ * crediting a replaced one), the Artist and label records the selection owns and, while one needs an answer, a link to the identity
+ * rows; then members the
  * selected numbers would leave at one position or out of range. Choices carry their item's basis, so they survive saves
  * (`onChoose`). It reports the draft a save writes, the edits and the selected proposed numbers only, and the count (`onDerived`).
  */
@@ -75,6 +78,7 @@ export function CatalogReviewRange({ item, base, edits, view: shownView, choices
           {entry.value.kind !== 'value' && <Suspense fallback={null}><ApplyItemValues item={entry} /></Suspense>}</li>)}</ul></details>
       </section>;
     })}
+    {model.selection.albumNote && <Suspense fallback={null}><ApplyAlbumNote item={item} namingReplaced={model.selection.albumNote.namingReplaced} /></Suspense>}
     {model.selection.identities.length > 0 && <Suspense fallback={null}><ApplyIdentityLines lines={model.selection.identities} /></Suspense>}
     {model.blocking.identities.length > 0 && <p>{t('catalog_review.identity_answers_first', { names: model.blocking.identities.join(', ') })}{' '}
       <a href="#catalog-review-identities">{t('catalog_review.range_identities_link')}</a></p>}

@@ -2,13 +2,12 @@
  * Exports
  *   Functions: AdminCatalogReviewPage
  * Internal
- *   Types: ReviewBuffer, Stage
- *   Functions: unsaved, hint, SummaryUnavailable, ReviewHeading, steps, discardedError, ReviewProject
- *   Constants: ImportReview, CatalogReviewHints, CatalogReviewEmptyState, CatalogReviewApply,
- *              CatalogReviewConfirmation, CatalogReviewDiscard, CatalogReviewHeader,
- *              CatalogReviewProposalTable, CatalogReviewRange, CatalogReviewManualEdit, CatalogReviewSummary,
- *              CatalogReviewLuna, CatalogReviewSteps, CatalogReviewApplied
- *   Variables: stepsChunk
+ *   Types: ReviewBuffer
+ *   Functions: unsaved, hint, SummaryUnavailable, ReviewHeading, unavailable, discardedError, ReviewProject
+ *   Constants: editable, barOutcome, ImportReview, CatalogReviewHints, CatalogReviewDiscard,
+ *              CatalogReviewHeader, CatalogReviewProposalTable, CatalogReviewRange, CatalogReviewManualEdit,
+ *              CatalogReviewSummary, CatalogReviewLuna, CatalogReviewActionBar, CatalogReviewApplied,
+ *              CatalogReviewStale
  * @end-catalog */
 
 import { lazy, Suspense, useEffect, useRef, useState, type ComponentProps, type ComponentType, type ReactNode } from 'react';
@@ -22,14 +21,15 @@ import { adminWorkspace } from './adminWorkspace';
 import { reviewDraftChanges, reviewResponseSchema, type CatalogReview, type ReviewDraft } from './catalogReviewApi';
 import type { ApplyChoice } from './catalogReviewApplyModel';
 import type { ReviewEditorDerived, ReviewEditorView, ReviewEdits } from './catalogReviewEdits';
+import type { CatalogReviewActionBar as Bar, CatalogReviewBarState } from './CatalogReviewActionBar';
+import type { CatalogReviewApplied as Applied } from './CatalogReviewApplied';
 import type { CatalogReviewManualEdit as ManualEdit } from './CatalogReviewDraftEditor';
 import type { CatalogReviewHeader as Header } from './CatalogReviewHeader';
 import type { CatalogReviewProposalTable as Proposal } from './CatalogReviewProposalTable';
 import type { CatalogReviewRange as Range } from './CatalogReviewRange';
-import type { Confirmation } from './CatalogReviewConfirmation';
 import type { CatalogReviewDiscard as Discard } from './CatalogReviewDiscard';
 import type { CatalogReviewLuna as Luna } from './CatalogReviewLuna';
-import type { CatalogReviewApplied as Applied, CatalogReviewSteps as Steps } from './CatalogReviewSteps';
+import type { CatalogReviewStale as Stale } from './CatalogReviewStale';
 import type { CatalogReviewSummary as Summary } from './CatalogReviewSummary';
 import { useCatalogReviewCommand } from './useCatalogReviewCommand';
 import { useOnline } from './useAdminOnline';
@@ -39,28 +39,28 @@ import styles from './adminStyles';
  * `base` is the saved draft the edit started from: a save sends only the values that differ from it, each with its base value.
  * `edits` are the administrator's own values over it (catalogReviewEdits.ts) and `draft` the base with them written in, both
  * given by the chunk that edits (the proposal table or the manual editor), so this chunk carries none of their code; the numbers
- * proposed from titles are derived by the proposal table and are never edits. `choices` are the Update selection's explicit
- * choices, kept across reads: each holds while its item shows the saved values it was made on (catalogReviewApplyModel.ts), so a
- * save or a saved identity decision never undoes a choice. `cleaned` are the slots whose titles the title cleanup wrote, kept across
- * saves too, so turning the cleanup off restores only those and never a title the administrator wrote.
+ * proposed from titles are derived by the proposal table and are never edits. `choices` are the update range's explicit choices,
+ * kept across reads: each holds while its item shows the saved values it was made on (catalogReviewApplyModel.ts), so a save or a
+ * saved identity decision never undoes a choice. `cleaned` are the slots whose titles the title cleanup wrote, kept across saves
+ * too, so turning the cleanup off restores only those and never a title the administrator wrote.
  */
 interface ReviewBuffer { base: ReviewDraft; edits: ReviewEdits; draft: ReviewDraft; revision: number; valueRevision: number; suggestions: string[]; choices: Record<string, ApplyChoice>;
   cleaned?: string[] }
 /** Whether the edits change a saved value: only they make the draft unsaved (an edit changed back, or a cleared proposal, does not). */
 const unsaved = (buffer: ReviewBuffer) => reviewDraftChanges(buffer.base, buffer.draft).length > 0;
-/** Artist-entries and label suggestions are identity hints (CatalogReviewHints), never Review checklist items. */
+/** Artist-entries and label suggestions are identity hints (CatalogReviewHints), never Luna AI suggestion items. */
 const hint = (field: string) => field === 'artists' || field === 'label';
-type Stage = 'draft' | 'review' | 'apply';
-// Review is loaded only when requested; its selections remain in the parent account-fenced buffer.
+/** The phases of requesting the update (useCatalogReviewPrepare.ts) in which the review stays editable. */
+const editable = ['editing', 'review_required', 'save_failed'];
+/** The phases whose command outcome the action bar shows itself, so the page does not repeat it. */
+const barOutcome = ['saving', 'saving_only', 'applying', 'save_unknown', 'unknown', 'querying'];
+// Luna AI suggestions load only while there are some to review.
 const ImportReview = lazy(() => import('./ImportReview').then(module => ({ default: module.ImportReview })));
 const CatalogReviewHints = lazy(() => import('./CatalogReviewHints').then(module => ({ default: module.CatalogReviewHints })));
-const CatalogReviewEmptyState = lazy(() => import('./CatalogReviewEmptyState').then(module => ({ default: module.CatalogReviewEmptyState })));
-const CatalogReviewApply = lazy(() => import('./CatalogReviewApply').then(module => ({ default: module.CatalogReviewApply })));
-const CatalogReviewConfirmation = lazy(() => import('./CatalogReviewConfirmation').then(module => ({ default: module.CatalogReviewConfirmation })));
 /** A discard action whose chunk cannot load (a deploy replaced it) is left out; the summary's fallback already asks for a reload. */
 const CatalogReviewDiscard = lazy<ComponentType<ComponentProps<typeof Discard>>>(() => import('./CatalogReviewDiscard')
   .then(module => ({ default: module.CatalogReviewDiscard }), () => ({ default: () => null })));
-/** Stands in for a lookup summary whose chunk cannot load (a deploy replaced it); manual editing stays usable. */
+/** Stands in for a part whose chunk cannot load (a deploy replaced it); manual editing stays usable. */
 function SummaryUnavailable() { const t = useAdminText(); return <p role="alert">{t('common.reload')}</p>; }
 /** The plain heading: shown while the header's chunk loads, and in its place when that chunk cannot load. */
 function ReviewHeading({ item, children }: { item: CatalogReview | null; children?: ReactNode }) {
@@ -72,44 +72,35 @@ function ReviewHeading({ item, children }: { item: CatalogReview | null; childre
 const CatalogReviewHeader = lazy<ComponentType<ComponentProps<typeof Header>>>(() => import('./CatalogReviewHeader')
   .then(module => ({ default: module.CatalogReviewHeader }), () => ({ default: ReviewHeading })));
 /**
- * The numbers proposed from titles, the update range and the manual editor, each its own chunk; one that cannot load asks for a
- * reload in its place, and the draft then saves the edits alone.
+ * The numbers proposed from titles, the update range, the manual editor, the lookup summary, the Luna AI controls, the action bar
+ * and the outcome views, each its own chunk; one that cannot load asks for a reload in its place, and the draft then saves the
+ * edits alone.
  */
-const CatalogReviewProposalTable = lazy<ComponentType<ComponentProps<typeof Proposal>>>(() => import('./CatalogReviewProposalTable')
-  .then(module => ({ default: module.CatalogReviewProposalTable }), () => ({ default: SummaryUnavailable })));
-const CatalogReviewRange = lazy<ComponentType<ComponentProps<typeof Range>>>(() => import('./CatalogReviewRange')
-  .then(module => ({ default: module.CatalogReviewRange }), () => ({ default: SummaryUnavailable })));
-const CatalogReviewManualEdit = lazy<ComponentType<ComponentProps<typeof ManualEdit>>>(() => import('./CatalogReviewDraftEditor')
-  .then(module => ({ default: module.CatalogReviewManualEdit }), () => ({ default: SummaryUnavailable })));
-const CatalogReviewSummary = lazy<ComponentType<ComponentProps<typeof Summary>>>(() => import('./CatalogReviewSummary')
-  .then(module => ({ default: module.CatalogReviewSummary }), () => ({ default: SummaryUnavailable })));
-/** The Luna AI controls and their inline confirmation, their own chunk; one that cannot load asks for a reload in their place. */
-const CatalogReviewLuna = lazy<ComponentType<ComponentProps<typeof Luna>>>(() => import('./CatalogReviewLuna')
-  .then(module => ({ default: module.CatalogReviewLuna }), () => ({ default: SummaryUnavailable })));
-/**
- * The step bar and an applied completion's list of what was updated share a chunk, loaded once for both (a failed load can be
- * tried again). When it cannot load, the step bar is left out, while the list of what was updated asks for a reload in its place,
- * so it does not disappear unexplained.
- */
-let stepsChunk: Promise<typeof import('./CatalogReviewSteps')> | undefined;
-const steps = <P extends object>(pick: (module: typeof import('./CatalogReviewSteps')) => ComponentType<P>, fallback: ComponentType<P> = () => null) =>
-  lazy<ComponentType<P>>(() => (stepsChunk ??= import('./CatalogReviewSteps').catch(error => { stepsChunk = undefined; throw error; }))
-    .then(module => ({ default: pick(module) }), () => ({ default: fallback })));
-const CatalogReviewSteps = steps<ComponentProps<typeof Steps>>(module => module.CatalogReviewSteps);
-const CatalogReviewApplied = steps<ComponentProps<typeof Applied>>(module => module.CatalogReviewApplied, SummaryUnavailable);
+const unavailable = <P extends object>(load: () => Promise<ComponentType<P>>) => lazy<ComponentType<P>>(() => load()
+  .then(component => ({ default: component }), () => ({ default: SummaryUnavailable })));
+const CatalogReviewProposalTable = unavailable<ComponentProps<typeof Proposal>>(() => import('./CatalogReviewProposalTable').then(module => module.CatalogReviewProposalTable));
+const CatalogReviewRange = unavailable<ComponentProps<typeof Range>>(() => import('./CatalogReviewRange').then(module => module.CatalogReviewRange));
+const CatalogReviewManualEdit = unavailable<ComponentProps<typeof ManualEdit>>(() => import('./CatalogReviewDraftEditor').then(module => module.CatalogReviewManualEdit));
+const CatalogReviewSummary = unavailable<ComponentProps<typeof Summary>>(() => import('./CatalogReviewSummary').then(module => module.CatalogReviewSummary));
+const CatalogReviewLuna = unavailable<ComponentProps<typeof Luna>>(() => import('./CatalogReviewLuna').then(module => module.CatalogReviewLuna));
+const CatalogReviewActionBar = unavailable<ComponentProps<typeof Bar>>(() => import('./CatalogReviewActionBar').then(module => module.CatalogReviewActionBar));
+const CatalogReviewApplied = unavailable<ComponentProps<typeof Applied>>(() => import('./CatalogReviewApplied').then(module => module.CatalogReviewApplied));
+const CatalogReviewStale = unavailable<ComponentProps<typeof Stale>>(() => import('./CatalogReviewStale').then(module => module.CatalogReviewStale));
 
 /** A read or change of a review answered as discarded (another tab, or this one, discarded it). */
 const discardedError = (error: unknown) => error instanceof ApiError && error.kind === 'http' && error.status === 404 && error.code === 'ADMIN_CATALOG_REVIEW_DISCARDED';
 
 /**
- * Existing-catalog suggestions stay private until a separately frozen field selection is approved. The page leads with its header
- * (CatalogReviewHeader.tsx) and the completion's three steps (CatalogReviewSteps.tsx) above the lookup summary; an unapplied review
- * then shows the numbers proposed from titles (CatalogReviewProposalTable.tsx) and the update range (CatalogReviewRange.tsx), which
- * count and save the draft as edited, then offers its Luna AI controls, then Discard completion, both under Other actions; an
- * applied one's Update original Album step lists what was updated, read-only. Pending proposals are not unsaved edits: they hold
- * neither lookup nor Luna AI, and a save writes only the selected ones; selected ones still wait for that save before the Update
- * tab or the step bar's Update applies, as only the saved draft applies there. Manual editing opens the draft editor (its own chunk)
- * under Edit draft. A review discarded meanwhile shows only the discarded notice with Back.
+ * Existing-catalog suggestions stay private until a separately frozen field selection is approved (docs/features/admin-workbench.md,
+ * the review page). The page leads with its header (CatalogReviewHeader.tsx) and the lookup summary; an unapplied review then shows
+ * the numbers proposed from titles (CatalogReviewProposalTable.tsx) and the update range (CatalogReviewRange.tsx), which count and
+ * save the draft as edited, the row of alternatives (manual editing, which opens the draft editor in place, and Discard completion),
+ * the Luna AI controls under Other actions, and, while Luna AI suggestions wait, their own section. The sticky action bar
+ * (CatalogReviewActionBar.tsx) ends the page: it saves, prepares and confirms the update and reports its phase, which holds the
+ * page's controls outside editing and shows the unknown view in place of the editing section. A review whose source is not current
+ * shows the stale view (read-only, Discard completion kept), and an applied one its outcome view. Pending proposals are not unsaved
+ * edits: they hold neither lookup nor Luna AI, and a save writes only the selected ones. A review discarded meanwhile shows only the
+ * discarded notice with Back.
  */
 function ReviewProject({ id }: { id: string }) {
   const t = useAdminText(), access = useAdminAccess(), online = useOnline();
@@ -117,13 +108,12 @@ function ReviewProject({ id }: { id: string }) {
   const [editor, setEditor] = useState<ReviewBuffer | null>(() => adminWorkspace.buffer(bufferKey) ?? null);
   const [confirmed, setConfirmed] = useState<CatalogReview | null>(null);
   const latestRevision = useRef(0);
-  const [stage, setStage] = useState<Stage>(() => adminWorkspace.buffer(`catalog-review-stage:${id}`) ?? 'draft');
-  const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
   // What the proposal table and the update range last derived for the editor (used only while they describe its current state),
-  // and whether manual editing is open.
+  // whether manual editing is open, and the action bar's phase and notice.
   const [view, setView] = useState<ReviewEditorView | null>(null);
   const [derived, setDerived] = useState<ReviewEditorDerived | null>(null);
   const [manual, setManual] = useState(false);
+  const [bar, setBar] = useState<CatalogReviewBarState>({ phase: 'editing', notice: null });
   const mutation = useCatalogReviewCommand(id, { id });
   const query = useQuery({
     queryKey: ['admin-catalog-reviews', access.viewerId, access.epoch, access.generation, id],
@@ -163,7 +153,6 @@ function ReviewProject({ id }: { id: string }) {
   // A refused save (another administrator changed a saved value) loads the newer saved draft, so the conflict panel offers it.
   useEffect(() => { if (mutation.error === 'conflict') void query.refetch(); }, [mutation.error]);
   useEffect(() => { if (editor) adminWorkspace.retain(bufferKey, editor, access); }, [editor]);
-  useEffect(() => { adminWorkspace.retain(`catalog-review-stage:${id}`, stage, access); }, [stage]);
   const client = useQueryClient(), navigate = useNavigate();
   const [gone, setGone] = useState(false);
   // Any read of this review (its detail, lookup summary or identity rows) answered as discarded ends the page.
@@ -171,9 +160,9 @@ function ReviewProject({ id }: { id: string }) {
     if (query.queryKey[0] === 'admin-catalog-reviews' && query.queryKey[4] === id && discardedError(query.state.error)) setGone(true);
   }), [client, id]);
   const discarded = gone || mutation.error === 'discarded' || discardedError(query.error);
-  // Declared after the effects that retain the editor and stage, so it runs last and nothing of the review stays buffered.
+  // Declared after the effect that retains the editor, so it runs last and nothing of the review stays buffered.
   useEffect(() => {
-    if (discarded) for (const name of ['catalog-review-editor', 'catalog-review-stage', 'catalog-review-command', 'catalog-review-discard']) adminWorkspace.forget(`${name}:${id}`);
+    if (discarded) for (const name of ['catalog-review-editor', 'catalog-review-command', 'catalog-review-discard', 'catalog-review-prepare']) adminWorkspace.forget(`${name}:${id}`);
   }, [discarded]);
   if (discarded) return <section className={styles.page}><AdminNav />
     <Link className={styles.back} to="/admin/imports?source=catalogReviews">{t('common.back')}</Link>
@@ -181,7 +170,10 @@ function ReviewProject({ id }: { id: string }) {
     <section className={styles.notice} role="status"><p>{t('catalog_review.discarded')}</p></section></section>;
   const item = confirmed;
   const active = Boolean(item && ['queued', 'running'].includes(item.analysis.state));
-  const locked = mutation.running || Boolean(mutation.intent) || !online || item?.state === 'applied';
+  // Requesting the update holds every other control from its save until the review is editable again.
+  const preparing = !editable.includes(bar.phase);
+  const pending = mutation.running || Boolean(mutation.intent);
+  const locked = pending || !online || item?.state === 'applied' || preparing;
   const dirty = Boolean(editor && unsaved(editor));
   // As on the server, only another administrator change makes a local edit stale: analysis progress adds no receipt.
   const conflict = Boolean(dirty && editor && item && (editor.revision < (item.receipts.at(-1)?.revision ?? item.revision) || editor.revision > item.revision));
@@ -191,9 +183,6 @@ function ReviewProject({ id }: { id: string }) {
   const now = <T extends { base: ReviewDraft; edits: ReviewEdits }>(value: T | null) => value && value.base === editor?.base && value.edits === editor.edits ? value : null;
   const shownView = now(view), shown = shownView?.shown ?? editor?.draft, proposed = view && view.base === editor?.base ? view.proposed : undefined;
   const saveChanges = editor ? reviewDraftChanges(editor.base, now(derived)?.draft ?? editor.draft) : [];
-  // Until requesting the update saves first, the Update tab and the step bar apply the saved draft only: selected proposals wait
-  // for a save there as edits do, while lookup, Luna AI and the name box are held by edits alone.
-  const pending = dirty || saveChanges.length > 0;
   const canAnalyze = Boolean(item && !savedOnly && item.sourceStatus === 'current' && item.capabilities.analysis
     && item.analysis.generation < 2 && item.analysis.issue !== 'providerOutcomeUnknown');
   const filenames = item?.source.tracks.map(track => ({ slotId: track.slotId, filename: track.originalFileName ?? '',
@@ -203,9 +192,19 @@ function ReviewProject({ id }: { id: string }) {
   };
   const setCurrent = (next: CatalogReview) => setEditor({ base: next.draft, edits: {}, draft: next.draft, revision: next.revision, valueRevision: next.valueRevision, suggestions: [],
     choices: editor?.choices ?? {}, cleaned: editor?.cleaned });
-  const selectStage = (next: Stage) => { setStage(next); document.getElementById(`catalog-review-tab-${next}`)?.focus(); };
   const originalHref = item ? `/admin/catalog/album/${item.source.album.id}` : '';
+  // The action bar shows its own command's outcome (its refusals, an unknown save or apply), so the page repeats none of them; a
+  // reload request stays here, with its button.
+  const barError = mutation.error !== 'reload' && (barOutcome.includes(bar.phase) || (bar.notice !== null && bar.notice === mutation.error));
+  const stale = Boolean(item && item.state !== 'applied' && (item.sourceStatus !== 'current' || bar.phase === 'stale'));
+  const unknown = bar.phase === 'unknown' || bar.phase === 'querying';
+  const editing = Boolean(item && item.state !== 'applied' && !stale && !unknown);
+  const pendingSuggestions = item?.suggestions.filter(value => value.decision === 'pending' && !hint(value.field)) ?? [];
+  const hints = item?.suggestions.filter(value => hint(value.field)) ?? [];
   const refresh = <button className={styles.button} type="button" disabled={query.isFetching || !online} onClick={() => void query.refetch()}>{t('common.refresh')}</button>;
+  const discard = item && <Suspense fallback={null}><CatalogReviewDiscard id={id} albumId={item.source.album.id} albumTitle={item.source.album.title} draftTitle={item.draft.album.title}
+    expectedRevision={item.revision} disabled={pending || active || (preparing && !stale)} reason={active ? 'catalog_review.discard_luna' : null}
+    onDiscarded={() => navigate(item.sourceStatus === 'unavailable' ? '/admin/imports?source=catalogReviews' : `/admin/catalog/album/${item.source.album.id}`)} /></Suspense>;
   return <section className={styles.page}><AdminNav />
     <Link className={styles.back} to="/admin/imports?source=catalogReviews">{t('common.back')}</Link>
     {item ? <Suspense fallback={<ReviewHeading item={item}>{refresh}</ReviewHeading>}><CatalogReviewHeader item={item}>{refresh}</CatalogReviewHeader></Suspense>
@@ -213,85 +212,59 @@ function ReviewProject({ id }: { id: string }) {
     {!online && <p role="status" className={styles.error}>{t('common.offline')}</p>}
     {query.isPending && <p role="status">{t('common.loading')}</p>}
     {query.isError && <p role="alert" className={styles.error}>{t('common.error')}</p>}
-    {mutation.error && <div role="alert" className={styles.error}><p>{t(`common.${mutation.error}`)}</p>
+    {mutation.error && !barError && <div role="alert" className={styles.error}><p>{t(`common.${mutation.error}`)}</p>
       {mutation.error === 'reload' && <button className={styles.button} type="button" onClick={() => window.location.reload()}>{t('common.reload_action')}</button>}
       {mutation.intent && <button className={styles.button} type="button" disabled={mutation.running || !online} onClick={mutation.command.retry}>{t('common.retry_operation')}</button>}
     </div>}
-    {item && editor && <>
-      <Suspense fallback={null}><CatalogReviewSteps item={item} choices={editor.choices} proposed={proposed} stage={stage} dirty={pending} onNavigate={selectStage} /></Suspense>
-      {item.state === 'applied' ? <section className={styles.notice} role="status"><h2>{t('catalog_review.applied')}</h2><p>{t('catalog_review.applied_copy')}</p></section>
-        : item.sourceStatus !== 'current' && <p role="alert" className={styles.error}>{t(`catalog_review.source_${item.sourceStatus}`)}</p>}
-      {item.state !== 'applied' && <Suspense fallback={null}><CatalogReviewSummary item={item} error={mutation.error}
-        disabled={locked || dirty || conflict || item.sourceStatus !== 'current'} onRun={mutate} /></Suspense>}
-      {/* The editing section: typed numbers and cleaned titles are edits; turning the cleanup on chooses its titles, so their
-        explicit choices give way to that default. */}
-      {item.state !== 'applied' && <><Suspense fallback={null}><CatalogReviewProposalTable item={item} base={editor.base} edits={editor.edits} cleaned={editor.cleaned ?? []}
-        disabled={locked || item.sourceStatus !== 'current'} onEdit={(edits, next) => setEditor({ ...editor, edits, draft: next })} onView={setView}
-        onCleanup={(edits, next, keys, cleaned) => setEditor({ ...editor, edits, draft: next, cleaned,
-          choices: Object.fromEntries(Object.entries(editor.choices).filter(([key]) => !keys.includes(key))) })} /></Suspense>
+    {item && editor && shown && <>
+      {item.state === 'applied' && <Suspense fallback={<p role="status">{t('common.loading')}</p>}><CatalogReviewApplied item={item} focus={bar.phase === 'success'} /></Suspense>}
+      {stale && <><Suspense fallback={null}><CatalogReviewStale item={item} focus={bar.phase === 'stale'} /></Suspense><div className={styles.actions}>{discard}</div></>}
+      {editing && <>
+        <Suspense fallback={null}><CatalogReviewSummary item={item} error={mutation.error} disabled={locked || dirty || conflict} onRun={mutate} /></Suspense>
+        {/* The editing section: typed numbers and cleaned titles are edits; turning the cleanup on chooses its titles, so their
+          explicit choices give way to that default. */}
+        <Suspense fallback={null}><CatalogReviewProposalTable item={item} base={editor.base} edits={editor.edits} cleaned={editor.cleaned ?? []}
+          disabled={locked} onEdit={(edits, next) => setEditor({ ...editor, edits, draft: next })} onView={setView}
+          onCleanup={(edits, next, keys, cleaned) => setEditor({ ...editor, edits, draft: next, cleaned,
+            choices: Object.fromEntries(Object.entries(editor.choices).filter(([key]) => !keys.includes(key))) })} /></Suspense>
         <Suspense fallback={null}><CatalogReviewRange item={item} base={editor.base} edits={editor.edits} view={shownView} choices={editor.choices}
-          disabled={locked || item.sourceStatus !== 'current' || !item.capabilities.apply} onDerived={setDerived}
-          onChoose={choices => setEditor(previous => previous && { ...previous, choices: { ...previous.choices, ...choices } })} /></Suspense></>}
-      {/* Other actions: Luna AI and discarding, secondary to the lookup summary and always visible under their own label. */}
-      {item.state !== 'applied' && <section aria-labelledby="catalog-review-other">
-        <h2 id="catalog-review-other" className={styles.meta} style={{ margin: '1.5rem 0 0' }}>{t('catalog_review.other_actions')}</h2>
-        <Suspense fallback={null}><CatalogReviewLuna item={item} active={active} canAnalyze={canAnalyze} busy={mutation.running || Boolean(mutation.intent) || !online}
-          onAnalyze={() => mutate('analyze', {})} onStop={() => mutate('cancel-analysis', {})} /></Suspense>
-        {/* Never primary, whatever the source status; unsaved edits do not block it, since its confirmation says they are removed. */}
-        <Suspense fallback={null}><CatalogReviewDiscard id={id} albumId={item.source.album.id} albumTitle={item.source.album.title} draftTitle={item.draft.album.title}
-          expectedRevision={item.revision} disabled={mutation.running || Boolean(mutation.intent) || active} reason={active ? 'catalog_review.discard_luna' : null}
-          onDiscarded={() => navigate(item.sourceStatus === 'unavailable' ? '/admin/imports?source=catalogReviews' : `/admin/catalog/album/${item.source.album.id}`)} /></Suspense>
-      </section>}
-      <details className={styles.details}><summary>{t('catalog_review.context_title')}</summary><p>{t('catalog_review.context_copy')}</p><p>{t('catalog_review.manage_copy')}</p></details>
-      <div className={styles.actions}><Link className={styles.link} to={originalHref}>{t('catalog_review.manage_original')}</Link></div>
-      <div role="tablist" aria-label={t('catalog_review.title')} className={styles.filters}>
-        {(['draft', 'review', 'apply'] as const).map((value, index, stages) => <button key={value} role="tab" type="button" id={`catalog-review-tab-${value}`}
-          className={styles.filter} aria-selected={stage === value} aria-controls={`catalog-review-panel-${value}`} tabIndex={stage === value ? 0 : -1}
-          onClick={() => setStage(value)} onKeyDown={event => {
-            const next = event.key === 'ArrowRight' ? stages[(index + 1) % stages.length] : event.key === 'ArrowLeft' ? stages[(index + stages.length - 1) % stages.length]
-              : event.key === 'Home' ? stages[0] : event.key === 'End' ? stages[2] : null;
-            if (next) { event.preventDefault(); setStage(next); document.getElementById(`catalog-review-tab-${next}`)?.focus(); }
-          }}>{t(`catalog_review.${value}_tab`)}</button>)}
-      </div>
-      {conflict && <section className={styles.error} role="alert"><p>{t('common.conflict')}</p>
-        <button className={styles.button} type="button" onClick={() => setCurrent(item)}>{t('review.load_saved')}</button></section>}
-      {pending && <p role="status" className={styles.muted}>{t('catalog_review.save_draft_first')}</p>}
-      <div hidden={stage !== 'draft'} role="tabpanel" id="catalog-review-panel-draft" aria-labelledby="catalog-review-tab-draft">
-        {/* A save sends the edits and the selected proposed numbers (an unselected proposal is never saved). */}
-        <form className={styles.panel} onSubmit={event => { event.preventDefault(); if (!locked && !conflict && saveChanges.length) mutation.command.run(path, { expectedRevision: editor.revision, changes: saveChanges }); }}>
-          <header className={styles.sectionHeader}><h2>{t('layout.metadata')}</h2><button id="catalog-review-save" className={`${styles.button} ${styles.primary}`} type="submit" disabled={locked || !saveChanges.length || conflict}>{t('catalog_review.save_draft')}</button></header>
-          <p role="status" className={styles.meta}>{t(dirty ? 'common.unsaved' : 'catalog_review.draft_saved')}</p>
-          <div className={styles.actions}><button type="button" className={styles.button} aria-expanded={manual} onClick={() => setManual(!manual)}>{t('catalog_review.manual_edit')}</button></div>
-          {manual && shown && <Suspense fallback={<p role="status">{t('common.loading')}</p>}><CatalogReviewManualEdit base={editor.base} edits={editor.edits} draft={shown}
-            source={item.source} filenames={filenames} disabled={locked} manageAlbumHref={originalHref} onEdit={(edits, next) => setEditor({ ...editor, edits, draft: next })} /></Suspense>}
-        </form>
-      </div>
-      <div hidden={stage !== 'review'} role="tabpanel" id="catalog-review-panel-review" aria-labelledby="catalog-review-tab-review">
-        {stage === 'review' && <Suspense fallback={<p role="status">{t('common.loading')}</p>}><ImportReview draft={editor.draft} filenames={filenames} suggestions={item.suggestions.filter(value => !hint(value.field))}
-          selected={editor.suggestions} onSelect={suggestions => setEditor({ ...editor, suggestions })} disabled={savedOnly} draftCopy={t('catalog_review.review_copy')}
-          emptyContent={<CatalogReviewEmptyState item={item} onNavigate={selectStage} />}
-          onAdopt={selectedIds => mutate('adopt', { generation: item.analysis.generation, selectedIds, rejectIds: [] })}
-          onReject={rejectIds => mutate('adopt', { generation: item.analysis.generation, selectedIds: [], rejectIds })} /></Suspense>}
-        {/* Artist-entries and label suggestions are identity hints for the original Album's Credits: they can be kept, never adopted. */}
-        {stage === 'review' && item.suggestions.some(value => hint(value.field)) && <Suspense fallback={null}><CatalogReviewHints suggestions={item.suggestions.filter(value => hint(value.field))}
-          album={editor.draft.album} disabled={savedOnly} onKeep={id => mutate('adopt', { generation: item.analysis.generation, selectedIds: [], rejectIds: [id] })} /></Suspense>}
-      </div>
-      <div hidden={stage !== 'apply'} role="tabpanel" id="catalog-review-panel-apply" aria-labelledby="catalog-review-tab-apply">
-        {stage === 'apply' && <Suspense fallback={<p role="status">{t('common.loading')}</p>}>{item.state === 'applied' ? <CatalogReviewApplied item={item} />
-          : <CatalogReviewApply item={item} choices={editor.choices} proposed={proposed} disabled={savedOnly || pending}
-            onChoose={(key, choice) => setEditor({ ...editor, choices: { ...editor.choices, [key]: choice } })} onConfirm={selection => setConfirmation({ kind: 'apply', item, selection })} />}</Suspense>}
-      </div>
-      {confirmation && <Suspense fallback={<p role="status">{t('common.loading')}</p>}><CatalogReviewConfirmation confirmation={confirmation}
-        disabled={savedOnly || pending || confirmation.item.revision !== item.revision || confirmation.item.valueRevision !== item.valueRevision
-          || item.sourceStatus !== 'current' || (confirmation.kind === 'analyze' ? !canAnalyze : !item.capabilities.apply)}
-        onClose={() => setConfirmation(null)} onConfirm={() => {
-              setConfirmation(null);
-              // Lookup writes values at the same revision: the value revision shown binds the apply to the draft it showed, which
-              // carries the identity items and members the confirmation showed.
-              const shown = confirmation.kind === 'apply' ? confirmation.selection : null;
-              mutation.command.run(`${path}/${confirmation.kind}`, { expectedRevision: confirmation.item.revision, ...(shown ? { fields: shown.fields, memberCredits: shown.memberCredits,
-                preselections: shown.preselections, musicBrainzIds: shown.musicBrainzIds, expectedValueRevision: confirmation.item.valueRevision } : {}) }, 'POST');
-            }} /></Suspense>}
+          disabled={locked || !item.capabilities.apply} onDerived={setDerived}
+          onChoose={choices => setEditor(previous => previous && { ...previous, choices: { ...previous.choices, ...choices } })} /></Suspense>
+        {/* A save of the bar refused for the conflict says it there (once, as its alert); only the way out is repeated here. */}
+        {conflict && (bar.phase === 'save_failed' && bar.notice === 'conflict'
+          ? <div className={styles.actions}><button className={styles.button} type="button" onClick={() => setCurrent(item)}>{t('review.load_saved')}</button></div>
+          : <section className={styles.error} role="alert"><p>{t('common.conflict')}</p>
+            <button className={styles.button} type="button" onClick={() => setCurrent(item)}>{t('review.load_saved')}</button></section>)}
+        {/* The row of alternatives: manual editing in place, then Discard completion (never primary; unsaved edits do not block it,
+          since its confirmation says they are removed). */}
+        <div role="group" aria-label={t('catalog_review.alternatives')} className={styles.actions}><span className={styles.meta}>{t('catalog_review.alternatives')}</span>
+          <button type="button" className={styles.button} aria-expanded={manual} onClick={() => setManual(!manual)}>{t('catalog_review.manual_edit')}</button>
+          {discard}</div>
+        {manual && <Suspense fallback={<p role="status">{t('common.loading')}</p>}><CatalogReviewManualEdit base={editor.base} edits={editor.edits} draft={shown}
+          source={item.source} filenames={filenames} disabled={locked} manageAlbumHref={originalHref} onEdit={(edits, next) => setEditor({ ...editor, edits, draft: next })} /></Suspense>}
+        {/* Other actions: Luna AI, secondary to the lookup summary and always visible under its own label. */}
+        <section aria-labelledby="catalog-review-other">
+          <h2 id="catalog-review-other" className={styles.meta} style={{ margin: '1.5rem 0 0' }}>{t('catalog_review.other_actions')}</h2>
+          <Suspense fallback={null}><CatalogReviewLuna item={item} active={active} canAnalyze={canAnalyze} busy={pending || !online || preparing}
+            onAnalyze={() => mutate('analyze', {})} onStop={() => mutate('cancel-analysis', {})} /></Suspense>
+        </section>
+        {/* Luna AI suggestions, only while some wait: adopting saves them to the draft, and an adopted one is listed in the update range
+          unselected. Artist-entries and label suggestions are identity hints for the original Album's Credits: kept, never adopted. */}
+        {(pendingSuggestions.length > 0 || hints.length > 0) && <section aria-labelledby="catalog-review-suggestions">
+          <h2 id="catalog-review-suggestions">{t('catalog_review.suggestions_title')}</h2>
+          {pendingSuggestions.length > 0 && <Suspense fallback={<p role="status">{t('common.loading')}</p>}><ImportReview draft={editor.draft} filenames={filenames}
+            suggestions={pendingSuggestions} selected={editor.suggestions} onSelect={suggestions => setEditor({ ...editor, suggestions })} disabled={savedOnly}
+            draftCopy={t('catalog_review.review_copy')} onAdopt={selectedIds => mutate('adopt', { generation: item.analysis.generation, selectedIds, rejectIds: [] })}
+            onReject={rejectIds => mutate('adopt', { generation: item.analysis.generation, selectedIds: [], rejectIds })} /></Suspense>}
+          {hints.length > 0 && <Suspense fallback={null}><CatalogReviewHints suggestions={hints} album={editor.draft.album} disabled={savedOnly}
+            onKeep={id => mutate('adopt', { generation: item.analysis.generation, selectedIds: [], rejectIds: [id] })} /></Suspense>}
+        </section>}
+        <details className={styles.details}><summary>{t('catalog_review.context_title')}</summary><p>{t('catalog_review.context_copy')}</p><p>{t('catalog_review.manage_copy')}</p></details>
+        <div className={styles.actions}><Link className={styles.link} to={originalHref}>{t('catalog_review.manage_original')}</Link></div>
+      </>}
+      <Suspense fallback={null}><CatalogReviewActionBar item={item} command={mutation.command} choices={editor.choices} proposed={proposed} shown={shown} revision={editor.revision}
+        changes={() => saveChanges} saveable={saveChanges.length > 0} refetch={query.refetch} online={online} conflict={conflict} busy={pending && editable.includes(bar.phase)}
+        onState={setBar} onChoices={choices => setEditor(previous => previous && { ...previous, choices: { ...previous.choices, ...choices } })} /></Suspense>
     </>}
   </section>;
 }

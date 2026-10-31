@@ -16,7 +16,7 @@
 .filter[aria-pressed=true],.filter[aria-selected=true] { background:var(--color-surface-hover);border-color:var(--color-border-strong);color:var(--color-text); }
 .primary { background:var(--color-accent);border-color:var(--color-accent);color:var(--color-on-accent); }
 /* A disabled primary button drops the accent, as the Album page's completion button does, so it never reads as the live next step. */
-.button.primary:disabled { background:var(--color-surface-hover);border-color:var(--color-border);color:var(--color-text-subtle);opacity:1; }
+.button.primary:disabled,.button.primary[aria-disabled=true] { background:var(--color-surface-hover);border-color:var(--color-border);color:var(--color-text-subtle);opacity:1; }
 .cards,.files { list-style:none;margin:1rem 0;padding:0; }
 .card,.panel { padding:1rem;margin:1rem 0; }
 .row,.check,.date,.track,.artworkChoice { display:flex;align-items:center;gap:.75rem; }
@@ -69,8 +69,20 @@
 .artworkChoice { margin:.65rem 0;padding:.65rem; }
 .artworkChoice span { min-width:0;overflow-wrap:anywhere; }
 .conflict { border-color:var(--color-danger-border); }
+/* The review page's action bar, sticky at the viewport's bottom with buttons at least 44 px high, and its compact rows. */
+.bar { position:sticky;bottom:0;z-index:2;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:.5rem 1rem;margin-top:1.5rem;padding:.75rem 1rem;background:var(--color-surface-raised);border-top:1px solid var(--color-border-strong); }
+.barText { flex:1 1 14rem;min-width:0;font-size:.85rem; }
+.barText p { margin:.2rem 0 0; }
+.barHeading { font-size:.8rem;margin:0; }
+.barActions { display:flex;flex-wrap:wrap;gap:.6rem;justify-content:end; }
+.barActions>* { min-height:2.75rem; }
+.compact { list-style:none;margin:.75rem 0;padding:0; }
+.compact li { display:flex;flex-wrap:wrap;justify-content:space-between;gap:.2rem 1rem;border-bottom:1px solid var(--color-border);padding:.55rem 0;overflow-wrap:anywhere; }
 @media(max-width:767px) {
 .page { padding:1rem 1rem 2rem; }
+.barHeading { display:none; }
+.barActions { flex:1 1 100%; }
+.barActions>* { flex:1; }
 .diff { grid-template-columns:1fr; }
 .toolbar>label { flex-basis:100%; }
 .dialogActions { display:grid;grid-template-columns:auto minmax(0,1fr); }

@@ -37,6 +37,6 @@ test('a header chunk that cannot load leaves the plain heading and Refresh statu
   expect(screen.queryByText(/Reload the page to continue/)).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'Edit manually' }));
   fireEvent.change(await screen.findByRole('textbox', { name: 'Title' }), { target: { value: 'A manual correction' } });
-  fireEvent.click(screen.getByRole('button', { name: 'Save completion draft' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Save draft only' }));
   await waitFor(() => expect(writes).toEqual([`/api/admin/v1/catalog-reviews/${reviewId}`]));
 });

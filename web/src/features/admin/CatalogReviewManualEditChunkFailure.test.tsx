@@ -38,15 +38,17 @@ test('a draft editor chunk that cannot load asks for a reload where manual editi
   fireEvent.click(toggle);
   await waitFor(() => expect(editorChunk.attempts).toBeGreaterThan(0));
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 600)); });
-  const panel = screen.getByRole('tabpanel', { name: 'Edit draft' });
-  expect(await within(panel).findByText(/Reload the page to continue/)).toHaveAttribute('role', 'alert');
+  // The alert takes the editor's place, right after the row of alternatives.
+  const alert = await screen.findByText(/Reload the page to continue/);
+  expect(alert).toHaveAttribute('role', 'alert');
+  expect(screen.getByRole('group', { name: 'Not right?' }).nextElementSibling).toBe(alert);
   expect(adminWorkspace.getSnapshot().reloadRequired).toBe(false);
   // The table still edits (a typed number is the administrator's own, unselected in the range), and the save sends the edit with
   // the selected proposals.
   expect(await screen.findByText(/^This update · 3 selected/)).toBeInTheDocument();
   fireEvent.change(within(table).getByRole('spinbutton', { name: 'Track number of track 2' }), { target: { value: '3' } });
   expect(await screen.findByText(/^This update · 2 selected/)).toBeInTheDocument();
-  const save = screen.getByRole('button', { name: 'Save completion draft' });
+  const save = await screen.findByRole('button', { name: 'Save draft only' });
   await waitFor(() => expect(save).toBeEnabled());
   fireEvent.click(save);
   await waitFor(() => expect(writes).toHaveLength(1));

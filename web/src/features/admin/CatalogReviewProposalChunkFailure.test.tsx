@@ -42,12 +42,12 @@ test('proposal table and update range chunks that cannot load ask for a reload i
   expect(await screen.findAllByText(/Reload the page to continue/)).toHaveLength(2);
   expect(adminWorkspace.getSnapshot().reloadRequired).toBe(false);
   expect(screen.queryByRole('region', { name: 'Check the suggested changes' })).not.toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'Save completion draft' })).toBeDisabled();
+  expect(screen.queryByRole('button', { name: 'Save draft only' })).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'Edit manually' }));
   // Nothing is proposed, so the editor shows the saved numbers.
   expect(await screen.findByRole('spinbutton', { name: '2 · Track number' })).toHaveValue(null);
   fireEvent.change(screen.getByRole('textbox', { name: 'Title' }), { target: { value: 'A manual correction' } });
-  fireEvent.click(screen.getByRole('button', { name: 'Save completion draft' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Save draft only' }));
   await waitFor(() => expect(writes).toHaveLength(1));
   expect(writes[0].changes).toEqual([{ path: 'album.title', base: 'Synthetic catalog Album', value: 'A manual correction' }]);
 });

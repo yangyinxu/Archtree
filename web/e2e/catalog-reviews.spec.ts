@@ -3,7 +3,8 @@
  *   Types: Locale, Write, CatalogPresentation, RemainingCatalogKind, ReviewView
  *   Functions: noReleaseLookup, label, message, elapsedPattern, refinedStatus, possiblePairing,
  *              remainingCatalogItems, setup, enter, expectStandaloneAdministration, capture, resetMainScroll,
- *              saveDraftGeometry, expectInFirstMainScreen, openManualEdit, expectLookupFirst, titleChangeName,
+ *              saveDraftGeometry, expectInFirstMainScreen, actionBar, barPrimary, saveOnly, saveDraftOnly,
+ *              openRange, rangeItem, openFullValues, openManualEdit, expectLookupFirst, titleChangeName,
  *              expectFrozenTitle, expectManualChange, editManualAlbum, captureManualDialog, reflow,
  *              expectDecodedPrivateCover, catalogItemName, catalogCategoryLabel, catalogArtworkLabel,
  *              expectOrganizationMark, completionAlbumTracks, placeholderMemberLookup, quietPairingReview,
@@ -20,15 +21,15 @@
  *   - an iTunes-only lookup result names iTunes on its answers and flags every value it wrote
  *   - pairing by hand sends no choice when the save's re-rank already applied the release, and a choice that fails after the save is offered again without saving
  *   - an open pairing panel keeps the lookup results open when its save's re-rank applies another release that leaves nothing open and the choice after it fails
- *   - a superseded lookup of an Album that changed offers opening the Album instead of a retry that cannot run
+ *   - a review of an Album that changed, whose lookup was superseded, shows the stale view, which opens the Album instead of a retry that cannot run
  *   - a Luna label suggestion is only an identity hint: it is never a Review item, and Keep current rejects it without changing the label
  *   - a long direct catalog confirmation starts at the first old/new field and keeps its actions reachable at 390px
  *   - reverting catalog edits restores review and cover actions without issuing a catalog mutation
  *   - reverting an old catalog draft retains the recovery entry for a newer saved revision
  *   - same-name credited Artists remain distinguishable in a mobile catalog confirmation
  *   - changed source media and stale confirmations cannot silently rebase catalog application
- *   - multiple manual changes open confirmation at its first difference without applying the Album
- *   - changed metadata remains reviewable but cannot be applied and 640px reflow stays accessible
+ *   - multiple manual changes open the inline confirmation, focused on going back, without applying the Album
+ *   - changed metadata leads to the read-only stale view, which cannot be applied, and 640px reflow stays accessible
  *   - User view and revoked role remove private reviews and stop their requests
  *   - discarding an Album completion from the workbench removes its card
  *   - an ordinary account never requests private catalog reviews
@@ -504,8 +505,9 @@ async function saveDraftGeometry(page: Page, name: string, width: number) {
     return { x: rect.x, y: rect.y, width: rect.width, height: rect.height, scrollTop: element.scrollTop, scrollHeight: element.scrollHeight, clientHeight: element.clientHeight };
   });
   const controls: Record<string, unknown> = {};
-  for (const [control, key] of [['start', 'admin.catalog_review.analysis_confirm'], ['refresh', 'admin.common.refresh'], ['save', 'admin.catalog_review.save_draft']] as const) {
-    controls[control] = await page.getByRole('button', { name: label(key), exact: true }).evaluate(element => {
+  for (const [control, locator] of [['start', page.getByRole('button', { name: label('admin.catalog_review.analysis_confirm'), exact: true })],
+    ['refresh', page.getByRole('button', { name: label('admin.common.refresh'), exact: true })], ['update', barPrimary(page)]] as const) {
+    controls[control] = await locator.evaluate(element => {
       const rect = element.getBoundingClientRect(), range = document.createRange();
       range.selectNodeContents(element);
       return { text: element.textContent, x: rect.x, y: rect.y, width: rect.width, height: rect.height,
@@ -526,6 +528,33 @@ async function expectInFirstMainScreen(page: Page, action: Locator) {
   expect(button!.y + button!.height).toBeLessThanOrEqual(main!.y + main!.height);
 }
 
+/**
+ * The review page's sticky action bar while editing (its heading names the current step) and its primary button, the last of its
+ * buttons: production builds hash class names, so a primary button is told by sharing this one's classes.
+ */
+const actionBar = (page: Page) => page.getByRole('region', { name: label('admin.catalog_review.bar_heading'), exact: true });
+const barPrimary = (page: Page) => page.locator('#catalog-review-bar').locator('button, a').last();
+/** The bar's save-only button. */
+const saveOnly = (page: Page) => page.getByRole('button', { name: label('admin.catalog_review.bar_save_only'), exact: true });
+/** Saves the draft alone from the action bar and waits for the bar to say it was saved. */
+async function saveDraftOnly(page: Page) {
+  await saveOnly(page).click();
+  await expect(actionBar(page).getByText(label('admin.common.saved'), { exact: true })).toBeVisible();
+  await expect(saveOnly(page)).toHaveCount(0);
+}
+/** Opens the update range and every group's item list, so each item's checkbox can be used. */
+async function openRange(page: Page) {
+  await page.locator('#catalog-review-range').evaluate(element => { (element as HTMLDetailsElement).open = true; for (const fold of element.querySelectorAll('details')) fold.open = true; });
+}
+/** An item of the update range, by its field label and target (the range names an item "Field · Target", then its values). */
+const rangeItem = (page: Page, field: string, target: string) =>
+  page.getByRole('checkbox', { name: new RegExp(`^${`${field} · ${target}`.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`) });
+/** Opens the inline confirmation's full original and new values. */
+async function openFullValues(dialog: Locator) {
+  const summary = dialog.locator('details > summary');
+  if (await summary.locator('..').getAttribute('open') === null) await summary.click();
+}
+
 /** Opens the review's draft editor, which the page mounts only behind Edit manually (and again after a reload). */
 async function openManualEdit(page: Page) {
   const toggle = page.getByRole('button', { name: label('admin.catalog_review.manual_edit'), exact: true });
@@ -535,8 +564,9 @@ async function openManualEdit(page: Page) {
 
 /**
  * Metadata lookup comes first on an existing-Album review: the summary's Look up button is in the first main screen, and the paid
- * Luna AI button follows it, above the first track title of the draft editor (opened behind Edit manually), without the class that
- * styles the draft's Save as the primary action (production builds hash class names, so the two buttons' class lists are compared).
+ * Luna AI button follows it, after the row of alternatives and the draft editor it opens (Edit manually), without the class that
+ * styles the action bar's update as the primary action (production builds hash class names, so the two buttons' class lists are
+ * compared).
  */
 async function expectLookupFirst(page: Page) {
   await openManualEdit(page);
@@ -546,10 +576,10 @@ async function expectLookupFirst(page: Page) {
   const firstTrack = page.getByRole('textbox', { name: `1 · ${label('admin.field.title')}`, exact: true });
   const [submitBox, startBox, trackBox] = await Promise.all([submit.boundingBox(), start.boundingBox(), firstTrack.boundingBox()]);
   expect(startBox!.y).toBeGreaterThan(submitBox!.y);
-  expect(startBox!.y).toBeLessThan(trackBox!.y);
+  expect(startBox!.y).toBeGreaterThan(trackBox!.y);
   const classes = async (button: Locator) => (await button.getAttribute('class') ?? '').split(/\s+/).filter(Boolean);
-  const luna = await classes(start), save = await classes(page.getByRole('button', { name: label('admin.catalog_review.save_draft'), exact: true }));
-  expect(save.filter(name => !luna.includes(name))).not.toEqual([]);
+  const luna = await classes(start), update = await classes(barPrimary(page));
+  expect(update.filter(name => !luna.includes(name))).not.toEqual([]);
   return start;
 }
 
@@ -557,8 +587,9 @@ function titleChangeName(target: string) {
   return label('admin.catalog_review.select_field', { type: label('admin.catalog_review.target_album'), target, field: label('admin.field.title') });
 }
 
-/** The final confirmation must display the exact selected original and saved values. */
+/** The final confirmation must display the exact selected original and saved values (behind its full-values disclosure). */
 async function expectFrozenTitle(dialog: Locator, target: string, value: string) {
+  await openFullValues(dialog);
   const summary = dialog.getByRole('heading', { name: titleChangeName(target), exact: true }).locator('..');
   await expect(summary.getByText(label('admin.catalog_review.original_value'), { exact: true })).toBeVisible();
   await expect(summary.getByText(label('admin.catalog_review.saved_value'), { exact: true })).toBeVisible();
@@ -923,17 +954,10 @@ for (const variant of localizedViewports) {
     await expect(page.getByRole('textbox', { name: label('admin.lookup.name'), exact: true })).toHaveValue('Manually corrected synthetic Album');
     await capture(page, '05-review-draft', width); await reflow(page);
     const start = await expectLookupFirst(page);
-    await page.getByRole('tab', { name: label('admin.catalog_review.review_tab'), exact: true }).click();
-    const empty = page.getByText(label('admin.catalog_review.empty_idle'), { exact: true });
-    const nextStep = page.getByRole('button', { name: label('admin.catalog_review.draft_tab'), exact: true });
-    await expect(empty).toBeVisible(); await nextStep.scrollIntoViewIfNeeded();
-    await expect(nextStep).toBeInViewport();
-    await capture(page, '05b-not-started-next-step', width, false, false);
-    await nextStep.click();
-    await expect(page.getByRole('tab', { name: label('admin.catalog_review.draft_tab'), exact: true })).toHaveAttribute('aria-selected', 'true');
+    // Luna AI has not run here, so no Luna AI suggestions section shows; the sticky action bar stays in view at the bottom.
+    await expect(page.getByRole('region', { name: label('admin.catalog_review.suggestions_title'), exact: true })).toHaveCount(0);
     await start.scrollIntoViewIfNeeded(); await expect(start).toBeInViewport();
-    const saveDraft = page.getByRole('button', { name: label('admin.catalog_review.save_draft'), exact: true });
-    await saveDraft.scrollIntoViewIfNeeded(); await expect(saveDraft).toBeInViewport();
+    await expect(barPrimary(page)).toBeInViewport();
     await capture(page, '05c-review-editor-save', width, false, false);
     await start.click();
     const analysis = page.getByRole('dialog', { name: label('admin.catalog_review.analysis_confirm_title') });
@@ -946,13 +970,16 @@ for (const variant of localizedViewports) {
     await analysis.getByRole('button', { name: label('admin.catalog_review.luna_start') }).click();
     await expect(page.getByRole('button', { name: label('admin.analysis.stop') })).toBeVisible();
     expect(api.writes.filter(value => value.path.endsWith('/analyze'))).toHaveLength(1);
+    // While Luna AI runs, the update waits and says so in the bar.
+    await expect(actionBar(page).getByText(label('admin.catalog_review.bar_wait_luna'), { exact: true })).toBeVisible();
     await page.reload(); await page.getByRole('button', { name: label('admin.view.switch_admin') }).click();
     await expect(page.getByRole('button', { name: label('admin.analysis.stop') })).toBeVisible();
     expect(api.writes.filter(value => value.path.endsWith('/analyze'))).toHaveLength(1);
     api.finish(); await page.getByRole('button', { name: label('admin.common.refresh') }).click();
     await expect(page.getByRole('button', { name: label('admin.catalog_review.analysis_again') })).toBeVisible();
-    await page.getByRole('tab', { name: label('admin.catalog_review.review_tab'), exact: true }).click();
-    const suggestion = page.getByRole('article').filter({ has: page.getByRole('checkbox', { name: label('admin.field.title'), exact: true }) });
+    // Its suggestions arrive in their own section, unticked.
+    const suggestions = page.getByRole('region', { name: label('admin.catalog_review.suggestions_title'), exact: true });
+    const suggestion = suggestions.getByRole('article').filter({ has: suggestions.getByRole('checkbox', { name: label('admin.field.title'), exact: true }) });
     await expect(suggestion.getByText(label('admin.review.baseline'), { exact: true })).toBeVisible();
     await expect(suggestion.getByText(label('admin.review.current'), { exact: true })).toBeVisible();
     await expect(suggestion.getByText(label('admin.review.suggested'), { exact: true })).toBeVisible();
@@ -960,42 +987,45 @@ for (const variant of localizedViewports) {
     await reflow(page);
     await suggestion.scrollIntoViewIfNeeded();
     await suggestion.screenshot({ path: `${shots}/${locale}/07b-review-diff-card-${width}.png`, animations: 'disabled' });
-    await page.getByRole('checkbox', { name: label('admin.field.title'), exact: true }).check();
-    await page.getByRole('button', { name: label('admin.action.apply'), exact: true }).click();
-    await page.getByRole('tab', { name: label('admin.catalog_review.draft_tab'), exact: true }).click();
+    await suggestions.getByRole('checkbox', { name: label('admin.field.title'), exact: true }).check();
+    await suggestions.getByRole('button', { name: label('admin.action.apply'), exact: true }).click();
     // The reload above closed manual editing.
     await openManualEdit(page);
     await expect(page.getByRole('textbox', { name: label('admin.field.title'), exact: true })).toHaveValue('Reviewed synthetic Album');
     await expect(page.getByRole('textbox', { name: `1 · ${label('admin.field.title')}`, exact: true })).toHaveValue('Synthetic first track');
     await page.getByRole('spinbutton', { name: `2 · ${label('admin.field.track_number')}`, exact: true }).fill('7');
-    await page.getByRole('button', { name: label('admin.catalog_review.save_draft'), exact: true }).click();
-    await expect(page.getByText(label('admin.catalog_review.draft_saved'), { exact: true })).toBeVisible();
-    await expect(page.getByRole('button', { name: label('admin.catalog_review.save_draft'), exact: true })).toBeDisabled();
+    await saveDraftOnly(page);
     expect(api.album().fields.title).toBe('Manually corrected synthetic Album');
-    await page.getByRole('tab', { name: label('admin.catalog_review.apply_tab') }).click();
-    await page.getByRole('checkbox', { name: label('admin.catalog_review.select_field', { type: label('admin.catalog_review.target_album'), target: 'Manually corrected synthetic Album', field: label('admin.field.title') }), exact: true }).check();
-    await expect(page.getByRole('checkbox', { name: label('admin.catalog_review.select_field', { type: label('admin.catalog_review.target_track'), target: 'Synthetic second track', field: label('admin.field.track_number') }), exact: true })).not.toBeChecked();
+    // An adopted suggestion and a manual value arrive unselected in the update range; selecting the title is the whole update.
+    await openRange(page);
+    const title = rangeItem(page, label('admin.field.title'), 'Manually corrected synthetic Album');
+    await title.check();
+    await expect(rangeItem(page, label('admin.field.track_number'), 'Synthetic second track')).not.toBeChecked();
     await reflow(page);
-    const change = page.getByRole('article').filter({ has: page.getByRole('checkbox', { name: titleChangeName('Manually corrected synthetic Album'), exact: true }) });
+    const change = page.locator('li').filter({ has: title });
     await change.scrollIntoViewIfNeeded();
     await change.screenshot({ path: `${shots}/${locale}/08b-apply-diff-card-${width}.png`, animations: 'disabled' });
-    await page.getByRole('button', { name: label('admin.catalog_review.apply_action', { count: 1 }) }).click();
-    const application = page.getByRole('dialog', { name: label('admin.catalog_review.apply_confirm') });
-    await expect(application.getByRole('heading', { name: label('admin.catalog_review.apply_confirm'), exact: true })).toBeVisible();
-    await expect(application.getByText('Manually corrected synthetic Album', { exact: true }).first()).toBeVisible();
-    await expect(application.getByText(label('admin.catalog_review.selected', { count: 1 }), { exact: true })).toBeVisible();
+    const update = page.getByRole('button', { name: label('admin.catalog_review.apply_action', { count: 1 }), exact: true });
+    await expect(update).not.toHaveAttribute('aria-disabled', 'true');
+    await update.click();
+    // Nothing was left to save: the inline confirmation shows the frozen selection, focused on going back.
+    const application = page.getByRole('dialog', { name: label('admin.catalog_review.confirm_title') });
+    await expect(application.getByRole('heading', { name: label('admin.catalog_review.confirm_title'), exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: label('admin.catalog_review.bar_back'), exact: true })).toBeFocused();
+    await expect(application.getByText(message('admin.catalog_review.confirm_summary', { count: 1 }), { exact: true })).toBeVisible();
     await expectFrozenTitle(application, 'Manually corrected synthetic Album', 'Reviewed synthetic Album');
     await expect(application.getByRole('heading', { name: label('admin.catalog_review.select_field', { type: label('admin.catalog_review.target_track'), target: 'Synthetic second track', field: label('admin.field.track_number') }), exact: true })).toHaveCount(0);
-    await expect(application.getByRole('button', { name: label('admin.catalog_review.apply_action', { count: 1 }), exact: true })).toBeVisible();
+    const confirm = page.getByRole('button', { name: label('admin.catalog_review.bar_confirm', { count: 1 }), exact: true });
+    await expect(confirm).toBeVisible();
     expect(api.writes.filter(value => value.path.endsWith('/apply'))).toHaveLength(0);
     await capture(page, '09-apply-confirmation', width, false); await reflow(page);
-    await application.getByRole('button', { name: label('admin.catalog_review.apply_action', { count: 1 }) }).click();
-    await expect(page.getByRole('heading', { name: label('admin.catalog_review.applied') })).toBeVisible();
-    // The Update step now lists what was updated, read-only, and Luna AI, which ran here, says it is closed.
-    const updated = page.getByRole('tabpanel', { name: label('admin.catalog_review.apply_tab'), exact: true });
-    await expect(updated.getByRole('heading', { name: label('admin.catalog_review.applied_title'), exact: true })).toBeVisible();
-    await expect(updated.getByRole('listitem')).toHaveText([label('admin.field.title')]);
-    await expect(updated.getByRole('checkbox')).toHaveCount(0);
+    await confirm.click();
+    // The applied view takes the focus: what was updated, read-only, and Luna AI, which ran here, says it is closed.
+    await expect(page.getByRole('heading', { name: message('admin.catalog_review.applied_count', { count: 1 }), exact: true })).toBeFocused();
+    const all = page.getByText(label('admin.catalog_review.applied_title'), { exact: true });
+    await all.click();
+    await expect(all.locator('..').getByRole('listitem')).toHaveText([label('admin.field.title')]);
+    await expect(page.getByRole('checkbox')).toHaveCount(0);
     await expect(page.getByRole('button', { name: label('admin.catalog_review.apply_action', { count: 0 }), exact: true })).toHaveCount(0);
     await expect(page.getByRole('term').filter({ hasText: label('admin.workbench.review_stage') }).locator('xpath=following-sibling::dd'))
       .toHaveText(label('admin.workbench.review_closed'));
@@ -1003,9 +1033,9 @@ for (const variant of localizedViewports) {
     expect(api.album().id).toBe(albumId); expect(api.album().fields.title).toBe('Reviewed synthetic Album');
     expect(api.review().source.tracks.find(value => value.slotId === slotTwo)?.trackNumber).toBeNull();
     expect(api.writes.some(value => /\/imports|\/publish|\/assets\//.test(value.path))).toBe(false);
-    await page.getByRole('tab', { name: label('admin.catalog_review.draft_tab'), exact: true }).click();
-    await expect(page.getByRole('textbox', { name: label('admin.field.title'), exact: true })).toBeDisabled();
-    await expect(page.getByRole('button', { name: label('admin.catalog_review.save_draft'), exact: true })).toBeDisabled();
+    // Read-only: no editing remains, and the bar's only control opens the original Album.
+    await expect(page.getByRole('textbox', { name: label('admin.field.title'), exact: true })).toHaveCount(0);
+    await expect(page.locator('#catalog-review-bar').getByRole('link', { name: label('admin.catalog_review.bar_open_album'), exact: true })).toBeVisible();
     await page.getByRole('link', { name: label('admin.common.back') }).click();
     await expect(page).toHaveURL(/source=catalogReviews/);
     await expect(page.getByRole('heading', { name: label('admin.workbench.title'), exact: true })).toBeVisible();
@@ -1184,32 +1214,28 @@ for (const variant of localizedViewports) {
     const guest = identities.getByRole('listitem').filter({ has: page.getByText(label('admin.catalog_review.needs_decision'), { exact: true }) });
     await guest.getByRole('radio', { name: label('admin.catalog_review.identity_create', { name: 'Synthetic guest' }), exact: true }).check();
     await expect(identities.getByText(label('admin.catalog_review.needs_decision'), { exact: true })).toHaveCount(0);
-    // Nothing is left to answer: the steps say so and lead, as their primary button, to the Update step's six selected changes.
-    const steps = page.getByRole('group', { name: label('admin.catalog_review.steps_label'), exact: true });
-    await expect(steps.getByText(label('admin.catalog_review.step_answers_none'), { exact: true })).toBeVisible();
-    await expect(page.getByText(label('admin.catalog_review.steps_ready'), { exact: true })).toBeVisible();
-    const toChanges = page.getByRole('button', { name: label('admin.catalog_review.view_changes', { count: 6 }), exact: true });
-    expect(await classList(toChanges)).toEqual(await classList(page.locator('#catalog-review-save')));
-    await toChanges.click();
-    const applyTab = page.getByRole('tab', { name: label('admin.catalog_review.apply_tab'), exact: true });
-    await expect(applyTab).toHaveAttribute('aria-selected', 'true'); await expect(applyTab).toBeFocused();
+    // Nothing is left to answer: the action bar's primary button requests the update of the range's six selected changes.
+    const update = page.getByRole('button', { name: label('admin.catalog_review.apply_action', { count: 6 }), exact: true });
+    await expect(update).not.toHaveAttribute('aria-disabled', 'true');
+    expect(await classList(update)).toEqual(await classList(barPrimary(page)));
     // Every change arrives selected; the member whose track credits only a placeholder has no line.
-    const panel = page.getByRole('tabpanel', { name: label('admin.catalog_review.apply_tab'), exact: true });
-    const change = (type: 'album' | 'track', target: string, field: keyof typeof english) =>
-      label('admin.catalog_review.select_field', { type: label(type === 'album' ? 'admin.catalog_review.target_album' : 'admin.catalog_review.target_track'), target, field: label(field) });
+    await openRange(page);
     const album = 'Synthetic catalog Album', second = 'Synthetic second track';
-    const selected = [change('album', album, 'admin.field.title'), change('album', album, 'admin.field.release_date'), change('album', album, 'admin.field.artists'),
-      change('album', album, 'admin.field.expected_tracklist'), change('track', second, 'admin.field.track_number'), change('track', second, 'admin.field.artists')];
-    for (const name of selected) await expect(panel.getByRole('checkbox', { name, exact: true })).toBeChecked();
-    await expect(panel.getByRole('checkbox', { name: change('track', 'Synthetic first track', 'admin.field.artists'), exact: true })).toHaveCount(0);
-    const update = panel.getByRole('button', { name: label('admin.catalog_review.apply_action', { count: 6 }), exact: true });
-    await expect(update).toBeEnabled();
+    const selected: [keyof typeof english, string][] = [['admin.field.title', album], ['admin.field.release_date', album], ['admin.field.artists', album],
+      ['admin.field.expected_tracklist', album], ['admin.field.track_number', second], ['admin.field.artists', second]];
+    for (const [field, target] of selected) await expect(rangeItem(page, label(field), target)).toBeChecked();
+    await expect(rangeItem(page, label('admin.field.artists'), 'Synthetic first track')).toHaveCount(0);
     await capture(page, '34-completion-apply', width); await reflow(page);
     await update.click();
-    const application = page.getByRole('dialog', { name: label('admin.catalog_review.apply_confirm') });
-    await expect(application.getByText(label('admin.catalog_review.selected', { count: 6 }), { exact: true })).toBeVisible();
+    const application = page.getByRole('dialog', { name: label('admin.catalog_review.confirm_title') });
+    await expect(application.getByText(message('admin.catalog_review.confirm_summary', { count: 6 }), { exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: label('admin.catalog_review.bar_back'), exact: true })).toBeFocused();
+    // The full values, behind their disclosure, repeat each frozen change.
+    await openFullValues(application);
+    const change = (type: 'album' | 'track', target: string, field: keyof typeof english) =>
+      label('admin.catalog_review.select_field', { type: label(type === 'album' ? 'admin.catalog_review.target_album' : 'admin.catalog_review.target_track'), target, field: label(field) });
     const card = (name: string) => application.getByRole('article').filter({ has: page.getByRole('heading', { name, exact: true }) });
-    for (const name of selected) await expect(card(name)).toHaveCount(1);
+    for (const [field, target] of selected) await expect(card(change(target === album ? 'album' : 'track', target, field))).toHaveCount(1);
     await expect(card(change('album', album, 'admin.field.artists')).getByText('Synthetic catalog Artist feat. Synthetic guest', { exact: true })).toBeVisible();
     const tracklist = card(change('album', album, 'admin.field.expected_tracklist'));
     await expect(tracklist.getByText(label('admin.catalog.album_expected_none'), { exact: true })).toBeVisible();
@@ -1224,20 +1250,21 @@ for (const variant of localizedViewports) {
     await expect(lines.getByText(`${label('admin.catalog_review.identity_bound', { name: 'Synthetic catalog Artist' })} · ${label('admin.catalog_review.identity_visibility',
       { visibility: label('admin.field.hidden') })}`, { exact: true })).toBeVisible();
     await capture(page, '35-completion-confirmation', width, false); await reflow(page);
-    await application.getByRole('button', { name: label('admin.catalog_review.apply_action', { count: 6 }), exact: true }).click();
-    await expect(page.getByRole('heading', { name: label('admin.catalog_review.applied') })).toBeVisible();
-    // The Update step lists the five fields written, read-only; the steps say when; Luna AI never ran here, so no Luna AI line.
-    await expect(panel.getByRole('heading', { name: label('admin.catalog_review.applied_title'), exact: true })).toBeVisible();
-    await expect(panel.getByRole('listitem')).toHaveText([label('admin.field.title'), label('admin.field.release_date'), label('admin.field.artists'),
+    await page.getByRole('button', { name: label('admin.catalog_review.bar_confirm', { count: 6 }), exact: true }).click();
+    // The applied view counts the five fields written, read-only; Luna AI never ran here, so no Luna AI line.
+    await expect(page.getByRole('heading', { name: message('admin.catalog_review.applied_count', { count: 5 }), exact: true })).toBeFocused();
+    const all = page.getByText(label('admin.catalog_review.applied_title'), { exact: true });
+    await all.click();
+    await expect(all.locator('..').getByRole('listitem')).toHaveText([label('admin.field.title'), label('admin.field.release_date'), label('admin.field.artists'),
       label('admin.field.expected_tracklist'), label('admin.catalog_review.applied_track_field', { title: 'Synthetic second track', field: label('admin.field.track_number') })]);
-    // The sixth change, a track's Artist, is not in the list, and the note says so.
-    await expect(panel.getByText(label('admin.catalog_review.applied_members_note'), { exact: true })).toBeVisible();
-    await expect(panel.getByRole('checkbox')).toHaveCount(0);
+    // The sixth change, a track's Artist, is not in the list, and the note says so; the edition line follows the release used.
+    await expect(page.getByText(label('admin.catalog_review.applied_members_note'), { exact: true })).toBeVisible();
+    await expect(page.getByText(label('admin.catalog_review.applied_edition_matched', { title: release }), { exact: true })).toBeVisible();
+    await expect(page.getByRole('checkbox')).toHaveCount(0);
     await expect(page.getByRole('button', { name: label('admin.catalog_review.apply_action', { count: 0 }), exact: true })).toHaveCount(0);
     // The time reads in the interface language, as the page formats the apply's time.
     const appliedAt = await page.evaluate(([value, language]) => new Date(value).toLocaleString(language, { dateStyle: 'medium', timeStyle: 'short' }), [api.review().applied!.at, locale]);
-    await expect(panel.getByText(label('admin.catalog_review.applied_when', { date: appliedAt }), { exact: true })).toBeVisible();
-    await expect(steps.getByText(label('admin.catalog_review.step_update_done', { date: appliedAt }), { exact: true })).toBeVisible();
+    await expect(page.getByText(label('admin.catalog_review.applied_when', { date: appliedAt }), { exact: true })).toBeVisible();
     await expect(page.getByText(label('admin.workbench.review_stage'))).toHaveCount(0);
     const applied = api.writes.filter(write => write.path.endsWith('/apply'));
     expect(applied.map(write => write.body)).toEqual([{ expectedRevision: api.review().revision - 1, expectedValueRevision: 1, operationId: expect.any(String),
@@ -1245,7 +1272,7 @@ for (const variant of localizedViewports) {
         { scope: 'album', slotId: null, field: 'expectedTracklist' }, { scope: 'track', slotId: slotTwo, field: 'trackNumber' }],
       memberCredits: [slotTwo], preselections: api.identities().preselections, musicBrainzIds: api.identities().musicBrainzIds }]);
     // The Album page shows the new Credits, documented, and the expected tracklist with its row without a file.
-    await page.getByRole('link', { name: label('admin.catalog_review.manage_original') }).click();
+    await page.locator('#catalog-review-bar').getByRole('link', { name: label('admin.catalog_review.bar_open_album'), exact: true }).click();
     await expect(page.getByRole('heading', { name: release, level: 1, exact: true })).toBeVisible();
     const credits = page.getByRole('group', { name: label('admin.catalog.credits'), exact: true });
     await expect(credits.getByText('Synthetic catalog Artist', { exact: true })).toBeVisible();
@@ -1582,7 +1609,7 @@ const numberInputs = (page: Page) => [1, 2].flatMap(position => (['admin.field.d
 /** The only changes a save sends with the numbers proposed from "1-01 " and "1-02 ": both members' Disc and Track Numbers, each over none. */
 const filledChanges = () => [slotId, slotTwo].flatMap((slot, index) => [{ path: `tracks.${slot}.discNumber`, base: null, value: 1 },
   { path: `tracks.${slot}.trackNumber`, base: null, value: index + 1 }]);
-/** A control's classes; production builds hash class names, so a primary button is told by sharing Save completion draft's. */
+/** A control's classes; production builds hash class names, so a primary button is told by sharing the action bar's primary's. */
 const classList = async (element: Locator) => (await element.getAttribute('class') ?? '').split(/\s+/).filter(Boolean);
 
 for (const variant of localizedViewports) {
@@ -1599,15 +1626,10 @@ for (const variant of localizedViewports) {
     await expect(status).toHaveAttribute('role', 'status');
     await expect(status).not.toContainText(/Luna|AI/);
     await expectInFirstMainScreen(page, status);
-    const primary = await classList(page.locator('#catalog-review-save'));
-    // The steps say the same in short: one possible release, whose Disc and Track Numbers are needed; one step per row on a phone.
-    const steps = page.getByRole('group', { name: label('admin.catalog_review.steps_label'), exact: true });
-    await expect(steps.getByText(message('admin.catalog_review.step_find_possible', { count: 1 }), { exact: true })).toBeVisible();
-    await expect(steps.getByText(label('admin.catalog_review.step_answers_numbers'), { exact: true })).toBeVisible();
-    const cells = await Promise.all(['admin.catalog_review.step_find', 'admin.catalog_review.step_answer', 'admin.catalog_review.step_update']
-      .map(async key => (await steps.getByText(label(key as keyof typeof english), { exact: true }).boundingBox())!));
-    if (width === 390) for (const [index, cell] of cells.slice(1).entries()) { expect(Math.abs(cell.x - cells[0].x)).toBeLessThan(1); expect(cell.y).toBeGreaterThan(cells[index].y); }
-    else for (const cell of cells.slice(1)) expect(Math.abs(cell.y - cells[0].y)).toBeLessThan(1);
+    const primary = await classList(barPrimary(page));
+    // The page has no step bar: the action bar's update, counting the proposed numbers, is the page's primary button.
+    await expect(page.getByRole('tablist')).toHaveCount(0);
+    await expect(barPrimary(page)).toHaveText(label('admin.catalog_review.apply_action', { count: 4 }));
     // Possible matches come first, open: one card for the release's two editions, why its tracks leave their positions unclear, no
     // rows promised, how many tracks the proposal gives numbers and choosing kept as Album values only under Other options. The
     // releases the tracks do not fit are the only other section, folded, and Use none of these follows.
@@ -1623,9 +1645,6 @@ for (const variant of localizedViewports) {
     await expect(card.getByText(message('admin.catalog_review.lookup_missing_rows', { count: 18 }), { exact: true })).toHaveCount(0);
     await expect(card.getByText(message('admin.catalog_review.lookup_fill_hint', { count: 2 }), { exact: true })).toBeVisible();
     expect(await classList(card.getByRole('button', { name: label('admin.catalog_review.lookup_pair_by_hand'), exact: true }))).not.toEqual(primary);
-    // The third step waits for the numbers and offers no button of its own.
-    await expect(steps.getByText(label('admin.catalog_review.step_update_after_numbers'), { exact: true })).toBeVisible();
-    await expect(page.getByRole('button', { name: label('admin.catalog_review.view_changes_plain'), exact: true })).toHaveCount(0);
     await expect(card.getByRole('button', { name: label('admin.lookup.choose'), exact: true })).toHaveCount(0);
     await expect(card.getByText(label('admin.catalog_review.lookup_other_options'), { exact: true })).toBeVisible();
     await expect(card.getByText(label('admin.catalog_review.lookup_editions_choose'), { exact: true })).toBeVisible();
@@ -1652,7 +1671,7 @@ for (const variant of localizedViewports) {
     const table = page.getByRole('region', { name: label('admin.catalog_review.proposal_title'), exact: true });
     await expect(table.getByText(label('admin.catalog_review.proposal_empty_originals'), { exact: true })).toBeVisible();
     for (const [index, input] of numberInputs(page).entries()) await expect(input).toHaveValue(['1', '1', '1', '2'][index]);
-    const save = page.getByRole('button', { name: label('admin.catalog_review.save_draft'), exact: true });
+    const save = saveOnly(page);
     await expect(save).toBeEnabled();
     // Pending proposals are not unsaved edits: the name box, opened from its fold, stays usable.
     await summary.getByText(label('admin.catalog_review.lookup_try_another'), { exact: true }).click();
@@ -1679,11 +1698,9 @@ for (const variant of localizedViewports) {
     const [noneOffered, partialOffered] = await Promise.all([offered.getByRole('button', { name: label('admin.lookup.choose_none'), exact: true }).boundingBox(),
       offered.getByText(label('admin.catalog_review.lookup_partial_comparison'), { exact: true }).boundingBox()]);
     expect(noneOffered!.y).toBeLessThan(partialOffered!.y);
-    // The steps show one next step: choosing the release. The Update step waits for it, with no button, though the saved numbers
-    // are listed there.
-    await expect(steps.getByText(label('admin.catalog_review.step_answers_choose'), { exact: true })).toBeVisible();
-    await expect(steps.getByText(label('admin.catalog_review.step_update_after_choose'), { exact: true })).toBeVisible();
-    await expect(page.getByRole('button', { name: label('admin.catalog_review.view_changes_plain'), exact: true })).toHaveCount(0);
+    // Saved, the numbers leave nothing to save alone; the update still counts them.
+    await expect(saveOnly(page)).toHaveCount(0);
+    await expect(barPrimary(page)).toHaveText(label('admin.catalog_review.apply_action', { count: 4 }));
     await offered.scrollIntoViewIfNeeded(); await capture(page, '43-review-offered', width, false, false); await reflow(page);
     // Using it writes its expected tracklist: 20 rows, the 18 the Album has no file for marked so.
     await use.click();
@@ -1741,8 +1758,8 @@ for (const variant of localizedViewports) {
     const handles = await Promise.all(order.map(locator => locator.elementHandle()));
     const tops = await page.evaluate(elements => elements.map(element => element!.getBoundingClientRect().top), handles);
     for (let index = 1; index < tops.length; index += 1) expect(tops[index]).toBeGreaterThan(tops[index - 1]);
-    // Saving the completion draft writes the proposed numbers.
-    const save = page.getByRole('button', { name: label('admin.catalog_review.save_draft'), exact: true });
+    // Saving the draft alone writes the proposed numbers.
+    const save = saveOnly(page);
     await expect(save).toBeEnabled();
     await save.click();
     await expect.poll(() => api.writes.filter(write => write.method === 'PATCH').map(write => write.body.changes)).toEqual([filledChanges()]);
@@ -1752,7 +1769,7 @@ for (const variant of localizedViewports) {
     await expect(again).toBeVisible();
     // The status says so, and using it again is the summary's primary button.
     await expect(summary.getByText(message('admin.catalog_review.lookup_applied_album_only', { title: 'Synthetic Live Album 2' }), { exact: true })).toHaveAttribute('role', 'status');
-    expect(await classList(again)).toEqual(await classList(page.locator('#catalog-review-save')));
+    expect(await classList(again)).toEqual(await classList(barPrimary(page)));
     // Not inside a folded list: every disclosure around it (the lookup results while something waits) is open.
     expect(await again.evaluate(element => { for (let fold = element.closest('details'); fold; fold = fold.parentElement?.closest('details') ?? null) if (!fold.open) return false; return true; }))
       .toBe(true);
@@ -1796,7 +1813,7 @@ for (const variant of localizedViewports) {
     await expect(possible.getByText(label('admin.catalog_review.lookup_fill_unavailable'), { exact: true })).toBeVisible();
     await expect(page.getByRole('region', { name: label('admin.catalog_review.proposal_title'), exact: true })).toHaveCount(0);
     const opener = possible.getByRole('button', { name: label('admin.catalog_review.lookup_pair_by_hand'), exact: true });
-    expect(await classList(opener)).not.toEqual(await classList(page.locator('#catalog-review-save')));
+    expect(await classList(opener)).not.toEqual(await classList(barPrimary(page)));
     await expect(opener).toHaveAttribute('aria-expanded', 'false');
     // The panel opens below the sections with its heading focused; Cancel closes it, returns to the opener and sends nothing.
     const name = message('admin.catalog_review.pairing_title', { title: 'Synthetic Live Album 2', rows: 20, discs: 2 });
@@ -1892,7 +1909,7 @@ test('pairing by hand sends no choice when the save\'s re-rank already applied t
   await expect.poll(() => api.writes.map(write => write.method)).toEqual(['PATCH', 'POST']);
   await expect(panel.getByRole('button', { name: label('admin.catalog_review.pairing_save'), exact: true })).toHaveCount(0);
   const use = panel.getByRole('button', { name: label('admin.lookup.choose'), exact: true });
-  expect(await classList(use)).toEqual(await classList(page.locator('#catalog-review-save')));
+  expect(await classList(use)).toEqual(await classList(barPrimary(page)));
   await use.click();
   await expect(summary.getByText(label('admin.lookup.applied', { title: 'Synthetic Live Album 2' }), { exact: true })).toBeVisible();
   const [, failed, chosen] = api.writes;
@@ -2093,7 +2110,7 @@ for (const variant of localizedViewports) {
     const time = await page.evaluate(([value, language]) => new Date(value).toLocaleTimeString(language, { timeStyle: 'medium' }), [at, locale] as const);
     const busy = summary.getByRole('status').filter({ hasText: message('admin.catalog_review.lookup_retry_busy', { source: 'MusicBrainz', time, attempt: 2, limit: 3 }) });
     await expect(busy).toHaveText(message('admin.catalog_review.lookup_retry_busy', { source: 'MusicBrainz', time, attempt: 2, limit: 3 }));
-    const primary = await classList(page.locator('#catalog-review-save'));
+    const primary = await classList(barPrimary(page));
     const retry = summary.getByRole('button', { name: label('admin.catalog_review.lookup_retry_free'), exact: true });
     const primaries: (string | null)[] = [];
     for (const button of await summary.getByRole('button').all()) if ((await classList(button)).join() === primary.join()) primaries.push(await button.textContent());
@@ -2118,25 +2135,24 @@ for (const variant of localizedViewports) {
   });
 }
 
-test('a superseded lookup of an Album that changed offers opening the Album instead of a retry that cannot run', async ({ page }) => {
+test('a review of an Album that changed, whose lookup was superseded, shows the stale view, which opens the Album instead of a retry that cannot run', async ({ page }) => {
   locale = 'en-US';
   await page.setViewportSize({ width: 1280, height: 720 });
   const item = { ...quietPairingReview(), sourceStatus: 'changed' as const };
   const api = await setup(page); api.seed(item, { ...pairingLookupResponse().lookup!, state: 'superseded', issue: 'projectClosed', outcome: null, candidates: [], groups: [],
     preselection: null, disclosure: null, timeline: pairingRunningTimeline(new Date().toISOString()) });
   await enter(page, `/finitude/admin/catalog-reviews/${reviewId}`);
-  const summary = page.getByRole('region', { name: label('admin.catalog_review.lookup_title'), exact: true });
-  await expect(summary.getByText(label('admin.catalog_review.lookup_superseded'), { exact: true })).toHaveAttribute('role', 'status');
-  const open = summary.getByRole('link', { name: label('admin.catalog_review.lookup_superseded_open'), exact: true });
-  await expect(open).toBeVisible();
-  await expect(summary.getByRole('button', { name: label('admin.catalog_review.lookup_retry_free'), exact: true })).toHaveCount(0);
-  // The step bar promises no free retry either.
-  const steps = page.getByRole('group', { name: label('admin.catalog_review.steps_label'), exact: true });
-  await expect(steps.getByText(label('admin.catalog_review.lookup_brief_unavailable'), { exact: true })).toBeVisible();
-  await expect(steps.getByText(label('admin.catalog_review.lookup_brief_retry'), { exact: true })).toHaveCount(0);
+  // The stale view replaces the editing section and the lookup summary: the old draft is read-only behind its disclosure.
+  await expect(page.getByRole('heading', { name: label('admin.catalog_review.stale_title'), exact: true })).toBeVisible();
+  await expect(page.getByText(label('admin.catalog_review.stale_draft'), { exact: true })).toBeVisible();
+  await expect(page.getByRole('region', { name: label('admin.catalog_review.lookup_title'), exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: label('admin.catalog_review.lookup_retry_free'), exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: label('admin.catalog_review.discard'), exact: true })).toBeEnabled();
+  const open = page.locator('#catalog-review-bar').getByRole('link', { name: label('admin.catalog_review.bar_open_latest'), exact: true });
   await reflow(page);
   await open.click();
   await expect(page).toHaveURL(new RegExp(`/finitude/admin/catalog/album/${item.source.album.id}$`));
+  expect(api.writes).toEqual([]);
 });
 
 for (const variant of localizedViewports) {
@@ -2154,7 +2170,7 @@ for (const variant of localizedViewports) {
     const other = page.getByRole('region', { name: label('admin.catalog_review.other_actions'), exact: true });
     await expect(other.getByText(label('admin.catalog_review.luna_failed_quiet'), { exact: true })).toBeVisible();
     await expect(other.getByRole('button', { name: label('admin.catalog_review.analysis_again'), exact: true })).toBeVisible();
-    await expect(other.getByRole('button', { name: label('admin.catalog_review.discard'), exact: true })).toBeVisible();
+    await expect(page.getByRole('group', { name: label('admin.catalog_review.alternatives'), exact: true }).getByRole('button', { name: label('admin.catalog_review.discard'), exact: true })).toBeVisible();
     await expect(page.getByText(label('admin.issue.provider_invalid_response'), { exact: true })).toHaveCount(0);
     await expect(page.getByText(label('admin.workbench.review_needs_attention'), { exact: true })).toHaveCount(0);
     // The card names the positions the titles start with.
@@ -2190,8 +2206,7 @@ for (const width of [320, 768, 1440]) {
     await expect(labelField).toHaveValue('Synthetic Label'); await expect(labelField).toHaveAttribute('readonly', '');
     await expect(page.getByRole('combobox', { name: label('admin.field.visibility'), exact: true })).toBeDisabled();
     await page.getByRole('spinbutton', { name: `1 · ${label('admin.field.disc_number')}`, exact: true }).fill('2');
-    await page.getByRole('button', { name: label('admin.catalog_review.save_draft'), exact: true }).click();
-    await expect(page.getByText(label('admin.catalog_review.draft_saved'), { exact: true })).toBeVisible();
+    await saveDraftOnly(page);
     // The save sends only the changed Disc Number with its base: no Credits, label or visibility, which stay as saved.
     const saved = api.writes.filter(value => value.method === 'PATCH').map(value => value.body);
     expect(saved).toHaveLength(1);
@@ -2200,12 +2215,14 @@ for (const width of [320, 768, 1440]) {
     expect({ artists: api.review().draft.album.artists, label: api.review().draft.album.label, visibility: api.review().draft.album.visibility }).toEqual({ artists: context.artists, label: context.label, visibility: context.visibility });
     expect(api.review().draft.tracks.map(track => track.discNumber)).toEqual([2, null]);
     await capture(page, '25-review-credits-context', width); await reflow(page);
-    await page.getByRole('tab', { name: label('admin.catalog_review.apply_tab') }).click();
-    const discChange = label('admin.catalog_review.select_field', { type: label('admin.catalog_review.target_track'), target: 'Synthetic first track', field: label('admin.field.disc_number') });
-    await page.getByRole('checkbox', { name: discChange, exact: true }).check();
+    // A typed value arrives unselected in the update range; selected, it is the whole update.
+    await openRange(page);
+    await rangeItem(page, label('admin.field.disc_number'), 'Synthetic first track').check();
     await reflow(page);
-    await page.getByRole('button', { name: label('admin.catalog_review.apply_action', { count: 1 }) }).click();
-    const application = page.getByRole('dialog', { name: label('admin.catalog_review.apply_confirm') });
+    await page.getByRole('button', { name: label('admin.catalog_review.apply_action', { count: 1 }), exact: true }).click();
+    const application = page.getByRole('dialog', { name: label('admin.catalog_review.confirm_title') });
+    await openFullValues(application);
+    const discChange = label('admin.catalog_review.select_field', { type: label('admin.catalog_review.target_track'), target: 'Synthetic first track', field: label('admin.field.disc_number') });
     const summary = application.getByRole('heading', { name: discChange, exact: true }).locator('..');
     await expect(summary.getByText(label('admin.catalog_review.original_value'), { exact: true })).toBeVisible();
     await expect(summary.getByText(label('admin.catalog_review.saved_value'), { exact: true })).toBeVisible();
@@ -2213,8 +2230,8 @@ for (const width of [320, 768, 1440]) {
     await expect(summary.getByText('2', { exact: true })).toBeVisible();
     expect(api.writes.filter(value => value.path.endsWith('/apply'))).toHaveLength(0);
     await capture(page, '26-disc-apply-confirmation', width, false); await reflow(page);
-    await application.getByRole('button', { name: label('admin.catalog_review.apply_action', { count: 1 }) }).click();
-    await expect(page.getByRole('heading', { name: label('admin.catalog_review.applied') })).toBeVisible();
+    await page.getByRole('button', { name: label('admin.catalog_review.bar_confirm', { count: 1 }), exact: true }).click();
+    await expect(page.getByRole('heading', { name: message('admin.catalog_review.applied_count', { count: 1 }), exact: true })).toBeVisible();
     expect(api.writes.filter(value => value.path.endsWith('/apply')).map(value => value.body.fields)).toEqual([[{ scope: 'track', slotId, field: 'discNumber' }]]);
     expect(api.album().fields.title).toBe('Synthetic catalog Album');
     await reflow(page);
@@ -2313,12 +2330,12 @@ test('a Luna label suggestion is only an identity hint: it is never a Review ite
   const hint = { ...title, id: '6'.repeat(24), field: 'label' as const, baseline: { name: 'Synthetic Label', musicBrainzId: null }, value: { name: 'Synthetic label hint', musicBrainzId: null } };
   item.suggestions = [hint];
   await enter(page, `/finitude/admin/catalog-reviews/${reviewId}`);
-  await page.getByRole('tab', { name: label('admin.catalog_review.review_tab') }).click();
-  const panel = page.getByRole('tabpanel', { name: label('admin.catalog_review.review_tab') });
+  // The hint shows in the Luna AI suggestions section, with nothing to adopt.
+  const panel = page.getByRole('region', { name: label('admin.catalog_review.suggestions_title'), exact: true });
   await expect(panel.getByRole('heading', { name: label('admin.catalog_review.hints_title'), exact: true })).toBeVisible();
   await expect(panel.getByText('Synthetic label hint', { exact: true })).toBeVisible();
   await expect(panel.getByRole('checkbox')).toHaveCount(0);
-  expect((await new AxeBuilder({ page }).include('[role=tabpanel]:not([hidden])').analyze()).violations).toEqual([]);
+  expect((await new AxeBuilder({ page }).include('[aria-labelledby="catalog-review-suggestions"]').analyze()).violations).toEqual([]);
   await panel.getByRole('button', { name: label('admin.action.keep'), exact: true }).click();
   await expect.poll(() => api.writes.filter(write => write.path.endsWith('/adopt')).map(write => [write.body.selectedIds, write.body.rejectIds])).toEqual([[[], [hint.id]]]);
   await expect(panel.getByRole('button', { name: label('admin.action.keep'), exact: true })).toHaveCount(0);
@@ -2477,37 +2494,43 @@ test('changed source media and stale confirmations cannot silently rebase catalo
   await enter(page, `/finitude/admin/catalog-reviews/${reviewId}`);
   await openManualEdit(page);
   await page.getByRole('textbox', { name: label('admin.field.title'), exact: true }).fill('Private manual correction');
-  await page.getByRole('button', { name: label('admin.catalog_review.save_draft'), exact: true }).click();
-  await expect(page.getByText(label('admin.catalog_review.draft_saved'), { exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: label('admin.catalog_review.save_draft'), exact: true })).toBeDisabled();
-  await page.getByRole('tab', { name: label('admin.catalog_review.apply_tab') }).click();
-  await page.getByRole('checkbox', { name: label('admin.catalog_review.select_field', { type: label('admin.catalog_review.target_album'), target: 'Synthetic catalog Album', field: label('admin.field.title') }), exact: true }).check();
-  await page.getByRole('button', { name: label('admin.catalog_review.apply_action', { count: 1 }) }).click();
-  const dialog = page.getByRole('dialog', { name: label('admin.catalog_review.apply_confirm') });
+  await saveDraftOnly(page);
+  await openRange(page);
+  const title = () => rangeItem(page, label('admin.field.title'), 'Synthetic catalog Album');
+  await title().check();
+  await page.getByRole('button', { name: label('admin.catalog_review.apply_action', { count: 1 }), exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: label('admin.catalog_review.confirm_title') });
+  const confirm = page.getByRole('button', { name: label('admin.catalog_review.bar_confirm', { count: 1 }), exact: true });
   await expectFrozenTitle(dialog, 'Synthetic catalog Album', 'Private manual correction');
+  // Another administrator saves the draft: the open confirmation waits with its reason and keeps the values it froze.
   api.externalDraft();
   await page.evaluate(() => window.dispatchEvent(new Event('visibilitychange')));
-  await expect(dialog.getByRole('button', { name: label('admin.catalog_review.apply_action', { count: 1 }) })).toBeDisabled();
+  await expect(confirm).toHaveAttribute('aria-disabled', 'true');
+  await expect(page.locator('#catalog-review-bar').getByText(label('admin.catalog_review.bar_outdated'), { exact: true })).toBeVisible();
   await expectFrozenTitle(dialog, 'Synthetic catalog Album', 'Private manual correction');
   await expect(dialog.getByText('Another saved review value', { exact: true })).toHaveCount(0);
+  await confirm.click();
   expect(api.writes.filter(value => value.path.endsWith('/apply'))).toHaveLength(0);
-  await page.keyboard.press('Escape');
-  await expect(page.getByRole('checkbox', { name: label('admin.catalog_review.select_field', { type: label('admin.catalog_review.target_album'), target: 'Synthetic catalog Album', field: label('admin.field.title') }), exact: true })).not.toBeChecked();
-  await expect(page.getByText('Another saved review value', { exact: true })).toBeVisible();
-  await page.getByRole('checkbox', { name: label('admin.catalog_review.select_field', { type: label('admin.catalog_review.target_album'), target: 'Synthetic catalog Album', field: label('admin.field.title') }), exact: true }).check();
-  await page.getByRole('button', { name: label('admin.catalog_review.apply_action', { count: 1 }) }).click();
-  await expect(dialog.getByRole('button', { name: label('admin.catalog_review.apply_action', { count: 1 }) })).toBeEnabled();
+  // Back to adjust: the newer saved value needs selecting again.
+  await page.getByRole('button', { name: label('admin.catalog_review.bar_back'), exact: true }).click();
+  await openRange(page);
+  await expect(title()).not.toBeChecked();
+  await expect(page.getByText(/Another saved review value/).first()).toBeVisible();
+  await title().check();
+  await page.getByRole('button', { name: label('admin.catalog_review.apply_action', { count: 1 }), exact: true }).click();
+  await expect(confirm).not.toHaveAttribute('aria-disabled', 'true');
   await expectFrozenTitle(dialog, 'Synthetic catalog Album', 'Another saved review value');
+  // The source media change: the confirmation gives way to the read-only stale view, which never submits the old draft.
   api.changeSource('media');
   await page.evaluate(() => window.dispatchEvent(new Event('visibilitychange')));
-  await expect(dialog.getByRole('button', { name: label('admin.catalog_review.apply_action', { count: 1 }) })).toBeDisabled();
-  await page.keyboard.press('Escape');
-  await expect(page.getByRole('alert')).toHaveText(label('admin.catalog_review.source_changed'));
-  await expect(page.getByRole('button', { name: label('admin.catalog_review.apply_action', { count: 1 }) })).toBeDisabled();
+  await expect(page.getByRole('heading', { name: label('admin.catalog_review.stale_title'), exact: true })).toBeFocused();
+  await expect(confirm).toHaveCount(0);
+  await expect(page.getByText(label('admin.catalog_review.source_changed'), { exact: true })).toBeVisible();
+  await expect(page.locator('#catalog-review-bar').getByRole('link', { name: label('admin.catalog_review.bar_open_latest'), exact: true })).toBeVisible();
   expect(api.writes.filter(value => value.path.endsWith('/apply'))).toHaveLength(0);
 });
 
-test('multiple manual changes open confirmation at its first difference without applying the Album', async ({ page }) => {
+test('multiple manual changes open the inline confirmation, focused on going back, without applying the Album', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   const api = await setup(page); api.ready();
   const item = api.review();
@@ -2517,26 +2540,25 @@ test('multiple manual changes open confirmation at its first difference without 
   await openManualEdit(page);
   await page.getByRole('textbox', { name: label('admin.field.title'), exact: true }).fill('Batch-reviewed synthetic Album');
   await page.getByRole('spinbutton', { name: `2 · ${label('admin.field.track_number')}`, exact: true }).fill('7');
-  await page.getByRole('button', { name: label('admin.catalog_review.save_draft'), exact: true }).click();
-  await expect(page.getByText(label('admin.catalog_review.draft_saved'), { exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: label('admin.catalog_review.save_draft'), exact: true })).toBeDisabled();
-  await page.getByRole('tab', { name: label('admin.catalog_review.apply_tab'), exact: true }).click();
-  await page.getByRole('checkbox', { name: titleChangeName('Synthetic catalog Album'), exact: true }).check();
-  await page.getByRole('checkbox', { name: label('admin.catalog_review.select_field', { type: label('admin.catalog_review.target_track'), target: 'Synthetic second track', field: label('admin.field.track_number') }), exact: true }).check();
+  await saveDraftOnly(page);
+  await openRange(page);
+  await rangeItem(page, label('admin.field.title'), 'Synthetic catalog Album').check();
+  await rangeItem(page, label('admin.field.track_number'), 'Synthetic second track').check();
   await page.getByRole('button', { name: label('admin.catalog_review.apply_action', { count: 2 }), exact: true }).click();
-  const dialog = page.getByRole('dialog', { name: label('admin.catalog_review.apply_confirm') });
-  // Footer focus would scroll a long summary past the first selected change before review begins.
-  await expect(dialog).toBeFocused();
-  await expect(dialog.getByRole('heading', { name: label('admin.catalog_review.apply_confirm'), exact: true })).toBeInViewport();
-  await expect(dialog.getByText(label('admin.catalog_review.selected', { count: 2 }), { exact: true })).toBeInViewport();
-  const first = dialog.getByRole('heading', { name: titleChangeName('Synthetic catalog Album'), exact: true }).locator('..');
-  await expect(first.getByText('Synthetic catalog Album', { exact: true })).toBeInViewport();
-  await expect(first.getByText('Batch-reviewed synthetic Album', { exact: true })).toBeInViewport();
-  const geometry = await dialog.evaluate(element => ({ scrollTop: element.scrollTop, scrollHeight: element.scrollHeight, clientHeight: element.clientHeight }));
-  expect(geometry.scrollTop).toBe(0);
-  expect(geometry.scrollHeight).toBeGreaterThan(geometry.clientHeight);
+  const dialog = page.getByRole('dialog', { name: label('admin.catalog_review.confirm_title') });
+  // The focus is on going back, the safe choice, which the summary describes; the sticky bar never hides it. Opened below the
+  // editing section, the confirmation scrolls itself into view, so its summary and first compact row are on screen, clear of the bar.
+  const back = page.getByRole('button', { name: label('admin.catalog_review.bar_back'), exact: true });
+  await expect(back).toBeFocused();
+  await expect(back).toBeInViewport();
+  const summary = dialog.getByText(message('admin.catalog_review.confirm_summary', { count: 2 }), { exact: true });
+  const firstRow = dialog.getByText('Synthetic second track', { exact: true });
+  await expect(summary).toBeInViewport();
+  await expect(firstRow).toBeInViewport();
+  const barTop = await page.locator('#catalog-review-bar').evaluate(element => element.getBoundingClientRect().top);
+  expect(await firstRow.evaluate(element => element.getBoundingClientRect().bottom)).toBeLessThanOrEqual(barTop);
+  await expect(dialog.getByText(`${label('admin.catalog_review.target_album')} · ${label('admin.field.title')}`, { exact: true })).toBeVisible();
   await capture(page, '17-multiple-changes-confirmation', 390, false, false);
-  await writeFile(`${shots}/${locale}/17-multiple-changes-confirmation-390.json`, JSON.stringify(geometry, null, 2));
   await reflow(page);
   expect(api.writes).toHaveLength(1);
   expect(api.writes[0]).toMatchObject({ path: `/api/admin/v1/catalog-reviews/${reviewId}`, method: 'PATCH' });
@@ -2544,24 +2566,24 @@ test('multiple manual changes open confirmation at its first difference without 
   expect(api.album().fields.title).toBe('Synthetic catalog Album');
 });
 
-test('changed metadata remains reviewable but cannot be applied and 640px reflow stays accessible', async ({ page }) => {
+test('changed metadata leads to the read-only stale view, which cannot be applied, and 640px reflow stays accessible', async ({ page }) => {
   await page.setViewportSize({ width: 640, height: 844 });
   const api = await setup(page); api.ready();
   await enter(page, `/finitude/admin/catalog-reviews/${reviewId}`);
   await openManualEdit(page);
   await page.getByRole('textbox', { name: label('admin.field.title'), exact: true }).fill('Reviewed metadata before another admin edit');
-  await page.getByRole('button', { name: label('admin.catalog_review.save_draft'), exact: true }).click();
-  await expect(page.getByText(label('admin.catalog_review.draft_saved'), { exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: label('admin.catalog_review.save_draft'), exact: true })).toBeDisabled();
+  await saveDraftOnly(page);
   await capture(page, '12-reflow-draft', 640); await reflow(page);
-  await page.getByRole('tab', { name: label('admin.catalog_review.apply_tab') }).click();
-  await page.getByRole('checkbox', { name: label('admin.catalog_review.select_field', { type: label('admin.catalog_review.target_album'), target: 'Synthetic catalog Album', field: label('admin.field.title') }), exact: true }).check();
-  await page.getByRole('button', { name: label('admin.catalog_review.apply_action', { count: 1 }) }).click();
+  await openRange(page);
+  await rangeItem(page, label('admin.field.title'), 'Synthetic catalog Album').check();
+  await page.getByRole('button', { name: label('admin.catalog_review.apply_action', { count: 1 }), exact: true }).click();
   await capture(page, '13-reflow-confirmation', 640, false); await reflow(page);
-  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: label('admin.catalog_review.bar_back'), exact: true }).click();
   api.changeSource('metadata'); await page.getByRole('button', { name: label('admin.common.refresh') }).click();
-  await expect(page.getByRole('button', { name: label('admin.catalog_review.apply_action', { count: 1 }) })).toBeDisabled();
-  await expect(page.getByRole('checkbox', { name: label('admin.catalog_review.select_field', { type: label('admin.catalog_review.target_album'), target: 'Synthetic catalog Album', field: label('admin.field.title') }), exact: true })).toBeDisabled();
+  await expect(page.getByRole('heading', { name: label('admin.catalog_review.stale_title'), exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: label('admin.catalog_review.apply_action', { count: 1 }), exact: true })).toHaveCount(0);
+  await expect(page.getByRole('checkbox')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: label('admin.catalog_review.discard'), exact: true })).toBeEnabled();
   await capture(page, '14-source-changed', 640); await reflow(page);
   expect(api.writes.filter(value => value.path.endsWith('/apply'))).toHaveLength(0);
 });
