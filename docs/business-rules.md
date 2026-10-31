@@ -796,6 +796,26 @@ The wire protocol and operational bounds are documented in
   are labelled Luna AI, arrive unticked, and change the private draft only
   when the administrator accepts each one; Luna's Artist and label
   suggestions remain hints.
+- When every member's title the review captured starts with a position of
+  one form, as Track-title searches read them in Administrator Metadata
+  Lookup, the review page proposes those positions for each member's empty
+  Disc and Track Number when it opens, in every lookup state, beside each
+  member's current catalog value; a Disc Number is proposed only where the
+  review captured one. Nothing is proposed when any member's number, its
+  own or one lookup filled, differs from its title's position, or when the
+  titles span several discs and a member's Disc Number was not captured, and
+  the page names the members whose titles stop the proposal, so a proposal
+  never makes two members claim one position. A proposal never replaces a
+  member's own number or one lookup filled. Proposed numbers start nothing,
+  do not hold lookup or Luna controls as unsaved edits do, are not given to
+  Luna, and become the administrator's own only when they are selected and
+  saved; a save never writes an unselected proposal, which stays a proposal
+  and never constrains pairing. The administrator can also remove those
+  positions from the members' draft titles in one optional step, off by
+  default, which never changes a title the administrator edited and keeps
+  pairing on the captured titles; a title cleaned that way can be applied
+  only with its member's Disc and Track Number, or when the member already
+  has them.
 - Applying an existing-Album review is a separate explicit confirmation of
   selected saved changes, each shown with its saved and proposed value: the
   Album title and date, the Artist entries and the label with each new or
@@ -804,8 +824,21 @@ The wire protocol and operational bounds are documented in
   number of missing-file rows it adds, each Track's title, Disc Number and
   Track Number, and each member whose Credits change, with its current and
   new Credits and attribution state. Every value lookup filled and every
-  conflict answered with the lookup value arrives selected, and any can be
-  deselected. An expected tracklist can be selected only when, after the
+  conflict answered with the lookup value arrives selected, since answering a
+  conflict with the lookup value chooses it, except an Artist entry list or
+  label whose identity row still needs an explicit choice, which arrives
+  unselected until that row is answered. Disc and Track Numbers proposed from
+  titles giving both numbers, the same numbers once saved while they still
+  equal the Disc and Track Number the member's captured title gives and fill
+  an empty catalog value, and a saved Disc or Track Number at its member's
+  pair position that fills an empty catalog value, also arrive selected.
+  Turning on the optional title cleanup chooses the titles it cleans, which
+  are listed selected. Track Numbers proposed from titles giving them alone,
+  any other value that replaces a non-empty catalog value, other
+  administrator edits and accepted Luna suggestions arrive unselected, and each value is
+  marked as replacing or filling the catalog value. No two members may be
+  applied at one Disc and Track position. Any change can be deselected. An
+  expected tracklist can be selected only when, after the
   selected changes, every member its pairing placed sits at its row;
   otherwise the confirmation says which member is off its row. Disc and
   Track Numbers filled through a pairing can be applied only together with
@@ -814,6 +847,18 @@ The wire protocol and operational bounds are documented in
   primary Artist Credits change, the confirmation says that Album Credits
   are never copied to members and names each member whose Credits, after the
   selected changes, still name a replaced Artist.
+  On the Web, requesting the update first saves the draft's unsaved values as
+  an ordinary save, which re-ranks the stored candidates without a lookup run
+  when a member's own number changed, then shows the confirmation of the saved
+  values with the selection the administrator requested. A save that is
+  refused keeps the unsaved values and shows no confirmation; one whose
+  outcome is unknown is retried only with its original intent. Values that
+  this save's re-rank fills are listed as not selected and never enlarge the
+  requested selection, and the confirmation says so; when it adds a conflict
+  or an identity answer to a selected change, the review shows it instead of
+  the confirmation. Leaving the confirmation keeps the saved draft and leaves
+  the catalog unchanged. Editing and saving the draft alone stay available
+  while lookup or Luna runs; only requesting the update waits for them.
 - Applying is refused while the review's metadata lookup is queued, running or
   retrying automatically or its Luna analysis is queued or running, and waits
   only for the conflicts and identity rows of selected changes; a tie never
@@ -833,6 +878,17 @@ The wire protocol and operational bounds are documented in
   unchanged, and MediaTrack Credits change only as described below. Applied
   reviews remain read-only and cannot be discarded; further corrections use
   the current Web catalog editor or a new Web review.
+  While a review's source is not current, its page shows the draft
+  read-only, offers opening the Album to start a new review when the Album
+  still exists, and keeps discarding available; a refusal for a new identity
+  candidate, MusicBrainz ID holder or lookup answer instead keeps the review
+  editable. An update whose outcome is unknown is checked by reading the
+  review again: a review shown applied leads to its applied view and one
+  whose source is not current to the stale view; only while it is still
+  unapplied and current is the update retried, and only with its original
+  intent. An applied review's page says whether the
+  release it used was matched or, when none or one chosen without a match
+  was used, that the edition remains unconfirmed.
 - An administrator can discard an unapplied existing-Album review, whatever
   its source status, from its review page or from the workbench's review
   queue, through a separate confirmation that names the Album and says that
@@ -2083,8 +2139,9 @@ The wire protocol and operational bounds are documented in
   a track whose duration is within half a second of its own, both known to the
   millisecond, which a release track length in whole seconds is not taken to be.
   Those positions are never sent, are not the member's own numbers and become
-  values only as the numbers lookup writes through that pairing; the ranking
-  records what decided it. A candidate matches only when its pairing is single
+  values only as the numbers lookup writes through that pairing, or as the
+  review page's proposal from titles once the administrator saves it; the
+  ranking records what decided it. A candidate matches only when its pairing is single
   and every paired duration is known. A release with fewer tracks than the Album
   has members never matches; a pairing that is not single, or a member or paired
   track without a duration, leaves it unverified; an Album without members
@@ -2285,12 +2342,14 @@ The wire protocol and operational bounds are documented in
   members have no duration, or the members fit a release in more than one way.
   When the members pair with a release in exactly one way, which a missing
   duration left unconfirmed, using that release is the next step and the name
-  box stays available. Otherwise, when their saved titles start with the
-  positions that Track-title lookup reads, the review offers filling the Disc
-  and Track Numbers the draft lacks from them, for the administrator to check
-  and save, which compares again. This is the next step when the titles give
-  both Disc and Track Numbers, and is otherwise offered after the name box,
-  which stays available. After the name box, the review also offers pairing the
+  box stays available. Otherwise, when the titles the review captured start
+  with the positions that Track-title lookup reads, the review page has
+  already proposed the Disc and Track Numbers they give, as Catalog
+  Visibility and Administration describes, for the administrator to check;
+  saving the selected ones, alone or when requesting the update, compares
+  again. Positions
+  giving Track Numbers alone are proposed unselected, and the name box stays
+  available. After the name box, the review also offers pairing the
   members by hand with a release that they fit in more than one way and whose
   title makes it a possible match: the administrator gives each member a
   distinct track of that release it can pair with, and saving stores those
@@ -2304,7 +2363,11 @@ The wire protocol and operational bounds are documented in
   lookup controls, never as the next step. An existing-Album review offers Luna
   the same way. Luna remains an explicitly confirmed paid step that shows the
   remaining project and daily budget; offering it starts nothing, a lookup
-  result never starts it, and it may also run beside applied lookup values. In
+  result never starts it, and it may also run beside applied lookup values.
+  While metadata lookup is queued or running, the Luna AI confirmation also
+  says that free lookup results are pending and offers waiting, which starts
+  nothing and keeps the lookup running; when the project has one Luna
+  analysis left, it says this is the last. In
   an import, Luna suggestions return to the summary labelled as Luna AI and are
   never collapsed: those for empty values or values from file tags arrive
   ticked, the others arrive unticked and keep the current value unless ticked,

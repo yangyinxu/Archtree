@@ -1367,86 +1367,70 @@ minutes after it first saw a lookup active (a run that never advances, such as
 one queued while imports are off); **Refresh status** and returning to the tab
 still read it. Card dates (**Last changed:**) follow the interface language, as
 on the import page.
-**Save completion draft**
-changes only the private draft and sends only the values edited since the saved
-draft was loaded (an edit changed back is no change), so it never overwrites
-another value saved meanwhile; **Update original Album** lists every change the
-apply can write (see below), lookup-filled and lookup-answered values preselected
-and deselectable, and confirms their frozen old/new values. A review page leads
-with its three steps in place of a status row: **① Find release**,
-**② Answer questions** and **③ Update original Album**, a group of label and
-value pairs that is no live region, so a poll announces nothing, one step per
-row at narrow widths. They load as one chunk with the Luna AI controls and the
-applied view; a chunk that cannot load leaves the steps out, while the Luna AI
-controls and the applied view ask for a reload in their place. A review
-captured for lookup shows a dash in each step until its lookup read lands, and
-while that read fails. On an unapplied review **Find release** links to the
-lookup summary; it reads the review's lookup view as the summary does, through
-the same brief as the list items (see `GET /catalog-reviews` below): not run,
-queued, running, retrying, the release applied by title (or, applied from
-iTunes, that a free retry can check it against MusicBrainz), a matching release
-found, how many releases that may fit were found (editions counted once), no
-release used, no matching release, or a lookup that did not finish or is
-unavailable, offering a free retry only while the review's source is current.
-**Answer questions** says **Disc and Track Numbers needed** where
-the summary's cause is the members' positions or missing durations,
-**Choose a release** for a tie or an offered match, else how many lookup
-answers are still needed (as the summary, the workbench card and the Album page
-count them) with how many records the identity rows still need beside them, or
-those records alone, **Choose a release** for a possible release that can be
-chosen or a release to use again, or **Nothing left to answer**; it links to the
-first open answer, else the identity rows, else the lookup summary, and shows a
-dash while a run is active and once applied. **Update original Album** shows
-how many changes the Update step has selected as it stands (that step's own
-count), how many it lists to select (manual values are not selected by
-default), **No changes yet**, or, once applied, **Updated** with the date and
-time in the interface language; while **Answer questions** asks for Disc and
-Track Numbers or a release choice, it says only that the update follows
-(**Update after entering Disc and Track Numbers** or **Update after choosing a
-release**) and the steps offer no button, even where the Update step lists saved
-numbers, so the page shows one next step. Otherwise, while that step lists
-changes, **Review changes to apply** opens it, with its count once something is
-selected. Once no lookup step is left (no active run, Disc and Track Numbers,
-choice or free retry), nothing is left to answer, Luna AI is not queued or
-running and the Update step's selection is ready to apply (the source current,
-a change selected, no identity row blocking it and its reads current), the
-steps add **Everything is answered; you can update the original Album.** as a
-polite status and that button becomes the primary one; with everything else
-clear but none of the listed changes selected yet, it is primary without a
-count or that line. When the last answer makes the changes ready and leaves the
-focus on the page or in a folded section, the focus moves to that button. Both
-show on the Edit draft tab only, and the button is disabled while the draft has
-unsaved edits. An applied review's steps offer **What was updated** instead,
-which opens the Update step. Once Luna AI was used (queued, running or a
+Saving the draft alone (the action bar's secondary save-only button, "仅保存草稿"
+in Simplified Chinese, shown only while the draft has unsaved edits or selected
+pending proposals, or after a save-only attempt failed, never primary) changes
+only the private draft and sends only the values edited since the saved draft
+was loaded (an edit changed back is no change) and the selected proposals, so it never
+overwrites another value saved meanwhile; it stays available while lookup or
+Luna AI runs. **Update original Album (N)**, the action bar's primary button,
+first saves the same way, then shows an inline confirmation of the selected
+changes' frozen old/new values (see the action bar below). A review page has no
+tabs and no steps bar. It leads with a header: the Album's current artwork (the
+catalog Album read the Album page uses, `GET /catalog/album/:id`, loaded in its
+own chunk, with the artwork placeholder while that read is pending, fails or
+finds none), the captured Album title as stored (a trailing credit is never
+stripped), the draft's primary Artist names and how many local tracks the review
+captured. One status row follows, a polite status naming the first that applies:
+the update being prepared, metadata lookup and Luna AI both running, Luna AI
+running, a lookup queued, running or retrying with its progress, a lookup that
+did not finish, no release found, a release used, or the completed lookup's
+result (the review's lookup summary below words each); a quieter line under it
+says what the administrator can do meanwhile, such as checking and editing the
+proposed numbers while the update waits for lookup. All numbers come from the
+lookup view, never a client timer. A details toggle beside the status shows or
+hides the lookup steps and log. The editing section follows: the numbers
+proposed from titles (see **Numbers proposed from titles** below) with the
+optional title-prefix cleanup, the update range (see below), the identity rows, the reference releases and any conflict notes. A row
+of alternatives comes next: looking up another name (the name box), manual
+editing, which opens the draft editor (`CatalogReviewDraftEditor.tsx`, its own
+chunk) in place for the Album title and date and each Track's title, Disc
+Number and Track Number, and **Discard completion**. An applied review shows
+its outcome view instead (below).
+Once Luna AI was used (queued, running or a
 generation above 0), one muted line gives **Luna AI (paid, optional)** and its
-state: above the Luna AI controls on an unapplied review, under the steps on an
-applied one. A run that did not succeed reads **Last run did not succeed**, with
+state: above the Luna AI controls on an unapplied review, under the header on
+an applied one. A run that did not succeed reads **Last run did not succeed**, with
 its issue below; while the lookup leads (as on the workbench card), it is
 instead the one quiet line **Luna AI (paid, optional): the last run did not
 succeed; you can ignore it.**, and of its issues only an unknown provider
 outcome, which keeps Luna AI from starting, is said, muted. On an unapplied
-review the Luna AI controls and **Discard completion** follow the lookup summary
-under **Other actions**, a visible label rather than a fold, so Luna AI stays
-visible and secondary. Then an unapplied review shows its **Metadata lookup** summary,
-above its tabs and loaded as its own chunk (a chunk that cannot load, the
-summary's or one it loads, asks for a reload in its place, leaving manual
-editing usable): the lookup status, refined for a review (see the review's
-lookup summary below), with the free **Retry lookup** (or, for a run that
-ended because the Album changed, **Open the Album to start a new completion**)
-or, where entering the numbers is the next step, **Fill Disc and Track Numbers
-from titles** as its only primary button, or while a run is queued or running
+review the Luna AI controls follow the row of alternatives in a block of their
+own, never a fold, so Luna AI stays visible and secondary; Luna AI suggestions,
+while there are any, follow in their own section labelled Luna AI. The status
+row, the reference releases, the name box and the identity rows form the
+review's **Metadata lookup** summary, loaded as its own chunk (a chunk that
+cannot load, the summary's or one it loads, asks for a reload in its place,
+leaving the proposed numbers, manual editing and the action bar usable): the
+lookup status, refined for a review (see the review's lookup summary below),
+with the free **Retry lookup** (or, for a run that ended because the Album
+changed, **Open the Album to start a new completion**) as the summary's own
+next step, never the page's primary button, or while a run is queued or running
 its progress line; right after the status, while a run is active, that the
 original Album can be updated once metadata lookup finishes, how many lookup answers are still needed and how many records the
 identity rows still need; the run's steps, open while a run is queued, running
 or retrying and, once it ended, folded under its record after a line naming
 what a completed run searched; the name box prefilled with the last submitted
 name and Artist name or else the
-saved Album title (its **Artist (optional)** hint says that an empty field uses
-the Album's primary Artists), which asks before it replaces a queued, running
-or retrying run, folded under **Didn't find it? Look up another name** after a
-completed run unless the status makes it the next step (see below), followed
-by the fill as a plain button where it is only
-offered; the candidate chooser (review copy about the Album's tracks; while the
+saved Album title and the draft's primary Artist names (its **Artist
+(optional)** hint says that an empty field uses the Album's primary Artists),
+which asks before it replaces a queued, running or retrying run, folded behind
+the alternatives row's look-up-another-name control after a completed run
+unless the status makes it the next step (see below), and which, after a run
+that found no release, hints that a shorter name may help ("可尝试去掉副标题");
+the candidate chooser, shown as the reference releases with how many possible
+releases it lists and folded unless choosing a release is the next step (review
+copy about the Album's tracks; while the
 run has no matching group, possible matches first and the other releases in two
 folded sections; per candidate one short reason, the editions a release card
 groups, each choosable,
@@ -1495,11 +1479,10 @@ MusicBrainz IDs; and **Lookup values applied or answered**, folded, each once.
 Once the release applied to the draft leaves nothing open (no active run, free
 retry, refined status, lookup answer or identity row that needs a record, and no
 release applied for its Album values only whose tracks still pair in more than
-one way while the titles can fill their Disc and Track Numbers, so that card's
-**Fill Disc and Track Numbers from titles** stays in view, also offered as a
-plain button under the status after a line that the tracks do not pair with the
-applied release in one way, so track values and track Artists are not applied,
-and the hint that the numbers can be filled from the titles) and is neither an
+one way while the titles give their Disc and Track Numbers, so a line under the
+status says that the tracks do not pair with the applied release in one way, so
+track values and track Artists are not applied, and that saving the numbers
+proposed from the titles compares again) and is neither an
 iTunes-only result nor an artist mismatch, whose values to check are never
 collapsed (so an iTunes-only result never folds), everything after the name box
 folds under **Lookup results and applied values**, which opens again on request
@@ -1507,20 +1490,36 @@ and by itself as soon as something opens, but never folds while the pairing pane
 (**Pair tracks by hand**, below) is open; it stays mounted, so unsaved identity
 choices survive it.
 Lookup controls are disabled while a command runs,
-offline, while the draft has unsaved or conflicting edits and while the source
+offline, while the draft has unsaved or conflicting edits (numbers proposed from
+titles and not yet saved are not edits) and while the source
 is not current, and answers also while a run is active; the summary polls while
 a run is active and reads the review detail again when its read shows a newer
 revision or `valueRevision`, which lookup applications advance at the same
-revision. An open Apply confirmation is disabled once the detail shows another
+revision. An open update confirmation is disabled once the detail shows another
 `valueRevision`, and its apply sends the one it showed, so a run that completed
 unseen is refused (`409 ADMIN_IMPORT_REVISION_CONFLICT`) and the page reads the
 review again. **Use Luna AI (paid)** (**Use Luna AI again (paid)** after a run)
-follows that summary, above the track editor, is never styled as the primary
-action and always has its own confirmation, titled "Use Luna AI? This is a paid
-AI service", whose confirm button keeps the primary style and repeats **Use Luna
-AI (paid)**; its suggestions arrive unticked in **Review Luna AI suggestions**
-and change the draft only when adopted. An applied review is read-only: its
-Update step shows **What was updated** in place of the selection, with when the
+follows the row of alternatives, is never styled as the primary
+action and always has its own inline confirmation, titled "Use Luna AI? This is
+a paid AI service", whose confirm button repeats that it starts Luna AI and is
+paid and whose cancel button keeps the focus. While metadata lookup is queued,
+running or retrying, the confirmation adds a warning that free lookup results
+are still pending, its cancel button offers waiting for the free results
+instead, and its confirm button says Luna AI starts anyway (paid), so both run
+side by side; when the run ends while the confirmation is open, the labels
+return to the plain ones, and a lookup that ends never starts Luna AI. The
+confirmation gives the project's remaining Luna AI runs and paid calls from the
+review detail's `analysis` (runs left are 2 minus `generation`, calls left
+`maxAttempts` minus `attemptsUsed`) and says when this is the project's last
+Luna AI analysis (one run left). No review read supplies the daily allowance
+(only the import summary's `analysis.daily` does), so the review's confirmation
+does not show it until a server field adds it. Its suggestions arrive
+unticked in the Luna AI section and change the draft only when adopted; an
+adopted suggestion is listed in the update range unselected. An applied review
+is read-only: its outcome view gives what was updated in place of the
+selection, one compact row per affected Track (its title with its new Disc and
+Track Number, and that its title was updated) and per Album value, the full
+original and new values behind a disclosure, with when the
 original Album was updated (in the interface language), each field the apply
 wrote (`applied.fields`, named as in the selection: the Album's title, date,
 Artists, label and expected tracklist, and each Track's title, Disc and Track
@@ -1529,17 +1528,24 @@ position only when untitled), for a review captured for lookup a note that
 track Artist changes, if any, are not in the list and can be checked on the
 original Album's tracks, or that only track Artists were updated when the apply
 wrote no listed field, and the release its metadata lookup applied, if any, with its
-source. It offers no **Update original Album** and no count.
-**Discard completion** (never primary) follows the Luna AI controls on an
-unapplied review page, whatever its source status, and ends each unfinished card
+source. A line then says how the edition stands: matched where lookup
+preselected the release it used (`applied.choice` `preselected`, its basis a
+match and nothing left unchecked), or else that the edition remains unconfirmed,
+naming a release the administrator chose without a match; checking the edition
+further is optional and takes a new completion. It offers no **Update original
+Album** and no count; the action bar's only button opens the original Album.
+**Discard completion** (never primary) ends the row of alternatives on an
+unapplied review page, whatever its source status (the read-only stale view
+keeps it), and ends each unfinished card
 of the **Album completions** queue; an applied completion offers none. It is
-disabled offline, while Luna AI is queued or running (its description then says
-"Stop Luna AI before discarding this completion.") and while the review page's
-own change is unconfirmed; unsaved edits do not block it. Its confirmation names
+disabled offline, while Luna AI is queued or running (the reason, "Stop Luna AI
+before discarding this completion.", then shows as text beside it) and while
+the review page's own change is unconfirmed; unsaved edits do not block it. Its
+confirmation, inline on the review page and a dialog on the queue, names
 the catalog Album, with the draft title as secondary text when it differs, says
 what is lost and that the catalog does not change, puts initial focus on Cancel
 and sends the revision it showed. On success, or when another tab already
-discarded the review, it forgets the review's editor, stage and command buffers,
+discarded the review, it forgets the review's editor and command buffers,
 removes the review's reads and navigates to the Album page (to the queue when
 the source is unavailable), whose action then opens another open completion or
 creates a new one; the queue reads itself again, so the card disappears. A
@@ -1631,57 +1637,141 @@ Artist entries (the Album's ordered Artist Credits until lookup changes them),
 their join phrases and its label read-only, and offers a Disc Number field only
 for Tracks whose review captured one. Metadata lookup values and conflict
 answers change the Artist entries, the label, each member's track Artist entries
-and the expected tracklist only in the review's private draft. **Update original
-Album** (`CatalogReviewApply.tsx`, its pure model `catalogReviewApplyModel.ts`)
-lists, in this order, the Album's title and date, its Artist entries and label
+and the expected tracklist only in the review's private draft. The update range
+(`CatalogReviewApply.tsx`, its pure model `catalogReviewApplyModel.ts`) is a
+disclosure in the editing section whose summary counts the selected changes
+(in "项", items, since member lines are not fields) and opens to adjust them:
+one group for the numbers (one per disc on a long Album), the Track titles
+(counted as one group), the Album date, the Album title, and the Artist
+entries, label, member Credits and expected tracklist, each with a checkbox that
+is mixed while only some of its items are selected and a nested disclosure
+listing each item with its original and new value. It lists, in this order,
+the Album's title and date, its Artist entries and label
 (current and new Credits, an IDs-only change said as such), the expected
 tracklist (the rows kept and the rows it stores, with their missing-file rows
 after the selected changes), each Track's title, Disc Number and Track Number,
 and one line per member whose Credits change (current and new Credits, every
 Credit removed, and its attribution change in a sentence: the track's Artist
-credits will be marked Documented, currently Unknown). It
+credits will be marked Documented, currently Unknown). Its count follows the
+draft as edited, unsaved values and proposals included, while whether the
+update is ready follows the saved review. It
 reads the review's lookup summary and its identity read (`GET /candidates`,
 whose `selection` names the Artist entry lists and label it shows and whose
 `keptTracklist` is the Album's captured tracklist): every review-only item (the
 Artist entries, label, tracklist and member lines) and every title, date or
 number lookup filled or that a conflict answered with the lookup value arrive
-selected, and so does a saved Disc or Track Number at its member's pair position
-(a number the administrator fixed, on which lookup re-ranked the pairing); any
-other manual or Luna-adopted change arrives unselected, and any can be
-deselected. An explicit choice is kept across reads while its item shows the
+selected, except an Artist entry list or label whose identity row still needs
+an answer, which arrives unselected until it is answered (the identity rows say
+whether it is in this update or not yet). Disc and Track Numbers proposed from
+titles giving both numbers also arrive selected, and so do the same numbers once
+saved, while they still equal the Disc and Track Number the member's captured
+title gives and fill an empty catalog value (so a reopened or returned-to review
+keeps that default), and a saved Disc or Track Number at its member's pair
+position (a number the administrator fixed, on which lookup re-ranked the
+pairing) that fills an empty catalog value. Titles the optional cleanup cleaned
+arrive selected, since turning it on chooses them (below). Track
+Numbers proposed from titles giving them alone (marked for checking), any other
+value that replaces a non-empty catalog value (marked as replacing, the original
+struck through), other manual changes and Luna-adopted changes arrive
+unselected, and any can be deselected (owner rules, Catalog Visibility and
+Administration). An explicit choice is kept across reads while its item shows the
 same saved values (the review draft's value, Artist entries or tracklist, never
-what identity decisions resolve), so saving identity decisions never undoes a
-deselection; a newer saved or looked-up value needs choosing again. A value
+what identity decisions resolve), so saving identity decisions, or the save
+that prepares the update, never undoes a choice; a newer saved or looked-up
+value needs choosing again. A value
 whose lookup conflict is unanswered cannot be selected and says to answer it
-first. The tracklist can be selected only while every member its pairing placed
+first. A Track title cleaned of its position can be selected only with its
+member's Disc and Track Number, or when the member already has both, otherwise
+its note says so. The tracklist can be selected only while every member its
+pairing placed
 sits at its row after the selected numbers, otherwise its note names each member
 off its row. A Disc or Track Number lookup filled through its pairing is
 selected only with that tracklist, or alone when the Album's kept tracklist
 places the member at a row with the same position, otherwise its note says it
 applies together with the expected tracklist; a deselected one waits for
-nothing, so it can always be selected again. When the Album's primary Artist Credits change, the step says Album
+nothing, so it can always be selected again. When the Album's primary Artist Credits change, the range says Album
 Credits are never copied to tracks and names each member whose Credits still
 credit a replaced Artist. Below the items it lists each Artist and label
 Organization the selected lists name: reused (hidden ones marked), created,
 named differently by bound entries, or still needing a record, with each
-MusicBrainz ID recorded or replaced. **Update original Album** waits while
-lookup or Luna runs, while a selected list's identity needs a record (it names
-them) and until both the lookup summary read and the identity read of this
-revision and value revision are in. Its confirmation, whose copy says only the
-listed changes update the Album, shows the same items, identities and note
-frozen, and sends
+MusicBrainz ID recorded or replaced.
+
+The action bar (`CatalogReviewActionBar.tsx`, its own chunk) sticks to the
+bottom of the viewport on an unapplied review and on its outcome views, with
+buttons at least 44 px high and its heading hidden at narrow widths; while it is
+shown the page keeps that much bottom scroll padding, so a focused field is
+never hidden behind it. It is absent from the discarded notice and the
+Admin view gate. Its primary **Update original Album (N)**, N being the range's
+count, waits while lookup runs and while Luna AI runs (it names both when both
+run; stopping Luna AI leaves the lookup reason), while a Disc or Track Number is
+out of range (Disc 1–999, Track 1–9999, as the review save accepts) or two
+members would sit at one Disc and Track position after the selected numbers (a
+missing Disc Number counting as 1; it names them), while nothing is selected,
+and while a selected list's identity needs a record (it names them); it never
+waits for unselected work, nor for a lookup that failed or found nothing. The
+reason shows as text under the bar, which describes the button
+(`aria-disabled`), so it stays reachable by keyboard. Pressing it prepares the
+update: it notes the selected items, saves the unsaved values and the selected pending
+proposals, never an unselected one, as one ordinary review save (`PATCH
+/catalog-reviews/:id`, skipped when nothing changed), which re-ranks the stored candidates without a lookup run
+when a member's own number changed, and waits until the detail, the lookup
+summary and the identity read are all at the saved revision and value revision.
+Meanwhile the bar says the draft is being saved, then that the saved numbers and
+the update range are being checked; it says the stored candidates were compared
+again only when the save changed a number and the run completed with
+candidates. When the save advanced the value revision (its re-rank applied
+release values), every item that was not noted is kept unselected by an
+explicit choice and the confirmation says that extra release data was found and
+not added; when a noted item gained a hold or an identity row that needs an
+answer, the page returns to editing with that row shown instead (owner rules,
+Catalog Visibility and Administration). A refused save keeps the unsaved values
+and shows its message as an alert at the bar, whose primary retries the
+preparation; a save whose outcome is unknown keeps its intent, and the bar's
+**Retry original operation** sends the same save again, after which the page
+returns to editing with the draft saved, so the update is requested again.
+Saving the draft alone, the bar's secondary button, saves the same way without
+preparing.
+
+The confirmation is inline above the bar, a region named as a dialog but not
+modal, with the focus on its back button, which its summary sentence describes,
+and the page's other controls disabled. It names the Album, says the draft is
+saved and checked and how many changes update the original Album after the
+final confirmation, lists one compact row per affected Track (its title with its
+new Disc and Track Number, and a neutral title change) and per Album value, the
+full original and new values behind a disclosure (rendered when opened), the
+Artists and Organizations to be reused or created, and that artwork, audio and
+visibility stay unchanged. It stays in view, disabled, while applying. Going
+back keeps the saved draft, says that it does and that the original Album is
+unchanged, and focuses the primary button. The bar's primary then confirms the
+update with its count and sends, from the frozen item,
 `{expectedRevision, fields, memberCredits, preselections, musicBrainzIds,
 expectedValueRevision}`: the selected fields and members, and only the
 preselections and ID writes of the identities a selected list or label owns. A
-`409` refusal (a new candidate or ID holder, a decided record or ID changed, a
-lookup application unseen) reads the review, its summary and its identity rows
-again, so a row that needs an answer is shown in the same review, and keeps
-nothing to retry. The steps' **Review changes to apply** count and their third
-step's are this step's own count of selected changes, so they always equal its
-**Update original Album (N)**; the Review step's empty state offers this step
-without a count. Luna's Artist and label suggestions appear only in a hint panel
-of the
-Review step, which can keep the current values (rejecting a suggestion) but
+`409` refusal for a new candidate or ID holder, a decided record or ID changed
+or a lookup application unseen (`ADMIN_IMPORT_REVIEW_REQUIRED`,
+`ADMIN_IMPORT_DUPLICATE_STALE`, `ADMIN_CATALOG_REVIEW_IDENTITY_CHANGED`,
+`ADMIN_IMPORT_REVISION_CONFLICT`, `ADMIN_IMPORT_FIELD_CONFLICT`) returns to
+editing and reads the review, its summary and its identity rows again, so a row
+that needs an answer is shown in the same review, and keeps nothing to retry;
+active Luna AI or lookup has its own message. Only
+`409 ADMIN_CATALOG_REVIEW_SOURCE_CHANGED`, or a detail read whose source is not
+current, leads to the stale view: the header, that this completion is out of
+date and cannot overwrite content saved later, the old draft read-only behind a
+disclosure, **Discard completion**, and as the bar's only button opening the
+latest Album to start a new completion, or the queue when the source is
+unavailable; the stale draft is never submitted again. An apply whose outcome is
+unknown shows the unknown view: that a lost connection does not mean the update
+failed, the frozen compact rows, and the note that it checks the same operation
+and never updates twice ("不会重复更新"). The bar's primary checks the result by
+reading the review again; when the review shows the update applied by this
+operation, the same operation is sent again, which replays its stored receipt,
+and the applied view follows; when it shows the review applied by another
+operation (another tab), the applied view follows without sending anything;
+when its source is no longer current, the stale view follows. Only while the
+review is still unapplied and current does its secondary send the same
+operation again. On the stale, unknown and applied views the focus moves to the view's
+heading. Luna's Artist and label suggestions appear only in a hint panel of the
+Luna AI section, which can keep the current values (rejecting a suggestion) but
 never adopts one or changes a Credit; acting on a hint is a separate catalog
 Credit edit.
 
@@ -1742,17 +1832,17 @@ entering the Disc and Track Numbers, saving, then choosing a release, which
 brings in its expected tracklist and track details through the single pairing
 the numbers make; or members that pair with it in more than one way, every
 duration known, where entering the numbers and saving compares again for free.
-Entering the numbers is the next step, with **Fill Disc and Track Numbers from
-titles** as the summary's only primary button, only when no release the tracks
-fit pairs with them in exactly one way, the titles give every member a Disc and
-Track Number (see below) and the draft still lacks one of them (owner rules,
-next-step bullet). Where the titles give Track Numbers alone, the fill follows
-the name box as a plain button, and the cause, like the one for titles without
+When no release the tracks fit pairs with them in exactly one way and the titles
+give every member a Disc and Track Number (see **Numbers proposed from titles**
+below), the page has already proposed them, selected, and the cause says that
+updating with the checked numbers, which saves them first, compares again (owner
+rules, next-step bullet). Where the titles give Track Numbers alone, the
+proposal is unselected, and the cause, like the one for titles without
 positions, says that another name can be looked up, the tracks paired by hand
 with a possible match where one is listed (see **Pair tracks by hand** below),
-or the numbers entered in **Edit draft**. Anything else is a real no match,
-which says so without naming a paid step; **Use Luna AI (paid)** stays the
-page's secondary button after the summary. A release this run applied for its
+or the numbers checked or entered by hand. Anything else is a real no match,
+which says so without naming a paid step; **Use Luna AI (paid)** stays a
+secondary button after the alternatives. A release this run applied for its
 Album values only (`applied.pairs` null) whose pairing a saved number has since
 made single replaces the applied status with one saying that using it again
 brings in its tracklist and track details, and the track Artists section says
@@ -1803,8 +1893,8 @@ A stopped run says why, with **Retry lookup**: the account that started it no
 longer has administrator access (`permissionLost`), or it ran past its time
 limit (`grantExpired`). A run that ended because the review's source was no
 longer current (`superseded`) offers no retry, which the server refuses while
-the source is not current (owner rules, next-step bullet), and its brief on the
-step bar, the workbench card and the Album page offers none either; the name box
+the source is not current (owner rules, next-step bullet), and its brief in the
+status row, the workbench card and the Album page offers none either; the name box
 stays open to look up again. When the Album changed, **Open the Album to start a
 new completion** links to the Album page in the retry's place, and when the
 Album or a track is no longer ready, the source notice above the summary
@@ -1858,12 +1948,13 @@ the searches it sent whose text is shown, in order (**This lookup searched for
 "X" · Artist, then "X" alone, then …**), never one the run may not have sent; a
 run that completed after MusicBrainz's retries ran out (issue `sourceBusy` or
 `sourceUnavailable`) may not have sent its searches and shows no such line.
-After a completed run the name box also folds under **Didn't find it? Look up
-another name**, a disclosure reachable by keyboard that keeps the box mounted
-and prefilled, unless the status makes the box the next step: no release,
-nothing to search, no release the tracks fit (also when iTunes was unavailable),
-an Album without members, or Disc and Track Numbers needed where filling them
-from the titles is not the next step (owner rules, next-step bullet). The box
+After a completed run the name box also folds behind the alternatives row's
+look-up-another-name control, a disclosure reachable by keyboard that keeps the
+box mounted and prefilled, unless the status makes the box the next step: no
+release (where the box opens with the hint "可尝试去掉副标题"), nothing to
+search, no release the tracks fit (also when iTunes was unavailable), an Album
+without members, or Disc and Track Numbers needed where the titles propose no
+Disc and Track Numbers (owner rules, next-step bullet). The box
 stays open before any run, while a run is queued, running or retrying, and after
 a run that ended otherwise. It folds as it mounts, and also when a run completes
 while the page is open, but then only while the box is untouched (its name,
@@ -1911,15 +2002,13 @@ members whose pairing is not single, **Use this release** moves under **Other
 options** as **Use Album values only (title, Artists, label, release date)**
 with that warning, enabled exactly when the plain button would be, and each
 other edition in that state is offered for its Album values only too; the card
-also offers **Pair tracks by hand** (below), in one spaced row with the fill
-where the card offers it, before **Other options**. While no
+also offers **Pair tracks by hand** (below) before **Other options**. While no
 possible match pairs with the members in exactly one way, the first such card
-offers **Fill Disc and Track Numbers from titles** with a hint naming
-how many members get a number (saving then compares again for free or, where a
-member has no duration, lets the release be used for its tracklist) in place of
-the unknown-Disc-Number disclosure, or, where nothing can be filled from the
-titles, says that the tracks can be paired with it by hand or the numbers
-entered in **Edit draft**. The candidate this run chose without a pairing
+says, in place of the unknown-Disc-Number disclosure, how many members the
+numbers proposed from titles give a number (saving them then compares again for
+free or, where a member has no duration, lets the release be used for its
+tracklist), or, where the titles propose nothing, that the tracks can be paired
+with it by hand or the numbers entered by hand. The candidate this run chose without a pairing
 (`applied.pairs` null) whose pairing is now single offers **Use this release
 again (with track details)** on its card, a primary button where it is not
 folded, and, while the run has matching groups,
@@ -1932,8 +2021,11 @@ lets each other one be chosen, as a possible match's does, and its **Use this
 release** is the primary button, since choosing it is the next step; **Use none
 of these** stays a plain button.
 
-**Fill Disc and Track Numbers from titles** is offered only when the saved
-titles give positions exactly as Track-title searches read them
+**Numbers proposed from titles** (`catalogReviewProposal.ts`) are derived on
+every render, never stored, from the titles the review captured
+(`source.tracks[].title`), never from draft titles, so a cleaned or edited title
+never changes them, as it never changes the pairing hints. They read positions
+exactly as Track-title searches read them
 (`src/administration/lookup/lookupTitlePositions.ts`; the Web test repeats the
 rows of `test/administration/lookupTitlePositions.test.ts`): every member's
 title, whitespace collapsed and trimmed, starts with a position of one form,
@@ -1945,17 +2037,54 @@ or more members, and a lone member only with a Disc Number and a Track Number
 written with a leading zero, so a lone "7 Rings", "1-2 Punch" or "1.5 Seconds"
 never counts, nor does `01_` or `12) `; titles that all start with increasing
 numbers, such as "24 Hours" before "99 Luftballons", read as positions, the same
-known limit as on the server. A saved number that disagrees with its own title,
-titles on several discs where a member's Disc Number cannot be filled (the
-review captured none for it), or no empty number left offer nothing, so filling
-never makes two members claim one position. It writes only the empty numbers, a
-Disc Number only where the review captured one, into the **Edit draft** tab as
-unsaved values, switches to that tab, says there for how many tracks it filled
-numbers until the next edit or save, and focuses **Save completion draft**; the
-administrator checks them and saves through the ordinary review save, which
-re-ranks the stored candidates without a lookup run. They are the
-administrator's own numbers: they constrain pairing and reach the catalog only
-when the review is applied.
+known limit as on the server. Each member's row records why it stops the
+proposal: no position (as "1999 X" or "Disc2-03"), a form unlike the others, a
+position not above the previous one, a number that disagrees with its own title
+(any non-empty draft number, captured, saved or filled by lookup), or titles on several discs where its Disc Number cannot be filled (the
+review captured none for it). Any of these proposes nothing for the whole Album,
+so a proposal never makes two members claim one position, and the page names
+the flagged members in text, never by color alone; a gap in a disc's Track
+Numbers is only noted. Otherwise every empty Disc and Track Number gets its
+title's number, a Disc Number only where the review captured one; a number the
+member already has, captured, saved or filled by lookup, is never replaced.
+Numbers from titles giving both are selected in the update range; Track Numbers
+from titles giving them alone are unselected and marked as read from the titles
+only, to be checked (owner rules, Catalog Visibility and Administration).
+
+The editing section's table lists each member with its captured title (a cleaned
+or edited draft title after an arrow), and its Disc and Track Number inputs,
+each showing the draft value, else the proposal. When any captured number is not
+empty, a column gives the original numbers and each cell is marked as filling an
+empty value or replacing a non-empty one (the original struck through), so a
+replacement is never unmarked; otherwise one note says every original number is
+empty. Inputs accept Disc 1–999 and Track 1–9999, as the review save does. A
+pending proposal is not an unsaved edit: it starts nothing, keeps the lookup and
+Luna AI controls usable and is not given to Luna; a typed number is an edit.
+Requesting the update, or saving the draft alone, saves the selected proposed
+numbers in the same ordinary review save as the edits (`PATCH
+/catalog-reviews/:id`), which re-ranks the stored candidates without a lookup
+run; from then on they are the administrator's own numbers: they constrain
+pairing and reach the catalog only when the review is applied. An unselected
+proposal, such as a Track Number read from titles giving it alone, is never
+saved: it stays a proposal, derived again on the next render, and never
+constrains pairing or the re-rank. On a long Album (dozens of members, up to the
+review's 100), one line sums up the members, discs and proposed range of
+positions; rows with a flag, a replacing value or an edit stay open first, and
+uniform fills sit in one disclosure per disc naming its disc and track count,
+whose inputs keep their values while folded. A re-render keeps the focus on the
+same input.
+
+Beside the table, an optional checkbox, off by default and offered only while
+the titles give a proposal, also removes each member's position from its draft
+title: exactly the position and separator Track-title searches strip, as
+`1.01.雪の華` becomes `雪の華`. It never changes a title the administrator
+edited, and turning it off restores the other captured titles. The cleaned
+titles are unsaved edits, listed in the update range under Track titles and
+selected when the checkbox is turned on, since turning it on chooses them (owner
+rules, Catalog Visibility and Administration), and each is marked as replacing
+its title, the original struck through; a cleaned title
+can be applied only with its member's Disc and Track Number, or when the member
+already has both.
 
 **Pair tracks by hand** opens the pairing panel (`CandidatePairing.tsx`, its own
 chunk; one that cannot load asks for a reload in its place) for that card's
@@ -1978,7 +2107,7 @@ not, closest first, each read as `1-1 Title · 3:35.64 · differs by 0.02 s`
 (**same duration** under 0.005 seconds, **duration unknown** without one). A
 member's own Disc or Track Number (captured from the catalog or saved by the
 administrator) restricts its list to the release tracks at that number, and the
-panel cannot change it: its copy says to change it in **Edit draft** to pair the
+panel cannot change it: its copy says to change it by manual editing to pair the
 member differently. A member that every complete pairing gives the same release
 track starts on it, saying **Only 1-2 "Title" can pair with this track**; the
 others start on **Choose a release track**. A release track another member took

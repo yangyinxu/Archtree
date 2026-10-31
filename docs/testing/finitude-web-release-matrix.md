@@ -767,21 +767,31 @@ player control still works.
 - As an administrator, with metadata lookup configured against MusicBrainz in a
   development environment, open an Album completion for an Album whose track
   titles start with 1-01, 1-02 and so on but whose tracks have no Disc or Track
-  Numbers. Confirm the summary names the possible release and says the track
-  positions are unclear, names no paid step in that sentence, offers Fill Disc
-  and Track Numbers from titles as its only primary button, and that Use Luna AI
-  (paid) still follows the lookup controls and is never primary; that the
-  release's card names its editions, does not promise missing-file rows and
-  offers Album values only under Other options; that filling only fills empty
-  numbers in Edit draft, focuses Save completion draft and saves nothing; and
-  that saving offers the release, said once, on a card naming its editions with
-  Use this release as the only primary button, or applies it, and that Use this
-  release brings in its expected tracklist. While a lookup is queued or runs,
-  confirm the queued or progress line and the note Lookup keeps running if you
-  leave this page, that a screen reader announces the status once rather than
-  every few seconds, and that a new name asks before replacing the run. Repeat
-  in Simplified Chinese (从标题填写碟号/曲号, 可能匹配, 离开页面后查找仍会继续。) and with a screen
-  reader at 320 CSS px.
+  Numbers. Confirm the page opens with those Disc and Track Numbers proposed
+  beside the empty originals and selected, also while the lookup still runs,
+  without any fill button; that the summary names the possible release and says
+  the track positions are unclear, naming no paid step in that sentence, and
+  that Use Luna AI (paid) follows the alternatives and is never primary; that
+  the release's card names its editions, does not promise missing-file rows and
+  offers Album values only under Other options; that titles giving Track Numbers
+  alone propose them unselected and marked for checking and are not saved
+  unless you select them, that a title whose position disagrees with a saved
+  number or one lookup filled proposes nothing and names that track, and that
+  the optional title-prefix cleanup starts off, never changes a title you
+  edited and, once turned on, lists the cleaned titles selected and marked as
+  replacing; that the save-only button is offered while selected proposals are
+  pending; that Update original Album (N) saves the selected numbers before
+  showing the inline confirmation, focused on its back button, that going back
+  keeps the saved draft and leaves the Album unchanged, and that reopening the
+  completion keeps those saved numbers selected; and that once the
+  numbers are saved the release is offered, said once, on a card naming its
+  editions with Use this release, or is applied, and that Use this release
+  brings in its expected tracklist. While a lookup is queued or runs, confirm
+  the queued or progress line and the note Lookup keeps running if you leave
+  this page, that a screen reader announces the status once rather than every
+  few seconds, and that a new name asks before replacing the run. Repeat in
+  Simplified Chinese (检查建议的修改, 同时清理标题前缀, 返回调整, 可能匹配,
+  离开页面后查找仍会继续。) and with a screen reader at 320 CSS px.
 - As an administrator, with metadata lookup configured against MusicBrainz in a
   development environment, open the Album completion of an Album whose primary
   Artist is saved with its romanized name added, such as
@@ -802,13 +812,16 @@ player control still works.
   that only a song title found is marked Found through a track title.
   Repeat in Simplified Chinese (通过曲名找到).
 - As an administrator, open an unfinished Album completion and choose Discard
-  completion. Confirm its confirmation names the Album and says the catalog
-  does not change; Cancel keeps the completion; confirming returns to the Album
-  page, where Complete from MusicBrainz (free) is offered again. While Luna AI
-  is queued or running, confirm the action is disabled with "Stop Luna AI
-  before discarding this completion."; an applied completion offers no
-  discard. Repeat from the workbench's Album completions queue, in Simplified
-  Chinese (放弃补全), and with a screen reader at 320 CSS px.
+  completion. Confirm its inline confirmation names the Album, says the catalog
+  does not change and focuses Cancel; Cancel keeps the completion; confirming
+  returns to the Album page, where Complete from MusicBrainz (free) is offered
+  again. While Luna AI is queued or running, confirm the action is disabled
+  with "Stop Luna AI before discarding this completion." shown beside it; an
+  applied completion offers no discard. Change the Album elsewhere and confirm
+  the completion shows its old draft read-only, offers opening the latest Album
+  and still offers discarding. Repeat from the workbench's Album completions
+  queue, in Simplified Chinese (放弃本次补全), and with a screen reader at 320
+  CSS px.
 - As an administrator, with metadata lookup configured against MusicBrainz in a
   development environment, open the Album completions queue while a completion's
   lookup runs. Confirm its card leads with Metadata lookup and changes without a
@@ -817,18 +830,23 @@ player control still works.
   cards whose lookup asks for something and that All no longer looks chosen
   while it is on, that Luna AI shows only on cards where it ran, and that dates
   read in the interface language. Open a completion and
-  confirm the three steps, their links to the lookup summary, that Use Luna AI
-  (paid) still follows the lookup summary and is never primary, that Review
-  changes to apply and Update original Album show the same count, the ready line
-  once nothing is left to answer and Luna AI is not running (never while the
-  free retry is the next step), the lookup results folding once nothing is open
-  (never for an iTunes-only result or an artist mismatch), and, after applying,
-  What was updated with the time, the fields and the release used, and no Update
-  original Album. On the Album page, confirm the open-completion note says where
-  its lookup stands. Repeat in Simplified Chinese (元数据查找, 查找需处理,
-  ① 查找发行, 已更新的内容, 厂牌) and with a screen reader at 320 CSS px,
-  confirming the steps are announced as a group of three label and value pairs
-  and not on each refresh.
+  confirm the header shows the Album's artwork, title, Artist and local track
+  count; that the status row's details open the lookup steps; that Use Luna AI
+  (paid) follows the alternatives and is never primary; that the update range
+  and Update original Album (N) in the bottom action bar show the same count and
+  the bar never hides a focused field; that the bar names what the update waits
+  for (the lookup, Luna AI or both) while editing stays possible; that, while a
+  lookup runs, the Luna AI confirmation warns that free results are pending and
+  offers waiting for them, and says when it is the project's last Luna AI run;
+  the lookup results folding once nothing is open (never for an iTunes-only
+  result or an artist mismatch); and, after applying, the applied view with the
+  time, a compact row per changed track, the fields, the release used and
+  whether the edition was matched or remains unconfirmed, with opening the
+  original Album as the bar's only button. On the Album page, confirm the
+  open-completion note says where its lookup stands. Repeat in Simplified
+  Chinese (元数据查找, 查找需处理, 先等待免费结果, 发行版本仍未确认。, 厂牌) and with
+  a screen reader at 320 CSS px, confirming the status is announced once and
+  not on each refresh.
 - As an administrator, with metadata lookup configured against MusicBrainz in a
   development environment, open the Album completion of an Album whose tracks
   have exact durations but no Disc or Track Numbers, whose track titles start
@@ -854,7 +872,7 @@ player control still works.
   how far each duration differs, never a release track whose duration is far
   from the track's, marks a release track another track took as used by that
   track, and enables Save pairing and use this release only once every track has
-  a release track; that saving fills the Disc and Track Numbers in Edit draft as
+  a release track; that saving stores the Disc and Track Numbers as the draft's
   saved values and applies the release with its expected tracklist and rows
   without a file; that Update original Album lists those numbers; that focus
   stays in the panel while it saves; that the lookup results never fold while
@@ -871,12 +889,13 @@ player control still works.
   step with its state (in progress, not started yet, not run, skipped or may not
   have been sent). Once it ends, confirm the steps fold under Lookup log with
   the time taken, the searches and the releases found, that This lookup searched
-  for names the searches it sent, and that the name box folds under Didn't find
-  it? Look up another name when the run completes while you are not using it,
-  also when the page is opened again after a release was applied, and opens from
-  the keyboard, but stays open while you type in it and when no release was
-  found. Repeat in Simplified Chinese (查找记录, 本次查找, 没找到？换个名称查找) and with a screen
-  reader at 320 CSS px.
+  for names the searches it sent, and that the name box folds behind the
+  alternatives' look-up-another-name control when the run completes while you
+  are not using it, also when the page is opened again after a release was
+  applied, and opens from the keyboard, but stays open while you type in it and,
+  prefilled with the hint to try without a subtitle, when no release was found.
+  Repeat in Simplified Chinese (查找记录, 本次查找, 换个名称查找, 可尝试去掉副标题)
+  and with a screen reader at 320 CSS px.
 - As an administrator, with metadata lookup configured against MusicBrainz in a
   development environment, open an Album completion whose applied release
   credits an Artist that an existing Artist matches only by name, and one whose
@@ -888,10 +907,13 @@ player control still works.
   IDs, which is offered only while a row has a MusicBrainz ID of its own, so an
   iTunes-only result whose Artists have no MusicBrainz ID offers none. On a
   possible match whose track titles start with 1-01 and 1-02, choose
-  Album values only and confirm the lookup results stay open with Fill Disc and
-  Track Numbers from titles on its card and under the status, after a line that
-  track values and track Artists are not applied; once filled, the unsaved draft
-  leaves the identity cards dimmed and unavailable until Save completion draft.
+  Album values only and confirm the lookup results stay open, under a line that
+  track values and track Artists are not applied, with the Disc and Track
+  Numbers proposed from the titles still pending; that the pending proposal
+  leaves the identity cards available, while a number you type leaves them
+  dimmed and unavailable until the draft is saved; and that a list or label
+  whose identity row still needs an answer starts outside the update range
+  until answered.
   In Simplified Chinese, confirm the summary, the cards and the Album page say
   没有音频的曲目 and never 缺文件, and that no status names the iTunes Search
   API. Repeat in Simplified Chinese (复用已有的, 新建, 默认选择, 显示
@@ -903,7 +925,9 @@ player control still works.
   "Use Luna AI again (paid)", or "使用 Luna AI 补全（付费）" or "再次使用 Luna
   AI 补全（付费）", comes after any lookup controls on the page, is never styled
   as the primary action, and opens a confirmation that names a paid AI service
-  before anything starts; that Stop Luna AI, the budget lines and Luna status
+  before anything starts, and, while a lookup runs, whose confirm button reads
+  "仍启动 Luna AI（付费）" in Simplified Chinese beside waiting for the free
+  results; that Stop Luna AI, the budget lines and Luna status
   text name Luna AI; and that no control labelled only Analyze, Review,
   Complete, 校对, 补全 or 分析 starts Luna, while the review pages call the
   project an Album completion (专辑补全).
