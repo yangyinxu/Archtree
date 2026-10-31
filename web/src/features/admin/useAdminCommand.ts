@@ -5,7 +5,8 @@ import { ApiError } from '../../api/client';
 import { ADMIN_IMPORT_RELOAD_REQUIRED, adminEndpointRequest } from './adminTransport';
 import { ADMIN_RELOAD_REQUIRED, adminWorkspace } from './adminWorkspace';
 
-interface Intent { path: string; body: string; operationId: string; method: string }
+/** A sent write, kept for an exact retry; `refusals` are the run's own refusal names, which its retries keep. */
+interface Intent { path: string; body: string; operationId: string; method: string; refusals?: Readonly<Record<string, string>> }
 /**
  * `error` names its message (`common.<error>`): an outcome kind (`unknown`, `conflict`, `error`, `reload`), `musicbrainz_id_in_use`
  * (another Artist, or another Organization, already keeps the MusicBrainz ID an edit sets), an existing-Album review's metadata
@@ -25,14 +26,17 @@ export class AdminCommand<T extends { receipt: { operationId: string } }> {
   private state: CommandState<T> = { running: false, intent: null, result: null, error: null };
   private listeners = new Set<() => void>();
   private owner = adminWorkspace.capture();
-  /** `refusals` maps a definite refusal's error code to this command's own message name, checked before the generic conflict. */
+  /**
+   * `refusals` maps a definite refusal's error code to this command's own message name, checked before the generic conflict; a
+   * run's own `refusals` replace them for that run and its retries, so names meant for one operation never reach the others.
+   */
   constructor(private schema: z.ZodType<T>, private confirmed: () => void = () => {}, private refusals: Readonly<Record<string, string>> = {}) {}
   getSnapshot = () => this.state;
   subscribe = (fn: () => void) => { this.listeners.add(fn); return () => { this.listeners.delete(fn); }; };
   private update(next: CommandState<T>) { this.state = next; for (const fn of this.listeners) fn(); }
-  run(path: string, payload: object, method = 'PATCH') {
+  run(path: string, payload: object, method = 'PATCH', refusals?: Readonly<Record<string, string>>) {
     if (this.state.running || this.state.intent || !adminWorkspace.current(this.owner, false)) return;
-    const operationId = crypto.randomUUID(); void this.send({ path, method, operationId, body: JSON.stringify({ ...payload, operationId }) });
+    const operationId = crypto.randomUUID(); void this.send({ path, method, operationId, body: JSON.stringify({ ...payload, operationId }), refusals });
   }
   reconcile(path: string, operationId: string) {
     if (this.state.running || this.state.intent || !adminWorkspace.current(this.owner, false)) return;
@@ -40,6 +44,8 @@ export class AdminCommand<T extends { receipt: { operationId: string } }> {
   }
   retry = () => { if (this.state.intent && !this.state.running) void this.send(this.state.intent); };
   acknowledge = () => this.update({ ...this.state, result: null });
+  /** Drops an unknown outcome's intent once a read settled it (another operation applied, or the target went stale): never resent. */
+  settle = () => { if (!this.state.running) this.update({ ...this.state, intent: null, error: null }); };
   private async send(intent: Intent) {
     if (!adminWorkspace.current(this.owner, false)) return;
     const guard = adminWorkspace.capture(); this.update({ running: true, intent, result: null, error: null });
@@ -58,7 +64,8 @@ export class AdminCommand<T extends { receipt: { operationId: string } }> {
       if (error instanceof ApiError && error.kind === 'http' && error.status === 409 && error.code === 'ADMIN_CATALOG_MUSICBRAINZ_ID_IN_USE') { this.update({ running: false, intent: null, result: null, error: 'musicbrainz_id_in_use' }); return; }
       const code = error instanceof ApiError && error.kind === 'http' ? error.code ?? '' : '';
       // An Album completion discarded meanwhile, and a command's own refusals, are definite and have their own messages.
-      const named = code === 'ADMIN_CATALOG_REVIEW_DISCARDED' && (error as ApiError).status === 404 ? 'discarded' : Object.hasOwn(this.refusals, code) ? this.refusals[code] : null;
+      const refusals = intent.refusals ?? this.refusals;
+      const named = code === 'ADMIN_CATALOG_REVIEW_DISCARDED' && (error as ApiError).status === 404 ? 'discarded' : Object.hasOwn(refusals, code) ? refusals[code] : null;
       if (named) { this.update({ running: false, intent: null, result: null, error: named }); return; }
       // A metadata lookup refusal (ADMIN_IMPORT_LOOKUP_*, at any status, a 503 unavailable included) has its own message and is
       // definite: nothing is retried, as useAdminMutation.ts treats it.

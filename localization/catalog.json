@@ -4643,6 +4643,13 @@
       ],
       "variables": {}
     },
+    "admin.common.analysis_active": {
+      "description": "Administrator workbench: a change refused because Luna AI is analyzing the Album completion.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.common.append_primary_required": {
       "description": "Administrator workbench: publishing was refused because the existing Album an import appends to has no primary Artist Credit.",
       "delivery": [
@@ -4693,6 +4700,13 @@
       "variables": {
         "date": "string"
       }
+    },
+    "admin.common.left_confirmation": {
+      "description": "Administrator review page: after leaving the update confirmation, the saved draft stays and the original Album is unchanged.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
     },
     "admin.common.loading": {
       "description": "Administrator workbench: common loading.",
@@ -4806,6 +4820,13 @@
       ],
       "variables": {}
     },
+    "admin.common.review_required": {
+      "description": "Administrator workbench: an Album completion update refused because an identity or lookup answer needs review again.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.common.saved": {
       "description": "Administrator workbench: common saved.",
       "delivery": [
@@ -4815,6 +4836,13 @@
     },
     "admin.common.saving": {
       "description": "Administrator workbench: common saving.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.common.stale": {
+      "description": "Administrator workbench: an Album completion update refused because its source Album changed.",
       "delivery": [
         "runtime"
       ],

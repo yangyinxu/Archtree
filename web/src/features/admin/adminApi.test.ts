@@ -18,6 +18,7 @@
  *   - a saved replace decision parses, and a catalog edit refused for an ID another record keeps shows that, with no retryable intent
  *   - AdminCommand shows each metadata lookup refusal of an existing-Album review with its own message, at any status, with no retryable intent
  *   - AdminCommand shows a discarded Album completion with its own message and a command's own refusals before the generic conflict, with no retryable intent
+ *   - AdminCommand names a refusal by the run's own refusals for that run and its retry only, never for the command's other runs
  * @end-catalog */
 
 import { z } from 'zod';
@@ -341,4 +342,20 @@ test('AdminCommand shows a discarded Album completion with its own message and a
   // An inherited property is never a refusal name, and the lookup refusal mapping is unchanged.
   expect(await outcome('toString', 409, refusals)).toMatchObject({ intent: null, error: 'conflict' });
   expect(await outcome('ADMIN_IMPORT_LOOKUP_ACTIVE', 409, refusals)).toMatchObject({ intent: null, error: 'lookup_active' });
+});
+
+test('AdminCommand names a refusal by the run\'s own refusals for that run and its retry only, never for the command\'s other runs', async () => {
+  const schema = z.object({ receipt: z.object({ operationId: z.string() }).strict() }).strict(), own = { ADMIN_IMPORT_DUPLICATE_STALE: 'review_required' };
+  const replies: (() => Response)[] = [() => { throw new TypeError('Failed to fetch'); }, () => json({ code: 'ADMIN_IMPORT_DUPLICATE_STALE' }, 409),
+    () => json({ code: 'ADMIN_IMPORT_DUPLICATE_STALE' }, 409)];
+  vi.stubGlobal('fetch', vi.fn(async () => replies.shift()!()));
+  const command = new AdminCommand(schema, undefined, { ADMIN_IMPORT_ANALYSIS_ACTIVE: 'discard_luna' });
+  // The run's outcome is unknown; its retry keeps the run's refusal names.
+  command.run('/catalog-reviews/item/apply', { expectedRevision: 1 }, 'POST', own);
+  await vi.waitFor(() => expect(command.getSnapshot()).toMatchObject({ running: false, error: 'unknown' }));
+  command.retry();
+  await vi.waitFor(() => expect(command.getSnapshot()).toMatchObject({ running: false, intent: null, error: 'review_required' }));
+  // Another run on the same command without them keeps the generic conflict.
+  command.run('/catalog-reviews/item/decisions', { decisions: [] }, 'POST');
+  await vi.waitFor(() => expect(command.getSnapshot()).toMatchObject({ running: false, intent: null, error: 'conflict' }));
 });

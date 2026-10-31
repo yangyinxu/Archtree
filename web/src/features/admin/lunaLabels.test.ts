@@ -44,7 +44,9 @@ const status = [...family('admin.analysis.'),
   ...family('admin.workbench.').filter(key => key.includes('analyzing')), 'admin.workbench.review_stage', 'admin.workbench.review_luna_attention',
   ...['analysis_limit', 'analysis_running', 'empty_attention', 'empty_cancelled', 'empty_no_suggestions'].map(copy => `admin.catalog_review.${copy}`),
   // The review's inline Luna AI confirmation (its concurrent-lookup warning and its last run) and why discarding waits for Luna AI.
-  ...['luna_concurrent_copy', 'luna_last_run', 'discard_luna'].map(copy => `admin.catalog_review.${copy}`)];
+  ...['luna_concurrent_copy', 'luna_last_run', 'discard_luna'].map(copy => `admin.catalog_review.${copy}`),
+  // A review change refused while Luna AI analyzes the completion.
+  'admin.common.analysis_active'];
 const lookupProse = [...['incomplete', 'itunes_unavailable', 'no_match', 'no_query', 'no_release', 'not_configured', 'not_started', 'stopped', 'unavailable'].map(state => `admin.lookup.${state}`),
   'admin.common.lookup_unavailable', ...['not_started', 'no_query'].map(state => `admin.catalog_review.lookup_${state}`)];
 // The review's own lookup status, progress and card copy after a run found releases: the free steps only, as the page's paid Luna AI
