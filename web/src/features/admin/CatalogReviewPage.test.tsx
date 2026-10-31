@@ -49,7 +49,7 @@
  *   - a lookup refusal shows its own message and keeps no intent to retry
  *   - a lookup application at the same revision disables an open Apply confirmation once the summary notices its value revision
  *   - identity decisions are saved with the shown revision as soon as one is chosen; a stale refusal reads the review, its summary and identity rows again, keeping the unsaved choice to send again
- *   - a member deselected in Update original Album stays deselected after an identity decision is saved
+ *   - a member deselected in Update original Album stays deselected after an identity decision is saved, while the lists it answered arrive selected
  *   - a choice whose response was lost is offered again as the original operation with its operation ID, and lookup waits meanwhile
  *   - the free retry sends only the shown revision and its operation ID, and its receipt leads to a new summary read
  *   - an answer refused because the lookup changed shows its own message and reads the summary and identity rows again
@@ -1178,7 +1178,7 @@ test('identity decisions are saved with the shown revision as soon as one is cho
   expect(adminWorkspace.getSnapshot().reloadRequired).toBe(false);
 });
 
-test('a member deselected in Update original Album stays deselected after an identity decision is saved', async () => {
+test('a member deselected in Update original Album stays deselected after an identity decision is saved, while the lists it answered arrive selected', async () => {
   let item = reviewAfterLookup(capturedCatalogReview());
   const member = 'Update Track · Synthetic second track · Artists', writes: string[] = [];
   const reads = routeSummary(() => item, () => ({ ...reviewLookupResponse(), revision: item.revision }), (path, body) => {
@@ -1186,9 +1186,13 @@ test('a member deselected in Update original Album stays deselected after an ide
     const receipt = { operationId: String(body.operationId), kind: 'decisions' as const, revision: item.revision + 1 };
     item = { ...item, revision: receipt.revision, receipts: [...item.receipts, receipt] };
     return reviewJson({ item, receipt });
-  }, () => ({ ...reviewIdentityResponse(), revision: item.revision }));
+  }, () => { const identity = { ...reviewIdentityResponse(), revision: item.revision }; identity.identities[0].needsAnswer = item.revision === 1; return identity; });
   mountPage(); await screen.findByRole('region', { name: 'Track Artists' });
   fireEvent.click(screen.getByRole('tab', { name: 'Update original Album' }));
+  // While the shared guest needs an answer its lists arrive unselected; the member is ticked, then deselected explicitly.
+  await waitFor(() => expect(screen.getByRole('checkbox', { name: member })).toBeEnabled());
+  expect(screen.getByRole('checkbox', { name: member })).not.toBeChecked();
+  fireEvent.click(screen.getByRole('checkbox', { name: member }));
   await waitFor(() => expect(screen.getByRole('checkbox', { name: member })).toBeChecked());
   fireEvent.click(screen.getByRole('checkbox', { name: member }));
   expect(screen.getByRole('checkbox', { name: member })).not.toBeChecked();
@@ -1305,10 +1309,11 @@ test('a number lookup filled through its pairing applies with its tracklist, and
   await waitFor(() => expect(number).toBeDisabled());
   expect(number).not.toBeChecked();
   expect(number).toHaveAccessibleDescription('Applies together with the expected tracklist');
-  // Selected again, the tracklist takes the number with it; deselecting the shared guest's lists leaves nothing waiting on it.
+  // Selected again, the tracklist takes the number with it; the shared guest's lists arrive unselected while it needs an answer, so
+  // nothing waits on it.
   fireEvent.click(screen.getByRole('checkbox', { name: 'Update Album · Synthetic catalog Album · Expected tracklist' }));
   await waitFor(() => expect(number).toBeChecked());
-  for (const name of ['Update Album · Synthetic catalog Album · Artists', 'Update Track · Synthetic second track · Artists']) fireEvent.click(screen.getByRole('checkbox', { name }));
+  for (const name of ['Update Album · Synthetic catalog Album · Artists', 'Update Track · Synthetic second track · Artists']) expect(screen.getByRole('checkbox', { name })).not.toBeChecked();
   fireEvent.click(await screen.findByRole('button', { name: 'Update original Album (2)' }));
   fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Update original Album (2)' }));
   await waitFor(() => expect(writes).toHaveLength(1));

@@ -3,10 +3,11 @@
  *   Functions: reviewRows, releaseTrackEntries, reviewLookupResponse, reviewItunesLookupResponse,
  *              reviewTieLookupResponse, reviewAfterLookup, reviewIdentityResponse, pairingRows, pairingReview,
  *              pairingLookupResponse, pairingApplication, pairedLookupResponse, handPairingRows,
- *              unnumberedPairingReview, handPairingResponse, pairingTimeline, pairingRunningTimeline
+ *              unnumberedPairingReview, longAlbumReview, handPairingResponse, pairingTimeline,
+ *              pairingRunningTimeline
  *   Constants: reviewRelease, reviewCandidateKey, otherReviewRelease, guestEntryKey, guestTrackEntryKey,
  *              guestHandle, leadHandle, leadRecordId, guestCandidateId, leadMusicBrainzId,
- *              leadOtherMusicBrainzId, leadCreditId, pairingEditions
+ *              leadOtherMusicBrainzId, leadCreditId, pairingEditions, longAlbumDiscs
  * Internal
  *   Types: Overrides, PairingCandidate, PairingTimeline
  *   Functions: entry, pairingEdition, pairingSearches
@@ -217,6 +218,23 @@ export function unnumberedPairingReview(): CatalogReview {
   const item = pairingReview(), titles = ['Synthetic opening (Live)', 'Synthetic second song (Live)'];
   return { ...item, source: { ...item.source, tracks: item.source.tracks.map((track, index) => ({ ...track, title: titles[index] })) },
     draft: { ...item.draft, tracks: item.draft.tracks.map((track, index) => ({ ...track, title: titles[index] })) } };
+}
+/** The disc sizes of the long Album (longAlbumReview): 44 tracks on three discs. */
+export const longAlbumDiscs = [15, 15, 14] as const;
+/**
+ * A review of a 44-track Album on three discs whose captured titles start with their positions, "1.01." through "3.14."
+ * ("1.01.Synthetic long song 1"), while no member has a Disc or Track Number, the Disc Number captured as none; captured for
+ * lookup, with no expected tracklist and no lookup applied. Slot IDs end in the member's Album position.
+ */
+export function longAlbumReview(): CatalogReview {
+  const item = capturedCatalogReview(), positions = longAlbumDiscs.flatMap((count, disc) => Array.from({ length: count }, (_, index) => [disc + 1, index + 1]));
+  const slot = (index: number) => `20000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`;
+  const titles = positions.map(([disc, track], index) => `${disc}.${String(track).padStart(2, '0')}.Synthetic long song ${index + 1}`);
+  return { ...item, suggestions: [],
+    source: { album: { ...item.source.album, title: 'Synthetic Long Album' }, tracks: titles.map((title, index) => ({ slotId: slot(index), id: `${'d'.repeat(22)}${(index + 1).toString(16).padStart(2, '0')}`,
+      revision: item.source.album.revision, title, discNumber: null, trackNumber: null, originalFileName: null })) },
+    draft: { album: { ...item.draft.album, title: 'Synthetic Long Album', expectedTracklist: null },
+      tracks: titles.map((title, index) => ({ slotId: slot(index), title, discNumber: null, trackNumber: null, artists: [] })) } };
 }
 /**
  * The pairing read (GET …/lookup/candidates/:key/pairing) of that review's release at `revision`: the first member may take 1-1 or

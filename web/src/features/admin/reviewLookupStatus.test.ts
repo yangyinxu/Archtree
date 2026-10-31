@@ -11,6 +11,7 @@
  *   - a queued or running run with progress says so with its phase and counts, its time beside it; retrying or no progress keeps the shared status
  *   - the track titles give Disc and Track Numbers only for positions of one form increasing in Album order, and only empty numbers fill
  *   - a track title's position reads as written, of the forms the numbers are filled from, and a title without one has none
+ *   - a track title's rest is exactly its text after the position, whitespace collapsed as the server keeps it, and a title without a position has none
  *   - the track titles read the positions the server lookup removes, row by row of its table
  *   - each card gives one reason, the first that applies
  *   - the fit of a no-match run: an empty Album's same-title releases; else possible matches before other fits, with the cause in its order
@@ -22,7 +23,8 @@
 
 import type { ReviewLookupView } from './importLookupApi';
 import { pairedLookupResponse, pairingApplication, pairingEditions, pairingLookupResponse } from './catalogReviewLookupFixtures.testSupport';
-import { candidateReason, editionKey, elapsedText, normalizedTitle, releaseGroups, reviewAppliedAgain, reviewLookupFit, reviewLookupStatus, reviewSections, titleNumbers, titlePosition, titleTier } from './reviewLookupStatus';
+import { candidateReason, editionKey, elapsedText, normalizedTitle, releaseGroups, reviewAppliedAgain, reviewLookupFit, reviewLookupStatus, reviewSections, titleLeadingPosition, titleNumbers, titlePosition,
+  titleRest, titleTier } from './reviewLookupStatus';
 
 /**
  * The review's own reading of its lookup view, without rendering: normalized titles, releases and their editions, the sections,
@@ -227,6 +229,15 @@ test('the track titles give Disc and Track Numbers only for positions of one for
 test('a track title\'s position reads as written, of the forms the numbers are filled from, and a title without one has none', () => {
   expect(['1-01 Synthetic opening (Live)', '1.01.合成の華', '01 - Synthetic', '  2-08   Synthetic', '7 Synthetic Rings'].map(titlePosition)).toEqual(['1-01', '1.01', '01', '2-08', '7']);
   expect(['Synthetic opening', '01_Synthetic', '12) Synthetic', '01-Synthetic', ''].map(titlePosition)).toEqual([null, null, null, null, null]);
+});
+
+test('a track title\'s rest is exactly its text after the position, whitespace collapsed as the server keeps it, and a title without a position has none', () => {
+  expect(['1-01 Yorugaonokokuhaku(Live)', '1.01.雪の華', '1.01. 創生(Instrumental)', '01 - 序曲', '2-12 Synthetic  Song ', ' 01  X', '01 . X', '1-01 \u2014 X', '01 ...Baby One More Time',
+    '01 -X', '7 Rings'].map(titleRest)).toEqual(['Yorugaonokokuhaku(Live)', '雪の華', '創生(Instrumental)', '序曲', 'Synthetic Song', 'X', 'X', 'X', '...Baby One More Time', '-X', 'Rings']);
+  // No position: a year, a prefix the server does not read, a zero, no text after the separator, or a title over 1024 characters.
+  expect(['1999 X', 'Disc2-03 X', '01_X', '12) X', '01-X', '0 X', '1-0 X', '0-1 X', '01', '01.', 'X', '', `01 ${'x'.repeat(1022)}`].map(titleRest)).toEqual(Array(13).fill(null));
+  expect([titleLeadingPosition('2-12 Synthetic'), titleLeadingPosition('012 Synthetic'), titleLeadingPosition('0 X')]).toEqual([{ discNumber: 2, trackNumber: 12, rest: 'Synthetic' },
+    { discNumber: null, trackNumber: 12, rest: 'Synthetic' }, null]);
 });
 
 test('the track titles read the positions the server lookup removes, row by row of its table', () => {

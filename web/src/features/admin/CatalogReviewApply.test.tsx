@@ -16,7 +16,7 @@
  *   - a failed identity read keeps the update disabled and offers a retry, after which the review-only items appear
  *   - while the identity read is pending a captured review says it is loading and cannot update, and lists its review-only items once it answers
  *   - the confirmation repeats the frozen selection: each selected change, the Album note after the Artist entries, the identity lines and the count it sends
- *   - the headless count reports the step's count, the changes it lists, the identity rows needing an answer and whether it is ready, and follows a deselection
+ *   - the headless count reports the step's count, the changes it lists, the identity rows needing an answer and whether it is ready, and follows a choice
  * @end-catalog */
 
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
@@ -191,7 +191,8 @@ test('an identity line marks a hidden reused record, a replaced MusicBrainz ID a
   identity.identities[1] = { ...identity.identities[1], decision: { scope: 'artist', identity: leadHandle, boundName: 'Synthetic catalog Artist', boundMusicBrainzId: '00000000-0000-4000-8000-0000000000a1',
     action: 'replace', candidateId: '121212121212121212121212', candidateRevision: 'b'.repeat(64) },
   musicBrainzIdWrite: { scope: 'artist', identity: leadHandle, musicBrainzId: '00000000-0000-4000-8000-0000000000a1', replaces: '00000000-0000-4000-8000-0000000000a2' } };
-  mount(item, { lookup, identity });
+  // The guest's lists arrive unselected while it needs an answer; ticked, they bring its line in and hold the update.
+  mount(item, { lookup, identity, choices: { 'album::artists': true } });
   const lines = within((await screen.findByRole('heading', { name: 'Artists and label' })).closest('section')!);
   expect(lines.getByText('Reuse Synthetic catalog Artist and replace its MusicBrainz ID 00000000-0000-4000-8000-0000000000a2 with 00000000-0000-4000-8000-0000000000a1')).toBeVisible();
   expect(within(lines.getByText('Synthetic guest').closest('li')!).getByText('Needs a decision')).toBeVisible();
@@ -302,7 +303,7 @@ test('the confirmation repeats the frozen selection: each selected change, the A
   expect(onClose).toHaveBeenCalledTimes(1);
 });
 
-test('the headless count reports the step\'s count, the changes it lists, the identity rows needing an answer and whether it is ready, and follows a deselection', async () => {
+test('the headless count reports the step\'s count, the changes it lists, the identity rows needing an answer and whether it is ready, and follows a choice', async () => {
   const { item, lookup } = lookedUp(), identity = reviewIdentityResponse(), client = new QueryClient({ defaultOptions: { queries: { retry: false } } }), onCount = vi.fn();
   client.setQueryData(['browser-session'], session);
   vi.stubGlobal('fetch', vi.fn(async (path: string) => reviewJson(path.endsWith('/lookup') ? lookup : identity)));
@@ -310,13 +311,14 @@ test('the headless count reports the step\'s count, the changes it lists, the id
   const expected = model({}), element = (choices: Record<string, { checked: boolean; basis: string }>) => <QueryClientProvider client={client}>
     <CatalogReviewApplyCount item={item} choices={choices} onCount={onCount} /></QueryClientProvider>;
   const view = render(element({}));
-  // It renders nothing; once the reads arrive it reports what the step shows: its selected count, its items, the guest to answer
-  // and, since the guest blocks applying, that the selection is not ready.
+  // It renders nothing; once the reads arrive it reports what the step shows: its selected count, its items and the guest to answer,
+  // whose lists arrive unselected, so the selection is ready.
   expect(view.container).toBeEmptyDOMElement();
   const count = expected.selection.fields.length + expected.selection.memberCredits.length;
-  expect(expected.ready).toBe(false);
-  await waitFor(() => expect(onCount).toHaveBeenLastCalledWith({ count, items: expected.items.length, identityAnswers: 1, ready: false }));
-  const first = expected.items.find(entry => entry.selected && entry.hold === null)!;
-  view.rerender(element({ [first.key]: { checked: false, basis: first.basis } }));
-  await waitFor(() => expect(onCount).toHaveBeenLastCalledWith({ count: count - 1, items: expected.items.length, identityAnswers: 1, ready: false }));
+  expect(expected.ready).toBe(true);
+  await waitFor(() => expect(onCount).toHaveBeenLastCalledWith({ count, items: expected.items.length, identityAnswers: 1, ready: true }));
+  // Ticking the Album's Artist entries counts them, and the guest they own then blocks applying.
+  const artists = expected.items.find(entry => entry.key === 'album::artists')!;
+  view.rerender(element({ [artists.key]: { checked: true, basis: artists.basis } }));
+  await waitFor(() => expect(onCount).toHaveBeenLastCalledWith({ count: count + 1, items: expected.items.length, identityAnswers: 1, ready: false }));
 });
