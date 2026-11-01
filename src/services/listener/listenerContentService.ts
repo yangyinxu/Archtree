@@ -2,9 +2,10 @@
  * Exports
  *   Classes: ListenerCollectionPageError
  *   Functions: getListenerHome, getListenerCollectionPage, searchListenerContent, getListenerAlbum,
- *              getListenerArtist, getListenerOrganization, getListenerAudioTrack, sanitizeListenerLibraryPage,
- *              listListenerLibrary, getListenerRecentlyPlayed
- *   Constants: maximumListenerCollectionPageSize, defaultListenerCollectionPageSize
+ *              getListenerArtist, getListenerOrganization, getListenerAudioTrack, isListenerVideoCursor,
+ *              listListenerVideos, sanitizeListenerLibraryPage, listListenerLibrary, getListenerRecentlyPlayed
+ *   Constants: maximumListenerCollectionPageSize, defaultListenerCollectionPageSize,
+ *              maximumListenerVideoPageSize, defaultListenerVideoPageSize
  *   Re-exports: * from '../../contracts/listenerV1'
  * Internal
  *   Types: ListenerContentRef, CatalogContext, OrderedListenerPageItem, OrderedCollectionRef,
@@ -72,7 +73,8 @@ import type {
     ListenerAlbum,
     ListenerArtist,
     ListenerOrganization,
-    ListenerTrack
+    ListenerTrack,
+    ListenerVideos
 } from '../../contracts/listenerV1';
 
 // Preserve existing server imports while the canonical contract stays persistence-free.
@@ -109,6 +111,8 @@ const maximumAlbumTracks = 500;
 const maximumHydratedAlbumTracks = 10_000;
 export const maximumListenerCollectionPageSize = 100;
 export const defaultListenerCollectionPageSize = 20;
+export const maximumListenerVideoPageSize = 48;
+export const defaultListenerVideoPageSize = 24;
 const queryTimeoutMs = 3_000;
 
 const artistProjection = {
@@ -1191,6 +1195,34 @@ export const getListenerAudioTrack = async (audioTrackId: string): Promise<Liste
     if (!track) return null;
     const context = await createCatalogContext([], [track]);
     return { audioTrack: toAudioTrackSummary(track, context) };
+};
+
+/** Cursors are bounded canonical IDs; whitespace and structured values are never query operators. */
+export const isListenerVideoCursor = (value: string) => /^[0-9a-fA-F]{24}$/.test(value);
+
+/**
+ * Lists ready, published, publicly visible Video MediaTracks newest first. The cursor is the
+ * last returned MediaTrack ID, so newer IDs inserted between reads do not shift later pages.
+ * Visibility and readiness are checked again before every page is sorted or limited.
+ */
+export const listListenerVideos = async (limit: number, cursor?: string): Promise<ListenerVideos> => {
+    const boundedLimit = Math.max(1, Math.min(Math.floor(limit), maximumListenerVideoPageSize));
+    const tracks = await findPublicAudioTracks({
+        ...readyAudioFilter,
+        mediaType: 'video',
+        _id: { $type: 'objectId', ...(cursor ? { $lt: toObjectId(cursor.toLowerCase()) } : {}) }
+    })
+        .project(audioTrackProjection)
+        .sort({ _id: -1 })
+        .limit(boundedLimit + 1)
+        .maxTimeMS(queryTimeoutMs)
+        .toArray();
+    const page = tracks.slice(0, boundedLimit);
+    const context = await createCatalogContext([], page);
+    return {
+        items: page.map((track) => toAudioTrackSummary(track, context)),
+        nextCursor: tracks.length > boundedLimit ? String(page[page.length - 1]._id).toLowerCase() : null
+    };
 };
 
 /** Strips lifecycle and ownership fields from the existing paginated Library result. */

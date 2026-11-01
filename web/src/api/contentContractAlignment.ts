@@ -2,6 +2,7 @@ import type * as Public from '../../../src/contracts/listenerV1';
 import type { z } from 'zod';
 import type * as Schemas from './contentSchemas';
 import type { ListenerCollectionPage } from './collectionSchemas';
+import type { ListenerVideos } from './listenerVideos';
 
 /** Bidirectional assignability plus identical keys catches omitted optional fields too. */
 type SameShape<Left, Right> = [Left] extends [Right]
@@ -28,6 +29,7 @@ export type ListenerContractAlignment = [
   Assert<SameShape<Schemas.ListenerArtist, Public.ListenerArtist>>,
   Assert<SameShape<Schemas.ListenerOrganization, Public.ListenerOrganization>>,
   Assert<SameShape<Schemas.ListenerTrack, Public.ListenerTrack>>,
+  Assert<SameShape<ListenerVideos, Public.ListenerVideos>>,
   Assert<SameShape<ListenerCollectionPage['pageItem'], Public.ListenerCollectionPage['pageItem']>>,
   Assert<SameShape<ListenerCollectionPage['items'][number], Public.ListenerCollectionPageRef>>,
   Assert<SameShape<ListenerCollectionPage['included'], Public.ListenerCollectionPage['included']>>,

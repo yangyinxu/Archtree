@@ -1525,6 +1525,13 @@ The wire protocol and operational bounds are documented in
   the public stream, so its one request shares the listener's media delivery
   limits until the preview stops. A card that cannot tell whether previews are
   enabled shows no preview.
+- The Web listener's primary navigation includes a Video page beside Home and
+  Library. It is filled automatically, not curated: it lists every ready,
+  published, publicly visible Video MediaTrack, newest first, as a Grid of
+  16:9 cards loaded a page at a time. Audio MediaTracks never appear there, and
+  a Video leaves it as soon as it stops being ready, published, or public. Its
+  cards play, pause, and preview exactly like other Video MediaTrack cards.
+  Native clients have no Video page yet.
 - A Web MediaTrack card whose MediaTrack is currently playing offers Pause in
   place of Play. Pause keeps the queue and elapsed time and adds no Recently
   Played activity. Once paused, the card's Play action launches that MediaTrack

@@ -47,6 +47,7 @@ router.get('/albums/:id', publicReadRateLimit, asyncHandler(listenerController.a
 router.get('/artists/:id', publicReadRateLimit, asyncHandler(listenerController.artist));
 router.get('/organizations/:id', publicReadRateLimit, asyncHandler(listenerController.organization));
 router.get('/tracks/:id', publicReadRateLimit, asyncHandler(listenerController.audioTrack));
+router.get('/videos', publicReadRateLimit, asyncHandler(listenerController.videos));
 router.get(
     '/recently-played',
     publicReadRateLimit,
