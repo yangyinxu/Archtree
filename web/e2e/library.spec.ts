@@ -47,9 +47,11 @@ test('Library navigation and section search fit a narrow mobile viewport', async
     return { x: box.x, y: box.y, width: box.width };
   }));
   expect(tabs).toHaveLength(4);
-  expect(tabs[0].y).toBe(tabs[1].y);
-  expect(tabs[2].y).toBe(tabs[3].y);
-  expect(tabs[2].y).toBeGreaterThan(tabs[0].y);
+  // The chip row wraps in a narrow pane; each chip follows the previous one in reading order.
+  for (let index = 1; index < tabs.length; index += 1) {
+    const [previous, current] = [tabs[index - 1], tabs[index]];
+    expect(current.y > previous.y || (current.y === previous.y && current.x > previous.x)).toBe(true);
+  }
   const search = page.getByRole('search', { name: 'Global search' });
   const offset = await search.evaluate((form) => {
     const circle = form.getBoundingClientRect();
@@ -66,18 +68,20 @@ test('Library navigation and section search fit a narrow mobile viewport', async
   await expect(main.getByText('Play some music and find it here next time.')).toBeVisible();
 });
 
-test('all Library destinations stay visible in two columns across sidebar breakpoints', async ({ page }) => {
+test('all Library destinations stay visible in reading order across sidebar breakpoints', async ({ page }) => {
   await installPrivateListenerRoutes(page);
   await page.goto('/finitude/library?section=saved');
   const navigation = page.getByRole('main').getByRole('navigation');
   await expect(navigation.getByRole('link')).toHaveCount(4);
-  let rowHeight: number | undefined;
   for (const width of [1440, 1032, 960, 888, 640, 390, 320]) {
     await page.setViewportSize({ width, height: 900 });
     await expect(async () => {
       const geometry = await navigation.evaluate((element) => ({
         height: element.getBoundingClientRect().height,
-        tops: [...element.querySelectorAll('a')].map((link) => link.getBoundingClientRect().top),
+        boxes: [...element.querySelectorAll('a')].map((link) => {
+          const box = link.getBoundingClientRect();
+          return { left: box.left, top: box.top };
+        }),
         visible: [...element.querySelectorAll('a')].every((link) => {
           const box = link.getBoundingClientRect();
           const parent = element.getBoundingClientRect();
@@ -86,13 +90,14 @@ test('all Library destinations stay visible in two columns across sidebar breakp
         }),
         overflows: element.scrollWidth > element.clientWidth
       }));
-      expect(new Set(geometry.tops).size).toBe(2);
-      expect(geometry.tops[0]).toBe(geometry.tops[1]);
-      expect(geometry.tops[2]).toBe(geometry.tops[3]);
+      // One row of chips in a wide pane; a narrow pane wraps rather than scrolls, keeping reading order.
+      if (width === 1440) expect(new Set(geometry.boxes.map((box) => box.top)).size).toBe(1);
+      geometry.boxes.slice(1).forEach((box, index) => {
+        const previous = geometry.boxes[index];
+        expect(box.top > previous.top || (box.top === previous.top && box.left > previous.left)).toBe(true);
+      });
       expect(geometry.visible).toBe(true);
       expect(geometry.overflows).toBe(false);
-      rowHeight ??= geometry.height;
-      expect(geometry.height).toBe(rowHeight);
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     }).toPass();
   }
