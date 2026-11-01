@@ -9,7 +9,7 @@
  *   - the management layout remains independent during authority suspension and identity reconciliation
  *   - round trips through management preserve the player queue, position and listener panel choice
  *   - ongoing Video retains its mounted surface without obscuring management content
- *   - listener navigation minimizes the Video theater until the listener restores it
+ *   - listener navigation minimizes the Video theater to the panel until the listener restores it
  *   - resizes and restores wide panels without remounting the player
  *   - removes panel separators when the compact shell takes control
  *   - shows authentication-required Library instead of an empty success
@@ -258,7 +258,7 @@ test('ongoing Video retains its mounted surface without obscuring management con
   expect(surface?.parentElement).not.toHaveAttribute('hidden');
 });
 
-test('listener navigation minimizes the Video theater until the listener restores it', async () => {
+test('listener navigation minimizes the Video theater to the panel until the listener restores it', async () => {
   const user = userEvent.setup();
   const item: PlayerQueueItem = { id: 'synthetic-video', title: 'Synthetic video', artworkUrl: '', artistNames: ['Synthetic artist'], mediaType: 'video', streamUrl: '' };
   const snapshot = { ...playerStore.getSnapshot(), queue: [item], currentIndex: 0, currentItem: item, status: 'playing' as const, currentTime: 42 };
@@ -276,14 +276,24 @@ test('listener navigation minimizes the Video theater until the listener restore
   expect(container.querySelector('[data-video-playing]')).toBeNull();
   const aside = container.querySelector('#now-playing-aside') as HTMLElement;
   expect(await within(aside).findByRole('img', { name: 'Synthetic video video' })).toBeInTheDocument();
-  const toggle = await screen.findByRole('button', { name: 'Video' });
+  expect(within(aside).getByRole('button', { name: 'Enter video fullscreen' })).toBeInTheDocument();
+  const player = await screen.findByRole('region', { name: 'Now playing' });
+  const toggle = await within(player).findByRole('button', { name: 'Video' });
   expect(toggle).toHaveAttribute('aria-pressed', 'false');
   expect(playerStore.getSnapshot()).toBe(snapshot);
 
-  await user.click(toggle);
+  // Selecting the panel Video returns it to the theater, as the player-bar toggle does.
+  await user.click(within(aside).getByRole('button', { name: 'Synthetic video video' }));
   await waitFor(() => expect(theater()).toBeInTheDocument());
   expect(within(aside).queryByRole('img', { name: 'Synthetic video video' })).not.toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'Video', hidden: true })).toHaveAttribute('aria-pressed', 'true');
+  expect(toggle).toHaveAttribute('aria-pressed', 'true');
+  // The selected panel control left with the panel Video, so focus continues on the toggle.
+  await waitFor(() => expect(toggle).toHaveFocus());
+
+  await user.click(toggle);
+  expect(theater()).toBeNull();
+  await user.click(toggle);
+  await waitFor(() => expect(theater()).toBeInTheDocument());
 
   await user.click(within(screen.getByRole('complementary', { name: 'Finitude Library' })).getByRole('link', { name: 'Search' }));
   expect(theater()).toBeNull();

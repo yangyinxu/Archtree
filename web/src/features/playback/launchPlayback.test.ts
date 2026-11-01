@@ -75,7 +75,7 @@ test('Playlist launch snapshots the ready queue and records only the explicit st
   });
   vi.stubGlobal('fetch', fetchMock);
 
-  await launchPlaylistPlayback(tracks, 'viewer-1', 'track-2');
+  await launchPlaylistPlayback('playlist-1', tracks, 'viewer-1', 'track-2');
 
   expect(launch).toHaveBeenCalledWith([
     expect.objectContaining({ id: 'track-1' }),
@@ -121,8 +121,8 @@ test('a superseded Playlist launch cannot borrow the newer queue state for activ
   });
   vi.stubGlobal('fetch', fetchMock);
 
-  const first = launchPlaylistPlayback([tracks[0]], 'viewer-1');
-  await launchPlaylistPlayback([tracks[1]], 'viewer-1');
+  const first = launchPlaylistPlayback('playlist-1', [tracks[0]], 'viewer-1');
+  await launchPlaylistPlayback('playlist-1', [tracks[1]], 'viewer-1');
   finishFirstLaunch?.();
   await first;
 
@@ -150,7 +150,7 @@ test.each(['standalone', 'album', 'playlist'] as const)('a delayed %s start keep
   const changes = vi.fn();
   const unsubscribe = subscribeToAccountSessionChanges(changes);
   const launch = kind === 'standalone' ? launchStandalonePlayback(tracks[0], 'old-viewer')
-    : kind === 'album' ? launchAlbumPlayback('album', tracks, 'old-viewer') : launchPlaylistPlayback(tracks, 'old-viewer');
+    : kind === 'album' ? launchAlbumPlayback('album', tracks, 'old-viewer') : launchPlaylistPlayback('playlist-1', tracks, 'old-viewer');
   advanceAccountEpoch();
   complete(); await launch;
   // Flush the lazy history module too: no response may initiate another account transition.

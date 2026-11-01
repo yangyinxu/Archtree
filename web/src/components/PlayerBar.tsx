@@ -17,11 +17,11 @@ import {
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent
 } from 'react';
-import { useLocation } from 'react-router';
+import { Link, useLocation } from 'react-router';
 
 import { Artwork } from './Artwork';
 import { Icon } from './Icon';
-import { SharedVideoSurface } from './SharedVideoSurface';
+import { SharedVideoSurface, videoTheaterToggleId } from './SharedVideoSurface';
 import { SeekSlider, formatPlaybackTime } from './SeekSlider';
 import {
   localizedPlayerError,
@@ -33,6 +33,7 @@ import {
 import styles from './PlayerBar.module.css';
 import { useLocalization } from '../localization/LocalizationProvider';
 import { LazyRoomTrackButton } from '../features/social/LazyRoomTrackButton';
+import { playbackSourcePath } from '../features/playback/launchPlayback';
 
 const MOBILE_PLAYER_QUERY = '(max-width: 767px)';
 const VERTICAL_GESTURE_THRESHOLD = 48;
@@ -300,9 +301,21 @@ export const PlayerBar = ({
     if (!mobile && expanded) setExpanded(false);
   }, [expanded, mobile]);
 
-  // Each MediaTrack that becomes current, including the same Video again, starts in its automatic presentation.
+  // Each MediaTrack that becomes current, including the same Video again, starts in its automatic
+  // presentation. Moving the element out of a fullscreen panel would end fullscreen, so that waits.
   useEffect(() => {
-    onTheaterMinimized?.(false);
+    if (!onTheaterMinimized) return undefined;
+    if (!document.fullscreenElement) {
+      onTheaterMinimized(false);
+      return undefined;
+    }
+    const restoreAfterFullscreen = () => {
+      if (document.fullscreenElement) return;
+      document.removeEventListener('fullscreenchange', restoreAfterFullscreen);
+      onTheaterMinimized(false);
+    };
+    document.addEventListener('fullscreenchange', restoreAfterFullscreen);
+    return () => document.removeEventListener('fullscreenchange', restoreAfterFullscreen);
   }, [current, onTheaterMinimized]);
 
   useEffect(() => {
@@ -450,6 +463,8 @@ export const PlayerBar = ({
     resetCompactGesture(event.currentTarget, event.pointerId);
   };
 
+  // The compact mobile identity is itself a button, so only the desktop title links back to its page.
+  const sourcePath = mobile || !current ? undefined : playbackSourcePath(player.queue);
   const compactIdentity = (
     <>
       {current ? (
@@ -470,7 +485,11 @@ export const PlayerBar = ({
         />
       )}
       <span className={styles.copy}>
-        <span className={styles.title}>{current?.title || t('player.identity.nothing')}</span>
+        {sourcePath ? (
+          <Link className={`${styles.title} ${styles.titleLink}`} to={sourcePath}>{current?.title}</Link>
+        ) : (
+          <span className={styles.title}>{current?.title || t('player.identity.nothing')}</span>
+        )}
         <span className={styles.meta}>
           {current?.displayByline || current?.artistNames.join(', ') || (current
             ? t('now_playing.fallback_byline')
@@ -570,6 +589,7 @@ export const PlayerBar = ({
               aria-label={t('common.label.video')}
               className={`${styles.secondaryControl} ${styles.nowPlayingToggle} ${styles.videoTheaterToggle}`}
               data-active={!theaterMinimized || undefined}
+              id={videoTheaterToggleId}
               onClick={() => onTheaterMinimized(!theaterMinimized)}
               title={t('common.label.video')}
               type="button"

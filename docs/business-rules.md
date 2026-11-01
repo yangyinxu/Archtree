@@ -1437,10 +1437,16 @@ The wire protocol and operational bounds are documented in
   offers no cover-only or audio-only mode switch.
 - Listener navigation while a Video is current (the brand, primary
   navigation, search, links, Back/Forward) minimizes the theater: the requested
-  page shows and the same Video keeps playing in the right panel. The player
-  bar's Video toggle restores or minimizes the theater; a MediaTrack becoming
-  current, including the same Video again, restores the automatic theater. A
-  management round trip leaves the theater as it was.
+  page shows and the same Video keeps playing at the top of the right panel.
+  Selecting that panel Video, or the player bar's Video toggle, restores the
+  theater; the panel Video also offers fullscreen from its top-right corner. A
+  MediaTrack becoming current, including the same Video again, restores the
+  automatic theater. A management round trip leaves the theater as it was.
+- On wide Finitude Web layouts the player bar's MediaTrack title links back
+  to the page its queue was started from: the Album for an Album queue, the
+  Playlist for a Playlist queue, and the MediaTrack's Album for a single
+  MediaTrack. A queue no listener page started, such as room playback, or a
+  single MediaTrack without an Album, has no title link.
 - Audio and Video use one long-lived media element, queue, elapsed clock,
   transport, Shuffle/Repeat state, playback origin, and activity identity.
   Automatic queue advancement changes presentation from the next MediaTrack's

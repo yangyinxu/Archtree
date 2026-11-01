@@ -382,7 +382,7 @@ export const PlaylistDetailPage = () => {
               aria-label={t('common.action.play')}
               className={styles.playButton}
               disabled={readyTracks.length === 0}
-              onClick={() => { void launchPlaylistPlayback(readyTracks, viewerId); }}
+              onClick={() => { void launchPlaylistPlayback(playlistId, readyTracks, viewerId); }}
               title={readyTracks.length === 0
                 ? t('playlist.detail.play_unavailable')
                 : t('playlist.detail.play_label', { name: playlist.name })}
@@ -456,7 +456,7 @@ export const PlaylistDetailPage = () => {
                     className={styles.memberPrimary}
                     disabled={!track}
                     onClick={() => {
-                      if (track) void launchPlaylistPlayback(readyTracks, viewerId, track.id);
+                      if (track) void launchPlaylistPlayback(playlistId, readyTracks, viewerId, track.id);
                     }}
                     type="button"
                   >

@@ -635,8 +635,11 @@ player control still works.
   present. Advance Video → Audio → Video and confirm elapsed time, queue,
   Shuffle, and Repeat remain owned by one player while the presentation follows
   each item. While Video plays, select the brand or a primary destination and
-  confirm the page shows, the Video continues in the right panel, and the
-  player bar's Video toggle restores the theater. A simulated Video failure
+  confirm the page shows and the Video continues at the top of the right
+  panel. Enter fullscreen from the panel Video's top-right corner, then select
+  the panel Video and confirm the theater returns; the player bar's Video
+  toggle does the same. Select the player bar title and confirm it opens the
+  Album or Playlist the queue was started from. A simulated Video failure
   must remain recoverable without fabricating an Audio fallback.
 - Hover the seek track without changing playback, commit pointer seeking only
   on release, seek by keyboard, change volume, mute, open keyboard help, and

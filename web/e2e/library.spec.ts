@@ -2,7 +2,7 @@
  * Tests
  *   - Library separates empty playlists, saved music and unsaved history
  *   - Library navigation and section search fit a narrow mobile viewport
- *   - all Library destinations stay visible in two columns across sidebar breakpoints
+ *   - all Library destinations stay visible in reading order across sidebar breakpoints
  * @end-catalog */
 
 import { trackFixtures } from './fixtures/catalog';
