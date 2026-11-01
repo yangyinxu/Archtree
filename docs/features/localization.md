@@ -264,23 +264,35 @@ the generated `en-US` and `zh-Hans` bundles with the same variable names the
 native clients read (their `{name}` / `{name,` pattern); it is skipped
 otherwise.
 
-New Page-management copy uses `web-admin` delivery and is packaged with the
-lazy Web administrator page rather than the listener startup bundle. The page
-uses the active application locale, with its packaged `en-US` messages as the
-final fallback, and the same plain ICU and named-variable validation as runtime
-copy. These release-owned strings do not depend on the runtime localization endpoint
+New Web-only administrator copy uses `web-admin` delivery: Page management;
+adding files to an existing Album (`admin.album_import.*`: the Album page's
+links, the create page's target card, the import summary's numbering step and
+Review's changed-match option); and the import-evidence words of an
+existing-Album review's lookup steps (`admin.lookup_evidence.*`). It is
+packaged with the lazy Web administrator chunks that show it rather than the
+listener startup bundle. Each page uses the active application locale, with
+its packaged `en-US` messages as the final fallback, and the same plain ICU
+and named-variable validation as runtime copy.
+These release-owned strings do not depend on the runtime localization endpoint
 or a writable cache; changing them requires a Web release. They are generated from the same
 canonical locale JSON, not maintained separately. Existing administrator keys
 already published through v2 remain in that runtime contract.
 
 The generator writes the scoped manifest and locale bundles under
-`localization/generated/web-admin/`. The Page route loads only the selected
-scoped locale asynchronously, suspending until the complete pack is available
-so confirmations never mix languages. A catalog without any `web-admin` keys
-produces no scoped files; generation removes stale scoped manifests and bundles
-along with obsolete locale files in the existing delivery groups. Native
-synchronization continues to copy only the runtime manifest and `en-US`
-fallback, so a change confined to scoped copy leaves those files unchanged.
+`localization/generated/web-admin/`. The Page route, and each lazy component
+that shows Album-import copy (through `useAlbumImportText`, which shares the
+Page route's loader in `adminPageText.ts`), loads only the selected scoped
+locale asynchronously, suspending until the complete pack is available so
+confirmations never mix languages. A pack that fails to load is loaded again
+on a later render; an optional Album-import link, line or option whose pack
+fails is left out instead of failing its page. A review's lookup steps load the
+same scoped pack only when they show import-evidence words, through a reader
+that asks for a reload in their place when the pack cannot load. A catalog
+without any `web-admin` keys produces no scoped files; generation removes stale
+scoped manifests and bundles along with obsolete locale files in the existing
+delivery groups. Native synchronization continues to copy only the runtime
+manifest and `en-US` fallback, so a change confined to scoped copy leaves those
+files unchanged.
 
 Until migration is complete, existing native resource systems remain valid:
 

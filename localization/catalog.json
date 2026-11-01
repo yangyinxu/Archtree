@@ -1011,6 +1011,136 @@
       ],
       "variables": {}
     },
+    "admin.album_import.add": {
+      "description": "Administrator Album page: hero link that opens import creation for this Album.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.album_import.append_note": {
+      "description": "Administrator import creation for an Album: what an append changes and keeps.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.album_import.back": {
+      "description": "Administrator import creation for an Album: link back to the target Album page.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.album_import.create_refused": {
+      "description": "Administrator import creation for an Album: the create was refused although the Album can still take files.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.album_import.intro": {
+      "description": "Administrator import creation for an Album: introduction above the target card.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.album_import.lookup_note": {
+      "description": "Administrator import creation for an Album: no automatic metadata lookup.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.album_import.match_changed": {
+      "description": "Administrator import Review: a chosen record changed since it was chosen (disabled select option).",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.album_import.no_file_rows": {
+      "description": "Administrator import creation for an Album: how many rows of the target Album's expected tracklist have no file.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.album_import.no_primary": {
+      "description": "Administrator import creation for an Album: the target has no primary Artist Credit.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.album_import.number_next": {
+      "description": "Administrator import summary for an Album with rows without a file: the numbering button is the next step.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.album_import.primary_not_ready": {
+      "description": "Administrator import creation for an Album: a primary Artist of the target is not ready.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.album_import.read_error": {
+      "description": "Administrator import creation for an Album: the target Album read failed (shown with Try again).",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.album_import.target": {
+      "description": "Administrator import creation for an Album: heading of the target Album card.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.album_import.title": {
+      "description": "Administrator import creation for an Album: page heading.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.album_import.too_large": {
+      "description": "Administrator import creation for an Album: the target lists more members than an append allows.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {
+        "max": "number"
+      }
+    },
+    "admin.album_import.unavailable": {
+      "description": "Administrator import creation for an Album: the target is missing or not a ready Album.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.album_import.unreadable": {
+      "description": "Administrator import creation for an Album: the target's saved title or visibility cannot be read.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.album_import.upload_missing": {
+      "description": "Administrator Album page: link beside the expected tracklist summary while rows have no file; opens import creation for this Album.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
     "admin.analysis.budget_daily": {
       "description": "Administrator workbench: paid Luna AI confirmation, the paid Luna AI calls left today across the deployment.",
       "delivery": [
@@ -6672,6 +6802,85 @@
       "description": "Selected Album cover summary.",
       "delivery": [
         "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.lookup_evidence.bridge_note_barcode": {
+      "description": "Administrator workbench: existing-Album review lookup steps: note under the bridge step when the Album titles it names came back from an iTunes lookup by the barcode in the file tags, not from a name search.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {
+        "titles": "string"
+      }
+    },
+    "admin.lookup_evidence.chosen_barcode": {
+      "description": "Administrator workbench: existing-Album review lookup log: the applied release was preselected by the barcode in the tags of every file.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.lookup_evidence.chosen_catalog_number": {
+      "description": "Administrator workbench: existing-Album review lookup log: the applied release was preselected by the catalogue number in the tags of every file.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.lookup_evidence.chosen_release_id_import": {
+      "description": "Administrator workbench: existing-Album review lookup log: the applied release was preselected by the release ID the import of the Album's files applied.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.lookup_evidence.chosen_release_id_tags": {
+      "description": "Administrator workbench: existing-Album review lookup log: the applied release was preselected by the release ID in the tags of every file.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.lookup_evidence.step_barcode": {
+      "description": "Administrator workbench: existing-Album review lookup steps: the release search by the barcode every file's tags carry (never shown as a value).",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.lookup_evidence.step_catalog_number": {
+      "description": "Administrator workbench: existing-Album review lookup steps: the release search by the catalogue number every file's tags carry (never shown as a value).",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.lookup_evidence.step_release_id_import": {
+      "description": "Administrator workbench: existing-Album review lookup steps: the release lookup by the release ID the import of the Album's files applied (never shown as a value).",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.lookup_evidence.step_release_id_tags": {
+      "description": "Administrator workbench: existing-Album review lookup steps: the release lookup by the release ID every file's tags carry (never shown as a value).",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.lookup_evidence.track_title_no_room": {
+      "description": "Administrator workbench: existing-Album review lookup steps: Track-title searches not run because the searches by the identifiers of the import that published the Album used the run's search limit.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.lookup_evidence.track_title_not_needed": {
+      "description": "Administrator workbench: existing-Album review lookup steps: Track-title searches not needed in a run that also looked up the import's identifiers, so a matching release was already found.",
+      "delivery": [
+        "web-admin"
       ],
       "variables": {}
     },

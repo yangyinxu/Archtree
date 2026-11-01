@@ -152,21 +152,27 @@ const progressSchema = z.object({ phase: z.enum(['search', 'details', 'itunes', 
   startedAt: z.iso.datetime(), updatedAt: z.iso.datetime() }).strict().refine(progress => progress.done <= progress.total, 'Invalid lookup progress');
 const searchText = z.string().min(1).max(200);
 /**
- * One step of a review run's timeline: a title search (one text, and its Artist name when credited), the Track-title searches
- * (their titles), or a stage with its settled and total requests (both or neither, within 100); at most four texts. `unconfirmed`
- * is a search the run may not have sent; `partial`, an iTunes step that left a result out of the comparison.
+ * One step of a review run's timeline: a search of the review's captured import evidence (`releaseId`, with `from`: the release
+ * the import applied or the release ID in the files' tags; `barcode`; `catalogNumber`; never a value), a title search (one text,
+ * and its Artist name when credited), the Track-title searches (their titles), or a stage with its settled and total requests
+ * (both or neither, within 100); at most four texts. `unconfirmed` is a search the run may not have sent; `partial`, an iTunes
+ * step that left a result out of the comparison; `byBarcode`, a bridge step with titles whose results all came back for the
+ * captured barcode.
  */
-const stepSchema = z.object({ kind: z.enum(['albumArtist', 'album', 'songArtist', 'song', 'trackTitle', 'details', 'itunes', 'bridge', 'aliases']),
-  state: z.enum(['done', 'unconfirmed', 'active', 'pending', 'skipped']), done: integer.max(100).optional(), total: integer.max(100).optional(),
-  texts: z.array(z.object({ text: searchText, artist: searchText.optional() }).strict()).min(1).max(4).optional(), partial: z.literal(true).optional() }).strict()
-  .refine(step => (step.done === undefined) === (step.total === undefined) && (step.done ?? 0) <= (step.total ?? 0), 'Invalid lookup step');
+const stepSchema = z.object({ kind: z.enum(['releaseId', 'barcode', 'catalogNumber', 'albumArtist', 'album', 'songArtist', 'song', 'trackTitle', 'details', 'itunes', 'bridge', 'aliases']),
+  state: z.enum(['done', 'unconfirmed', 'active', 'pending', 'skipped']), from: z.enum(['import', 'tags']).optional(), done: integer.max(100).optional(), total: integer.max(100).optional(),
+  texts: z.array(z.object({ text: searchText, artist: searchText.optional() }).strict()).min(1).max(4).optional(), partial: z.literal(true).optional(),
+  byBarcode: z.literal(true).optional() }).strict()
+  .refine(step => (step.done === undefined) === (step.total === undefined) && (step.done ?? 0) <= (step.total ?? 0)
+    && (step.from !== undefined) === (step.kind === 'releaseId') && (step.byBarcode === undefined || (step.kind === 'bridge' && step.texts !== undefined))
+    && (!['releaseId', 'barcode', 'catalogNumber'].includes(step.kind) || (step.texts === undefined && step.total === undefined)), 'Invalid lookup step');
 /**
  * A review run's timeline: at most 12 steps, the Track-title search state where the server can say it, the run's start, last-step
  * and end times, and while it waits for an automatic retry, when, for which source and which retry of how many.
  */
 const timelineSchema = z.object({ steps: z.array(stepSchema).max(12),
   trackTitleSearch: z.union([z.object({ state: z.enum(['sent', 'notNeeded', 'pending']) }).strict(),
-    z.object({ state: z.literal('skipped'), reason: z.enum(['positionsStart', 'fileName', 'generic', 'noneDistinct', 'unavailable']) }).strict()]).optional(),
+    z.object({ state: z.literal('skipped'), reason: z.enum(['positionsStart', 'fileName', 'generic', 'noneDistinct', 'noRoom', 'unavailable']) }).strict()]).optional(),
   startedAt: z.iso.datetime(), updatedAt: z.iso.datetime(), completedAt: z.iso.datetime().nullable(),
   retry: z.object({ at: z.iso.datetime(), source: z.enum(['musicbrainz', 'itunes']), attempt: z.number().int().min(1).max(10), limit: z.number().int().min(1).max(10) }).strict()
     .refine(retry => retry.attempt <= retry.limit, 'Invalid lookup retry').nullable() }).strict();
@@ -192,14 +198,15 @@ const appendTracklistSchema = z.object({
  * each shown Luna suggestion's tick state, the analysis budget left (project runs and calls, and calls today), whether this
  * server can run metadata lookup, how many identity rows of the saved draft no decision or preselection answers and, for a saved
  * append to an Album with an expected tracklist until its publication is complete, its rows (the server sends no key otherwise,
- * nor does a release before expected tracklists; both read as null).
+ * nor does a release before expected tracklists; both read as null). `forAlbum` names the Album an import was created for and is sent
+ * only for such an import, which runs no automatic lookup.
  */
 const summarySchema = z.object({
   // `cover`: the applied release's front artwork is being staged (false from a server that sends none).
   append: z.boolean(), waiting: z.object({ uploads: z.boolean(), lookup: z.boolean(), cover: z.boolean().default(false), analysis: z.boolean() }).strict(), placeholderOnly: z.boolean(),
   luna: z.array(z.object({ id: z.string().regex(/^[a-f0-9]{24}$/), tick: z.enum(['ticked', 'unticked', 'resolved', 'conflict']) }).strict()).max(1000),
   analysis: z.object({ runs: integer, attempts: integer, daily: integer }).strict(), lookupAvailable: z.boolean(), identityAnswers: integer.max(1000),
-  appendTracklist: appendTracklistSchema.nullable().default(null)
+  appendTracklist: appendTracklistSchema.nullable().default(null), forAlbum: z.string().regex(/^[a-f0-9]{24}$/).optional()
 }).strict();
 /**
  * The lookup view (null before any run) with the import's revision, automatic-write counter and summary state, and the names lookup

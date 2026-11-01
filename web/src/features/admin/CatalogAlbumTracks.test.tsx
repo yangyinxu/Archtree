@@ -10,6 +10,7 @@
  *   - a failed member read retries from the section and from the page Refresh, and other kinds never read members
  *   - the strict member schema refuses private fields, unknown states and misnumbered or repeated members
  *   - an expected tracklist lists its rows by Disc then Track Number, marks rows without a file and keeps each member's Album-order number
+ *   - Upload missing files appears beside the summary only for rows without a file, the imports capability and a primary Artist Credit
  *   - clearing the expected tracklist confirms what it removes, sends only the clear at the Album revision and rereads the tracks
  *   - a refused clear shows the conflict and rereads the rows, and an unconfirmed one retries the identical body
  *   - a confirmed clear whose reread fails keeps the saved Album, cannot clear the rows still shown and retries the section read
@@ -227,6 +228,32 @@ test.each([
   expect(rows).toHaveLength(value.expected!.rows.reduce((count, row) => count + Math.max(row.memberIds.length, 1), 0));
   expect(within(tracks).queryAllByText('No file yet')).toHaveLength(value.expected!.rows.filter(row => !row.memberIds.length).length);
   expect(within(tracks).queryByRole('heading', { name: 'Outside the expected tracklist' }) !== null).toBe(value.tracks.length > value.expected!.rows.flatMap(row => row.memberIds).length);
+});
+
+test('Upload missing files appears beside the summary only for rows without a file, the imports capability and a primary Artist Credit', async () => {
+  const summary = 'From MusicBrainz, applied Oct 20, 2026: 4 rows, 2 without a file.';
+  const show = async (value: CatalogAlbumTracks, primaryArtistCredit: boolean | undefined, imports = true) => {
+    cleanup(); adminWorkspace.reset(); adminWorkspace.authorize(captureAccountOperation(viewer), imports, true, undefined, { editing: true, visibility: true }); adminWorkspace.select('admin');
+    stub([value]); mount(<CatalogAlbumTracksSection id={albumId} refresh={0} primaryArtistCredit={primaryArtistCredit} />);
+    const tracks = await section(); await within(tracks).findByRole('list', { name: 'Expected tracklist' });
+    return tracks;
+  };
+  const shown = await show(catalogAlbumTracksWithExpected(), true);
+  expect(await within(shown).findByRole('link', { name: 'Upload missing files' })).toHaveAttribute('href', `/admin/imports/new?album=${albumId}`);
+  expect(within(shown).getByText(summary)).toBeVisible();
+  expect(within(shown).queryByText(uploadOnly)).not.toBeInTheDocument();
+  // Without a primary Artist Credit only the upload-only note shows; unknown Credits, no imports, no row without a file or a
+  // truncated Album show neither.
+  const noPrimary = await show(catalogAlbumTracksWithExpected(), false);
+  expect(within(noPrimary).getByText(uploadOnly)).toBeVisible();
+  expect(within(noPrimary).queryByRole('link', { name: 'Upload missing files' })).not.toBeInTheDocument();
+  const filled = { ...catalogAlbumTracks(), expected: { ...catalogAlbumTracksWithExpected().expected!, rows: catalogAlbumTracksWithExpected().expected!.rows.slice(0, 1),
+    outsideMemberIds: ['444444444444444444444444', 'c1c1c1c1c1c1c1c1c1c1c1c1'] } };
+  for (const [value, credit, imports] of [[catalogAlbumTracksWithExpected(), undefined, true], [catalogAlbumTracksWithExpected(), true, false], [filled, true, true],
+    [{ ...catalogAlbumTracksWithExpected(), truncated: true }, true, true]] as const) {
+    const tracks = await show(value, credit, imports);
+    expect(within(tracks).queryByRole('link', { name: 'Upload missing files' })).not.toBeInTheDocument();
+  }
 });
 
 test('clearing the expected tracklist confirms what it removes, sends only the clear at the Album revision and rereads the tracks', async () => {

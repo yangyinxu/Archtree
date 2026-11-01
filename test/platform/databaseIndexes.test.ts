@@ -14,6 +14,7 @@
  *   - the cover cancellation receipt index requires both declared string predicates
  *   - the cover upload bound and cleanup claim indexes are required
  *   - the MusicBrainz ID indexes are required, unique and partial on stored strings only
+ *   - the published-Album import index is required and partial on a stored string Album ID
  *   - a dropped required index makes a previously initialized database unready
  *   - optional performance-index failure preserves required constraints and emits bounded diagnostics
  *   - the lookup cover worker index is optional: its failure is a bounded diagnostic and needs no required-index revision
@@ -233,7 +234,27 @@ test('the MusicBrainz ID indexes are required, unique and partial on stored stri
     await assert.rejects(initializeDatabaseIndexes(failing.db), DatabaseIndexInitializationError);
     assert.deepEqual(failing.receipts, []);
   }
-  assert.equal(requiredIndexRevision, 'required-indexes-v12-catalog-cover-uploads');
+  assert.equal(requiredIndexRevision, 'required-indexes-v13-import-published-album');
+});
+
+test('the published-Album import index is required and partial on a stored string Album ID', async () => {
+  const declared = databaseIndexes.filter(index => index.options?.name === 'admin_import_published_album');
+  assert.deepEqual(declared.map(index => [index.collection, index.keys, index.required, index.options?.partialFilterExpression]),
+    [['adminAlbumImports', { 'media.publication.albumId': 1 }, true, { 'media.publication.albumId': { $type: 'string' } }]]);
+  const indexId = 'adminAlbumImports:media.publication.albumId';
+  const fake = databaseDouble(); await initializeDatabaseIndexes(fake.db);
+  const indexes = fake.metadata.get('adminAlbumImports')!, index = indexes.find(entry => 'media.publication.albumId' in entry.key)!;
+  assert.equal(index.name, 'admin_import_published_album');
+  await verifyRequiredDatabaseIndexes(fake.db);
+  // A substitute without the partial filter cannot stand in for it.
+  const original = structuredClone(index);
+  delete index.partialFilterExpression;
+  await assert.rejects(verifyRequiredDatabaseIndexes(fake.db), (error: unknown) => error instanceof DatabaseIndexInitializationError && error.indexId === indexId);
+  Object.assign(index, original);
+  await verifyRequiredDatabaseIndexes(fake.db);
+  fake.metadata.set('adminAlbumImports', indexes.filter(entry => !('media.publication.albumId' in entry.key)));
+  await assert.rejects(verifyRequiredDatabaseIndexes(fake.db), (error: unknown) => error instanceof DatabaseIndexInitializationError && error.indexId === indexId);
+  assert.equal(requiredIndexRevision, 'required-indexes-v13-import-published-album');
 });
 
 test('a dropped required index makes a previously initialized database unready', async () => {
@@ -260,7 +281,7 @@ test('the lookup cover worker index is optional: its failure is a bounded diagno
   const declared = databaseIndexes.filter(index => index.options?.name === 'admin_import_lookup_cover_worker');
   assert.deepEqual(declared.map(index => [index.collection, index.keys, Boolean(index.required || index.options?.unique)]),
     [['adminAlbumImports', { 'media.lookupCover.due': 1, 'media.lookupCover.leaseUntil': 1 }, false]]);
-  assert.equal(requiredIndexRevision, 'required-indexes-v12-catalog-cover-uploads');
+  assert.equal(requiredIndexRevision, 'required-indexes-v13-import-published-album');
   const fake = databaseDouble(), collection = fake.db.collection.bind(fake.db);
   (fake.db as unknown as { collection: unknown }).collection = (name: string) => {
     const target = collection(name);

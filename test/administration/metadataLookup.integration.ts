@@ -41,6 +41,7 @@
  *   - saves, decisions, candidates and analysis succeed while a run is queued, running or unavailable
  *   - a project closed or deleted after queueing supersedes its run without a request, and a lock during a request discards its answer
  *   - removing a bound file while its request is in flight supersedes the run in the cleanup and discards the late answer
+ *   - an import created for an Album never runs an automatic lookup after an upload, a reconciliation, a changed file set or a submitted run, while a submitted name and its retry still run
  *   - a bound file replaced without lookup bookkeeping, as by a release before lookup jobs, is caught by the worker and by the next trigger
  *   - a refused query is skipped and a refused release lookup leaves its candidate incomplete, while the run completes
  *   - a timed-out or unexpected failure is retried after 30 seconds, a throttled one within seconds, a refused gate keeps a longer Retry-After up to a minute, and busy answers through every retry end the run busy
@@ -880,6 +881,29 @@ test('removing a bound file while its request is in flight supersedes the run in
     held.release();
     assert.equal(await worker, true);
     assert.deepEqual([await lookup(item.id), (await stored(item.id)).lookupGate!.fence, fixture.requests.length], [superseded, 3, 1]);
+});
+
+test('an import created for an Album never runs an automatic lookup after an upload, a reconciliation, a changed file set or a submitted run, while a submitted name and its retry still run', async () => {
+    const id = await seeded(2, syntheticAlbum), forAlbum = { queued: false, run: null, reason: 'forAlbum' };
+    await projects().updateOne({ _id: new ObjectId(id) }, { $set: { createdForAlbumId: new ObjectId().toHexString() } });
+    assert.deepEqual(await requestAutomaticMetadataLookup(by, id, 'upload'), forAlbum);
+    assert.deepEqual(await requestAutomaticMetadataLookup(byOther, id, 'reopen'), forAlbum);
+    assert.deepEqual([await lookup(id), (await stored(id)).lookupGate], [null, undefined]);
+    // A submitted name runs, and a confirmation after it still queues nothing.
+    const submitted = await queue(byOther, id, submit('Typed Album'));
+    assert.deepEqual([submitted.run, submitted.grantSource, submitted.automatic], [1, 'submit', false]);
+    assert.deepEqual(await requestAutomaticMetadataLookup(by, id, 'upload'), forAlbum);
+    // Replacing a bound file still supersedes the active run, but queues no automatic one.
+    await projects().updateOne({ _id: new ObjectId(id), 'media.assets.slotId': (await stored(id)).manifest.files[0].slotId },
+        { $set: { 'media.assets.$.operationId': randomUUID(), 'media.assets.$.sha256': 'f'.repeat(64) } });
+    assert.deepEqual(await requestAutomaticMetadataLookup(by, id, 'upload'), forAlbum);
+    assert.deepEqual([(await lookup(id))!.run, (await lookup(id))!.state, (await lookup(id))!.issue], [1, 'superseded', 'fileSetChanged']);
+    // A retry of the ended run still runs, under its own grant.
+    const retried = await queue(byOther, id, () => ({ kind: 'retry', actorId: byOther, operationId: randomUUID() }));
+    assert.deepEqual([retried.run, retried.grantSource, retried.automatic], [2, 'retry', false]);
+    // Any other import still runs its automatic lookup.
+    const control = await seeded(2, syntheticAlbum);
+    assert.deepEqual(await requestAutomaticMetadataLookup(by, control, 'upload'), { queued: true, run: 1, reason: 'queued' });
 });
 
 test('a bound file replaced without lookup bookkeeping, as by a release before lookup jobs, is caught by the worker and by the next trigger', async () => {

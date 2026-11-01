@@ -16,8 +16,8 @@ import { UNCREDITED_TRACK_TITLE_MIN_WEIGHT } from './lookupTrackTitles';
 import { musicBrainzLuceneQuery, type MusicBrainzRecordingQuery, type MusicBrainzReleaseQuery } from './musicBrainzClient';
 
 /**
- * Pure planner from an import's evidence, or an existing-Album review's saved Album title and primary
- * Artist names, to at most six MusicBrainz queries: valid embedded identifiers first, then album or
+ * Pure planner from an import's evidence, or an existing-Album review's saved Album title, primary
+ * Artist names and captured import identifiers, to at most six MusicBrainz queries: valid embedded identifiers first, then album or
  * song text, then a cleaned folder name. It accepts names, never links or file names; an identifier
  * that fails its format check is dropped and never sent. Submitted text is only normalized (NFC,
  * collapsed whitespace), so a link, an over-long name or a control or format character rejects the
@@ -47,7 +47,7 @@ export type LookupPlanInput = {
     tags?: { album: string | null; albumArtist: string | null; title: string | null; artist: string | null };
     folderName?: string | null;
     fileCount: number;
-    /** Values shared by every selected file. */
+    /** Values shared by every selected file, or an existing-Album review's captured import identifiers (never an ISRC). */
     identifiers?: { releaseId?: string | null; barcode?: string | null; catalogNumber?: string | null; isrc?: string | null };
     /**
      * Existing-Album reviews only: their distinctive saved Track titles in ranked order (distinctiveTrackTitles), each with the
@@ -253,7 +253,8 @@ export const planMetadataLookup = (input: LookupPlanInput): LookupPlan => {
         else if (album) albumQueries(album, true);
         else folderQueries();
     } else if (input.trigger === 'catalog') {
-        // An existing Album is looked up by its saved title only (Track titles only through `trackTitles`): never a file name, folder or identifier.
+        // An existing Album is looked up by its saved title (Track titles only through `trackTitles`), never a file name or folder; its
+        // captured import identifiers come first like an import's.
         // A trailing slash and primary Artist name, which the credited search already sends, is left out of every search of the title.
         const album = tagTerm(tags?.album);
         if (album) albumQueries(titleWithoutTrailingCredit(album, credited.artists) ?? album, true);

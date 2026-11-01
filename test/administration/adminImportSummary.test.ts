@@ -26,6 +26,7 @@
  *   - an Album reuse without a string candidate lists no append tracklist, and a file at the administrator's own position outside the tracklist or on a filled row takes no missing-file row
  *   - a complete publication lists no append tracklist, since the import's own new members then fill its rows, while an unfinished one still does
  *   - the numbering never places a file on a position an appended file it leaves unmoved keeps, and a file left out for that keeps its own position in turn
+ *   - only an import created for an Album carries forAlbum, naming that Album
  * @end-catalog */
 
 /**
@@ -455,4 +456,18 @@ test('the numbering never places a file on a position an appended file it leaves
     const movedLookup = { applied: { values: [{ path: `tracks.${slot(0)}.trackNumber`, value: 6, slotId: slot(0) }] } } as unknown as MetadataLookupRecord;
     assert.deepEqual(numberingOf(moved, rows.slice(0, 2), [], movedLookup), [{ slotId: slot(0), discNumber: 1, trackNumber: 5, title: 'Row Five' },
         { slotId: slot(1), discNumber: 1, trackNumber: 6, title: 'Row Six' }]);
+});
+
+test('only an import created for an Album carries forAlbum, naming that Album', () => {
+    const plain = importSummaryView(project(), null, context(0));
+    assert.equal('forAlbum' in plain, false);
+    const created = project(); created.createdForAlbumId = id(9);
+    const view = importSummaryView(created, null, context(0));
+    assert.equal(view.forAlbum, id(9));
+    assert.deepEqual(Object.keys(view).filter(key => key !== 'forAlbum'), Object.keys(plain));
+    // A malformed stored value names no Album, so the summary keeps its earlier shape.
+    for (const malformed of ['not-an-id', null, 7]) {
+        const doc = project(); (doc as unknown as Record<string, unknown>).createdForAlbumId = malformed;
+        assert.equal('forAlbum' in importSummaryView(doc, null, context(0)), false);
+    }
 });

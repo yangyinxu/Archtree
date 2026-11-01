@@ -335,7 +335,10 @@ sends nothing. Where the save's re-rank instead applies another release for its
 Album values only, leaving nothing open, and the choice after it fails, the
 lookup results stay open under the panel, whose status, saved numbers and Use
 this release stay visible with focus in the panel. Each with an axe scan and no
-overflow, also at 320 px.
+overflow, also at 320 px. A review lookup that searched the import's evidence
+lists its release ID and barcode rows first in its steps, in their own words and
+without a value, and says in its log which one chose the release, at 1280 px in
+English and 390 px in Chinese.
 
 The redesigned review page's own flows run against the same mocked server. A
 44-track Album on three discs whose titles run from 1.01. to 3.14. (every

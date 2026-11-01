@@ -36,6 +36,8 @@
  *   - an append without an expected tracklist, and an import that is no append, show no expected rows
  *   - a file without a Disc Number on a tracklist of several discs, and one at a position no row has, say so beside the row they reach
  *   - numbering is disabled while the summary was read at another automatic-write revision, since automation may have changed the values it numbers
+ *   - an import created for an Album says lookup has not run, never that it waits for uploads, and keeps the name box
+ *   - once every upload is confirmed, numbering from the target's expected tracklist is the primary next step of an import created for an Album, and a click saves it
  * @end-catalog */
 
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
@@ -818,4 +820,41 @@ test('numbering is disabled while the summary was read at another automatic-writ
   const { run } = mount(item, read(item.valueRevision)), action = await button();
   expect(action).toBeEnabled(); fireEvent.click(action);
   expect(run).toHaveBeenCalledTimes(1);
+});
+
+test('an import created for an Album says lookup has not run, never that it waits for uploads, and keeps the name box', async () => {
+  const waiting = { waiting: { uploads: true, lookup: false, cover: false, analysis: false } };
+  mount(appendItem(), lookupResponse({ revision: 1, summary: summary({ append: true, forAlbum: 'f'.repeat(24), ...waiting }) }));
+  expect(await screen.findByText('Metadata lookup has not run for these files. Look up a name below, or use Luna AI (paid).')).toBeVisible();
+  expect(screen.queryByText(/It runs once every selected file is uploaded/)).not.toBeInTheDocument();
+  expect(await screen.findByRole('group', { name: 'Look up by name' })).toBeVisible();
+  cleanup();
+  // An ordinary import still says lookup runs once its uploads are confirmed.
+  mount(appendItem(), lookupResponse({ revision: 1, summary: summary({ append: true, ...waiting }) }));
+  expect(await screen.findByText('Metadata lookup has not run yet. It runs once every selected file is uploaded, or look up a name below.')).toBeVisible();
+});
+
+test('once every upload is confirmed, numbering from the target\'s expected tracklist is the primary next step of an import created for an Album, and a click saves it', async () => {
+  const item = appendItem(), numbering = [{ slotId: slotTwo, discNumber: 1, trackNumber: 3, title: 'Third Row' }];
+  const read = (extra: Record<string, unknown>) => lookupResponse({ revision: 1, summary: summary({ append: true, appendTracklist: appendTracklist({ numbering }), ...extra }) });
+  const button = async () => within(await rowsSection()).getByRole('button', { name: 'Number from the Album\'s expected tracklist' });
+  const next = 'Next step: number these files from the Album\'s expected tracklist. Their Disc and Track Numbers change only when you choose to.';
+  const { run } = mount(item, read({ forAlbum: 'f'.repeat(24) }));
+  const action = await button();
+  expect(action).toHaveClass(styles.primary);
+  expect(await screen.findByText(next)).toBeVisible();
+  await waitFor(() => expect(action).toHaveAccessibleDescription(`${next} Files without your own Disc and Track Numbers take the only row each one can fill, with its title when the file's title is empty or automatic.`));
+  expect(run).not.toHaveBeenCalled();
+  fireEvent.click(action);
+  expect(run).toHaveBeenCalledWith(`/${item.id}`, 'PATCH', { expectedRevision: 1, changes: [{ path: `tracks.${slotTwo}.discNumber`, base: null, value: 1 },
+    { path: `tracks.${slotTwo}.trackNumber`, base: null, value: 3 }, { path: `tracks.${slotTwo}.title`, base: '', value: 'Third Row' }] });
+  cleanup();
+  // While an upload waits, on the server or in this browser, and for an ordinary append, it stays an ordinary secondary button.
+  for (const [response, queue] of [[read({ forAlbum: 'f'.repeat(24), waiting: { uploads: true, lookup: false, cover: false, analysis: false } }), uploads],
+    [read({ forAlbum: 'f'.repeat(24) }), { ...uploads, running: true }], [read({}), uploads]] as const) {
+    mount(item, response, { uploads: queue as ImportUploadQueueView });
+    expect(await button()).not.toHaveClass(styles.primary);
+    expect(screen.queryByText(next)).not.toBeInTheDocument();
+    cleanup();
+  }
 });

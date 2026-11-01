@@ -3,11 +3,11 @@
  *   Functions: AdminCatalogEditor
  * Internal
  *   Types: CatalogBuffer
- *   Constants: CatalogCover, CatalogFields, CatalogReviewStart, CatalogEditConfirmation, MotionPreviewPanel,
- *              CatalogAlbumTracks
+ *   Constants: CatalogCover, CatalogFields, CatalogReviewStart, CatalogAlbumFilesLink, CatalogEditConfirmation,
+ *              MotionPreviewPanel, CatalogAlbumTracks
  * @end-catalog */
 
-import { lazy, Suspense, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router';
 import { ApiError } from '../../api/client';
@@ -28,6 +28,8 @@ import heroStyles from './AdminCatalogEditor.module.css';
 const CatalogCover = lazy(() => import('./CatalogCover').then(module => ({ default: module.CatalogCover })));
 const CatalogFields = lazy(() => import('./CatalogFields').then(module => ({ default: module.CatalogFields })));
 const CatalogReviewStart = lazy(() => import('./CatalogReviewStart').then(module => ({ default: module.CatalogReviewStart })));
+// A link chunk, or its copy, that cannot load renders nothing; the Album page keeps working.
+const CatalogAlbumFilesLink = lazy<(props: { id: string }) => ReactNode>(() => import('./CatalogAlbumFilesLink').then(module => ({ default: module.CatalogAlbumFilesLink }), () => ({ default: () => null })));
 const CatalogEditConfirmation = lazy(() => import('./CatalogEditConfirmation').then(module => ({ default: module.CatalogEditConfirmation })));
 const MotionPreviewPanel = lazy(() => import('./MotionPreviewPanel').then(module => ({ default: module.MotionPreviewPanel })));
 const CatalogAlbumTracks = lazy(() => import('./CatalogAlbumTracks').then(module => ({ default: module.CatalogAlbumTracks })));
@@ -116,6 +118,9 @@ export function AdminCatalogEditor({ kind, id }: { kind: CatalogKind; id: string
             note={edit?.dirty ? t('catalog_review.save_first') : undefined} /></Suspense></div>}
           <div className={heroStyles.secondary}>
             {(kind === 'album' || kind === 'audioTrack') && access.conversion && !edit?.dirty && !conflict && <Link className={styles.link} to={`/admin/conversions?${kind === 'album' ? 'album' : 'track'}=${id}`}>{t('conversion.existing')}</Link>}
+            {/* Adding files appends to the saved Album, which needs imports and a primary Artist Credit; hidden, as conversion is,
+                while the Album has unsaved edits or a save conflict. */}
+            {kind === 'album' && access.imports && primaryArtistCredit && !edit?.dirty && !conflict && <Suspense fallback={null}><CatalogAlbumFilesLink id={id} /></Suspense>}
             {refresh}
           </div>
         </div>

@@ -25,7 +25,8 @@
  * the applied pairing (`pairs`), while its run is queued, running or retrying `progress` (its phase, the done and total counts of
  * that phase's bounded steps and the run's start and last-step times; numbers and times only), and, on the lookup read, for every
  * run it can read that planned a search `timeline` (lookupTimelineView.ts): its searches and stages as bounded steps (a search
- * the record cannot vouch was sent as unconfirmed), the texts its searches sent where each is the review's own saved title,
+ * the record cannot vouch was sent as unconfirmed; a search of a captured import identifier only as its basis and, for a release
+ * ID, where it came from, never its value), the texts its searches sent where each is the review's own saved title,
  * Artist name or Track title or the run's submitted name and Artist name, or an answered bridge search's title a shown candidate
  * carries (never a filename, folder name, label, identifier, iTunes term or artist), the derived Track-title search state, the
  * stored retry time with its attempt, and the run's times. An import's view never carries them. Pure.

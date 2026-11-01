@@ -37,6 +37,8 @@
  *   - an image every file shares is chosen automatically until the administrator chooses, and the summary and confirmation show the choice
  *   - a release with front artwork shows a protected preview, Publish waits while its cover is staged, and the staged lookup cover is then chosen automatically and published
  *   - an iTunes-only result applied after MusicBrainz stayed unavailable is marked iTunes only and not checked against MusicBrainz, its values stay flagged, and it publishes after one confirmation
+ *   - an Album page adds files to that Album: the create page shows the target and sends targetAlbumId, and lands on the new import
+ *   - an import created for an Album makes numbering its primary next step once uploads are confirmed
  *   - an append to an Album with an expected tracklist shows each file's row and flags, numbers the files in one field save, lists the rows in the confirmation, and reflows at 320 px
  * @end-catalog */
 
@@ -46,7 +48,7 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { applyDraftChanges, artistEntry, capabilities, detail, entryKey, labelEntry, lookupResponse, projectId, session, slotId, slotTwo, viewer } from '../src/features/admin/adminFixtures.testSupport';
-import { albumId, albumRevision, catalogAlbum, catalogAlbumTracks, reviewEligibility } from '../src/features/admin/catalogReviewFixtures.testSupport';
+import { albumId, albumRevision, catalogAlbum, catalogAlbumTracks, catalogAlbumTracksWithExpected, reviewEligibility } from '../src/features/admin/catalogReviewFixtures.testSupport';
 import sharp from 'sharp';
 
 /** The file part of one queued multipart upload, so mocked assets carry the real length and SHA-256. */
@@ -1371,6 +1373,85 @@ test('an iTunes-only result applied after MusicBrainz stayed unavailable is mark
   await page.getByRole('dialog').getByRole('button', { name: 'Publish Album', exact: true }).click();
   await expect.poll(() => server.writes.map(write => write.action)).toEqual(['publish']);
   expect(server.writes[0].body).toEqual(expect.objectContaining({ approvalDigest: expect.any(String), decisions: item.decisions }));
+});
+
+test('an Album page adds files to that Album: the create page shows the target and sends targetAlbumId, and lands on the new import', async ({ page }) => {
+  await setup(page); const server = await createRoutes(page);
+  const headers = { 'X-Finitude-Account-Viewer': viewer, 'Cache-Control': 'no-store' }, artistId = '5'.repeat(24);
+  const album = { ...catalogAlbum(), fields: { ...catalogAlbum().fields, attributionStatus: 'documented' as const,
+    credits: [{ creditId: 'synthetic_primary', subjectType: 'artist' as const, subjectId: artistId, role: 'primary' as const, order: 0 }] } };
+  // Registered after createRoutes, so these answer first; anything else falls back to it and to setup.
+  await page.route('**/api/admin/v1/**', async route => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === `/api/admin/v1/catalog/album/${albumId}`) return route.fulfill({ json: { item: album }, headers });
+    if (path === `/api/admin/v1/catalog/album/${albumId}/tracks`) return route.fulfill({ json: catalogAlbumTracksWithExpected(), headers });
+    if (path === `/api/admin/v1/catalog/album/${albumId}/cover-operations`) return route.fulfill({ json: { items: [] }, headers });
+    if (path === `/api/admin/v1/catalog/artist/${artistId}`) return route.fulfill({ json: { item: { ...catalogAlbum(), id: artistId, kind: 'artist', fields: { name: 'Synthetic Ensemble', bio: '', birthDate: null, musicBrainzId: null } } }, headers });
+    if (path === '/api/admin/v1/catalog-reviews/eligibility') return route.fulfill({ json: reviewEligibility(), headers });
+    if (path === `/api/admin/v1/imports/album-targets/${albumId}`) return route.fulfill({ json: { albumId, refusal: null,
+      album: { title: 'Synthetic catalog Album', primaryArtists: ['Synthetic Ensemble'], coverUrl: null, missingRows: 1 } }, headers });
+    return route.fallback();
+  });
+  await page.goto(`/finitude/admin/catalog/album/${albumId}`); await page.getByRole('button', { name: 'Switch to Admin view' }).click();
+  const tracks = page.getByRole('region', { name: 'Tracks', exact: true });
+  await expect(tracks.getByRole('link', { name: 'Upload missing files', exact: true })).toHaveAttribute('href', `/finitude/admin/imports/new?album=${albumId}`);
+  await page.getByRole('link', { name: 'Add files to this Album', exact: true }).click();
+  await expect(page).toHaveURL(new RegExp(`/finitude/admin/imports/new\\?album=${albumId}$`));
+  await expect(page.getByRole('heading', { name: 'Add files to an existing Album', exact: true })).toBeVisible();
+  const card = page.getByRole('region', { name: 'Target Album', exact: true });
+  await expect(card.getByText('Synthetic catalog Album', { exact: true })).toBeVisible();
+  await expect(card.getByText('1 row of its expected tracklist has no file yet.', { exact: true })).toBeVisible();
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+  await page.setViewportSize({ width: 320, height: 900 }); expect(await noOverflow(page)).toBe(true);
+  await page.locator('input[type=file]').nth(1).setInputFiles([{ name: 'Song.mp3', mimeType: 'audio/mpeg', buffer: Buffer.alloc(120, 7) }]);
+  await page.getByRole('button', { name: 'Create import and upload files', exact: true }).click();
+  await expect.poll(() => server.created.length).toBe(1);
+  expect(server.created[0]).toMatchObject({ targetAlbumId: albumId }); expect(server.created[0]).not.toHaveProperty('draft');
+  await expect.poll(() => server.uploads.length).toBe(1);
+  await expect(page).toHaveURL(new RegExp(`/finitude/admin/imports/${projectId}$`));
+});
+
+test('an import created for an Album makes numbering its primary next step once uploads are confirmed', async ({ page }) => {
+  await setup(page);
+  const item = uploadedProject(), [first, second] = item.draft.tracks, target = '3'.repeat(24);
+  Object.assign(first, { discNumber: null, trackNumber: null }); Object.assign(second, { title: '', discNumber: null, trackNumber: null });
+  item.decisions = [{ scope: 'album', slotId: null, entryKey: null, boundName: null, action: 'reuse', candidateId: target, candidateRevision: 'r-album' }];
+  const tracklist = { albumId: target, durationToleranceMs: 3000,
+    rows: [{ discNumber: 1, trackNumber: 1, title: 'Opening', durationMs: null, filled: true }, { discNumber: 1, trackNumber: 2, title: 'Second Row', durationMs: 200_000, filled: false },
+      { discNumber: 1, trackNumber: 3, title: 'Third Row', durationMs: 300_000, filled: false }],
+    files: [{ slotId: first.slotId, durationMs: 200_500, durationPrecisionMs: 0, appended: true }, { slotId: second.slotId, durationMs: 300_000, durationPrecisionMs: 0, appended: true }],
+    numbering: [{ slotId: first.slotId, discNumber: 1, trackNumber: 2, title: null }, { slotId: second.slotId, discNumber: 1, trackNumber: 3, title: 'Third Row' }] };
+  const changes = [{ path: `tracks.${first.slotId}.discNumber`, base: null, value: 1 }, { path: `tracks.${first.slotId}.trackNumber`, base: null, value: 2 },
+    { path: `tracks.${second.slotId}.discNumber`, base: null, value: 1 }, { path: `tracks.${second.slotId}.trackNumber`, base: null, value: 3 }, { path: `tracks.${second.slotId}.title`, base: '', value: 'Third Row' }];
+  const server = await summaryProject(page, item, (state, action, body) => {
+    expect([action, body]).toEqual(['', { operationId: expect.any(String), expectedRevision: state.item.revision, changes }]);
+    state.item = { ...state.item, draft: applyDraftChanges(state.item.draft, body.changes) };
+    state.summary = { append: true, forAlbum: target, appendTracklist: { ...tracklist, numbering: [] } };
+    return 'edit';
+  });
+  server.summary = { append: true, forAlbum: target, appendTracklist: tracklist, waiting: { uploads: true, lookup: false, cover: false, analysis: false } };
+  await page.goto(`/finitude/admin/imports/${projectId}`); await page.getByRole('button', { name: 'Switch to Admin view' }).click();
+  const next = summaryRegion(page).getByText('Next step: number these files from the Album\'s expected tracklist. Their Disc and Track Numbers change only when you choose to.', { exact: true });
+  await expect(summaryRegion(page).getByText('Metadata lookup has not run for these files. Look up a name below, or use Luna AI (paid).', { exact: true })).toBeVisible();
+  const rows = summaryRegion(page).getByRole('region', { name: 'Album\'s expected tracklist', exact: true });
+  const number = rows.getByRole('button', { name: 'Number from the Album\'s expected tracklist', exact: true });
+  const luna = summaryRegion(page).getByRole('button', { name: 'Use Luna AI (paid)', exact: true });
+  const classes = async (button: typeof number) => (await button.getAttribute('class') ?? '').split(/\s+/).filter(Boolean);
+  // While an upload waits the button is an ordinary secondary one, styled like the paid Luna AI button.
+  await expect(number).toBeVisible(); await expect(next).toHaveCount(0);
+  expect(await classes(number)).toEqual(await classes(luna));
+  // Once every upload is confirmed it is the next step: primary, under its line, and still waiting for a click.
+  server.summary = { append: true, forAlbum: target, appendTracklist: tracklist };
+  await page.reload(); await page.getByRole('button', { name: 'Switch to Admin view' }).click();
+  await expect(next).toBeVisible();
+  const lunaClasses = await classes(luna);
+  expect((await classes(number)).filter(name => !lunaClasses.includes(name))).not.toEqual([]);
+  expect(server.writes).toEqual([]);
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+  await page.setViewportSize({ width: 320, height: 900 }); expect(await noOverflow(page)).toBe(true);
+  await number.click();
+  await expect.poll(() => server.writes.map(write => write.action)).toEqual(['']);
+  await expect(number).toHaveCount(0); await expect(next).toHaveCount(0);
 });
 
 test('an append to an Album with an expected tracklist shows each file\'s row and flags, numbers the files in one field save, lists the rows in the confirmation, and reflows at 320 px', async ({ page }) => {

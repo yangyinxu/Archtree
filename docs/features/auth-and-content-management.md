@@ -541,7 +541,7 @@ sign-in attempts.
   Each contextual Home item may carry
   `{ "reason": { "code": "followedArtist", "artist": { "id": "...", "name": "..." } } }`;
   public content summaries and expanded `included` objects never gain this field.
-- Startup revision `required-indexes-v12-catalog-cover-uploads` requires the
+- Startup revision `required-indexes-v13-import-published-album` requires the
   unique `artistFollows(userId, artistId)` index, owner/follow-date and
   Artist/owner cleanup indexes, and the Album/MediaTrack descending
   calendar-date indexes. The resolver uses those date indexes, bounded equality
