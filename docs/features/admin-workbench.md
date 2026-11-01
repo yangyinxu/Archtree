@@ -89,6 +89,19 @@ falls back to User on a new authorization. Account/role loss still immediately
 clears private buffers and fences old operations; the saved choice grants no
 access and contains no draft or operation state.
 
+A new-Album import keeps the applied release's per-track Artist entries only
+when its tracks pair positionally with every selected file. The summary shows
+independent bylines and explains inheritance when a release track has no usable
+list or exceeds the bounded identity plan. Review resolves shared and track-only
+Artist identities; the publication confirmation lists each differing track,
+selected by default, and allows reverting it to the Album's primary Artists.
+The approval freezes only the identities its selected, non-skipped tracks need.
+Format-4 publication snapshots commit those track Credits, their Artists and
+MusicBrainz ID writes in the catalog transaction with the normal publication
+receipt. Existing format-1/2/3 approvals retain their frozen behavior. Appending
+continues to inherit the target Album's primary Credits. The `track_artists`
+copy is release-packaged `web-admin` content rather than a native runtime change.
+
 The Web import editor uses Draft, Review, Files and Publish sections.
 Section navigation retains account-fenced local work and does not dispatch a
 mutation. Saving sends only the values the administrator changed, each with

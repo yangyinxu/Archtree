@@ -38,6 +38,7 @@
  *   - numbering is disabled while the summary was read at another automatic-write revision, since automation may have changed the values it numbers
  *   - an import created for an Album says lookup has not run, never that it waits for uploads, and keeps the name box
  *   - once every upload is confirmed, numbering from the target's expected tracklist is the primary next step of an import created for an Album, and a click saves it
+ *   - the new Album summary names independent track Artists and inheritance, while an append shows neither
  * @end-catalog */
 
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
@@ -857,4 +858,19 @@ test('once every upload is confirmed, numbering from the target\'s expected trac
     expect(screen.queryByText(next)).not.toBeInTheDocument();
     cleanup();
   }
+});
+
+
+test('the new Album summary names independent track Artists and inheritance, while an append shows neither', async () => {
+  const item = detail(), primary = artistEntry('Lorem Lead'), featured = artistEntry('Ipsum Guest', '30000000-0000-4000-8000-000000000002', 'featured');
+  primary.joinPhrase = ' feat. ';
+  const extra = { trackArtists: [{ slotId, entries: [{ ...primary, identity: primary.key }, { ...featured, identity: featured.key }] }], inheritsAlbum: [slotTwo] };
+  mount(item, lookupResponse({ summary: summary(extra) }));
+  expect(await screen.findByText('Track Artists: Lorem Lead feat. Ipsum Guest')).toBeInTheDocument();
+  expect(await screen.findByText('Uses the Album’s primary Artists because the paired release track has no usable Artist list.')).toBeInTheDocument();
+  cleanup();
+  mount(item, lookupResponse({ summary: summary({ ...extra, append: true }) }));
+  await ready();
+  expect(screen.queryByText('Track Artists: Lorem Lead feat. Ipsum Guest')).not.toBeInTheDocument();
+  expect(screen.queryByText(/paired release track has no usable Artist list/)).not.toBeInTheDocument();
 });

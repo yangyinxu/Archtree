@@ -4,15 +4,16 @@
  *   Functions: ImportApprovalChecklist
  * Internal
  *   Functions: RowsUnavailable
- *   Constants: identityKeys, ImportExpectedRows
+ *   Constants: identityKeys, ImportExpectedRows, TrackArtistsChecklist
  * @end-catalog */
 
-import { lazy, Suspense, useEffect, useId, useState, type ComponentProps, type ComponentType } from 'react';
+import { lazy, Suspense, useEffect, useId, useMemo, useState, type ComponentProps, type ComponentType } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useLocalization } from '../../localization/LocalizationProvider';
 import type { MessageKey } from '../../localization/contract';
 import { useAdminAccess, useAdminText } from './AdminAccess';
 import type { ImportExpectedRows as ExpectedRows } from './ImportExpectedRows';
+import type { TrackArtistsChecklist as TrackChecklist } from './ImportTrackArtists';
 import { adminRequest, duplicateEditsKey, importPath, lookupCoverName, type DecisionEdits, type ImportDecision, type ImportDetail, type ImportDraftV2 } from './adminApi';
 import { candidatesSchema, identityPreselections, musicBrainzIdWrites, type MusicBrainzIdWrite } from './importIdentity';
 import { adminWorkspace } from './adminWorkspace';
@@ -28,7 +29,8 @@ import styles from './adminStyles';
  * The publish body a confirmation can send, with the preselections, Luna ticks and MusicBrainz ID writes it shows (the approval
  * refuses any other set), and whether everything it shows is decided and current.
  */
-export interface ApprovalState { body: ApprovalBody & { preselections: ImportDecision[]; suggestionTicks: ReturnType<typeof suggestionTicks>; musicBrainzIds: MusicBrainzIdWrite[] }; ready: boolean }
+export interface ApprovalState { body: ApprovalBody & { preselections: ImportDecision[]; suggestionTicks: ReturnType<typeof suggestionTicks>; musicBrainzIds: MusicBrainzIdWrite[];
+  trackArtists?: { slotId: string; selected: boolean }[] }; ready: boolean }
 
 const identityKeys = { new: 'publication.new_record', needsDecision: 'publication.needs_decision', changed: 'publication.decision_changed', notApplied: 'publication.not_applied' } as const;
 /** Stands in for expected rows whose chunk cannot load. */
@@ -37,6 +39,9 @@ function RowsUnavailable() { const t = useAdminText(); return <p role="alert">{t
 // asks for a reload in their place. The rows are information only, so approval does not wait for them.
 const ImportExpectedRows = lazy<ComponentType<ComponentProps<typeof ExpectedRows>>>(() => import('./ImportExpectedRows')
   .then(module => ({ default: module.ImportExpectedRows }), () => ({ default: RowsUnavailable })));
+// A new Album's Track Artists block loads only when some track differs; a chunk that cannot load asks for a reload and keeps Approve off.
+const TrackArtistsChecklist = lazy<ComponentType<ComponentProps<typeof TrackChecklist>>>(() => import('./ImportTrackArtists')
+  .then(module => ({ default: module.TrackArtistsChecklist }), () => ({ default: RowsUnavailable })));
 
 /**
  * The publication confirmation's list of everything that becomes catalog content, built from the project, the editor's draft and
@@ -51,6 +56,10 @@ const ImportExpectedRows = lazy<ComponentType<ComponentProps<typeof ExpectedRows
  * (`onAdopt`, the summary's same adopt body), after which Review answers it. An append waits for the summary read to answer too
  * and lists the target's missing-file rows the shown new tracks fill (information only, so a failed read shows its error without
  * holding approval), or, when Review's unsaved decisions target another Album than the saved one, says to save them first.
+ * A new Album also waits for the summary read: its tracks whose own Artist entries differ are listed ticked in the Track Artists
+ * block (its own lazy chunk, which must show before approval), unticking one leaves out of the identity rows, preselections and ID
+ * writes every track-only identity only unticked or skipped tracks credit, the body sends each listed track's tick, and an unsaved
+ * change to the Album's Artist entries holds approval, since the tracks were compared with the saved entries.
  * Loaded on demand with the confirmation.
  */
 export function ImportApprovalChecklist({ item, draft, changes, onChange, onAdopt }: {
@@ -58,25 +67,30 @@ export function ImportApprovalChecklist({ item, draft, changes, onChange, onAdop
   onAdopt: (body: { generation: number; selectedIds: string[]; rejectIds: string[] }) => void;
 }) {
   const t = useAdminText(), { t: sharedText } = useLocalization(), access = useAdminAccess(), heading = useId();
-  // Review's unsaved decisions and the summary's tick toggles are read once, as the dialog opens; the modal keeps them from changing behind it.
-  const [body] = useState(() => {
-    const decisions = shownDecisions(item, draft, adminWorkspace.buffer<DecisionEdits>(duplicateEditsKey(item.id)) ?? null);
-    return decisions && approvalBody(item, changes, decisions);
-  });
+  // The server's tick state, an append target's rows and a new Album's track Artist entries, shared with the summary.
+  const summary = useQuery(importSummaryQuery(access, item)), identities = summary.data?.summary.trackIdentities;
+  // Review's unsaved decisions and the summary's tick toggles are read once, as the dialog opens; the modal keeps them from changing
+  // behind it. Decisions on track-only identities are kept once the summary names them.
+  const [edits] = useState(() => adminWorkspace.buffer<DecisionEdits>(duplicateEditsKey(item.id)) ?? null);
+  const body = useMemo(() => { const decisions = shownDecisions(item, draft, edits, identities); return decisions && approvalBody(item, changes, decisions); }, [Boolean(summary.data)]);
+  const [deselected, setDeselected] = useState<string[]>([]), [tracksOk, setTracksOk] = useState(false);
   const [toggles] = useState(() => adminWorkspace.buffer<Record<string, boolean>>(lunaTicksKey(item.id)) ?? {});
   const pending = item.suggestions.filter(suggestion => suggestion.decision === 'pending');
   // The Album the shown decisions append to, and the one the saved decisions do: the summary lists the saved target's rows.
   const shownTarget = body?.decisions.find(decision => decision.scope === 'album' && decision.action === 'reuse')?.candidateId ?? null;
   const savedTarget = item.decisions.find(decision => decision.scope === 'album' && decision.action === 'reuse')?.candidateId ?? null, append = Boolean(shownTarget);
-  // The server's tick state and an append target's rows, shared with the summary; only a project with pending suggestions, or an
-  // append, waits for it. Pending ticks need the read to succeed; an append's rows only need it to answer, since they are
+  // Pending ticks and a new Album's track entries need the read to succeed; an append's rows only need it to answer, since they are
   // information only.
-  const summary = useQuery({ ...importSummaryQuery(access, item), enabled: pending.length > 0 || append });
   const ticks = new Map(summary.data?.summary.luna.map(entry => [entry.id, entry.tick]));
   const luna = suggestionTicks(item, ticks, toggles, new Set(changes.map(change => change.path)));
   const lunaReady = !pending.length || summary.isSuccess, rowsReady = !append || summary.isSuccess || summary.isError, tracklist = summary.data?.summary.appendTracklist ?? null;
-  const shown = tickedDraft(draft, item.suggestions, luna.ticked), read = [item.draft, lunaProposals(item)];
-  const bound = body ? boundDecisions(body.decisions, shown) : [];
+  const shown = tickedDraft(draft, item.suggestions, luna.ticked), trackArtists = append ? [] : summary.data?.summary.trackArtists ?? [];
+  // Identities are read for the draft with one featured entry per track-only identity a ticked, not skipped track credits.
+  const skipped = body?.decisions.filter(decision => decision.scope === 'track' && decision.action === 'skip').map(decision => decision.slotId) ?? [];
+  const extra = trackArtists.length ? (identities ?? []).filter(identity => identity.slotIds.some(slot => !deselected.includes(slot) && !skipped.includes(slot))) : [];
+  const withTracks = (value: ImportDraftV2): ImportDraftV2 => ({ ...value, album: { ...value.album, artists: [...value.album.artists, ...extra.map(({ key, name, musicBrainzId }) => ({ key, name, role: 'featured' as const, joinPhrase: null, musicBrainzId }))] } });
+  const identityDraft = withTracks(shown), read = [withTracks(item.draft), lunaProposals(item)];
+  const bound = body ? boundDecisions(body.decisions, identityDraft) : [];
   // The same candidate read Review uses (and shares while Review keeps it): reuses are shown by name and visibility from it, and
   // the preselections are computed from it for rows holding a saved or proposed value; a row renamed in the unsaved draft is never
   // preselected (its candidates were not read).
@@ -85,23 +99,28 @@ export function ImportApprovalChecklist({ item, draft, changes, onChange, onAdop
     queryFn: ({ signal }) => adminRequest(`${importPath(item.id)}/duplicate-candidates`, candidatesSchema, { signal }),
     enabled: Boolean(body), retry: false, gcTime: 0
   });
-  const preselections = body && candidates.isSuccess && lunaReady ? identityPreselections(shown, read, bound, candidates.data) : [];
+  const preselections = body && candidates.isSuccess && lunaReady ? identityPreselections(identityDraft, read, bound, candidates.data) : [];
   // Every MusicBrainz ID the publication records or replaces is listed, and sent: the approval refuses any other set.
-  const writes = body && candidates.isSuccess && lunaReady ? musicBrainzIdWrites(shown, bound, preselections, candidates.data) : [];
+  const writes = body && candidates.isSuccess && lunaReady ? musicBrainzIdWrites(identityDraft, bound, preselections, candidates.data) : [];
   const ticked = new Set(luna.ticked.map(id => suggestionPath(item.suggestions.find(suggestion => suggestion.id === id)!)));
-  const checklist = body && candidates.isSuccess && lunaReady ? approvalChecklist(shown, bound, candidates.data.items,
+  const checklist = body && candidates.isSuccess && lunaReady ? approvalChecklist(identityDraft, bound, candidates.data.items,
     { automaticPaths: item.automaticPaths, lookupPaths: item.lookupPaths, possibleLabelEntryKeys: item.possibleLabelEntryKeys, changedPaths: [...changes.map(change => change.path), ...ticked] }, preselections, writes) : null;
-  const ready = Boolean(checklist && checklist.blocked === 0 && !candidates.isFetching && !summary.isFetching && rowsReady);
+  const artistsChanged = trackArtists.length > 0 && JSON.stringify(shown.album.artists) !== JSON.stringify(item.draft.album.artists);
+  const ready = Boolean(checklist && checklist.blocked === 0 && !candidates.isFetching && !summary.isFetching && rowsReady && (append || summary.isSuccess)
+    && (!trackArtists.length || (tracksOk && !artistsChanged)));
   // Rows a ticked suggestion introduces that still need an explicit answer (a same-name record and no preselection): the same
   // checklist without the ticks blocks fewer rows.
-  const untickedDecisions = body ? boundDecisions(body.decisions, draft) : [];
-  const lunaRows = Boolean(checklist && luna.ticked.length && checklist.blocked > approvalChecklist(draft, untickedDecisions, candidates.data!.items, undefined,
-    identityPreselections(draft, read, untickedDecisions, candidates.data!)).blocked);
+  const unticked = withTracks(draft), untickedDecisions = body ? boundDecisions(body.decisions, unticked) : [];
+  const lunaRows = Boolean(checklist && luna.ticked.length && checklist.blocked > approvalChecklist(unticked, untickedDecisions, candidates.data!.items, undefined,
+    identityPreselections(unticked, read, untickedDecisions, candidates.data!)).blocked);
   // Reported again only when what it shows changes, so the dialog's state update never loops back here.
-  const reported = JSON.stringify([preselections, luna, writes]);
+  const selections = trackArtists.map(({ slotId }) => ({ slotId, selected: !deselected.includes(slotId) }));
+  const reported = JSON.stringify([preselections, luna, writes, selections]);
   useEffect(() => {
-    const [shownPreselections, shownTicks, shownWrites] = JSON.parse(reported) as [ImportDecision[], typeof luna, MusicBrainzIdWrite[]];
-    onChange(body && { body: { ...body, preselections: shownPreselections, suggestionTicks: shownTicks, musicBrainzIds: shownWrites }, ready });
+    const [shownPreselections, shownTicks, shownWrites, shownTracks] = JSON.parse(reported) as [ImportDecision[], typeof luna, MusicBrainzIdWrite[], typeof selections];
+    const needed = new Set(extra.map(identity => identity.key)), trackOnly = new Set((identities ?? []).map(identity => identity.key));
+    const decisions = body?.decisions.filter(decision => decision.scope !== 'artist' || !trackOnly.has(decision.entryKey!) || needed.has(decision.entryKey!));
+    onChange(body && { body: { ...body, decisions: decisions!, preselections: shownPreselections, suggestionTicks: shownTicks, musicBrainzIds: shownWrites, ...(shownTracks.length ? { trackArtists: shownTracks } : {}) }, ready });
   }, [body, ready, reported]);
   const identity = (value: ApprovalIdentity) => value.kind === 'reused'
     ? [t('publication.reused_record', { name: value.label }), value.hidden && t('field.hidden')].filter(Boolean).join(' · ') : t(identityKeys[value.kind]);
@@ -126,7 +145,7 @@ export function ImportApprovalChecklist({ item, draft, changes, onChange, onAdop
       <dl>
         <div><dt>{t('field.title')}</dt><dd>{applied(shown.album.title || t('common.untitled'))}</dd></div>
         <div><dt>{t('field.artists')}</dt><dd>{[entriesByline(shown.album.artists) || '—', checklist.artistsFromTags && t('publication.tags_only')].filter(Boolean).join(' · ')}
-          <ol>{checklist.artists.map(entry => <li key={entry.key}>{[entry.name, sharedText(`catalog.credit.${entry.role}` as MessageKey),
+          <ol>{checklist.artists.slice(0, shown.album.artists.length).map(entry => <li key={entry.key}>{[entry.name, sharedText(`catalog.credit.${entry.role}` as MessageKey),
             entry.joinPhrase && t('publication.join_phrase', { phrase: entry.joinPhrase }), identity(entry.identity), idWrite(entry.musicBrainzIdWrite), entry.possibleLabel && t('entries.possible_label')].filter(Boolean).join(' · ')}</li>)}</ol></dd></div>
         <div><dt>{t('field.label')}</dt><dd>{checklist.label ? [checklist.label.name, identity(checklist.label.identity), idWrite(checklist.label.musicBrainzIdWrite), checklist.labelFromTags && t('publication.tags_only')].filter(Boolean).join(' · ') : t('publication.no_label')}</dd></div>
         <div><dt>{t('field.releaseDate')}</dt><dd>{applied(reviewValueText(shown.album.releaseDate))}</dd></div>
@@ -140,6 +159,11 @@ export function ImportApprovalChecklist({ item, draft, changes, onChange, onAdop
           ? [track.identity.kind !== 'reused' && (track.title || t('common.untitled')), identity(track.identity), t('publication.existing_member')]
           : [t('publication.track_position', { disc: String(track.discNumber ?? 1), track: track.trackNumber === null ? '—' : String(track.trackNumber) }),
             track.title || t('common.untitled'), identity(track.identity)]).filter(Boolean).join(' · ')}</li>)}</ol></dd></div>
+        {trackArtists.length > 0 && <Suspense fallback={null}><TrackArtistsChecklist tracks={trackArtists} order={checklist.tracks.filter(track => !track.existing)} filenames={item.manifest.files}
+          deselected={deselected} onToggle={(slotId, selected) => setDeselected(selected ? deselected.filter(slot => slot !== slotId) : [...deselected, slotId])} artistsChanged={artistsChanged}
+          albumByline={entriesByline(shown.album.artists.filter(entry => entry.role === 'primary'))} onReady={setTracksOk} describe={key => {
+            const row = checklist.artists.find(entry => entry.key === key); return row ? [identity(row.identity), idWrite(row.musicBrainzIdWrite)].filter(Boolean).join(' · ') : '';
+          }} /></Suspense>}
         {/* Rows are read for the saved target only; Review's unsaved decisions naming another Album need saving first. */}
         {checklist.append && shownTarget !== savedTarget ? <div><dt>{t('append_rows.title')}</dt><dd><p role="note">{t('append_rows.unsaved_target')}</p></dd></div>
           : tracklist && tracklist.albumId === shownTarget && <div><dt>{t('append_rows.title')}</dt><dd><Suspense fallback={null}>

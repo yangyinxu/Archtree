@@ -17,15 +17,18 @@ import { sortTrackIdsByDiscAndTrackNumber } from '../../services/catalog/albumTr
 import { ADMIN_IMPORT_LIMITS, AdminImportError, IMPORT_APPROVAL_FIELDS, exact, importEnabled, objectId, record, uuid } from './adminImportContract';
 import { boundImportApproval, saveImportApproval } from './adminImportApproval';
 import { getAdminImport, importCandidateProjection, importCollection, importLookupRecord, importPurposeFilter, importCandidateRevision, mutateAdminImport, withImportAdmin } from './adminImportService';
-import { importPrivateStorageReady, importPublicationSupported, type ImportAsset, type ImportPublication } from './adminImportMediaTypes';
-import { hasOwn, sameDraftValue, type ImportDecisionV2 } from './adminImportDraft';
+import { importPrivateStorageReady, importPublicationSupported, type ImportAsset, type ImportPublication, type ImportPublicationTrackArtists } from './adminImportMediaTypes';
+import { hasOwn, importIdentityDraft, importTrackArtistPlan, retainBoundDecisions, sameDraftValue, type ImportDecisionV2 } from './adminImportDraft';
 import { importDraftV2View } from './adminImportDraftCompat';
 import { applySuggestionTicks, boundSuggestionTicks } from './adminImportLunaTicks';
 import { importUploadsWaiting } from './adminImportSummary';
 import { draftV2Paths, markAdministratorValues } from './adminImportValueState';
 import { defaultImportObjectStorage, importAssetTarget, type ImportObjectStorage, type ImportObjectTarget, type ImportObjectIdentity } from './adminImportStorage';
 import { assertImportPreselectionsCurrent, importIdentityCandidates, importIdentityPreselections, sameImportPreselections } from './adminImportIdentity';
-import { assertImportReusedRecordsReady, commitImportCatalogGraph, freezeImportIdentities, importAlbumCredits, importPublicationConflict as conflict, requireCurrentApproval as currentApproval, requireImportPublicationReady as ready } from './adminImportCatalogCommit';
+import {
+    assertImportReusedRecordsReady, commitImportCatalogGraph, freezeImportIdentities, importAlbumCredits, importTrackEntryCredits, importPublicationConflict as conflict, requireCurrentApproval as currentApproval,
+    requireImportPublicationReady as ready
+} from './adminImportCatalogCommit';
 import { lookupAnswersNeeded } from '../lookup/lookupValueApplication';
 import { importLocalizedNameMap, mergeImportLocalizedNames } from './adminImportLocalizedNames';
 import { importMusicBrainzIdWrites, importMusicBrainzNameMap, mergeImportMusicBrainzNames, sameMusicBrainzIdWrites } from './adminImportMusicBrainzIds';
@@ -67,9 +70,17 @@ const lookupGateProjection = { run: 1, state: 1, 'ranking.preselection': 1, 'ran
  * ({scope, entryKey, musicBrainzId, replaces}); the frozen writes must equal it, and a body without it may freeze no write
  * (ADMIN_IMPORT_REVIEW_REQUIRED otherwise), so an editor that did not show the IDs never records one. The names lookup found for
  * each carried ID are frozen with the approval for the worker's alias recheck.
+ * Track Artist entries (a new Album only): the tracks whose entries do not agree with the saved draft's primary entries
+ * (importTrackArtistPlan, after the changes and ticks) are the ones the optional `trackArtists` [{slotId, selected}] must list,
+ * exactly (ADMIN_IMPORT_REVIEW_REQUIRED otherwise); a body without it is admitted only when there is none (otherwise
+ * ADMIN_IMPORT_RELOAD_REQUIRED), and an append ignores it. Identities are read, preselected and frozen on the identity draft
+ * (importIdentityDraft) without the tracks shown deselected or decided `skip`, so an Artist only those tracks credit needs no
+ * decision and is not created. When some selected track remains, the approval is format 4: it also freezes each track-only
+ * identity's Artist and each selected track's entries naming their frozen Artists (a list naming one Artist twice is
+ * ADMIN_IMPORT_REVIEW_REQUIRED); otherwise format 3, exactly as before. Track entries stay automatic.
  */
 export async function publishAdminImport(actor: string, id: string, raw: unknown) {
-    const body = record(raw); exact(body, ['operationId', 'expectedRevision', ...IMPORT_APPROVAL_FIELDS, 'preselections', 'suggestionTicks', 'musicBrainzIds']); if (!uuid(body.operationId) || !Number.isSafeInteger(body.expectedRevision) || (body.expectedRevision as number) < 1) throw new AdminImportError(400, 'ADMIN_IMPORT_INVALID_INPUT');
+    const body = record(raw); exact(body, ['operationId', 'expectedRevision', ...IMPORT_APPROVAL_FIELDS, 'preselections', 'suggestionTicks', 'musicBrainzIds', 'trackArtists']); if (!uuid(body.operationId) || !Number.isSafeInteger(body.expectedRevision) || (body.expectedRevision as number) < 1) throw new AdminImportError(400, 'ADMIN_IMPORT_INVALID_INPUT');
     boundImportApproval(body); if (hasOwn(body, 'suggestionTicks')) boundSuggestionTicks(body.suggestionTicks);
     const result = await mutateAdminImport(actor, id, body as typeof body & { operationId: string; expectedRevision: number }, 'publish', async (doc, session) => {
         ready();
@@ -93,15 +104,27 @@ export async function publishAdminImport(actor: string, id: string, raw: unknown
         if (lookupCoverStagingActive(doc.media?.lookupCover, new Date())) throw new AdminImportError(409, 'ADMIN_IMPORT_LOOKUP_ACTIVE');
         // The project is Draft v2 here (converted on admission). A stored value the editor cannot show (a v1 value over its bound
         // after NFC reads as empty there) is never frozen.
-        if (!draft.album.title || !sameDraftValue(importDraftV2View(draft, doc.manifest, id), draft)) throw new AdminImportError(400, 'ADMIN_IMPORT_DRAFT_INCOMPLETE');
+        if (!draft.album.title || !sameDraftValue(importDraftV2View(draft, doc.manifest, id, { trackArtists: true }), draft)) throw new AdminImportError(400, 'ADMIN_IMPORT_DRAFT_INCOMPLETE');
+        // A new Album's tracks whose entries do not agree with the primary entries must be the ones the confirmation listed; the
+        // deselected and skipped ones publish with the Album's primary Credits, so their track-only identities are left out.
+        const saved = doc.decisions as ImportDecisionV2[], plan = saved.some(decision => decision.scope === 'album' && decision.action === 'reuse') ? null : importTrackArtistPlan(draft);
+        const shownTracks = hasOwn(body, 'trackArtists') ? body.trackArtists as { slotId: string; selected: boolean }[] : null;
+        if (plan && !shownTracks && plan.differing.length) throw new AdminImportError(409, 'ADMIN_IMPORT_RELOAD_REQUIRED');
+        if (plan && shownTracks && (shownTracks.length !== plan.differing.length || plan.differing.some(track => !shownTracks.some(item => item.slotId === track.slotId)))) throw new AdminImportError(409, 'ADMIN_IMPORT_REVIEW_REQUIRED');
+        const excluded = new Set([...(shownTracks ?? []).filter(item => !item.selected).map(item => item.slotId),
+            ...saved.filter(decision => decision.scope === 'track' && decision.action === 'skip').map(decision => decision.slotId as string)]);
+        const identityDraft = plan ? importIdentityDraft(draft, excluded) : draft;
         // Candidates are read again in this transaction: a row neither answered nor still preselected (a candidate appeared since
         // review) needs a fresh review below. Saved decisions stay explicit; the preselections are frozen with them, and must be
         // the ones the confirmation showed, so an append file shown as a new member is never frozen as a reuse, or the reverse.
-        const explicit = doc.decisions as ImportDecisionV2[];
-        const localized = mergeImportLocalizedNames(doc.localizedNames, [], draft);
-        const candidates = await importIdentityCandidates({ manifest: doc.manifest, draft, assets: doc.media?.assets ?? [], decisions: explicit, names: importMusicBrainzNameMap(doc.musicBrainzNames, draft),
-            localized: importLocalizedNameMap(localized, draft.album.artists.map(entry => entry.name)), albumTarget: doc.createdForAlbumId ?? null }, session);
-        const preselections = importIdentityPreselections(draft, explicit, candidates);
+        const identityKeys = new Set(identityDraft.album.artists.map(entry => entry.key));
+        // The identity draft still carries the original track values; retainBoundDecisions must not revive an excluded track-only identity from them.
+        const explicit = retainBoundDecisions(saved, draft).filter(decision => decision.scope !== 'artist' || identityKeys.has(decision.entryKey!));
+        const localized = mergeImportLocalizedNames(doc.localizedNames, [], identityDraft);
+        const candidates = await importIdentityCandidates({ manifest: doc.manifest, draft: identityDraft, assets: doc.media?.assets ?? [], decisions: explicit,
+            names: importMusicBrainzNameMap(doc.musicBrainzNames, identityDraft), localized: importLocalizedNameMap(localized, identityDraft.album.artists.map(entry => entry.name)),
+            albumTarget: doc.createdForAlbumId ?? null }, session);
+        const preselections = importIdentityPreselections(identityDraft, explicit, candidates);
         if (hasOwn(body, 'preselections') && !sameImportPreselections(body.preselections as unknown[], preselections)) throw new AdminImportError(409, 'ADMIN_IMPORT_REVIEW_REQUIRED');
         const decisions = [...explicit, ...preselections];
         // As the summary waits: no upload may still be in flight, and every file a published track needs is confirmed.
@@ -134,23 +157,36 @@ export async function publishAdminImport(actor: string, id: string, raw: unknown
         // automatic one, which stays automatic. An append never changes the target Album's cover, so it copies none.
         const coverAsset = append ? undefined : doc.media?.assets.find(asset => asset.slotId === body.selectedCoverSlotId);
         if (coverAsset && (coverAsset.state !== 'ready' || !coverAsset.etag)) throw new AdminImportError(409, 'ADMIN_IMPORT_UPLOAD_INCOMPLETE');
-        const identities = await freezeImportIdentities(draft, decisions, existingAlbum, session, candidates);
+        const frozen = await freezeImportIdentities(identityDraft, decisions, existingAlbum, session, candidates);
         // Every ID the commit records or replaces must be one the confirmation listed.
-        const writes = importMusicBrainzIdWrites(identities, draft);
+        const writes = importMusicBrainzIdWrites(frozen, identityDraft);
         if (hasOwn(body, 'musicBrainzIds') ? !sameMusicBrainzIdWrites(body.musicBrainzIds as unknown[], writes) : writes.length > 0) throw new AdminImportError(409, 'ADMIN_IMPORT_REVIEW_REQUIRED');
+        // The Album credits its entries' Artists; the Artists of track-only identities are frozen on their own, with their synthetic entry's name and ID.
+        const albumKeys = new Set(draft.album.artists.map(entry => entry.key)), synthetic = new Map(identityDraft.album.artists.map(entry => [entry.key, entry]));
+        const identities = { ...frozen, artists: frozen.artists.filter(artist => existingAlbum || albumKeys.has(artist.entryKey!)) };
+        const trackIdentities = frozen.artists.filter(artist => !existingAlbum && !albumKeys.has(artist.entryKey!))
+            .map(({ entryKey, ...artist }) => ({ entryKey: entryKey!, name: synthetic.get(entryKey!)!.name, musicBrainzId: synthetic.get(entryKey!)!.musicBrainzId, ...artist }));
         // The reviewed join phrases already satisfy the Credit rules; a refusal here means the draft cannot be published as shown.
         if (!existingAlbum) { try { importAlbumCredits(draft.album.artists, identities.artists, identities.label); } catch { throw new AdminImportError(400, 'ADMIN_IMPORT_DRAFT_INCOMPLETE'); } }
+        const artistOf = new Map([...identities.artists, ...trackIdentities].map(artist => [artist.entryKey, artist.artistId]));
+        const trackArtists: ImportPublicationTrackArtists[] = (existingAlbum || !plan ? [] : plan.differing.filter(track => !excluded.has(track.slotId))).map(track => ({ slotId: track.slotId,
+            entries: track.entries.map((entry, index) => ({ name: entry.name, role: entry.role, joinPhrase: entry.joinPhrase, artistId: artistOf.get(track.identities[index])! })) }));
+        for (const track of trackArtists) {
+            if (track.entries.some(entry => !entry.artistId) || new Set(track.entries.map(entry => entry.artistId)).size !== track.entries.length) throw new AdminImportError(409, 'ADMIN_IMPORT_REVIEW_REQUIRED');
+            try { importTrackEntryCredits(track.entries); } catch { throw new AdminImportError(400, 'ADMIN_IMPORT_DRAFT_INCOMPLETE'); }
+        }
         doc.media ??= { assets: [] };
         const tracks: ImportPublication['tracks'] = selected.map(track => { const reusedTrack = reused.get(track.slotId); const id = reusedTrack?._id.toHexString() ?? new ObjectId().toHexString(); return { slotId: track.slotId, id, key: reusedTrack ? '' : `audio/${id}/${new ObjectId().toHexString()}`, reused: Boolean(reusedTrack), candidateRevision: reusedTrack ? importCandidateRevision(reusedTrack) : null, state: reusedTrack ? 'ready' : 'pending', versionId: null, etag: null }; });
         // The approved order is the catalog rule: reviewed Disc Number, then Track Number; an existing Album's order is re-derived from its stored rows at commit.
         const approvedOrder = sortTrackIdsByDiscAndTrackNumber(tracks.map(track => track.id), new Map(tracks.map(track => { const reviewed = draft.tracks.find(item => item.slotId === track.slotId)!; return [track.id, { discNumber: reviewed.discNumber, trackNumber: reviewed.trackNumber }]; })));
         const approvedRank = new Map(approvedOrder.map((trackId, index) => [trackId, index])); tracks.sort((left, right) => approvedRank.get(left.id)! - approvedRank.get(right.id)!);
         const coverId = coverAsset ? new ObjectId().toHexString() : null;
-        // Every reviewed value included in the approval is the administrator's own.
-        markAdministratorValues(doc.draftOrigins ??= {}, draftV2Paths(draft));
+        // Every reviewed value included in the approval is the administrator's own, except track Artist entries, which stay automatic.
+        markAdministratorValues(doc.draftOrigins ??= {}, draftV2Paths(draft).filter(path => !/^tracks\.[^.]+\.artists$/.test(path)));
         if (lookup || doc.lookupGate) doc.lookupGate = lookupGateFor(lookup ?? doc.lookupGate!, doc.lookupGate);
-        doc.media.publication = { schemaVersion: 3, operationId: body.operationId as string, actorId: actor, approvedRevision: doc.revision, snapshot: structuredClone(draft), decisions: structuredClone(decisions), state: 'preparing', issue: null, grantExpiresAt: new Date(Date.now() + 24 * 3600000), ...identities, albumId: existingAlbum?._id.toHexString() ?? new ObjectId().toHexString(), newAlbum: !existingAlbum, albumRevision: existingAlbum ? albumDecision.candidateRevision : null, coverId, tracks, cover: coverId ? { slotId: coverAsset!.slotId, key: `images/${coverId}`, state: 'pending', versionId: null, etag: null } : null, bucket: process.env.S3_BUCKET_NAME!.trim(), leaseOwner: null, leaseUntil: null,
-            musicBrainzNames: mergeImportMusicBrainzNames(doc.musicBrainzNames, new Map(), draft), ...(localized.length ? { localizedNames: localized } : {}) };
+        doc.media.publication = { schemaVersion: trackArtists.length ? 4 : 3, operationId: body.operationId as string, actorId: actor, approvedRevision: doc.revision, snapshot: structuredClone(draft), decisions: structuredClone(decisions), state: 'preparing', issue: null, grantExpiresAt: new Date(Date.now() + 24 * 3600000), ...identities, albumId: existingAlbum?._id.toHexString() ?? new ObjectId().toHexString(), newAlbum: !existingAlbum, albumRevision: existingAlbum ? albumDecision.candidateRevision : null, coverId, tracks, cover: coverId ? { slotId: coverAsset!.slotId, key: `images/${coverId}`, state: 'pending', versionId: null, etag: null } : null, bucket: process.env.S3_BUCKET_NAME!.trim(), leaseOwner: null, leaseUntil: null,
+            musicBrainzNames: mergeImportMusicBrainzNames(doc.musicBrainzNames, new Map(), identityDraft), ...(localized.length ? { localizedNames: localized } : {}),
+            ...(trackArtists.length ? { trackIdentities, trackArtists } : {}) };
     });
     return result;
 }

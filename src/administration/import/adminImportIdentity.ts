@@ -2,8 +2,8 @@
  * Exports
  *   Types: ImportIdentityProposals
  *   Functions: importCandidateRevision, importCandidateRow, readyImportCandidate, importIdentityCandidates,
- *              importIdentityPreselections, assertImportPreselectionsCurrent, shownPreselectionKey,
- *              sameImportPreselections, serializeImportIdentityCommits
+ *              importIdentityPreselections, frozenIdentityDraft, assertImportPreselectionsCurrent,
+ *              shownPreselectionKey, sameImportPreselections, serializeImportIdentityCommits
  *   Constants: importCandidateProjection, IMPORT_CANDIDATE_COLLECTIONS, IMPORT_MEMBER_MATCH_LIMIT,
  *              IMPORT_CANDIDATE_READ_BUDGET_MS, IMPORT_IDENTITY_FENCE_ID
  * Internal
@@ -30,7 +30,7 @@ import { readyAlbumLifecycleFilter } from '../../services/catalog/albumReference
 import { readyOrganizationLifecycleFilter } from '../../services/catalog/organizationReferenceFenceService';
 import { ADMIN_IMPORT_LIMITS, AdminImportError, cleanText, invalidImport, objectId, type ImportCandidatesResponse, type ImportDuplicateCandidate, type ImportManifest } from './adminImportContract';
 import { importPublicationFormat, type ImportAsset, type ImportPublication } from './adminImportMediaTypes';
-import { DRAFT_V2_LIMITS, boundArtistDecision, boundLabelDecision, foldImportName, hasOwn, type ImportDecisionV2, type ImportDraftV2 } from './adminImportDraft';
+import { DRAFT_V2_LIMITS, boundArtistDecision, boundLabelDecision, foldImportName, hasOwn, type ImportArtistEntry, type ImportDecisionV2, type ImportDraftV2 } from './adminImportDraft';
 import { importLocalizedNameMap } from './adminImportLocalizedNames';
 import { importMusicBrainzNameMap } from './adminImportMusicBrainzIds';
 import { keepableMusicBrainzId } from '../../utils/musicBrainzId';
@@ -93,29 +93,31 @@ export const IMPORT_CANDIDATE_READ_BUDGET_MS = 10_000;
 
 /**
  * Exact case-insensitive name candidates, at most 20 rows per query: one query per distinct folded Artist entry name, label name
- * and Album title (so one common value cannot hide another's candidates), one for the saved track titles. With `proposals` (the
+ * and Album title (so one common value cannot hide another's candidates), one for the saved track titles. An import passes its
+ * identity draft (importIdentityDraft), whose Artist entries also name each track-only identity. With `proposals` (the
  * duplicate-candidates read), the values pending Luna proposals would write get queries of their own: each Artist name (at most
- * 40 names in all), one label name and one Album title beside the saved ones, and one query for the proposed track titles no saved
- * title folds to, whose match also names the slots it was proposed for (at most 40 * 20 + 2 * 20 + 2 * 20 + 2 * 20 = 920 items).
+ * 60 names in all), one label name and one Album title beside the saved ones, and one query for the proposed track titles no saved
+ * title folds to, whose match also names the slots it was proposed for (at most 60 * 20 + 2 * 20 + 2 * 20 + 2 * 20 = 1320 items).
  * Verified byte matches have their own query, the first ready Track outside the explicit
  * append target per staged hash (at most 100), so no number of same-title Tracks hides a possible duplicate. Then every byte or
  * title match among the members of each Album candidate and of the explicit append target (`decisions`), deduplicated and capped
  * at IMPORT_MEMBER_MATCH_LIMIT; saved and proposed track titles share that cap, so pending proposals can leave it incomplete for
  * the saved draft too, and the approval then asks for explicit append answers. Then, for the entries and the label that carry a
  * MusicBrainz ID, one query per kind for the ready
- * records holding those IDs (at most 21 rows, `match: 'musicBrainzId'`, upgrading a row already listed by name), and one query
+ * records holding those IDs (at most 41 rows, `match: 'musicBrainzId'`, upgrading a row already listed by name), and one query
  * per such entry or label for the names lookup found for its ID (`names`, at most 32 names, 20 rows each, `match: 'alias'`),
- * then one query per Artist name read (saved or proposed, at most 40) that has iTunes localized names (`localized`, by folded name)
+ * then one query per Artist name read (saved or proposed, at most 60) that has iTunes localized names (`localized`, by folded name)
  * for the Artists named with them (20 rows each, `match: 'localizedName'`, `localizedOf` that name). The target of an explicit
  * Album reuse and the Album the import was created for (`albumTarget`) are also listed, once each, as Album candidates
- * (`match: 'name'`) whatever the draft title, so their members are read too: at most 2563 items. A row is
+ * (`match: 'name'`) whatever the draft title, so their members are read too: at most 3783 items. A row is
  * listed once, by its strongest match (ID over alias over localized name over name). `memberMatchesComplete` is false when more
  * member matches exist or a member is malformed, so no append file is preselected from a partial list; `unavailable` names the
  * rows whose same-name, same-ID, alias or localized-name record is malformed, and the Artist names whose localized-name record is
  * listed for another row. All reads share IMPORT_CANDIDATE_READ_BUDGET_MS.
- * Names are never unique identity keys. `artistNameLimit` raises the bound of distinct Artist names queried (40 by default, which
- * every import keeps): an existing-Album review passes its identity bound (REVIEW_LOOKUP_LIMITS.identities), since each of its
- * identities is one synthetic entry; the shared read budget still bounds the whole read.
+ * Names are never unique identity keys. `artistNameLimit` raises the bound of distinct Artist names queried (60 by default: an
+ * import's Album entries, track-only identities and proposed names): an existing-Album review passes its identity bound
+ * (REVIEW_LOOKUP_LIMITS.identities), since each of its identities is one synthetic entry; the shared read budget still bounds the
+ * whole read.
  */
 export async function importIdentityCandidates(input: { manifest: ImportManifest; draft: ImportDraftV2; assets: readonly ImportAsset[]; decisions: readonly Pick<ImportDecisionV2, 'scope' | 'action' | 'candidateId'>[];
     names?: ReadonlyMap<string, readonly string[]>; localized?: ReadonlyMap<string, readonly string[]>; proposals?: ImportIdentityProposals; artistNameLimit?: number;
@@ -131,7 +133,7 @@ export async function importIdentityCandidates(input: { manifest: ImportManifest
         return out;
     };
     const groups: { kind: Exclude<Kind, 'track'>; value: string }[] = [
-        ...distinct([...draft.album.artists.map(entry => entry.name), ...proposals.artistNames], input.artistNameLimit ?? 2 * DRAFT_V2_LIMITS.artists).map(value => ({ kind: 'artist' as const, value })),
+        ...distinct([...draft.album.artists.map(entry => entry.name), ...proposals.artistNames], input.artistNameLimit ?? 3 * DRAFT_V2_LIMITS.artists).map(value => ({ kind: 'artist' as const, value })),
         ...distinct([draft.album.label?.name ?? '', ...proposals.labelNames], 2).map(value => ({ kind: 'organization' as const, value })),
         ...distinct([draft.album.title, ...proposals.albumTitles], 2).map(value => ({ kind: 'album' as const, value }))];
     const hashes = new Set(assets.filter(asset => asset.state === 'ready' && manifest.files.some(file => file.slotId === asset.slotId)).map(asset => asset.sha256));
@@ -313,18 +315,30 @@ export function importIdentityPreselections(draft: ImportDraftV2, decisions: rea
 
 const identityKey = (decision: ImportDecisionV2) => JSON.stringify([decision.scope, decision.slotId, decision.entryKey, decision.boundName, decision.action, decision.candidateId]);
 /**
- * Worker recheck, before the first copy and inside the commit transaction: every preselection a format-3 approval froze must still
- * be preselected from its frozen snapshot, its frozen explicit decisions and fresh candidates; otherwise a candidate appeared since
- * approval (409 ADMIN_IMPORT_IDENTITY_CONFLICT, which the worker records as needs attention with `identityConflict`). Formats 1 and
- * 2, and approvals that froze no preselection, are not rechecked. A format-3 decision list in any other shape, or candidate reads
- * over their time budget, are a catalog conflict (409 ADMIN_IMPORT_PUBLICATION_CONFLICT): the recheck never passes unproven.
+ * The draft a format-4 approval's identities were reviewed on: its snapshot with one synthetic featured entry per frozen track-only
+ * identity after the Album entries, as the approval's identity draft (importIdentityDraft) held them; a format-3 snapshot as it is.
+ */
+export function frozenIdentityDraft(publication: ImportPublication): ImportDraftV2 {
+    const draft = publication.snapshot as ImportDraftV2;
+    if (publication.schemaVersion !== 4 || !Array.isArray(publication.trackIdentities)) return draft;
+    const synthetic: ImportArtistEntry[] = publication.trackIdentities.map(identity => ({ key: identity.entryKey, name: identity.name, role: 'featured', joinPhrase: null, musicBrainzId: identity.musicBrainzId }));
+    return { ...draft, album: { ...draft.album, artists: [...draft.album.artists, ...synthetic] } };
+}
+/**
+ * Worker recheck, before the first copy and inside the commit transaction: every preselection a format-3 or format-4 approval froze
+ * must still be preselected from its frozen identity draft (frozenIdentityDraft), its frozen explicit decisions and fresh
+ * candidates; otherwise a candidate appeared since approval (409 ADMIN_IMPORT_IDENTITY_CONFLICT, which the worker records as needs
+ * attention with `identityConflict`). Formats 1 and 2, and approvals that froze no preselection, are not rechecked. A format-3 or
+ * format-4 decision list in any other shape, or candidate reads over their time budget, are a catalog conflict (409
+ * ADMIN_IMPORT_PUBLICATION_CONFLICT): the recheck never passes unproven.
  */
 export async function assertImportPreselectionsCurrent(publication: ImportPublication, source: { manifest: ImportManifest; assets: readonly ImportAsset[]; albumTarget?: string | null }, session: ClientSession): Promise<void> {
-    if (importPublicationFormat(publication) !== 3) return;
+    const format = importPublicationFormat(publication);
+    if (format !== 3 && format !== 4) return;
     if (!Array.isArray(publication.decisions) || publication.decisions.some(decision => !decision || typeof decision !== 'object')) throw new AdminImportError(409, 'ADMIN_IMPORT_PUBLICATION_CONFLICT');
     const frozen = publication.decisions as ImportDecisionV2[], preselected = frozen.filter(decision => decision.preselected === true);
     if (!preselected.length) return;
-    const explicit = frozen.filter(decision => decision.preselected !== true), draft = publication.snapshot as ImportDraftV2;
+    const explicit = frozen.filter(decision => decision.preselected !== true), draft = frozenIdentityDraft(publication);
     let candidates: ImportCandidatesResponse;
     // The alias and localized-name candidates are read from the names frozen with the approval, so the recheck compares what the
     // review compared.
@@ -362,7 +376,7 @@ export function sameImportPreselections(shown: readonly unknown[], computed: rea
 
 export const IMPORT_IDENTITY_FENCE_ID = 'identity';
 /**
- * Every format-3 import commit, and every existing-Album review apply that creates, reuses or records identities, writes this one
+ * Every format-3 and format-4 import commit, and every existing-Album review apply that creates, reuses or records identities, writes this one
  * fence document. Snapshot isolation alone lets two commits each insert a record the other's recheck could not see; writing one
  * shared document makes the later commit conflict and retry against fresh state, where its recheck sees the first commit's records.
  * Only those writers write it: a record that a format-1 or format-2 commit, the Admin Catalog or the Content Manager creates

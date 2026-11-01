@@ -30,7 +30,8 @@
  *   - an artist tag agrees with a credited artist through an iTunes localized name group that holds the credited name
  *   - an explicit exact comparison ranks as the default for Hotel California, Blue Archive and Pandora Call, with no subset or completeness key
  *   - the MusicBrainz group key of the one-track single against one file of its own duration is unchanged
- *   - track credits never change an import proposal, group or status
+ *   - independent track credits split import groups without changing the Album proposal or match status
+ *   - two matching releases differing only by a track Artist need a choice instead of an arbitrary automatic release
  * @end-catalog */
 
 import assert from 'node:assert/strict';
@@ -534,14 +535,26 @@ test('the MusicBrainz group key of the one-track single against one file of its 
     assert.equal(ranked.groups[0].groupKey, 'df546672b3a58420e3f3e1cf61f2fc0f449f8a9ee8fb94b083031e436ac06462');
 });
 
-test('track credits never change an import proposal, group or status', () => {
+test('independent track credits split import groups without changing the Album proposal or match status', () => {
     const guest = { name: 'Synthetic Guest', joinPhrase: '', artistId: '00000000-0000-4000-8000-0000000000e1', artistName: 'Synthetic Guest' };
     const credited = (value: MusicBrainzRelease, index: number) => ({ ...value, media: value.media.map(medium => ({ ...medium, tracks: medium.tracks.map((track, position) =>
         ({ ...track, artistCredit: (index + position) % 3 === 0 ? 'release' as const : (index + position) % 3 === 1 ? [guest] : value.artistCredit })) })) });
     const files = filesFrom(hotelBase, { jitter, artistTags: ['Eagles'] });
     const plain = rankLookupCandidates(hotelCalifornia.map(value => candidate(value)), files);
     const withCredits = rankLookupCandidates(hotelCalifornia.map((value, index) => candidate(credited(value, index))), files);
-    assert.deepEqual(withCredits, plain);
+    assert.deepEqual(withCredits.candidates.map(value => [value.key, value.status]).sort(), plain.candidates.map(value => [value.key, value.status]).sort());
+    assert.ok(withCredits.groups.some(group => group.proposal.trackArtists?.length));
     for (const value of hotelCalifornia) assert.deepEqual(proposalForRelease(credited(value, 1)), proposalForRelease(value));
     assert.deepEqual(lookupTrackAssignment(credited(hotelBase, 2), files), lookupTrackAssignment(hotelBase, files));
+});
+
+
+test('two matching releases differing only by a track Artist need a choice instead of an arbitrary automatic release', () => {
+    const original = structuredClone(hotelBase), other = structuredClone(hotelBase);
+    other.releaseId = '00000000-0000-4000-8000-0000000000a7';
+    other.media[0].tracks[0].artistCredit = [{ name: 'Independent Guest', joinPhrase: '', artistId: '00000000-0000-4000-8000-0000000000e1', artistName: 'Independent Guest' }];
+    const ranked = rankLookupCandidates([candidate(original), candidate(other)], filesFrom(original));
+    assert.equal(ranked.groups.length, 2);
+    assert.equal(ranked.preselection, null);
+    assert.equal(ranked.groups.find(group => group.representativeKey === candidate(other).key)!.proposal.trackArtists![0].artists[0].name, 'Independent Guest');
 });

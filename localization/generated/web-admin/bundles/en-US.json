@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "locale": "en-US",
-  "revision": "sha256-4lq_rGp0FkyvhzL05CIaVUUtYR3WleTbJhG7WQJChDU",
+  "revision": "sha256-G4vtl_3Zpxb0Z1zdUVlpQQ2c557bQZcPZ-uCNlOzMqQ",
   "messages": {
     "admin.album_import.add": "Add files to this Album",
     "admin.album_import.append_note": "These files become new tracks of this Album and take its primary Artists, track order and visibility. The Album's own title, Artists, label, cover and visibility stay unchanged.",
@@ -88,6 +88,15 @@
     "admin.pages.refreshing_copy": "Refreshing. The last loaded placements remain visible.",
     "admin.pages.scope": "Only this placement changes. Other placements, content and reusable Carousel, Grid or List definitions stay as they are.",
     "admin.pages.subtitle": "Manage placements on Home and Library.",
-    "admin.pages.updating": "Updating…"
+    "admin.pages.updating": "Updating…",
+    "admin.track_artists.album_primary": "Uses Album primary Artists: {byline}",
+    "admin.track_artists.byline": "Track Artists: {byline}",
+    "admin.track_artists.copy": "Selected tracks publish with the Artists of their paired release track. These Credits stay on the track and never change the Album’s Artists. Unselect a track to use the Album’s primary Artists instead.",
+    "admin.track_artists.inherits": "Uses the Album’s primary Artists because the paired release track has no usable Artist list.",
+    "admin.track_artists.more_tracks": "{count} more tracks",
+    "admin.track_artists.review_row": "{name} · Track Artist on {tracks}",
+    "admin.track_artists.save_artists_first": "Save or undo the Album Artist changes before reviewing these track Artists.",
+    "admin.track_artists.title": "Track Artists",
+    "admin.track_artists.use_own": "Use track Artists for {track}"
   }
 }

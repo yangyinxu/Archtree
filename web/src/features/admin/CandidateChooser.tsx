@@ -4,13 +4,14 @@
  * Internal
  *   Types: Candidate, ReviewCandidate, Proposal, Subset, Preview
  *   Functions: proposalText, PairingUnavailable
- *   Constants: PREVIEWS_AT_ONCE, RETRY_MS, fields, fieldKeys, CandidatePairing
+ *   Constants: PREVIEWS_AT_ONCE, RETRY_MS, fields, fieldKeys, CandidatePairing, TrackArtistProposals
  * @end-catalog */
 
 import { lazy, Suspense, useEffect, useId, useLayoutEffect, useRef, useState, type ComponentProps, type ComponentType, type ReactNode } from 'react';
 import { useLocalization } from '../../localization/LocalizationProvider';
 import { useAdminText } from './AdminAccess';
 import type { CandidatePairing as Pairing } from './CandidatePairing';
+import type { TrackArtistProposals as ArtistProposals } from './ImportTrackArtists';
 import { entriesByline } from './artistEntriesByline';
 import type { ImportLookupView, ReviewLookupView } from './importLookupApi';
 import { reviewLookupKey } from './lookupNextStep';
@@ -42,6 +43,8 @@ function PairingUnavailable() { const t = useAdminText(); return <p role="alert"
 /** The pairing panel, its own chunk, loaded only when a card opens it. */
 const CandidatePairing = lazy<ComponentType<ComponentProps<typeof Pairing>>>(() => import('./CandidatePairing')
   .then(module => ({ default: module.CandidatePairing }), () => ({ default: PairingUnavailable })));
+const TrackArtistProposals = lazy<ComponentType<ComponentProps<typeof ArtistProposals>>>(() => import('./ImportTrackArtists')
+  .then(module => ({ default: module.TrackArtistProposals }), () => ({ default: PairingUnavailable })));
 
 /**
  * Chooses a release of the current lookup run, or none. While several matching groups tie, it lists each group's representative
@@ -112,6 +115,7 @@ export function CandidateChooser({ projectId, viewerId, lookup, review, disabled
   // A label differs also by its MusicBrainz ID; groups whose entries or label differ only by ID show each ID.
   const valueOf = (proposal: Proposal, field: typeof fields[number]) => JSON.stringify(field === 'label' ? [proposal.label, proposal.labelMusicBrainzId] : proposal[field]);
   const differing = single ? [...fields] : fields.filter(field => new Set(lookup.groups.map(group => valueOf(group.proposal, field))).size > 1);
+  const trackArtistsDiffer = !review && (single || new Set(lookup.groups.map(group => JSON.stringify(group.proposal.trackArtists ?? []))).size > 1);
   const byId = (field: typeof fields[number]) => !single && (field === 'artists' || field === 'label') && new Set(lookup.groups.map(group => proposalText(field, group.proposal))).size === 1;
   const withId = (text: string, musicBrainzId: string | null) => musicBrainzId ? `${text} · ${t('lookup.musicbrainz_id', { id: musicBrainzId })}` : text;
   const representatives = lookup.groups.flatMap(group => lookup.candidates.filter(candidate => candidate.key === group.representativeKey).map(candidate => ({ candidate, proposal: group.proposal })));
@@ -196,6 +200,7 @@ export function CandidateChooser({ projectId, viewerId, lookup, review, disabled
         {!proposal && <p className={styles.muted}>{[!reason && t(`lookup.status_${candidate.status}`), candidate.label, reviewValueText(candidate.date), candidate.trackCount === null ? null : t('lookup.track_count', { count: candidate.trackCount })].filter(Boolean).join(' · ')}</p>}
         <dl>
           {proposal && differing.map(field => fact(fieldKeys[field], proposalText(field, proposal, byId(field) ? withId : undefined)))}
+          {proposal && trackArtistsDiffer && (proposal.trackArtists?.length || !single) && <Suspense fallback={null}><TrackArtistProposals tracks={proposal.trackArtists} albumByline={entriesByline(proposal.artists.filter(entry => entry.role === 'primary'))} /></Suspense>}
           {fact('lookup.barcode', candidate.barcode)}{fact('lookup.catalog_number', candidate.catalogNumber)}
           {group.length === 1 && <>{fact('lookup.country', candidate.country)}{fact('lookup.medium', candidate.formats.join(', '))}</>}
         </dl>

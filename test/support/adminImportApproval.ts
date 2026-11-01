@@ -10,7 +10,7 @@ import { draftChanges } from './adminImportDraftChanges';
  * `musicBrainzIds: 'created'` lists every MusicBrainz ID the edited draft carries as recorded on a new record (none for an append).
  */
 export type ApprovalOptions = { edit?: (draft: ImportDraftV2) => void; decisions?: unknown[]; selectedCoverSlotId?: string | null; approvalDigest?: string; operationId?: string; expectedRevision?: number; preselections?: unknown[];
-    suggestionTicks?: { generation: number; ticked: string[]; unticked: string[] }; musicBrainzIds?: unknown[] | 'created' };
+    suggestionTicks?: { generation: number; ticked: string[]; unticked: string[] }; musicBrainzIds?: unknown[] | 'created'; trackArtists?: unknown[] };
 
 /** The ID writes a confirmation lists when every Artist entry and the label carrying a MusicBrainz ID becomes a new record. */
 export const createdMusicBrainzIdWrites = (draft: ImportDraftV2) => [
@@ -20,7 +20,7 @@ export const createdMusicBrainzIdWrites = (draft: ImportDraftV2) => [
 /**
  * A one-step approval body as the Web confirmation sends it for a shown project: its revision, the changes of an unsaved edit
  * (none by default), its saved decisions and cover, and its approvalDigest. The optional `preselections`, Luna
- * `suggestionTicks` and MusicBrainz ID writes the confirmation showed are sent only when given. A replay must reuse the same object.
+ * `suggestionTicks`, MusicBrainz ID writes and track selections (`trackArtists`) the confirmation showed are sent only when given. A replay must reuse the same object.
  */
 export function approvalBody(item: Pick<AdminImportDetailV2, 'revision' | 'draft' | 'decisions' | 'selectedCoverSlotId' | 'approvalDigest'>, options: ApprovalOptions = {}) {
     const edited = structuredClone(item.draft); options.edit?.(edited);
@@ -31,7 +31,8 @@ export function approvalBody(item: Pick<AdminImportDetailV2, 'revision' | 'draft
         operationId: options.operationId ?? randomUUID(), expectedRevision: options.expectedRevision ?? item.revision, changes: draftChanges(item.draft, edited),
         decisions, selectedCoverSlotId: options.selectedCoverSlotId !== undefined ? options.selectedCoverSlotId : item.selectedCoverSlotId,
         approvalDigest: options.approvalDigest ?? item.approvalDigest, ...(options.preselections ? { preselections: options.preselections } : {}),
-        ...(options.suggestionTicks ? { suggestionTicks: options.suggestionTicks } : {}), ...(musicBrainzIds ? { musicBrainzIds } : {})
+        ...(options.suggestionTicks ? { suggestionTicks: options.suggestionTicks } : {}), ...(musicBrainzIds ? { musicBrainzIds } : {}),
+        ...(options.trackArtists ? { trackArtists: options.trackArtists } : {})
     };
 }
 

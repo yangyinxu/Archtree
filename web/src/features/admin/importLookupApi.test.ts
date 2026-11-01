@@ -14,6 +14,8 @@
  *   - a review candidate says whether a track-title search first found its release, false from a server that sends none, and only as a boolean
  *   - a submitted run's Artist name parses in import and review views within 1000 characters; a view without it reads as none
  *   - a summary names the Album an import was created for only with forAlbum as an Album ID, and refuses any other value
+ *   - track Artist summary entries and track-only identities are strictly bounded and cannot carry catalog or storage internals
+ *   - independent track Credits in a release-group proposal accept bounded source evidence and refuse private fields
  * @end-catalog */
 
 import { lookupResponseSchema, lookupViewSchema, reviewLookupViewSchema } from './importLookupApi';
@@ -222,4 +224,32 @@ test('a summary names the Album an import was created for only with forAlbum as 
   expect(parse({ forAlbum: 'a'.repeat(24) }).data?.summary.forAlbum).toBe('a'.repeat(24));
   expect(parse({}).data?.summary.forAlbum).toBeUndefined();
   for (const forAlbum of [true, false, 'true', 'A'.repeat(24), 'a'.repeat(23), 1, null]) expect(parse({ forAlbum }).success, String(forAlbum)).toBe(false);
+});
+
+
+test('track Artist summary entries and track-only identities are strictly bounded and cannot carry catalog or storage internals', () => {
+  const artist = { ...entry('Lorem Guest', 2), identity: entry('Lorem Guest', 2).key };
+  const valid = { ...summary(), trackArtists: [{ slotId: slot, entries: [artist] }],
+    trackIdentities: [{ key: artist.key, name: artist.name, musicBrainzId: null, slotIds: [slot] }], inheritsAlbum: [slotTwo] };
+  const accepts = (value: unknown) => lookupResponseSchema.safeParse({ lookup: null, revision: 1, valueRevision: 0, summary: value }).success;
+  expect(accepts(valid)).toBe(true);
+  for (const value of [
+    { ...valid, trackArtists: [{ slotId: slot, entries: [{ ...artist, artistId: 'a'.repeat(24) }] }] },
+    { ...valid, trackArtists: [{ slotId: slot, entries: [{ ...artist, identity: 'not-an-entry' }] }] },
+    { ...valid, trackArtists: [{ slotId: slot, entries: Array(21).fill(artist) }] },
+    { ...valid, trackArtists: Array(101).fill(valid.trackArtists[0]) },
+    { ...valid, trackIdentities: Array(21).fill(valid.trackIdentities[0]) },
+    { ...valid, trackIdentities: [{ ...valid.trackIdentities[0], ownerId: 'a'.repeat(24) }] },
+    { ...valid, inheritsAlbum: ['not-a-slot'] }
+  ]) expect(accepts(value)).toBe(false);
+});
+
+
+test('independent track Credits in a release-group proposal accept bounded source evidence and refuse private fields', () => {
+  const item = view(), artists = [{ name: 'Guest', role: 'primary', joinPhrase: null, musicBrainzId: null }];
+  const own = { discNumber: 1, trackNumber: 2, artists };
+  const shown = (trackArtists: unknown) => ({ ...item, groups: [{ ...item.groups[0], proposal: { ...item.groups[0].proposal, trackArtists } }] });
+  expect(lookupViewSchema.safeParse(shown([own])).success).toBe(true);
+  for (const tracks of [[{ ...own, s3Key: 'private' }], [{ ...own, artists: [{ ...artists[0], ownerId: 'a'.repeat(24) }] }], [{ ...own, artists: Array(21).fill(artists[0]) }], Array(101).fill(own)])
+    expect(lookupViewSchema.safeParse(shown(tracks)).success).toBe(false);
 });

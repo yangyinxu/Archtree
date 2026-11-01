@@ -1877,7 +1877,7 @@ test('an approval sending the preselections its confirmation showed freezes exac
     await assert.rejects(publishAdminImport(actor.toHexString(), item.id, approvalBody(reviewed, { preselections: asNew })), code('ADMIN_IMPORT_REVIEW_REQUIRED'));
     assert.deepEqual(await stored(item.id), before);
     // A malformed or forged preselection list is invalid input before any read.
-    for (const preselections of [[{ ...asNew[0], preselected: true }], [{ ...asNew[0], action: 'skip' }], Array(123).fill(asNew[0])])
+    for (const preselections of [[{ ...asNew[0], preselected: true }], [{ ...asNew[0], action: 'skip' }], Array(143).fill(asNew[0])])
         await assert.rejects(publishAdminImport(actor.toHexString(), item.id, approvalBody(reviewed, { preselections })), code('ADMIN_IMPORT_INVALID_INPUT'));
     // A fresh confirmation shows the reuse, and its approval freezes exactly that; the reverse flip is refused the same way.
     const asReuse = await confirmation(reviewed);

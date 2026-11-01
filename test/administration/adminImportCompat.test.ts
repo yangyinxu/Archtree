@@ -496,8 +496,8 @@ test('the Draft v2 decision view keeps one readable decision per entry, label, A
     // An unreadable bound name (not text, or over 200 characters) is shown as none, which a decision save can never echo back.
     assert.deepEqual(importDecisionsV2View([decision('artist', { entryKey: e1, boundName: 'n'.repeat(201) }), decision('label', { boundName: 7 }), decision('album', { boundName: 'x' })], slots).map(item => item.boundName), [null, null, null]);
     assert.equal(importDecisionsV2View('not a list', slots).length, 0);
-    const many = Array.from({ length: 130 }, (_, index) => decision('artist', { entryKey: `00000009-0000-4000-8000-${String(index).padStart(12, '0')}` }));
-    assert.equal(importDecisionsV2View(many, slots).length, 122);
+    const many = Array.from({ length: 150 }, (_, index) => decision('artist', { entryKey: `00000009-0000-4000-8000-${String(index).padStart(12, '0')}` }));
+    assert.equal(importDecisionsV2View(many, slots).length, 142);
     // `replace` exists only for Artist and label decisions; the bound MusicBrainz ID is copied only for server reads, never into the DTO.
     const mbid = '00000000-0000-4000-8000-0000000000a1';
     const replacing = [decision('artist', { entryKey: e1, action: 'replace', candidateId: id, candidateRevision: 'r', boundMusicBrainzId: mbid }), decision('label', { action: 'replace', candidateId: id, candidateRevision: 'r', boundMusicBrainzId: 'bad' }),

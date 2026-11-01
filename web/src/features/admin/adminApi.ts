@@ -31,7 +31,7 @@ const common = { id, revision: integer, createdAt: z.string(), updatedAt: z.stri
 // An import project carries Draft v2: ordered Artist entries, an optional label and per-track Disc Numbers.
 export const detailSchema = z.object({ ...common, manifest: manifestSchema, draft: importDraftV2Schema,
   publicationRecovery: z.object({ operationId: uuid, cleanupPending: z.boolean(), startedByMe: z.boolean() }).strict().nullable().default(null),
-  suggestions: z.array(importSuggestionV2Schema).max(1000), decisions: z.array(decisionSchema).max(122),
+  suggestions: z.array(importSuggestionV2Schema).max(1000), decisions: z.array(decisionSchema).max(142),
   assets: z.array(z.object({ slotId: z.string(), state: z.enum(['pending', 'ready', 'failed', 'unknown', 'deleting', 'cleanupFailed', 'deleted']), byteLength: integer, sha256: z.string().regex(/^[a-f0-9]{64}$/), contentType: z.string(), recovery: assetRecoverySchema.nullable().default(null), tags: tagsSchema.nullable().default(null) }).strict()).max(205).default([]),
   // The selected cover and whether it is the automatic choice (no administrator choice yet) or an explicit one.
   selectedCoverSlotId: z.string().nullable().default(null), coverChoice: z.enum(['automatic', 'explicit']).default('explicit'),
