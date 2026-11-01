@@ -13,6 +13,7 @@ import {
   useEffect,
   useRef,
   useState,
+  useSyncExternalStore,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent
@@ -34,6 +35,7 @@ import styles from './PlayerBar.module.css';
 import { useLocalization } from '../localization/LocalizationProvider';
 import { LazyRoomTrackButton } from '../features/social/LazyRoomTrackButton';
 import { playbackSourcePath } from '../features/playback/launchPlayback';
+import { subscribeToAccountEpoch } from '../api/accountEpoch';
 
 const MOBILE_PLAYER_QUERY = '(max-width: 767px)';
 const VERTICAL_GESTURE_THRESHOLD = 48;
@@ -463,8 +465,15 @@ export const PlayerBar = ({
     resetCompactGesture(event.currentTarget, event.pointerId);
   };
 
+  // An account transition must remove a private Playlist link even while playback is paused and
+  // its snapshot has no clock updates. Public Album sources remain available across accounts.
+  const queueSourcePath = useSyncExternalStore(
+    subscribeToAccountEpoch,
+    () => playbackSourcePath(player.queue),
+    () => undefined
+  );
   // The compact mobile identity is itself a button, so only the desktop title links back to its page.
-  const sourcePath = mobile || !current ? undefined : playbackSourcePath(player.queue);
+  const sourcePath = mobile || !current ? undefined : queueSourcePath;
   const compactIdentity = (
     <>
       {current ? (

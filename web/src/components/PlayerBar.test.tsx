@@ -25,6 +25,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactElement } from 'react';
 import { MemoryRouter } from 'react-router';
 import { browserSessionQueryKey } from '../api/session';
+import { advanceAccountEpoch, captureAccountOperation } from '../api/accountEpoch';
 import { listenerCapabilitiesWrapper, seedListenerCapabilities } from '../test/listenerCapabilities';
 
 import { createPlayerStore, playerStore } from '../player';
@@ -288,6 +289,28 @@ test('the desktop title links to the page its queue was launched from', async ()
   await act(() => store.launchStandalone(tracks[1], { autoplay: false }));
   expect(within(player).queryByRole('link')).not.toBeInTheDocument();
   expect(within(player).getByText('Open Field')).toBeInTheDocument();
+});
+
+test.each(['playlist', 'album'] as const)('an account change updates the paused %s source without touching playback', async (kind) => {
+  setMobileViewport(false);
+  resetPlaybackSource();
+  const store = createPlayerStore({ audioFactory: () => new PlayerBarAudio(), mediaSession: null });
+  stores.push(store);
+  vi.spyOn(playerStore, 'getSnapshot').mockImplementation(() => store.getSnapshot());
+  const path = kind === 'playlist' ? '/playlists/private-playlist' : '/albums/public-album';
+  await launchFromSource(path, () => store.launchQueue(tracks, 0, { autoplay: false }),
+    kind === 'playlist' ? captureAccountOperation('viewer-1') : undefined);
+  const paused = store.getSnapshot();
+  expect(paused.status).toBe('paused');
+  render(<MemoryRouter><PlayerBar store={store} /></MemoryRouter>);
+  const player = screen.getByRole('region', { name: 'Now playing' });
+  expect(within(player).getByRole('link', { name: 'Still Water' })).toHaveAttribute('href', path);
+
+  act(() => { advanceAccountEpoch(); });
+
+  expect(store.getSnapshot()).toBe(paused);
+  if (kind === 'playlist') expect(within(player).queryByRole('link')).not.toBeInTheDocument();
+  else expect(within(player).getByRole('link', { name: 'Still Water' })).toHaveAttribute('href', path);
 });
 
 test('a new MediaTrack restores the theater only once fullscreen has ended', async () => {

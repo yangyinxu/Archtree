@@ -21,23 +21,29 @@ import {
   type PlayerQueueItem
 } from '../../player';
 
-let source: { path: string; queue: readonly PlayerQueueItem[] } | null = null;
+let source: { path: string; queue: readonly PlayerQueueItem[]; guard?: AccountOperationGuard } | null = null;
 
 /**
  * Runs one launch and remembers the listener page it came from, keyed to the exact queue the
  * launch created. A launch the player refuses leaves the queue, and so the previous page, as it was.
+ * An account-owned page also captures its account epoch so a retained public queue reveals no
+ * private page identity after the account changes.
  */
-export const launchFromSource = (path: string | null, launch: () => Promise<void>) => {
+export const launchFromSource = (
+  path: string | null,
+  launch: () => Promise<void>,
+  guard?: AccountOperationGuard
+) => {
   const previousQueue = playerStore.getSnapshot().queue;
   const launched = launch();
   const { queue } = playerStore.getSnapshot();
-  if (queue !== previousQueue) source = path ? { path, queue } : null;
+  if (queue !== previousQueue) source = path ? { path, queue, guard } : null;
   return launched;
 };
 
 /** Names the page that owns this queue; a newer launch, a room or a cleared queue has none. */
 export const playbackSourcePath = (queue: readonly PlayerQueueItem[]) =>
-  source?.queue === queue ? source.path : undefined;
+  source?.queue === queue && (!source.guard || isAccountOperationCurrent(source.guard)) ? source.path : undefined;
 
 /** Lets tests start from a player that no page has launched. */
 export const resetPlaybackSource = () => { source = null; };
@@ -219,7 +225,8 @@ export const launchPlaylistPlayback = async (
   const guard = viewerId ? captureAccountOperation(viewerId) : undefined;
   await launchFromSource(
     `/playlists/${encodeURIComponent(playlistId)}`,
-    () => playerStore.launchQueue(tracks.map(queueItemFromTrack), initialIndex)
+    () => playerStore.launchQueue(tracks.map(queueItemFromTrack), initialIndex),
+    guard ?? captureAccountOperation('')
   );
   recordAfterPlaybackStarts(
     guard,
