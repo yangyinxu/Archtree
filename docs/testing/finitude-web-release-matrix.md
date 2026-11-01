@@ -49,6 +49,15 @@ shell typeahead: inline suggestions on the current route, arrow-key highlight
 kept in view, Enter on a highlight, Enter and Escape without one, recent
 searches, result-type filters, and axe scans with the suggestion list open.
 
+`videos.spec.ts` covers the public Video destination, direct-route refresh,
+16:9 card geometry at 1440, 768 and 320 px, and a narrow-page axe scan. It checks
+empty and initial-error retry states, retention and retry after a failed
+continuation, decorative hover previews, and shared-player identity, source and
+elapsed time when a Video card pauses and the listener navigates away and back.
+`listenerVideos.integration.ts` separately covers ready/published/public filtering,
+inherited Album visibility, wrong-kind storage, safe DTOs, strict query admission,
+bounded keyset pagination and concurrent insertion without repeated members.
+
 The Engineering Guide browser spec verifies its hosted login return destination,
 then reads the same generated bundle through the loopback documentation preview.
 It checks deep links, refresh/back navigation, keyboard focus, operation without

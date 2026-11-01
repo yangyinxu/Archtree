@@ -15,6 +15,7 @@ test.each([
   ['/admin/catalog/audioTrack/111111111111111111111111', 'Edit catalog content'],
   ['/admin/catalog/organization/111111111111111111111111', 'Edit catalog content'],
   ['/admin/pages', 'Page items'],
+  ['/videos', 'Video'],
   ['/missing-listener-page', 'Page not found']
 ])('announces %s using its matching title', async (path, title) => {
   render(<MemoryRouter initialEntries={[path]}><RouteAnnouncer /></MemoryRouter>);

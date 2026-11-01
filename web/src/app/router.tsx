@@ -30,6 +30,7 @@ const SearchPage = page(() => import('../features/search/SearchPage'), 'SearchPa
 const SocialPage = page(() => import('../features/social/SocialPage'), 'SocialPage');
 const RoomInvitationsPage = page(() => import('../features/social/RoomInvitationsPage'), 'RoomInvitationsPage');
 const MusicSharesPage = page(() => import('../features/social/MusicSharesPage'), 'MusicSharesPage');
+const VideosPage = page(() => import('../features/videos/VideosPage'), 'VideosPage');
 
 /** Provides an announced route placeholder while a page-specific bundle loads. */
 const RouteLoadingPage = () => {
@@ -61,6 +62,7 @@ export const appRoutes: RouteObject[] = [
       { path: 'admin/*', element: loadRoute(<AdminRouter />), errorElement: <RouteErrorPage /> },
       { path: 'search', element: loadRoute(<SearchPage />), errorElement: <RouteErrorPage /> },
       { path: 'library', element: loadRoute(<LibraryPage />), errorElement: <RouteErrorPage /> },
+      { path: 'videos', element: loadRoute(<VideosPage />), errorElement: <RouteErrorPage /> },
       { path: 'social', element: loadRoute(<SocialPage />), errorElement: <RouteErrorPage /> },
       { path: 'social/shares', element: loadRoute(<MusicSharesPage />), errorElement: <RouteErrorPage /> },
       { path: 'social/invitations', element: loadRoute(<RoomInvitationsPage />), errorElement: <RouteErrorPage /> },

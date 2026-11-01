@@ -4,7 +4,8 @@
  *          ListenerArtistSummary, ListenerOrganizationSummary, ListenerAlbumSummary, ListenerAudioTrackSummary,
  *          ListenerCatalogCredit, ListenerPlayableSummary, ListenerPresentation, ListenerHomeItem,
  *          ListenerHomeSection, ListenerPageSlug, ListenerCollectionPageRef, ListenerCollectionPage,
- *          ListenerHome, ListenerSearch, ListenerAlbum, ListenerArtist, ListenerOrganization, ListenerTrack
+ *          ListenerHome, ListenerSearch, ListenerAlbum, ListenerArtist, ListenerOrganization, ListenerTrack,
+ *          ListenerVideos
  * @end-catalog */
 
 /**
@@ -169,4 +170,10 @@ export interface ListenerOrganization {
 /** One playable MediaTrack detail response. */
 export interface ListenerTrack {
     audioTrack: ListenerAudioTrackSummary;
+}
+
+/** One newest-first page of ready public Video MediaTracks; nextCursor is opaque to clients. */
+export interface ListenerVideos {
+    items: ListenerAudioTrackSummary[];
+    nextCursor: string | null;
 }

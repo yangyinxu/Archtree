@@ -1,0 +1,12 @@
+/* Wide cards need wider Grid columns: at least 16rem of 16:9 artwork, one column on phones. */
+.page [data-presentation='grid'] {
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, calc(16rem + 2 * var(--card-inset))), 1fr));
+}
+
+.pagination {
+  align-items: center;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin-top: var(--space-6);
+}

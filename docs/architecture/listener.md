@@ -27,6 +27,18 @@ and checks both assignability and complete top-level keys against the canonical
 DTOs. Each nested public DTO is also checked independently. Updating only one side
 therefore fails type checking even when the difference is an optional field.
 
+The Web-only `/finitude/videos` route reads `GET /api/listener/v1/videos` through
+`web/src/api/listenerVideos.ts`. It adds a new response envelope without changing
+the existing Home, Search, Album, or native wire shapes. The service reuses the
+public MediaTrack visibility join before sorting and limiting, so a hidden or
+unavailable assigned Album cannot leak through pagination. Pages sort canonical
+ObjectIds descending, read at most 49 records to return at most 48, and carry the
+last returned ID as the continuation cursor. Each continuation rechecks current
+access; an inserted newer ID does not shift the traversal. The Web decoder bounds
+pages and cursors, rejects Audio and duplicate members, and strips additive fields
+before query caching. This remains public online browsing, with no download or
+browser-local media lifecycle.
+
 ### Compatibility policy
 
 - Finitude Web's public catalog and collection schemas discard unknown additive

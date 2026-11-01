@@ -19,7 +19,7 @@ import {
 } from 'react';
 
 import type { AlbumSummary, AudioTrackSummary, HomeContentSummary, SectionPresentation } from '../api/contentSchemas';
-import { ContentCard, defaultContentCardArtworkSizes } from './ContentCard';
+import { ContentCard, defaultContentCardArtworkSizes, type ContentCardProps } from './ContentCard';
 import { ContentListRow } from './ContentListRow';
 import { Icon } from './Icon';
 import styles from './PageSection.module.css';
@@ -100,6 +100,8 @@ export interface PageSectionProps {
   items: Array<HomeContentSummary>;
   onPlay?: (audioTrack: AudioTrackSummary) => void;
   renderTrackTrailing?: (audioTrack: AudioTrackSummary) => ReactNode;
+  /** Card shape for Carousel and Grid; the Video page uses 'wide'. */
+  cardFrame?: ContentCardProps['frame'];
 }
 
 /** Preserves the creator-selected Carousel, Grid, or List presentation at every width. */
@@ -109,7 +111,8 @@ export const PageSection = ({
   presentation,
   items,
   onPlay,
-  renderTrackTrailing
+  renderTrackTrailing,
+  cardFrame
 }: PageSectionProps) => {
   const { t } = useLocalization();
   const headingId = `listener-section-${id}`;
@@ -277,7 +280,7 @@ export const PageSection = ({
           ))
         : items.map((item, index) => (
           <li className={styles.cardItem} key={entryKeys[index]}>
-            <ContentCard artworkSizes={cardArtworkSizes} item={item} onPlay={onPlay} reason={item.reason} />
+            <ContentCard artworkSizes={cardArtworkSizes} frame={cardFrame} item={item} onPlay={onPlay} reason={item.reason} />
           </li>
         ))}
     </ul>

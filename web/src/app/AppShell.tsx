@@ -32,6 +32,7 @@ const destinations: Array<{ labelKey: MessageKey; path: string; icon: IconName }
   { labelKey: 'shell.nav.home', path: '/', icon: 'home' },
   { labelKey: 'shell.nav.search', path: '/search', icon: 'search' },
   { labelKey: 'shell.nav.library', path: '/library', icon: 'library' },
+  { labelKey: 'common.label.video', path: '/videos', icon: 'video' },
   { labelKey: 'social.nav', path: '/social', icon: 'account' }
 ];
 

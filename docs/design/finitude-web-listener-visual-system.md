@@ -223,6 +223,9 @@ artwork.
   Save-Data, or a hidden page. With motion previews enabled it plays the
   dedicated preview clip, looping the whole clip from its start, and a Video
   without one keeps its artwork.
+- The Video page uses wide cards: artwork and preview crop to 16:9 with
+  `object-fit: cover`, in a Grid whose columns are at least 16rem of artwork
+  (one column on phones). Every other surface keeps square cards.
 - Rows highlight across their complete surface, including trailing controls,
   without creating overlapping actions.
 - Primary play and pause glyphs are filled transport icons on the same solid

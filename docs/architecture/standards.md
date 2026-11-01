@@ -113,7 +113,7 @@ placing it in a neighbor that does not own it.
 | --- | --- |
 | `app/` | Shell, router, session coordination, layout preferences. |
 | `api/` | Typed HTTP clients and zod response schemas, one module per server API area. |
-| `features/<feature>/` | Route pages and feature-specific components, hooks, and CSS Modules (`account`, `admin`, `catalog`, `home`, `library`, `playback`, `playlists`, `search`, `social`). |
+| `features/<feature>/` | Route pages and feature-specific components, hooks, and CSS Modules (`account`, `admin`, `catalog`, `home`, `library`, `playback`, `playlists`, `search`, `social`, `videos`). |
 | `components/` | Reusable presentational components shared by two or more features. |
 | `player/` | The single audio/video player store and playback recovery. |
 | `localization/`, `telemetry/`, `artwork/`, `styles/` | Cross-cutting client concerns. |

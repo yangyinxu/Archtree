@@ -64,6 +64,16 @@ return `400`, while cross-scope, lifecycle-changed, or stale cursors return
 `409`. Anonymous Home collection pages may use the public catalog cache;
 authenticated Home and Library collection pages remain private and
 non-cacheable so account-viewer identity headers never enter a shared cache.
+`GET /api/listener/v1/videos?limit=&cursor=` backs the Web Video page: ready,
+published, publicly visible Video MediaTracks newest first as allowlisted
+MediaTrack DTOs in `items`, 24 per page by default and at most 48. `nextCursor`
+is the last returned MediaTrack ID, or `null` on the last page; unknown query
+parameters, a malformed limit, or a malformed cursor return `400`. The response
+is public and non-cacheable like the other catalog reads. Cursors must be exactly
+24 hexadecimal characters; repeated, nested, empty or whitespace-padded values
+are rejected. Each page rechecks current MediaTrack and assigned-Album access
+before sorting or limiting, so lifecycle changes remove unavailable results on
+the next read. Newer inserted IDs do not shift an in-progress traversal.
 Device-local Downloaded Grid/List definitions return
 `collection_source_not_server_backed` and are never populated from server
 catalog data. Public media streaming is limited to database-confirmed `ready`

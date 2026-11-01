@@ -32,6 +32,8 @@ export interface ContentCardProps {
   onPlay?: (audioTrack: AudioTrackSummary) => void;
   artworkSizes?: string;
   reason?: Reason;
+  /** 'wide' crops artwork and previews to 16:9 for Video Grids; every other surface stays square. */
+  frame?: 'square' | 'wide';
 }
 
 /**
@@ -49,7 +51,8 @@ export const ContentCard = ({
   item,
   onPlay,
   reason,
-  artworkSizes = defaultContentCardArtworkSizes
+  artworkSizes = defaultContentCardArtworkSizes,
+  frame = 'square'
 }: ContentCardProps) => {
   const { locale, t } = useLocalization();
   const playingTrackId = usePlayingTrackId();
@@ -82,7 +85,14 @@ export const ContentCard = ({
   const body = (
     <>
       <span className={styles.artworkFrame}>
-        <Artwork alt="" kind={item.contentType} sizes={artworkSizes} src={item.artworkUrl} />
+        <Artwork
+          alt=""
+          className={frame === 'wide' ? styles.wideArtwork : undefined}
+          kind={item.contentType}
+          // A wide Grid card is about one third of the content width, at most 24rem.
+          sizes={frame === 'wide' ? '(max-width: 600px) 100vw, 24rem' : artworkSizes}
+          src={item.artworkUrl}
+        />
         {preview.active && previewSource ? (
           <Suspense fallback={null}>
             <CardVideoPreview
