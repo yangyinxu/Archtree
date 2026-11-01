@@ -5,6 +5,7 @@
  *              toneHome
  * Tests
  *   - tints the Album header from its artwork, fits a long title, and reveals the compact header
+ *   - the action bar band carries the Album tone below the hero
  *   - Home follows the hovered or focused media card tone and falls back to neutral
  *   - animates tone changes over 600 ms unless reduced motion is requested
  *   - keeps the Album header and compact header usable on a phone
@@ -152,6 +153,29 @@ test('tints the Album header from its artwork, fits a long title, and reveals th
 
   await main.evaluate((element) => element.scrollTo({ top: 0 }));
   await expect(compactPlay).toHaveCount(0);
+});
+
+test('the action bar band carries the Album tone below the hero', async ({ page }) => {
+  await page.route(`**/api/listener/v1/albums/${catalogIds.album}`, (route) => route.fulfill(json(toneAlbum)));
+  await page.setViewportSize({ width: 1_440, height: 900 });
+  await page.goto(`/finitude/albums/${catalogIds.album}`);
+
+  const hero = page.locator('header').filter({ has: page.getByRole('heading', { level: 1, name: longTitle }) });
+  await expect.poll(() => toneOf(hero)).not.toBe(neutralHero);
+  const actionBar = hero.getByRole('button', { name: 'Play', exact: true }).locator('..');
+  const band = await actionBar.evaluate((element) => {
+    const style = getComputedStyle(element, '::before');
+    return {
+      image: style.backgroundImage,
+      tone: style.getPropertyValue('--tone-color').trim(),
+      height: Number.parseFloat(style.height),
+      barHeight: element.getBoundingClientRect().height
+    };
+  });
+  expect(band.image).not.toBe('none');
+  expect(band.tone).toBe(await toneOf(hero));
+  // The band runs past the bar, behind the column header and the first rows.
+  expect(band.height).toBeGreaterThan(band.barHeight);
 });
 
 test('Home follows the hovered or focused media card tone and falls back to neutral', async ({ page }) => {

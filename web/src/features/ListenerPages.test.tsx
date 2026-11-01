@@ -8,6 +8,7 @@
  *   - a paused current Album row keeps its indicator and resumes without relaunching
  *   - row meta falls back to the Album byline, never the Album title
  *   - Album detail shows the server byline and lists the label among its Credits
+ *   - a missing Album year is omitted, not replaced by Album
  *   - Organization page renders its public metadata and credited releases
  *   - Search renders grouped public results and keeps content actions canonical
  *   - Search retry refreshes results without adding or reordering history
@@ -142,7 +143,7 @@ test('Album Play and explicit soundtrack selection share the ordered Album queue
   expect(heroArtwork).toHaveAttribute('fetchpriority', 'high');
   expect(heroArtwork).toHaveAttribute(
     'sizes',
-    '(max-width: 520px) 12rem, (max-width: 720px) 10rem, 20rem'
+    '(max-width: 520px) 12rem, (max-width: 720px) 10rem, 15rem'
   );
   await user.click(screen.getByRole('button', { name: 'Play' }));
   expect(launch).toHaveBeenLastCalledWith([
@@ -174,7 +175,7 @@ test('Album marks the actively playing track and pauses it without relaunching t
   const launch = vi.spyOn(playerStore, 'launchAlbumQueue').mockResolvedValue();
   renderRoute(`/albums/${album.id}`, '/albums/:albumId', <AlbumPage />);
 
-  const pauseAction = await screen.findByRole('button', { name: 'Pause' });
+  const pauseAction = await within(await screen.findByRole('list')).findByRole('button', { name: 'Pause' });
   const trackRow = pauseAction.closest('li');
   expect(trackRow).toHaveAttribute('data-playback-state', 'playing');
   expect(pauseAction).toHaveAttribute('aria-current', 'true');
@@ -185,6 +186,14 @@ test('Album marks the actively playing track and pauses it without relaunching t
   await user.click(pauseAction);
 
   expect(pause).toHaveBeenCalledOnce();
+  expect(launch).not.toHaveBeenCalled();
+
+  // The hero Play reflects this Album's queue too, and pauses it without relaunching.
+  const heroPause = screen.getByRole('heading', { level: 1 }).closest('header')!
+    .querySelector<HTMLButtonElement>('button[aria-label="Pause"]')!;
+  expect(heroPause).toBeInTheDocument();
+  await user.click(heroPause);
+  expect(pause).toHaveBeenCalledTimes(2);
   expect(launch).not.toHaveBeenCalled();
 });
 
@@ -245,7 +254,13 @@ test('Album detail shows the server byline and lists the label among its Credits
   renderRoute(`/albums/${album.id}`, '/albums/:albumId', <AlbumPage />);
 
   expect(await screen.findByRole('heading', { name: 'Night Geometry' })).toBeInTheDocument();
-  expect(screen.getByText('Finite Ensemble & Guest Voice · 2026 · 1 MediaTrack')).toBeInTheDocument();
+  const hero = screen.getByRole('heading', { level: 1 }).closest('header')!;
+  expect(hero.querySelector('p:last-of-type'))
+    .toHaveTextContent('Finite Ensemble & Guest Voice • 2026 • 1 MediaTrack • 3 min');
+  expect(within(hero).getAllByRole('link').map((link) => link.getAttribute('href'))).toEqual([
+    `/artists/${artist.id}`,
+    `/artists/${guestId}`
+  ]);
   const credits = screen.getByRole('region', { name: 'Credits' });
   const label = within(credits).getByRole('link', { name: /Finite Records/ });
   expect(label).toHaveAttribute('href', `/organizations/${organization.id}`);
@@ -255,6 +270,17 @@ test('Album detail shows the server byline and lists the label among its Credits
     `/artists/${guestId}`,
     `/organizations/${organization.id}`
   ]);
+});
+
+test('a missing Album year is omitted, not replaced by Album', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
+    album: { ...album, displayByline: 'Finite Ensemble', releaseDate: null },
+    tracks: [track]
+  })));
+  renderRoute(`/albums/${album.id}`, '/albums/:albumId', <AlbumPage />);
+
+  const hero = (await screen.findByRole('heading', { level: 1, name: 'Night Geometry' })).closest('header')!;
+  expect(hero.querySelector('p:last-of-type')).toHaveTextContent(/^Finite Ensemble • 1 MediaTrack • 3 min$/);
 });
 
 test('Organization page renders its public metadata and credited releases', async () => {

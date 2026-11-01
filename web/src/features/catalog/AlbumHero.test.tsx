@@ -11,10 +11,11 @@
  *   - uses the newest of several queued observer entries
  *   - moves focus from the compact Play to the hero Play when the bar hides
  *   - keeps the compact header hidden where IntersectionObserver is unavailable
+ *   - the compact Play shows Pause when the Album queue is playing
  * @end-catalog */
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router';
 
@@ -104,6 +105,7 @@ const layoutTitle = (fitsAt: () => string[]) => {
 
 afterEach(() => {
   cleanup();
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
   document.body.innerHTML = '';
 });
@@ -245,4 +247,24 @@ test('keeps the compact header hidden where IntersectionObserver is unavailable'
   await screen.findByRole('heading', { level: 1, name: 'Night Geometry' });
   expect(screen.getByRole('button', { name: 'Play' })).toBeInTheDocument();
   expect(screen.queryByRole('button', { name: albumPlayName('Night Geometry') })).not.toBeInTheDocument();
+});
+
+test('the compact Play shows Pause when the Album queue is playing', async () => {
+  const user = userEvent.setup();
+  const track = trackTitled('Opening');
+  vi.spyOn(playerStore, 'getSnapshot').mockReturnValue({
+    ...playerStore.getSnapshot(), currentIndex: 0, currentItem: track as never, queue: [track as never], status: 'playing'
+  });
+  const pause = vi.spyOn(playerStore, 'pause').mockImplementation(() => undefined);
+  const launch = vi.spyOn(playerStore, 'launchAlbumQueue').mockResolvedValue();
+  const { scrollHeroOut } = observeHero();
+  mount(albumWith('Night Geometry'), track);
+  await screen.findByRole('heading', { level: 1, name: 'Night Geometry' });
+  scrollHeroOut();
+
+  const bar = screen.getByText('Night Geometry', { selector: 'span' }).parentElement!;
+  expect(within(bar).queryByRole('button', { name: albumPlayName('Night Geometry') })).not.toBeInTheDocument();
+  await user.click(within(bar).getByRole('button', { name: 'Pause' }));
+  expect(pause).toHaveBeenCalledOnce();
+  expect(launch).not.toHaveBeenCalled();
 });

@@ -5,7 +5,7 @@
  *   Constants: creditRoleKeys
  * @end-catalog */
 
-import { useMemo, useRef, type CSSProperties } from 'react';
+import { Fragment, useMemo, useRef, type CSSProperties } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router';
 
@@ -15,15 +15,18 @@ import { contentByline } from '../../api/contentSchemas';
 import { browserSessionQuery } from '../../api/session';
 import { neutralArtworkTone, useArtworkTone } from '../../artwork/useArtworkTone';
 import { Artwork } from '../../components/Artwork';
+import { CompactCatalogHeader } from '../../components/CompactCatalogHeader';
+import { DetailHero, DetailHeroSkeleton } from '../../components/DetailHero';
+import h from '../../components/DetailHero.module.css';
 import { LinkedByline } from '../../components/LinkedByline';
+import { ShuffleToggle } from '../../components/ShuffleToggle';
 import { TrackTable } from '../../components/TrackTable';
 import { Icon } from '../../components/Icon';
 import { SaveButton } from '../../components/SaveButton';
 import { launchAlbumPlayback } from '../playback/launchPlayback';
 import { LazyAddTrackToPlaylistButton as AddTrackToPlaylistButton } from '../playlists/LazyAddTrackToPlaylistButton';
-import { CompactCatalogHeader } from './CompactCatalogHeader';
-import { useFittedHeroTitle } from './useFittedHeroTitle';
 import styles from './CatalogPages.module.css';
+import { formatTotalDuration, totalDurationSeconds } from './totalDuration';
 import { LazyRoomTrackButton } from '../social/LazyRoomTrackButton';
 import { useLocalization } from '../../localization/LocalizationProvider';
 import type { MessageKey } from '../../localization/contract';
@@ -58,7 +61,6 @@ export const AlbumPage = () => {
   // gradient taller than a short header would otherwise show as a band below it.
   const tone = useArtworkTone(albumQuery.data?.album.artworkUrl) ?? neutralArtworkTone;
   const title = albumQuery.data?.album.title || t('content.title.untitled_album');
-  const titleFit = useFittedHeroTitle(albumQuery.data ? title : null);
   const targets = useMemo<LibraryTarget[]>(() => {
     if (!albumQuery.data) return [];
     return [
@@ -81,9 +83,7 @@ export const AlbumPage = () => {
     return statuses.isError ? null : savedByKey.get(key) ?? null;
   };
 
-  if (albumQuery.isPending) {
-    return <div className={styles.page}><div className={styles.state} aria-busy="true">{t('catalog.album.loading')}</div></div>;
-  }
+  if (albumQuery.isPending) return <DetailHeroSkeleton label={t('catalog.album.loading')} />;
   if (albumQuery.isError) {
     return (
       <div className={styles.page}>
@@ -99,66 +99,72 @@ export const AlbumPage = () => {
   const { album, tracks } = albumQuery.data;
   const albumTarget: LibraryTarget = { contentType: 'album', contentId: album.id };
   const byline = contentByline(album);
-  const play = () => { void launchAlbumPlayback(album.id, tracks, viewerId); };
+  // Hero and compact Play reflect this Album's queue: Pause while it plays, resume while it is paused.
+  const heroPlaying = playback.matches && playback.status === 'playing';
+  const togglePlay = () => {
+    if (heroPlaying) playerStore.pause();
+    else if (playback.matches && playback.status === 'paused') void playerStore.play();
+    else void launchAlbumPlayback(album.id, tracks, viewerId);
+  };
+  const total = totalDurationSeconds(tracks);
+  const pauseLabel = t('player.action.pause');
 
   return (
     <>
       <CompactCatalogHeader
         heroPlayRef={heroPlayRef}
         heroRef={heroRef}
-        onPlay={play}
+        onPlay={togglePlay}
         playDisabled={tracks.length === 0}
-        playLabel={byline
+        playing={heroPlaying}
+        playLabel={heroPlaying ? pauseLabel : byline
           ? t('content.album.play_byline_label', { title, byline })
           : t('content.album.play_label', { title })}
         title={title}
         tone={tone.pane}
       />
-      <div className={`${styles.page} ${styles.albumPage}`}>
-        <header className={styles.albumHeroBlock} ref={heroRef} style={{ '--tone-color': tone.hero } as CSSProperties}>
-          <div className={styles.hero}>
-            <Artwork
-              alt={t('content.album.cover_alt', { title: album.title })}
-              className={styles.heroArtwork}
-              fetchPriority="high"
-              kind="album"
-              loading="eager"
-              sizes="(max-width: 520px) 12rem, (max-width: 720px) 10rem, 20rem"
-              src={album.artworkUrl}
-            />
-            <div className={styles.heroCopy}>
-              <p className={styles.eyebrow}>{t('common.label.album')}</p>
-              <h1 className={styles.albumTitle} data-title-size={titleFit.initialSize} ref={titleFit.ref} title={title}>{title}</h1>
-              <p className={styles.metadata}>
-                {[byline, album.releaseDate?.year
-                  ? String(album.releaseDate.year)
-                  : t('common.label.album'), t('catalog.album.track_count', { count: tracks.length })]
-                  .filter(Boolean)
-                  .join(' · ')}
-              </p>
-            </div>
-          </div>
-          <div className={`${styles.actions} ${styles.albumActions}`}>
-            <LazyShareMusicButton contentType="album" contentId={album.id} title={album.title} />
+      <div className={h.page}>
+        <DetailHero
+          actions={<>
             <button
-              aria-label={t('common.action.play')}
-              className={styles.playButton}
+              aria-label={heroPlaying ? pauseLabel : t('common.action.play')}
+              className={h.play}
               disabled={tracks.length === 0}
-              onClick={play}
+              onClick={togglePlay}
               ref={heroPlayRef}
               type="button"
             >
-              <Icon name="play" />
-              <span className={styles.playLabel}>{t('common.action.play')}</span>
+              <Icon name={heroPlaying ? 'pause' : 'play'} />
             </button>
-            <SaveButton
-              compact
-              saved={savedFor(albumTarget)}
-              target={albumTarget}
-              viewerId={viewerId}
-            />
-          </div>
-        </header>
+            <ShuffleToggle disabled={tracks.length < 2} />
+            <span className={h.iconSlot}>
+              <SaveButton compact saved={savedFor(albumTarget)} target={albumTarget} viewerId={viewerId} />
+            </span>
+            <span className={h.iconSlot}>
+              <LazyShareMusicButton contentType="album" contentId={album.id} title={album.title} />
+            </span>
+          </>}
+          artwork={<Artwork
+            alt={t('content.album.cover_alt', { title: album.title })}
+            className={h.artwork}
+            fetchPriority="high"
+            kind="album"
+            loading="eager"
+            sizes="(max-width: 520px) 12rem, (max-width: 720px) 10rem, 15rem"
+            src={album.artworkUrl}
+          />}
+          // The year shows only when known; nothing stands in for a missing one.
+          byline={[
+            byline && <LinkedByline credits={album.credits} text={byline} />,
+            album.releaseDate?.year,
+            t('catalog.album.track_count', { count: tracks.length }),
+            total ? formatTotalDuration(total, t) : null
+          ].filter(Boolean).map((part, index) => <Fragment key={index}>{index > 0 && ' • '}{part}</Fragment>)}
+          eyebrow={t('common.label.album')}
+          heroRef={heroRef}
+          title={title}
+          tone={tone.hero}
+        />
 
         {viewerId && statuses.isError && <div className={styles.state} role="alert">
           <p>{t('library.error.load')}</p>

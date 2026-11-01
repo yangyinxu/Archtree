@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type CSSProperties, type RefObject } from 'react';
 
-import { Icon } from '../../components/Icon';
-import styles from './CatalogPages.module.css';
+import { Icon } from './Icon';
+import h from './DetailHero.module.css';
+import styles from './CompactCatalogHeader.module.css';
 
 interface CompactCatalogHeaderProps {
   /** The page hero; the bar appears once it has scrolled up under the bar. */
@@ -9,9 +10,11 @@ interface CompactCatalogHeaderProps {
   /** The hero's own Play, which takes focus if the bar hides while its Play is focused. */
   heroPlayRef: RefObject<HTMLButtonElement | null>;
   title: string;
-  /** Accessible name of the bar's Play control, which must name the Album, not a track. */
+  /** Accessible name of the bar's Play control, which must name the page, not a track. */
   playLabel: string;
   playDisabled: boolean;
+  /** True while this page's queue plays, so the control shows Pause. */
+  playing: boolean;
   onPlay: () => void;
   /** The pane tone, which keeps the bar's white title at AA contrast. */
   tone: string;
@@ -21,7 +24,7 @@ interface CompactCatalogHeaderProps {
  * Sticks to the top of the main pane and fades in the title and Play, on the page tone, once the
  * hero has scrolled under it. Rendered before the page so it overlays content without taking
  * layout space; while it shows, the main pane reserves its height for focus scrolling (see
- * CatalogPages.module.css). While hidden it is inert and removed from the accessibility tree, so it
+ * CompactCatalogHeader.module.css). While hidden it is inert and removed from the accessibility tree, so it
  * never duplicates the hero's controls; its title stays hidden because the hero heading names the
  * page.
  */
@@ -31,6 +34,7 @@ export const CompactCatalogHeader = ({
   title,
   playLabel,
   playDisabled,
+  playing,
   onPlay,
   tone
 }: CompactCatalogHeaderProps) => {
@@ -69,12 +73,12 @@ export const CompactCatalogHeader = ({
       >
         <button
           aria-label={playLabel}
-          className={styles.playButton}
+          className={h.play}
           disabled={playDisabled}
           onClick={onPlay}
           type="button"
         >
-          <Icon name="play" />
+          <Icon name={playing ? 'pause' : 'play'} />
         </button>
         <span aria-hidden="true">{title}</span>
       </div>
