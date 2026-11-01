@@ -182,9 +182,11 @@
   inline-size: 1.75rem;
 }
 
+/* The transparent background also overrides SaveButton's own pill hover inside an icon slot. */
 .play:not(:disabled):hover,
 .iconAction:not(:disabled):hover,
 .iconSlot button:hover {
+  background: transparent;
   color: var(--color-text);
   transform: scale(1.04);
 }
