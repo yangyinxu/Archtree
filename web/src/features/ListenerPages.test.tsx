@@ -5,6 +5,8 @@
  * Tests
  *   - Album Play and explicit soundtrack selection share the ordered Album queue
  *   - Album marks the actively playing track and pauses it without relaunching the queue
+ *   - a paused current Album row keeps its indicator and resumes without relaunching
+ *   - row meta falls back to the Album byline, never the Album title
  *   - Album detail shows the server byline and lists the label among its Credits
  *   - Organization page renders its public metadata and credited releases
  *   - Search renders grouped public results and keeps content actions canonical
@@ -184,6 +186,45 @@ test('Album marks the actively playing track and pauses it without relaunching t
 
   expect(pause).toHaveBeenCalledOnce();
   expect(launch).not.toHaveBeenCalled();
+});
+
+test('a paused current Album row keeps its indicator and resumes without relaunching', async () => {
+  const user = userEvent.setup();
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ album, tracks: [track] })));
+  const snapshot = playerStore.getSnapshot();
+  vi.spyOn(playerStore, 'getSnapshot').mockReturnValue({
+    ...snapshot,
+    currentIndex: 0,
+    currentItem: track,
+    queue: [track],
+    status: 'paused'
+  });
+  const play = vi.spyOn(playerStore, 'play').mockResolvedValue();
+  const launch = vi.spyOn(playerStore, 'launchAlbumQueue').mockResolvedValue();
+  renderRoute(`/albums/${album.id}`, '/albums/:albumId', <AlbumPage />);
+
+  const resume = await screen.findByRole('button', { name: 'Play Blue Interval' });
+  expect(resume.closest('li')).toHaveAttribute('data-playback-state', 'paused');
+  expect(resume).toHaveAttribute('aria-current', 'true');
+  expect(screen.getByText('Blue Interval').className).toContain('trackTitlePlaying');
+
+  await user.click(resume);
+
+  expect(play).toHaveBeenCalledOnce();
+  expect(launch).not.toHaveBeenCalled();
+});
+
+test('row meta falls back to the Album byline, never the Album title', async () => {
+  const anonymous = { ...track, artistNames: [] };
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
+    album: { ...album, displayByline: 'Finite Ensemble' },
+    tracks: [anonymous]
+  })));
+  renderRoute(`/albums/${album.id}`, '/albums/:albumId', <AlbumPage />);
+
+  const row = (await screen.findByRole('button', { name: 'Play Blue Interval' })).closest('li')!;
+  expect(row).toHaveTextContent('Finite Ensemble');
+  expect(row).not.toHaveTextContent('Night Geometry');
 });
 
 test('Album detail shows the server byline and lists the label among its Credits', async () => {

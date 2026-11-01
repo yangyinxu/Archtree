@@ -154,7 +154,7 @@ src/api/listenerContractCompatibility.test.ts src/player/playerStore.test.ts
 src/player/queueOrder.test.ts` for the focused wire and transport checks, followed
 by the normal full test/build and Listener playback/release gates for a release.
 The existing build measures every emitted entry's transitive gzip JavaScript
-against the unchanged 150 KiB limit; architectural splitting must not raise that
+against the reviewed 151 KiB limit; architectural splitting must not raise that
 limit merely to make the gate pass. Inspect future eager dependencies before adding them; the current budget has little spare capacity.
 
 

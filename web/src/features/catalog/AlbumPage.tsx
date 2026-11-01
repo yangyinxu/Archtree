@@ -7,7 +7,6 @@
 
 import { useMemo, useRef, type CSSProperties } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { AudioLines } from 'lucide-react';
 import { Link, useParams } from 'react-router';
 
 import type { LibraryTarget } from '../../api/contentSchemas';
@@ -16,6 +15,8 @@ import { contentByline } from '../../api/contentSchemas';
 import { browserSessionQuery } from '../../api/session';
 import { neutralArtworkTone, useArtworkTone } from '../../artwork/useArtworkTone';
 import { Artwork } from '../../components/Artwork';
+import { LinkedByline } from '../../components/LinkedByline';
+import { TrackTable } from '../../components/TrackTable';
 import { Icon } from '../../components/Icon';
 import { SaveButton } from '../../components/SaveButton';
 import { launchAlbumPlayback } from '../playback/launchPlayback';
@@ -26,7 +27,8 @@ import styles from './CatalogPages.module.css';
 import { LazyRoomTrackButton } from '../social/LazyRoomTrackButton';
 import { useLocalization } from '../../localization/LocalizationProvider';
 import type { MessageKey } from '../../localization/contract';
-import { playerStore, usePlayingTrackId } from '../../player';
+import { playerStore } from '../../player';
+import { usePlaybackContext } from '../../player/usePlaybackContext';
 import { LazyShareMusicButton } from '../social/LazyShareMusicButton';
 
 const creditRoleKeys: Record<string, MessageKey> = {
@@ -46,7 +48,6 @@ const creditRoleKeys: Record<string, MessageKey> = {
 /** Renders one expanded Album and launches its canonical ready-only queue. */
 export const AlbumPage = () => {
   const { t } = useLocalization();
-  const playingTrackId = usePlayingTrackId();
   const { albumId = '' } = useParams();
   const session = useQuery(browserSessionQuery());
   const viewerId = session.data?.user.id;
@@ -68,6 +69,8 @@ export const AlbumPage = () => {
       }))
     ];
   }, [albumQuery.data]);
+  const trackIds = useMemo(() => albumQuery.data?.tracks.map((track) => track.id) ?? [], [albumQuery.data]);
+  const playback = usePlaybackContext(trackIds);
   const statuses = useQuery(saveStatusesQuery(viewerId ?? '', targets));
   const savedByKey = useMemo(() => new Map(
     statuses.data?.items.map((item) => [`${item.contentType}:${item.contentId}`, item.saved]) ?? []
@@ -183,82 +186,47 @@ export const AlbumPage = () => {
           </section>
         )}
 
-        <section className={styles.trackSection} aria-labelledby="album-soundtracks-title">
-          <div className={styles.sectionHeader}>
-            <div>
-              <p className={styles.eyebrow}>{t('catalog.album.in_album')}</p>
-              <h2 id="album-soundtracks-title">{t('common.label.mediatracks')}</h2>
-            </div>
-            <p>{tracks.length > 0 ? t('catalog.album.select_track') : t('catalog.album.no_tracks')}</p>
-          </div>
+        <section aria-labelledby="album-soundtracks-title" style={{ '--tt-sticky-top': '4rem' } as CSSProperties}>
+          <h2 className="visually-hidden" id="album-soundtracks-title">{t('common.label.mediatracks')}</h2>
           {tracks.length > 0 ? (
-            <ol className={styles.trackList}>
-              {tracks.map((track, index) => {
+            <TrackTable
+              durationHeading={t('playlist.detail.table.duration')}
+              rows={tracks.map((track) => {
                 const target: LibraryTarget = { contentType: 'audioTrack', contentId: track.id };
                 const title = track.title || t('content.title.untitled_track');
-                const isPlaying = playingTrackId === track.id;
-                return (
-                  <li
-                    className={styles.trackRow}
-                    data-playback-state={isPlaying ? 'playing' : undefined}
-                    key={track.id}
-                  >
-                    <button
-                      aria-current={isPlaying ? 'true' : undefined}
-                      aria-label={isPlaying
-                        ? t('player.action.pause')
-                        : t('content.play.label', { title })}
-                      className={styles.trackAction}
-                      onClick={() => {
-                        if (isPlaying) {
-                          playerStore.pause();
-                          return;
-                        }
-                        void launchAlbumPlayback(album.id, tracks, viewerId, track.id);
-                      }}
-                      type="button"
-                    >
-                      <span aria-hidden="true" className={styles.trackNumber}>
-                        {isPlaying ? (
-                          <span className={styles.trackPlaybackIndicator}>
-                            <AudioLines
-                              aria-hidden="true"
-                              className={styles.trackPlaybackBars}
-                              focusable="false"
-                              strokeWidth={1.9}
-                            />
-                            <Icon className={styles.trackPauseIcon} name="pause" />
-                          </span>
-                        ) : index + 1}
-                      </span>
-                      <span className={styles.trackCopy}>
-                        <span className={`${styles.trackTitle} ${isPlaying ? styles.trackTitlePlaying : ''}`}>
-                          {title}
-                        </span>
-                        <span className={styles.trackMeta}>{contentByline(track) || album.title}</span>
-                      </span>
-                      <span className={styles.duration}>{track.duration || ''}</span>
-                    </button>
-                    <span className={styles.trackTrailing}>
-                      {track.mediaType !== 'video' && <LazyRoomTrackButton mediaTrackId={track.id} title={title} />}
-                      <LazyShareMusicButton contentType="audioTrack" contentId={track.id} title={title} />
-                      <AddTrackToPlaylistButton
-                        accountPending={session.isPending}
-                        accountUnavailable={session.isError}
-                        track={track}
-                        viewerId={viewerId}
-                      />
-                      <SaveButton
-                        compact
-                        saved={savedFor(target)}
-                        target={target}
-                        viewerId={viewerId}
-                      />
-                    </span>
-                  </li>
-                );
+                const state = track.id === playback.currentId ? playback.status : null;
+                const trackByline = contentByline(track);
+                return {
+                  key: track.id,
+                  title,
+                  // A row never repeats the Album title; it falls back to the Album byline.
+                  byline: trackByline
+                    ? <LinkedByline credits={track.credits} text={trackByline} />
+                    : byline && <LinkedByline credits={album.credits} text={byline} />,
+                  duration: track.duration,
+                  state,
+                  playLabel: state === 'playing' ? t('player.action.pause') : t('content.play.label', { title }),
+                  onActivate: () => {
+                    if (state === 'playing') playerStore.pause();
+                    else if (state === 'paused' && playback.matches) void playerStore.play();
+                    else void launchAlbumPlayback(album.id, tracks, viewerId, track.id);
+                  },
+                  actions: <>
+                    {track.mediaType !== 'video' && <LazyRoomTrackButton mediaTrackId={track.id} title={title} />}
+                    <LazyShareMusicButton contentType="audioTrack" contentId={track.id} title={title} />
+                    <AddTrackToPlaylistButton
+                      accountPending={session.isPending}
+                      accountUnavailable={session.isError}
+                      track={track}
+                      viewerId={viewerId}
+                    />
+                  </>,
+                  save: <SaveButton compact saved={savedFor(target)} target={target} viewerId={viewerId} />
+                };
               })}
-            </ol>
+              titleHeading={t('playlist.detail.table.title')}
+              variant="album"
+            />
           ) : (
             <div className={styles.empty}>{t('catalog.album.empty')}</div>
           )}

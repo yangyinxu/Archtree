@@ -18,6 +18,8 @@
  *   - removing the only member focuses the MediaTracks heading
  *   - searches ready MediaTracks and adds the selected result to an empty Playlist
  *   - skips unavailable members when snapshotting the persisted Playlist order
+ *   - the playing Playlist row shows Pause with aria-current
+ *   - the Album column links to /albums/:id
  * @end-catalog */
 
 import type { ReactNode } from 'react';
@@ -510,4 +512,42 @@ test('skips unavailable members when snapshotting the persisted Playlist order',
     expect.objectContaining({ id: firstTrack.id }),
     expect.objectContaining({ id: secondTrack.id })
   ], 0);
+});
+
+test('the playing Playlist row shows Pause with aria-current', async () => {
+  const user = userEvent.setup();
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(detail)));
+  const snapshot = playerStore.getSnapshot();
+  vi.spyOn(playerStore, 'getSnapshot').mockReturnValue({
+    ...snapshot,
+    currentIndex: 1,
+    currentItem: secondTrack,
+    queue: [firstTrack, secondTrack],
+    status: 'playing'
+  });
+  const pause = vi.spyOn(playerStore, 'pause').mockImplementation(() => undefined);
+  const launch = vi.spyOn(playerStore, 'launchQueue').mockResolvedValue();
+  renderPlaylistRoutes('/playlists/playlist-1');
+
+  const list = await screen.findByRole('list', { name: 'Quiet sequence MediaTracks' });
+  const current = within(list).getByRole('button', { name: 'Pause' });
+  expect(current).toHaveAttribute('aria-current', 'true');
+  expect(current.closest('li')).toHaveTextContent('Dawn');
+  expect(within(list).getByRole('button', { name: 'Play Night' })).not.toHaveAttribute('aria-current');
+
+  await user.click(current);
+  expect(pause).toHaveBeenCalledOnce();
+  expect(launch).not.toHaveBeenCalled();
+});
+
+test('the Album column links to /albums/:id', async () => {
+  const onAlbum = { ...firstTrack, albumId: 'album-7', albumTitle: 'Night Geometry' };
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
+    ...detail,
+    items: [{ ...detail.items[0], audioTrack: onAlbum }, detail.items[1]]
+  })));
+  renderPlaylistRoutes('/playlists/playlist-1');
+
+  const list = await screen.findByRole('list', { name: 'Quiet sequence MediaTracks' });
+  expect(within(list).getByRole('link', { name: 'Night Geometry' })).toHaveAttribute('href', '/albums/album-7');
 });

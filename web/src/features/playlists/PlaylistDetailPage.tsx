@@ -31,6 +31,10 @@ import { browserSessionQuery } from '../../api/session';
 import { focusMainContent } from '../../app/focusMainContent';
 import { neutralArtworkTone, useArtworkTone, useMainPaneTone } from '../../artwork/useArtworkTone';
 import { Artwork } from '../../components/Artwork';
+import { LinkedByline } from '../../components/LinkedByline';
+import { TrackTable } from '../../components/TrackTable';
+import { playerStore } from '../../player';
+import { usePlaybackContext } from '../../player/usePlaybackContext';
 import { launchPlaylistPlayback } from '../playback/launchPlayback';
 import {
   commitPlaylistDetail,
@@ -248,6 +252,8 @@ export const PlaylistDetailPage = () => {
   const readyTracks = useMemo(() => playlist?.items.flatMap((item) => (
     item.availability === 'ready' && item.audioTrack ? [item.audioTrack] : []
   )) ?? [], [playlist]);
+  const readyTrackIds = useMemo(() => readyTracks.map((track) => track.id), [readyTracks]);
+  const playback = usePlaybackContext(readyTrackIds);
   const knownDuration = useMemo(() => readyTracks.reduce<number | null>((total, track) => {
     const seconds = durationSeconds(track.duration);
     return seconds === null || total === null ? null : total + seconds;
@@ -418,16 +424,14 @@ export const PlaylistDetailPage = () => {
       )}
       <p aria-atomic="true" aria-live="polite" className="visually-hidden">{visibleMovementAnnouncement}</p>
 
-      <section aria-labelledby="playlist-soundtracks-title" className={styles.memberSection}>
-        <div className={styles.sectionHeading}>
-          <div>
-            <p className={styles.eyebrow}>{t('playlist.detail.in_playlist')}</p>
-            <h2 id="playlist-soundtracks-title" ref={memberHeadingRef} tabIndex={-1}>{t('common.label.mediatracks')}</h2>
-          </div>
-          <p>{playlist.items.length > 0
-            ? t('playlist.detail.items_copy')
-            : t('playlist.detail.empty_copy')}</p>
-        </div>
+      <section aria-labelledby="playlist-soundtracks-title">
+        {/* Hidden over a list; shown above the empty state, where it is the removal focus fallback. */}
+        <h2
+          className={playlist.items.length > 0 ? 'visually-hidden' : styles.emptyHeading}
+          id="playlist-soundtracks-title"
+          ref={memberHeadingRef}
+          tabIndex={-1}
+        >{t('common.label.mediatracks')}</h2>
         {playlist.items.length === 0 ? (
           <div className={styles.emptyState}>
             <ListMusic aria-hidden="true" />
@@ -436,77 +440,71 @@ export const PlaylistDetailPage = () => {
             <button className={styles.primaryButton} onClick={() => setDialog('add')} type="button">{t('playlist.action.add_tracks')}</button>
           </div>
         ) : (
-          <>
-            <div aria-hidden="true" className={styles.memberTableHeader}>
-              <span>#</span>
-              <span className={styles.memberTitleHeading}>{t('playlist.detail.table.title')}</span>
-              <span>{t('playlist.detail.table.duration')}</span>
-              <span />
-            </div>
-            <ol aria-label={t('playlist.detail.members_label', { name: playlist.name })} className={styles.memberList}>
-            {playlist.items.map((item, index) => {
+          <TrackTable
+            albumHeading={t('common.label.album')}
+            durationHeading={t('playlist.detail.table.duration')}
+            label={t('playlist.detail.members_label', { name: playlist.name })}
+            rows={playlist.items.map((item, index) => {
               const track = item.audioTrack;
               const title = track?.title || t('playlist.detail.unavailable_title');
-              return (
-                <li className={`${styles.memberRow} ${!track ? styles.unavailableRow : ''}`} key={item.itemId}>
-                  <button
-                    aria-label={track
-                      ? t('content.play.label', { title })
-                      : t('playlist.detail.cannot_play', { title })}
-                    className={styles.memberPrimary}
-                    disabled={!track}
-                    onClick={() => {
-                      if (track) void launchPlaylistPlayback(readyTracks, viewerId, track.id);
-                    }}
-                    type="button"
-                  >
-                    <span className={styles.memberPosition}>{index + 1}</span>
-                    <Artwork alt="" className={styles.memberArtwork} kind="audioTrack" sizes="3.25rem" src={track?.artworkUrl} />
-                    <span className={styles.memberCopy}>
-                      <span title={title}>{title}</span>
-                      <span>{track
-                        ? [track.artistNames.join(', '), track.albumTitle].filter(Boolean).join(' · ') || t('common.label.mediatrack')
-                        : t('playlist.detail.unavailable_copy')}</span>
-                    </span>
-                    <span className={styles.memberDuration}>{track?.duration || '—'}</span>
-                  </button>
-                  <span className={styles.memberMenu}>
-                    <Suspense fallback={null}>
-                      <ActionMenu
-                        items={[
-                          { label: t('playlist.action.move_up'), disabled: mutationPending || index === 0, onSelect: () => moveItem(item.itemId, -1) },
-                          { label: t('playlist.action.move_down'), disabled: mutationPending || index === playlist.items.length - 1, onSelect: () => moveItem(item.itemId, 1) },
-                          {
-                            label: t('playlist.action.remove'),
-                            destructive: true,
-                            disabled: mutationPending,
-                            restoreFocus: false,
-                            onSelect: () => {
-                              focusAfterMemberRemoval(item.itemId);
-                              const signature = `remove:${playlist.revision}:${item.itemId}`;
-                              const idempotencyKey = mutationKeysRef.current.get(signature)
-                                ?? createPlaylistIdempotencyKey();
-                              mutationKeysRef.current.set(signature, idempotencyKey);
-                              removeMutation.mutate({
-                                viewerId, playlistId, operation: ++mutationOperationRef.current,
-                                itemId: item.itemId,
-                                revision: playlist.revision,
-                                idempotencyKey,
-                                signature
-                              });
-                            }
-                          }
-                        ]}
-                        label={t('playlist.actions.for', { name: title })}
-                        triggerRef={memberActionRef(item.itemId)}
-                      />
-                    </Suspense>
-                  </span>
-                </li>
-              );
+              const state = track && track.id === playback.currentId ? playback.status : null;
+              return {
+                key: item.itemId,
+                title,
+                byline: !track
+                  ? t('playlist.detail.unavailable_copy')
+                  : track.artistNames.length > 0 && <LinkedByline credits={track.credits} text={track.artistNames.join(', ')} />,
+                artworkUrl: track?.artworkUrl,
+                album: track?.albumId
+                  ? <Link to={`/albums/${encodeURIComponent(track.albumId)}`}>{track.albumTitle}</Link>
+                  : track?.albumTitle,
+                duration: track?.duration ?? null,
+                state,
+                disabled: !track,
+                playLabel: !track
+                  ? t('playlist.detail.cannot_play', { title })
+                  : state === 'playing' ? t('player.action.pause') : t('content.play.label', { title }),
+                onActivate: () => {
+                  if (!track) return;
+                  if (state === 'playing') playerStore.pause();
+                  else if (state === 'paused' && playback.matches) void playerStore.play();
+                  else void launchPlaylistPlayback(readyTracks, viewerId, track.id);
+                },
+                menu: <Suspense fallback={null}>
+                  <ActionMenu
+                    items={[
+                      { label: t('playlist.action.move_up'), disabled: mutationPending || index === 0, onSelect: () => moveItem(item.itemId, -1) },
+                      { label: t('playlist.action.move_down'), disabled: mutationPending || index === playlist.items.length - 1, onSelect: () => moveItem(item.itemId, 1) },
+                      {
+                        label: t('playlist.action.remove'),
+                        destructive: true,
+                        disabled: mutationPending,
+                        restoreFocus: false,
+                        onSelect: () => {
+                          focusAfterMemberRemoval(item.itemId);
+                          const signature = `remove:${playlist.revision}:${item.itemId}`;
+                          const idempotencyKey = mutationKeysRef.current.get(signature)
+                            ?? createPlaylistIdempotencyKey();
+                          mutationKeysRef.current.set(signature, idempotencyKey);
+                          removeMutation.mutate({
+                            viewerId, playlistId, operation: ++mutationOperationRef.current,
+                            itemId: item.itemId,
+                            revision: playlist.revision,
+                            idempotencyKey,
+                            signature
+                          });
+                        }
+                      }
+                    ]}
+                    label={t('playlist.actions.for', { name: title })}
+                    triggerRef={memberActionRef(item.itemId)}
+                  />
+                </Suspense>
+              };
             })}
-            </ol>
-          </>
+            titleHeading={t('playlist.detail.table.title')}
+            variant="playlist"
+          />
         )}
       </section>
 
