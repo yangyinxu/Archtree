@@ -31,6 +31,7 @@ test('keeps the wide-shell Tab order deterministic through navigation and Librar
     sidebar.getByRole('link', { name: 'Home' }),
     sidebar.getByRole('link', { name: 'Search' }),
     sidebar.getByRole('link', { name: 'Library' }),
+    sidebar.getByRole('link', { name: 'Video', exact: true }),
     sidebar.getByRole('link', { name: 'Together' }),
     sidebar.getByRole('button', { name: 'New Playlist' })
   ];
