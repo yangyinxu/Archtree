@@ -27,7 +27,7 @@ test('Video navigation and wide cards remain reachable on desktop and narrow scr
   for (const width of [1440, 768, 320]) {
     await page.setViewportSize({ width, height: 900 });
     await expect(page.getByRole('link', { name: 'Video', exact: true })).toBeVisible();
-    const artwork = videos.locator('article [class*="artworkFrame"]').first();
+    const artwork = videos.locator('article').first().locator('button').first().locator(':scope > span').first();
     await expect(async () => {
       const bounds = await artwork.boundingBox();
       expect(bounds).not.toBeNull();
