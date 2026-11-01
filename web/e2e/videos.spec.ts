@@ -7,6 +7,8 @@
  *   - wide Video cards offer decorative hover previews without starting playback
  * @end-catalog */
 
+import { mkdir } from 'node:fs/promises';
+
 import { trackFixtures } from './fixtures/catalog';
 import { expectNoUnownedAxeViolations } from './support/accessibility';
 import { installDeterministicAudio } from './support/deterministicAudio';
@@ -127,5 +129,3 @@ test('wide Video cards offer decorative hover previews without starting playback
   await page.mouse.move(0, 0);
   await expect(preview).toHaveCount(0);
 });
-import { mkdir } from 'node:fs/promises';
-
