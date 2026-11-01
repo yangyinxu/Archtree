@@ -2111,7 +2111,21 @@ started yet)** or, for a step a run that ended never reached, ○ **(not run)**,
 and – **(skipped)**, or – alone where the step's own words say why. A search
 names what it searched by (Album name and Artist, Album name only, song name and
 Artist, song name only) with the text and Artist name it sent, or reads **Search
-by name** where its text is not shown. The Track-title row names the titles it
+by name** where its text is not shown. A run that searched the review's captured
+import evidence lists those rows first, never with a value: **Look up the
+release by the release ID from the import** (or **… in the file tags**),
+**Search by the barcode in the file tags** and **Search by the catalogue number
+in the file tags**; in such a run a Track-title row that was not needed reads
+**not needed (a matching release was already found)**, and one whose searches
+the identifier searches crowded out under the query bound (`noRoom`) reads
+**not run (the searches by the import's identifiers used the search limit)**.
+These words are Web-only `web-admin` copy (`admin.lookup_evidence.*`) in their
+own chunk (`LookupEvidence.tsx`, loaded only for such a run, which reads the
+scoped bundle through `adminWebMessages.ts`); the row marks stay runtime copy.
+When that chunk or bundle cannot load, those rows and the chosen line below
+render nothing, and one alert above the list says the workbench was updated,
+with **Reload page**. The
+Track-title row names the titles it
 searched (as planned while undecided; those the run may not have sent follow in
 a second row) or, from `timeline.trackTitleSearch`, why none was searched: not
 needed because the name searches found a matching release; skipped because the
@@ -2128,7 +2142,9 @@ aliases (4 of 4 lookups)**. An iTunes row whose stage left results out of the
 comparison (`partial`) adds a line that iTunes returned many Albums, so only the
 first 4 were checked on MusicBrainz, and a bridge row with titles adds that they
 came back from iTunes as other Albums for the names searched, so their
-MusicBrainz releases are among the releases found. While a run is queued, running or retrying the steps show open after the
+MusicBrainz releases are among the releases found; where they came back only
+for the captured barcode (`byBarcode`), the line says so instead
+(`admin.lookup_evidence.bridge_note_barcode`, through the same chunk). While a run is queued, running or retrying the steps show open after the
 status; while it is running and the page has seen no new step
 (`timeline.updatedAt`) for more than 5 seconds of its own clock (from the read
 that first brought that step to the summary's last read), a line above them says
@@ -2138,17 +2154,23 @@ behind it never shows or hides the line, and a page opened during a long wait
 shows it from its first read more than 5 seconds later. Once a run ended, the
 steps fold under **Lookup log: took N s · N searches · N releases found**
 (**took N min N s** from a minute; from `timeline.startedAt` to `completedAt`,
-else the last step; the title searches done, the Track titles of a done row
-once sent and the iTunes searches its iTunes row counts as done, never a search
-the run may not have sent nor the bridge's checks, so the count matches the
-rows; every candidate, as **Releases found** counts them), which opens on
-request.
+else the last step; the identifier and title searches done, the Track titles of
+a done row once sent and the iTunes searches its iTunes row counts as done,
+never a search the run may not have sent nor the bridge's checks, so the count
+matches the rows; every candidate, as **Releases found** counts them), which
+opens on request.
 
 After a run that completed with no issue, a line before the folded steps names
 the searches it sent whose text is shown, in order (**This lookup searched for
 "X" · Artist, then "X" alone, then …**), never one the run may not have sent; a
 run that completed after MusicBrainz's retries ran out (issue `sourceBusy` or
 `sourceUnavailable`) may not have sent its searches and shows no such line.
+After a completed run whose release this run applied as its preselection by a
+captured identifier, a line under the status, shown also while the log is
+folded (other releases can still be listed as matching), says which one chose
+it: **Chosen automatically: the MusicBrainz release ID applied when these files
+were imported.**, or the MusicBrainz release ID, barcode or catalogue number in
+the tags of every file.
 The name box (`CatalogReviewLookupAnother.tsx`) is not part of these steps. It
 sits under the page's row of alternatives, opened by **Look up another name**,
 and is unmounted while closed. Its Cancel button closes it and returns focus to
@@ -2555,8 +2577,9 @@ Catalog review routes (relative to `/api/admin/v1`):
   the Album's first label Credit; whether every primary and featured Artist
   Credit is shown, for the Album and each member (a Credit left out as a
   repeated name, in any letter case, makes its list incomplete, so lookup marks
-  it `notApplicable` and applying never writes it); and the Album's expected
-  tracklist rows. The draft gains those rows and each member's shown primary and
+  it `notApplicable` and applying never writes it); the Album's expected
+  tracklist rows; and its import evidence (below). The draft gains those rows
+  and each member's shown primary and
   featured Artist Credits as entries (keyed per member); the Album's entries and
   label are rebuilt from the Credits read then, keeping the keys of unchanged
   Credits, and carry the records' MusicBrainz IDs; and each source track that
@@ -2564,6 +2587,39 @@ Catalog review routes (relative to `/api/admin/v1`):
   where it showed none. Admission adds no receipt and advances the revision
   once, when it converts, and a format-3 review is only checked again, never
   captured again.
+- Import evidence. In the transaction that captures a review for lookup, the
+  server reads the completed imports (`purpose` `import`, or a legacy import
+  without `purpose`; `media.publication.state` `complete`) whose
+  `media.publication.albumId` is the Album and whose published tracks name a
+  member, through the required partial index `admin_import_published_album`
+  (see [Runtime](../architecture/runtime.md); the Album ID term also states
+  `$type: 'string'`, since MongoDB uses a partial index only for a query that
+  implies its filter), at most 101 within 3 seconds,
+  and, by `_id`, only the `applied` of their `adminImportLookups` records. An
+  Album without members reads nothing. Provenance holds when every member is a
+  published track (`media.publication.tracks[]` with `reused` stored as
+  `false`) of exactly one of those imports whose asset for that slot is `ready`
+  or `deleted` and whose MediaTrack still passes the byte checks local MP3
+  conversion makes before it reports a local result removable
+  (`adminImportPublishedMedia.ts`): the asset's SHA-256 and byte length equal
+  the MediaTrack's `mediaByteHash` for its active audio key, with a well-formed
+  etag and version that agree with its media representation's key, etag,
+  version and length, for any import actor and any audio content type. A
+  member an import reused, one uploaded through Content Manager, one whose
+  media local MP3 conversion replaced, or one no completed import published
+  breaks provenance. With provenance the capture stores `importEvidence
+  {releaseId, tagReleaseId, barcode, catalogNumber}`: `releaseId` is the
+  release every contributing import applied when they all applied the same
+  MusicBrainz release (choice `preselected` or `chosen`, never an iTunes-only
+  application or `none`), and `tagReleaseId`, `barcode` (GTIN digits) and
+  `catalogNumber` are the values every member's version-2 tags carry with one
+  value, each checked as `lookupIdentifiers.ts` checks an import's; a missing,
+  invalid or disagreeing value is `null` on its own. It is `null` without
+  provenance and when every field is `null`, and absent on a capture stored
+  before this release. It is written once with the capture, so later changes
+  to the imports or their lookup records never reach the review; no detail,
+  list, eligibility, lookup view or candidate read projects it, and it never
+  reaches Luna's context.
 - `GET /catalog-reviews/:id/lookup` (the Web review summary reads it, polling
   while a run is active, and calls the two routes after it):
   `200 {lookup, revision, valueRevision, summary}`, read in
@@ -3946,6 +4002,24 @@ roll back to:
   summary shows an error until the tab is reloaded. Their copy is
   release-packaged `web-admin` copy: no runtime key is added, removed or moved,
   so the runtime bundles and native clients are unchanged.
+- Import evidence in existing-Album reviews needs no floor of its own; no
+  document is migrated and no approval format changes. The release before it
+  ignores a capture's `importEvidence` (its capture check reads only the Album
+  and members), so its submitted runs plan no identifier and its rankings and
+  re-ranks compare none: the next re-rank there (a number save or a choice)
+  ranks without them, so a tie an identifier broke here can be a tie again,
+  while values already applied stay. A run planned here and retried there
+  repeats its stored identifier queries, which its run step and iTunes stage
+  handle as for an import, and its timeline lists no identifier step. A review
+  captured before this release, or while rolled back, keeps no import
+  evidence after rolling forward, since a capture is never taken again; a new
+  completion of the Album captures it. Its index revision is older, so it
+  verifies its own indexes and leaves `admin_import_published_album` in place.
+  A Web tab opened before this release cannot parse a timeline with an
+  identifier step and asks for a reload; reload open admin Web tabs across
+  deploy or rollback. Every runtime key and its variables are unchanged; the
+  new `admin.lookup_evidence.*` words are `web-admin` copy packaged with the
+  Web release, so no remote bundle changes.
 - Credit join phrases and Disc Numbers have their own floor in the
   [catalog Credit rollout runbook](../deployment/catalog-credit-rollout-runbook.md#join-phrase-and-disc-number-rollback-floor).
 
@@ -4083,7 +4157,9 @@ below). The source layer, the jobs and their routes live in
   Archive listings yield image IDs, flags, types and sizes, never URLs.
 - **Planning and ranking.** Both are pure. The planner turns embedded
   identifiers shared by every file (release MBID, barcode, catalogue number and,
-  for one file, an ISRC), then album or song text, then a cleaned folder name
+  for one file, an ISRC; for an existing-Album review, those of its captured
+  import evidence: the release ID the imports applied, else the tag release ID
+  (only one release ID is planned), never an ISRC), then album or song text, then a cleaned folder name
   into at most six MusicBrainz queries, in that order, so the cap drops
   trailing fallbacks first. It never accepts file names. Submitted text and a
   submitted Artist name are only normalized (NFC, collapsed whitespace), so a
@@ -4098,7 +4174,9 @@ below). The source layer, the jobs and their routes live in
     search asks for a page of 100 releases, so popular Albums with many
     editions still offer their plausible editions to that admission; a
     recording search asks for 25 recordings. Media counts and release-group
-    browse are not used.
+    browse are not used. A review's identifier queries precede its title
+    searches and count among the six, so a review with import evidence leaves
+    less room for title fallbacks and Track-title searches.
   - Album text plans the credited search (with the album-artist name or label
     term, or the folder's "Artist - Album" split) and the bare search, then
     fallbacks in the normalized spelling: the credited search respelled, then
@@ -4316,7 +4394,13 @@ below). The source layer, the jobs and their routes live in
     is its release's audio tracks, else its search summary's audio media, else
     a reported total, and an unknown count could be anything; a release or
     summary whose every medium is video or data has none and can hide no
-    group. After the identifier rules, while `exact` holds, the one matching
+    group. In a review the identifier rules read its captured import evidence,
+    every member carrying the same values (`catalogReviewFileEvidence`), and
+    run first: the one matching candidate an identifier matches alone is
+    preselected (`releaseId`, `barcode` or `catalogNumber`) even beside other
+    matching groups, and an identifier never changes a candidate's status, so
+    an unverified or non-matching release is never preselected by it. After
+    the identifier rules, while `exact` holds, the one matching
     group whose release has exactly as many audio tracks as members is
     preselected (`exactTrackCount`) even beside matching groups with more
     tracks; otherwise the only matching group of a complete comparison is
@@ -4441,8 +4525,9 @@ below). The source layer, the jobs and their routes live in
   and it leaves nothing out, so the comparison stays as complete as the searches
   left it, and a lone matching group, such as one a later saved Disc or Track
   Number makes, is then preselected rather than offered. Imports never skip it.
-- **Requests.** First, for a valid barcode every file shares (a placeholder,
-  meaning an all-zero, malformed or bad-check-digit GTIN, is never sent),
+- **Requests.** First, for a valid barcode every file shares, or a review's
+  captured barcode (a placeholder, meaning an all-zero, malformed or
+  bad-check-digit GTIN, is never sent),
   `lookup?upc=<digits>&entity=song` in at most two storefronts chosen by the
   GS1 prefix of its GTIN-14 (digits 2 to 4): `jp` then `us` for 450–459 and
   490–499, `kr` then `us` for 880, `tw` then `us` for 471, otherwise `us` then
@@ -4714,7 +4799,13 @@ database, what the step stores and which request comes next.
   review captured it, with its first usable shown primary Artist name) or a
   submitted name, with the submitted Artist name in place of that primary Artist
   name when one was given, and it compares in subset mode (a release may have
-  more audio tracks than the Album has members). Searches and bridge searches
+  more audio tracks than the Album has members). A review whose capture holds
+  `importEvidence` gives its identifiers to every run's plan, automatic or
+  submitted, ahead of the title searches, and a retry repeats the stored
+  queries, so it repeats them too; a barcode also gives the iTunes stage its
+  UPC requests. Its rankings and re-ranks read the identifiers from the
+  capture, never from the run's input, which stores none, and the identifier
+  rule runs before `exactTrackCount`. Searches and bridge searches
   admit releases by audio track count, fewest extra tracks first, then unknown
   counts, then those with fewer tracks than members, and pending details are
   fetched in that order. Beside `searchComplete`, which for a review means that
@@ -5194,11 +5285,17 @@ only, and absent when the run's start or last-step time is unreadable or outside
 those years, or the run planned no search (it completed at once with `noQuery`,
 which its status explains): `steps`, at most 12 in run order, each with a `kind`
 and a `state` (`done`, `unconfirmed`, `active`, `pending` or `skipped`). First
-come at most 6 title searches (`albumArtist` and `album` for a release search by
-the Album name with or without an Artist name, `songArtist` and `song` for a
-recording search by a submitted song name; a search by barcode, catalogue
-number, release ID, ISRC or folder name, and a respelled fallback, whose sending
-the record does not keep, are never listed): `active` at `queryIndex` while the
+come the searches of the review's captured import evidence, in plan order:
+`releaseId` (the release lookup, with `from` `import` for the release the
+imports applied or `tags` for the release ID in their files' tags), `barcode`
+and `catalogNumber` (release searches), only while the capture holds that
+identifier and never with `texts`, counts or a value; then the title searches
+(`albumArtist` and `album` for a release search by the Album name with or
+without an Artist name, `songArtist` and `song` for a recording search by a
+submitted song name), at most 6 steps together (a search by an ISRC, folder
+name or an identifier the capture does not hold, and a respelled fallback,
+whose sending the record does not keep, are never listed). Each takes its
+state from `queryIndex`: `active` at it while the
 run searches, `done` below it (or `unconfirmed`, below), `pending` while the
 search phase lasts or after a run ended in it, and `skipped` once the run moved
 on without sending it (the candidate bound). Then, where the plan holds
@@ -5208,7 +5305,10 @@ below); then `details`, `itunes`, `bridge` and `aliases` with `done` and `total`
 `total` at most 100). `itunes` also carries `partial: true` when its stage left a
 plausible result out of the comparison (its result bound of 4, or a collection
 lookup iTunes never answered; the stage's `complete` is false), which makes the
-run's comparison partial. `itunes` is `skipped`, without counts, when its stage is
+run's comparison partial. `bridge` also carries `byBarcode: true` when it has
+`texts` and every result its titled answered searches came from was answered by
+an iTunes UPC lookup of the captured barcode (the result keeps that barcode),
+not by a name search. `itunes` is `skipped`, without counts, when its stage is
 unavailable and in a complete run without a stage (the fallback was not needed,
 the review skip applied or the run had no iTunes request); `bridge` is listed
 only with a readable stage or while the run is not complete. A step's `texts` (1
@@ -5238,19 +5338,26 @@ track number like file names), `fileName` (titles equal to or shaped like their
 file names), `generic` (generic, digit-only or instrumental titles) or
 `noneDistinct` (no title distinctive enough: repeated, the Album title or
 submitted name, too light, too light to search without an Artist name, or
-skipped for different reasons). It is absent for an Album without members and
-for a run an earlier release planned without the Track-title searches this
-release would plan. `retry` is `null` except while the run waits for an
-automatic retry with a readable `retryAt`: then `at`, the `source` retried
-(`itunes` in the `itunes` phase, else `musicbrainz`), `attempt` (that source's
-stored failed attempts, 1 to `limit`) and `limit` (3). `startedAt`, `updatedAt`
-and `completedAt` (`null` while active or unreadable) are the run's times. Some
-ends of a run move `queryIndex` past searches it may never have sent, and the
-record does not keep which were sent, so such a search is `unconfirmed`, never
+skipped for different reasons); and `noRoom` when the plan for the run's input
+without the captured identifiers' searches would hold a Track-title search, so
+those searches used its room under the query bound of 6. It is absent for an
+Album without members, for a plan without a title search (an Album title that
+cannot be searched), and for a run an earlier release planned without the
+Track-title searches this release would plan. A Web tab loaded before
+`noRoom` or `byBarcode` existed cannot read a view that carries them and asks
+for a reload, as for the identifier steps. `retry` is `null` except while
+the run waits for an automatic retry with a readable `retryAt`: then `at`, the
+`source` retried (`itunes` in the `itunes` phase, else `musicbrainz`), `attempt`
+(that source's stored failed attempts, 1 to `limit`) and `limit` (3).
+`startedAt`, `updatedAt` and `completedAt` (`null` while active or unreadable)
+are the run's times. Some ends of a run move `queryIndex` past searches it may
+never have sent, and the record does not keep which were sent, so such a search
+is `unconfirmed`, never
 `done`: in a plan with Track-title searches, once the title searches are over
 with the search partial (`searchComplete` not true, which the candidate bound of
-15 also leaves), every title search after the plan's first; in a plan without
-them whose search is partial, every title search after the first once
+15 also leaves), every identifier or title search after the plan's first; in
+a plan without them whose search is partial, every such search after the first
+once
 MusicBrainz's retries ran out after the search phase (which moves `queryIndex`
 past the plan); when MusicBrainz's retries ran out while the run searched (it
 ended in the `search` phase, or its iTunes stage started with reason
@@ -5266,7 +5373,9 @@ An import's view never carries these keys, and a run with the `catalog` input
 has no import view. The Web parses a review's view with its own strict schema
 (`reviewLookupViewSchema` in `importLookupApi.ts`, read through
 `catalogReviewLookupApi.ts`), which admits exactly these keys beyond the import
-view's, so the import page still refuses them.
+view's, so the import page still refuses them. A Web tab opened before the
+identifier steps refuses a timeline that carries one and asks for a reload;
+reload admin Web tabs across deploy or rollback.
 
 The `summary` is the import's Review and publish state, computed by
 `src/administration/import/adminImportSummary.ts` from the same snapshot:
@@ -5340,7 +5449,8 @@ publication confirmation. The approval and the publication commit never read
 
 - To MusicBrainz, only the planner's URLs under `https://musicbrainz.org/ws/2/`:
   the shared album text and album-artist names, or a one-file import's title
-  and artist; shared identifiers that pass their format checks; a submitted
+  and artist; shared identifiers that pass their format checks, for an
+  existing-Album review those of its captured import evidence; a submitted
   name and any submitted Artist name; for an existing-Album review, the
   Album's saved title as the review captured it, without a trailing `／` or
   `/` and primary Artist name, with its first usable shown
@@ -5373,7 +5483,8 @@ publication confirmation. The approval and the publication commit never read
   attempt): the run's search term (its text and credited artist, a submitted
   Artist name included while both fit the 200-character term, never a
   respelling or a Track title), the fixed storefront code, the digits of a
-  valid barcode every file shares (never a placeholder such as all zeros), and
+  valid barcode every file shares, or a review's captured barcode (never a
+  placeholder such as all zeros), and
   collection IDs from earlier results of the same run. To the iTunes artwork
   hosts, only the rewritten path of an iTunes-only candidate's stored artwork
   address.
@@ -5381,8 +5492,9 @@ publication confirmation. The approval and the publication commit never read
   the same import's or review's lookup candidates (a staged cover or a
   preview; a review only previews), and the
   archive.org redirects they lead to.
-- A review never sends its original filenames, folders, labels, catalog IDs or
-  identifiers, and sends at most two saved Track titles (without a guarded
+- A review never sends its original filenames, folders, labels or catalog
+  IDs, sends no identifier but those of its captured import evidence, and
+  sends at most two saved Track titles (without a guarded
   leading position or a trailing version or featuring note; a title named
   like its file is sent only without its position, never as the filename)
   only to MusicBrainz, as above. Its ranking reads the original filenames'

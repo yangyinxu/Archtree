@@ -2186,6 +2186,32 @@ for (const variant of localizedViewports) {
 
 for (const variant of localizedViewports) {
   const { width } = variant;
+  test(`a review lookup that used the import's evidence names its release ID and barcode steps and says which one chose the release at ${width}px ${variant.locale}`, async ({ page }) => {
+    locale = variant.locale; test.setTimeout(60_000);
+    await page.setViewportSize({ width, height: width === 1280 ? 720 : 844 });
+    const finished = pairingTimeline({ steps: [{ kind: 'releaseId', state: 'done', from: 'import' }, { kind: 'barcode', state: 'done' }, ...pairingTimeline().steps] });
+    const key = pairingEditions[0];
+    const lookup: ReviewView = { ...pairingLookupResponse().lookup!, timeline: finished, preselection: { candidateKey: key, basis: 'releaseId', artistMismatch: false, notChecked: false },
+      applied: { ...pairingApplication(key, true), choice: 'preselected', basis: 'releaseId' } };
+    const api = await setup(page); api.seed(quietPairingReview(), lookup);
+    await enter(page, `/finitude/admin/catalog-reviews/${reviewId}`);
+    const details = statusLine(page).getByRole('button', { name: label('admin.catalog_review.lookup_log_show'), exact: true });
+    await expect(details).toBeVisible({ timeout: 10_000 });
+    // The identifier that chose the release is said under the status while the log is still folded.
+    await expect(statusLine(page).getByText(label('admin.lookup_evidence.chosen_release_id_import'), { exact: true })).toBeVisible();
+    await details.click();
+    const rows = statusLine(page).getByRole('list', { name: label('admin.catalog_review.lookup_steps'), exact: true }).getByRole('listitem');
+    // The identifier searches come first and name only their basis, never a value; the title searches follow as before.
+    await expect(rows.nth(0)).toHaveText(label('admin.catalog_review.lookup_step_done', { step: label('admin.lookup_evidence.step_release_id_import') }));
+    await expect(rows.nth(1)).toHaveText(label('admin.catalog_review.lookup_step_done', { step: label('admin.lookup_evidence.step_barcode') }));
+    await expect(rows.nth(2)).toHaveText(label('admin.catalog_review.lookup_step_done', { step: label('admin.catalog_review.lookup_step_album_artist', { text: 'Synthetic Live Album 2', artist: 'Synthetic Live Artist' }) }));
+    await expect(statusLine(page).getByText(label('admin.lookup_evidence.chosen_release_id_import'), { exact: true })).toBeVisible();
+    await reflow(page);
+  });
+}
+
+for (const variant of localizedViewports) {
+  const { width } = variant;
   test(`a retrying review lookup says when it retries and which retry, tells busy from unreachable, and a stopped or exhausted one says why, each keeping the free retry at ${width}px ${variant.locale}`, async ({ page }) => {
     locale = variant.locale; test.setTimeout(60_000);
     await page.setViewportSize({ width, height: width === 1280 ? 720 : 844 });

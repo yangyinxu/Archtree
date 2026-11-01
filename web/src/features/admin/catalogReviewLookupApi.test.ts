@@ -6,6 +6,7 @@
  *   - a missing or malformed value revision, extra keys, forged paths, rows on a member path and a member that is not a slot are refused
  *   - an active run's progress parses within its bounds, numbers and times only, and a view without it parses too
  *   - a review run's timeline and pairing parse within their bounds, and anything else is refused
+ *   - a review run's searches of its captured import evidence parse by their basis alone, a release ID with where it came from
  *   - the identity read parses bound, conflicting and unbound rows, the label, more candidates than an import reads and Credit views
  *   - a decision without its bound ID, a preselection with an extra key, an Album or track candidate and a malformed revision are refused
  *   - the identity read's default selection and kept expected tracklist are required, strict and well formed
@@ -89,7 +90,7 @@ test('a review run\'s timeline and pairing parse within their bounds, and anythi
   const viewed = (value: unknown) => withLookup(lookup => { lookup.timeline = value; });
   expect(reviewLookupResponseSchema.parse(viewed(timeline)).lookup!.timeline).toEqual(timeline);
   expect(reviewLookupResponseSchema.parse(reviewLookupResponse()).lookup!.timeline).toBeUndefined();
-  for (const trackTitleSearch of [{ state: 'notNeeded' }, { state: 'pending' }, ...['positionsStart', 'fileName', 'generic', 'noneDistinct', 'unavailable'].map(reason => ({ state: 'skipped', reason })), undefined])
+  for (const trackTitleSearch of [{ state: 'notNeeded' }, { state: 'pending' }, ...['positionsStart', 'fileName', 'generic', 'noneDistinct', 'noRoom', 'unavailable'].map(reason => ({ state: 'skipped', reason })), undefined])
     expect(parse(viewed({ ...timeline, trackTitleSearch })).success, JSON.stringify(trackTitleSearch)).toBe(true);
   expect(parse(viewed({ ...timeline, retry: null, completedAt: at })).success).toBe(true);
   const step = (change: Record<string, unknown>) => ({ ...timeline, steps: [{ kind: 'details', state: 'done', done: 1, total: 2, ...change }] });
@@ -106,6 +107,26 @@ test('a review run\'s timeline and pairing parse within their bounds, and anythi
   for (const value of ['titlePositions', 'fileNamePositions', 'nearExactDuration']) expect(reviewLookupResponseSchema.parse(paired('unique', value)).lookup!.candidates[0].comparison!.subset!.pairedBy).toBe(value);
   for (const [pairing, value] of [['ambiguous', 'titlePositions'], [null, 'titlePositions'], ['unique', 'guess'], ['unique', null]] as const)
     expect(parse(paired(pairing, value)).success, `${pairing} ${value}`).toBe(false);
+});
+
+test('a review run\'s searches of its captured import evidence parse by their basis alone, a release ID with where it came from', () => {
+  const at = '2026-10-22T01:24:52.000Z';
+  const timeline = (steps: unknown[]) => withLookup(lookup => { lookup.timeline = { steps, startedAt: at, updatedAt: at, completedAt: at, retry: null }; });
+  const steps = [{ kind: 'releaseId', state: 'done', from: 'import' }, { kind: 'releaseId', state: 'unconfirmed', from: 'tags' }, { kind: 'barcode', state: 'active' },
+    { kind: 'catalogNumber', state: 'skipped' }];
+  expect(reviewLookupResponseSchema.parse(timeline(steps)).lookup!.timeline!.steps).toEqual(steps);
+  // `from` belongs to a release ID step only, which needs it; no identifier step carries a text, a value or counts.
+  for (const step of [{ kind: 'releaseId', state: 'done' }, { kind: 'releaseId', state: 'done', from: 'file' }, { kind: 'barcode', state: 'done', from: 'tags' },
+    { kind: 'album', state: 'done', from: 'import' }, { kind: 'barcode', state: 'done', texts: [{ text: '4006381333931' }] }, { kind: 'catalogNumber', state: 'done', done: 1, total: 1 },
+    { kind: 'releaseId', state: 'done', from: 'import', releaseId: '0000000b-0000-4000-8000-000000000001' }, { kind: 'isrc', state: 'done' }]) {
+    expect(parse(timeline([step])).success, JSON.stringify(step)).toBe(false);
+  }
+  // `byBarcode` belongs to a bridge step that names titles.
+  const bridge = { kind: 'bridge', state: 'done', done: 1, total: 1, texts: [{ text: 'Synthetic other Album 1' }], byBarcode: true };
+  expect(reviewLookupResponseSchema.parse(timeline([bridge])).lookup!.timeline!.steps).toEqual([bridge]);
+  for (const step of [{ ...bridge, texts: undefined }, { ...bridge, kind: 'itunes' }, { ...bridge, byBarcode: false }, { kind: 'barcode', state: 'done', byBarcode: true }]) {
+    expect(parse(timeline([step])).success, JSON.stringify(step)).toBe(false);
+  }
 });
 
 test('the identity read parses bound, conflicting and unbound rows, the label, more candidates than an import reads and Credit views', () => {

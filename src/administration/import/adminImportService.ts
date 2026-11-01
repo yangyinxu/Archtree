@@ -192,7 +192,10 @@ export const adminImportIndexes = [
     { collection: 'adminAlbumImports', keys: { createdAt: -1, _id: -1 }, options: { name: 'admin_import_inventory' }, required: true },
     { collection: 'adminAlbumImports', keys: { 'analysis.state': 1, 'analysis.leaseUntil': 1, createdAt: 1 }, options: { name: 'admin_import_worker' }, required: true },
     { collection: 'adminAlbumImports', keys: { 'analysis.actorId': 1, 'analysis.state': 1 }, options: { name: 'admin_import_actor_admission' }, required: true },
-    { collection: 'adminAlbumImports', keys: { 'media.publication.state': 1, 'media.publication.leaseUntil': 1 }, options: { name: 'admin_import_publication_worker' }, required: true }
+    { collection: 'adminAlbumImports', keys: { 'media.publication.state': 1, 'media.publication.leaseUntil': 1 }, options: { name: 'admin_import_publication_worker' }, required: true },
+    // An existing-Album review reads the completed imports that published its Album's members by this path.
+    { collection: 'adminAlbumImports', keys: { 'media.publication.albumId': 1 }, options: { name: 'admin_import_published_album',
+        partialFilterExpression: { 'media.publication.albumId': { $type: 'string' } } }, required: true }
 ] as const;
 /** The `adminImportAnalysisSlots` document every existing-Album review creation increments, so concurrent creations conflict. */
 export const CATALOG_REVIEW_CREATION_FENCE_ID = 'catalog-review-creation';

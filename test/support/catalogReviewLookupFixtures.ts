@@ -11,6 +11,7 @@
  * credits, for tests of review runs, views and evidence without a database. All names and identifiers are synthetic.
  */
 import { ObjectId } from 'mongodb';
+import type { CatalogReviewImportEvidence } from '../../src/administration/catalog/adminCatalogReviewContract';
 import type { AdminImportDocument } from '../../src/administration/import/adminImportService';
 import { SAME_AS_RELEASE_CREDIT, type LookupArtistCredit, type MusicBrainzRelease, type MusicBrainzTrack } from '../../src/administration/lookup/lookupContract';
 import type { StoredLookupCandidate } from '../../src/administration/lookup/metadataLookupRecord';
@@ -47,11 +48,12 @@ export const reviewMemberEntryKey = (member: number, index: number) => `0000000e
  * Artist Credits and entries. `albumComplete: false` captures the Album's Artist Credits as not all shown, `label` the label state
  * (`none`: no label Credit and no label; `first` by default), and `releaseDate` and `expectedTracklist` the saved values (none by
  * default). `origins` marks draft value origins; `capture: false` leaves the review without a capture, as before its first lookup
- * admission.
+ * admission; `importEvidence` is stored in the capture only when given (absent otherwise, as on a capture stored before it existed).
  */
 export function reviewLookupDocument(options: { title?: string; primaryNames?: string[]; albumEntries?: ReviewEntryFixture[]; albumComplete?: boolean; label?: 'none' | 'first' | 'other';
     releaseDate?: { year: number; month: number | null; day: number | null } | null; expectedTracklist?: { discNumber: number; trackNumber: number; title: string; durationMs: number | null }[] | null;
-    members?: ReviewMemberFixture[]; origins?: Record<string, 'automatic' | 'administrator'>; capture?: boolean; id?: string } = {}): AdminImportDocument {
+    members?: ReviewMemberFixture[]; origins?: Record<string, 'automatic' | 'administrator'>; capture?: boolean; id?: string;
+    importEvidence?: CatalogReviewImportEvidence | null } = {}): AdminImportDocument {
     const title = options.title ?? 'Synthetic Album', names = options.primaryNames ?? ['Synthetic Ensemble'], members = options.members ?? [];
     const at = new Date('2026-10-20T00:00:00Z'), slots = members.map((_member, index) => reviewSlot(index)), label = options.label ?? 'first';
     const subject = (name: string, musicBrainzId: string | null = null) => ({ name, musicBrainzId, revision: 'ar_synthetic' });
@@ -99,7 +101,8 @@ export function reviewLookupDocument(options: { title?: string; primaryNames?: s
             album: { credits, artistsComplete: options.albumComplete ?? true, label, expectedTracklist: options.expectedTracklist ?? null },
             members: members.map((member, index) => ({ slotId: slots[index], credits: memberCredits(member, index), artistsComplete: member.complete === undefined || member.complete === true,
                 attributionStatus: member.attributionStatus ?? null,
-                duration: typeof member.durationMs === 'number' ? { durationMs: member.durationMs, durationPrecisionMs: member.legacy ? 1000 : 0 } : null }))
+                duration: typeof member.durationMs === 'number' ? { durationMs: member.durationMs, durationPrecisionMs: member.legacy ? 1000 : 0 } : null })),
+            ...(options.importEvidence === undefined ? {} : { importEvidence: options.importEvidence })
         } }),
         analysis: { state: 'idle', generation: 0, operationId: null, actorId: null, grantExpiresAt: null, baseline: null, chunks: [], issue: null, leaseOwner: null, leaseUntil: null },
         analysisHistory: [], attemptsUsed: 0, suggestions: [], decisions: [], receipts: []

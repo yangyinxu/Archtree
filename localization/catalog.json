@@ -6805,6 +6805,85 @@
       ],
       "variables": {}
     },
+    "admin.lookup_evidence.bridge_note_barcode": {
+      "description": "Administrator workbench: existing-Album review lookup steps: note under the bridge step when the Album titles it names came back from an iTunes lookup by the barcode in the file tags, not from a name search.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {
+        "titles": "string"
+      }
+    },
+    "admin.lookup_evidence.chosen_barcode": {
+      "description": "Administrator workbench: existing-Album review lookup log: the applied release was preselected by the barcode in the tags of every file.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.lookup_evidence.chosen_catalog_number": {
+      "description": "Administrator workbench: existing-Album review lookup log: the applied release was preselected by the catalogue number in the tags of every file.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.lookup_evidence.chosen_release_id_import": {
+      "description": "Administrator workbench: existing-Album review lookup log: the applied release was preselected by the release ID the import of the Album's files applied.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.lookup_evidence.chosen_release_id_tags": {
+      "description": "Administrator workbench: existing-Album review lookup log: the applied release was preselected by the release ID in the tags of every file.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.lookup_evidence.step_barcode": {
+      "description": "Administrator workbench: existing-Album review lookup steps: the release search by the barcode every file's tags carry (never shown as a value).",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.lookup_evidence.step_catalog_number": {
+      "description": "Administrator workbench: existing-Album review lookup steps: the release search by the catalogue number every file's tags carry (never shown as a value).",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.lookup_evidence.step_release_id_import": {
+      "description": "Administrator workbench: existing-Album review lookup steps: the release lookup by the release ID the import of the Album's files applied (never shown as a value).",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.lookup_evidence.step_release_id_tags": {
+      "description": "Administrator workbench: existing-Album review lookup steps: the release lookup by the release ID every file's tags carry (never shown as a value).",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.lookup_evidence.track_title_no_room": {
+      "description": "Administrator workbench: existing-Album review lookup steps: Track-title searches not run because the searches by the identifiers of the import that published the Album used the run's search limit.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.lookup_evidence.track_title_not_needed": {
+      "description": "Administrator workbench: existing-Album review lookup steps: Track-title searches not needed in a run that also looked up the import's identifiers, so a matching release was already found.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
     "admin.lookup.active": {
       "description": "Administrator workbench: import summary, metadata lookup is queued or running.",
       "delivery": [

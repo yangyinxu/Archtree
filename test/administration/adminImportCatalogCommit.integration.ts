@@ -58,6 +58,7 @@
  *   - the worker rechecks alias candidates from the names the approval froze; cancelling permits a fresh review that reuses the alias record and records the ID
  *   - the worker rechecks localized-name candidates from the groups the approval froze: an Artist named with an entry's other localized name after approval needs attention with identityConflict
  *   - a malformed record holding an entry's ID, or named as an alias of the label's, is unavailable and holds its row; a create despite that holder needs attention at commit
+ *   - a published WAV import whose staged file was cleaned up gives a review of its Album the release its lookup applied
  * @end-catalog */
 
 /**
@@ -74,8 +75,8 @@ import { Collection, FindCursor, MongoServerError, ObjectId } from 'mongodb';
 import { getDb } from '../../src/infrastructure/database';
 import { startMongoReplicaSet, type MongoReplicaSetHarness } from '../support/mongoReplicaSet';
 import { AdminImportError, type AdminImportDetailV2, type ImportDecisionDtoV2, type ImportDuplicateCandidate } from '../../src/administration/import/adminImportContract';
-import { adminImportDuplicateCandidates, adoptAdminImportSuggestions, createAdminImport, decideAdminImportDuplicates, getAdminImport, initializeAdminImportStorage, listAdminImports, type AdminImportDocument } from '../../src/administration/import/adminImportService';
-import { selectAdminImportCover, uploadAdminImportAsset, type ImportObjectIdentity, type ImportObjectStorage, type ImportObjectTarget } from '../../src/administration/import/adminImportStorage';
+import { adminImportDuplicateCandidates, adoptAdminImportSuggestions, createAdminImport, decideAdminImportDuplicates, getAdminImport, initializeAdminImportStorage, listAdminImports, withImportAdmin, type AdminImportDocument } from '../../src/administration/import/adminImportService';
+import { cleanupAdminImportAsset, selectAdminImportCover, uploadAdminImportAsset, type ImportObjectIdentity, type ImportObjectStorage, type ImportObjectTarget } from '../../src/administration/import/adminImportStorage';
 import { cancelAdminImportPublication, publishAdminImport, resumeAdminImportPublication, runAdminImportPublicationOnce } from '../../src/administration/import/adminImportPublisher';
 import { importIdentityPreselections } from '../../src/administration/import/adminImportIdentity';
 import { getAdminImportLookup } from '../../src/administration/lookup/metadataLookupRequests';
@@ -86,6 +87,9 @@ import { followArtist } from '../../src/services/listener/artistFollowService';
 import { resolveFollowedArtistReleases } from '../../src/services/listener/followedArtistReleasesService';
 import { getListenerAlbum, getListenerArtist, getListenerOrganization } from '../../src/services/listener/listenerContentService';
 import { editImportDraft } from '../support/adminImportDraftChanges';
+import { adminCatalogItemRevision } from '../../src/administration/catalog/adminCatalogService';
+import { createCatalogReview } from '../../src/administration/catalog/adminCatalogReviewService';
+import { catalogReviewForLookup } from '../../src/administration/catalog/adminCatalogReviewCapture';
 
 let harness: MongoReplicaSetHarness; const actor = new ObjectId(), other = new ObjectId(), listener = new ObjectId();
 const by = actor.toHexString();
@@ -1210,4 +1214,23 @@ test('a malformed record holding an entry\'s ID, or named as an alias of the lab
     assert.equal((await stored(item.id)).media!.publication!.state, 'complete');
     assert.deepEqual([(await db().collection('artists').findOne({ name: 'Lorem Ensemble' }))!.musicBrainzId, (await db().collection('artists').findOne({ _id: holder }))!.musicBrainzId,
         (await db().collection('organizations').findOne({ name: 'Sit Records' }))!.musicBrainzId], [undefined, mbid(1), mbid(9)]);
+});
+
+test('a published WAV import whose staged file was cleaned up gives a review of its Album the release its lookup applied', async () => {
+    const storage = new Storage(), published = await publishNow(storage, await decided(await reviewed(storage)));
+    assert.equal(published.publication, 'complete');
+    const slotId = published.draft.tracks[0].slotId, importId = new ObjectId(published.id), release = mbid(5);
+    await cleanupAdminImportAsset(by, published.id, slotId, mutation(published.revision), storage);
+    assert.equal((await stored(published.id)).media!.assets.find(asset => asset.slotId === slotId)!.state, 'deleted');
+    await db().collection('adminImportLookups').insertOne({ _id: importId, run: 1, state: 'complete',
+        applied: { run: 1, choice: 'preselected', candidateKey: `musicbrainz:${release}`, releaseId: release, basis: 'exactTrackCount', values: [], conflicts: [], flagged: [] } } as never);
+    const albumId = new ObjectId(published.published!.albumId), album = await db().collection('albums').findOne({ _id: albumId });
+    const review = await createCatalogReview(by, { operationId: randomUUID(), albumId: String(albumId), expectedRevision: adminCatalogItemRevision('album', album), another: true });
+    const _id = new ObjectId(review.item.id);
+    await withImportAdmin(by, async session => {
+        const doc = (await imports().findOne({ _id }, { session }))!;
+        await catalogReviewForLookup(doc, session);
+        assert.deepEqual(doc.catalogCapture!.importEvidence, { releaseId: release, tagReleaseId: null, barcode: null, catalogNumber: null });
+    });
+    await db().collection('adminImportLookups').deleteOne({ _id: importId });
 });

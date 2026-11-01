@@ -44,7 +44,7 @@ An existing correct index is reused. Indexes and duplicate records are never
 automatically dropped or rewritten.
 
 After verification, startup upserts the static receipt named by
-`requiredIndexRevision` (now `required-indexes-v12-catalog-cover-uploads`) in
+`requiredIndexRevision` (now `required-indexes-v13-import-published-album`) in
 `schemaMigrations`. It records only the revision and application time. A new
 required constraint must receive a new reviewed revision. A partially failed
 attempt is retried using the same additive definitions; a prior receipt is never
@@ -427,7 +427,7 @@ the PUT, and the catalog item is never written. Two required indexes,
 per administrator and `{ 'asset.state': 1, leaseUntil: 1 }` for the cleanup
 claim, also create the collection at startup, since its first write is an insert
 inside an administrator transaction, where the MongoDB 4.2 floor cannot create a
-collection; `requiredIndexRevision` is now
+collection; `requiredIndexRevision` was then
 `required-indexes-v12-catalog-cover-uploads`. A cover operation admitted from an
 upload stores `sourceUploadId` and a null `sourceImportId`; its copy,
 attachment, cancellation and reconciliation are unchanged. The existing-catalog
@@ -447,6 +447,23 @@ verifies only the indexes it declares, completes, reconciles and cancels
 operations admitted from uploads (its copy reads only the operation's source and
 target) and never reads the upload records, whose objects wait in the private
 bucket until rolling forward lets the cleanup pass delete them (see
+[Rollback floors](../features/admin-workbench.md#rollback-floors)).
+
+Capturing an existing-Album review for metadata lookup reads the completed
+imports that published its Album's members (see Import evidence in the
+[administrator workbench](../features/admin-workbench.md)) through the required
+partial index `admin_import_published_album` on `adminAlbumImports`
+(`{ 'media.publication.albumId': 1 }` with the partial filter
+`{ 'media.publication.albumId': { $type: 'string' } }`; the read's Album ID term
+is `{ $eq: albumId, $type: 'string' }`, since MongoDB uses a partial index only
+for a query that implies its filter), so the read scans only imports that name
+the Album, then only the `applied` of their lookup records by
+`_id`, in the capture transaction within the usual 3-second bound; it writes
+nothing to them. `requiredIndexRevision` is now
+`required-indexes-v13-import-published-album`. The change is additive: the
+review keeps the result in `catalogCapture.importEvidence`, no document is
+migrated, and reviews captured before it have none. The release before it
+verifies only the indexes it declares and leaves this one in place (see
 [Rollback floors](../features/admin-workbench.md#rollback-floors)).
 
 Playback Audio/Video GETs that briefly overlap an older stream may wait up to two

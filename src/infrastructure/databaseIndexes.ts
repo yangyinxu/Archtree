@@ -170,7 +170,7 @@ export const databaseIndexes: Array<{
       catalogSearchIndexKeys.map(keys => ({ collection, keys })))
   ];
 
-export const requiredIndexRevision = 'required-indexes-v12-catalog-cover-uploads';
+export const requiredIndexRevision = 'required-indexes-v13-import-published-album';
 const requiredIndexes = databaseIndexes.filter(index => index.options?.unique === true || index.required);
 
 /** Reports a static schema identifier without retaining database errors or user values. */

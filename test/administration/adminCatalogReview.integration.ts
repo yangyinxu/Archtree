@@ -883,7 +883,7 @@ test('admitting a review to metadata lookup captures its source, member Credits,
     // The detail shows the review-only values (the DTO allowlist) and never the capture; the review is still current and applicable.
     const read = await current(id), json = JSON.stringify(read);
     assert.deepEqual([read.item.draft.album.expectedTracklist, read.item.draft.tracks.map(track => track.artists?.length), read.item.sourceStatus, read.item.capabilities.apply], [rows, [2, 0, 0], 'current', true]);
-    for (const sentinel of ['catalogCapture', 'capturedAt', 'artistsComplete', 'attributionStatus', 'durationPrecisionMs', 'legacyUnspecified']) assert.equal(json.includes(sentinel), false, sentinel);
+    for (const sentinel of ['catalogCapture', 'capturedAt', 'artistsComplete', 'attributionStatus', 'durationPrecisionMs', 'legacyUnspecified', 'importEvidence']) assert.equal(json.includes(sentinel), false, sentinel);
 });
 
 test('a review whose source is not current is never admitted to metadata lookup, and nothing is stored', async () => {

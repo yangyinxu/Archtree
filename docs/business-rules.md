@@ -764,7 +764,18 @@ The wire protocol and operational bounds are documented in
   attribution state, the Album's ordered primary and featured Artist Credits
   and its first label Credit, the revision and MusicBrainz ID of each Artist
   and Organization those Credits name, and the Album's expected tracklist
-  rows. A member's legacy Artist relationships not yet migrated count as
+  rows. When the Album has members and each member is a MediaTrack that a
+  completed import published, not as a reused member, whose media is still
+  exactly the file that import staged, the review also captures import
+  evidence: the MusicBrainz release that every such import applied, when
+  they all applied the same one, else an embedded MusicBrainz release ID, and
+  an embedded barcode and catalogue number, each embedded identifier only
+  when every member's file carries it with one value. Otherwise, such as when
+  a member was uploaded through Content Manager or its media was replaced by
+  local MP3 conversion, the review captures no import evidence. Captured
+  evidence never changes with the imports afterwards, is private review
+  evidence that no view shows as a value, and is never given to Luna.
+  A member's legacy Artist relationships not yet migrated count as
   legacy unspecified Credits. Missing historical filenames and folder names
   remain explicitly unknown; an Album title is not presented as a source
   folder. The Web Album page's Complete from MusicBrainz action creates a
@@ -2037,18 +2048,20 @@ The wire protocol and operational bounds are documented in
   selected upload. An import created for an Album runs no automatic lookup at
   all; its name box remains available. An existing-Album review looks up its
   Album: it runs automatically once when a review is created where lookup is
-  available, from the Album's saved title and the names of its primary Artist
-  Credits and, when needed, its saved Track titles as described below, and runs
-  when the administrator submits an Album or song name, optionally with an
-  Artist name, or retries. iOS and Android do not offer metadata lookup.
+  available, from any import evidence it captured, the Album's saved title and
+  the names of its primary Artist Credits and, when needed, its saved Track
+  titles as described below, and runs when the administrator submits an Album
+  or song name, optionally with an Artist name, or retries. iOS and Android do
+  not offer metadata lookup.
 - Metadata lookup accepts names, not links. The server queries only fixed,
   server-chosen services and never fetches an administrator-supplied URL. It
   sends only the submitted text and any submitted Artist name, cleaned tag
   text, a cleaned folder name or an existing Album's saved title, primary
   Artist names and at most two of its saved Track titles with the primary
   Artist names of those Tracks, terms taken from earlier results of the same
-  lookup, and embedded identifiers; every identifier or barcode used in a
-  query must match its expected format. An automatic lookup never sends file
+  lookup, and embedded identifiers, for an existing-Album review those of
+  its captured import evidence; every identifier or barcode used in a query
+  must match its expected format. An automatic lookup never sends file
   names, sends a folder name only when no usable tags exist, and no lookup
   sends account data or audio. A review's lookup never sends original
   filenames, and sends saved Track titles only to MusicBrainz, as described
@@ -2171,7 +2184,7 @@ The wire protocol and operational bounds are documented in
   each member that no track of the release can pair with. Saving a review Disc
   or Track Number re-ranks the stored candidates without new requests; a re-rank
   is not a lookup run. While no candidate was chosen, a
-  re-rank that leaves exactly one preselectable group applies it as a
+  re-rank whose comparison preselects a candidate applies it as a
   preselection would. A re-rank never removes values already applied, and the
   expected tracklist then follows the placement check of applying the review.
   Searches admit, and the iTunes fallback keeps, releases with at least as
@@ -2200,24 +2213,31 @@ The wire protocol and operational bounds are documented in
   candidate stays selectable, one that does not match shows its differences, and
   the administrator may choose none.
 - In an existing-Album review, the names of the Album's primary Artist Credits
-  stand in for artist tags and no embedded identifier exists. Matching
-  candidates form different groups when their pairings, their expected
-  tracklists, durations included, or the track Artist entries they propose
-  for paired members differ. Among matching groups, one whose release has
-  exactly as many tracks as the Album has members is preferred: when no
-  release left out of the comparison could have exactly as many tracks as the
-  Album has members and exactly one such group exists, it is preselected even
-  when groups with more tracks also match; otherwise the only matching group
-  of a complete comparison is preselected, and two or more matching groups are
-  a tie. The view of differences also shows each candidate's track count, the
-  members it pairs and how many missing-file rows it would add.
+  stand in for artist tags. Its embedded identifiers are the import evidence
+  the review captured, as Catalog Visibility and Administration describes,
+  and none exist without it; they are looked up first, as an import's are.
+  Matching candidates form different groups when their pairings, their
+  expected tracklists, durations included, or the track Artist entries they
+  propose for paired members differ. The matching candidate that one of
+  those identifiers matches alone is preselected even among several matching
+  groups; an identifier never makes a candidate match. Otherwise, among
+  matching groups, one whose release has exactly as many tracks as the Album
+  has members is preferred: when no release left out of the comparison could
+  have exactly as many tracks as the Album has members and exactly one such
+  group exists, it is preselected even when groups with more tracks also
+  match; otherwise the only matching group of a complete comparison is
+  preselected, and two or more matching groups are a tie. The view of
+  differences also shows each candidate's track count, the members it pairs
+  and how many missing-file rows it would add, and the lookup details name
+  each captured identifier a run looked up or preselected by, never its value.
 - An existing-Album review's lookup, automatic or submitted, can also search
   MusicBrainz recordings by at most two of the Album's Track titles, as the
   review captured them from the catalog. It does so only when its searches
-  for the Album title or submitted name, once their releases are compared,
-  preselect nothing: for any reason, a tie included, when those searches name
-  no Artist because the Album shows no primary Artist name usable for search
-  and none was submitted; otherwise only because no candidate matches or the
+  for its captured identifiers and for the Album title or submitted name,
+  once their releases are compared, preselect nothing: for any reason, a tie
+  included, when its searches for that title or name credit no Artist
+  because the Album shows no primary Artist name usable for search and none
+  was submitted; otherwise only because no candidate matches or the
   comparison is partial. Track titles are compared and searched without a
   trailing version or featuring note and, when every member's title starts
   with a position, all of one form, either a Track Number or a Disc Number,

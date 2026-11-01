@@ -9,7 +9,7 @@
  *          DecideCatalogReviewIdentities, CatalogReviewCreditView, CatalogReviewBoundRecord,
  *          CatalogReviewIdentityResponse, CatalogReviewCapturedSubject, CatalogReviewCapturedCredit,
  *          CatalogReviewCapturedCredits, CatalogReviewMemberDuration, CatalogReviewMemberCapture,
- *          CatalogReviewCapture
+ *          CatalogReviewCapture, CatalogReviewImportEvidence
  *   Constants: CATALOG_REVIEW_MAX_FIELDS, CATALOG_REVIEW_MAX_MEMBER_CREDITS, CATALOG_REVIEW_MAX_DECISIONS
  * @end-catalog */
 
@@ -203,7 +203,16 @@ export type CatalogReviewCapture = {
     capturedAt: Date;
     album: CatalogReviewCapturedCredits & { label: 'none' | 'first' | 'other'; expectedTracklist: ExpectedTracklistRow[] | null };
     members: CatalogReviewMemberCapture[];
+    /** Absent on a capture stored before import evidence was captured; null when the review captured none. */
+    importEvidence?: CatalogReviewImportEvidence | null;
 };
+/**
+ * The import evidence an existing-Album review captured with its capture (adminCatalogReviewImportEvidence.ts): the MusicBrainz
+ * release every import that published its members applied (`releaseId`), and the release ID, barcode (GTIN digits) and catalogue
+ * number every member's staged file carries in its tags with one value. Each is null when it does not hold; private evidence that
+ * no view projects.
+ */
+export type CatalogReviewImportEvidence = { releaseId: string | null; tagReleaseId: string | null; barcode: string | null; catalogNumber: string | null };
 
 // GET list accepts the same filter/startedByMe/q/limit/cursor as imports; it only lists catalog reviews.
 // POST creates a review and, where metadata lookup is available, queues its one automatic run in the same transaction
