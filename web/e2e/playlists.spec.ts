@@ -181,7 +181,8 @@ test('creates, renames, composes, reorders, plays, removes, and deletes one Play
   await page.getByRole('button', { name: 'Create Playlist' }).click();
   await expect(page).toHaveURL(new RegExp(`/finitude/playlists/${playlistId}$`));
 
-  await page.getByRole('button', { name: 'Rename' }).click();
+  await page.getByRole('button', { name: 'More actions for Night order' }).click();
+  await page.getByRole('menuitem', { name: 'Rename' }).click();
   await page.getByRole('textbox', { name: 'Name' }).fill('Quiet order');
   await page.getByRole('button', { name: 'Save name' }).click();
   await expect(page.getByRole('heading', { level: 1, name: 'Quiet order' })).toBeVisible();

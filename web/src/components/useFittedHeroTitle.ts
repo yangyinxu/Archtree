@@ -1,13 +1,16 @@
 import { useLayoutEffect, useRef } from 'react';
 
 /**
- * Hero title size steps, largest first (see `.albumTitle` in CatalogPages.module.css). Every step
+ * Hero title size steps, largest first (see `.title` in DetailHero.module.css). Every step
  * but the last clamps to three lines; the last never clamps, so the full title always shows.
  */
 const titleSizes = [undefined, 'medium', 'small', 'xsmall', 'xxsmall'] as const;
 
 /** CJK, Hangul, and full-width characters take about two Latin character widths. */
 const wideCharacter = /[\u1100-\u115f\u2e80-\ua4cf\uac00-\ud7a3\uf900-\ufaff\ufe30-\ufe4f\uff00-\uff60\uffe0-\uffe6]/;
+
+/** True when a title contains CJK, Hangul, or full-width characters, which need looser tracking. */
+export const hasWideCharacters = (title: string) => wideCharacter.test(title);
 
 /** Estimates the first step from the title's weighted length, before any layout is known. */
 const estimatedStep = (title: string) => {

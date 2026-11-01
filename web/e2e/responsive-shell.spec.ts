@@ -2,12 +2,14 @@
  * Internal
  *   Types: ShellBoxes
  *   Functions: expectNear, readShellBoxes, waitForExpandedShell, waitForShellWidths, dragSeparator
+ *   Constants: longPlaylist
  * Tests
  *   - prioritizes the compact left rail before dismissing Now Playing
  *   - resizes both wide panels, preserves the main pane, and restores preferences
  *   - coarse-pointer panel resizing
  *     - keeps a 44 px central grab target without covering the panel edges
  *   - compacts the Album hero inside the 416 px main pane without clipping
+ *   - compacts the Playlist hero and docks its column header under the compact bar in the 416 px pane
  *   - stacks authentication content inside the 416 px main pane
  *   - stacks Library heading controls inside the 416 px main pane
  *   - lets the listener close and restore Now Playing without replacing the player
@@ -15,8 +17,9 @@
 
 import type { Page } from '@playwright/test';
 
-import { catalogIds } from './fixtures/catalog';
-import { privatePlaylistSummary } from './fixtures/privateListener';
+import type { PlaylistDetail } from '../src/api/playlists';
+import { catalogIds, trackFixtures } from './fixtures/catalog';
+import { privatePlaylistDetail, privatePlaylistSummary } from './fixtures/privateListener';
 import { installPrivateListenerRoutes } from './support/privateRoutes';
 import { expect, test } from './support/test';
 
@@ -319,6 +322,46 @@ test('compacts the Album hero inside the 416 px main pane without clipping', asy
   expectNear(artwork!.width, 128);
   expect(artwork!.x).toBeGreaterThanOrEqual(main!.x);
   expect(title!.x + title!.width).toBeLessThanOrEqual(main!.x + main!.width);
+});
+
+// Enough ready members for the Playlist hero to scroll out of the 416 x 900 main pane.
+const longPlaylist = {
+  ...privatePlaylistDetail,
+  itemCount: 20,
+  items: Array.from({ length: 20 }, (_, index) => ({
+    itemId: `e2e-narrow-item-${index + 1}`,
+    audioTrackId: `e2e-narrow-member-${index + 1}`,
+    addedAt: '2026-08-04T13:00:00.000Z',
+    availability: 'ready' as const,
+    audioTrack: { ...trackFixtures[1], id: `e2e-narrow-member-${index + 1}`, title: `Narrow Member ${index + 1}` }
+  }))
+} satisfies PlaylistDetail;
+
+test('compacts the Playlist hero and docks its column header under the compact bar in the 416 px pane', async ({ page }) => {
+  await installPrivateListenerRoutes(page, { playlistDetail: longPlaylist });
+  await page.setViewportSize({ width: 800, height: 900 });
+  await page.goto(`/finitude/playlists/${longPlaylist.id}`);
+
+  const main = page.getByRole('main');
+  const hero = page.locator('header').filter({ has: page.getByRole('heading', { level: 1, name: longPlaylist.name }) });
+  // The hero's first block is the cover (or its placeholder) beside the copy.
+  const artwork = await hero.locator(':scope > div:first-child > :first-child').boundingBox();
+  const mainBox = await main.boundingBox();
+  expect(artwork).not.toBeNull();
+  expect(mainBox).not.toBeNull();
+  expectNear(mainBox!.width, 416);
+  expectNear(artwork!.width, 128);
+
+  const compactPlay = page.getByRole('button', { name: `Play ${longPlaylist.name}` });
+  await main.evaluate((element) => element.scrollTo({ top: element.scrollHeight }));
+  await expect(compactPlay).toBeVisible();
+  const bar = await compactPlay.locator('..').boundingBox();
+  const columnHeader = await page.locator('[data-track-table-header]').boundingBox();
+  expect(bar).not.toBeNull();
+  expect(columnHeader).not.toBeNull();
+  expectNear(bar!.y, mainBox!.y);
+  expectNear(bar!.height, 64);
+  expectNear(columnHeader!.y, bar!.y + bar!.height);
 });
 
 test('stacks authentication content inside the 416 px main pane', async ({ page }) => {

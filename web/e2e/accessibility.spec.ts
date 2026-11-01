@@ -11,6 +11,7 @@
  *     - Library has no unowned axe findings
  *     - Account has no unowned axe findings
  *     - Playlist menu and dialog have no unowned axe findings
+ *     - Playlist detail has no unowned axe findings
  *   - Home loading state has no unowned axe findings
  *   - Home empty state has no unowned axe findings
  *   - Home error and retry state has no unowned axe findings
@@ -179,6 +180,17 @@ test.describe('signed-in surfaces', () => {
     const dialog = page.getByRole('dialog', { name: 'Rename Playlist' });
     await expect(dialog).toBeVisible();
     await expectNoUnownedAxeViolations(page, 'playlist-rename-dialog');
+  });
+
+  test('Playlist detail has no unowned axe findings', async ({ page }) => {
+    await page.goto(`/finitude/playlists/${privatePlaylistSummary.id}`);
+    await expect(page.getByRole('heading', { level: 1, name: privatePlaylistSummary.name })).toBeVisible();
+    await expect(page.getByRole('list', { name: `${privatePlaylistSummary.name} MediaTracks` })).toBeVisible();
+    await expectNoUnownedAxeViolations(page, 'playlist-detail');
+
+    await page.getByRole('button', { name: `More actions for ${privatePlaylistSummary.name}` }).click();
+    await expect(page.getByRole('menu', { name: `More actions for ${privatePlaylistSummary.name}` })).toBeVisible();
+    await expectNoUnownedAxeViolations(page, 'playlist-detail-more-menu');
   });
 });
 

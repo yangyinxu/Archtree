@@ -5,7 +5,12 @@
  * Tests
  *   - Album Play and explicit soundtrack selection share the ordered Album queue
  *   - Album marks the actively playing track and pauses it without relaunching the queue
+ *   - a paused current Album row keeps its indicator and resumes without relaunching
+ *   - row meta falls back to the Album byline, never the Album title
  *   - Album detail shows the server byline and lists the label among its Credits
+ *   - the Credits footer follows the MediaTrack list in document order
+ *   - a full release date renders via Intl, and a year-only date renders no footer date
+ *   - a missing Album year is omitted, not replaced by Album
  *   - Organization page renders its public metadata and credited releases
  *   - Search renders grouped public results and keeps content actions canonical
  *   - Search retry refreshes results without adding or reordering history
@@ -140,7 +145,7 @@ test('Album Play and explicit soundtrack selection share the ordered Album queue
   expect(heroArtwork).toHaveAttribute('fetchpriority', 'high');
   expect(heroArtwork).toHaveAttribute(
     'sizes',
-    '(max-width: 520px) 12rem, (max-width: 720px) 10rem, 20rem'
+    '(max-width: 520px) 12rem, (max-width: 720px) 10rem, 15rem'
   );
   await user.click(screen.getByRole('button', { name: 'Play' }));
   expect(launch).toHaveBeenLastCalledWith([
@@ -172,7 +177,7 @@ test('Album marks the actively playing track and pauses it without relaunching t
   const launch = vi.spyOn(playerStore, 'launchAlbumQueue').mockResolvedValue();
   renderRoute(`/albums/${album.id}`, '/albums/:albumId', <AlbumPage />);
 
-  const pauseAction = await screen.findByRole('button', { name: 'Pause' });
+  const pauseAction = await within(await screen.findByRole('list')).findByRole('button', { name: 'Pause' });
   const trackRow = pauseAction.closest('li');
   expect(trackRow).toHaveAttribute('data-playback-state', 'playing');
   expect(pauseAction).toHaveAttribute('aria-current', 'true');
@@ -184,6 +189,53 @@ test('Album marks the actively playing track and pauses it without relaunching t
 
   expect(pause).toHaveBeenCalledOnce();
   expect(launch).not.toHaveBeenCalled();
+
+  // The hero Play reflects this Album's queue too, and pauses it without relaunching.
+  const heroPause = screen.getByRole('heading', { level: 1 }).closest('header')!
+    .querySelector<HTMLButtonElement>('button[aria-label="Pause"]')!;
+  expect(heroPause).toBeInTheDocument();
+  await user.click(heroPause);
+  expect(pause).toHaveBeenCalledTimes(2);
+  expect(launch).not.toHaveBeenCalled();
+});
+
+test('a paused current Album row keeps its indicator and resumes without relaunching', async () => {
+  const user = userEvent.setup();
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ album, tracks: [track] })));
+  const snapshot = playerStore.getSnapshot();
+  vi.spyOn(playerStore, 'getSnapshot').mockReturnValue({
+    ...snapshot,
+    currentIndex: 0,
+    currentItem: track,
+    queue: [track],
+    status: 'paused'
+  });
+  const play = vi.spyOn(playerStore, 'play').mockResolvedValue();
+  const launch = vi.spyOn(playerStore, 'launchAlbumQueue').mockResolvedValue();
+  renderRoute(`/albums/${album.id}`, '/albums/:albumId', <AlbumPage />);
+
+  const resume = await screen.findByRole('button', { name: 'Play Blue Interval' });
+  expect(resume.closest('li')).toHaveAttribute('data-playback-state', 'paused');
+  expect(resume).toHaveAttribute('aria-current', 'true');
+  expect(screen.getByText('Blue Interval').className).toContain('trackTitlePlaying');
+
+  await user.click(resume);
+
+  expect(play).toHaveBeenCalledOnce();
+  expect(launch).not.toHaveBeenCalled();
+});
+
+test('row meta falls back to the Album byline, never the Album title', async () => {
+  const anonymous = { ...track, artistNames: [] };
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
+    album: { ...album, displayByline: 'Finite Ensemble' },
+    tracks: [anonymous]
+  })));
+  renderRoute(`/albums/${album.id}`, '/albums/:albumId', <AlbumPage />);
+
+  const row = (await screen.findByRole('button', { name: 'Play Blue Interval' })).closest('li')!;
+  expect(row).toHaveTextContent('Finite Ensemble');
+  expect(row).not.toHaveTextContent('Night Geometry');
 });
 
 test('Album detail shows the server byline and lists the label among its Credits', async () => {
@@ -204,7 +256,13 @@ test('Album detail shows the server byline and lists the label among its Credits
   renderRoute(`/albums/${album.id}`, '/albums/:albumId', <AlbumPage />);
 
   expect(await screen.findByRole('heading', { name: 'Night Geometry' })).toBeInTheDocument();
-  expect(screen.getByText('Finite Ensemble & Guest Voice · 2026 · 1 MediaTrack')).toBeInTheDocument();
+  const hero = screen.getByRole('heading', { level: 1 }).closest('header')!;
+  expect(hero.querySelector('p:last-of-type'))
+    .toHaveTextContent('Finite Ensemble & Guest Voice • 2026 • 1 MediaTrack • 3 min');
+  expect(within(hero).getAllByRole('link').map((link) => link.getAttribute('href'))).toEqual([
+    `/artists/${artist.id}`,
+    `/artists/${guestId}`
+  ]);
   const credits = screen.getByRole('region', { name: 'Credits' });
   const label = within(credits).getByRole('link', { name: /Finite Records/ });
   expect(label).toHaveAttribute('href', `/organizations/${organization.id}`);
@@ -214,6 +272,55 @@ test('Album detail shows the server byline and lists the label among its Credits
     `/artists/${guestId}`,
     `/organizations/${organization.id}`
   ]);
+});
+
+test('the Credits footer follows the MediaTrack list in document order', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
+    album: {
+      ...album,
+      credits: [{ subjectType: 'artist', subjectId: artist.id, name: 'Finite Ensemble', role: 'primary', order: 0 }]
+    },
+    tracks: [track]
+  })));
+  renderRoute(`/albums/${album.id}`, '/albums/:albumId', <AlbumPage />);
+
+  const credits = await screen.findByRole('region', { name: 'Credits' });
+  const list = screen.getByRole('button', { name: 'Play Blue Interval' }).closest('ol')!;
+  expect(credits.closest('footer')).not.toBeNull();
+  expect(list.compareDocumentPosition(credits) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(list.contains(credits)).toBe(false);
+});
+
+test('a full release date renders via Intl, and a year-only date renders no footer date', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
+    album: { ...album, releaseDate: { year: 2026, month: 8, day: 2 } },
+    tracks: [track]
+  })));
+  const full = renderRoute(`/albums/${album.id}`, '/albums/:albumId', <AlbumPage />);
+
+  await screen.findByRole('heading', { level: 1, name: 'Night Geometry' });
+  const expected = new Intl.DateTimeFormat('en-US', { dateStyle: 'long', timeZone: 'UTC' })
+    .format(Date.UTC(2026, 7, 2));
+  expect(expected).toBe('August 2, 2026');
+  expect(full.container.querySelector('footer')).toHaveTextContent(expected);
+  full.unmount();
+
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ album, tracks: [track] })));
+  const yearOnly = renderRoute(`/albums/${album.id}`, '/albums/:albumId', <AlbumPage />);
+  await screen.findByRole('heading', { level: 1, name: 'Night Geometry' });
+  expect(yearOnly.container.querySelector('footer p')).toBeNull();
+  expect(yearOnly.container.querySelector('footer')).not.toHaveTextContent('2026');
+});
+
+test('a missing Album year is omitted, not replaced by Album', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
+    album: { ...album, displayByline: 'Finite Ensemble', releaseDate: null },
+    tracks: [track]
+  })));
+  renderRoute(`/albums/${album.id}`, '/albums/:albumId', <AlbumPage />);
+
+  const hero = (await screen.findByRole('heading', { level: 1, name: 'Night Geometry' })).closest('header')!;
+  expect(hero.querySelector('p:last-of-type')).toHaveTextContent(/^Finite Ensemble • 1 MediaTrack • 3 min$/);
 });
 
 test('Organization page renders its public metadata and credited releases', async () => {
