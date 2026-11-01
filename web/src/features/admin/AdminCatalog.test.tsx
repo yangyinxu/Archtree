@@ -296,7 +296,7 @@ test('a transient catalog failure retains the account-fenced draft and its revis
 test('Page visibility patches only the confirmed occurrence and its captured page revision', async () => {
   const page = { slug: 'home', title: 'Home', revision: `cr_${'a'.repeat(43)}`, items: [{ itemId: '222222222222222222222222', itemType: 'carousel', referenceId: 'shared-carousel', order: 0, visibility: 'public', name: 'Featured releases', sourceMode: 'manual', referenceStatus: 'ready' }] }; const writes: any[] = [];
   vi.stubGlobal('fetch', vi.fn(async (path: string, init: RequestInit) => { if (init.method === 'PATCH') { const body = JSON.parse(String(init.body)); writes.push({ path, body }); return json({ page: { ...page, revision: `cr_${'b'.repeat(43)}`, items: [{ ...page.items[0], visibility: 'hidden' }] }, receipt: { operationId: body.operationId } }); } return json({ page }); }));
-  mount(<AdminPagesPage />); fireEvent.click(await screen.findByRole('button', { name: 'Hide this placement' })); expect(writes).toHaveLength(0);
+  await act(async () => mount(<AdminPagesPage />)); fireEvent.click(await screen.findByRole('button', { name: 'Hide this placement' })); expect(writes).toHaveLength(0);
   const dialog = within(screen.getByRole('dialog'));
   expect(dialog.getByText('1 · Featured releases')).toBeVisible();
   expect(dialog.getByText('Public → Hidden')).toBeVisible();
@@ -308,7 +308,7 @@ test('Page placements keep missing and unsupported references identifiable', asy
     { itemId: '333333333333333333333333', itemType: 'list', referenceId: 'old-list', order: 1, visibility: 'hidden', name: 'Legacy list', sourceMode: null, referenceStatus: 'unsupported' }
   ] };
   vi.stubGlobal('fetch', vi.fn(async () => json({ page })));
-  mount(<AdminPagesPage />);
+  await act(async () => mount(<AdminPagesPage />));
   expect(await screen.findByText('Referenced content is missing')).toBeVisible();
   expect(screen.getByText('Unsupported reference')).toBeVisible();
   expect(screen.getByRole('heading', { name: '1 · Unnamed placement' })).toBeVisible();
@@ -318,7 +318,7 @@ test('a placement rename or source change invalidates its open visibility approv
   let page = { slug: 'home', title: 'Home', revision: `cr_${'a'.repeat(43)}`, items: [{ itemId: '222222222222222222222222', itemType: 'grid', referenceId: 'shared-grid', order: 0, visibility: 'public', name: 'Featured releases', sourceMode: 'manual', referenceStatus: 'ready' }] };
   const writes: string[] = [];
   vi.stubGlobal('fetch', vi.fn(async (_path: string, init: RequestInit) => { if (init.method === 'PATCH') writes.push(String(init.body)); return json({ page }); }));
-  const client = mount(<AdminPagesPage />);
+  const client = await act(async () => mount(<AdminPagesPage />));
   fireEvent.click(await screen.findByRole('button', { name: 'Hide this placement' }));
   page = { ...page, revision: `cr_${'b'.repeat(43)}`, items: [{ ...page.items[0], name: 'Popular recordings', sourceMode: 'dynamic' }] };
   await act(async () => { await client.refetchQueries({ queryKey: ['admin-imports'] }); });

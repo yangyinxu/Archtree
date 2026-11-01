@@ -5,8 +5,9 @@ import { gzipSync } from 'node:zlib';
 
 export const staticAssetBudgets = Object.freeze({
   // Raised from 32 KiB through the reviewed visual-polish stages: media cards, artwork-tone
-  // headers, and the shell search typeahead with shared result filters.
-  cssGzipBytes: 35 * 1024,
+  // headers, the shell search typeahead, and the approved Page placements/order modes.
+  // Its isolated administrator stylesheet totals about 2.5 KiB and loads only on that route.
+  cssGzipBytes: 38 * 1024,
   fontBytes: 128 * 1024,
   imageBytes: 256 * 1024,
   individualImageBytes: 128 * 1024

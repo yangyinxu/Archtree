@@ -2927,6 +2927,57 @@ reusable definitions and order. Each placement includes bounded `name`,
 (`ready`, `missing` or `unsupported`) display metadata. The Page digest binds
 that resolved metadata, so a referenced name/source change requires fresh
 confirmation. A named target is write-fenced with the visibility mutation.
+The Web Page manager reads only the selected slug. Its neutral Home/Library
+controls show the selected Page's confirmed count and a dash for the other Page;
+they do not prefetch a second private Page. Placements remain in saved order,
+with distinct Carousel/Grid/List icons, optional source text, Public/Hidden
+status, visible reference warnings and inline, copyable reference IDs. Both
+visibility directions require a confirmation that names the captured placement,
+shows its transition and preserves the reusable-definition scope. A newer
+**Page** revision disables that approval and explains how to review again.
+During an uncertain write, account-fenced in-memory context retains the original
+placement name, position and action across refreshes and Page switches; only
+the original command is retryable. A definite conflict offers refresh/review.
+Submitting returns keyboard focus to the same row's enabled Details control;
+cancelling returns it to the initiating action. Clipboard results are fenced by
+account/view, reference identity and attempt, so an older copy cannot mark a
+newly refreshed reference as copied. New Page-only copy is generated from the
+canonical locale sources into the release-packaged `web-admin` localization
+namespace; existing v1/v2 translation bundles remain unchanged.
+`POST /pages/:slug/reorder` saves an explicitly approved complete Page order as
+`{ itemIds, expectedRevision, operationId }` and returns the same allowlisted
+`page` snapshot plus `receipt.operationId`. It uses the existing actor-bound
+catalog mutation receipts: replay checks precede revision validation, and reusing
+an operation ID with different parameters is rejected. The raw stored membership,
+not a filtered projection, must match one complete unique permutation. Unique
+legacy definition-ID fallbacks are persisted as placement IDs during this write;
+unidentifiable or ambiguous records require configuration repair. The transaction
+fences reviewed existing references and commits contiguous order values and the
+receipt together. It does not change visibility, definitions or storage objects.
+The older index-based Content Manager reorder endpoint is not used by Web.
+
+The Web order mode disables Page switching and manual refresh, replaces row
+visibility/details actions with a drag handle and quiet 44-pixel move buttons,
+and supports keyboard arrows on each handle. Native drag presents a floating row
+and an empty slot while adjacent rows shift; no insertion line or duplicate
+"moved" badge is shown. Position changes remain local until confirmation of the
+complete new order. A stale confirmation offers Cancel adjustment and Refresh
+and adjust again; it cannot leave an apparently saveable stale draft. During
+submission the modal is locked and shows its pending button; confirmed success
+exits the mode and announces that the order was saved.
+
+Order and visibility share `AdminCommand` on the existing `page:${slug}` channel.
+An uncertain order appears in a top-of-page notice with an expandable frozen
+complete order, Refresh status and Retry original operation. The list below
+continues to show current reads. Refreshes never replace the retained intent or
+settle it merely because the server order happens to match. Definite conflicts
+offer cancellation or refresh and adjustment, without an original-operation
+retry. Account and administrator-access fences apply to recovery and delayed
+refreshes. Order writes invalidate open visibility approvals through the same
+whole-Page revision and retain the existing listener cursor invalidation rules.
+The approved Page layout including order adjustment adds about 2.5 KiB gzip of route-specific CSS; the
+aggregate emitted-CSS budget is 38 KiB. The 150 KiB initial JavaScript budget,
+font/image limits and lazy loading of administrator styles stay in place.
 `/artwork` and `/media`
 are private previews with current-source and current-role stream revocation.
 Unknown commit responses retry the original intent; stale revisions require

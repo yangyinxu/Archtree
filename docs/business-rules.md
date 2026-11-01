@@ -2469,6 +2469,33 @@ The wire protocol and operational bounds are documented in
   in persisted order, including each item's resolved name, source mode, and ID.
   Missing or unsupported references remain visible as warnings rather than
   disappearing from the page summary.
+- Web Page management uses a compact ordered list with inline reference details.
+  It reads only the selected Page and shows its confirmed placement count; the
+  unselected Page's count remains unknown until selected. Visibility approval
+  identifies the exact placement and is invalidated by any change to the Page
+  revision. An uncertain operation retains its originally approved name and
+  visibility direction for an exact retry, even after a refresh or Page switch.
+- Web administrators adjust Page placement order in a separate local draft,
+  using drag handles, keyboard arrows or Move up/Move down controls. Hidden
+  placements and broken references remain in that order. Cancelling writes
+  nothing; saving requires explicit review of the complete new order and its
+  immediate listener effect. An unchanged draft cannot be submitted.
+- Page order approval binds the complete unique placement identities and the
+  whole Page revision. A stale approval cannot save; the administrator can
+  cancel or refresh and adjust again. The atomic write preserves placement
+  visibility, references and reusable definitions, backfills unique legacy
+  fallback identities, and rejects missing or ambiguous identities instead of
+  dropping their records. Sorting changes the Page revision and invalidates
+  already-open visibility approvals and listener collection cursors.
+- Visibility and order writes share the same per-Page administrator command.
+  While either is submitting or uncertain, no new write can start on that Page.
+  An uncertain order keeps its original operation identity, complete approved
+  order, revision and review context for an exact retry. A refresh may show the
+  latest server order alongside that retained intent, but neither replaces it
+  nor proves which operation applied. Only a confirmed receipt or definite
+  refusal resolves the command; version conflicts require a fresh review. An
+  incompatible response requires reloading the workbench without resending an
+  intent the current bundle cannot confirm.
 - Manual Lists can contain explicitly curated supported content references and
   preserve their configured order. Dynamic Lists resolve their ordering from
   their source definition.
