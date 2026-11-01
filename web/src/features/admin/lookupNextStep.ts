@@ -59,7 +59,7 @@ export function lookupNextStep(lookup: LookupStepView | null, context: { availab
  * (`catalog_review.lookup_<rest>`, camelCase kept so the admin text hook snake-cases it, as `lookup.<key>` is).
  */
 const REVIEW_COPY: ReadonlySet<string> = new Set([
-  'lookup.not_started', 'lookup.no_query', 'lookup.no_match', 'lookup.applied_none', 'lookup.tie', 'lookup.single_choice', 'lookup.superseded',
+  'lookup.applied_none', 'lookup.tie', 'lookup.single_choice', 'lookup.superseded',
   'lookup.status_matching', 'lookup.status_notMatching', 'lookup.status_unverified', 'lookup.unknown_durations', 'lookup.unknown_discs',
   'lookup.partial_comparison', 'lookup.difference_pairing', 'lookup.difference_tooManyTracks', 'lookup.difference_tracklistInvalid'
 ]);

@@ -17,8 +17,9 @@ import styles from './adminStyles';
  * from the catalog Album read the Album page uses (`GET /catalog/album/:id`, under AdminCatalogEditor's query key, so either page
  * reuses the other's read), with the artwork placeholder while that read is pending, fails or finds none; the captured Album title
  * as stored (a trailing credit is never stripped); the draft's primary Artist names; and how many local tracks the review captured.
- * `children` are the page's own header actions. It is a compact Album hero, its cover beside the title at every width (a small one
- * on a phone), so the lookup status below stays in the first screen above the sticky action bar. A cover is presentation only: a
+ * `children` are the page's own header actions (only while the review cannot be read). It is a compact Album hero, its cover beside
+ * the title at every width (a small one on a phone), so the status line and the proposed changes below stay in the first screen
+ * above the sticky action bar. A cover is presentation only: a
  * read this bundle cannot parse shows the placeholder and asks for no reload, and an Album no longer available is not read.
  */
 export function CatalogReviewHeader({ item, children }: { item: CatalogReview; children?: ReactNode }) {

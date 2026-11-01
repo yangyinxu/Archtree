@@ -13,7 +13,8 @@ import { catalogReview, reviewId, reviewJson, session, viewer } from './catalogR
  */
 const chunk = vi.hoisted(() => { let release = () => {}; const gate = new Promise<void>(resolve => { release = resolve; }); return { gate, release }; });
 vi.mock('./CatalogReviewPrepareControl', async importOriginal => { await chunk.gate; return importOriginal(); });
-vi.mock('./CatalogReviewSummary', () => ({ CatalogReviewSummary: () => <section aria-label="Metadata lookup">Synthetic lookup summary</section> }));
+vi.mock('./CatalogReviewStatus', () => ({ CatalogReviewStatus: () => <div id="catalog-review-status"><strong role="status">Synthetic status line</strong></div> }));
+vi.mock('./CatalogReviewLookupDetails', () => ({ CatalogReviewLookupDetails: () => <section aria-label="Metadata lookup">Synthetic lookup summary</section> }));
 
 /** A ResizeObserver stand-in that records what it observes and reports a resize on demand. */
 class Observer {

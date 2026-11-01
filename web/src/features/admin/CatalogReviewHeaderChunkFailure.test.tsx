@@ -7,20 +7,21 @@ import { AdminCatalogReviewPage } from './AdminCatalogReviewPage';
 import { catalogReview, reviewId, reviewJson, session, viewer } from './catalogReviewFixtures.testSupport';
 
 /**
- * A deploy removed the review page's header chunk before the page loaded it: the plain heading with the Album title and the page's
- * Refresh status stays in its place, asking for no reload, and manual editing and its save stay usable. All names and identifiers
+ * A deploy removed the review page's header chunk before the page loaded it: the plain heading with the Album title stays in its
+ * place, asking for no reload, with the status line under it, and manual editing and its save stay usable. All names and identifiers
  * are synthetic.
  */
 const headerChunk = vi.hoisted(() => ({ attempts: 0 }));
 vi.mock('./CatalogReviewHeader', () => { headerChunk.attempts += 1; throw new TypeError('Failed to fetch dynamically imported module'); });
-vi.mock('./CatalogReviewSummary', () => ({ CatalogReviewSummary: () => <section aria-label="Metadata lookup">Synthetic lookup summary</section> }));
+vi.mock('./CatalogReviewStatus', () => ({ CatalogReviewStatus: () => <div id="catalog-review-status"><strong role="status">Synthetic status line</strong></div> }));
+vi.mock('./CatalogReviewLookupDetails', () => ({ CatalogReviewLookupDetails: () => <section aria-label="Metadata lookup">Synthetic lookup summary</section> }));
 
 beforeEach(() => {
   adminWorkspace.reset(); adminWorkspace.authorize(captureAccountOperation(viewer), true, true, undefined, { editing: true, visibility: true }); adminWorkspace.select('admin');
 });
 afterEach(() => { cleanup(); adminWorkspace.reset(); vi.unstubAllGlobals(); });
 
-test('a header chunk that cannot load leaves the plain heading and Refresh status in its place, and manual editing and its save stay usable', async () => {
+test('a header chunk that cannot load leaves the plain heading in its place, the status line under it, and manual editing and its save stay usable', async () => {
   const item = catalogReview(), writes: string[] = [];
   vi.stubGlobal('fetch', vi.fn(async (path: string, init?: RequestInit) => {
     if (init?.method === 'PATCH') { writes.push(path); return reviewJson({ code: 'unexpected' }, 500); }
@@ -32,7 +33,9 @@ test('a header chunk that cannot load leaves the plain heading and Refresh statu
   expect(await screen.findByText('Synthetic lookup summary')).toBeVisible();
   await waitFor(() => expect(headerChunk.attempts).toBeGreaterThan(0));
   expect(screen.getByRole('heading', { level: 1, name: 'Synthetic catalog Album' })).toBeVisible();
-  expect(screen.getByRole('button', { name: 'Refresh status' })).toBeEnabled();
+  // A loaded review's heading has no Refresh status (design v3): the status line under it polls.
+  expect(screen.queryByRole('button', { name: 'Refresh status' })).not.toBeInTheDocument();
+  expect(screen.getByRole('heading', { level: 1 }).compareDocumentPosition(screen.getByText('Synthetic status line')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(screen.queryByRole('img', { name: /cover/ })).not.toBeInTheDocument();
   expect(screen.queryByText(/Reload the page to continue/)).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'Edit manually' }));

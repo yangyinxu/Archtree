@@ -14,7 +14,7 @@ import type { CandidatePairing as Pairing } from './CandidatePairing';
 import { entriesByline } from './artistEntriesByline';
 import type { ImportLookupView, ReviewLookupView } from './importLookupApi';
 import { reviewLookupKey } from './lookupNextStep';
-import { candidateReason, releaseGroups, reviewSections, titlePosition } from './reviewLookupStatus';
+import { candidateReason, releaseGroups, reviewReleaseCount, reviewSections, titlePosition } from './reviewLookupStatus';
 import { reviewValueText } from './reviewValueText';
 import styles from './adminStyles';
 
@@ -71,16 +71,15 @@ const CandidatePairing = lazy<ComponentType<ComponentProps<typeof Pairing>>>(() 
  * used where a member has no duration, else compared again, unless another possible match pairs in one way (then that release is
  * the next step and nothing asks for numbers). Each such card also offers Pair tracks by hand, which opens the pairing panel (CandidatePairing.tsx, its own
  * chunk) for that edition below the sections, one at a time; it keeps one place in the tree whichever view a re-rank shows, so it stays open with its state when
- * the release leaves the possible matches, and `onPairing` hears whether it is open, so the summary never folds its results under
- * it. While it saves, the chooser's other choices wait; once it closes, focus returns to its
- * opener after Cancel, else (or when the opener is gone) to the summary's lookup panel. A review card whose pairing the title or
+ * the release leaves the possible matches, and `onPairing` hears whether it is open. While it saves, the chooser's other choices
+ * wait; once it closes, focus returns to its opener after Cancel, else (or when the opener is gone) to the review's lookup details. A review card whose pairing the title or
  * filename positions or the closest durations made single says so (`pairedBy`), naming the title positions it read, and the unknown
  * Disc Numbers line then stays out; a possible match whose choice sits under Other options leaves its no-tracklist line there.
  * The release this run applied without a pairing whose pairing is now single can be used again, a primary button where it is not
  * folded, which brings in its tracklist and track details; with groups it is also listed above the folded list. In a review, the
- * tie or offer sentence names its region without being printed again (the summary's status says it), and the offered release's
+ * tie or offer sentence names its region without being printed again (the status line says it), and the offered release's
  * card names its editions like a possible match, with Use this release as the primary button, the next step. A review's chooser
- * sits in one Reference releases disclosure (see its return), which never folds under the open pairing panel, and a release card
+ * sits in one collapsed Reference releases disclosure (see its return), which never folds under the open pairing panel, and a release card
  * whose records show the same media and country (a card's records share every other value shown) says nothing tells them apart,
  * numbering their edition buttons, so they never read as one edition.
  */
@@ -238,16 +237,15 @@ export function CandidateChooser({ projectId, viewerId, lookup, review, disabled
   const fold = (prefix: string, heading: string, body: ReactNode) => <details className={styles.details} onToggle={event => toggle(prefix, event.currentTarget.open)}><summary>{heading}</summary>{body}</details>;
   const releases = (groups: Candidate[][]) => groups.map(group => ({ candidate: acting(group), proposal: null, group }));
   // The pairing panel follows the sections. Focus returns to its opener after Cancel; once the release is used, or when the opener
-  // is gone, to the summary's lookup panel, as a re-read usually removes the opener.
+  // is gone, to the review's lookup details, as a re-read usually removes the opener.
   const opened = panel && lookup.candidates.find(candidate => candidate.key === panel.key);
-  // A layout effect, so a summary deciding in the same commit whether its results fold already knows.
   const showing = Boolean(opened);
   useLayoutEffect(() => { onPairing?.(showing); return () => onPairing?.(false); }, [showing]);
   const pairing = panel && opened && <Suspense fallback={<p role="status">{t('common.loading')}</p>}><CandidatePairing key={panel.key} projectId={projectId}
     candidateKey={panel.key} editions={panel.editions} run={lookup.run} title={opened.title ?? '—'} disabled={locked} onBusy={setSaving}
     onClose={used => { setPanel(null); ((!used && document.getElementById(opener(panel.key))) || document.getElementById('catalog-review-lookup'))?.focus(); }} /></Suspense>;
   const all = fold('a', t('lookup.candidates', { count: lookup.candidates.length }), <>{list('a', lookup.candidates.map(candidate => ({ candidate, proposal: null })))}{!tie && !offered && none}</>);
-  // A review's summary already says the tie or offer sentence as its status, so here it only names the region; its offered release
+  // A review's status line already says the tie or offer sentence, so here it only names the region; its offered release
   // names its editions as a possible match does.
   const heading = t(tie ? 'lookup.tie' : 'lookup.single_choice'), editions = review && offered ? releaseGroups(lookup.candidates as ReviewCandidate[]) : [];
   // Each view's parts before and after the pairing panel, which so keeps its place (and its state) whichever view a re-rank shows.
@@ -259,16 +257,16 @@ export function CandidateChooser({ projectId, viewerId, lookup, review, disabled
       {sections.others.length > 0 && fold('o', t('catalog_review.lookup_section_other_fit', { count: sections.others.length }), list('o', releases(sections.others)))}
       {sections.rest.length > 0 && fold('n', t('catalog_review.lookup_section_not_fit', { count: sections.rest.length }), list('n', releases(sections.rest)))}</>, none]
     : [<>{disclosed}{rechoose.length > 0 && list('r', rechoose.map(candidate => ({ candidate, proposal: null })))}{partial}</>, all];
-  // A review's chooser sits in one Reference releases disclosure naming how many records the tracks may fit (matching or
-  // unverified), with what using one does. It stays open while anything is to choose: a tie, an offered release, the sections
-  // (nothing matched as a group, where the pairing panel opens) or a release to use again; it folds once this run applied a
-  // release or none from matching groups, and opens again as soon as that no longer holds. It never folds under an open pairing
+  // A review's chooser sits in one Reference releases disclosure naming how many possible releases the review names (the status
+  // line's count, reviewLookupStatus.ts), with what using one does. It starts collapsed and opens only while choosing is the next
+  // step: a tie, an offered release, a release to use again, or a release the tracks fit that they pair with in exactly one way
+  // (whose unknown durations left it unused); it folds again as soon as that no longer holds. It never folds under an open pairing
   // panel, whose status and choices stay in view when its save's re-rank settles the run; closing that panel leaves it as it is.
-  const settled = !tie && !offered && !sections && lookup.applied?.run === lookup.run && rechoose.length === 0;
+  const fits = sections ? (sections.possible.length ? sections.possible : sections.others) : [];
+  const next = Boolean(tie || offered || rechoose.length > 0 || fits.flat().some(candidate => subsetOf(candidate)?.pairing === 'unique'));
   const releasesFold = useRef<HTMLDetailsElement>(null);
-  useLayoutEffect(() => { if (releasesFold.current && (!settled || !showing)) releasesFold.current.open = !settled; }, [settled]);
+  useLayoutEffect(() => { if (releasesFold.current && (next || !showing)) releasesFold.current.open = next; }, [next]);
   if (!review) return <>{head}{pairing}{tail}</>;
-  const possible = lookup.candidates.filter(candidate => candidate.status === 'matching' || candidate.status === 'unverified').length;
-  return <details ref={releasesFold} className={styles.details}><summary>{t('catalog_review.lookup_releases', { count: possible })}</summary>
+  return <details ref={releasesFold} className={styles.details}><summary>{t('catalog_review.lookup_releases', { count: reviewReleaseCount(lookup as ReviewLookupView, review.searched, review.artists) })}</summary>
     <p className={styles.muted}>{t('catalog_review.lookup_releases_copy')}</p>{head}{pairing}{tail}</details>;
 }

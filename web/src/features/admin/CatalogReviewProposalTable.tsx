@@ -86,12 +86,13 @@ export function CatalogReviewProposalTable({ item, base, edits, cleaned, disable
     {long && <p>{[t('catalog_review.proposal_long', { tracks: sources.length, discs: new Set(proposal.rows.map(disc)).size }),
       proposal.count > 0 && t('catalog_review.proposal_long_range', { first: titlePosition(first.title) ?? '', last: titlePosition(last.title) ?? '' })].filter(Boolean).join(' · ')}</p>}
     <fieldset ref={list} className={styles.editor} disabled={disabled}>
-      {cleanup.offered && <label className={styles.check}><input type="checkbox" data-cleanup="" checked={cleanup.checked}
-        onChange={event => { const next = toggleCleanup(proposal, base, edits, event.target.checked, cleaned);
-          onCleanup(next.edits, withEdits(base, next.edits), next.keys, next.cleaned); }} />{t('catalog_review.proposal_cleanup')}</label>}
       {open.length > 0 && <ol className={styles.cards}>{open.map(rowView)}</ol>}
       {[...discs].map(([number, rows]) => <details key={number} className={styles.details}><summary>{t('catalog_review.proposal_disc', { disc: number, count: rows.length })}</summary>
         <ol className={styles.cards}>{rows.map(rowView)}</ol></details>)}
+      {/* The optional title cleanup follows the rows it previews (design v3). */}
+      {cleanup.offered && <label className={styles.check}><input type="checkbox" data-cleanup="" checked={cleanup.checked}
+        onChange={event => { const next = toggleCleanup(proposal, base, edits, event.target.checked, cleaned);
+          onCleanup(next.edits, withEdits(base, next.edits), next.keys, next.cleaned); }} />{t('catalog_review.proposal_cleanup')}</label>}
     </fieldset>
   </section>;
 }

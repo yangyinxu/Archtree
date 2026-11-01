@@ -6,7 +6,7 @@
  * Tests
  *   - while a run is active its steps read in order with what each searched, their states and counts, without a live region
  *   - a running run that shows no new step for more than five seconds of this page's clock says it waits for MusicBrainz, iTunes in the iTunes phase, and a queued or retrying run never does
- *   - after a run it says what it searched, then keeps its record with the time taken, searches and releases and its steps behind Details
+ *   - after a run its Details log keeps its record with the time taken, searches and releases, then what it searched, then its steps
  *   - a stopped run shows its record without the names searched, and the steps it never reached read as not run
  *   - a search the run may not have sent reads as such, and is neither named as searched nor counted
  *   - a run that completed after MusicBrainz's retries ran out names no search, as it may not have sent them
@@ -15,7 +15,8 @@
  *   - a search whose text is not shown reads as a search by name, and a song search names its song
  *   - a run ended because its Album changed offers opening the Album, with or without a timeline
  *   - a view without a timeline renders nothing
- *   - in the summary's status row Details follows the status, which it leaves mounted; the choice holds through an active run's polls, and a run that completes starts hidden again
+ *   - the status line's notes lead the log of an active run, and show on their own without a timeline
+ *   - in the status line Details follows the status, which it leaves mounted; the choice holds through an active run's polls, and a run that completes starts hidden again
  * @end-catalog */
 
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
@@ -27,7 +28,7 @@ import { LookupProgress } from './LookupProgress';
 /**
  * The review lookup's step list on its own: the steps in order with what each searched, their states and counts, the wait for a
  * source, the names searched and the record after a run behind Details, each Track-title and iTunes state in its own words, the
- * Details button it adds to the summary's status row, and the link to open an Album that changed. All names and identifiers are synthetic.
+ * Details button it adds to the status line, and the link to open an Album that changed. All names and identifiers are synthetic.
  */
 type Timeline = NonNullable<ReviewLookupView['timeline']>;
 const startedAt = '2026-10-22T01:24:52.000Z';
@@ -92,30 +93,30 @@ test('a running run that shows no new step for more than five seconds of this pa
   }
 });
 
-test('after a run it says what it searched, then keeps its record with the time taken, searches and releases and its steps behind Details', () => {
+test('after a run its Details log keeps its record with the time taken, searches and releases, then what it searched, then its steps', () => {
   const { container } = show(lookup(), undefined, null, true);
   const searched = screen.getByText('This lookup searched for "Synthetic Live Album 2" · Synthetic Live Artist, then "Synthetic Live Album 2" alone, '
     + 'then "Synthetic Live Album 2" · Synthetic Live Artist -Romanized-.');
-  expect(searched).toBeVisible();
-  // A completed run starts with its record and steps hidden, still mounted; Details shows them under the searched line.
+  // A completed run starts with its log hidden, still mounted: the record, the names searched and the steps.
   const toggle = screen.getByRole('button', { name: 'Details' }), record = screen.getByText('Lookup log: took 22 s · 7 searches · 12 releases found');
   expect(toggle).toHaveAttribute('aria-expanded', 'false');
-  expect(record).not.toBeVisible();
+  expect(record).not.toBeVisible(); expect(searched).not.toBeVisible();
   expect(screen.queryByRole('list', { name: 'Lookup steps' })).not.toBeInTheDocument();
   fireEvent.click(toggle);
   expect(toggle).toHaveAccessibleName('Hide details'); expect(toggle).toHaveAttribute('aria-expanded', 'true');
   expect(document.getElementById(toggle.getAttribute('aria-controls')!)).toContainElement(record);
-  expect(record).toBeVisible();
-  expect(searched.compareDocumentPosition(record) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(record).toBeVisible(); expect(searched).toBeVisible();
+  expect(document.getElementById(toggle.getAttribute('aria-controls')!)).toContainElement(searched);
+  expect(record.compareDocumentPosition(searched) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(rows()).toEqual([...searches, `✓ Search by track title: ${titles}`, '✓ Read release details (12 of 12 releases)', '✓ iTunes fallback (2 of 2 searches)',
     '✓ Check the Albums iTunes returned on MusicBrainz (4 of 4 checks), found "Synthetic other Album 1"', '✓ Read Artist and label aliases (4 of 4 lookups)']);
   // The bridge row says why a release of another title was found: it is what iTunes returned for the names searched.
   expect(notes()).toEqual(['', '', '', '', '', '',
     '"Synthetic other Album 1" came back from iTunes as other Albums for the names searched, so their releases on MusicBrainz are among the releases found too.', '']);
-  // Details comes first, then the full-width rest led by the searched line; without an end time the record counts to the last step.
+  // Details comes first, then the full-width log led by the record; without an end time the record counts to the last step.
   expect(container.firstElementChild).toBe(toggle);
   expect(container.firstElementChild!.nextElementSibling!.tagName).toBe('DIV');
-  expect(container.firstElementChild!.nextElementSibling!.firstElementChild).toBe(searched);
+  expect(container.firstElementChild!.nextElementSibling!.firstElementChild!.firstElementChild).toBe(record);
   fireEvent.click(toggle);
   expect(record).not.toBeVisible();
   cleanup();
@@ -223,7 +224,20 @@ test('a view without a timeline renders nothing', () => {
   expect(container).toBeEmptyDOMElement();
 });
 
-test('in the summary\'s status row Details follows the status, which it leaves mounted; the choice holds through an active run\'s polls, and a run that completes starts hidden again', () => {
+test('the status line\'s notes lead the log of an active run, and show on their own without a timeline', () => {
+  const now = Date.parse('2026-10-22T01:25:30.000Z'), noted = ['Running 0:38', 'Lookup keeps running after you leave this page.'];
+  render(<MemoryRouter><LookupProgress lookup={running('2026-10-22T01:25:28.000Z')} now={now} notes={noted} albumHref={null} /></MemoryRouter>);
+  const toggle = screen.getByRole('button', { name: 'Hide details' }), log = document.getElementById(toggle.getAttribute('aria-controls')!)!;
+  expect([...log.querySelectorAll('p')].slice(0, 2).map(line => line.textContent)).toEqual(noted);
+  fireEvent.click(toggle);
+  expect(screen.getByText(noted[0])).not.toBeVisible();
+  cleanup();
+  render(<MemoryRouter><LookupProgress lookup={{ ...running('2026-10-22T01:25:28.000Z'), timeline: undefined }} now={now} notes={noted} albumHref={null} /></MemoryRouter>);
+  expect(screen.queryByRole('button')).not.toBeInTheDocument();
+  expect(screen.getByText(noted[1])).toBeVisible();
+});
+
+test('in the status line Details follows the status, which it leaves mounted; the choice holds through an active run\'s polls, and a run that completes starts hidden again', () => {
   const element = (view: ReviewLookupView) => <MemoryRouter><div data-testid="row"><p><span role="status">Synthetic status</span></p>
     <LookupProgress lookup={view} now={Date.parse('2026-10-22T01:25:30.000Z')} albumHref={null} /></div></MemoryRouter>;
   const { rerender } = render(element(running('2026-10-22T01:25:28.000Z')));

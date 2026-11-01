@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useId, useState } from 'react';
 import { useAdminText } from './AdminAccess';
 import styles from './adminStyles';
 
@@ -15,10 +15,9 @@ const link = (text: string) => /:\/\/|^www\./i.test(text);
  * search to the administration layout. While the review's run is queued, running or retrying (`active`), Look up first asks
  * whether to stop that run for the new name, since the server replaces an active run on submission; the box stays usable, as
  * automatic retries can last minutes, and any edit withdraws the question. A run that ends meanwhile leaves the question open, as
- * whether to look up the name now, so the submission is never dropped unseen. A review can fold it under Didn't find it? Look up
- * another name (`fold`), a disclosure that keeps the form mounted and reachable by keyboard: as it mounts, and later only while the
- * form is untouched (its values as mounted, no question open, the focus outside it), so a box the administrator may be using
- * never folds; it unfolds whenever `fold` turns false.
+ * whether to look up the name now, so the submission is never dropped unseen. A review shows it under its row of alternatives,
+ * opened by Look up another name, with a Cancel button beside Look up (`onCancel`) that closes it, left out while the replace
+ * question offers its own Cancel.
  *
  * A review's box also prefills the Artist field with the Album's primary Artists (`defaultArtist`, their byline) unless a submitted
  * run named one. Submitted unchanged it is sent as none only where the server credits those very Artists itself
@@ -26,15 +25,15 @@ const link = (text: string) => /:\/\/|^www\./i.test(text);
  * sent as typed, so a lookup never searches Artists other than the ones shown. Its submit says the lookup is free, and `hint` (a
  * completed run that found nothing to use) suggests trying the name without its subtitle, describing the name field.
  */
-export function LookupBox({ lookup, rootLabel, defaultText, defaultArtist = '', defaultArtistImplicit = false, hint = false, mode, disabled, active, fold, onSubmit }: {
+export function LookupBox({ lookup, rootLabel, defaultText, defaultArtist = '', defaultArtistImplicit = false, hint = false, mode, disabled, active, onSubmit, onCancel }: {
   lookup: { input: { trigger: string; submitted: { kind: 'album' | 'song'; text: string; artist?: string } | null } } | null; rootLabel: string;
   defaultText?: string; defaultArtist?: string;
   /** Whether the server searches `defaultArtist`'s Artists when no Artist name is sent, so an unchanged prefill is sent as none. */
   defaultArtistImplicit?: boolean;
   hint?: boolean; mode: 'import' | 'review'; disabled: boolean; active?: boolean;
-  /** Fold the box under Didn't find it? Look up another name: as it mounts, and later only while the form is untouched. */
-  fold?: boolean;
   onSubmit: (kind: 'album' | 'song', text: string, artist: string | null) => void;
+  /** Closes the box: a Cancel button beside Look up. */
+  onCancel?: () => void;
 }) {
   const t = useAdminText(), id = useId();
   const [kind, setKind] = useState<'album' | 'song'>(lookup?.input.submitted?.kind ?? 'album');
@@ -43,16 +42,7 @@ export function LookupBox({ lookup, rootLabel, defaultText, defaultArtist = '', 
   const [refused, setRefused] = useState({ name: false, artist: false });
   // The submission waiting for the administrator to confirm that it replaces the active run.
   const [confirming, setConfirming] = useState<Parameters<typeof onSubmit> | null>(null);
-  const [folded, setFolded] = useState(Boolean(fold));
-  const form = useRef<HTMLFormElement>(null), mounted = useRef({ kind, text, artist });
-  useEffect(() => {
-    const untouched = kind === mounted.current.kind && text === mounted.current.text && artist === mounted.current.artist && !confirming
-      && !form.current?.contains(document.activeElement);
-    if (!fold) setFolded(false);
-    else if (untouched) setFolded(true);
-    // Only a change of `fold` decides; editing the form never folds it.
-  }, [fold]);
-  const box = <form ref={form} className={styles.editor} noValidate onSubmit={event => {
+  return <form className={styles.editor} noValidate onSubmit={event => {
     event.preventDefault();
     // The prefilled primary Artists, where they are the server's own default, are sent as none.
     const name = text.trim(), typed = artist.trim(), credit = defaultArtistImplicit && typed === defaultArtist.trim() ? '' : typed, next = { name: link(name), artist: link(typed) };
@@ -69,11 +59,12 @@ export function LookupBox({ lookup, rootLabel, defaultText, defaultArtist = '', 
     </div>
     {hint && <p id={`${id}-hint`} className={styles.muted}>{t('catalog_review.lookup_subtitle_hint')}</p>}
     {(refused.name || refused.artist) && <p id={`${id}-refused`} role="alert">{t('lookup.link_refused')}</p>}
-    <div className={styles.actions}><button className={styles.button} type="submit" disabled={!text.trim()}>{t(mode === 'review' ? 'catalog_review.lookup_submit_free' : 'lookup.submit')}</button></div>
+    <div className={styles.actions}><button className={styles.button} type="submit" disabled={!text.trim()}>{t(mode === 'review' ? 'catalog_review.lookup_submit_free' : 'lookup.submit')}</button>
+      {/* While the replace question is open, its own Cancel answers it; this one closes the box. */}
+      {onCancel && !confirming && <button className={styles.button} type="button" onClick={onCancel}>{t('common.cancel')}</button>}</div>
     {confirming && <><p role="alert">{t(active ? 'catalog_review.lookup_replace_copy' : 'catalog_review.lookup_replace_ended')}</p><div className={styles.actions}>
       <button className={styles.button} type="button" onClick={() => { setConfirming(null); onSubmit(...confirming); }}>{t(active ? 'catalog_review.lookup_replace_confirm' : 'catalog_review.lookup_replace_now')}</button>
       <button className={styles.button} type="button" onClick={() => setConfirming(null)}>{t('common.cancel')}</button></div></>}
     <p id={`${id}-artist-hint`} className={styles.muted}>{t(`lookup.artist_hint_${mode}`)}</p>
   </fieldset></form>;
-  return folded ? <details className={styles.details}><summary>{t('catalog_review.lookup_try_another')}</summary>{box}</details> : box;
 }

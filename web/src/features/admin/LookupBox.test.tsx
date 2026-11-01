@@ -12,7 +12,7 @@
  *   - a review's box prefills its primary Artists, sends them unchanged as none where the server searches them itself, says its lookup is free and, when a run found nothing, suggests dropping a subtitle
  *   - while a run is active, Look up asks first: confirming sends the name, Cancel or any edit withdraws the question, and the box stays usable
  *   - a run that ends while the question is open leaves it open as whether to look up now, so the submission is never dropped unseen
- *   - a folded box sits under Didn't find it? Look up another name; a later fold folds it only while untouched, it unfolds whenever the fold ends, and the import box never folds
+ *   - a review's box offers Cancel beside Look up, which closes it without sending anything; the import box has none
  * @end-catalog */
 
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
@@ -214,41 +214,15 @@ test('a run that ends while the question is open leaves it open as whether to lo
   expect(within(box).queryByRole('alert')).not.toBeInTheDocument();
 });
 
-test('a folded box sits under Didn\'t find it? Look up another name; a later fold folds it only while untouched, it unfolds whenever the fold ends, and the import box never folds', () => {
-  const onSubmit = vi.fn(), lookup = view({ trigger: 'submitted', submitted: { kind: 'album', text: 'Synthetic Typed Name' } });
-  const element = (fold: boolean) => <LookupBox lookup={lookup} rootLabel="" mode="review" disabled={false} fold={fold} onSubmit={onSubmit} />;
-  const { container, rerender } = render(element(true));
-  const details = container.querySelector('details')!;
-  expect([details.open, within(details).getByText("Didn't find it? Look up another name").tagName]).toEqual([false, 'SUMMARY']);
-  // The form stays mounted inside the fold, prefilled, and submits once opened.
-  const box = within(details).getByRole('group', { name: 'Look up by name' });
-  expect(within(box).getByRole('textbox', { name: 'Name' })).toHaveValue('Synthetic Typed Name');
-  details.open = true;
-  fireEvent.click(within(box).getByRole('button', { name: 'Look up metadata (free)' }));
-  expect(onSubmit).toHaveBeenCalledWith('album', 'Synthetic Typed Name', null);
-  // When the status points at the box again, it unfolds, keeping what it holds.
-  rerender(element(false));
-  expect(container.querySelector('details')).toBeNull();
-  expect(screen.getByRole('textbox', { name: 'Name' })).toHaveValue('Synthetic Typed Name');
-  cleanup();
-  // A box open while the run ran folds once the run completes, as long as it is untouched: its values as mounted, no question
-  // open and the focus outside it.
-  const open = render(element(false));
-  open.rerender(element(true));
-  expect(open.container.querySelector('details')).not.toBeNull();
-  cleanup();
-  // A box in use never folds: the focus in it, an edited value, or a question open.
-  const uses: [(box: HTMLElement) => void, boolean][] = [[box => within(box).getByRole('textbox', { name: 'Name' }).focus(), false],
-    [box => fireEvent.change(within(box).getByRole('textbox', { name: 'Artist (optional)' }), { target: { value: 'Synthetic Typed Artist' } }), false],
-    [box => fireEvent.click(within(box).getByRole('radio', { name: 'Song name' })), false], [box => fireEvent.click(within(box).getByRole('button', { name: 'Look up metadata (free)' })), true]];
-  for (const [use, active] of uses) {
-    const used = render(<LookupBox lookup={lookup} rootLabel="" mode="review" disabled={false} active={active} fold={false} onSubmit={onSubmit} />);
-    use(screen.getByRole('group', { name: 'Look up by name' }));
-    used.rerender(<LookupBox lookup={lookup} rootLabel="" mode="review" disabled={false} active={active} fold onSubmit={onSubmit} />);
-    expect(used.container.querySelector('details')).toBeNull();
-    cleanup();
-  }
+test('a review\'s box offers Cancel beside Look up, which closes it without sending anything; the import box has none', () => {
+  const onSubmit = vi.fn(), onCancel = vi.fn(), lookup = view({ trigger: 'submitted', submitted: { kind: 'album', text: 'Synthetic Typed Name' } });
+  render(<LookupBox lookup={lookup} rootLabel="" mode="review" disabled={false} onSubmit={onSubmit} onCancel={onCancel} />);
+  const box = screen.getByRole('group', { name: 'Look up by name' }), actions = within(box).getByRole('button', { name: 'Look up metadata (free)' }).parentElement!;
+  expect(within(actions).getAllByRole('button').map(button => button.textContent)).toEqual(['Look up metadata (free)', 'Cancel']);
+  fireEvent.click(within(actions).getByRole('button', { name: 'Cancel' }));
+  expect([onCancel.mock.calls.length, onSubmit.mock.calls.length]).toEqual([1, 0]);
+  expect(document.querySelector('details')).toBeNull();
   cleanup();
   render(<LookupBox lookup={lookup} rootLabel="Synthetic Folder" mode="import" disabled={false} onSubmit={onSubmit} />);
-  expect(document.querySelector('details')).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Cancel' })).not.toBeInTheDocument();
 });

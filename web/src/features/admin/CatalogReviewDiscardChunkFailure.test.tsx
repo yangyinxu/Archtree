@@ -12,7 +12,7 @@ import { albumId, catalogReview, reviewId, reviewJson, session, viewer } from '.
  * completion action is left out, while the review page (with the summary's reload request) and the queue stay usable. All names
  * and identifiers are synthetic.
  */
-vi.mock('./CatalogReviewSummary', () => { throw new TypeError('Failed to fetch dynamically imported module'); });
+vi.mock('./CatalogReviewStatus', () => { throw new TypeError('Failed to fetch dynamically imported module'); });
 const discardChunk = vi.hoisted(() => ({ attempts: 0 }));
 vi.mock('./CatalogReviewDiscard', () => { discardChunk.attempts += 1; throw new TypeError('Failed to fetch dynamically imported module'); });
 
@@ -37,7 +37,7 @@ async function settle(before: number) {
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 600)); });
 }
 
-test('a review page whose summary and discard chunks cannot load asks for a reload, and manual editing, its save and Luna AI stay usable', async () => {
+test('a review page whose status line and discard chunks cannot load asks for a reload, and manual editing, its save and Luna AI stay usable', async () => {
   const item = catalogReview(); item.analysis = { ...item.analysis, state: 'idle', generation: 0, operationId: null, completedChunks: 0, totalChunks: 0, attemptsUsed: 0 }; item.suggestions = [];
   const writes: string[] = [];
   vi.stubGlobal('fetch', vi.fn(async (path: string, init?: RequestInit) => {

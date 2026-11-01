@@ -13,26 +13,26 @@ type Text = NonNullable<Step['texts']>[number];
 const STAGES: readonly string[] = ['details', 'itunes', 'bridge', 'aliases'];
 
 /**
- * The steps of an existing-Album review's lookup run (its own lazy chunk, review only; when it cannot load, the summary renders
- * nothing in its place, or asks for a reload where it would carry the Album link). While a run is queued, running or retrying: its
- * steps in order with what each searched, their states and counts (each stage naming what it counts, the bridge also the titles
- * it found), and while a running run has shown no new step for more than five seconds of this page's clock (`now`, the summary's
- * last read), that it waits for MusicBrainz (iTunes in the iTunes phase). After a run that completed with no issue: the names it
- * searched, then its record (time taken, the MusicBrainz name searches and iTunes searches sent, and
- * releases found); any other ended run, also one that completed after MusicBrainz's retries ran out, shows its steps the same way
- * without the names. A search the run may not have sent reads as such and is never named or counted. An iTunes step that left
- * results out of the comparison, and a bridge step naming the titles iTunes returned, add a line saying so. With `albumHref` (a run
- * that ended because the Album changed) the link to open the Album and start a new completion comes first, also without a
- * timeline. The list is no live region, as every poll changes it.
+ * The Details log of an existing-Album review's lookup run (its own lazy chunk, review only; when it cannot load, the status line
+ * renders nothing in its place, or asks for a reload where it would carry the Album link). While a run is queued, running or
+ * retrying: the status line's `notes` (the time it has waited or run, that it keeps running after the page is left), then its steps
+ * in order with what each searched, their states and counts (each stage naming what it counts, the bridge also the titles it
+ * found), and while a running run has shown no new step for more than five seconds of this page's clock (`now`, the summary's last
+ * read), that it waits for MusicBrainz (iTunes in the iTunes phase). After a run: its record (time taken, the MusicBrainz name
+ * searches and iTunes searches sent, and releases examined), then, after a run that completed with no issue, the names it
+ * searched, then its steps; any other ended run, also one that completed after MusicBrainz's retries ran out, shows its steps
+ * the same way without the names. A search the run may not have sent reads as such and is never named or counted. An iTunes step
+ * that left results out of the comparison, and a bridge step naming the titles iTunes returned, add a line saying so. With
+ * `albumHref` (a run that ended because the Album changed) the link to open the Album and start a new completion stays in view,
+ * also without a timeline. The log is no live region, as every poll changes it.
  *
- * It renders inside the summary's status row (`styles.statusRow`, which puts each block on its own line), which the summary keeps
- * mounted with its own status line first (the summary's live region, so it never remounts as a run appears or this chunk loads):
- * where the run has a timeline, a Details / Hide details button beside that line, then the rest as a block on the row's full width. The button shows or hides the steps (with the wait
- * note) or, after a run, its record and steps. They start shown while a run is active or after one that failed (unavailable or stopped) and hidden after
- * one that completed or was superseded; the administrator's choice holds until the run or that state changes. Hidden steps stay
- * mounted, so the wait keeps counting from when this page first saw the last step. The names searched and the Album link stay in view.
+ * It renders inside the status line (`styles.statusLine`, which puts each block after the headline on its own line): where the
+ * run has a timeline, a Details / Hide details text button on the headline's right, then the log as a block on the line's full
+ * width. The log starts shown while a run is active or after one that failed (unavailable or stopped) and hidden after one that
+ * completed or was superseded; the administrator's choice holds until the run or that state changes. A hidden log stays mounted,
+ * so the wait keeps counting from when this page first saw the last step.
  */
-export function LookupProgress({ lookup, now, albumHref }: { lookup: ReviewLookupView; now: number; albumHref: string | null }) {
+export function LookupProgress({ lookup, now, notes = [], albumHref }: { lookup: ReviewLookupView; now: number; notes?: readonly string[]; albumHref: string | null }) {
   const t = useAdminText(), { locale } = useLocalization(), id = useId(), timeline = lookup.timeline;
   // When this page first saw the run's current last step, on its own clock.
   const seen = useRef<{ at: string; since: number } | null>(null);
@@ -42,11 +42,12 @@ export function LookupProgress({ lookup, now, albumHref }: { lookup: ReviewLooku
   // The administrator's Details choice, for this run in this state (an active run's states count as one).
   const shown = `${lookup.run}:${active ? 'active' : lookup.state}`, [choice, setChoice] = useState<{ shown: string; open: boolean } | null>(null);
   const open = choice?.shown === shown ? choice.open : active || lookup.state === 'unavailable' || lookup.state === 'stopped';
-  const button = timeline && <button className={styles.button} type="button" style={{ whiteSpace: 'nowrap' }} aria-expanded={open} aria-controls={`${id}-log`}
+  const button = timeline && <button className={styles.textButton} type="button" style={{ whiteSpace: 'nowrap' }} aria-expanded={open} aria-controls={`${id}-log`}
     onClick={() => setChoice({ shown, open: !open })}>{t(open ? 'catalog_review.lookup_log_hide' : 'catalog_review.lookup_log_show')}</button>;
   // What follows the status and its button is a block, which the status row lays out on its full width.
   const below = (body: ReactNode) => <div>{body}</div>;
-  if (!timeline) return link ? below(link) : null;
+  const noted = notes.map(note => <p key={note} className={styles.meta}>{note}</p>);
+  if (!timeline) return link || notes.length ? below(<>{link}{noted}</>) : null;
   const search = timeline.trackTitleSearch;
   const quote = (entry: Text) => t(entry.artist ? 'catalog_review.lookup_step_quoted_artist' : 'catalog_review.lookup_step_quoted', { text: entry.text, artist: entry.artist ?? '' });
   const titles = (step: Step) => new Intl.ListFormat(locale, { type: 'conjunction' }).format((step.texts ?? []).map(quote));
@@ -70,15 +71,15 @@ export function LookupProgress({ lookup, now, albumHref }: { lookup: ReviewLooku
   const rows = <ol aria-label={t('catalog_review.lookup_steps')} className={styles.muted} style={{ listStyle: 'none', paddingLeft: 0 }}>{timeline.steps.map((step, index) =>
     <li key={`${step.kind}${index}`}>{t(`catalog_review.lookup_step_${mark(step)}`, { step: step.total ? counted(step, step.total) : label(step) })}
       {note(step) && <span style={{ display: 'block', paddingInlineStart: '1.2em' }}>{note(step)}</span>}</li>)}</ol>;
-  const log = (body: ReactNode) => <div id={`${id}-log`} hidden={!open}>{body}</div>;
+  const log = (body: ReactNode) => <div id={`${id}-log`} className={styles.lookupLog} hidden={!open}>{body}</div>;
   if (active) {
     const wait = gateWaitSeconds(lookup, now, seen.current!.since);
-    return <>{button}{below(log(<>{wait !== null && <p className={styles.muted}>{t('catalog_review.lookup_gate_wait', { source: lookup.progress?.phase === 'itunes' ? 'iTunes' : 'MusicBrainz', seconds: wait })}</p>}{rows}</>))}</>;
+    return <>{button}{below(log(<>{noted}{wait !== null && <p className={styles.muted}>{t('catalog_review.lookup_gate_wait', { source: lookup.progress?.phase === 'itunes' ? 'iTunes' : 'MusicBrainz', seconds: wait })}</p>}{rows}</>))}</>;
   }
   // A run that completed after MusicBrainz's retries ran out (its issue says so) may not have sent the searches it lists.
   const searched = lookup.state === 'complete' && lookup.issue === null ? searchedTexts(timeline) : [];
   return <>{button}{below(<>{link}
-    {searched.length > 0 && <p>{t('catalog_review.lookup_searched', { searches: searched.map((entry, index) => index
-      ? t(entry.artist ? 'catalog_review.lookup_searched_then' : 'catalog_review.lookup_searched_then_alone', { item: quote(entry) }) : quote(entry)).join('') })}</p>}
-    {log(<><p className={styles.details}>{t('catalog_review.lookup_log', lookupRecord(lookup)!)}</p>{rows}</>)}</>)}</>;
+    {log(<>{noted}<p className={styles.details}>{t('catalog_review.lookup_log', lookupRecord(lookup)!)}</p>
+      {searched.length > 0 && <p className={styles.meta}>{t('catalog_review.lookup_searched', { searches: searched.map((entry, index) => index
+        ? t(entry.artist ? 'catalog_review.lookup_searched_then' : 'catalog_review.lookup_searched_then_alone', { item: quote(entry) }) : quote(entry)).join('') })}</p>}{rows}</>)}</>)}</>;
 }

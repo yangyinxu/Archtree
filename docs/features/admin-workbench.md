@@ -1377,36 +1377,38 @@ overwrites another value saved meanwhile; it stays available while lookup or
 Luna AI runs. **Update original Album (N)**, the action bar's primary button,
 first saves the same way, then shows an inline confirmation of the selected
 changes' frozen old/new values (see the action bar below). A review page has no
-tabs and no steps bar. It leads with a header, a compact Album hero with the
-cover beside the title at every width (a small one on a phone), so the status
-row below is in the first screen above the action bar: the Album's current artwork (the
-catalog Album read the Album page uses, `GET /catalog/album/:id`, loaded in its
-own chunk, with the artwork placeholder while that read is pending, fails or
-finds none), the captured Album title as stored (a trailing credit is never
-stripped), the draft's primary Artist names and how many local tracks the review
-captured. One status row follows, a polite status naming the first that applies
-(while the update is being prepared, the action bar says so instead, below):
-metadata lookup and Luna AI both running, Luna AI
-running (either while Luna AI is queued or running), a lookup queued, running or retrying with its progress, a lookup that
-did not finish, no release found, a release used, or the completed lookup's
-result (the review's lookup summary below words each); a quieter line under it,
-while the update waits for lookup or Luna AI, says the administrator can check
-and edit the draft meanwhile and confirm the update afterwards (why the update
-waits is the action bar's alone). All numbers come from the
-lookup view, never a client timer. A details toggle beside the status shows or
-hides the lookup steps and log. The status row opens the review's **Metadata
-lookup** summary (described below: the steps, the name box, the reference
-releases, any conflict notes and the identity rows). The editing section
-follows it: the numbers proposed from titles (see **Numbers proposed from
-titles** below) with the optional title-prefix cleanup, then the update range
-(see below), then any notice that the saved draft changed (a conflict). A row
-of alternatives comes next, labelled "不对？" (**Not right?**): manual
-editing, which opens the draft editor (`CatalogReviewDraftEditor.tsx`, its own
-chunk) in place below the row for the Album title and date and each Track's
-title, Disc Number and Track Number, and **Discard completion**; looking up
-another name stays in the lookup summary, as the name box's own fold. A review
-whose source is not current shows its stale view, and an applied review its
-outcome view, instead (below).
+tabs and no steps bar, and follows the v3 design's order. It leads with a header,
+a compact Album hero with the cover beside the title at every width (a small one
+on a phone) and no header buttons once the review is read (a review that cannot
+be read keeps **Refresh status** there), so the status line and the proposed
+changes below are in the first screen above the action bar: the Album's current
+artwork (the catalog Album read the Album page uses, `GET /catalog/album/:id`,
+loaded in its own chunk, with the artwork placeholder while that read is
+pending, fails or finds none), the captured Album title as stored (a trailing
+credit is never stripped), the draft's primary Artist names and how many local
+tracks the review captured. One status line follows (`CatalogReviewStatus.tsx`,
+its own chunk): an icon, a short headline that is the polite status, one
+sentence naming the next step, and a **Details** text button on the right that
+shows or hides the run's log (see the review's status line below). The editing
+section follows it: **Check the proposed changes**, the numbers proposed from
+titles (see **Numbers proposed from titles** below) with the optional
+title-prefix cleanup after the rows, then the update range (see below), then the
+review's lookup details (`CatalogReviewLookupDetails.tsx`, its own chunk, the
+**Metadata lookup** region: how many answers and records are still needed, the
+identity rows, the results, the free retry and the collapsed **Reference
+releases**), then any notice that the saved draft changed (a conflict). A row of
+alternatives comes next, labelled "不对？" (**Not right?**): **Look up another
+name** while lookup is available, which opens the name box
+(`CatalogReviewLookupAnother.tsx`, its own chunk) below the row and opens it by
+itself where the status line makes it the next step (no match, no release,
+nothing to search, a lookup not started, a run superseded, or numbers the titles
+do not propose); the administrator's choice to open or close it holds for that
+run, and a new run (a name submitted, a retry) drops it; manual editing, which
+opens the draft editor (`CatalogReviewDraftEditor.tsx`, its own chunk) in place
+below the row for the Album title and date and each Track's title, Disc Number
+and Track Number; and **Discard completion**. A review whose source is not
+current shows its stale view, and an applied review its outcome view, instead
+(below).
 Once Luna AI was used (queued, running or a
 generation above 0), one muted line gives **Luna AI (paid, optional)** and its
 state: above the Luna AI controls on an unapplied review, under the header on
@@ -1418,28 +1420,33 @@ outcome, which keeps Luna AI from starting, is said, muted. On an unapplied
 review the Luna AI controls follow the row of alternatives in a block of their
 own, never a fold, so Luna AI stays visible and secondary; Luna AI suggestions,
 while there are any, follow in their own section labelled Luna AI. The status
-row, the reference releases, the name box and the identity rows form the
-review's **Metadata lookup** summary, loaded as its own chunk (a chunk that
-cannot load, the summary's or one it loads, asks for a reload in its place,
-leaving the proposed numbers, manual editing and the action bar usable): the
-lookup status, refined for a review (see the review's lookup summary below),
-with the free **Retry lookup** (or, for a run that ended because the Album
-changed, **Open the Album to start a new completion**) as the summary's own
-next step, never the page's primary button, or while a run is queued or running
-its progress line; right after the status, while a run is active, that the
-original Album can be updated once metadata lookup finishes, how many lookup answers are still needed and how many records the
-identity rows still need; the run's steps, open while a run is queued, running
-or retrying and, once it ended, folded under its record after a line naming
-what a completed run searched; the name box prefilled with the last submitted
-name and Artist name or else the
-saved Album title and the draft's primary Artist names (its **Artist
-(optional)** hint says that an empty field uses the Album's primary Artists),
-which asks before it replaces a queued, running or retrying run, folded behind
-its look-up-another-name control (**Didn't find it? Look up another name**) after a completed run
-unless the status makes it the next step (see below), and which, after a run
-that found no release, hints that a shorter name may help ("可尝试去掉副标题");
-the candidate chooser, shown as the reference releases with how many possible
-releases it lists and folded unless choosing a release is the next step (review
+line, the lookup details and the name box are the review's lookup parts, each
+its own chunk (a chunk that cannot load asks for a reload in its place, leaving
+the proposed numbers, manual editing and the action bar usable; without the
+status line no other name is offered, as its next step is unknown). The lookup
+details hold, in order: how many lookup answers are still needed and how many
+records the identity rows still need; the identity rows; the results (below);
+for a release applied for its Album values only whose tracks still pair in more
+than one way while the titles propose the numbers, a line saying why its tracks
+are not applied; the free **Retry lookup** (a plain button, never the page's
+primary, which is the action bar's update), not for a run that ended because the
+Album changed, whose status line links **Open the Album to start a new
+completion** instead; and the candidate chooser. The name box is prefilled with
+the last submitted name and Artist name or else the saved Album title and the
+draft's primary Artist names (its **Artist (optional)** hint says that an empty
+field uses the Album's primary Artists), offers **Cancel** beside its free
+submit, which closes it and returns the focus to **Look up another name**, asks
+before it replaces a queued, running or retrying run (**Look up another name**
+stays usable while a run is active, as automatic retries can last minutes), and,
+after a run that found no release, hints that a shorter name may help
+("可尝试去掉副标题");
+the candidate chooser, shown as **Reference releases · N possible editions**, N
+being the possible releases the status line counts too (the matching groups,
+else the release groups the tracks fit: the possible matches, else the other
+fits; never the records examined, which only the log counts), collapsed unless
+choosing a release is the next step (a tie, an offered release, a release to use
+again, or a release the tracks pair with in exactly one way), and folded again
+once that no longer holds (review
 copy about the Album's tracks; while the
 run has no matching group, possible matches first and the other releases in two
 folded sections; per candidate one short reason, the editions a release card
@@ -1487,18 +1494,18 @@ record's shows only beside it, so there is none when neither the lookup nor the
 captured Album supplied one, as with an iTunes-only result for Artists without
 MusicBrainz IDs; and **Lookup values applied or answered**, folded, each once.
 Once the release applied to the draft leaves nothing open (no active run, free
-retry, refined status, lookup answer or identity row that needs a record, and no
-release applied for its Album values only whose tracks still pair in more than
-one way while the titles give their Disc and Track Numbers, so a line under the
-status says that the tracks do not pair with the applied release in one way, so
-track values and track Artists are not applied, and that saving the numbers
-proposed from the titles compares again) and is neither an
-iTunes-only result nor an artist mismatch, whose values to check are never
-collapsed (so an iTunes-only result never folds), everything after the name box
-folds under **Lookup results and applied values**, which opens again on request
-and by itself as soon as something opens, but never folds while the pairing panel
-(**Pair tracks by hand**, below) is open; it stays mounted, so unsaved identity
-choices survive it.
+retry or lookup answer, and no release applied for its Album values only whose
+tracks still pair in more than one way while the titles give their Disc and
+Track Numbers, which the line after the results then explains: the tracks do not
+pair with the applied release in one way, so track values and track Artists are
+not applied, and saving the numbers proposed from the titles compares again)
+and is neither an iTunes-only result nor an artist mismatch, whose values to
+check are never collapsed (so an iTunes-only result never folds), the results
+(the bulk answers, conflicts, values to check, Track Artists, the expected
+tracklist and the values applied or answered; never the identity rows or the
+reference releases, which sit outside them) fold under **Lookup results and
+applied values**, which opens again on request and by itself as soon as
+something opens; it stays mounted.
 Lookup controls are disabled while a command runs,
 offline, while the draft has unsaved or conflicting edits (numbers proposed from
 titles and not yet saved are not edits) and while the source
@@ -1745,7 +1752,12 @@ the review runs or waits for its outcome, and while the reads the update rests
 on catch up with the saved review (**Loading…**). It never
 waits for unselected work, nor for a lookup that failed or found nothing. The
 reason shows as text under the bar, which describes the button
-(`aria-disabled`), so it stays reachable by keyboard. Pressing it prepares the
+(`aria-disabled`), so it stays reachable by keyboard. While nothing holds the
+update and no save failed or needs checking, a plain note under the heading
+says what the update does instead: **The original Album changes only after you
+check and confirm.** ("核对确认后才更新原专辑。"), or, once the draft is saved
+with nothing unsaved, **Draft saved; the original Album has not changed. Next,
+check and confirm.**; it is neither live nor the button's description. Pressing it prepares the
 update: it notes the selected items, saves the unsaved values and the selected pending
 proposals, never an unselected one, as one ordinary review save (`PATCH
 /catalog-reviews/:id`, skipped when nothing changed), which re-ranks the stored candidates without a lookup run
@@ -1840,18 +1852,21 @@ Luna AI section, which can keep the current values (rejecting a suggestion) but
 never adopts one or changes a Credit; acting on a hint is a separate catalog
 Credit edit.
 
-A review's lookup summary (`CatalogReviewSummary.tsx`) presents what the server
-decides. Its statuses and next steps are the import summary's
+A review's lookup parts (the status line, `CatalogReviewStatus.tsx`; the lookup
+details, `CatalogReviewLookupDetails.tsx`; the name box,
+`CatalogReviewLookupAnother.tsx`) present what the server decides. Their
+statuses and next steps are the import summary's
 (`lookupNextStep.ts`, shared with `ImportSummary.tsx`, and refined as below), in
 the review's own words where the import's wording names files, tags or the
 import: before a
 review's first run it says lookup has not run, with the name box next, and where
 lookup is not configured (`lookupAvailable` false) it says so and offers neither
-a retry nor the name box. It reads `GET /catalog-reviews/:id/lookup` for each
+a retry nor the name box (nor **Look up another name**). The status line reads
+`GET /catalog-reviews/:id/lookup`, which the details and the name box share, for each
 review revision and, while online, every 3 seconds while a lookup is queued or
 running or waits on a busy source and every 10 seconds while it waits out an
 outage, and the identity rows (`GET /catalog-reviews/:id/candidates`) for each
-revision and `valueRevision`. Its name box, candidate chooser and identity rows
+revision and `valueRevision`. The name box, candidate chooser and identity rows
 load as their own chunks, the first two shared with the import page, and the
 chooser loads its pairing panel (`CandidatePairing.tsx`) as another only when it
 is opened. The name box sends `POST /catalog-reviews/:id/lookup`, with `artist`
@@ -1877,44 +1892,45 @@ no candidate from another entry and every save leaves it out. Each lookup
 refusal has its own message, as on the import page, and reads the summary and
 its identity rows again.
 
-Where the shared next step is no match (`lookup.no_match`), or no match with the
-iTunes fallback unavailable (`lookup.itunes_unavailable`, which then adds that a
-matching release may be missing from the list), the review refines it in
-`reviewLookupStatus.ts`. The review summary imports it, and so does the chooser
-shared with the import page, which loads it with its own chunk but never calls
-it there, so `lookupNextStep.ts` and the import page's initial chunks stay
-unchanged. It takes the first cause that applies. An Album without members says
-that its tracks cannot confirm a release and how many releases have a matching
-name, which choosing brings in with every row without a file, and, when the run
-named no Artist (none was submitted and the Album has no primary Artist entry),
-that adding one narrows the results. Otherwise it looks at the releases the
-tracks fit: the possible matches (below), else the other unverified candidates,
-saying that their titles differ from the name searched. It names the first of
-them and the cause. When one of those releases pairs with the members in exactly
-one way (by their own numbers, the positions their titles or original filenames
-start with, or durations within half a second), nothing asks for numbers: the
-step is using that release, which a member without a duration, or a paired
-release track without one, left unconfirmed. Otherwise it is a member without a
-duration, where saving numbers alone cannot make a release match, so the step is
-entering the Disc and Track Numbers, saving, then choosing a release, which
-brings in its expected tracklist and track details through the single pairing
-the numbers make; or members that pair with it in more than one way, every
-duration known, where entering the numbers and saving compares again for free.
-When no release the tracks fit pairs with them in exactly one way and the titles
+The review's status line (`reviewStatusLine.ts`, pure, loaded only with the
+status line's chunk) gives one headline and one sentence, the first that
+applies. Luna AI running beside an active lookup reads **Free lookup and Luna AI
+are both running**, saying to wait for the lookup and to wait for or stop Luna
+AI; Luna AI alone (queued or running) reads **Luna AI is analyzing**, saying the
+draft can be checked meanwhile, and keeps whether the name box is next. A queued
+or running run names its phase and counts (below), saying the draft can be
+checked and edited meanwhile. A run that did not finish (retrying, MusicBrainz's
+retries run out, stopped, incomplete, unavailable or superseded) reads
+**Metadata lookup has not finished**, with why (below) or that the free retry,
+or the checked numbers, can be next. Without a run it reads **Metadata lookup
+has not run**, with the name box next, or, where lookup is not configured, the
+shared not-configured sentence. A completed run reads **Lookup complete · N
+possible releases**, N as on the reference releases. Where the shared next step
+is no match (`lookup.no_match`, or `lookup.itunes_unavailable` with the iTunes
+fallback unavailable), the sentence says why no edition is confirmed, the first
+cause that applies, looking at the releases the tracks fit (the possible
+matches, below, else the other unverified candidates): an Album without tracks,
+which no release can confirm by its tracks (the name box next); members without
+a duration, or members that pair in more than one way with every duration
+known, where the next step is updating the numbers the titles propose when they
 give every member a Disc and Track Number (see **Numbers proposed from titles**
-below), the page has already proposed them, selected, and the cause says that
-updating with the checked numbers, which saves them first, compares again (owner
-rules, next-step bullet). Where the titles give Track Numbers alone, the
-proposal is unselected, and the cause, like the one for titles without
-positions, says that another name can be looked up, the tracks paired by hand
-with a possible match where one is listed (see **Pair tracks by hand** below),
-or the numbers checked or entered by hand. Anything else is a real no match,
-which says so without naming a paid step; **Use Luna AI (paid)** stays a
-secondary button after the alternatives. A release this run applied for its
-Album values only (`applied.pairs` null) whose pairing a saved number has since
-made single replaces the applied status with one saying that using it again
-brings in its tracklist and track details, and the track Artists section says
-the same in place of its no-pairing line.
+below; owner rules, next-step bullet), and otherwise another name or manual
+editing (the name box next; pairing by hand stays on the possible match's card,
+see **Pair tracks by hand** below); or a release the tracks pair with in exactly
+one way (by their own numbers, the positions their titles or original filenames
+start with, or durations within half a second) that an unknown duration left
+unused, where using it under Reference releases is next and nothing asks for
+numbers. A tie, an offered release and a run that applied none keep their own
+review sentence. Anything else that found nothing to confirm (a real no match,
+no release, nothing to search) reads **No release found to confirm**, with
+another name or the checked numbers next, and names no paid step; **Use Luna AI
+(paid)** stays a secondary button after the alternatives. An applied release
+names itself (the shared applied status) and, where a saved number has since
+made the pairing of a release applied for its Album values only
+(`applied.pairs` null) single, says that using it again under Reference releases
+brings in its tracklist, which the track Artists section says in place of its
+no-pairing line; else, while members have no duration, how many tracks'
+durations are still unverified.
 
 A possible match is an unverified candidate whose normalized title equals the
 normalized Album name the run searched (the submitted Album name, else the saved
@@ -1936,19 +1952,21 @@ MusicBrainz, reading Artist and label aliases), with its done and total counts
 when the total is not zero. Only that text is the polite status. The time waited
 or run (m:ss from `startedAt` to the later of the summary's last read and
 `updatedAt`, so a client clock behind the server's still counts, never below
-0:00) follows it outside the status, so a poll does not announce it. A view
+0:00) leads the status line's Details log, open while a run is active, outside
+the polite status, so a poll does not announce it. A view
 without `progress` keeps the shared active status. A retrying run says whether
 its source (`timeline.retry.source`: MusicBrainz, or iTunes while the fallback
 retries) had too many requests (`sourceBusy`) or is unavailable
 (`sourceUnavailable`), when it retries (`at`, as a time in the interface
-language) and which automatic retry that is (`attempt` of `limit`), followed by
-**Retry lookup**; a view without `timeline.retry` keeps the shared retrying
+language) and which automatic retry that is (`attempt` of `limit`), with
+**Retry lookup** in the lookup details; a view without `timeline.retry` keeps the shared retrying
 status. Once MusicBrainz's automatic retries ran out with nothing matched, the
 status says whether there were too many requests or it stayed unavailable, with
 **Retry lookup**, and names no paid step.
-Queued, running and retrying runs add **Lookup keeps running if you leave this
-page.** on the same line, after the status; a dot parts the time from the
-status, directly after a full-width closing bracket, and from that note. While a
+Queued and running runs add **Lookup keeps running if you leave this page.** to
+the log after the time. The log also holds, after a run, its record (the time
+taken, the searches sent and the releases examined), the names it searched and
+its steps; it starts hidden after a completed or superseded run. While a
 run is queued, running or retrying, submitting the name box first asks (**This
 stops the current lookup and starts a new one with the name above.**, with
 **Stop and look up again** and **Cancel**), since the server replaces an active
@@ -1962,8 +1980,8 @@ longer has administrator access (`permissionLost`), or it ran past its time
 limit (`grantExpired`). A run that ended because the review's source was no
 longer current (`superseded`) offers no retry, which the server refuses while
 the source is not current (owner rules, next-step bullet), and its brief in the
-status row, the workbench card and the Album page offers none either; the name box
-stays open to look up again. When the Album changed, **Open the Album to start a
+status line, the workbench card and the Album page offers none either; the name
+box opens by itself to look up again. When the Album changed, **Open the Album to start a
 new completion** links to the Album page in the retry's place, and when the
 Album or a track is no longer ready, the source notice above the summary
 explains it.
@@ -2913,7 +2931,7 @@ administrator Tracks read shows it as `expected`, matched to the members, and
 `PATCH /catalog/album/:id` clears it. An existing-Album review admitted to
 metadata lookup captures a copy of its rows (see the catalog review routes),
 which lookup may fill, or propose another as a conflict, in the review's
-private draft (its lookup summary shows them with their missing-file rows);
+private draft (its lookup details show them with their missing-file rows);
 only applying that review, through its **Update original Album** confirmation
 (`POST /catalog-reviews/:id/apply`), sets or replaces it.
 `GET /imports/:id/lookup` also
@@ -3751,7 +3769,7 @@ to the catalog (see the catalog review routes
 above and Existing-Album reviews under Lookup runs and Value application).
 [Routes](#lookup-routes) and the `metadataLookup` capability expose them; the
 import's Review and publish summary (see the import page above) and an
-existing-Album review's Metadata lookup summary are their Web controls.
+existing-Album review's status line, lookup details and name box are their Web controls.
 MusicBrainz is the primary source; only when it returns no matching candidate
 is the iTunes
 Search API queried and the names it shows searched again in MusicBrainz (see

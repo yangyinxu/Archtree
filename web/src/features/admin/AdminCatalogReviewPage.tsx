@@ -6,11 +6,11 @@
  *   Functions: unsaved, hint, SummaryUnavailable, ReviewHeading, unavailable, discardedError, ReviewProject
  *   Constants: editable, barOutcome, ImportReview, CatalogReviewHints, CatalogReviewDiscard,
  *              CatalogReviewHeader, CatalogReviewProposalTable, CatalogReviewRange, CatalogReviewManualEdit,
- *              CatalogReviewSummary, CatalogReviewLuna, CatalogReviewActionBar, CatalogReviewApplied,
- *              CatalogReviewStale
+ *              CatalogReviewStatus, CatalogReviewLookupDetails, CatalogReviewLookupAnother, CatalogReviewLuna,
+ *              CatalogReviewActionBar, CatalogReviewApplied, CatalogReviewStale
  * @end-catalog */
 
-import { lazy, Suspense, useEffect, useRef, useState, type ComponentProps, type ComponentType, type ReactNode } from 'react';
+import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState, type ComponentProps, type ComponentType, type ReactNode } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useParams } from 'react-router';
 import { ApiError } from '../../api/client';
@@ -29,8 +29,10 @@ import type { CatalogReviewProposalTable as Proposal } from './CatalogReviewProp
 import type { CatalogReviewRange as Range } from './CatalogReviewRange';
 import type { CatalogReviewDiscard as Discard } from './CatalogReviewDiscard';
 import type { CatalogReviewLuna as Luna } from './CatalogReviewLuna';
+import type { CatalogReviewLookupAnother as Another } from './CatalogReviewLookupAnother';
+import type { CatalogReviewLookupDetails as Details } from './CatalogReviewLookupDetails';
 import type { CatalogReviewStale as Stale } from './CatalogReviewStale';
-import type { CatalogReviewSummary as Summary } from './CatalogReviewSummary';
+import type { CatalogReviewStatus as Status, LookupNext } from './CatalogReviewStatus';
 import { useCatalogReviewCommand } from './useCatalogReviewCommand';
 import { useOnline } from './useAdminOnline';
 import styles from './adminStyles';
@@ -57,7 +59,7 @@ const barOutcome = ['saving', 'saving_only', 'applying', 'save_unknown', 'unknow
 // Luna AI suggestions load only while there are some to review.
 const ImportReview = lazy(() => import('./ImportReview').then(module => ({ default: module.ImportReview })));
 const CatalogReviewHints = lazy(() => import('./CatalogReviewHints').then(module => ({ default: module.CatalogReviewHints })));
-/** A discard action whose chunk cannot load (a deploy replaced it) is left out; the summary's fallback already asks for a reload. */
+/** A discard action whose chunk cannot load (a deploy replaced it) is left out; the status line's fallback already asks for a reload. */
 const CatalogReviewDiscard = lazy<ComponentType<ComponentProps<typeof Discard>>>(() => import('./CatalogReviewDiscard')
   .then(module => ({ default: module.CatalogReviewDiscard }), () => ({ default: () => null })));
 /** Stands in for a part whose chunk cannot load (a deploy replaced it); manual editing stays usable. */
@@ -72,8 +74,8 @@ function ReviewHeading({ item, children }: { item: CatalogReview | null; childre
 const CatalogReviewHeader = lazy<ComponentType<ComponentProps<typeof Header>>>(() => import('./CatalogReviewHeader')
   .then(module => ({ default: module.CatalogReviewHeader }), () => ({ default: ReviewHeading })));
 /**
- * The numbers proposed from titles, the update range, the manual editor, the lookup summary, the Luna AI controls, the action bar
- * and the outcome views, each its own chunk; one that cannot load asks for a reload in its place, and the draft then saves the
+ * The status line, the numbers proposed from titles, the update range, the lookup details, the name box, the manual editor, the
+ * Luna AI controls, the action bar and the outcome views, each its own chunk; one that cannot load asks for a reload in its place, and the draft then saves the
  * edits alone.
  */
 const unavailable = <P extends object>(load: () => Promise<ComponentType<P>>) => lazy<ComponentType<P>>(() => load()
@@ -81,7 +83,9 @@ const unavailable = <P extends object>(load: () => Promise<ComponentType<P>>) =>
 const CatalogReviewProposalTable = unavailable<ComponentProps<typeof Proposal>>(() => import('./CatalogReviewProposalTable').then(module => module.CatalogReviewProposalTable));
 const CatalogReviewRange = unavailable<ComponentProps<typeof Range>>(() => import('./CatalogReviewRange').then(module => module.CatalogReviewRange));
 const CatalogReviewManualEdit = unavailable<ComponentProps<typeof ManualEdit>>(() => import('./CatalogReviewDraftEditor').then(module => module.CatalogReviewManualEdit));
-const CatalogReviewSummary = unavailable<ComponentProps<typeof Summary>>(() => import('./CatalogReviewSummary').then(module => module.CatalogReviewSummary));
+const CatalogReviewStatus = unavailable<ComponentProps<typeof Status>>(() => import('./CatalogReviewStatus').then(module => module.CatalogReviewStatus));
+const CatalogReviewLookupDetails = unavailable<ComponentProps<typeof Details>>(() => import('./CatalogReviewLookupDetails').then(module => module.CatalogReviewLookupDetails));
+const CatalogReviewLookupAnother = unavailable<ComponentProps<typeof Another>>(() => import('./CatalogReviewLookupAnother').then(module => module.CatalogReviewLookupAnother));
 const CatalogReviewLuna = unavailable<ComponentProps<typeof Luna>>(() => import('./CatalogReviewLuna').then(module => module.CatalogReviewLuna));
 const CatalogReviewActionBar = unavailable<ComponentProps<typeof Bar>>(() => import('./CatalogReviewActionBar').then(module => module.CatalogReviewActionBar));
 const CatalogReviewApplied = unavailable<ComponentProps<typeof Applied>>(() => import('./CatalogReviewApplied').then(module => module.CatalogReviewApplied));
@@ -92,10 +96,13 @@ const discardedError = (error: unknown) => error instanceof ApiError && error.ki
 
 /**
  * Existing-catalog suggestions stay private until a separately frozen field selection is approved (docs/features/admin-workbench.md,
- * the review page). The page leads with its header (CatalogReviewHeader.tsx) and the lookup summary; an unapplied review then shows
- * the numbers proposed from titles (CatalogReviewProposalTable.tsx) and the update range (CatalogReviewRange.tsx), which count and
- * save the draft as edited, the row of alternatives (manual editing, which opens the draft editor in place, and Discard completion),
- * the Luna AI controls under Other actions, and, while Luna AI suggestions wait, their own section. The sticky action bar
+ * the review page). The page follows the v3 design's order: its header (CatalogReviewHeader.tsx), then, for an unapplied review,
+ * one status line (CatalogReviewStatus.tsx), the numbers proposed from titles (CatalogReviewProposalTable.tsx) and the update range
+ * (CatalogReviewRange.tsx), which count and save the draft as edited, the lookup details (CatalogReviewLookupDetails.tsx: identity
+ * rows, results, the free retry and the collapsed Reference releases), the row of alternatives (Look up another name, which opens
+ * the name box below it, CatalogReviewLookupAnother.tsx, and opens it by itself where the status line makes it the next step;
+ * manual editing, which opens the draft editor in place; and Discard completion), the Luna AI controls under Other actions, and,
+ * while Luna AI suggestions wait, their own section. The sticky action bar
  * (CatalogReviewActionBar.tsx) ends the page: it saves, prepares and confirms the update and reports its phase, which holds the
  * page's controls outside editing and shows the unknown view in place of the editing section. A review whose source is not current
  * shows the stale view (read-only, Discard completion kept), and an applied one its outcome view. Pending proposals are not unsaved
@@ -114,6 +121,17 @@ function ReviewProject({ id }: { id: string }) {
   const [derived, setDerived] = useState<ReviewEditorDerived | null>(null);
   const [manual, setManual] = useState(false);
   const [bar, setBar] = useState<CatalogReviewBarState>({ phase: 'editing', notice: null });
+  // What the status line says the lookup's next step is, and the administrator's choice to open or close the name box, which holds
+  // for the run it was made in: a new run (a name submitted, a retry) drops it, and the box then opens only where it is the next step.
+  const [next, setNext] = useState<LookupNext | null>(null);
+  const [another, setAnother] = useState<{ run: number; open: boolean } | null>(null);
+  const anotherOpen = Boolean(next?.available) && (another && another.run === next!.run ? another.open : Boolean(next?.box));
+  const anotherToggle = useRef<HTMLButtonElement>(null), wasOpen = useRef(false);
+  // A box that closes with the focus in it (a new run unmounts it) returns the focus to its toggle.
+  useLayoutEffect(() => {
+    if (wasOpen.current && !anotherOpen && (!document.activeElement || document.activeElement === document.body)) anotherToggle.current?.focus({ preventScroll: true });
+    wasOpen.current = anotherOpen;
+  }, [anotherOpen]);
   const mutation = useCatalogReviewCommand(id, { id });
   const query = useQuery({
     queryKey: ['admin-catalog-reviews', access.viewerId, access.epoch, access.generation, id],
@@ -205,9 +223,9 @@ function ReviewProject({ id }: { id: string }) {
   const discard = item && <Suspense fallback={null}><CatalogReviewDiscard id={id} albumId={item.source.album.id} albumTitle={item.source.album.title} draftTitle={item.draft.album.title}
     expectedRevision={item.revision} disabled={pending || active || (preparing && !stale)} reason={active ? 'catalog_review.discard_luna' : null}
     onDiscarded={() => navigate(item.sourceStatus === 'unavailable' ? '/admin/imports?source=catalogReviews' : `/admin/catalog/album/${item.source.album.id}`)} /></Suspense>;
-  return <section className={styles.page}><AdminNav />
+  return <section className={`${styles.page} ${styles.reviewPage}`}><AdminNav />
     <Link className={styles.back} to="/admin/imports?source=catalogReviews">{t('common.back')}</Link>
-    {item ? <Suspense fallback={<ReviewHeading item={item}>{refresh}</ReviewHeading>}><CatalogReviewHeader item={item}>{refresh}</CatalogReviewHeader></Suspense>
+    {item ? <Suspense fallback={<ReviewHeading item={item} />}><CatalogReviewHeader item={item} /></Suspense>
       : <ReviewHeading item={null}>{refresh}</ReviewHeading>}
     {!online && <p role="status" className={styles.error}>{t('common.offline')}</p>}
     {query.isPending && <p role="status">{t('common.loading')}</p>}
@@ -220,7 +238,7 @@ function ReviewProject({ id }: { id: string }) {
       {item.state === 'applied' && <Suspense fallback={<p role="status">{t('common.loading')}</p>}><CatalogReviewApplied item={item} focus={bar.phase === 'success'} /></Suspense>}
       {stale && <><Suspense fallback={null}><CatalogReviewStale item={item} focus={bar.phase === 'stale'} /></Suspense><div className={styles.actions}>{discard}</div></>}
       {editing && <>
-        <Suspense fallback={null}><CatalogReviewSummary item={item} error={mutation.error} disabled={locked || dirty || conflict} onRun={mutate} /></Suspense>
+        <Suspense fallback={null}><CatalogReviewStatus item={item} onNext={setNext} /></Suspense>
         {/* The editing section: typed numbers and cleaned titles are edits; turning the cleanup on chooses its titles, so their
           explicit choices give way to that default. */}
         <Suspense fallback={null}><CatalogReviewProposalTable item={item} base={editor.base} edits={editor.edits} cleaned={editor.cleaned ?? []}
@@ -230,19 +248,27 @@ function ReviewProject({ id }: { id: string }) {
         <Suspense fallback={null}><CatalogReviewRange item={item} base={editor.base} edits={editor.edits} view={shownView} choices={editor.choices}
           disabled={locked || !item.capabilities.apply} onDerived={setDerived}
           onChoose={choices => setEditor(previous => previous && { ...previous, choices: { ...previous.choices, ...choices } })} /></Suspense>
+        <Suspense fallback={null}><CatalogReviewLookupDetails item={item} error={mutation.error} disabled={locked || dirty || conflict} onRun={mutate} /></Suspense>
         {/* A save of the bar refused for the conflict says it there (once, as its alert); only the way out is repeated here. */}
         {conflict && (bar.phase === 'save_failed' && bar.notice === 'conflict'
           ? <div className={styles.actions}><button className={styles.button} type="button" onClick={() => setCurrent(item)}>{t('review.load_saved')}</button></div>
           : <section className={styles.error} role="alert"><p>{t('common.conflict')}</p>
             <button className={styles.button} type="button" onClick={() => setCurrent(item)}>{t('review.load_saved')}</button></section>)}
-        {/* The row of alternatives: manual editing in place, then Discard completion (never primary; unsaved edits do not block it,
-          since its confirmation says they are removed). */}
-        <div role="group" aria-label={t('catalog_review.alternatives')} className={styles.actions}><span className={styles.meta}>{t('catalog_review.alternatives')}</span>
-          <button type="button" className={styles.button} aria-expanded={manual} onClick={() => setManual(!manual)}>{t('catalog_review.manual_edit')}</button>
+        {/* The row of alternatives: Look up another name (while lookup is available; it stays usable while a run is active, as the
+          box asks before replacing it, and closes an open box at any time), manual editing in place, then Discard completion (never
+          primary; unsaved edits do not block it, since its confirmation says they are removed). */}
+        <div role="group" aria-label={t('catalog_review.alternatives')} className={`${styles.actions} ${styles.alternatives}`}><span className={styles.meta}>{t('catalog_review.alternatives')}</span>
+          {next?.available && <button ref={anotherToggle} type="button" className={styles.textButton} aria-expanded={anotherOpen}
+            aria-controls={anotherOpen ? 'catalog-review-another' : undefined} disabled={!anotherOpen && (locked || dirty || conflict)}
+            onClick={() => setAnother({ run: next.run, open: !anotherOpen })}>{t('catalog_review.lookup_try_another')}</button>}
+          <button type="button" className={styles.textButton} aria-expanded={manual} onClick={() => setManual(!manual)}>{t('catalog_review.manual_edit')}</button>
           {discard}</div>
+        {anotherOpen && <div id="catalog-review-another"><Suspense fallback={<p role="status">{t('common.loading')}</p>}>
+          <CatalogReviewLookupAnother item={item} disabled={locked || dirty || conflict} onSubmit={(kind, text, artist) => mutate('lookup', { kind, text, ...(artist ? { artist } : {}) })}
+            onCancel={() => { setAnother({ run: next!.run, open: false }); anotherToggle.current?.focus(); }} /></Suspense></div>}
         {manual && <Suspense fallback={<p role="status">{t('common.loading')}</p>}><CatalogReviewManualEdit base={editor.base} edits={editor.edits} draft={shown}
           source={item.source} filenames={filenames} disabled={locked} manageAlbumHref={originalHref} onEdit={(edits, next) => setEditor({ ...editor, edits, draft: next })} /></Suspense>}
-        {/* Other actions: Luna AI, secondary to the lookup summary and always visible under its own label. */}
+        {/* Other actions: Luna AI, secondary to the lookup and always visible under its own label. */}
         <section aria-labelledby="catalog-review-other">
           <h2 id="catalog-review-other" className={styles.meta} style={{ margin: '1.5rem 0 0' }}>{t('catalog_review.other_actions')}</h2>
           <Suspense fallback={null}><CatalogReviewLuna item={item} active={active} canAnalyze={canAnalyze} busy={pending || !online || preparing}

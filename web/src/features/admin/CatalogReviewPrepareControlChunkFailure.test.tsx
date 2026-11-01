@@ -12,7 +12,8 @@ import { catalogReview, reviewId, reviewJson, session, viewer } from './catalogR
  */
 const controlChunk = vi.hoisted(() => ({ attempts: 0 }));
 vi.mock('./CatalogReviewPrepareControl', () => { controlChunk.attempts += 1; throw new TypeError('Failed to fetch dynamically imported module'); });
-vi.mock('./CatalogReviewSummary', () => ({ CatalogReviewSummary: () => <section aria-label="Metadata lookup">Synthetic lookup summary</section> }));
+vi.mock('./CatalogReviewStatus', () => ({ CatalogReviewStatus: () => <div id="catalog-review-status"><strong role="status">Synthetic status line</strong></div> }));
+vi.mock('./CatalogReviewLookupDetails', () => ({ CatalogReviewLookupDetails: () => <section aria-label="Metadata lookup">Synthetic lookup summary</section> }));
 
 beforeEach(() => {
   adminWorkspace.reset(); adminWorkspace.authorize(captureAccountOperation(viewer), true, true, undefined, { editing: true, visibility: true }); adminWorkspace.select('admin');

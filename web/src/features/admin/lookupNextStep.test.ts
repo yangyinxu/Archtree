@@ -37,9 +37,10 @@ test('the free retry is never offered where this server cannot run lookup', () =
 });
 
 test('a review reads its own copy for messages that name files, tags or the import, camelCase kept for the text hook, and every other key unchanged', () => {
-  expect(['lookup.not_started', 'lookup.no_query', 'lookup.no_match', 'lookup.applied_none', 'lookup.tie', 'lookup.single_choice', 'lookup.superseded'].map(reviewLookupKey)).toEqual([
-    'catalog_review.lookup_not_started', 'catalog_review.lookup_no_query', 'catalog_review.lookup_no_match', 'catalog_review.lookup_applied_none', 'catalog_review.lookup_tie',
-    'catalog_review.lookup_single_choice', 'catalog_review.lookup_superseded']);
+  expect(['lookup.applied_none', 'lookup.tie', 'lookup.single_choice', 'lookup.superseded'].map(reviewLookupKey)).toEqual([
+    'catalog_review.lookup_applied_none', 'catalog_review.lookup_tie', 'catalog_review.lookup_single_choice', 'catalog_review.lookup_superseded']);
+  // The review's status line says these in its own headline and sentence (reviewStatusLine.ts), so they keep the shared key.
+  for (const key of ['lookup.not_started', 'lookup.no_query', 'lookup.no_match']) expect(reviewLookupKey(key)).toBe(key);
   expect(['lookup.status_notMatching', 'lookup.difference_tooManyTracks', 'lookup.difference_tracklistInvalid', 'lookup.difference_pairing', 'lookup.unknown_discs'].map(reviewLookupKey)).toEqual([
     'catalog_review.lookup_status_notMatching', 'catalog_review.lookup_difference_tooManyTracks', 'catalog_review.lookup_difference_tracklistInvalid',
     'catalog_review.lookup_difference_pairing', 'catalog_review.lookup_unknown_discs']);
@@ -58,7 +59,7 @@ test('a summary polls every 3 seconds while a run is active, every 10 while an o
 });
 
 test('every review copy a lookup key maps to is a shipped message in both locales, worded apart from the import\'s', () => {
-  const keys = ['lookup.not_started', 'lookup.no_query', 'lookup.no_match', 'lookup.applied_none', 'lookup.tie', 'lookup.single_choice', 'lookup.superseded', 'lookup.status_matching',
+  const keys = ['lookup.applied_none', 'lookup.tie', 'lookup.single_choice', 'lookup.superseded', 'lookup.status_matching',
     'lookup.status_notMatching', 'lookup.status_unverified', 'lookup.unknown_durations', 'lookup.unknown_discs', 'lookup.partial_comparison', 'lookup.difference_pairing',
     'lookup.difference_tooManyTracks', 'lookup.difference_tracklistInvalid'];
   // As the admin text hook reads a key: under `admin.`, camelCase snake-cased.

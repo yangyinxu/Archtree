@@ -53,7 +53,9 @@ const pageOwned = ['reload', 'discarded'];
  * reads the Update model of the saved review (what the update waits for and applies) and of the draft as edited (its count, its
  * blockers and the selection noted when the update is requested; useReviewApplyModel.ts), runs the prepare state machine
  * (CatalogReviewPrepareControl.tsx) and renders, by its phase, the primary Update original Album (N) with the reason it waits as
- * text that describes it (`aria-disabled`, so it stays reachable), the save-only button, a refused save as an alert, the inline
+ * text that describes it (`aria-disabled`, so it stays reachable) or, while nothing holds it, a plain note that only the
+ * confirmation changes the original Album (or that the draft is saved and confirming is next), the save-only button, a refused
+ * save as an alert, the inline
  * confirmation with its back and confirm buttons, the unknown view, the stale view's link to the latest Album and the applied
  * view's link to the original Album. It reports the phase and notice to the page (`onState`).
  */
@@ -138,7 +140,7 @@ function BarBody({ bar, item, prepare, model, count, compared, shown, saveable, 
   // polite status, which otherwise says a settled outcome (`status`).
   // The secondary and primary controls keep their places in every phase, so the primary button keeps the focus as its label changes.
   let heading = t('catalog_review.bar_heading'), status: ReactNode = null, alert: ReactNode = null, wait: string | null = null, progress = false, second: ReactNode = null,
-    first: ReactNode = null, above: ReactNode = null, said = false;
+    first: ReactNode = null, above: ReactNode = null, said = false, note: string | null = null;
   if (applied) {
     status = t('catalog_review.bar_applied');
     first = <Link className={`${styles.link} ${styles.primary}`} to={`/admin/catalog/album/${item.source.album.id}`}>{t('catalog_review.bar_open_album')}</Link>;
@@ -182,6 +184,9 @@ function BarBody({ bar, item, prepare, model, count, compared, shown, saveable, 
       .filter((text): text is string => Boolean(text)) : [];
     if (details.length) alert = <>{alert}{alert ? ' ' : ''}{details.join(' ')}</>;
     wait = reason;
+    // While nothing holds the update, a plain note says what it does (design v3): only the confirmation changes the original
+    // Album, and, once the draft is saved with nothing unsaved, that confirming is next. Not live, and not the primary's description.
+    note = !failed && wait === null && !alert ? t(saveable ? 'catalog_review.bar_ready_note' : 'catalog_review.bar_saved_note') : null;
     second = (saveable || prepare.saveOnlyFailed) && saveOnly(Boolean(range));
     first = button(failed && !prepare.saveOnlyFailed ? t('catalog_review.bar_retry_prepare') : t('catalog_review.apply_action', { count }), prepare.prepare, wait);
   }
@@ -192,7 +197,8 @@ function BarBody({ bar, item, prepare, model, count, compared, shown, saveable, 
         {progress && status && <p className={styles.meta}>{status}</p>}
         {/* Always mounted, so what it says next is announced: the progress while preparing, saving or querying, else a settled outcome. */}
         <p id={progress && !said ? `${id}-reason` : undefined} role="status" className={styles.meta}>{progress ? wait : status}</p>
-        {wait && !said && !progress && <p id={`${id}-reason`} className={styles.meta}>{wait}</p>}</div>
+        {wait && !said && !progress && <p id={`${id}-reason`} className={styles.meta}>{wait}</p>}
+        {note && <p className={styles.meta}>{note}</p>}</div>
       <div className={styles.barActions}>{second}{first}</div>
     </div></>;
 }
