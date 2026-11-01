@@ -14,6 +14,7 @@ import { defaultImportObjectStorage } from '../administration/import/adminImport
 import { catalogCoverUploadPreflight, uploadAdminCatalogCover } from '../administration/catalog/adminCatalogCoverUpload';
 import { limitMediaConcurrencyFor } from '../middleware/mediaDeliveryMiddleware';
 import { replaceAdminCatalogCover, clearAdminCatalogCover, listAdminCatalogCoverOperations, reconcileAdminCatalogCover, cancelAdminCatalogCover, type AdminCatalogCoverDependencies } from '../administration/catalog/adminCatalogCoverService';
+import { reorderAdminPage } from '../services/content/adminPageOrderService';
 
 /** Media elements cannot send the viewer header; the non-secret viewer is still only a session fence. */
 const requireAdminCatalogViewer: express.RequestHandler = (req, res, next) => {
@@ -62,6 +63,7 @@ export const createAdminCatalogRouter = (dependencies: AdminCatalogCoverDependen
     router.get('/catalog/:kind/:id/artwork', limitMediaConcurrencyFor('artwork'), asyncHandler(adminCatalogArtwork));
     router.get('/catalog/audioTrack/:id/media', limitMediaConcurrencyFor('playback'), asyncHandler(adminCatalogMedia));
     router.get('/pages/:slug', asyncHandler(run((actor, req) => getAdminPage(actor, req.params.slug))));
+    router.post('/pages/:slug/reorder', asyncHandler(run((actor, req) => reorderAdminPage(actor, req.params.slug, req.body))));
     router.patch('/pages/:slug/items/:itemId', asyncHandler(run((actor, req) => editAdminPageItem(actor, req.params.slug, req.params.itemId, req.body))));
     return router;
 };

@@ -4,13 +4,13 @@
  *   Classes: AdminCatalogError
  *   Functions: adminCatalogKind, adminCatalogEditableFields, adminCatalogItemRevision,
  *              withCurrentAdministrator, readAdminCatalogRecord, adminCatalogSnapshot, getAdminCatalogItem,
- *              listAdminCatalog, editAdminCatalogItem, getAdminPage, editAdminPageItem
+ *              listAdminCatalog, editAdminCatalogItem, pageSnapshot, getAdminPage, editAdminPageItem
+ *   Constants: adminCatalogMutation
  * Internal
  *   Types: CatalogReceipt
  *   Functions: hasOwn, fail, id, record, exact, date, text, visibility, revision, hasStoredDiscNumber,
  *              hasStoredMusicBrainzId, storedDiscNumber, storedMusicBrainzId, musicBrainzIdField,
- *              stateForRevision, parseFields, assertHiddenDelivery, receipts, parseMutation, replay, receipt,
- *              pageSnapshot
+ *              stateForRevision, parseFields, assertHiddenDelivery, receipts, parseMutation, replay, receipt
  *   Constants: configs, fields
  * @end-catalog */
 
@@ -228,6 +228,9 @@ const receipt = async (actor: string, body: { operationId: string }, fingerprint
     await receipts().insertOne({ actor, operationId: body.operationId, fingerprint, result, expiresAt: new Date(Date.now() + 7 * 86_400_000) }, { session });
 };
 
+/** Page composition mutations share catalog validation and actor-scoped transaction receipts. */
+export const adminCatalogMutation = { parse: parseMutation, fingerprint: revision, replay, receipt };
+
 /**
  * Partial metadata patches never reassign media, replace memberships, or mutate a reused entity implicitly. An Album's expected
  * tracklist is never a field: a top-level `clearExpectedTracklist: true` removes a stored one at the captured revision.
@@ -297,7 +300,7 @@ export const editAdminCatalogItem = (actor: string, kind: AdminCatalogKind, rawI
 };
 
 /** Resolves bounded display metadata privately so an approval identifies the actual placement. */
-const pageSnapshot = async (page: any, session: ClientSession) => {
+export const pageSnapshot = async (page: any, session: ClientSession) => {
     const sourceItems = Array.isArray(page.items) ? page.items : [];
     if (sourceItems.length > 1000) fail(409, 'ADMIN_PAGE_ITEMS_LIMIT');
     const referenceIds = (carousel: boolean): string[] => [...new Set<string>(sourceItems
