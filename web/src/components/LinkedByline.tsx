@@ -20,8 +20,8 @@ export const LinkedByline = ({ text, credits }: { text: string; credits?: readon
   const parts: ReactNode[] = [];
   let cursor = 0;
   // Match catalogBylineSegments: an omitted Credit must never claim a shown name's prefix.
-  const sorted = [...credits ?? []].sort((left, right) => left.order - right.order).filter(credit => credit.name !== '');
-  const performing = sorted.filter(credit => ['primary', 'featured', 'performer'].includes(credit.role));
+  const sorted = (credits ?? []).filter(credit => credit.name).sort((left, right) => left.order - right.order);
+  const performing = sorted.filter(credit => /^(primary|featured|performer)$/.test(credit.role));
   const organizations = sorted.filter(credit => credit.subjectType === 'organization');
   const shown = performing.length ? performing : organizations.length ? organizations : sorted;
   const seen = new Set<string>();
@@ -32,9 +32,10 @@ export const LinkedByline = ({ text, credits }: { text: string; credits?: readon
     if (at < 0) continue;
     parts.push(text.slice(cursor, at), <Link
       key={parts.length}
-      to={`/${credit.subjectType === 'artist' ? 'artists' : 'organizations'}/${encodeURIComponent(credit.subjectId)}`}
+      to={`/${credit.subjectType}s/${encodeURIComponent(credit.subjectId)}`}
     >{credit.name}</Link>);
     cursor = at + credit.name.length;
   }
-  return <>{parts}{text.slice(cursor)}</>;
+  parts.push(text.slice(cursor));
+  return parts;
 };

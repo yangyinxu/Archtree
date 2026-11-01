@@ -1,4 +1,4 @@
-import { useMemo, useRef, useSyncExternalStore } from 'react';
+import { useRef, useSyncExternalStore } from 'react';
 
 import { playerStore } from './playerStore';
 import type { PlayerSnapshot, PlayerStore } from './types';
@@ -41,12 +41,10 @@ export const usePlaybackContext = (
     () => select(store.getSnapshot()),
     () => select(store.getServerSnapshot())
   );
-  return useMemo(() => {
-    const [matches, status, ...id] = key.split('|');
-    return {
-      matches: matches === '1',
-      status: (status || null) as PlaybackContext['status'],
-      currentId: id.join('|') || null
-    };
-  }, [key]);
+  const [matches, status, ...id] = key.split('|');
+  return {
+    matches: matches === '1',
+    status: (status || null) as PlaybackContext['status'],
+    currentId: id.join('|') || null
+  };
 };
