@@ -4,12 +4,13 @@
  *   Functions: noReleaseLookup, label, message, elapsedPattern, refinedStatus, possiblePairing,
  *              remainingCatalogItems, setup, enter, expectStandaloneAdministration, capture, resetMainScroll,
  *              saveDraftGeometry, expectInFirstMainScreen, actionBar, barPrimary, saveOnly, saveDraftOnly,
- *              openRange, rangeItem, openFullValues, openManualEdit, expectLookupFirst, titleChangeName,
+ *              openRange, rangeItem, openFullValues, openManualEdit, expectLookupFirst, tops, titleChangeName,
  *              expectFrozenTitle, expectManualChange, editManualAlbum, captureManualDialog, reflow,
  *              expectDecodedPrivateCover, catalogItemName, catalogCategoryLabel, catalogArtworkLabel,
  *              expectOrganizationMark, completionAlbumTracks, placeholderMemberLookup, quietPairingReview,
  *              pairingServer, quietUnnumberedReview, handPairingServer, numberInputs, filledChanges, classList,
- *              quoted, escapedText, reenter
+ *              quoted, escapedText, reenter, gappedLongAlbum, focusClear, expectFocusClear, padsBar,
+ *              focusFromTop
  *   Constants: shots, localizedViewports, privateCoverPath, coverSvg, coverPalettes, privateCoverFixtures,
  *              remainingCatalogKinds
  *   Variables: locale
@@ -29,6 +30,10 @@
  *   - same-name credited Artists remain distinguishable in a mobile catalog confirmation
  *   - changed source media and stale confirmations cannot silently rebase catalog application
  *   - multiple manual changes open the inline confirmation, focused on going back, without applying the Album
+ *   - the keyboard alone prepares, confirms and applies an update, every focus stop on the way clear of the sticky action bar
+ *   - at 390px the scroll padding follows the action bar as its wait reason wraps and a refused save adds an alert, so a field focused near the bottom stays clear of it
+ *   - a save refused for another administrator's change and an apply refused for a reload are each said once, the conflict at the bar and the reload at the top
+ *   - the same operation sent again after a lost apply updates the Album once
  *   - changed metadata leads to the read-only stale view, which cannot be applied, and 640px reflow stays accessible
  *   - User view and revoked role remove private reviews and stop their requests
  *   - discarding an Album completion from the workbench removes its card
@@ -45,7 +50,7 @@ import sharp from 'sharp';
 import { capabilities, session, viewer } from '../src/features/admin/adminFixtures.testSupport';
 import { albumId, capturedCatalogReview, catalogAlbum, catalogAlbumTracks, catalogAlbumTracksWithExpected, catalogReview, reviewId, slotId, slotTwo, titleSuggestionId } from '../src/features/admin/catalogReviewFixtures.testSupport';
 import {
-  guestHandle, handPairingResponse, handPairingRows, pairedLookupResponse, pairingApplication, pairingEditions, pairingLookupResponse, pairingReview, pairingRows, pairingRunningTimeline,
+  guestHandle, handPairingResponse, handPairingRows, longAlbumReview, pairedLookupResponse, pairingApplication, pairingEditions, pairingLookupResponse, pairingReview, pairingRows, pairingRunningTimeline,
   pairingTimeline, reviewAfterLookup, reviewIdentityResponse, reviewItunesLookupResponse, reviewLookupResponse, reviewTieLookupResponse, unnumberedPairingReview
 } from '../src/features/admin/catalogReviewLookupFixtures.testSupport';
 import type { CatalogAlbumTracks } from '../src/features/admin/catalogAlbumTracksApi';
@@ -128,6 +133,9 @@ async function setup(page: Page, administrator = true, initialReleaseDate: { yea
   let album = catalogAlbum(), review = catalogReview(), created = false, denied = false, finishAnalysis = false;
   // A discarded review leaves a tombstone: every read of it is then refused as discarded until a creation stores another.
   let discarded = false;
+  // The next review save refused with a code (`elsewhere`: another administrator saved a newer draft first), the next apply refused
+  // with a code, and the next apply whose response is lost, after the server applied it or before.
+  let saveRefusal: { code: string; elsewhere: boolean } | null = null, applyRefusal: string | null = null, lostApply: 'applied' | 'unapplied' | null = null;
   let artworkFailed = presentation.cover === 'failed';
   album.fields.releaseDate = initialReleaseDate;
   album.fields.title = presentation.title ?? album.fields.title;
@@ -277,6 +285,12 @@ async function setup(page: Page, administrator = true, initialReleaseDate: { yea
       }
       expect(method).toBe('PATCH');
       const body = request.postDataJSON(); writes.push({ path, method, body });
+      if (saveRefusal) {
+        const refusal = saveRefusal; saveRefusal = null;
+        if (refusal.elsewhere) review = { ...review, revision: review.revision + 1, draft: { ...review.draft, album: { ...review.draft.album, title: 'Another saved review value' } },
+          receipts: [...review.receipts, { operationId: '30000000-0000-4000-8000-0000000000aa', kind: 'edit', revision: review.revision + 1 }] };
+        return route.fulfill({ status: 409, json: { code: refusal.code }, headers });
+      }
       expect(body.expectedRevision).toBe(review.revision);
       // A review save sends only changed values, each with its base; the server writes each value at its path.
       expect(body).not.toHaveProperty('draft');
@@ -318,6 +332,10 @@ async function setup(page: Page, administrator = true, initialReleaseDate: { yea
     }
     if (path.startsWith(`/api/admin/v1/catalog-reviews/${reviewId}/`) && method === 'POST') {
       const body = request.postDataJSON(); writes.push({ path, method, body });
+      // An apply sent again with the operation the server already applied replays its stored receipt, as the server does.
+      if (path.endsWith('/apply') && review.applied?.operationId === body.operationId) {
+        return route.fulfill({ json: { item: review, receipt: review.receipts.find(value => value.operationId === body.operationId) }, headers });
+      }
       expect(body.expectedRevision).toBe(review.revision);
       if (path.endsWith('/discard')) {
         // The server keeps only a tombstone: the review leaves the queue and the Album page, and its lookup run ends.
@@ -387,6 +405,8 @@ async function setup(page: Page, administrator = true, initialReleaseDate: { yea
         return route.fulfill({ json: lookupReceipt(body, 'decisions'), headers });
       }
       expect(path.endsWith('/apply')).toBe(true);
+      if (applyRefusal) { const code = applyRefusal; applyRefusal = null; return route.fulfill({ status: 409, json: { code }, headers }); }
+      if (lostApply === 'unapplied') { lostApply = null; return route.abort('connectionreset'); }
       // Each test asserts its own selected fields through api.writes; the mocked Album takes a selected title, date, Artist entries and
       // expected tracklist, and each selected member its new Credits, documented.
       expect(review.sourceStatus).toBe('current');
@@ -419,7 +439,9 @@ async function setup(page: Page, administrator = true, initialReleaseDate: { yea
       }
       review = { ...review, revision: review.revision + 1, state: 'applied', capabilities: { analysis: false, apply: false },
         applied: { operationId: body.operationId, at: '2026-10-14T00:00:00.000Z', fields: body.fields } };
-      return route.fulfill({ json: receipt(body, 'apply'), headers });
+      const applied = receipt(body, 'apply');
+      if (lostApply === 'applied') { lostApply = null; return route.abort('connectionreset'); }
+      return route.fulfill({ json: applied, headers });
     }
     if (method === 'GET' && /^\/api\/admin\/v1\/catalog\/audioTrack\/[0-9a-f]{24}\/motion-preview$/.test(path)) {
       // Motion previews default off, so the editor's preview panel renders nothing.
@@ -449,6 +471,12 @@ async function setup(page: Page, administrator = true, initialReleaseDate: { yea
     pairing: (value: typeof pairingRead) => { pairingRead = value; },
     /** The next choice fails as unavailable, its outcome unknown, and changes nothing. */
     failNextChoose: () => { failChooses++; },
+    /** The next review save is refused with `code`; with `elsewhere`, another administrator saved a newer draft just before. */
+    refuseNextSave: (code: string, elsewhere = false) => { saveRefusal = { code, elsewhere }; },
+    /** The next apply is refused with `code` and changes nothing. */
+    refuseNextApply: (code: string) => { applyRefusal = code; },
+    /** The next apply's response is lost: after the server applied it (`applied`) or before it reached it (`unapplied`). */
+    loseNextApply: (when: 'applied' | 'unapplied') => { lostApply = when; },
     lookup: () => lookup, identities: () => identities, member: (id: string) => memberItems.get(id)
   };
 }
@@ -494,8 +522,9 @@ async function capture(page: Page, name: string, width: number, fullPage = true,
   }
   await page.screenshot({ path: `${shots}/${locale}/${name}-${width}.png`, fullPage, animations: 'disabled' });
 }
+/** Scrolls the main area back to its top at once (it scrolls smoothly otherwise, so a read right after would see it moving). */
 async function resetMainScroll(page: Page) {
-  await page.getByRole('main').evaluate(element => { element.scrollTop = 0; });
+  await page.getByRole('main').evaluate(element => { element.scrollTo({ top: 0, behavior: 'instant' }); });
 }
 
 /** Record actual scroll and text bounds alongside first-screen screenshots for reviewable layout evidence. */
@@ -518,14 +547,18 @@ async function saveDraftGeometry(page: Page, name: string, width: number) {
   await writeFile(`${shots}/${locale}/${name}-${width}.json`, JSON.stringify({ viewport: page.viewportSize(), main, controls }, null, 2));
 }
 
-/** Visibility assertions alone do not prove an action can be discovered without scrolling. */
+/**
+ * Visibility assertions alone do not prove an action can be discovered without scrolling. On a review page the sticky action bar
+ * covers the bottom of the main area, so the action must also end above the bar.
+ */
 async function expectInFirstMainScreen(page: Page, action: Locator) {
   await expect(action).toBeVisible();
   const [main, button] = await Promise.all([page.getByRole('main').boundingBox(), action.boundingBox()]);
   expect(main).not.toBeNull(); expect(button).not.toBeNull();
   expect(await page.getByRole('main').evaluate(element => element.scrollTop)).toBe(0);
   expect(button!.y).toBeGreaterThanOrEqual(main!.y);
-  expect(button!.y + button!.height).toBeLessThanOrEqual(main!.y + main!.height);
+  const bar = await page.locator('#catalog-review-bar').count() ? await page.locator('#catalog-review-bar').boundingBox() : null;
+  expect(button!.y + button!.height).toBeLessThanOrEqual(Math.min(main!.y + main!.height, bar?.y ?? Infinity));
 }
 
 /**
@@ -563,24 +596,36 @@ async function openManualEdit(page: Page) {
 }
 
 /**
- * Metadata lookup comes first on an existing-Album review: the summary's Look up button is in the first main screen, and the paid
- * Luna AI button follows it, after the row of alternatives and the draft editor it opens (Edit manually), without the class that
- * styles the action bar's update as the primary action (production builds hash class names, so the two buttons' class lists are
- * compared).
+ * Metadata lookup comes first on an existing-Album review: under the header, the lookup summary's status is in the first main
+ * screen, clear of the sticky action bar, and its Look up button comes before the numbers proposed from titles and the draft editor
+ * (Edit manually); the paid Luna AI button follows them all, without the class that styles the action bar's update as the primary
+ * action (production builds hash class names, so the two buttons' class lists are compared).
  */
 async function expectLookupFirst(page: Page) {
   await openManualEdit(page);
-  const submit = page.getByRole('region', { name: label('admin.catalog_review.lookup_title'), exact: true }).getByRole('button', { name: label('admin.catalog_review.lookup_submit_free'), exact: true });
-  await expectInFirstMainScreen(page, submit);
+  // Opening the draft editor scrolled to its toggle; the first screen is the page as it opens.
+  await resetMainScroll(page);
+  const summary = page.getByRole('region', { name: label('admin.catalog_review.lookup_title'), exact: true });
+  await expectInFirstMainScreen(page, summary.getByRole('status').first());
+  const submit = summary.getByRole('button', { name: label('admin.catalog_review.lookup_submit_free'), exact: true });
   const start = page.getByRole('button', { name: label('admin.catalog_review.analysis_confirm'), exact: true });
   const firstTrack = page.getByRole('textbox', { name: `1 · ${label('admin.field.title')}`, exact: true });
-  const [submitBox, startBox, trackBox] = await Promise.all([submit.boundingBox(), start.boundingBox(), firstTrack.boundingBox()]);
-  expect(startBox!.y).toBeGreaterThan(submitBox!.y);
-  expect(startBox!.y).toBeGreaterThan(trackBox!.y);
+  const proposal = page.getByRole('region', { name: label('admin.catalog_review.proposal_title'), exact: true });
+  const [submitTop, trackTop, startTop, proposalTop] = await tops(page, submit, firstTrack, start, ...await proposal.count() ? [proposal] : []);
+  expect(submitTop).toBeLessThan(trackTop);
+  if (proposalTop !== undefined) expect(submitTop).toBeLessThan(proposalTop);
+  expect(startTop).toBeGreaterThan(submitTop);
+  expect(startTop).toBeGreaterThan(trackTop);
   const classes = async (button: Locator) => (await button.getAttribute('class') ?? '').split(/\s+/).filter(Boolean);
   const luna = await classes(start), update = await classes(barPrimary(page));
   expect(update.filter(name => !luna.includes(name))).not.toEqual([]);
   return start;
+}
+
+/** The top of each element, read at one moment, so a scroll between reads (the main area scrolls smoothly) cannot skew an order. */
+async function tops(page: Page, ...locators: Locator[]) {
+  const handles = await Promise.all(locators.map(locator => locator.elementHandle()));
+  return page.evaluate(elements => elements.map(element => element!.getBoundingClientRect().top), handles);
 }
 
 function titleChangeName(target: string) {
@@ -979,7 +1024,7 @@ for (const variant of localizedViewports) {
     await expect(page.getByRole('button', { name: label('admin.catalog_review.analysis_again') })).toBeVisible();
     // Its suggestions arrive in their own section, unticked.
     const suggestions = page.getByRole('region', { name: label('admin.catalog_review.suggestions_title'), exact: true });
-    const suggestion = suggestions.getByRole('article').filter({ has: suggestions.getByRole('checkbox', { name: label('admin.field.title'), exact: true }) });
+    const suggestion = suggestions.getByRole('article').filter({ has: page.getByRole('checkbox', { name: label('admin.field.title'), exact: true }) });
     await expect(suggestion.getByText(label('admin.review.baseline'), { exact: true })).toBeVisible();
     await expect(suggestion.getByText(label('admin.review.current'), { exact: true })).toBeVisible();
     await expect(suggestion.getByText(label('admin.review.suggested'), { exact: true })).toBeVisible();
@@ -1049,9 +1094,12 @@ for (const variant of localizedViewports) {
     await reflow(page);
     const calls = api.writes.filter(value => value.path.endsWith('/analyze')).length;
     await page.getByRole('link', { name: label('admin.workbench.open_review') }).click();
-    await expect(page.getByRole('heading', { name: label('admin.catalog_review.applied') })).toBeVisible();
+    // Opened already applied, the outcome view shows what was updated without taking the focus.
+    const outcome = page.getByRole('heading', { name: message('admin.catalog_review.applied_count', { count: 1 }), exact: true });
+    await expect(outcome).toBeVisible(); await expect(outcome).not.toBeFocused();
     expect(api.writes.filter(value => value.path.endsWith('/analyze'))).toHaveLength(calls);
-    await page.getByRole('link', { name: label('admin.catalog_review.manage_original') }).click();
+    // The action bar's only control opens the original Album.
+    await page.locator('#catalog-review-bar').getByRole('link', { name: label('admin.catalog_review.bar_open_album'), exact: true }).click();
     await expect(page.getByRole('textbox', { name: label('admin.field.title'), exact: true })).toHaveValue('Reviewed synthetic Album');
   });
 }
@@ -1650,10 +1698,13 @@ for (const variant of localizedViewports) {
     await expect(card.getByText(label('admin.catalog_review.lookup_editions_choose'), { exact: true })).toBeVisible();
     for (const button of await summary.getByRole('button').all()) expect(await classList(button)).not.toEqual(primary);
     // The releases the tracks do not fit fold on their own; the name box folds beside them, as checking the proposed numbers is the next step.
-    // Nothing is applied, so the results show no fold of their own: the only disclosures are the name box's, the card's two and that one.
+    // Nothing is applied, so the results show no fold of their own: the only disclosures are the name box's, the Reference releases
+    // one (open, as the possible match is there to choose), the card's two and that one.
     await expect(summary.getByText(label('admin.catalog_review.lookup_details'), { exact: true })).toHaveCount(0);
-    await expect(summary.locator('summary:visible')).toHaveText([label('admin.catalog_review.lookup_try_another'), label('admin.catalog_review.lookup_other_options'),
-      label('admin.catalog_review.lookup_editions_choose'), message('admin.catalog_review.lookup_section_not_fit', { count: 10 })]);
+    await expect(summary.locator('summary:visible')).toHaveText([label('admin.catalog_review.lookup_try_another'), message('admin.catalog_review.lookup_releases', { count: 2 }),
+      label('admin.catalog_review.lookup_other_options'), label('admin.catalog_review.lookup_editions_choose'), message('admin.catalog_review.lookup_section_not_fit', { count: 10 })]);
+    await expect(summary.locator('details').filter({ has: page.locator(':scope > summary', { hasText: message('admin.catalog_review.lookup_releases', { count: 2 }) }) }))
+      .toHaveJSProperty('open', true);
     const folds = summary.locator('details').filter({ has: page.locator(':scope > summary', { hasText: message('admin.catalog_review.lookup_section_not_fit', { count: 10 }) }) });
     await expect(folds).toHaveCount(1);
     await expect(folds).not.toHaveAttribute('open');
@@ -2509,7 +2560,8 @@ test('changed source media and stale confirmations cannot silently rebase catalo
   await expect(page.locator('#catalog-review-bar').getByText(label('admin.catalog_review.bar_outdated'), { exact: true })).toBeVisible();
   await expectFrozenTitle(dialog, 'Synthetic catalog Album', 'Private manual correction');
   await expect(dialog.getByText('Another saved review value', { exact: true })).toHaveCount(0);
-  await confirm.click();
+  // The waiting button stays focusable (aria-disabled), and pressing it anyway applies nothing.
+  await confirm.click({ force: true });
   expect(api.writes.filter(value => value.path.endsWith('/apply'))).toHaveLength(0);
   // Back to adjust: the newer saved value needs selecting again.
   await page.getByRole('button', { name: label('admin.catalog_review.bar_back'), exact: true }).click();
@@ -2566,6 +2618,293 @@ test('multiple manual changes open the inline confirmation, focused on going bac
   expect(api.album().fields.title).toBe('Synthetic catalog Album');
 });
 
+/**
+ * The long Album (longAlbumReview: 44 tracks on three discs titled "1.01." to "3.14.", every number empty) with its second disc's
+ * positions after 2.04 moved up by one, so track 20 ("2.06.") follows a gap the proposal only notes; its lookup found no release.
+ */
+function gappedLongAlbum() {
+  const item = longAlbumReview();
+  const retitle = (title: string) => title.replace(/^2\.(\d\d)\./, (whole, track: string) => Number(track) >= 5 ? `2.${String(Number(track) + 1).padStart(2, '0')}.` : whole);
+  return { ...item, source: { ...item.source, tracks: item.source.tracks.map(track => ({ ...track, title: retitle(track.title) })) },
+    draft: { ...item.draft, tracks: item.draft.tracks.map(track => ({ ...track, title: retitle(track.title) })) } };
+}
+
+/**
+ * Whether the focused element, when it is part of the page above the sticky action bar, is in the main area and clear of the bar
+ * (WCAG 2.4.11): null when the focus is elsewhere (the banner, the bar itself or the main area), and where it is not, the
+ * element and the geometry as text, for the failure message.
+ */
+const focusClear = (page: Page) => page.evaluate(() => {
+  const element = document.activeElement, bar = document.getElementById('catalog-review-bar'), main = document.querySelector('main');
+  if (!element || !bar || !main || element === main || !main.contains(element) || bar.contains(element)) return null;
+  const rect = element.getBoundingClientRect();
+  const clear = rect.bottom <= bar.getBoundingClientRect().top + 0.5 && rect.top >= main.getBoundingClientRect().top - 0.5;
+  return clear || JSON.stringify({ tag: element.tagName, text: element.textContent?.slice(0, 40), top: rect.top, bottom: rect.bottom, barTop: bar.getBoundingClientRect().top,
+    barHeight: bar.offsetHeight, padding: getComputedStyle(main).scrollPaddingBottom, mainBottom: main.getBoundingClientRect().bottom, scrollTop: main.scrollTop });
+});
+/** Waits until the focused element is clear of the sticky action bar (the main area scrolls smoothly to it). */
+async function expectFocusClear(page: Page) {
+  await expect.poll(async () => { const clear = await focusClear(page); return clear === null || clear; }).toBe(true);
+}
+/** Whether the main area's bottom scroll padding is the action bar's height and 12px of room for a focus outline. */
+const padsBar = (page: Page) => page.evaluate(() => parseFloat(getComputedStyle(document.querySelector('main')!).scrollPaddingBottom)
+  === document.getElementById('catalog-review-bar')!.offsetHeight + 12);
+/** Scrolls the main area to its top, then focuses `field` from there, as moving the focus to a field below the screen does. */
+async function focusFromTop(page: Page, field: Locator) {
+  await resetMainScroll(page);
+  await field.focus();
+  await expect(field).toBeFocused();
+  await expectFocusClear(page);
+  expect(await focusClear(page)).toBe(true);
+}
+
+for (const variant of localizedViewports) {
+  const { width } = variant;
+  test(`a 44-track Album on three discs sums up its proposal, folds each disc with a flagged row open, groups its range by disc and is updated in two clicks through a grouped confirmation at ${width}px ${variant.locale}`, async ({ page }) => {
+    locale = variant.locale; test.setTimeout(90_000);
+    await page.setViewportSize({ width, height: width === 1280 ? 720 : 844 });
+    const api = await setup(page); api.seed(gappedLongAlbum(), noReleaseLookup());
+    await enter(page, `/finitude/admin/catalog-reviews/${reviewId}`);
+    const table = page.getByRole('region', { name: label('admin.catalog_review.proposal_title'), exact: true });
+    // One line sums up the tracks, discs and positions; only the flagged row is open, before one fold per disc.
+    await expect(table.getByText(`${message('admin.catalog_review.proposal_long', { tracks: 44, discs: 3 })} · ${label('admin.catalog_review.proposal_long_range', { first: '1.01', last: '3.14' })}`,
+      { exact: true })).toBeVisible();
+    const open = table.locator('fieldset > ol > li');
+    await expect(open).toHaveCount(1);
+    await expect(open.locator('strong')).toHaveText('20 · 2.06.Synthetic long song 20');
+    await expect(open.getByText(label('admin.catalog_review.proposal_flag_gap'), { exact: true })).toBeVisible();
+    const flagged = (field: 'disc_number' | 'track_number') => open.getByRole('spinbutton', { name: label('admin.catalog_review.number_label', { position: 20, field: label(`admin.field.${field}`) }), exact: true });
+    await expect(flagged('disc_number')).toHaveValue('2'); await expect(flagged('track_number')).toHaveValue('6');
+    const discs = table.locator('fieldset > details');
+    await expect(discs.locator('> summary')).toHaveText([message('admin.catalog_review.proposal_disc', { disc: 1, count: 15 }),
+      message('admin.catalog_review.proposal_disc', { disc: 2, count: 14 }), message('admin.catalog_review.proposal_disc', { disc: 3, count: 14 })]);
+    for (const fold of await discs.all()) await expect(fold).toHaveJSProperty('open', false);
+    const [rowTop, discsTop] = await tops(page, open, discs.first());
+    expect(rowTop).toBeLessThan(discsTop);
+    // Folded rows keep their proposed values; every number fills an empty one and is selected: 88 items.
+    await expect(page.getByRole('spinbutton', { name: label('admin.catalog_review.number_label', { position: 44, field: label('admin.field.track_number') }), exact: true, includeHidden: true }))
+      .toHaveValue('14');
+    await expect(barPrimary(page)).toHaveText(message('admin.catalog_review.apply_action', { count: 88 }));
+    await reflow(page);
+    // The optional cleanup chooses the cleaned titles: the uniform rows stay folded and the update counts 132 items.
+    await table.getByRole('checkbox', { name: label('admin.catalog_review.proposal_cleanup'), exact: true }).check();
+    await expect(open).toHaveCount(1);
+    await expect(barPrimary(page)).toHaveText(message('admin.catalog_review.apply_action', { count: 132 }));
+    // The update range groups the numbers by disc, each fully selected, then the 44 titles.
+    const range = page.locator('#catalog-review-range');
+    await range.locator('> summary').click();
+    await expect(range.locator('> summary')).toHaveText(label('admin.catalog_review.range_summary', { count: 132 }));
+    const groups = range.locator('> section');
+    await expect(groups.locator('> label > strong')).toHaveText([1, 2, 3].map(disc => label('admin.catalog_review.range_numbers_disc', { disc }))
+      .concat(message('admin.catalog_review.range_titles', { count: 44 })));
+    await expect(groups.locator('> label > span')).toHaveText([[30, 30], [30, 30], [28, 28], [44, 44]].map(([selected, total]) => label('admin.catalog_review.range_group_count', { selected, total })));
+    for (const group of await groups.locator('> label input[type=checkbox]').all()) await expect(group).toBeChecked();
+    await reflow(page);
+    expect(api.writes).toEqual([]);
+    // A short screen, so the confirmation is taller than the room above the bar: it shows its top, focused on going back.
+    await page.setViewportSize({ width, height: 400 });
+    await barPrimary(page).click();
+    const dialog = page.getByRole('dialog', { name: label('admin.catalog_review.confirm_title') });
+    const back = page.getByRole('button', { name: label('admin.catalog_review.bar_back'), exact: true });
+    await expect(back).toBeFocused();
+    await expect.poll(() => api.writes.map(write => [write.method, write.path])).toEqual([['PATCH', `/api/admin/v1/catalog-reviews/${reviewId}`]]);
+    expect(api.writes[0].body.changes).toHaveLength(132);
+    await expect(dialog.locator('ul').first().getByRole('listitem')).toHaveText([message('admin.catalog_review.compact_numbers', { count: 44 }),
+      message('admin.catalog_review.compact_titles', { count: 44 })]);
+    await expect(dialog.getByText(label('admin.catalog_review.confirm_full', { count: 132 }), { exact: true })).toBeVisible();
+    const heading = dialog.getByRole('heading', { name: label('admin.catalog_review.confirm_title'), exact: true });
+    await expect.poll(() => page.evaluate(() => {
+      const section = document.querySelector('[role=dialog][aria-modal=false]')!, main = document.querySelector('main')!, bar = document.getElementById('catalog-review-bar')!;
+      const room = bar.getBoundingClientRect().top - main.getBoundingClientRect().top, rect = section.getBoundingClientRect();
+      return { taller: rect.height > room, top: rect.top >= main.getBoundingClientRect().top - 0.5 && rect.top < bar.getBoundingClientRect().top };
+    })).toEqual({ taller: true, top: true });
+    await expect(heading).toBeInViewport();
+    await reflow(page);
+    await page.setViewportSize({ width, height: width === 1280 ? 720 : 844 });
+    // The second click applies all 132 items; the applied view says so in the same two grouped lines.
+    await page.getByRole('button', { name: label('admin.catalog_review.bar_confirm', { count: 132 }), exact: true }).click();
+    const outcome = page.getByRole('heading', { name: message('admin.catalog_review.applied_count', { count: 132 }), exact: true });
+    await expect(outcome).toBeFocused();
+    expect(api.writes.filter(write => write.path.endsWith('/apply')).map(write => (write.body.fields as ReviewField[]).length)).toEqual([132]);
+    await expect(outcome.locator('..').locator('ul').first().getByRole('listitem')).toHaveText([message('admin.catalog_review.compact_numbers_done', { count: 44 }),
+      message('admin.catalog_review.compact_titles_done', { count: 44 })]);
+    await expect(page.getByText(label('admin.catalog_review.applied_edition_unconfirmed'), { exact: true })).toBeVisible();
+    await expect(page.locator('#catalog-review-bar').getByRole('link', { name: label('admin.catalog_review.bar_open_album'), exact: true })).toBeVisible();
+    await reflow(page);
+  });
+}
+
+test('the keyboard alone prepares, confirms and applies an update, every focus stop on the way clear of the sticky action bar', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  const api = await setup(page); api.seed(quietPairingReview(), noReleaseLookup());
+  await enter(page, `/finitude/admin/catalog-reviews/${reviewId}`);
+  const update = page.getByRole('button', { name: label('admin.catalog_review.apply_action', { count: 4 }), exact: true });
+  await expect(update).not.toHaveAttribute('aria-disabled', 'true');
+  // Tab from the banner through the page to the bar's primary button: no stop is hidden under the bar.
+  let stops = 0;
+  while (!await update.evaluate(element => element === document.activeElement)) {
+    expect(++stops).toBeLessThan(80);
+    await page.keyboard.press('Tab');
+    await expectFocusClear(page);
+  }
+  await page.keyboard.press('Enter');
+  const dialog = page.getByRole('dialog', { name: label('admin.catalog_review.confirm_title') });
+  await expect(dialog).toBeVisible();
+  await expect(page.getByRole('button', { name: label('admin.catalog_review.bar_back'), exact: true })).toBeFocused();
+  await page.keyboard.press('Tab');
+  const confirm = page.getByRole('button', { name: label('admin.catalog_review.bar_confirm', { count: 4 }), exact: true });
+  await expect(confirm).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('heading', { name: message('admin.catalog_review.applied_count', { count: 4 }), exact: true })).toBeFocused();
+  expect(api.writes.map(write => [write.method, write.path.replace(`/api/admin/v1/catalog-reviews/${reviewId}`, '')])).toEqual([['PATCH', ''], ['POST', '/apply']]);
+});
+
+test('at 390px the scroll padding follows the action bar as its wait reason wraps and a refused save adds an alert, so a field focused near the bottom stays clear of it', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const api = await setup(page);
+  // Metadata lookup is queued and Luna AI runs: the update waits for both, a reason that wraps at this width.
+  const item = quietPairingReview(); item.analysis = { ...item.analysis, state: 'queued', generation: 1, operationId: '30000000-0000-4000-8000-0000000000bb' };
+  api.seed(item, { ...noReleaseLookup()!, state: 'queued', outcome: null, blocking: true });
+  await enter(page, `/finitude/admin/catalog-reviews/${reviewId}`);
+  const reason = page.locator('#catalog-review-bar').getByText(label('admin.catalog_review.bar_wait_both'), { exact: true });
+  await expect(reason).toBeVisible();
+  expect(await reason.evaluate(element => element.getBoundingClientRect().height > parseFloat(getComputedStyle(element).lineHeight) * 1.5)).toBe(true);
+  await expect.poll(() => padsBar(page)).toBe(true);
+  const before = await page.locator('#catalog-review-bar').evaluate(element => (element as HTMLElement).offsetHeight);
+  // A field near the bottom of the draft editor, focused from the top of the page, scrolls clear of the bar.
+  await openManualEdit(page);
+  const last = page.getByRole('spinbutton', { name: `2 · ${label('admin.field.track_number')}`, exact: true });
+  await focusFromTop(page, last);
+  // Saving the draft alone stays available; refused, it adds an alert to the bar, which grows, and the padding follows it.
+  api.refuseNextSave('ADMIN_IMPORT_ANALYSIS_ACTIVE');
+  await saveOnly(page).click();
+  const alert = page.locator('#catalog-review-bar').getByRole('alert');
+  await expect(alert).toHaveText(`${label('admin.catalog_review.bar_save_failed')} ${label('admin.common.analysis_active')}`);
+  // Said once: the page does not repeat the bar's refusal.
+  await expect(page.getByText(label('admin.common.analysis_active'))).toHaveCount(1);
+  await expect.poll(async () => await padsBar(page) && await page.locator('#catalog-review-bar').evaluate(element => (element as HTMLElement).offsetHeight) > before).toBe(true);
+  await expect(last).toHaveValue('2');
+  await focusFromTop(page, last);
+  await reflow(page);
+  expect(api.writes.map(write => write.method)).toEqual(['PATCH']);
+});
+
+test('a save refused for another administrator\'s change and an apply refused for a reload are each said once, the conflict at the bar and the reload at the top', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  const api = await setup(page); api.seed(quietPairingReview(), noReleaseLookup());
+  await enter(page, `/finitude/admin/catalog-reviews/${reviewId}`);
+  // A typed number is an unsaved edit; another administrator saves first, so the save that prepares the update is refused.
+  await page.getByRole('spinbutton', { name: label('admin.catalog_review.number_label', { position: 2, field: label('admin.field.track_number') }), exact: true }).fill('5');
+  api.refuseNextSave('ADMIN_IMPORT_FIELD_CONFLICT', true);
+  await barPrimary(page).click();
+  const conflict = label('admin.common.conflict');
+  const barAlert = page.locator('#catalog-review-bar').getByRole('alert');
+  await expect(barAlert).toHaveText(`${label('admin.catalog_review.bar_save_failed')} ${conflict}`);
+  await expect(page.getByRole('alert').filter({ hasText: conflict })).toHaveCount(1);
+  await expect(page.getByText(conflict)).toHaveCount(1);
+  await reflow(page);
+  // The page keeps only the way out: loading the saved version, which drops the typed number.
+  await page.getByRole('button', { name: label('admin.review.load_saved'), exact: true }).click();
+  await expect(barAlert).toHaveCount(0);
+  await expect(page.getByText(conflict)).toHaveCount(0);
+  await expect(barPrimary(page)).not.toHaveAttribute('aria-disabled', 'true');
+  await barPrimary(page).click();
+  await expect(page.getByRole('dialog', { name: label('admin.catalog_review.confirm_title') })).toBeVisible();
+  // The apply is refused because the workbench was updated: the reload request is said once, at the top, with its button.
+  api.refuseNextApply('ADMIN_IMPORT_RELOAD_REQUIRED');
+  await barPrimary(page).click();
+  const reload = page.getByRole('alert').filter({ hasText: label('admin.common.reload') });
+  await expect(reload).toHaveCount(1);
+  await expect(reload.getByRole('button', { name: label('admin.common.reload_action'), exact: true })).toBeVisible();
+  await expect(page.getByText(label('admin.common.reload'))).toHaveCount(1);
+  await expect(page.locator('#catalog-review-bar').getByText(label('admin.common.reload'))).toHaveCount(0);
+  const [reloadTop, summaryTop] = await tops(page, reload, page.getByRole('region', { name: label('admin.catalog_review.lookup_title'), exact: true }));
+  expect(reloadTop).toBeLessThan(summaryTop);
+  expect(api.writes.filter(write => write.path.endsWith('/apply'))).toHaveLength(1);
+});
+
+for (const variant of localizedViewports) {
+  const { width } = variant;
+  test(`an apply whose response was lost shows the unknown view, focused only when this page lost it, and checking its result shows it applied without updating twice at ${width}px ${variant.locale}`, async ({ page }) => {
+    locale = variant.locale;
+    await page.setViewportSize({ width, height: width === 1280 ? 720 : 844 });
+    const api = await setup(page); api.seed(quietPairingReview(), noReleaseLookup());
+    await enter(page, `/finitude/admin/catalog-reviews/${reviewId}`);
+    await barPrimary(page).click();
+    api.loseNextApply('applied');
+    await page.getByRole('button', { name: label('admin.catalog_review.bar_confirm', { count: 4 }), exact: true }).click();
+    const heading = page.getByRole('heading', { name: label('admin.catalog_review.unknown_title'), exact: true });
+    await expect(heading).toBeFocused();
+    await expect(page.getByText(label('admin.catalog_review.unknown_copy'), { exact: true })).toBeVisible();
+    await expect(page.getByText(label('admin.catalog_review.unknown_note'), { exact: true })).toBeVisible();
+    const query = page.getByRole('button', { name: label('admin.catalog_review.bar_query'), exact: true });
+    await expect(query).toBeVisible();
+    await expect(page.getByRole('button', { name: label('admin.catalog_review.bar_retry_same'), exact: true })).toBeVisible();
+    // Nothing reads as updated yet.
+    await expect(page.getByRole('heading', { name: message('admin.catalog_review.applied_count', { count: 4 }), exact: true })).toHaveCount(0);
+    await reflow(page);
+    // Reopened in this tab, the review resumes the unknown view without moving the focus.
+    await page.getByRole('link', { name: label('admin.common.back'), exact: true }).click();
+    await expect(page).toHaveURL(/source=catalogReviews/);
+    await page.goBack();
+    await expect(heading).toBeVisible();
+    await expect(heading).not.toBeFocused();
+    // Checking reads the review, finds this operation applied and replays its receipt: the same operation, applied once.
+    await query.click();
+    await expect(page.getByRole('heading', { name: message('admin.catalog_review.applied_count', { count: 4 }), exact: true })).toBeFocused();
+    const applies = api.writes.filter(write => write.path.endsWith('/apply'));
+    expect(applies).toHaveLength(2);
+    expect(applies[1].body).toEqual(applies[0].body);
+    expect(api.review().applied?.operationId).toBe(applies[0].body.operationId);
+  });
+
+  test(`an apply lost before it reached the server stays unconfirmed after a check, and once the Album changes a refresh leads to the stale view, which keeps Discard completion at ${width}px ${variant.locale}`, async ({ page }) => {
+    locale = variant.locale;
+    await page.setViewportSize({ width, height: width === 1280 ? 720 : 844 });
+    const api = await setup(page); api.seed(quietPairingReview(), noReleaseLookup());
+    await enter(page, `/finitude/admin/catalog-reviews/${reviewId}`);
+    await barPrimary(page).click();
+    api.loseNextApply('unapplied');
+    await page.getByRole('button', { name: label('admin.catalog_review.bar_confirm', { count: 4 }), exact: true }).click();
+    await expect(page.getByRole('heading', { name: label('admin.catalog_review.unknown_title'), exact: true })).toBeFocused();
+    // Checking finds the review not updated: the view says the same operation may be sent again.
+    await page.getByRole('button', { name: label('admin.catalog_review.bar_query'), exact: true }).click();
+    await expect(page.getByText(label('admin.catalog_review.unknown_pending'), { exact: true })).toBeVisible();
+    expect(api.writes.filter(write => write.path.endsWith('/apply'))).toHaveLength(1);
+    // The Album changes meanwhile: refreshing the status settles the operation as stale. The old draft is read-only, Discard
+    // completion is kept and the bar opens the latest Album.
+    api.changeSource('metadata');
+    await page.getByRole('button', { name: label('admin.common.refresh'), exact: true }).click();
+    await expect(page.getByRole('heading', { name: label('admin.catalog_review.stale_title'), exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: label('admin.catalog_review.bar_query'), exact: true })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: label('admin.catalog_review.bar_retry_same'), exact: true })).toHaveCount(0);
+    await expect(page.locator('#catalog-review-bar').getByRole('link', { name: label('admin.catalog_review.bar_open_latest'), exact: true })).toBeVisible();
+    await expect(page.getByRole('checkbox')).toHaveCount(0);
+    await reflow(page);
+    const discard = page.getByRole('button', { name: label('admin.catalog_review.discard'), exact: true });
+    await expect(discard).toBeEnabled();
+    await discard.click();
+    await page.getByRole('dialog', { name: label('admin.catalog_review.discard_title'), exact: true }).getByRole('button', { name: label('admin.catalog_review.discard_confirm'), exact: true }).click();
+    await expect(page).toHaveURL(new RegExp(`/finitude/admin/catalog/album/${albumId}$`));
+    expect(api.writes.filter(write => write.path.endsWith('/apply'))).toHaveLength(1);
+    expect(api.writes.at(-1)!.path).toBe(`/api/admin/v1/catalog-reviews/${reviewId}/discard`);
+  });
+}
+
+test('the same operation sent again after a lost apply updates the Album once', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  const api = await setup(page); api.seed(quietPairingReview(), noReleaseLookup());
+  await enter(page, `/finitude/admin/catalog-reviews/${reviewId}`);
+  await barPrimary(page).click();
+  api.loseNextApply('unapplied');
+  await page.getByRole('button', { name: label('admin.catalog_review.bar_confirm', { count: 4 }), exact: true }).click();
+  await page.getByRole('button', { name: label('admin.catalog_review.bar_retry_same'), exact: true }).click();
+  await expect(page.getByRole('heading', { name: message('admin.catalog_review.applied_count', { count: 4 }), exact: true })).toBeVisible();
+  const applies = api.writes.filter(write => write.path.endsWith('/apply'));
+  expect(applies).toHaveLength(2);
+  expect(applies[1].body).toEqual(applies[0].body);
+});
+
 test('changed metadata leads to the read-only stale view, which cannot be applied, and 640px reflow stays accessible', async ({ page }) => {
   await page.setViewportSize({ width: 640, height: 844 });
   const api = await setup(page); api.ready();
@@ -2577,6 +2916,10 @@ test('changed metadata leads to the read-only stale view, which cannot be applie
   await openRange(page);
   await rangeItem(page, label('admin.field.title'), 'Synthetic catalog Album').check();
   await page.getByRole('button', { name: label('admin.catalog_review.apply_action', { count: 1 }), exact: true }).click();
+  // At 640px too, the confirmation scrolls itself into view: its summary is on screen, clear of the bar.
+  const summary = page.getByRole('dialog', { name: label('admin.catalog_review.confirm_title') }).getByText(message('admin.catalog_review.confirm_summary', { count: 1 }), { exact: true });
+  await expect(summary).toBeInViewport();
+  await expect.poll(async () => (await tops(page, page.locator('#catalog-review-bar')))[0] - await summary.evaluate(element => element.getBoundingClientRect().bottom)).toBeGreaterThanOrEqual(0);
   await capture(page, '13-reflow-confirmation', 640, false); await reflow(page);
   await page.getByRole('button', { name: label('admin.catalog_review.bar_back'), exact: true }).click();
   api.changeSource('metadata'); await page.getByRole('button', { name: label('admin.common.refresh') }).click();

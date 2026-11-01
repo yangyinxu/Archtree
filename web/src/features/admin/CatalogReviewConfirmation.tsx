@@ -26,18 +26,13 @@ const countOf = (frozen: CatalogReviewFrozen) => frozen.selection.fields.length 
  * left out, one compact row per affected Track and per Album value, the Artists and Organizations to be reused or created, the full
  * original and new values behind a disclosure rendered once opened, and that artwork, audio and visibility stay unchanged. It stays
  * in view, busy, while applying. Shown below the editing section, it scrolls into view when it appears, clear of the sticky bar
- * (its bottom scroll margin is the page's bottom scroll padding, the bar's height): the nearest edge, so a tall one shows its top.
+ * (the scroll container's bottom scroll padding is the bar's height): the nearest edge, so a tall one shows its top.
  */
 export function CatalogReviewConfirmation({ frozen, compared, applying, titleId, summaryId }: { frozen: CatalogReviewFrozen; compared: boolean; applying: boolean;
   titleId: string; summaryId: string }) {
   const t = useAdminText(), [open, setOpen] = useState(false), { item, selection } = frozen, count = countOf(frozen);
   const section = useRef<HTMLElement>(null);
-  useEffect(() => {
-    const node = section.current;
-    if (!node) return;
-    node.style.scrollMarginBottom = document.documentElement.style.scrollPaddingBottom;
-    node.scrollIntoView?.({ block: 'nearest' });
-  }, []);
+  useEffect(() => { section.current?.scrollIntoView?.({ block: 'nearest' }); }, []);
   const artists = entriesByline(item.draft.album.artists.filter(entry => entry.role === 'primary'));
   return <section ref={section} role="dialog" aria-modal="false" aria-labelledby={titleId} aria-describedby={summaryId} aria-busy={applying} className={styles.panel}>
     <h2 id={titleId}>{t('catalog_review.confirm_title')}</h2>

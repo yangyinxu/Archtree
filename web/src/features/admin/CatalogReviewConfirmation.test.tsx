@@ -31,14 +31,15 @@ test('the confirmation is a labelled non-modal region with its summary, compact 
   const item = catalogReview(); item.draft.album.title = 'Saved Album correction'; item.draft.tracks[1] = { ...item.draft.tracks[1], discNumber: 1, trackNumber: 2, title: 'Second track cleaned' };
   const fields: ReviewField[] = [{ scope: 'album', slotId: null, field: 'title' }, { scope: 'track', slotId: item.draft.tracks[1].slotId, field: 'discNumber' },
     { scope: 'track', slotId: item.draft.tracks[1].slotId, field: 'trackNumber' }, { scope: 'track', slotId: item.draft.tracks[1].slotId, field: 'title' }];
-  // Shown below the editing section, it scrolls into view at its nearest edge, clear of the sticky bar (the page's bottom scroll padding).
+  // Shown below the editing section, it scrolls into view at its nearest edge, clear of the sticky bar (the scroll container's bottom
+  // scroll padding, which the browser honours, so the confirmation adds no margin of its own).
   const scrolled: Element[] = [];
   Element.prototype.scrollIntoView = vi.fn(function (this: Element, options?: boolean | ScrollIntoViewOptions) { expect(options).toEqual({ block: 'nearest' }); scrolled.push(this); });
   document.documentElement.style.scrollPaddingBottom = '96px';
   render(<CatalogReviewConfirmation frozen={frozen(item, fields, [], true)} compared={false} applying={false} titleId="title" summaryId="summary" />);
   const dialog = screen.getByRole('dialog', { name: 'Confirm this update' });
   expect(scrolled).toEqual([dialog]);
-  expect(dialog.style.scrollMarginBottom).toBe('96px');
+  expect(dialog.style.scrollMarginBottom).toBe('');
   expect(dialog).toHaveAttribute('aria-modal', 'false');
   expect(dialog).toHaveAccessibleDescription('The draft is saved and checked. 4 changes update the original Album after the final confirmation.');
   expect(screen.getByText('Synthetic catalog Album / Synthetic catalog Artist')).toBeVisible();

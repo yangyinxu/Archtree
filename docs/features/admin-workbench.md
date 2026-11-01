@@ -1376,7 +1376,9 @@ overwrites another value saved meanwhile; it stays available while lookup or
 Luna AI runs. **Update original Album (N)**, the action bar's primary button,
 first saves the same way, then shows an inline confirmation of the selected
 changes' frozen old/new values (see the action bar below). A review page has no
-tabs and no steps bar. It leads with a header: the Album's current artwork (the
+tabs and no steps bar. It leads with a header, a compact Album hero with the
+cover beside the title at every width (a small one on a phone), so the status
+row below is in the first screen above the action bar: the Album's current artwork (the
 catalog Album read the Album page uses, `GET /catalog/album/:id`, loaded in its
 own chunk, with the artwork placeholder while that read is pending, fails or
 finds none), the captured Album title as stored (a trailing credit is never
@@ -1715,9 +1717,10 @@ another (`CatalogReviewConfirmation.tsx`, with the compact rows of
 chunk that cannot load asks for a reload in the bar's place, with nothing to
 press; a confirmation chunk that cannot load asks for a reload in its place and
 holds the confirm button with that reason, as nothing may be confirmed unseen. While it is
-shown the page keeps that much bottom scroll padding, following the bar's height
-as it grows (an alert, a wrapped reason), so a focused field is never hidden
-behind it. It is absent from the discarded notice and the
+shown, the page's scroll container (the shell's main area) keeps that much
+bottom scroll padding plus 12 px of room for a focus outline, following the
+bar's height as it grows (an alert, a wrapped reason), so a focused field and its
+outline are never hidden behind it. It is absent from the discarded notice and the
 Admin view gate. Its primary **Update original Album (N)**, N being the range's
 count, waits while lookup runs and while Luna AI runs (it names both when both
 run; stopping Luna AI leaves the lookup reason), while a Disc or Track Number is
@@ -1749,7 +1752,8 @@ Catalog Visibility and Administration). A refused save keeps the unsaved values
 and shows its message as an alert at the bar (said there only, never again at
 the top of the page; when another administrator's save made the edits
 conflicting, the editing section keeps only its button to load the saved
-version), whose primary, relabelled **Retry preparing the
+version, and loading it ends the refusal, as the values it kept are gone: the
+alert goes and the primary updates again), whose primary, relabelled **Retry preparing the
 confirmation** ("重试准备确认") and keeping the focus, retries the
 preparation; a save whose outcome is unknown keeps its intent, and the bar's
 **Retry original operation** sends the same save again, after which the page
@@ -1760,8 +1764,8 @@ preparing.
 The confirmation is inline above the bar, a region named as a dialog but not
 modal, with the focus on its back button, which its summary sentence describes,
 and the page's other controls disabled. Shown after the editing section, it
-scrolls into view when it opens (to its nearest edge, clear of the bar, so a tall
-one shows its top). It names the Album, says the draft is
+scrolls into view when it opens (to its nearest edge, clear of the bar through
+the scroll container's padding, so a tall one shows its top). It names the Album, says the draft is
 saved and checked and how many changes update the original Album after the
 final confirmation, lists one compact row per affected Track (its title with its
 new Disc and Track Number, and a neutral title change, "标题修改") and per Album

@@ -4,7 +4,7 @@
  * Tests
  *   - with the title cleanup on, the update saves the cleaned titles with the numbers, confirms them in compact rows and applies them all
  *   - a refused save shows its message as an alert in the bar, keeps the unsaved values and retries the preparation from the relabelled primary
- *   - a save refused because another administrator changed the review says the conflict once, at the bar, which describes the waiting primary
+ *   - a save refused because another administrator changed the review says the conflict once, at the bar, which describes the waiting primary, until the saved version is loaded
  *   - an apply refused because the workbench was updated asks for a reload once, at the top of the page with its button, never again at the bar
  *   - a save-only attempt whose response was lost keeps its intent: the bar retries the same save, which returns to editing with the draft saved
  *   - when the save that prepares the update finds extra release data, the confirmation says it was not added and the apply leaves it out
@@ -153,7 +153,7 @@ test('a refused save shows its message as an alert in the bar, keeps the unsaved
   expect(writes[1].body.operationId).not.toBe(writes[0].body.operationId);
 });
 
-test('a save refused because another administrator changed the review says the conflict once, at the bar, which describes the waiting primary', async () => {
+test('a save refused because another administrator changed the review says the conflict once, at the bar, which describes the waiting primary, until the saved version is loaded', async () => {
   const state = { item: pairingReview() };
   route(state, () => {
     // Another administrator saved a new title meanwhile: the read after the refusal shows the newer revision and its receipt.
@@ -177,6 +177,12 @@ test('a save refused because another administrator changed the review says the c
   const alert = screen.getByText(/^The draft was not saved; your changes are kept\./);
   expect(within(screen.getByRole('region', { name: 'Current step' })).getByRole('alert')).toBe(alert);
   expect(screen.getByRole('button', { name: 'Retry preparing the confirmation' })).toHaveAccessibleDescription(alert.textContent!);
+  // Loading the saved version drops the typed number, so the refusal no longer stands: no alert, and the primary updates again.
+  fireEvent.click(screen.getByRole('button', { name: 'Discard local edits and load saved version' }));
+  expect(await screen.findByRole('button', { name: /^Update original Album/ })).toBeVisible();
+  expect(screen.queryByText(/^The draft was not saved/)).not.toBeInTheDocument();
+  expect(screen.queryByText(conflict)).not.toBeInTheDocument();
+  expect(screen.getByRole('spinbutton', { name: 'Track number of track 2' })).toHaveValue(2);
 });
 
 test('an apply refused because the workbench was updated asks for a reload once, at the top of the page with its button, never again at the bar', async () => {

@@ -23,7 +23,8 @@ import type { AdminCommand } from './useAdminCommand';
  * `reading` until the detail, lookup summary and identity read show the saved revision, `review_required` (editable: a noted item
  * gained a hold, an identity answer or a shared position, or the server asked for review), `frozen` (the inline confirmation),
  * `applying`, `success`, `stale`, `unknown` (an apply whose outcome is unknown), `querying` (reading the review to settle it),
- * `save_failed` (a refused save; the unsaved values stay) and `save_unknown` (a save whose outcome is unknown).
+ * `save_failed` (a refused save; the unsaved values stay, until the editor loads a newer saved draft) and `save_unknown` (a save whose
+ * outcome is unknown).
  */
 export type CatalogReviewPreparePhase = 'editing' | 'saving' | 'saving_only' | 'reading' | 'review_required' | 'frozen' | 'applying' | 'success' | 'stale'
   | 'unknown' | 'querying' | 'save_failed' | 'save_unknown';
@@ -168,6 +169,15 @@ export function useCatalogReviewPrepare({ id, command, item, model, reads, refet
           : { ...idle, phase: 'save_failed', notice: error, saveOnlyFailed: mine.only });
     }
   }), [command]);
+  // A refused save's alert says the unsaved values are kept; once the editor moves to a newer saved draft (the conflict panel's
+  // Load saved version), they are not, and the refusal no longer stands: the review is plainly editable again, and the command
+  // drops the refusal so the page does not say it either.
+  const failedAt = useRef<number | null>(null);
+  useEffect(() => {
+    if (state.phase !== 'save_failed') failedAt.current = null;
+    else if (failedAt.current === null) failedAt.current = revision;
+    else if (revision > failedAt.current) { if (command.getSnapshot().error === state.notice) command.settle(); setState(idle); }
+  }, [state.phase, revision]);
   // Losing the Admin view or the account (a 401 or 403 resets the workspace) leaves nothing pending here.
   useEffect(() => adminWorkspace.subscribe(() => {
     if (owner && !adminWorkspace.current(owner, false)) { pending.current = null; running.current = null; setState(idle); }

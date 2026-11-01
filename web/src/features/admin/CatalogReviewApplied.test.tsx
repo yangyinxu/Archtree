@@ -5,7 +5,7 @@ import { adminWorkspace } from './adminWorkspace';
 import type { CatalogReview, ReviewField } from './catalogReviewApi';
 import { CatalogReviewApplied } from './CatalogReviewApplied';
 import { capturedCatalogReview, catalogReview, reviewJson, session, slotTwo, viewer } from './catalogReviewFixtures.testSupport';
-import { reviewAfterLookup, reviewLookupResponse } from './catalogReviewLookupFixtures.testSupport';
+import { longAlbumReview, reviewAfterLookup, reviewLookupResponse } from './catalogReviewLookupFixtures.testSupport';
 
 /**
  * An applied Album completion's outcome view: how many fields were updated with a compact row per affected Track and Album value,
@@ -77,4 +77,20 @@ test('an apply that wrote only track Artists says so', async () => {
   expect(screen.getByText('Only track Artists were updated.')).toBeVisible();
   expect(screen.queryByRole('listitem')).not.toBeInTheDocument();
   expect(screen.queryByText('Track Artist changes, if any, are not in this list; check them on the original Album\'s tracks.')).not.toBeInTheDocument();
+});
+
+test('on a 44-track Album the numbers and titles written are one line each, as the confirmation grouped them', async () => {
+  const long = longAlbumReview();
+  long.draft.tracks = long.draft.tracks.map((track, index) => ({ ...track, discNumber: index < 15 ? 1 : index < 30 ? 2 : 3, trackNumber: index < 15 ? index + 1 : index < 30 ? index - 14 : index - 29,
+    title: track.title.replace(/^\d\.\d\d\./, '') }));
+  const written: ReviewField[] = long.draft.tracks.flatMap(track => (['discNumber', 'trackNumber', 'title'] as const).map(field => ({ scope: 'track' as const, slotId: track.slotId, field })));
+  mount(applied(long, written), { ...reviewLookupResponse(), lookup: null });
+  expect(screen.getByRole('heading', { name: '132 fields updated' })).toBeVisible();
+  expect(within(screen.getAllByRole('list')[0]).getAllByRole('listitem').map(item => item.textContent))
+    .toEqual(['Disc and Track Numbers of 44 tracks updated', 'Titles of 44 tracks updated']);
+  // Behind the disclosure, each field written, a track by its new title.
+  const all = screen.getByText('What was updated').closest('details')!;
+  expect(within(all).getAllByRole('listitem')).toHaveLength(132);
+  expect(within(all).getAllByRole('listitem')[2]).toHaveTextContent('"Synthetic long song 1" · Title');
+  expect(await screen.findByText('The edition remains unconfirmed.')).toBeVisible();
 });

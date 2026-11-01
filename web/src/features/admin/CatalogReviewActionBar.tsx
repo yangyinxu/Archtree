@@ -66,13 +66,14 @@ export function CatalogReviewActionBar({ item, command, choices, proposed, shown
   const input: CatalogReviewPrepareInput = { id: item.id, command, item, model: saved.model, reads: saved.reads, refetch, revision, changes, onChoices,
     intended: () => edited.model.items.filter(entry => entry.selected).map(entry => entry.key) };
   const lookup = (saved.reads[0]?.data as { lookup?: { state: string; candidates: unknown[] } | null } | undefined)?.lookup;
-  // The bar element mounted (the placeholder while the state machine loads, then the bar itself): while one is shown, the page's
-  // bottom scroll padding follows its height, so a focused field scrolls clear of it.
+  // The bar element mounted (the placeholder while the state machine loads, then the bar itself): while one is shown, the bottom
+  // scroll padding of the page's scroll container (the shell's main element, else the document) follows its height, with room for
+  // a focus outline, so a focused field and its outline scroll clear of it.
   const [bar, setBar] = useState<HTMLDivElement | null>(null);
   useEffect(() => {
     if (!bar) return;
-    const root = document.documentElement, before = root.style.scrollPaddingBottom;
-    const pad = () => { root.style.scrollPaddingBottom = `${bar.offsetHeight}px`; };
+    const root = bar.closest<HTMLElement>('main') ?? document.documentElement, before = root.style.scrollPaddingBottom;
+    const pad = () => { root.style.scrollPaddingBottom = `${bar.offsetHeight + 12}px`; };
     pad();
     const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(pad);
     observer?.observe(bar);

@@ -78,7 +78,10 @@
 .barActions>* { min-height:2.75rem; }
 .compact { list-style:none;margin:.75rem 0;padding:0; }
 .compact li { display:flex;flex-wrap:wrap;justify-content:space-between;gap:.2rem 1rem;border-bottom:1px solid var(--color-border);padding:.55rem 0;overflow-wrap:anywhere; }
+/* The review header (CatalogReviewHeader.tsx): a compact Album hero, its cover beside the title at every width, so the lookup status stays in the first screen above the bar. */
+header.reviewHero { align-items:center;grid-template-columns:10rem minmax(0,1fr);min-height:auto;padding-block:1.25rem; }
 @media(max-width:767px) {
+header.reviewHero { gap:.9rem;grid-template-columns:4.5rem minmax(0,1fr);padding-block:1rem; }
 .page { padding:1rem 1rem 2rem; }
 .barHeading { display:none; }
 .barActions { flex:1 1 100%; }

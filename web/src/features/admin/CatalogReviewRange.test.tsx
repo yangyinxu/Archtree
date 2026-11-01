@@ -6,6 +6,7 @@
  *   - a held item is a disabled box with its reason, and members the selected numbers would leave at one position are named
  *   - choices survive a save: a deselected proposal stays deselected and unsaved, and the saved proposals stay selected
  *   - a stored number that disagreed with its title, corrected and saved, lets the proposal the table shows arrive selected, its cleaned titles too
+ *   - on a 44-track Album on three discs the numbers are grouped per disc, each counting its own selection, and the cleaned titles in one group, a title held with its numbers
  *   - a review captured for lookup
  *     - it lists every change with its default: review-only items and lookup-filled values selected, a conflict held, the member line and the identities it owns
  *     - a member line lists removed Credits
@@ -22,9 +23,9 @@ import type { CatalogReview, ReviewDraft } from './catalogReviewApi';
 import { memberKey, reviewApplyModel, type ApplyChoice } from './catalogReviewApplyModel';
 import type { ReviewEditorDerived, ReviewEdits } from './catalogReviewEdits';
 import { capturedCatalogReview, catalogReview, reviewJson, session, slotId, slotTwo, viewer } from './catalogReviewFixtures.testSupport';
-import { guestHandle, leadHandle, reviewAfterLookup, reviewIdentityResponse, reviewLookupResponse } from './catalogReviewLookupFixtures.testSupport';
+import { guestHandle, leadHandle, longAlbumReview, reviewAfterLookup, reviewIdentityResponse, reviewLookupResponse } from './catalogReviewLookupFixtures.testSupport';
 import type { ReviewIdentityResponse, ReviewLookupResponse } from './catalogReviewLookupApi';
-import { reviewEditor } from './catalogReviewProposal';
+import { reviewEditor, titleCleanup } from './catalogReviewProposal';
 import { CatalogReviewRange } from './CatalogReviewRange';
 
 /**
@@ -151,6 +152,33 @@ test('a stored number that disagreed with its title, corrected and saved, lets t
   expect(item(/^Title · 1-01 Synthetic first/)).toBeChecked();
   expect(item(/^Title · 1-02 Synthetic second/)).toBeChecked();
   expect(range().querySelector('summary')).toHaveTextContent('This update · 4 selected');
+});
+
+test('on a 44-track Album on three discs the numbers are grouped per disc, each counting its own selection, and the cleaned titles in one group, a title held with its numbers', () => {
+  // The long Album, not captured for lookup, so the range reads nothing; its cleaned titles are the edits the cleanup writes.
+  const long = longAlbumReview(); delete (long.draft.album as Partial<CatalogReview['draft']['album']>).expectedTracklist;
+  const titles = titleCleanup(reviewEditor(long.source, long.draft, {}).proposal, long.draft.tracks);
+  const { range, open } = mount(long, { tracks: Object.fromEntries(Object.entries(titles).map(([slot, title]) => [slot, { title }])) });
+  expect(range().querySelector('summary')).toHaveTextContent('This update · 132 selected · Adjust the range');
+  open();
+  const discs = [1, 2, 3].map(disc => `Disc and Track Numbers · disc ${disc}`);
+  expect(screen.getAllByRole('region').map(region => region.getAttribute('aria-label'))).toEqual([...discs, 'Track titles · 44 tracks']);
+  for (const [name, total] of [[discs[0], 30], [discs[1], 30], [discs[2], 28], ['Track titles · 44 tracks', 44]] as const) {
+    expect([group(name).checked, group(name).indeterminate]).toEqual([true, false]);
+    expect(within(screen.getByRole('region', { name })).getByText(`${total} of ${total} selected`)).toBeVisible();
+  }
+  // A track on disc 2 is listed under its disc; deselecting its number mixes that disc's group only.
+  const number = item(/^Track number · 2\.05\.Synthetic long song 20/);
+  expect(within(screen.getByRole('region', { name: discs[1] })).getAllByRole('checkbox')).toContain(number);
+  fireEvent.click(number);
+  expect([group(discs[1]).checked, group(discs[1]).indeterminate]).toEqual([false, true]);
+  expect([group(discs[0]).indeterminate, group(discs[2]).indeterminate]).toEqual([false, false]);
+  expect(within(screen.getByRole('region', { name: discs[1] })).getByText('29 of 30 selected')).toBeVisible();
+  // Its cleaned title can be applied only with its numbers, so it is held too.
+  const title = item(/^Title · 2\.05\.Synthetic long song 20\b/);
+  expect(title).toBeDisabled(); expect(title).not.toBeChecked();
+  expect(title).toHaveAccessibleDescription(/Disc and Track Number/);
+  expect(range().querySelector('summary')).toHaveTextContent('This update · 130 selected');
 });
 
 describe('a review captured for lookup', () => {

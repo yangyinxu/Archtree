@@ -9,7 +9,7 @@ import { catalogReview, reviewId, reviewJson, session, viewer } from './catalogR
 /**
  * The page's bottom scroll padding follows the action bar actually shown: the placeholder while the prepare state machine's chunk
  * loads (slowly, as on a first visit), then the bar itself, whose later growth (an alert, a wrapped reason) keeps a focused field
- * clear of it. All names and identifiers are synthetic.
+ * clear of it, with 12px more for a focus outline. All names and identifiers are synthetic.
  */
 const chunk = vi.hoisted(() => { let release = () => {}; const gate = new Promise<void>(resolve => { release = resolve; }); return { gate, release }; });
 vi.mock('./CatalogReviewPrepareControl', async importOriginal => { await chunk.gate; return importOriginal(); });
@@ -48,7 +48,25 @@ test('with a slow state-machine chunk, the scroll padding follows the placeholde
   await waitFor(() => expect(Observer.all.filter(observer => observer.observed.size > 0).map(observer => [...observer.observed])).toEqual([[bar]]));
   Object.defineProperty(bar, 'offsetHeight', { configurable: true, value: 132 });
   act(() => Observer.all.find(observer => observer.observed.has(bar))!.report());
-  expect(document.documentElement.style.scrollPaddingBottom).toBe('132px');
+  expect(document.documentElement.style.scrollPaddingBottom).toBe('144px');
   cleanup();
   expect(document.documentElement.style.scrollPaddingBottom).toBe('');
+});
+
+test('inside the shell, the padding goes on its main element, the container that scrolls, and the document keeps none', async () => {
+  const item = catalogReview();
+  vi.stubGlobal('fetch', vi.fn(async () => reviewJson({ item, receipt: null })));
+  chunk.release();
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } }); client.setQueryData(['browser-session'], session);
+  render(<QueryClientProvider client={client}><MemoryRouter initialEntries={[`/admin/catalog-reviews/${reviewId}`]}><main data-testid="shell-main"><Routes>
+    <Route path="/admin/catalog-reviews/:reviewId" element={<AdminCatalogReviewPage />} /></Routes></main></MemoryRouter></QueryClientProvider>);
+  const bar = await screen.findByRole('region', { name: 'Current step' });
+  await waitFor(() => expect(Observer.all.filter(observer => observer.observed.size > 0).map(observer => [...observer.observed])).toEqual([[bar]]));
+  Object.defineProperty(bar, 'offsetHeight', { configurable: true, value: 88 });
+  act(() => Observer.all.find(observer => observer.observed.has(bar))!.report());
+  const main = screen.getByTestId('shell-main');
+  expect(main.style.scrollPaddingBottom).toBe('100px');
+  expect(document.documentElement.style.scrollPaddingBottom).toBe('');
+  cleanup();
+  expect(main.style.scrollPaddingBottom).toBe('');
 });

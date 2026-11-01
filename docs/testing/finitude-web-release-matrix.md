@@ -147,17 +147,20 @@ run, and an emptied field sends no Artist, with an axe scan and no overflow at
 The catalog reviews spec checks that an existing-Album review shows the Album's
 Artist Credits and label read-only, saves a Disc Number change as one per-value
 change (never sending Credits, the label or visibility) and applies it, that its
-Luna button reads Use Luna AI (paid) and opens a confirmation titled as a paid
-AI service, and that a Luna label suggestion shows only as an identity hint that
+Luna button reads Use Luna AI (paid) and opens an inline confirmation titled as
+a paid AI service, and that a Luna label suggestion shows only as an identity hint that
 Keep current rejects. Another shows an Album's expected tracklist with its rows
 without a file, the members outside it and the note for an Album without a
 primary Artist Credit at 1280 px in English and 390 px in Chinese with an axe
 scan. Its open clear confirmation turns stale when the Album changes elsewhere,
 and after the page rereads the Album and its tracks, one confirmed request
 clears it at the newer revision, after which the Tracks section returns to the
-plain Album order. An existing-Album review opens on its metadata lookup
-summary, whose Look up button is in the first screen above the paid Luna AI
-button, also for 100 tracks. At 1280 px in English and 390 px in Chinese it
+plain Album order. An existing-Album review leads, under its compact header,
+with its metadata lookup summary: the summary's status is in the first screen
+and ends above the sticky action bar, Look up comes before the numbers proposed
+from titles and the draft editor, and the paid Luna AI button follows them all
+without the action bar primary's style, also for 100 tracks at 1280 and 390 px.
+At 1280 px in English and 390 px in Chinese it
 looks up the Album by its prefilled saved title, shows the run queued and then
 applied after the review detail is read again, answers one conflict with Keep
 current and the rest, a track's Artists included, with Use all MusicBrainz in
@@ -191,8 +194,8 @@ review page names the catalog Album in its confirmation (Cancel focused, axe
 scan) and returns to the Album page, whose action then creates a new
 completion; on the workbench it removes the card. An existing-Album review at
 1280 px looks up a typed name with a typed Artist in one request carrying both,
-shows both again in the box of the queued run, keeps Look up in the first
-screen and shows the Artist hint; and at 1280 px in English and 390 px in
+shows both again in the box of the queued run, keeps the lookup status in the
+first screen with Look up before the proposed numbers and shows the Artist hint; and at 1280 px in English and 390 px in
 Chinese its tie chooser marks only the release a track-title search found first
 as Found through a track title, as does the opened folded list of every release
 found, without sending anything; each with an axe scan and no overflow.
@@ -201,8 +204,9 @@ or Track Numbers whose titles start with 1-01 and 1-02, two editions of one
 release they fit in more than one way, and ten releases they do not fit, with a
 partial comparison), shows at 1280 px in English and 390 px in Chinese the
 possible-pairing status, naming no paid step, with no button of the summary
-styled as the primary one, in the first screen; Possible match (1
-release) open with one card naming both editions, the reason that the tracks fit
+styled as the primary one, in the first screen above the action bar; the
+Reference releases disclosure (2 possible editions) open, with Possible match (1
+release) open in it with one card naming both editions, the reason that the tracks fit
 in more than one way, no missing-file row count and, on the card face, no line
 that choosing brings in no expected tracklist, which Other options says beside
 Use Album values only, and the fill hint beside Pair tracks by hand, the two
@@ -240,7 +244,9 @@ the track's title) with the time in the interface language, a note that the
 sixth change, a track Artist, is not in the list, that the edition was
 matched, no checkbox and no Update original Album, and no Luna AI line, as Luna
 AI never ran. After a manual completion with Luna AI is applied, What was
-updated lists the one field written and the Luna AI line reads closed. After the
+updated lists the one field written and the Luna AI line reads closed; opened
+again from the queue, the applied view keeps the focus where it was and the
+action bar's only link opens the original Album. After the
 last lookup answer and identity decision, the lookup results fold under Lookup
 results and applied values, which opens on request. The Album page's
 open-completion note, when the eligibility read carries the open completion's
@@ -315,6 +321,55 @@ Album values only, leaving nothing open, and the choice after it fails, the
 lookup results stay open under the panel, whose status, saved numbers and Use
 this release stay visible with focus in the panel. Each with an axe scan and no
 overflow, also at 320 px.
+
+The redesigned review page's own flows run against the same mocked server. A
+44-track Album on three discs whose titles run from 1.01. to 3.14. (every
+number empty, a gap before 2.06.) shows, at 1280 px in English and 390 px in
+Chinese, one line summing up 44 tracks, 3 discs and the numbers from 1.01 to
+3.14, only the gap's flagged row open with its note and proposed numbers, then
+one closed disclosure per disc (15, 14 and 14 tracks) whose folded inputs keep
+their values, and Update original Album (88); the optional cleanup chooses the
+44 cleaned titles (132) without opening the folded rows, and the update range
+groups the numbers by disc (30, 30 and 28 selected) before the 44 titles. On a
+screen 400 px high, where the confirmation is taller than the room above the
+bar, the first press saves the 132 values in one review save and the
+confirmation shows its top, focused on Back to adjust, with the two grouped
+lines (Fill the Disc and Track Numbers of 44 tracks, Change the titles of 44
+tracks) and Full original / new values · 132; the second press applies the 132
+fields, and the applied view, focused, says the same two lines in the past
+tense, that the edition remains unconfirmed and offers only the original
+Album. With the keyboard alone at 1280 px, Tab from the banner reaches Update
+original Album (4) with every stop in the page clear of the bar; Enter opens
+the confirmation focused on Back to adjust, Tab reaches Confirm update (4) and
+Enter applies, focusing the applied view's heading, after one save and one
+apply. At 390 px, with lookup queued and Luna AI running, the bar's wait reason
+wraps and the main area's bottom scroll padding is the bar's height plus 12 px;
+a field near the end of the draft editor focused from the top of the page ends
+above the bar; a refused save-only adds the bar's alert (said once on the
+page), the padding follows the taller bar and the same field still ends above
+it. A save refused because another administrator saved first says the conflict
+once, as the bar's alert, while the editing section keeps only its button to
+load the saved version, which ends the refusal; an apply then refused for a
+reload says so once, at the top of the page above the lookup summary with
+Reload page, never in the bar. An apply whose response is lost after the server
+applied it shows, at 1280 px in English and 390 px in Chinese, the unknown view
+focused on its heading with its note that checking never updates twice and the
+bar's Check the result of this update and Retry the same operation, nothing
+said as updated; reopened from the workbench with Back, it returns without
+taking the focus, and checking replays the same operation's receipt (two apply
+requests with one body) and shows the applied view. An apply lost before it
+reached the server stays unconfirmed after a check, with the note that the same
+operation may be sent again; once the Album changes, Refresh status leads to
+the stale view with no check or retry, the bar's View the latest original
+Album and no checkbox, where Discard completion stays enabled and returns to
+the Album page with no second apply. Retry the same operation after a lost
+apply sends the identical request once more and shows the applied view.
+Multiple manual changes at 390 px open the confirmation scrolled into view, its
+summary and first compact row above the bar; at 640 px its summary is likewise
+in view above the bar. An open confirmation whose saved draft another
+administrator changed waits with its reason, and pressing it anyway applies
+nothing. Each of the editing, confirmation, unknown and stale states passes an
+axe scan with no overflow at 1280 px in English and 390 px in Chinese.
 
 The historical 2026-08-19 MediaTrack amendment passed
 304/304 server tests, 214/214 Web unit/component tests, 148/148 integration
@@ -847,6 +902,20 @@ player control still works.
   Chinese (元数据查找, 查找需处理, 先等待免费结果, 发行版本仍未确认。, 厂牌) and with
   a screen reader at 320 CSS px, confirming the status is announced once and
   not on each refresh.
+- As an administrator, open the Album completion of an Album of 25 or more
+  tracks on several discs whose titles start with 1.01., 1.02. and so on.
+  Confirm the proposal sums up the tracks, discs and numbers in one line, keeps
+  flagged rows open and folds the others per disc; that the update range groups
+  the numbers by disc; and that Update original Album (N), then Confirm update
+  (N), updates it in two presses through a confirmation of grouped lines that
+  shows its top on a short window. Using only the keyboard, confirm every focused
+  field and button stays visible above the bottom action bar, also after a
+  refused save adds its alert to the bar. Interrupt the network while confirming
+  and confirm the page says the result is not confirmed yet, never that the
+  Album was updated, and that Check the result of this update ("查询这次更新的结果")
+  then shows the applied view without updating twice. Repeat in Simplified
+  Chinese (更新原专辑（N 项）, 确认更新（N 项）, 重试准备确认, 不会重复更新) and with a
+  screen reader at 320 CSS px.
 - As an administrator, with metadata lookup configured against MusicBrainz in a
   development environment, open the Album completion of an Album whose tracks
   have exact durations but no Disc or Track Numbers, whose track titles start

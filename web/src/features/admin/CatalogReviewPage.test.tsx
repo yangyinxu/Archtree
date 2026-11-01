@@ -39,7 +39,7 @@
  *   - a captured review saves only changed editable values, never its expected tracklist or member Artist entries
  *   - each save is based on the draft the last save stored, so a second save sends the first saved value as its base
  *   - an edit changed back to the saved value leaves nothing to save
- *   - a save refused because another administrator changed the value reloads the saved review and offers it
+ *   - a save refused because another administrator changed the value reloads the saved review and offers it, which ends the refusal
  *   - metadata lookup comes first: its controls precede the paid Luna AI button, which is never primary, and Luna AI suggestions arrive unticked
  *   - a failed Luna AI run is one quiet line under Other actions while the lookup asks for numbers, which the proposal table holds
  *   - an applied review shows no lookup summary and never reads it
@@ -985,7 +985,7 @@ test('an edit changed back to the saved value leaves nothing to save', async () 
   expect(writes).toEqual([]);
 });
 
-test('a save refused because another administrator changed the value reloads the saved review and offers it', async () => {
+test('a save refused because another administrator changed the value reloads the saved review and offers it, which ends the refusal', async () => {
   let item = catalogReview(); const writes: string[] = [];
   vi.stubGlobal('fetch', vi.fn(async (path: string, init: RequestInit) => {
     if (init.method === 'PATCH') {
@@ -1004,9 +1004,14 @@ test('a save refused because another administrator changed the value reloads the
   expect(screen.getByRole('textbox', { name: 'Title' })).toHaveValue('My stale correction');
   // The refusal is an alert at the bar, once; the save-only button stays, as the last save-only attempt failed.
   expect(screen.getByText(/^The draft was not saved; your changes are kept\./)).toBeVisible();
+  expect(screen.getByRole('button', { name: 'Save draft only' })).toBeVisible();
+  // Loading the saved version drops the stale correction, so the refusal no longer stands: its alert goes, and with nothing left
+  // to save, so does the save-only button.
   fireEvent.click(screen.getByRole('button', { name: 'Discard local edits and load saved version' }));
   expect(screen.getByRole('textbox', { name: 'Title' })).toHaveValue('Another administrator title');
-  expect(screen.getByRole('button', { name: 'Save draft only' })).toBeDisabled();
+  await waitFor(() => expect(screen.queryByText(/^The draft was not saved/)).not.toBeInTheDocument());
+  expect(screen.queryByRole('button', { name: 'Save draft only' })).not.toBeInTheDocument();
+  expect(writes).toHaveLength(1);
 });
 
 /**
