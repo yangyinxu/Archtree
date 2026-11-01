@@ -6,9 +6,9 @@
  *              importAppendedTrackCredits, assertImportReusedRecordsReady, commitImportCatalogGraph
  * Internal
  *   Types: CommitGraph, LegacyValues
- *   Functions: reviewRequired, stale, oid, date, storedSimpleDate, albumPrimaryIds, decided, exactHolder,
- *              idWrite, validIdWrite, frozenIdentities, legacyCommitValues, draftV2CommitValues, legacyCredits,
- *              newArtist, legacyGraph, approvedGraph
+ *   Functions: reviewRequired, stale, oid, date, storedSimpleDate, decided, exactHolder, idWrite, validIdWrite,
+ *              frozenIdentities, legacyCommitValues, draftV2CommitValues, legacyCredits, newArtist,
+ *              legacyGraph, approvedGraph
  *   Constants: conflict
  * @end-catalog */
 
@@ -22,7 +22,7 @@
 import { ObjectId, type ClientSession } from 'mongodb';
 import { getDatabaseClient, getDb } from '../../infrastructure/database';
 import { catalogSearchProjection } from '../../utils/catalogSearch';
-import { inheritedAlbumPrimaryCredits, legacyAlbumArtistIdsFromCredits, legacyTrackArtistIdsFromCredits, normalizeCatalogCredits, normalizeStoredCatalogCredits, validateAttribution, type CatalogCredit } from '../../models/catalogCredit';
+import { inheritedAlbumPrimaryCredits, legacyTrackArtistIdsFromCredits, normalizeCatalogCredits, validateAttribution, type CatalogCredit } from '../../models/catalogCredit';
 import { requireCatalogCreditWrites } from '../../config/catalogCreditRollout';
 import { readyArtistLifecycleFilter, touchReadyArtistReferences } from '../../services/catalog/artistReferenceFenceService';
 import { readyAlbumLifecycleFilter, touchReadyAlbumReferences } from '../../services/catalog/albumReferenceFenceService';
@@ -36,6 +36,7 @@ import { isMusicBrainzIdDuplicateKey, keepableMusicBrainzId } from '../../utils/
 import { musicBrainzIdWriteFor } from './adminImportMusicBrainzIds';
 import { importCandidateProjection, importCandidateRevision, importCollection, importPurposeFilter, touchImportAdmin, type AdminImportDocument } from './adminImportService';
 import { assertImportPreselectionsCurrent, serializeImportIdentityCommits } from './adminImportIdentity';
+import { importAlbumPrimaryIds } from './adminImportAlbumTarget';
 import { importPrivateStorageReady, importPublicationFormat, type ImportMusicBrainzIdWriteFrozen, type ImportPublication, type ImportPublicationArtist, type ImportPublicationLabel } from './adminImportMediaTypes';
 import { boundArtistDecision, boundLabelDecision, type ImportArtistEntry, type ImportDecisionV2, type ImportDraftV2 } from './adminImportDraft';
 import { newArtistRecord, newLabelOrganizationRecord } from '../catalog/adminNewCatalogRecords';
@@ -65,8 +66,6 @@ const storedSimpleDate = (value: unknown) => {
     const validYear = part(year, 9999), validMonth = part(month, 12);
     return validYear === null ? {} : date({ year: validYear, month: validMonth, day: validMonth === null ? null : part(day, 31) });
 };
-/** The ordered primary Artist IDs of stored Album Credits, or null when the stored list cannot be read. */
-const albumPrimaryIds = (credits: unknown): string[] | null => { try { return legacyAlbumArtistIdsFromCredits(normalizeStoredCatalogCredits(credits)); } catch { return null; } };
 const decided = (decision: ImportDecisionV2 | undefined): decision is ImportDecisionV2 => decision?.action === 'reuse' || decision?.action === 'replace' || decision?.action === 'create-distinct';
 /** The ready record of `kind` holding `id` among the review's candidates (null without candidates or an ID). */
 const exactHolder = (candidates: ImportCandidatesResponse | undefined, kind: 'artist' | 'organization', id: string | null) =>
@@ -91,7 +90,7 @@ export async function freezeImportIdentities(draft: ImportDraftV2, decisions: re
     candidates?: ImportCandidatesResponse): Promise<ImportApprovedIdentities> {
     const db = getDb()!; const artists: ImportPublicationArtist[] = []; let label: ImportPublicationLabel | null = null;
     if (targetAlbum) {
-        const primaries = albumPrimaryIds(targetAlbum.credits);
+        const primaries = importAlbumPrimaryIds(targetAlbum.credits);
         if (!primaries?.length) throw new AdminImportError(409, 'ADMIN_IMPORT_APPEND_PRIMARY_REQUIRED');
         if (await db.collection('artists').countDocuments({ _id: { $in: primaries.map(oid) }, ...readyArtistLifecycleFilter }, { session }) !== primaries.length) throw stale();
         artists.push(...primaries.map(artistId => ({ entryKey: null, artistId, newArtist: false, candidateRevision: null })));
@@ -266,7 +265,7 @@ async function approvedGraph(publication: ImportPublication, doc: AdminImportDoc
     const trackCredits = new Map<string, CatalogCredit[]>();
     let albumCredits: CatalogCredit[] = [];
     if (existingAlbum) {
-        const primaries = albumPrimaryIds(existingAlbum.credits);
+        const primaries = importAlbumPrimaryIds(existingAlbum.credits);
         if (label || !primaries?.length || reused.length !== artists.length || primaries.length !== artists.length || primaries.some((id, index) => artists[index].artistId !== id || artists[index].entryKey !== null)) throw conflict();
         try { for (const track of publication.tracks) if (!track.reused) trackCredits.set(track.id, importAppendedTrackCredits(track.id, existingAlbum.credits)); } catch { throw conflict(); }
     } else {
@@ -279,7 +278,7 @@ async function approvedGraph(publication: ImportPublication, doc: AdminImportDoc
         const credits = importNewAlbumTrackCredits(albumCredits);
         for (const track of publication.tracks) trackCredits.set(track.id, credits);
     }
-    await assertImportPreselectionsCurrent(publication, { manifest: doc.manifest, assets: doc.media?.assets ?? [] }, session);
+    await assertImportPreselectionsCurrent(publication, { manifest: doc.manifest, assets: doc.media?.assets ?? [], albumTarget: doc.createdForAlbumId ?? null }, session);
     await serializeImportIdentityCommits(session);
     if (existingAlbum) await touchReadyAlbumReferences([publication.albumId], session);
     if (reused.length) await touchReadyArtistReferences(reused.map(artist => artist.artistId), session);

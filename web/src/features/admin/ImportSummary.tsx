@@ -76,9 +76,10 @@ export function ImportSummary({ item, operation, uploads, disabled, publishDisab
     return scope === 'album' ? name : t('summary.track_field', { position: item.draft.tracks.findIndex(track => track.slotId === slot) + 1, field: name });
   };
   const role = (value: string) => shared(`catalog.credit.${value}` as MessageKey);
-  // The status and whether the free retry is offered (lookupNextStep); Luna AI is never a next step.
+  // The status and whether the free retry is offered (lookupNextStep); Luna AI is never a next step. An import created for an
+  // Album runs no automatic lookup, so it never says lookup waits for uploads.
   const applied = lookup?.applied, tie = Boolean(lookup?.needsAnswer.tie), available = summary?.lookupAvailable !== false;
-  const { status, retry: retryOffered } = lookupNextStep(lookup, { available, uploadsWaiting: Boolean(summary?.waiting.uploads) });
+  const { status, retry: retryOffered } = lookupNextStep(lookup, { available, uploadsWaiting: Boolean(summary?.waiting.uploads) && !summary?.forAlbum });
   const release = lookup?.candidates.find(candidate => candidate.key === applied?.candidateKey)?.title ?? '—';
   // The server refuses Luna AI while the publication is locked or its cancelled approval still has cleanup pending.
   const locked = ['preparing', 'needsAttention', 'complete'].includes(item.publication), cleanupPending = item.publication === 'cancelled' && Boolean(item.publicationRecovery?.cleanupPending);
@@ -126,7 +127,7 @@ export function ImportSummary({ item, operation, uploads, disabled, publishDisab
       {tracklist && <Suspense fallback={null}><ImportExpectedRows heading tracklist={tracklist} filenames={item.manifest.files}
         tracks={draft.tracks.filter(track => tracklist.files.find(file => file.slotId === track.slotId)?.appended)}
         numbering={{ saved: item.draft, disabled: disabled || locked || data.revision !== item.revision || data.valueRevision !== item.valueRevision,
-          onSave: changes => operation.run(path, 'PATCH', { expectedRevision: item.revision, changes }) }} /></Suspense>}
+          next: Boolean(data.summary.forAlbum) && !waiting.includes('uploads'), onSave: changes => operation.run(path, 'PATCH', { expectedRevision: item.revision, changes }) }} /></Suspense>}
       {/* Luna AI is a paid, secondary alternative after every lookup control (retry, name box, chooser, conflict answers), in every
           lookup state; it is never the next step or the primary action. */}
       <div className={styles.actions}><button type="button" className={styles.button} disabled={disabled || !luna} onClick={() => setAnalyzing(true)}>{t('lookup.luna')}</button></div>

@@ -1723,7 +1723,17 @@ The wire protocol and operational bounds are documented in
   Leaving Admin view, losing the role, or a publication that locks the import's
   sources stops the queue after the current file, and navigation never restarts
   it. Files chosen without a folder need no typed folder name, and no folder
-  name is then sent to Luna or metadata lookup.
+  name is then sent to Luna or metadata lookup. An administrator may also create
+  an import for an existing Album from its Web Album page, which offers this
+  only while the Album has a primary Artist Credit. Its Album decision is then
+  reuse of that Album, an append, saved as if the administrator had chosen it,
+  so it needs no answer while it stays valid, and its draft starts with that
+  Album's title; creating it is refused, naming the reason, when that Album
+  could not be appended to, such as when it is not ready, has no primary Artist
+  Credit or credits a primary Artist that is not ready. An import created for
+  an Album, and any import whose Album decision is reuse, shows that Album as an
+  Album candidate whatever the draft's title, so a reuse that became stale can
+  be chosen again.
 - The import draft holds the Album title, ordered Artist entries, an optional
   label, the release date and visibility, and each track's title, Disc Number
   and Track Number. Each Artist entry has a name, a role of primary or
@@ -1974,7 +1984,10 @@ The wire protocol and operational bounds are documented in
   do not constrain the pairing and are replaced. Each file that every largest
   such pairing places at the same row takes that row's Disc and Track Number
   and, when its title is empty or automatic, the row's title, as the
-  administrator's own values; other files keep their values.
+  administrator's own values; other files keep their values. For an import
+  created for an Album with a missing-file row, numbering the files from the
+  expected tracklist is the summary's next step once every upload is confirmed;
+  it still waits for the administrator.
 - An existing-catalog cover approval copies a ready private image: one chosen
   from an import project or, on the Web detail page of an Album, Artist or
   MediaTrack, one the administrator uploads from their computer; Organizations
@@ -2021,12 +2034,13 @@ The wire protocol and operational bounds are documented in
   the selected folder's name, when there is one, which the name box shows for
   editing. Typing, saving and navigation never run metadata lookup, and
   reopening a project runs it only when its reconciliation confirms the last
-  selected upload. An existing-Album review looks up its Album: it runs
-  automatically once when a review is created where lookup is available, from
-  the Album's saved title and the names of its primary Artist Credits and,
-  when needed, its saved Track titles as described below, and runs when the
-  administrator submits an Album or song name, optionally with an Artist name,
-  or retries. iOS and Android do not offer metadata lookup.
+  selected upload. An import created for an Album runs no automatic lookup at
+  all; its name box remains available. An existing-Album review looks up its
+  Album: it runs automatically once when a review is created where lookup is
+  available, from the Album's saved title and the names of its primary Artist
+  Credits and, when needed, its saved Track titles as described below, and runs
+  when the administrator submits an Album or song name, optionally with an
+  Artist name, or retries. iOS and Android do not offer metadata lookup.
 - Metadata lookup accepts names, not links. The server queries only fixed,
   server-chosen services and never fetches an administrator-supplied URL. It
   sends only the submitted text and any submitted Artist name, cleaned tag
@@ -2309,11 +2323,11 @@ The wire protocol and operational bounds are documented in
   grant stores nothing and ends that lookup and its value application: the
   summary reports it as stopped, with a manual retry as the next step and Luna
   beside it, and Publish never waits for it. A changed file set runs one
-  automatic lookup again, within a small per-project limit, and replacing,
-  removing or reselecting a file marks its match evidence stale without
-  reverting values. Metadata lookup is independent of Luna generations: starting
-  or stopping Luna does not discard its results, and a lookup does not discard
-  Luna's.
+  automatic lookup again, within a small per-project limit, except in an import
+  created for an Album, and replacing, removing or reselecting a file marks its
+  match evidence stale without reverting values. Metadata lookup is independent
+  of Luna generations: starting or stopping Luna does not discard its results,
+  and a lookup does not discard Luna's.
 - A review's metadata lookup runs on the server under an expiring grant from
   the administrator's review creation, submission, manual retry or choice of a
   candidate, rechecks that administrator's role at every stored step, and binds

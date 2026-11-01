@@ -163,8 +163,14 @@ the Album is new (explicitly or preselected). Creating a distinct record, or
 reusing another one, instead of the record holding the entry's ID records no ID.
 Reusing a record that holds a different ID keeps that ID, and reusing it while
 replacing its ID with the entry's is a separate choice, offered while no
-listed record holds the entry's ID. When the Album row reuses an existing
-Album, a file whose verified bytes match exactly one member of that Album, which
+listed record holds the entry's ID. The Album row also offers the Album a saved
+reuse names and the Album the import was created for (summary `forAlbum`),
+whatever their titles and without a match kind, and a reuse or replace whose
+record changed since it was chosen reads as changed ("This record changed since
+you chose it. Choose it again below to keep it.", release-packaged `web-admin`
+copy), so choosing that record again saves its current revision. When
+the Album row reuses an existing Album, a file whose verified bytes match
+exactly one member of that Album, which
 no other file matches and no other decision reuses, is preselected to reuse it,
 and a file matching no member by bytes or title is preselected as a new member;
 a title-only match, ambiguous bytes or an incomplete member list
@@ -207,9 +213,12 @@ neither Publish nor Approve. The server decides what holds Publish; the
 summary only presents it:
 
 - **Status and next step.** Not run yet while uploads are awaited, not run
-  although every needed file is uploaded (its automatic trigger failed; the name
-  box next), looking up (queued or running), retrying (busy or unavailable, next
-  step the free **Retry lookup**), unavailable after the automatic retries (the
+  although every needed file is uploaded (its automatic trigger failed, or the
+  import was created for an Album, which runs no automatic lookup: it shows
+  this not-started status whenever it has no run, also while uploads are
+  awaited, never the waiting-for-uploads one; the name box next),
+  looking up (queued or running), retrying (busy or unavailable, next step the
+  free **Retry lookup**), unavailable after the automatic retries (the
   retry still next), not configured (no next step; the name box where this
   server can now run lookup), stopped (the retry next), superseded (the retry
   next), no release or nothing to look up (the name box next), no matching
@@ -307,7 +316,8 @@ summary only presents it:
   more second for a legacy whole-second duration (both known). Flags need no
   answer and never hold Publish. While `numbering` is not empty, **Number from
   the Album's expected tracklist** (an ordinary secondary button after the
-  flagged values and before Luna AI, never the next step) saves it as one
+  flagged values and before Luna AI, never the next step, except as below) saves
+  it as one
   `PATCH /imports/:id` field save of each proposed file's
   `tracks.<slotId>.discNumber`, `.trackNumber` and, where proposed, `.title`,
   with the saved values as `base`, so they become the administrator's own. It
@@ -315,7 +325,12 @@ summary only presents it:
   the publication is locked, and while the summary read is of another revision
   or automatic-write revision; a changed numbered value is
   `409 ADMIN_IMPORT_FIELD_CONFLICT`, after which the page reads the project and
-  the summary again, as for any field conflict.
+  the summary again, as for any field conflict. In an import created for an
+  Album (summary `forAlbum`), once no upload is waiting on the server or in this
+  browser and `numbering` is not empty, the button is the summary's next step:
+  it takes the primary style, under the line "Next step: number these files from
+  the Album's expected tracklist." (release-packaged `web-admin` copy, loaded in
+  its own Suspense boundary), and still saves only when clicked.
 - **Folded.** Every other row: title, Artist entries with roles and join
   phrases, label, date, visibility (changed in place by a field save, public by
   default), cover (one chosen automatically says so, and a lookup cover is
@@ -527,8 +542,9 @@ Import routes (relative to `/api/admin/v1`):
   `q` matches the folder label, the Album title and every Artist entry name, or
   the Artist name of a project still in format 1; a row's `artistName` is the
   first primary entry.
-- `POST /imports`: `{operationId, manifest, draft?}`; names and relative paths,
-  at most 100 files, never client S3 locations or absolute filesystem paths.
+- `POST /imports`: `{operationId, manifest, draft?, targetAlbumId?}`; names and
+  relative paths, at most 100 files, never client S3 locations or absolute
+  filesystem paths.
   `manifest.rootLabel` may be empty only when no `relativePath` contains a
   folder; Luna input then carries no folder name, and a suggestion citing
   folder evidence is rejected. Rolling back below this release keeps every
@@ -545,7 +561,45 @@ Import routes (relative to `/api/admin/v1`):
   `ADMIN_IMPORT_OPERATION_CONFLICT`. `draft` keeps the v1 shape and its frozen
   parser and fingerprint, so every earlier create receipt still replays; the
   new project is stored as Draft v2 (`draftVersion` 2), and a supplied v1
-  `draft` converts with every value the administrator's own.
+  `draft` converts with every value the administrator's own. An optional
+  `targetAlbumId` (24 lowercase hexadecimal digits, never with `draft`, else
+  `400 ADMIN_IMPORT_INVALID_INPUT`) creates the import for that Album. It enters
+  the create fingerprint only when present, so every earlier receipt and every
+  create without it replays unchanged, while a retry naming another target, or
+  dropping or adding one, is `409 ADMIN_IMPORT_OPERATION_CONFLICT`. Receipt
+  lookup comes first, so a replay returns the original project whatever the
+  Album has become, also while imports are disabled. Then, after admission
+  (`503 ADMIN_IMPORTS_DISABLED`), the target is checked as an append's is at
+  approval, and each refusal writes nothing: no ready Album with that ID, one
+  too malformed to be a candidate (an unclean saved title or a malformed
+  visibility), or one whose primary Artist Credits name an Artist that is not
+  ready is `409 ADMIN_IMPORT_TARGET_UNAVAILABLE`, an Album without a primary
+  Artist Credit is `409 ADMIN_IMPORT_APPEND_PRIMARY_REQUIRED`, and one listing
+  more than
+  `ADMIN_IMPORT_LIMITS.appendTargetMembers` (5000) member IDs is
+  `409 ADMIN_IMPORT_TARGET_TOO_LARGE`. Otherwise the same insert stores an
+  explicit Album decision `reuse` whose `candidateId` is that Album and whose
+  `candidateRevision` is its candidate revision read in that transaction, so the
+  import appends to it and its Album row needs no answer while that revision is
+  current; the draft's title starts as the Album's saved title, as the
+  administrator's own (left empty when the draft cannot hold it), since approval
+  needs a title even for an append. The server-only, never projected
+  `createdForAlbumId` records the Album; such an import never runs an automatic
+  metadata lookup (see [Triggers and grants](#triggers-and-grants)) and its
+  summary carries `forAlbum`, that Album's ID.
+- `GET /imports/album-targets/:albumId`: the create page's read of the Album an
+  import would add files to, also while imports are disabled:
+  `{albumId, refusal, album}`, where `refusal` is `null`, `unavailable` (no
+  ready Album), `unreadable` (a ready Album whose saved title or visibility
+  cannot be read), `primaryRequired`, `primaryNotReady` (a primary Artist that
+  is not ready) or `tooLarge`, as a targeted create would refuse, and `album` is
+  `null` exactly when `refusal` is `unavailable` or `unreadable`, else
+  `{title, primaryArtists, coverUrl, missingRows}`: the
+  cleaned saved title, the names of its ready primary
+  Artists in Credit order (at most 50), the private artwork URL
+  `/api/admin/v1/catalog/album/<id>/artwork` or `null`, and how many rows of a
+  valid stored expected tracklist no declared member fills (`null` without one
+  or over the member bound). A malformed ID is `400 ADMIN_IMPORT_INVALID_INPUT`.
 - `GET /imports/:id`: the private project with a Draft v2 `draft`. `album`
   holds `title`, `artists`, `label`, `releaseDate` and `visibility`, and each
   track holds `slotId`, `title`, `discNumber` and `trackNumber`. An Artist
@@ -781,8 +835,16 @@ Import routes (relative to `/api/admin/v1`):
   title is matched on its own, exactly and case-insensitively: at most 20
   ready Artists per name (kind `artist`), 20 ready Organizations of any type
   per label name (kind `organization`, `albumId` `null`) and 20 Albums per
-  title, beside at most 20 Track title candidates. Verified byte matches are
-  read on their own: for each staged file's hash, the first ready Track outside
+  title, beside at most 20 Track title candidates. The Album a saved Album
+  reuse names and the Album the import was created for (`createdForAlbumId`)
+  are also added, once each, when ready, not malformed and not already listed,
+  whatever their titles (`match: 'name'`), so a reuse whose revision is no
+  longer current, or that was replaced by another Album decision, can be chosen
+  again; preselections compare Album items by name only, so an Album listed by
+  ID under another title changes no preselection. Approval and the worker's
+  preselection recheck read the same candidates. Verified
+  byte matches are read on their own: for each staged file's hash, the first
+  ready Track outside
   the saved append target whose stored hash is bound to its current object, so
   at most 100, and no number of same-title Tracks hides one. Every ready Track
   on an Album candidate or on the saved append target whose verified bytes or
@@ -816,9 +878,11 @@ Import routes (relative to `/api/admin/v1`):
   MusicBrainz bridge](#itunes-fallback-and-musicbrainz-bridge)),
   one query adds up to 20 ready Artists named with another name of its group
   (`match: 'localizedName'`, `localizedOf` the name it was read for, upgrading
-  a row listed by name only, never one listed by ID or alias): at most 2561
-  items. Such a row blocks a preselected create of the entry or proposal with
-  that name; since a row is listed once, another name read whose localized
+  a row listed by name only, never one listed by ID or alias): at most 2563
+  items with the saved append target and the Album the import was created for.
+  Such a localized-name row blocks a
+  preselected create of the entry or proposal with that name; since a row is
+  listed once, another name read whose localized
   name it also is (a second entry of the same group, or a name beside the
   entry whose ID or alias lists it) is made `unavailable`, so its create is
   not preselected either. A label has no localized names. An Artist
@@ -1268,6 +1332,38 @@ fails that file before admission and stops the queue with a reload request and
 a Reload button beside the uploads; for other changes it shows that request and
 button on the refused action only.
 
+An Album page's **Add files to this Album** and **Upload missing files** open
+the create page as `/admin/imports/new?album=<id>`. It reads
+`GET /imports/album-targets/:albumId` and shows a Target Album card in place of
+the new-Album heading, above the file choosers: the cover, title and primary
+Artists and, when the Album keeps an expected tracklist and lists at most 5000
+members, how many rows have no file yet. The card says that the files become new
+tracks of that Album, whose own title, Artists, label, cover and visibility stay
+unchanged, and that metadata lookup does not run automatically for them.
+**Create import and upload files** then sends `targetAlbumId` with the manifest
+(never a draft), and the import that opens already appends to that Album. The
+choosers and Create stay disabled while the Album is read and when it cannot be
+used: a failed read offers a retry, and an Album the read does not find ready,
+one whose saved title or visibility cannot be read, one without a primary Artist
+Credit, one with a primary Artist that is not ready, or one over the member
+bound shows that reason in place of the card, with links back to the Album and
+to a new Album upload (which keeps the chosen files); a malformed `album` value
+reads as unavailable without a request, and a card chunk or copy that cannot
+load asks for a reload. A create refused as a conflict (any 409 without a
+message of its own, such as `ADMIN_IMPORT_TARGET_UNAVAILABLE` or
+`ADMIN_IMPORT_TARGET_TOO_LARGE`) or as `ADMIN_IMPORT_APPEND_PRIMARY_REQUIRED`
+reads the Album again; the card then names the reason, or, when the Album can
+still take files, says that it changed while the import was being created, in
+place of the generic refusal. The selected files, folder name and a pending
+create are the page's usual buffers, shared with the plain create page, and the
+page always shows what Create or Retry sends: while a create intent is pending,
+the page replaces itself with the page of that intent's target (the Album's, or
+the plain one), and files chosen for another target are dropped once no create
+is pending. The card and the Album page's two links are release-packaged
+`web-admin` copy (`admin.album_import.*`) in their own lazy chunks; the plain
+create page loads none of it. A link or the summary's next-step line whose copy
+cannot load is left out, and the page keeps working.
+
 The analysis worker admits two active projects globally and one per initiating
 admin, uses 24-hour grants and 120-second leases, and checkpoints every provider
 attempt before dispatch. A stopped analysis still occupies its actor/global slot
@@ -1304,9 +1400,14 @@ edits, catalog editing turned off, or the Album's ineligibility) is the
 buttons' accessible description, and a disabled completion button loses the
 accent so it never reads as the live action, as does every disabled primary
 button on the administrator pages (grey at full opacity), such as **Save pairing
-and use this release** while a track still needs a release track. **Convert to MP3** and **Refresh
-status** follow on a quieter row of their own, with fainter outlines, in the
-same keyboard order. On a single-column hero the completion buttons fill their
+and use this release** while a track still needs a release track. **Convert to
+MP3**, **Add files to this Album** (only while imports are available to the
+viewer and the saved Album has a primary Artist Credit, and, like Convert to
+MP3, hidden while the Album has unsaved edits or a save conflict; it opens New
+import for this Album) and **Refresh status** follow on a quieter row of their
+own, with
+fainter outlines, in the same keyboard order. On a single-column hero the
+completion buttons fill their
 row. The completion block keeps the primary button's place while its chunk and
 the eligibility read load, so the row below does not move, and the Album's copy
 is top-aligned with its cover, so rows the read adds only grow the hero
@@ -1593,10 +1694,10 @@ history entry, so browser Back returns to that page, which shows the Admin view
 gate as any User view visit does and never restarts a stopped upload queue.
 The catalog uses artwork/name entries for Albums, Artists, MediaTracks and
 Organizations, with management actions on their detail pages: the hero groups
-them, an Album's completion first, then Convert to MP3 (Albums and
-MediaTracks) and Refresh status on a quieter row, and the details form below
-the hero is where manual edits are made. The inventory
-loads separately from editing controls. Its optional `kind=artist`,
+them, an Album's completion first, then Convert to MP3 (Albums and MediaTracks),
+Add files to this Album (Albums) and Refresh status on a quieter row, and the
+details form below the hero is where manual edits are made. The inventory loads
+separately from editing controls. Its optional `kind=artist`,
 `kind=audioTrack` or `kind=organization` query parameter selects a category;
 missing or unsupported values select Albums. Detail return links retain that
 category. Organizations use a name mark, matching listener details, and do not
@@ -1628,10 +1729,13 @@ state. A summary names the source (MusicBrainz or iTunes, untranslated), the
 date it was applied in the viewer's locale and time zone, its row count and how
 many rows have no file; on an Album without a primary Artist Credit (the append
 refusal's test, read from the saved Album) that has such a row, a note says only
-a Content Manager Audio upload can fill them. On a truncated Album a row's
-member may be past the read bound, so no row is marked No file yet, no note is
-shown and the summary reads only Expected tracklist. Administrators who may edit
-the catalog see Clear expected tracklist. It opens the catalog confirmation,
+a Content Manager Audio upload can fill them, and on one with a primary Artist
+Credit, while imports are available to the viewer, **Upload missing files**
+beside the summary opens the same New import for this Album as the hero's **Add
+files to this Album**. On a truncated Album a row's member may be past the read
+bound, so no row is marked No file yet, no note or link is shown and the summary
+reads only Expected tracklist. Administrators who may edit the catalog see Clear
+expected tracklist. It opens the catalog confirmation,
 which shows the summary against No expected tracklist and says that tracks,
 files, the Album order and listeners are unchanged, and sends the clear alone at
 the Album revision the confirmation captured. It is disabled while a field edit
@@ -3816,6 +3920,32 @@ roll back to:
   them, which lacks the `admin.append_rows.*` keys. After deploying them, a Web
   client's cached bundle from before them is refused once for lacking those
   keys, so it shows English until the new bundle loads.
+- Imports created for an Album need no floor of their own; no collection, index,
+  approval format or publication commit changes. Such an import stores the
+  server-only `createdForAlbumId` beside an ordinary Album reuse decision (the
+  shape every release reads), and a release before them ignores that field: it
+  runs automatic metadata lookup for the import once its uploads complete (the
+  append still applies no Album values), lists the Album as a candidate only
+  while the draft's title matches it (the draft starts with the Album's title,
+  so it normally still does), so a reuse whose Album changed can be chosen again
+  only then, and sends no `summary.forAlbum`, so numbering is never the
+  summary's next step. It reads candidates without the Album the import was
+  created for, which changes no preselection except through the member match
+  limit: when that Album is not the append target, its member matches count
+  toward the limit here and not there, so an approval and a commit made on
+  different sides of the deploy can, only when the limit is reached, refuse
+  preselected appended files as an identity conflict that asks for a fresh
+  review. It refuses a create body carrying `targetAlbumId` as
+  `400 ADMIN_IMPORT_INVALID_INPUT` before receipt lookup and never replays one,
+  so retry a targeted create whose response was lost only after rolling forward
+  again; a project it already created stays readable and publishable there, and
+  it has no `GET /imports/album-targets/:albumId`, so this Web's targeted create
+  page shows a read failure. Creates without the key keep their fingerprints and
+  replay as before. A Web tab opened before them cannot parse a summary carrying
+  `forAlbum`, sent only for imports this release's Web created, so that import's
+  summary shows an error until the tab is reloaded. Their copy is
+  release-packaged `web-admin` copy: no runtime key is added, removed or moved,
+  so the runtime bundles and native clients are unchanged.
 - Credit join phrases and Disc Numbers have their own floor in the
   [catalog Credit rollout runbook](../deployment/catalog-credit-rollout-runbook.md#join-phrase-and-disc-number-rollback-floor).
 
@@ -4667,9 +4797,15 @@ database, what the step stores and which request comes next.
 - **Automatic runs.** The confirmation that completes the file set queues a
   run: the upload of the last selected audio file (or a replay of its intent),
   or a reconciliation ("Check again") that itself confirms the last upload.
-  Creating an import queues nothing, because none of its files is confirmed
-  yet. A reconciliation that finds the file already ready, cover and
-  embedded-artwork slots, typing, saving, reading, listing, decisions,
+  Creating an import queues nothing, because none of its files is confirmed yet.
+  An import created for an Album (`createdForAlbumId`) takes none of these
+  triggers: there a completing confirmation or reconciliation reconciles the
+  stored run's files (superseding an active run or marking stale files) and
+  re-ranks a completed run, but never queues a run or spends the folder-name
+  allowance (outcome `forAlbum`); its submitted and retried runs and its
+  candidate choices work as in any import. A reconciliation that finds the file
+  already ready, cover and embedded-artwork slots, typing, saving, reading,
+  listing, decisions,
   candidates, adoption, cover selection, analysis and navigation never run
   lookup, and a format-1 project's conversion never does either. Existing-Album
   reviews never take these triggers: their one automatic run is the catalog
@@ -4690,8 +4826,9 @@ database, what the step stores and which request comes next.
   Artist name.
 - **File set.** A run binds each manifest slot's confirmed upload. Once the set
   is complete again after a change, the next completing confirmation reruns,
-  within the limit. Removing or replacing a bound file supersedes an active run
-  (in the staged-cleanup transaction) or lists the file in a finished run's
+  within the limit, except in an import created for an Album. Removing or
+  replacing a bound file supersedes an active run (in the staged-cleanup
+  transaction) or lists the file in a finished run's
   `staleSlotIds`, without reverting values. A file confirmed after a run
   started is newly known, not stale.
 - **Grants.** Each run holds a one-hour grant:
@@ -5148,8 +5285,12 @@ project's two runs and 22 calls and of the deployment's 220 calls today),
 `lookupAvailable` (whether this server's configuration lets lookup run),
 `identityAnswers` (the identity rows of the saved draft that neither a saved
 decision nor a preselection answers, read with the same candidates as Review)
-and, only where it applies, `appendTracklist` (below).
-The lookup view's `needsAnswer` remains the list of lookup answers Publish waits
+and, only where it applies, `appendTracklist` (below) and `forAlbum` (the ID of
+the Album an import was created for, sent only for such an import: it runs no
+automatic lookup, Review's Album row offers that Album whatever the decision,
+and the Web makes the numbering its next step once no upload is waiting). The
+lookup
+view's `needsAnswer` remains the list of lookup answers Publish waits
 for. A stored manifest in a shape this release does not know is read through its
 sanitized view. The publish transaction rechecks all of it; an upload still in
 flight, or a file a published track needs without a confirmed upload, is

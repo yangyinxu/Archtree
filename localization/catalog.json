@@ -1011,6 +1011,136 @@
       ],
       "variables": {}
     },
+    "admin.album_import.add": {
+      "description": "Administrator Album page: hero link that opens import creation for this Album.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.album_import.append_note": {
+      "description": "Administrator import creation for an Album: what an append changes and keeps.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.album_import.back": {
+      "description": "Administrator import creation for an Album: link back to the target Album page.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.album_import.create_refused": {
+      "description": "Administrator import creation for an Album: the create was refused although the Album can still take files.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.album_import.intro": {
+      "description": "Administrator import creation for an Album: introduction above the target card.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.album_import.lookup_note": {
+      "description": "Administrator import creation for an Album: no automatic metadata lookup.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.album_import.match_changed": {
+      "description": "Administrator import Review: a chosen record changed since it was chosen (disabled select option).",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.album_import.no_file_rows": {
+      "description": "Administrator import creation for an Album: how many rows of the target Album's expected tracklist have no file.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.album_import.no_primary": {
+      "description": "Administrator import creation for an Album: the target has no primary Artist Credit.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.album_import.number_next": {
+      "description": "Administrator import summary for an Album with rows without a file: the numbering button is the next step.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.album_import.primary_not_ready": {
+      "description": "Administrator import creation for an Album: a primary Artist of the target is not ready.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.album_import.read_error": {
+      "description": "Administrator import creation for an Album: the target Album read failed (shown with Try again).",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.album_import.target": {
+      "description": "Administrator import creation for an Album: heading of the target Album card.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.album_import.title": {
+      "description": "Administrator import creation for an Album: page heading.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.album_import.too_large": {
+      "description": "Administrator import creation for an Album: the target lists more members than an append allows.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {
+        "max": "number"
+      }
+    },
+    "admin.album_import.unavailable": {
+      "description": "Administrator import creation for an Album: the target is missing or not a ready Album.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.album_import.unreadable": {
+      "description": "Administrator import creation for an Album: the target's saved title or visibility cannot be read.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.album_import.upload_missing": {
+      "description": "Administrator Album page: link beside the expected tracklist summary while rows have no file; opens import creation for this Album.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
     "admin.analysis.budget_daily": {
       "description": "Administrator workbench: paid Luna AI confirmation, the paid Luna AI calls left today across the deployment.",
       "delivery": [

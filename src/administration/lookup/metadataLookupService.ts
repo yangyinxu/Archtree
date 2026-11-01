@@ -14,7 +14,8 @@
 
 /**
  * Metadata lookup jobs for import projects and existing-Album reviews: the automatic trigger after the confirmation that completes
- * an import's file set (or a re-rank of the stored candidates when it completes nothing new), a review's automatic run (the catalog
+ * an import's file set (or a re-rank of the stored candidates when it completes nothing new; an import created for an Album only
+ * re-ranks), a review's automatic run (the catalog
  * trigger), stale marking when a bound file is removed, admission of submitted and retried runs (a review is admitted through its
  * capture, adminCatalogReviewCapture.ts), and the persisted worker that advances one run one request per stored step (MusicBrainz,
  * or iTunes for the fallback stage; the request and the pure step decision live in lookupRunStep.ts) and applies a completed
@@ -55,6 +56,7 @@ import {
     type MetadataLookupInput, type MetadataLookupRecord, type MetadataLookupSubmission
 } from './metadataLookupRecord';
 import { readMusicBrainzIdState } from '../import/adminImportMusicBrainzIds';
+import { importCreatedForAlbum } from '../import/adminImportAlbumTarget';
 
 export const adminImportLookupCollection = () => getDb()!.collection<MetadataLookupRecord>(ADMIN_IMPORT_LOOKUP_COLLECTION);
 const lookups = adminImportLookupCollection;
@@ -129,7 +131,7 @@ async function reconcileLookupFiles(doc: AdminImportDocument, record: MetadataLo
 }
 
 export type MetadataLookupTriggerOutcome = { queued: boolean; run: number | null;
-    reason: 'queued' | 'noQuery' | 'unavailable' | 'closed' | 'incomplete' | 'current' | 'limit' | 'failed' };
+    reason: 'queued' | 'noQuery' | 'unavailable' | 'closed' | 'incomplete' | 'current' | 'limit' | 'forAlbum' | 'failed' };
 const triggerOutcome = (reason: MetadataLookupTriggerOutcome['reason'], run: number | null = null): MetadataLookupTriggerOutcome => ({ queued: reason === 'queued', run, reason });
 /**
  * Re-ranks a completed run's stored candidates against newly known evidence without any request, in the trigger's transaction
@@ -153,8 +155,10 @@ async function rerankLookup(doc: AdminImportDocument, record: MetadataLookupReco
  * Automatic trigger after an upload or reconcile confirmed a file, as `actor` (who must still hold the role). It queues a run once
  * every selected audio file is confirmed and the file set differs from the last run's, within the per-project automatic limit. A
  * replay, a second reconcile or a racing confirmation finds the same file set and queues nothing. A confirmation that leaves the
- * file set incomplete, or reaches the limit, re-ranks a completed run's stored candidates instead when the evidence changed. Never
- * throws; the confirmation keeps its own result.
+ * file set incomplete, or reaches the limit, re-ranks a completed run's stored candidates instead when the evidence changed. An
+ * import created for an Album never queues a run here (`forAlbum`): its replaced or removed bound files are still marked and a
+ * completed run is still re-ranked, while its submitted and retried runs go through queueMetadataLookup. Never throws; the
+ * confirmation keeps its own result.
  */
 export async function requestAutomaticMetadataLookup(actor: string, id: string, grant: 'upload' | 'reopen',
     options: { now?: Date; configuration?: () => MetadataLookupConfiguration } = {}): Promise<MetadataLookupTriggerOutcome> {
@@ -167,6 +171,9 @@ export async function requestAutomaticMetadataLookup(actor: string, id: string, 
             if (!doc || !metadataLookupAccepted(doc)) return outcome('closed');
             const fileSet = importLookupFileSet(doc);
             const record = await reconcileLookupFiles(doc, await lookups().findOne({ _id: doc._id }, { session }), fileSet.files, session, now);
+            // An import created for an Album never runs an automatic lookup, after any confirmation or file-set change; a submitted
+            // name or a retry still runs one, and a completed run is still re-ranked against newly known evidence.
+            if (importCreatedForAlbum(doc)) { await rerankLookup(doc, record, actor, session, now); return outcome('forAlbum'); }
             if (!fileSet.complete) { await rerankLookup(doc, record, actor, session, now); return outcome('incomplete'); }
             if (record?.fileSetDigest === fileSet.digest) return outcome('current');
             if ((record?.automaticRuns ?? 0) >= JOB.automaticRuns) { await rerankLookup(doc, record, actor, session, now); return outcome('limit'); }

@@ -24,6 +24,7 @@ import {
     dailyAnalysisAttemptsUsed, importCollection, importLookupRecord, importPurposeFilter, importSavedIdentity, mutateAdminImport, parseAdminProjectMutation, withImportAdmin
 } from '../import/adminImportService';
 import { importIdentityPreselections } from '../import/adminImportIdentity';
+import { importAlbumMemberPositions } from '../import/adminImportAlbumTarget';
 import { importIdentityAnswers, importSummaryView, type ImportAppendTarget, type ImportSummaryView } from '../import/adminImportSummary';
 import { metadataLookupConfiguration, type MetadataLookupConfiguration } from '../../config/metadataLookup';
 import { boundedJson, parseDraftPath } from '../import/adminImportValueState';
@@ -66,9 +67,7 @@ async function readAppendTarget(decisions: readonly ImportDecisionV2[], session:
     const db = getDb()!, bound = ADMIN_IMPORT_LIMITS.appendTargetMembers;
     const album = await db.collection('albums').findOne({ _id: new ObjectId(reuse.candidateId), ...readyAlbumLifecycleFilter }, { session, projection: { expectedTracklist: 1, audioTrackIds: 1 }, maxTimeMS: 3_000 });
     if (!album || !hasStoredExpectedTracklist({ expectedTracklist: album.expectedTracklist }) || !Array.isArray(album.audioTrackIds) || album.audioTrackIds.length > bound) return null;
-    const ids = [...new Set(album.audioTrackIds.flatMap((value: unknown) => { const id = String(value ?? '').trim().toLowerCase(); return objectId(id) ? [id] : []; }))];
-    const members = ids.length ? await db.collection('audioTracks').find({ _id: { $in: ids.map(value => new ObjectId(value)) } }, { session, projection: { discNumber: 1, trackNumber: 1 }, maxTimeMS: 3_000 })
-        .limit(bound).toArray() : [];
+    const members = await importAlbumMemberPositions(album.audioTrackIds, session);
     return { albumId: album._id.toHexString(), tracklist: album.expectedTracklist, members: members.map(member => ({ discNumber: member.discNumber, trackNumber: member.trackNumber })) };
 }
 

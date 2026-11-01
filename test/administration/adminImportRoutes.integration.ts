@@ -7,6 +7,7 @@
  * Tests
  *   - import auth and current-role guards precede JSON parsing and do not intercept adjacent protected routers
  *   - cookie-owned import reads require exact viewer and create/replay uses top-level bounded codes
+ *   - a create names its target Album, and the create page reads that Album through the guarded no-store target route
  *   - unconfigured provider and private storage reject admission without provider/S3 dispatch
  *   - multipart Unicode filename and image preview remain bounded behind exact cookie viewer and current admin
  *   - publication cancellation uses the guarded private route and a new immutable approval-bound receipt
@@ -106,6 +107,27 @@ test('cookie-owned import reads require exact viewer and create/replay uses top-
     assert.equal(saved.status, 200); assert.equal((await saved.json()).item.draft.album.title, 'Saved first');
     const stale = await request(path, 'PATCH', { operationId: randomUUID(), expectedRevision: 1, changes: [{ path: 'album.title', base: '', value: 'Saved later' }] });
     assert.equal(stale.status, 409); assert.deepEqual(await stale.json(), { code: 'ADMIN_IMPORT_FIELD_CONFLICT' });
+});
+test('a create names its target Album, and the create page reads that Album through the guarded no-store target route', async () => {
+    const albumId = new ObjectId(), artistId = new ObjectId();
+    await getDb()!.collection('artists').deleteMany({}); await getDb()!.collection('albums').deleteMany({});
+    await getDb()!.collection('artists').insertOne({ _id: artistId, name: 'Synthetic Route Artist', lifecycleStatus: 'ready' });
+    await getDb()!.collection('albums').insertOne({ _id: albumId, title: 'Synthetic Route Album', lifecycleStatus: 'ready', visibility: 'public', audioTrackIds: [],
+        credits: [{ creditId: 'primary_artist', subjectType: 'artist', subjectId: String(artistId), role: 'primary', order: 0 }], attributionStatus: 'documented' });
+    const created = await request('/api/admin/v1/imports', 'POST', { ...body(), targetAlbumId: String(albumId) });
+    assert.equal(created.status, 201);
+    const item = (await created.json()).item;
+    assert.deepEqual(item.decisions.map((decision: { scope: string; action: string; candidateId: string }) => [decision.scope, decision.action, decision.candidateId]), [['album', 'reuse', String(albumId)]]);
+    assert.equal('createdForAlbumId' in item, false);
+    const unknown = await request('/api/admin/v1/imports', 'POST', { ...body(), targetAlbum: String(albumId) });
+    assert.deepEqual([unknown.status, await unknown.json()], [400, { code: 'ADMIN_IMPORT_INVALID_INPUT' }]);
+    const target = await request(`/api/admin/v1/imports/album-targets/${albumId}`);
+    assert.deepEqual([target.status, target.headers.get('cache-control')], [200, 'no-store']);
+    assert.deepEqual(await target.json(), { albumId: String(albumId), refusal: null, album: { title: 'Synthetic Route Album', primaryArtists: ['Synthetic Route Artist'], coverUrl: null, missingRows: null } });
+    const malformed = await request('/api/admin/v1/imports/album-targets/not-an-album');
+    assert.deepEqual([malformed.status, await malformed.json()], [400, { code: 'ADMIN_IMPORT_INVALID_INPUT' }]);
+    assert.equal((await request(`/api/admin/v1/imports/album-targets/${albumId}`, 'GET', undefined, userToken)).status, 403);
+    assert.equal((await request(`/api/admin/v1/imports/album-targets/${albumId}`, 'GET', undefined, '')).status, 401);
 });
 test('unconfigured provider and private storage reject admission without provider/S3 dispatch', async () => {
     const created = await (await request('/api/admin/v1/imports', 'POST', body())).json();

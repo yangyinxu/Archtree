@@ -1,5 +1,7 @@
 import enBundle from '../../../../localization/generated/bundles/en-US.json';
 import zhBundle from '../../../../localization/generated/bundles/zh-Hans.json';
+import enAdminBundle from '../../../../localization/generated/web-admin/bundles/en-US.json';
+import zhAdminBundle from '../../../../localization/generated/web-admin/bundles/zh-Hans.json';
 
 /**
  * The plain wording of metadata lookup and Album completion copy in both generated bundles: no API names, no "here" for the
@@ -25,5 +27,17 @@ test('the import summary\'s conflict answers and partial-comparison copy read li
     expect(messages['admin.summary.keep_mine']).toBe(messages['admin.catalog_review.keep_current']);
     expect(messages['admin.summary.kept_mine']).toBe(messages['admin.catalog_review.kept_current']);
     for (const key of ['admin.lookup.single_choice', 'admin.lookup.partial_comparison']) expect(messages[key], key).not.toMatch(/MusicBrainz/);
+  }
+});
+
+test('the release-packaged copy for adding files to an Album uses the same plain words in both locales', () => {
+  const enAdmin = enAdminBundle.messages as Record<string, string>, zhAdmin = zhAdminBundle.messages as Record<string, string>;
+  const albumKeys = Object.keys(enAdmin).filter(key => key.startsWith('admin.album_import.'));
+  expect(albumKeys).toEqual(expect.arrayContaining(['admin.album_import.add', 'admin.album_import.upload_missing', 'admin.album_import.number_next']));
+  expect(Object.keys(zhAdmin).filter(key => key.startsWith('admin.album_import.'))).toEqual(albumKeys);
+  for (const key of albumKeys) {
+    expect(zhAdmin[key], key).not.toMatch(/缺文件|此处/);
+    expect(enAdmin[key], key).not.toMatch(/missing-file| here, /);
+    expect(en[key], key).toBeUndefined();
   }
 });

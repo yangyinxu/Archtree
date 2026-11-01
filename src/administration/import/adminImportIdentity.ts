@@ -106,7 +106,9 @@ export const IMPORT_CANDIDATE_READ_BUDGET_MS = 10_000;
  * records holding those IDs (at most 21 rows, `match: 'musicBrainzId'`, upgrading a row already listed by name), and one query
  * per such entry or label for the names lookup found for its ID (`names`, at most 32 names, 20 rows each, `match: 'alias'`),
  * then one query per Artist name read (saved or proposed, at most 40) that has iTunes localized names (`localized`, by folded name)
- * for the Artists named with them (20 rows each, `match: 'localizedName'`, `localizedOf` that name): at most 2561 items. A row is
+ * for the Artists named with them (20 rows each, `match: 'localizedName'`, `localizedOf` that name). The target of an explicit
+ * Album reuse and the Album the import was created for (`albumTarget`) are also listed, once each, as Album candidates
+ * (`match: 'name'`) whatever the draft title, so their members are read too: at most 2563 items. A row is
  * listed once, by its strongest match (ID over alias over localized name over name). `memberMatchesComplete` is false when more
  * member matches exist or a member is malformed, so no append file is preselected from a partial list; `unavailable` names the
  * rows whose same-name, same-ID, alias or localized-name record is malformed, and the Artist names whose localized-name record is
@@ -116,7 +118,8 @@ export const IMPORT_CANDIDATE_READ_BUDGET_MS = 10_000;
  * identities is one synthetic entry; the shared read budget still bounds the whole read.
  */
 export async function importIdentityCandidates(input: { manifest: ImportManifest; draft: ImportDraftV2; assets: readonly ImportAsset[]; decisions: readonly Pick<ImportDecisionV2, 'scope' | 'action' | 'candidateId'>[];
-    names?: ReadonlyMap<string, readonly string[]>; localized?: ReadonlyMap<string, readonly string[]>; proposals?: ImportIdentityProposals; artistNameLimit?: number }, session: ClientSession): Promise<ImportCandidatesResponse> {
+    names?: ReadonlyMap<string, readonly string[]>; localized?: ReadonlyMap<string, readonly string[]>; proposals?: ImportIdentityProposals; artistNameLimit?: number;
+    albumTarget?: string | null }, session: ClientSession): Promise<ImportCandidatesResponse> {
     const { manifest, draft, assets } = input, db = getDb()!, items: ImportDuplicateCandidate[] = [], unavailable: ImportCandidatesResponse['unavailable'] = [];
     const deadline = Date.now() + IMPORT_CANDIDATE_READ_BUDGET_MS, maxTimeMS = () => Math.max(1, Math.min(3_000, deadline - Date.now()));
     const target = input.decisions.find(decision => decision.scope === 'album' && decision.action === 'reuse' && objectId(decision.candidateId))?.candidateId ?? null;
@@ -144,6 +147,15 @@ export async function importIdentityCandidates(input: { manifest: ImportManifest
             // Malformed legacy metadata cannot become a selectable identity, but its name still holds the row for an explicit choice.
             catch { if (!unavailable.some(entry => entry.kind === kind && sameName(entry.label, value))) unavailable.push({ kind, label: value }); }
         }
+    }
+    // The saved reuse target and the Album the import was created for are Album candidates whatever the draft title, so a reuse
+    // that became stale (the Album changed since it was chosen), or was replaced, can be chosen again. A row listed by ID under
+    // another title is never a name candidate, so preselections (which compare names) are unchanged.
+    for (const id of new Set([target, input.albumTarget].filter((value): value is string => objectId(value)))) {
+        if (items.some(item => item.kind === 'album' && item.id === id)) continue;
+        const row = await db.collection(IMPORT_CANDIDATE_COLLECTIONS.album).findOne({ $and: [readyImportCandidate('album'), { _id: new ObjectId(id) }] },
+            { session, projection: importCandidateProjection, maxTimeMS: maxTimeMS() });
+        if (row) { try { items.push(importCandidateRow('album', row)); } catch { /* a malformed Album cannot be chosen */ } }
     }
     await addMusicBrainzIdCandidates(draft, input.names ?? new Map(), { items, unavailable, maxTimeMS }, session);
     await addLocalizedNameCandidates(groups.filter(group => group.kind === 'artist').map(group => group.value), input.localized ?? new Map(), draft, { items, unavailable, maxTimeMS }, session);
@@ -307,7 +319,7 @@ const identityKey = (decision: ImportDecisionV2) => JSON.stringify([decision.sco
  * 2, and approvals that froze no preselection, are not rechecked. A format-3 decision list in any other shape, or candidate reads
  * over their time budget, are a catalog conflict (409 ADMIN_IMPORT_PUBLICATION_CONFLICT): the recheck never passes unproven.
  */
-export async function assertImportPreselectionsCurrent(publication: ImportPublication, source: { manifest: ImportManifest; assets: readonly ImportAsset[] }, session: ClientSession): Promise<void> {
+export async function assertImportPreselectionsCurrent(publication: ImportPublication, source: { manifest: ImportManifest; assets: readonly ImportAsset[]; albumTarget?: string | null }, session: ClientSession): Promise<void> {
     if (importPublicationFormat(publication) !== 3) return;
     if (!Array.isArray(publication.decisions) || publication.decisions.some(decision => !decision || typeof decision !== 'object')) throw new AdminImportError(409, 'ADMIN_IMPORT_PUBLICATION_CONFLICT');
     const frozen = publication.decisions as ImportDecisionV2[], preselected = frozen.filter(decision => decision.preselected === true);

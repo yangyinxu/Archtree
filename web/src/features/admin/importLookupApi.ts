@@ -192,14 +192,15 @@ const appendTracklistSchema = z.object({
  * each shown Luna suggestion's tick state, the analysis budget left (project runs and calls, and calls today), whether this
  * server can run metadata lookup, how many identity rows of the saved draft no decision or preselection answers and, for a saved
  * append to an Album with an expected tracklist until its publication is complete, its rows (the server sends no key otherwise,
- * nor does a release before expected tracklists; both read as null).
+ * nor does a release before expected tracklists; both read as null). `forAlbum` names the Album an import was created for and is sent
+ * only for such an import, which runs no automatic lookup.
  */
 const summarySchema = z.object({
   // `cover`: the applied release's front artwork is being staged (false from a server that sends none).
   append: z.boolean(), waiting: z.object({ uploads: z.boolean(), lookup: z.boolean(), cover: z.boolean().default(false), analysis: z.boolean() }).strict(), placeholderOnly: z.boolean(),
   luna: z.array(z.object({ id: z.string().regex(/^[a-f0-9]{24}$/), tick: z.enum(['ticked', 'unticked', 'resolved', 'conflict']) }).strict()).max(1000),
   analysis: z.object({ runs: integer, attempts: integer, daily: integer }).strict(), lookupAvailable: z.boolean(), identityAnswers: integer.max(1000),
-  appendTracklist: appendTracklistSchema.nullable().default(null)
+  appendTracklist: appendTracklistSchema.nullable().default(null), forAlbum: z.string().regex(/^[a-f0-9]{24}$/).optional()
 }).strict();
 /**
  * The lookup view (null before any run) with the import's revision, automatic-write counter and summary state, and the names lookup

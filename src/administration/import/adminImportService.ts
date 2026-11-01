@@ -5,11 +5,12 @@
  *              idleAnalysis, touchImportAdmin, withImportAdmin, importLookupRecord, importLookupRecords,
  *              importAppliedLookupRelease, initializeAdminImportStorage, adminImportDto, adminImportDetail,
  *              parseAdminProjectMutation, mutateAdminProject, mutateAdminImport, createAdminImport,
- *              getAdminImport, editAdminImport, listAdminImports, analyzeAdminImport, analyzeAdminProject,
- *              cancelAdminImportAnalysis, suggestionPath, acceptDraftV2Suggestion, adoptAdminImportSuggestions,
- *              adoptAdminProjectSuggestions, adminImportDuplicateCandidates, importSavedIdentity,
- *              reusesOneArtistTwice, parseImportDecisions, decideAdminImportDuplicates,
- *              dailyAnalysisAttemptsUsed, runAdminImportWorkerOnce, startAdminImportWorker
+ *              getAdminImportAlbumTarget, getAdminImport, editAdminImport, listAdminImports,
+ *              analyzeAdminImport, analyzeAdminProject, cancelAdminImportAnalysis, suggestionPath,
+ *              acceptDraftV2Suggestion, adoptAdminImportSuggestions, adoptAdminProjectSuggestions,
+ *              adminImportDuplicateCandidates, importSavedIdentity, reusesOneArtistTwice, parseImportDecisions,
+ *              decideAdminImportDuplicates, dailyAnalysisAttemptsUsed, runAdminImportWorkerOnce,
+ *              startAdminImportWorker
  *   Constants: importPurposeFilter, adminImportIndexes, CATALOG_REVIEW_CREATION_FENCE_ID
  *   Re-exports: importCandidateProjection, importCandidateRevision
  * Internal
@@ -41,6 +42,7 @@ import type { ImportLookupGate, LookupApplication, MetadataLookupRecord, StoredL
 import { IMPORT_CANDIDATE_COLLECTIONS, IMPORT_IDENTITY_FENCE_ID, importCandidateProjection, importCandidateRevision, importCandidateRow, importIdentityCandidates, readyImportCandidate } from './adminImportIdentity';
 import { importMusicBrainzNameMap, type ImportMusicBrainzNames } from './adminImportMusicBrainzIds';
 import { importLocalizedNameMap, type ImportLocalizedNames } from './adminImportLocalizedNames';
+import { IMPORT_ALBUM_TARGET_CODES, importAlbumTargetView, readImportAlbumTargetState } from './adminImportAlbumTarget';
 import { keepableMusicBrainzId } from '../../utils/musicBrainzId';
 
 export type ProjectReceipt = Omit<ImportReceipt, 'kind'> & { kind: ImportReceipt['kind'] | 'apply' } & { actorId: string; hash: string; at: Date; selection?: { generation: number; acceptedIds: string[]; rejectedIds: string[] } };
@@ -88,6 +90,12 @@ export type AdminImportDocument = {
      * application, never projected; identity candidates read them.
      */
     localizedNames?: ImportLocalizedNames;
+    /**
+     * The Album an administrator created this import for from its Web Album page (POST /imports `targetAlbumId`): set once at
+     * creation, never changed or projected. Such an import never runs an automatic metadata lookup (metadataLookupService.ts) and
+     * its summary says so (`forAlbum`); its Album decision starts as reuse of that Album.
+     */
+    createdForAlbumId?: string;
     _id: ObjectId; actorId: string; revision: number; createdAt: Date; updatedAt: Date; manifest: ImportManifest; draft: ImportDraft | ImportDraftV2; analysis: Analysis; analysisHistory: Analysis[]; attemptsUsed: number;
     suggestions: StoredSuggestion[]; decisions: (ImportDuplicateDecision | ImportDecisionV2)[]; receipts: Receipt[]; recoveryReceipts?: Receipt[]; automaticReceipts?: Receipt[]; media?: ImportMedia };
 /**
@@ -122,10 +130,11 @@ const digest = importDigest;
  * Create intent fingerprint: a draftless body hashes legacyDefaultDraftV1 (never the stored defaultDraft), so retries
  * admitted before the public default still replay; an explicit draft hashes as parsed. Known collision: an explicit
  * draft equal to that frozen hidden empty draft fingerprints like a draftless body, so a retry that switches between
- * the two replays the stored project instead of conflicting.
+ * the two replays the stored project instead of conflicting. `targetAlbumId` enters it only when present, so every create
+ * without one keeps its fingerprint, and a retry naming another target, or dropping or adding one, conflicts.
  */
-export const importCreateHash = (manifest: ImportManifest, draft: ImportDraft | undefined, operationId: string) =>
-    digest({ kind: 'create', manifest, draft: draft ?? legacyDefaultDraftV1(manifest), operationId });
+export const importCreateHash = (manifest: ImportManifest, draft: ImportDraft | undefined, operationId: string, targetAlbumId?: string) =>
+    digest({ kind: 'create', manifest, draft: draft ?? legacyDefaultDraftV1(manifest), operationId, ...(targetAlbumId === undefined ? {} : { targetAlbumId }) });
 export const idleAnalysis = (): Analysis => ({ state: 'idle', generation: 0, operationId: null, actorId: null, grantExpiresAt: null, baseline: null, chunks: [], issue: null, leaseOwner: null, leaseUntil: null });
 const notFound = () => new AdminImportError(404, 'ADMIN_IMPORT_NOT_FOUND');
 const conflict = (code = 'ADMIN_IMPORT_REVISION_CONFLICT') => new AdminImportError(409, code);
@@ -336,22 +345,50 @@ export async function mutateAdminProject<T>(actor: string, id: string, body: Rec
 export const mutateAdminImport = (actor: string, id: string, body: Record<string, unknown> & { operationId: string; expectedRevision: number }, kind: ImportReceipt['kind'], change: (doc: AdminImportDocument, session: ClientSession) => Promise<void>) => mutateAdminProject(actor, id, body, kind, change, importPolicy);
 const mutate = mutateAdminImport;
 
+/**
+ * Creates an import `{operationId, manifest, draft?, targetAlbumId?}`. A retry of the same operation replays its first receipt
+ * before admission (so it works while imports are disabled) and any other body under that operation conflicts. `targetAlbumId`
+ * (never with a draft) creates the import for that Album (adminImportAlbumTarget.ts): it must be a readable ready Album whose primary
+ * Artist Credits name only ready Artists, within the append member bound, else 409 naming the reason and nothing is written; the same insert stores reuse
+ * of that Album at its current candidate revision as an explicit Album decision, and the draft starts with the Album's saved
+ * title as the administrator's own (an append applies no Album value, but approval needs a title).
+ */
 export async function createAdminImport(actor: string, raw: unknown): Promise<AdminImportResponse> {
-    const input = record(raw); exact(input, ['operationId', 'manifest', 'draft']); if (!uuid(input.operationId)) return invalidImport();
+    const input = record(raw); exact(input, ['operationId', 'manifest', 'draft', 'targetAlbumId']); if (!uuid(input.operationId)) return invalidImport();
+    const targeted = hasOwn(input, 'targetAlbumId');
+    if (targeted && (!objectId(input.targetAlbumId) || input.draft !== undefined)) return invalidImport();
+    const targetAlbumId = targeted ? input.targetAlbumId as string : undefined;
     // The body keeps its v1 draft and frozen fingerprint, so every earlier create receipt replays; the project is stored as Draft v2.
     // A draftless create stores the public default, and a v1 draft converts with every value the administrator's own.
     const manifest = parseManifest(input.manifest), requested = input.draft === undefined ? undefined : parseDraft(input.draft, manifest);
-    const operationId = input.operationId, _id = new ObjectId(digest({ actor, operationId }).slice(0, 24)), hash = importCreateHash(manifest, requested, operationId);
-    const draft = requested ? importDraftV2FromV1(requested, _id.toHexString()) : defaultDraftV2(manifest), draftOrigins = requested ? legacyAdministratorOrigins(draft) : {};
+    const operationId = input.operationId, _id = new ObjectId(digest({ actor, operationId }).slice(0, 24)), hash = importCreateHash(manifest, requested, operationId, targetAlbumId);
+    const baseDraft = requested ? importDraftV2FromV1(requested, _id.toHexString()) : defaultDraftV2(manifest), baseOrigins = requested ? legacyAdministratorOrigins(baseDraft) : {};
     return withAdmin(actor, async session => {
         const previous = await collection().findOne({ _id }, { session });
         if (previous) { if (!isImportProject(previous)) throw notFound(); const receipt = previous.receipts[0]; if (receipt.hash !== hash || receipt.actorId !== actor) throw conflict('ADMIN_IMPORT_OPERATION_CONFLICT'); return response(previous, actor, receipt, session); }
         admit();
+        // Built afresh on every transaction attempt, so a retried attempt never sees an earlier attempt's title.
+        const draft = structuredClone(baseDraft), draftOrigins = structuredClone(baseOrigins);
+        let decisions: ImportDecisionV2[] = [];
+        if (targetAlbumId) {
+            const { album, decision, refusal } = await readImportAlbumTargetState(targetAlbumId, session);
+            if (refusal) throw new AdminImportError(409, IMPORT_ALBUM_TARGET_CODES[refusal]);
+            decisions = [decision!];
+            // The target's title becomes the administrator's own, so automation never replaces it; one the draft cannot hold leaves it empty.
+            try { draft.album.title = parseDraftValue('album.title', album!.title, draft) as string; } catch { /* left empty */ }
+            if (draft.album.title) markAdministratorValues(draftOrigins, ['album.title']);
+        }
         const now = new Date(), receipt: Receipt = { operationId, kind: 'create', revision: 1, hash, actorId: actor, at: now };
-        const doc: AdminImportDocument = { _id, draftVersion: DRAFT_V2, actorId: actor, revision: 1, createdAt: now, updatedAt: now, manifest, draft, draftOrigins, analysis: idleAnalysis(), analysisHistory: [], attemptsUsed: 0, suggestions: [], decisions: [], receipts: [receipt] };
+        const doc: AdminImportDocument = { _id, draftVersion: DRAFT_V2, actorId: actor, revision: 1, createdAt: now, updatedAt: now, manifest, draft, draftOrigins, analysis: idleAnalysis(), analysisHistory: [], attemptsUsed: 0, suggestions: [], decisions, receipts: [receipt],
+            ...(targetAlbumId ? { createdForAlbumId: targetAlbumId } : {}) };
         await collection().insertOne(doc, { session }); return response(doc, actor, receipt, session);
     });
 }
+/** The create page's read of the Album an import would add files to (adminImportAlbumTarget.ts importAlbumTargetView); it works while imports are disabled. */
+export const getAdminImportAlbumTarget = async (actor: string, albumId: string) => {
+    if (!objectId(albumId)) return invalidImport();
+    return withAdmin(actor, session => importAlbumTargetView(albumId, session));
+};
 export const getAdminImport = (actor: string, id: string) => withAdmin(actor, async session => { const doc = await collection().findOne({ _id: idValue(id), ...importPurposeFilter }, { session }); if (!doc) throw notFound(); return response(doc, actor, null, session); });
 /**
  * A field save `{operationId, expectedRevision, changes}` writes only the values the administrator changed. A whole-draft save
@@ -499,8 +536,9 @@ export { importCandidateProjection, importCandidateRevision };
  * case-insensitive name candidates for each Artist entry, the label, the Album and the tracks, also for the names and titles each
  * pending Luna proposal shown would write (Artist entries, label, Album and track titles), so the confirmation preselects a ticked
  * suggestion as if it were applied; one verified byte candidate per staged hash; every byte or title match among the members of
- * each Album candidate and of the saved append target; the exact-ID and alias candidates of the saved draft; and the Artists named
- * with an iTunes localized name of a saved or proposed Artist name (importIdentityCandidates): at most 2561 items, with
+ * each Album candidate and of the saved append target; the exact-ID and alias candidates of the saved draft; the Artists named
+ * with an iTunes localized name of a saved or proposed Artist name; and the saved append target and the Album the import was
+ * created for as Album candidates whatever the draft title (importIdentityCandidates): at most 2563 items, with
  * `memberMatchesComplete` false when more member matches exist, and the
  * `unavailable` names whose same-name record is malformed. Only the saved Album reuse target is read from the decisions.
  */
@@ -525,7 +563,7 @@ export async function importSavedIdentity(doc: AdminImportDocument, session: Cli
     const proposals = options.lunaProposals ? lunaIdentityProposals(importSuggestionsV2View(doc.suggestions, legacyAnalysisView(doc).generation, slots, id).filter(suggestion => suggestion.decision === 'pending')) : undefined;
     const localized = importLocalizedNameMap(doc.localizedNames, [...draft.album.artists.map(entry => entry.name), ...(proposals?.artistNames ?? [])]);
     return { draft, decisions, candidates: await importIdentityCandidates({ manifest, draft, assets: doc.media?.assets ?? [], decisions, names: importMusicBrainzNameMap(doc.musicBrainzNames, draft),
-        localized, ...(proposals ? { proposals } : {}) }, session) };
+        localized, albumTarget: doc.createdForAlbumId ?? null, ...(proposals ? { proposals } : {}) }, session) };
 }
 /** Two Artist entries of one decision set cannot reuse one Artist (a reuse that replaces its ID is a reuse too). */
 export const reusesOneArtistTwice = (raw: readonly unknown[]) => {

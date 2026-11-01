@@ -25,6 +25,7 @@ import { importUploadSettled, type ImportAsset } from './adminImportMediaTypes';
 import { lookupCoverStagingActive } from './adminImportCoverAutomation';
 import type { AdminImportDocument } from './adminImportService';
 import { importAssetDurationEvidence, importTagsV2View } from './adminImportTags';
+import { importCreatedForAlbum } from './adminImportAlbumTarget';
 import { draftWithinSizeLimit, importAutomationMarkers, originOf } from './adminImportValueState';
 import { METADATA_LOOKUP_LIMITS } from '../lookup/lookupContract';
 import { isPlaceholderCredit } from '../lookup/lookupIdentifiers';
@@ -51,6 +52,12 @@ export type ImportSummaryView = {
      * the files and the numbering. Once complete, the import's own new members fill the rows, so none is listed.
      */
     appendTracklist?: ImportAppendTracklist;
+    /**
+     * The Album an import was created for, present only for such an import: it runs no automatic lookup, the Web offers that
+     * Album in the Album row of Review whatever the decision, and makes numbering from the target's expected tracklist the next
+     * step once every upload is confirmed.
+     */
+    forAlbum?: string;
 };
 /** What the summary read found for the saved append target, read in the same snapshot: its stored tracklist and its members' numbers. */
 export type ImportAppendTarget = { albumId: string; tracklist: unknown; members: readonly { discNumber: unknown; trackNumber: unknown }[] };
@@ -183,7 +190,7 @@ export function importAppendTracklist(input: { draft: ImportDraftV2; origins: Im
  * application shares that step), the lookup cover while its staging is queued or running within its grant (a failed, skipped or
  * expired one never waits), and analysis while it is queued or running. A saved append whose target the context read lists that
  * target's rows (importAppendTracklist) until its publication is complete; the key is absent otherwise, so other summaries keep
- * their shape. A stored manifest in a shape this release does not know reads as its sanitized view, as the editor shows it.
+ * their shape, and so is `forAlbum` except for an import created for an Album. A stored manifest in a shape this release does not know reads as its sanitized view, as the editor shows it.
  */
 export function importSummaryView(doc: AdminImportDocument, lookup: Partial<MetadataLookupRecord> | null, context: ImportSummaryContext): ImportSummaryView {
     const id = doc._id.toHexString(), manifest = legacyManifestView(doc.manifest);
@@ -212,6 +219,7 @@ export function importSummaryView(doc: AdminImportDocument, lookup: Partial<Meta
             daily: left(ADMIN_IMPORT_LIMITS.dailyAttempts, context.dailyAttemptsUsed) },
         lookupAvailable: context.lookupAvailable,
         identityAnswers: context.identityAnswers,
+        ...importCreatedForAlbum(doc) ? { forAlbum: doc.createdForAlbumId! } : {},
         ...appendTracklist ? { appendTracklist } : {}
     };
 }

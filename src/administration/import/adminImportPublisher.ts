@@ -100,7 +100,7 @@ export async function publishAdminImport(actor: string, id: string, raw: unknown
         const explicit = doc.decisions as ImportDecisionV2[];
         const localized = mergeImportLocalizedNames(doc.localizedNames, [], draft);
         const candidates = await importIdentityCandidates({ manifest: doc.manifest, draft, assets: doc.media?.assets ?? [], decisions: explicit, names: importMusicBrainzNameMap(doc.musicBrainzNames, draft),
-            localized: importLocalizedNameMap(localized, draft.album.artists.map(entry => entry.name)) }, session);
+            localized: importLocalizedNameMap(localized, draft.album.artists.map(entry => entry.name)), albumTarget: doc.createdForAlbumId ?? null }, session);
         const preselections = importIdentityPreselections(draft, explicit, candidates);
         if (hasOwn(body, 'preselections') && !sameImportPreselections(body.preselections as unknown[], preselections)) throw new AdminImportError(409, 'ADMIN_IMPORT_REVIEW_REQUIRED');
         const decisions = [...explicit, ...preselections];
@@ -268,7 +268,7 @@ export async function runAdminImportPublicationOnce(storage: ImportObjectStorage
         await withImportAdmin(publication.actorId, async session => {
             const current = await importCollection().findOne({ _id: doc._id, 'media.publication.leaseOwner': worker }, { session }); if (!current?.media?.publication) throw conflict(); currentApproval(current.media.publication);
             await assertImportReusedRecordsReady(current.media.publication, session);
-            await assertImportPreselectionsCurrent(current.media.publication, { manifest: current.manifest, assets: current.media.assets }, session);
+            await assertImportPreselectionsCurrent(current.media.publication, { manifest: current.manifest, assets: current.media.assets, albumTarget: current.createdForAlbumId ?? null }, session);
         });
         const copies = [...publication.tracks.filter(track => !track.reused).map(track => ({ slotId: track.slotId, key: track.key, value: track, isCover: false })), ...(publication.cover ? [{ slotId: publication.cover.slotId, key: publication.cover.key, value: publication.cover, isCover: true }] : [])];
         for (const copy of copies) {

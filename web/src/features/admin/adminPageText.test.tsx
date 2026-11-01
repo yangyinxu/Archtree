@@ -1,6 +1,6 @@
 import { Suspense, type PropsWithChildren } from 'react';
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
-import { useAdminPageText } from './adminPageText';
+import { useAdminPageText, useAlbumImportText } from './adminPageText';
 
 const localization = vi.hoisted(() => ({
   locale: 'en-US',
@@ -68,4 +68,25 @@ test('existing administrator keys still delegate to the shared localization cata
   const variables = { current: 'Public', next: 'Hidden' };
   expect(result.current('catalog.visibility_change', variables)).toBe('Existing translated text');
   expect(localization.t).toHaveBeenCalledExactlyOnceWith('admin.catalog.visibility_change', variables);
+});
+
+test('copy for adding files to an Album reads the release-packaged pack in each locale, while Page and other keys keep their sources', async () => {
+  const { result, rerender } = await act(async () => renderHook(useAlbumImportText, { wrapper: ({ children }: PropsWithChildren) => <Suspense fallback={null}>{children}</Suspense> }));
+  await waitFor(() => expect(result.current).toEqual(expect.any(Function)));
+  expect(result.current('album_import.add')).toBe('Add files to this Album');
+  expect(result.current('album_import.no_file_rows', { count: 1 })).toBe('1 row of its expected tracklist has no file yet.');
+  expect(result.current('album_import.too_large', { max: 5000 })).toBe('Files cannot be added to this Album: an import can add files only to an Album with at most 5000 tracks.');
+  // Page copy is not this hook's: it delegates to the runtime catalog like any other administrator key.
+  expect(result.current('pages.subtitle')).toBe('Existing translated text');
+  expect(localization.t).toHaveBeenCalledWith('admin.pages.subtitle', undefined);
+  localization.locale = 'zh-Hans'; await act(async () => rerender());
+  await waitFor(() => expect(result.current('album_import.add')).toBe('向此专辑添加文件'));
+  expect(result.current('album_import.upload_missing')).toBe('为没有音频的曲目上传文件');
+  expect(result.current('album_import.no_file_rows', { count: 2 })).toBe('完整曲目表中有 2 首曲目还没有音频。');
+});
+
+test('Page copy never reads the copy for adding files to an Album from the release-packaged pack', async () => {
+  const { result } = await mountText();
+  await waitFor(() => expect(result.current).toEqual(expect.any(Function)));
+  expect(result.current('album_import.add')).toBe('Existing translated text');
 });

@@ -2,12 +2,13 @@
  * Exports
  *   Functions: AdminCreateImportPage
  * Internal
- *   Functions: handOff, CreateImport
+ *   Functions: TargetUnavailable, intentTarget, handOff, CreateImport
+ *   Constants: ImportAlbumTargetCard, CREATE_TARGET
  *   Variables: openPages
  * @end-catalog */
 
-import { useEffect, useRef, useState } from 'react';
-import { Link, useNavigate } from 'react-router';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
+import { Link, useLocation, useNavigate } from 'react-router';
 import type { ImportDetail } from './adminApi';
 import { AdminGate, useAdminAccess, useAdminText } from './AdminAccess';
 import { adminWorkspace } from './adminWorkspace';
@@ -18,6 +19,19 @@ import { useAdminMutation, type AdminMutation } from './useAdminMutation';
 import { MutationStatus, useOnline } from './AdminShared';
 import { AdminNav } from './AdminNav';
 import styles from './adminStyles';
+
+// The target of an import created for an Album loads only on a page opened for one; a chunk that cannot load keeps Create disabled.
+const ImportAlbumTargetCard = lazy(() => import('./ImportAlbumTargetCard').then(module => ({ default: module.ImportAlbumTargetCard }), () => ({ default: TargetUnavailable })));
+/** Stands in for a target card whose chunk cannot load: Create stays disabled. */
+function TargetUnavailable() { const t = useAdminText(); return <p role="alert">{t('common.reload')}</p>; }
+
+/** The target the chosen files were chosen for ('' for a new Album); the same key as ImportAlbumTargetCard's CREATE_TARGET_KEY. */
+const CREATE_TARGET = 'create-target';
+/** The Album a create intent names (null for a new Album); a body that cannot be read names none. */
+const intentTarget = (body: unknown): string | null => {
+  try { const target = typeof body === 'string' ? (JSON.parse(body) as { targetAlbumId?: unknown }).targetAlbumId : undefined; return typeof target === 'string' ? target : null; }
+  catch { return null; }
+};
 
 /** How many New import pages are mounted; a create confirmed while none is shows a fresh form on the next visit. */
 let openPages = 0;
@@ -32,11 +46,19 @@ function handOff(item: ImportDetail, approval: AdminGuard) {
     adminWorkspace.retain(`files:${item.id}`, sources, approval);
     loadImportUploadQueue().then(({ importUploadQueue }) => importUploadQueue(item.id, approval).start(item, sources, approval), () => {});
   }
-  adminWorkspace.forget('create-files'); adminWorkspace.forget('create-manifest');
+  adminWorkspace.forget('create-files'); adminWorkspace.forget('create-manifest'); adminWorkspace.forget(CREATE_TARGET);
   if (!openPages) adminWorkspace.forget('mutation:create');
 }
 
-/** Creating the import is the one approval that uploads every selected file; files chosen without a folder need no folder name. */
+/**
+ * Creating the import is the one approval that uploads every selected file; files chosen without a folder need no folder name.
+ * Opened for an Album (`?album=<id>`, from its Album page), the page shows that Album's target card instead of the new-Album
+ * heading and creates the import for it (`targetAlbumId`) once the card reports it eligible; the choosers and Create wait until
+ * then. A create refused as a conflict, or because the Album has no primary Artist Credit, reads the Album again, and the card
+ * then names the reason, or says the create was refused when the Album can still take files. The page always shows what Create
+ * or Retry sends: while a create intent is pending, the page follows that intent's target, and files chosen for another target
+ * (another Album, or a new Album) are dropped, except those kept on purpose by the card's "Upload new Album" link.
+ */
 function CreateImport() {
   const t = useAdminText();
   const access = useAdminAccess();
@@ -49,6 +71,22 @@ function CreateImport() {
   const mutation = useAdminMutation('create');
   const locked = mutation.running || Boolean(mutation.intent);
   const needsFolder = Boolean(manifest?.files.some(file => file.relativePath.includes('/')));
+  const albumId = new URLSearchParams(useLocation().search).get('album');
+  const [eligible, setEligible] = useState<string | null>(null), [recheck, setRecheck] = useState(0);
+  const ready = albumId === null || eligible === albumId, choosing = locked || !access.imports || !ready;
+  // A pending create shows the page of its own target, so Retry never sends what the page does not show.
+  const pendingTarget = mutation.intent ? intentTarget(mutation.intent.body) : undefined;
+  useEffect(() => {
+    if (pendingTarget !== undefined && pendingTarget !== albumId) navigate(pendingTarget ? `/admin/imports/new?album=${pendingTarget}` : '/admin/imports/new', { replace: true });
+  }, [pendingTarget, albumId]);
+  // Files chosen for another target are dropped when no create is pending.
+  useEffect(() => {
+    if (mutation.intent || (adminWorkspace.buffer<string>(CREATE_TARGET) ?? '') === (albumId ?? '')) return;
+    setManifest(null); adminWorkspace.forget('create-manifest'); adminWorkspace.forget('create-files'); adminWorkspace.forget(CREATE_TARGET);
+  }, [albumId]);
+  // A create refused as a conflict or for a missing primary Artist Credit (the Album changed since the card read it) reads it again.
+  const refused = albumId !== null && !mutation.intent && (mutation.error === 'conflict' || mutation.error === 'append_primary_required');
+  useEffect(() => { if (refused) setRecheck(value => value + 1); }, [mutation.error]);
   useEffect(() => { folder.current?.setAttribute('webkitdirectory', ''); }, []);
   useEffect(() => { if (manifest) adminWorkspace.retain('create-manifest', manifest, access); }, [manifest]);
   // The upload hand-off already ran at confirmation; a mounted page only opens the new import.
@@ -56,26 +94,28 @@ function CreateImport() {
     adminWorkspace.forget('mutation:create'); navigate(`/admin/imports/${mutation.result.item.id}`, { replace: true });
   } }, [mutation.result, navigate]);
   const select = (list: FileList | null) => {
-    if (!list || locked) return;
+    if (!list || choosing) return;
     try { const files = Array.from(list), next = namingManifest(files);
       adminWorkspace.retain('create-files', Object.fromEntries(next.files.map(entry => [entry.slotId, files.find(file => (file.webkitRelativePath || file.name) === entry.relativePath)!])), access);
+      adminWorkspace.retain(CREATE_TARGET, albumId ?? '', access);
       setManifest(next); setInvalid(false);
     } catch { setInvalid(true); }
   };
   const submit = () => {
-    if (!manifest || !access.imports || needsFolder && !manifest.rootLabel.trim()) return;
+    if (!manifest || !access.imports || !ready || needsFolder && !manifest.rootLabel.trim()) return;
     const approval = adminWorkspace.capture();
-    mutation.operation.run('', 'POST', { manifest: needsFolder ? manifest : { ...manifest, rootLabel: '' } }, result => handOff(result.item, approval));
+    mutation.operation.run('', 'POST', { manifest: needsFolder ? manifest : { ...manifest, rootLabel: '' }, ...(albumId === null ? {} : { targetAlbumId: albumId }) }, result => handOff(result.item, approval));
   };
   return <section className={styles.page}><AdminNav />
-    <Link className={styles.back} to="/admin/imports">{t('common.back')}</Link>
-    <h1 className={styles.title}>{t('workbench.new')}</h1><p className={styles.muted}>{t('import.intro')}</p>
-    <p className={styles.muted}>{t('import.visibility_default')}</p>
+    {albumId === null ? <><Link className={styles.back} to="/admin/imports">{t('common.back')}</Link>
+      <h1 className={styles.title}>{t('workbench.new')}</h1><p className={styles.muted}>{t('import.intro')}</p>
+      <p className={styles.muted}>{t('import.visibility_default')}</p></>
+      : <Suspense fallback={<p role="status">{t('common.loading')}</p>}><ImportAlbumTargetCard key={albumId} albumId={albumId} recheck={recheck} refused={refused} onEligible={setEligible} /></Suspense>}
     <p className={styles.panel}>{t('import.manifest_only')}</p>
     <form className={styles.form} onSubmit={event => { event.preventDefault(); submit(); }}>
       <div className={styles.actions}>
-        <button className={styles.button} type="button" disabled={locked || !access.imports} onClick={() => folder.current?.click()}>{t('import.folder')}</button>
-        <button className={styles.button} type="button" disabled={locked || !access.imports} onClick={() => files.current?.click()}>{t('import.files')}</button>
+        <button className={styles.button} type="button" disabled={choosing} onClick={() => folder.current?.click()}>{t('import.folder')}</button>
+        <button className={styles.button} type="button" disabled={choosing} onClick={() => files.current?.click()}>{t('import.files')}</button>
         <input hidden ref={folder} type="file" multiple onChange={event => { select(event.target.files); event.target.value = ''; }} />
         <input hidden ref={files} type="file" multiple accept=".mp3,.m4a,.aac,.wav,.flac,.ogg,.opus,.aif,.aiff" onChange={event => { select(event.target.files); event.target.value = ''; }} />
       </div>
@@ -89,8 +129,9 @@ function CreateImport() {
         <ul className={styles.files}>{manifest.files.map(file => <li key={file.slotId}>{file.relativePath}</li>)}</ul>
       </>}
       {!online && <p role="status">{t('common.offline')}</p>}
-      <MutationStatus mutation={mutation} />
-      <div><button className={`${styles.button} ${styles.primary}`} type="submit" disabled={!manifest || needsFolder && !manifest.rootLabel.trim() || locked || !online || !access.imports}>{t('import.create')}</button></div>
+      {/* The card speaks for a refused create for an Album: the reason it can no longer take files, or that the create was refused. */}
+      {!refused && <MutationStatus mutation={mutation} />}
+      <div><button className={`${styles.button} ${styles.primary}`} type="submit" disabled={!manifest || needsFolder && !manifest.rootLabel.trim() || locked || !online || !access.imports || !ready}>{t('import.create')}</button></div>
     </form>
   </section>;
 }
