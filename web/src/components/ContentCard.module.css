@@ -193,11 +193,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .action,
-  .playReveal {
-    transition: none;
-  }
-
+  /* Global reduced motion makes transitions instant; suppress the spatial reveal and preview. */
   .playReveal {
     transform: none;
   }

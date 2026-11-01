@@ -71,12 +71,6 @@
   color: var(--color-danger);
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .trigger {
-    transition: none;
-  }
-}
-
 @media (pointer: coarse) {
   .menu button {
     min-height: var(--control-min-size);

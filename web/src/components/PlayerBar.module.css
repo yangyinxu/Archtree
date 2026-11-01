@@ -785,19 +785,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .control,
-  .secondaryControl,
-  .volumeButton,
-  .helpButton,
-  .expandedHeaderButton {
-    transition: none;
-  }
-
-  .mobileIdentityButton,
-  .transport {
-    transition: none;
-  }
-
+  /* Transitions are already instant globally; keep the buffering indicator static here. */
   .control[data-buffering="true"]::after {
     animation: none;
     border-color: currentColor;

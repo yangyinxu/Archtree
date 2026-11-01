@@ -76,12 +76,6 @@
   z-index: 4;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .button {
-    transition: none;
-  }
-}
-
 @media (forced-colors: active) {
   .button,
   .compact .button,

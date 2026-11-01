@@ -588,11 +588,6 @@
 }
 
 @media (min-width: 768px) and (max-width: 1007px) {
-  .sidebarSection {
-    flex: 1;
-    min-height: 0;
-  }
-
   .sidebarCreate {
     justify-content: center;
     padding-left: 0;
@@ -606,11 +601,6 @@
   .sidebarListItem > span:last-child,
   .summaryCopy {
     display: none;
-  }
-
-  .sidebarCollection,
-  .sidebarList {
-    min-height: 0;
   }
 
   .sidebarList {
@@ -660,21 +650,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .primaryButton,
-  .secondaryButton,
-  .dangerButton,
-  .textButton,
-  .summaryListItem,
-  .sidebarListItem,
-  .sidebarCreate,
-  .summaryListItem > span:last-child,
-  .sidebarListItem > span:last-child,
-  .field input,
-  .pickerSearch input,
-  .pickerResults li {
-    transition: none;
-  }
-
+  /* The global sheet makes transitions instant; this also removes the hover's spatial change. */
   .primaryButton:not(:disabled):hover {
     transform: none;
   }
