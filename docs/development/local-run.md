@@ -13,7 +13,7 @@ second process with `npm run dev:web`, then open
 `/finitude` and supports listener deep links. Requests to the legacy `/listen`
 prefix permanently redirect to the equivalent `/finitude` path. The Web build
 measures every initial route's unique compressed JavaScript and fails if any
-route exceeds the reviewed 151 KiB gzip budget. It also caps the complete
+route exceeds the reviewed 152 KiB gzip budget. It also caps the complete
 emitted stylesheet payload at 39 KiB gzip, emitted fonts at 128 KiB, bundled
 images at 256 KiB total, and any one bundled image at 128 KiB. Catalog artwork
 continues to load through listener DTOs rather than being bundled into the app.

@@ -1,10 +1,11 @@
 import { readFileSync } from 'node:fs';
 import { gzipSync } from 'node:zlib';
 
-// Raised from 150 KiB for the Album/Playlist detail redesign (shared TrackTable, LinkedByline and
-// playback-context selector); shared shell growth had left every route within 1 KiB, and SearchPage
-// already measured 150.01 KiB before the redesign.
-const initialRouteBudgetBytes = 151 * 1024;
+// Raised from 150 KiB for the Album/Playlist detail redesign (shared TrackTable, DetailHero,
+// LinkedByline and playback-context selector, plus the compact header on Playlist); shared shell
+// growth had left every route within 1 KiB, and SearchPage already measured 150.01 KiB before the
+// redesign.
+const initialRouteBudgetBytes = 152 * 1024;
 const distributionRoot = new URL('../dist/', import.meta.url);
 const manifest = JSON.parse(readFileSync(new URL('.vite/manifest.json', distributionRoot), 'utf8'));
 

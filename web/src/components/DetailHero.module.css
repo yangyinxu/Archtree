@@ -176,8 +176,9 @@
   position: relative;
 }
 
+/* Outranks the lazy ActionMenu trigger's own glyph size, which loads after this sheet. */
 .iconAction svg,
-.iconSlot svg {
+.iconSlot button svg {
   block-size: 1.75rem;
   inline-size: 1.75rem;
 }

@@ -55,11 +55,6 @@
   justify-self: end;
 }
 
-/* Until the Playlist page gets the compact bar, its header docks at the top on its own surface. */
-.table[data-variant="playlist"] .header {
-  background: var(--color-surface);
-}
-
 /* Playlist durations sit before the row menu, so the clock leaves the menu's width. */
 .table[data-variant="playlist"] .headerDuration {
   margin-inline-end: calc(var(--control-min-size) + 0.25rem);
