@@ -2,6 +2,7 @@
  * Exports
  *   Functions: AlbumPage
  * Internal
+ *   Functions: formatReleaseDate
  *   Constants: creditRoleKeys
  * @end-catalog */
 
@@ -48,9 +49,24 @@ const creditRoleKeys: Record<string, MessageKey> = {
   legacyUnspecified: 'catalog.credit.credit'
 };
 
+/**
+ * Formats a release date that is more precise than its year for the Album footer, or returns null.
+ * A year alone already shows in the hero byline, so it yields no footer date.
+ */
+const formatReleaseDate = (
+  date: { year?: number; month?: number; day?: number } | null | undefined,
+  locale: string
+) => {
+  if (!date?.year || !date.month) return null;
+  return new Intl.DateTimeFormat(locale, date.day
+    ? { dateStyle: 'long', timeZone: 'UTC' }
+    : { year: 'numeric', month: 'long', timeZone: 'UTC' }
+  ).format(Date.UTC(date.year, date.month - 1, date.day ?? 1));
+};
+
 /** Renders one expanded Album and launches its canonical ready-only queue. */
 export const AlbumPage = () => {
-  const { t } = useLocalization();
+  const { locale, t } = useLocalization();
   const { albumId = '' } = useParams();
   const session = useQuery(browserSessionQuery());
   const viewerId = session.data?.user.id;
@@ -107,6 +123,7 @@ export const AlbumPage = () => {
     else void launchAlbumPlayback(album.id, tracks, viewerId);
   };
   const total = totalDurationSeconds(tracks);
+  const releaseLabel = formatReleaseDate(album.releaseDate, locale);
   const pauseLabel = t('player.action.pause');
 
   return (
@@ -171,27 +188,6 @@ export const AlbumPage = () => {
           <button onClick={() => statuses.refetch()} type="button">{t('common.action.try_again')}</button>
         </div>}
 
-        {(album.credits?.length ?? 0) > 0 && (
-          <section className={styles.creditSection} aria-labelledby="album-credits-title">
-            <div className={styles.sectionHeader}>
-              <div>
-                <p className={styles.eyebrow}>{t('catalog.album.attribution')}</p>
-                <h2 id="album-credits-title">{t('common.label.credits')}</h2>
-              </div>
-            </div>
-            <ul className={styles.creditList}>
-              {album.credits?.map((credit) => (
-                <li key={`${credit.subjectType}:${credit.subjectId}:${credit.role}`}>
-                  <Link to={`/${credit.subjectType === 'artist' ? 'artists' : 'organizations'}/${encodeURIComponent(credit.subjectId)}`}>
-                    <span>{credit.name}</span>
-                    <small>{t(creditRoleKeys[credit.role] ?? 'catalog.credit.credit')}</small>
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          </section>
-        )}
-
         <section aria-labelledby="album-soundtracks-title" style={{ '--tt-sticky-top': '4rem' } as CSSProperties}>
           <h2 className="visually-hidden" id="album-soundtracks-title">{t('common.label.mediatracks')}</h2>
           {tracks.length > 0 ? (
@@ -237,6 +233,25 @@ export const AlbumPage = () => {
             <div className={styles.empty}>{t('catalog.album.empty')}</div>
           )}
         </section>
+
+        <footer className={styles.albumFooter}>
+          {releaseLabel && <p>{releaseLabel}</p>}
+          {(album.credits?.length ?? 0) > 0 && (
+            <section aria-labelledby="album-credits-title" className={styles.albumCredits}>
+              <h2 id="album-credits-title">{t('common.label.credits')}</h2>
+              <ul>
+                {album.credits?.map((credit) => (
+                  <li key={`${credit.subjectType}:${credit.subjectId}:${credit.role}`}>
+                    <Link to={`/${credit.subjectType === 'artist' ? 'artists' : 'organizations'}/${encodeURIComponent(credit.subjectId)}`}>
+                      {credit.name}
+                      <small>{t(creditRoleKeys[credit.role] ?? 'catalog.credit.credit')}</small>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+        </footer>
       </div>
     </>
   );

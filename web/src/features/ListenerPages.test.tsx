@@ -8,6 +8,8 @@
  *   - a paused current Album row keeps its indicator and resumes without relaunching
  *   - row meta falls back to the Album byline, never the Album title
  *   - Album detail shows the server byline and lists the label among its Credits
+ *   - the Credits footer follows the MediaTrack list in document order
+ *   - a full release date renders via Intl, and a year-only date renders no footer date
  *   - a missing Album year is omitted, not replaced by Album
  *   - Organization page renders its public metadata and credited releases
  *   - Search renders grouped public results and keeps content actions canonical
@@ -270,6 +272,44 @@ test('Album detail shows the server byline and lists the label among its Credits
     `/artists/${guestId}`,
     `/organizations/${organization.id}`
   ]);
+});
+
+test('the Credits footer follows the MediaTrack list in document order', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
+    album: {
+      ...album,
+      credits: [{ subjectType: 'artist', subjectId: artist.id, name: 'Finite Ensemble', role: 'primary', order: 0 }]
+    },
+    tracks: [track]
+  })));
+  renderRoute(`/albums/${album.id}`, '/albums/:albumId', <AlbumPage />);
+
+  const credits = await screen.findByRole('region', { name: 'Credits' });
+  const list = screen.getByRole('button', { name: 'Play Blue Interval' }).closest('ol')!;
+  expect(credits.closest('footer')).not.toBeNull();
+  expect(list.compareDocumentPosition(credits) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(list.contains(credits)).toBe(false);
+});
+
+test('a full release date renders via Intl, and a year-only date renders no footer date', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
+    album: { ...album, releaseDate: { year: 2026, month: 8, day: 2 } },
+    tracks: [track]
+  })));
+  const full = renderRoute(`/albums/${album.id}`, '/albums/:albumId', <AlbumPage />);
+
+  await screen.findByRole('heading', { level: 1, name: 'Night Geometry' });
+  const expected = new Intl.DateTimeFormat('en-US', { dateStyle: 'long', timeZone: 'UTC' })
+    .format(Date.UTC(2026, 7, 2));
+  expect(expected).toBe('August 2, 2026');
+  expect(full.container.querySelector('footer')).toHaveTextContent(expected);
+  full.unmount();
+
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ album, tracks: [track] })));
+  const yearOnly = renderRoute(`/albums/${album.id}`, '/albums/:albumId', <AlbumPage />);
+  await screen.findByRole('heading', { level: 1, name: 'Night Geometry' });
+  expect(yearOnly.container.querySelector('footer p')).toBeNull();
+  expect(yearOnly.container.querySelector('footer')).not.toHaveTextContent('2026');
 });
 
 test('a missing Album year is omitted, not replaced by Album', async () => {
