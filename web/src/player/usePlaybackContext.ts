@@ -7,7 +7,7 @@ import type { PlayerSnapshot, PlayerStore } from './types';
 export interface PlaybackContext {
   currentId: string | null;
   status: 'playing' | 'paused' | null;
-  /** True when the player queue holds exactly this page's MediaTracks in this order. */
+  /** True when the local player queue holds exactly this page's MediaTracks in this order. */
   matches: boolean;
 }
 
@@ -22,6 +22,8 @@ export const usePlaybackContext = (
   const cache = useRef<{ queue?: PlayerSnapshot['queue']; ids?: readonly string[]; matches: boolean }>({ matches: false });
   // A string key keeps the snapshot stable across unrelated store updates such as currentTime.
   const select = (snapshot: PlayerSnapshot) => {
+    // Matching IDs do not authorize ordinary page actions to control a listening room.
+    if (store.isRoomPlaybackActive()) return '0||';
     const memo = cache.current;
     if (memo.queue !== snapshot.queue || memo.ids !== trackIds) {
       cache.current = {

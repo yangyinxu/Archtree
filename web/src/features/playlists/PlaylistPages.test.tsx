@@ -630,6 +630,28 @@ test('a paused Playlist queue resumes from the hero Play without relaunching', a
   expect(launch).not.toHaveBeenCalled();
 });
 
+test.each(['playing', 'paused'] as const)('Playlist controls never reuse a matching %s Room queue', async (status) => {
+  const user = userEvent.setup();
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(detail)));
+  vi.spyOn(playerStore, 'getSnapshot').mockReturnValue({
+    ...playerStore.getSnapshot(), currentIndex: 0, currentItem: firstTrack,
+    queue: [firstTrack, secondTrack], status
+  });
+  vi.spyOn(playerStore, 'isRoomPlaybackActive').mockReturnValue(true);
+  const pause = vi.spyOn(playerStore, 'pause').mockImplementation(() => undefined);
+  const play = vi.spyOn(playerStore, 'play').mockResolvedValue();
+  const launch = vi.spyOn(playerStore, 'launchQueue').mockResolvedValue();
+  renderPlaylistRoutes('/playlists/playlist-1');
+  const hero = (await screen.findByRole('heading', { level: 1, name: 'Quiet sequence' })).closest('header')!;
+
+  await user.click(within(hero).getByRole('button', { name: 'Play' }));
+  await user.click(screen.getByRole('button', { name: 'Play Night' }));
+
+  expect(launch).toHaveBeenCalledTimes(2);
+  expect(play).not.toHaveBeenCalled();
+  expect(pause).not.toHaveBeenCalled();
+});
+
 test('the hero byline joins the MediaTrack count, total duration and unavailable count', async () => {
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
     ...detail,

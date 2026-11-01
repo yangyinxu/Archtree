@@ -17,11 +17,13 @@ const item = (id: string): PlayerQueueItem => ({
 const fakeStore = (initial: Partial<PlayerSnapshot>) => {
   const base = createPlayerStore().getSnapshot();
   let snapshot: PlayerSnapshot = { ...base, ...initial };
+  let roomActive = false;
   const listeners = new Set<() => void>();
   const store = {
     ...createPlayerStore(),
     getSnapshot: () => snapshot,
     getServerSnapshot: () => snapshot,
+    isRoomPlaybackActive: () => roomActive,
     subscribe: (listener: () => void) => {
       listeners.add(listener);
       return () => listeners.delete(listener);
@@ -31,7 +33,11 @@ const fakeStore = (initial: Partial<PlayerSnapshot>) => {
     snapshot = { ...snapshot, ...patch };
     listeners.forEach((listener) => listener());
   });
-  return { store, update };
+  const setRoomActive = (active: boolean) => {
+    roomActive = active;
+    update({});
+  };
+  return { store, update, setRoomActive };
 };
 
 const first = item('first');
@@ -58,6 +64,18 @@ test('reports paused and playing, and nothing while idle', () => {
   expect(result.current.status).toBe('playing');
   update({ status: 'idle', currentItem: null, queue: [] });
   expect(result.current).toEqual({ matches: false, status: null, currentId: null });
+});
+
+test.each(['playing', 'paused'] as const)('a %s room never becomes this page context even with the same queue IDs', (status) => {
+  const { store, setRoomActive } = fakeStore({ queue: [first, second], currentItem: first, status });
+  const { result } = renderHook(() => usePlaybackContext(pageIds, store));
+  expect(result.current.matches).toBe(true);
+
+  setRoomActive(true);
+
+  expect(result.current).toEqual({ matches: false, status: null, currentId: null });
+  setRoomActive(false);
+  expect(result.current).toEqual({ matches: true, status, currentId: 'first' });
 });
 
 test('a clock-only snapshot change does not re-render the page', () => {

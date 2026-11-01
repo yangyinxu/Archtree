@@ -235,3 +235,28 @@ test('the compact Play shows Pause when the Album queue is playing', async () =>
   expect(pause).toHaveBeenCalledOnce();
   expect(launch).not.toHaveBeenCalled();
 });
+
+test.each(['playing', 'paused'] as const)('Album controls never reuse a matching %s Room queue', async (status) => {
+  const user = userEvent.setup();
+  const track = trackTitled('Opening');
+  vi.spyOn(playerStore, 'getSnapshot').mockReturnValue({
+    ...playerStore.getSnapshot(), currentIndex: 0, currentItem: track as never, queue: [track as never], status
+  });
+  vi.spyOn(playerStore, 'isRoomPlaybackActive').mockReturnValue(true);
+  const pause = vi.spyOn(playerStore, 'pause').mockImplementation(() => undefined);
+  const play = vi.spyOn(playerStore, 'play').mockResolvedValue();
+  const launch = vi.spyOn(playerStore, 'launchAlbumQueue').mockResolvedValue();
+  const { scrollHeroOut } = observeHero();
+  mount(albumWith('Night Geometry'), track);
+  const hero = (await screen.findByRole('heading', { level: 1, name: 'Night Geometry' })).closest('header')!;
+
+  await user.click(within(hero).getByRole('button', { name: 'Play' }));
+  await user.click(screen.getByRole('button', { name: 'Play Opening' }));
+  scrollHeroOut();
+  await user.click(screen.getByRole('button', { name: albumPlayName('Night Geometry') }));
+
+  // The ordinary launch path enforces the store's room refusal instead of issuing Room transport commands.
+  expect(launch).toHaveBeenCalledTimes(3);
+  expect(play).not.toHaveBeenCalled();
+  expect(pause).not.toHaveBeenCalled();
+});
