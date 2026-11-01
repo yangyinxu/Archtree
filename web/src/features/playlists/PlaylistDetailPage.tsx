@@ -348,7 +348,7 @@ export const PlaylistDetailPage = () => {
   const togglePlay = () => {
     if (heroPlaying) playerStore.pause();
     else if (playback.matches && playback.status === 'paused') void playerStore.play();
-    else void launchPlaylistPlayback(readyTracks, viewerId);
+    else void launchPlaylistPlayback(playlistId, readyTracks, viewerId);
   };
   const pauseLabel = t('player.action.pause');
 
@@ -482,7 +482,7 @@ export const PlaylistDetailPage = () => {
                     if (!track) return;
                     if (state === 'playing') playerStore.pause();
                     else if (state === 'paused' && playback.matches) void playerStore.play();
-                    else void launchPlaylistPlayback(readyTracks, viewerId, track.id);
+                    else void launchPlaylistPlayback(playlistId, readyTracks, viewerId, track.id);
                   },
                   menu: <Suspense fallback={null}>
                     <ActionMenu

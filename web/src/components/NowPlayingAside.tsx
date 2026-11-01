@@ -4,10 +4,14 @@
  *   Default: NowPlayingAside
  * Internal
  *   Types: NowPlayingAsideProps
+ *   Functions: MinimizedVideo
  * @end-catalog */
 
+import { useLayoutEffect } from 'react';
+
 import { Artwork } from './Artwork';
-import { SharedVideoSurface } from './SharedVideoSurface';
+import { Icon } from './Icon';
+import { SharedVideoSurface, useVideoFullscreen, videoTheaterToggleId } from './SharedVideoSurface';
 import {
   playerStore,
   type PlayerStore
@@ -21,10 +25,62 @@ interface NowPlayingAsideProps {
   store?: PlayerStore;
   /** Hosts the current Video here while the shell shows the routed page instead of the theater. */
   theaterMinimized?: boolean;
+  /** Returns the minimized Video to the theater; omitted where no theater exists. */
+  onTheaterMinimized?: (minimized: boolean) => void;
 }
 
+/**
+ * Hosts the minimized Video at the top of the panel. Selecting it restores the theater, and its
+ * top-right control enters fullscreen. When it leaves while it holds focus, focus moves to the
+ * player bar's Video toggle instead of falling back to the document.
+ */
+const MinimizedVideo = ({ onRestore, store, title }: {
+  onRestore?: () => void;
+  store: PlayerStore;
+  title: string;
+}) => {
+  const { t } = useLocalization();
+  const { enterFullscreen, nativeControls, root } = useVideoFullscreen<HTMLDivElement>();
+
+  // Layout cleanup runs before React removes this subtree, while focus can still be read inside it.
+  useLayoutEffect(() => {
+    const container = root.current;
+    return () => {
+      if (!container?.contains(document.activeElement)) return;
+      queueMicrotask(() => document.getElementById(videoTheaterToggleId)?.focus());
+    };
+  }, [root]);
+
+  return (
+    <div className={styles.videoPreview} ref={root}>
+      <SharedVideoSurface nativeControls={nativeControls} store={store} title={title} />
+      {onRestore && (
+        <button
+          aria-label={t('video.surface.label', { title })}
+          className={styles.videoExpand}
+          onClick={onRestore}
+          type="button"
+        />
+      )}
+      <button
+        aria-label={t('video.fullscreen.action')}
+        className={styles.videoFullscreen}
+        onClick={() => { void enterFullscreen(); }}
+        title={t('video.fullscreen.title')}
+        type="button"
+      >
+        <Icon name="expand" />
+      </button>
+    </div>
+  );
+};
+
 /** Presents read-only playback context without owning media, queue, or activity writes. */
-export const NowPlayingAside = ({ store = playerStore, theaterMinimized = false }: NowPlayingAsideProps) => {
+export const NowPlayingAside = ({
+  onTheaterMinimized,
+  store = playerStore,
+  theaterMinimized = false
+}: NowPlayingAsideProps) => {
   const player = usePlayerQueue(store);
   const { t } = useLocalization();
   const current = player.currentItem;
@@ -54,7 +110,13 @@ export const NowPlayingAside = ({ store = playerStore, theaterMinimized = false 
           <h2 title={current.title}>{current.title}</h2>
         </header>
 
-        {theaterMinimized && <SharedVideoSurface store={store} title={current.title} />}
+        {theaterMinimized && (
+          <MinimizedVideo
+            onRestore={onTheaterMinimized && (() => onTheaterMinimized(false))}
+            store={store}
+            title={current.title}
+          />
+        )}
 
         <div className={styles.queueCurrent} aria-current="true">
           <Artwork

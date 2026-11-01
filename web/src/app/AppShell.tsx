@@ -212,7 +212,7 @@ const AppShellContent = () => {
         inert={adminRoute || !effectiveNowPlayingOpen ? true : undefined}
       >
         <Suspense fallback={<div className={styles.asideLoading} aria-hidden="true" />}>
-          <NowPlayingAside theaterMinimized={theaterMinimized} />
+          <NowPlayingAside onTheaterMinimized={setTheaterMinimized} theaterMinimized={theaterMinimized} />
         </Suspense>
       </aside>
 
