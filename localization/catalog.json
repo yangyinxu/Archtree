@@ -7475,6 +7475,429 @@
       ],
       "variables": {}
     },
+    "admin.pages.confirm_hint": {
+      "description": "Administrator Page placements: confirm hint.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.confirm_stale": {
+      "description": "Administrator Page placements: confirm stale.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.conflict": {
+      "description": "Administrator Page placements: conflict.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.copied": {
+      "description": "Administrator Page placements: copied.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.copy": {
+      "description": "Administrator Page placements: copy.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.copy_failed": {
+      "description": "Administrator Page placements: copy failed.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.copy_reference": {
+      "description": "Administrator Page placements: copy reference.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.empty": {
+      "description": "Administrator Page placements: empty.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.hide_details": {
+      "description": "Administrator Page placements: hide details.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.item_count": {
+      "description": "Administrator Page placements: item count.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.pages.load_error": {
+      "description": "Administrator Page placements: load error.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.operation_error": {
+      "description": "Administrator Page placements: operation error.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.operation_target": {
+      "description": "Administrator Page placements: captured operation target and direction.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {
+        "action": "string",
+        "name": "string",
+        "position": "number"
+      }
+    },
+    "admin.pages.order": {
+      "description": "Administrator Page placements: order.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.order_adjust": {
+      "description": "Administrator Page ordering: adjust.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.order_back": {
+      "description": "Administrator Page ordering: back.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.order_cancel": {
+      "description": "Administrator Page ordering: cancel.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.order_capacity": {
+      "description": "Administrator Page ordering: a definite operation capacity refusal.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.order_changed": {
+      "description": "Administrator Page ordering: changed.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.pages.order_confirm": {
+      "description": "Administrator Page ordering: confirm.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.order_confirm_copy": {
+      "description": "Administrator Page ordering: confirm copy.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.order_confirm_title": {
+      "description": "Administrator Page ordering: confirm title.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.order_conflict": {
+      "description": "Administrator Page ordering: conflict.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.order_current": {
+      "description": "Administrator Page ordering: current.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.order_down": {
+      "description": "Administrator Page ordering: down.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {
+        "name": "string"
+      }
+    },
+    "admin.pages.order_down_short": {
+      "description": "Administrator Page ordering: down short.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.order_draft": {
+      "description": "Administrator Page ordering: draft.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.order_error": {
+      "description": "Administrator Page ordering: error.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.order_failed": {
+      "description": "Administrator Page ordering: failed.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.order_handle": {
+      "description": "Administrator Page ordering: handle.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {
+        "name": "string"
+      }
+    },
+    "admin.pages.order_heading": {
+      "description": "Administrator Page ordering: heading.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.pages.order_hint": {
+      "description": "Administrator Page ordering: hint.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.order_identity": {
+      "description": "Administrator Page ordering: identity.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.order_keyboard": {
+      "description": "Administrator Page ordering: keyboard.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.order_moved": {
+      "description": "Administrator Page ordering: moved.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {
+        "count": "number",
+        "name": "string",
+        "position": "number"
+      }
+    },
+    "admin.pages.order_new": {
+      "description": "Administrator Page ordering: new.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.order_original": {
+      "description": "Administrator Page ordering: original.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {
+        "position": "number"
+      }
+    },
+    "admin.pages.order_original_list": {
+      "description": "Administrator Page ordering: original list.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.order_restart": {
+      "description": "Administrator Page ordering: restart.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.order_save": {
+      "description": "Administrator Page ordering: save.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.order_saved": {
+      "description": "Administrator Page ordering: saved.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.order_saving": {
+      "description": "Administrator Page ordering: saving.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.order_saving_button": {
+      "description": "Administrator Page ordering: saving button.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.order_scope": {
+      "description": "Administrator Page ordering: scope.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.order_stale": {
+      "description": "Administrator Page ordering: stale.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.order_unknown": {
+      "description": "Administrator Page ordering: unknown.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {
+        "page": "string"
+      }
+    },
+    "admin.pages.order_unknown_copy": {
+      "description": "Administrator Page ordering: unknown copy.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.order_up": {
+      "description": "Administrator Page ordering: up.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {
+        "name": "string"
+      }
+    },
+    "admin.pages.order_up_short": {
+      "description": "Administrator Page ordering: up short.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.order_view_original": {
+      "description": "Administrator Page ordering: view original.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.reference_id": {
+      "description": "Administrator Page placements: reference id.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.reference_not_repaired": {
+      "description": "Administrator Page placements: reference not repaired.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.refreshing": {
+      "description": "Administrator Page placements: refreshing.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.refreshing_copy": {
+      "description": "Administrator Page placements: refreshing copy.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.scope": {
+      "description": "Administrator Page placements: scope.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.subtitle": {
+      "description": "Administrator Page placements: subtitle.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.updating": {
+      "description": "Administrator Page placements: updating.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
     "admin.publication.append_not_applied": {
       "description": "Administrator workbench: note before publishing an import that appends to an existing Album, naming the draft values that are not applied.",
       "delivery": [

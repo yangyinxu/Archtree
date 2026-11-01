@@ -105,6 +105,11 @@ localization/
     bundles/
       en-US.json
       zh-Hans.json
+    web-admin/
+      manifest.json
+      bundles/
+        en-US.json
+        zh-Hans.json
 ```
 
 `catalog.json` contains translator context and the variable contract. Locale
@@ -197,11 +202,19 @@ translators one authoritative definition for every message:
 ```
 
 Every catalog entry declares one or more delivery targets: `runtime`,
-`ios-system`, or `android-system`. Delivery metadata controls generated output;
-it does not create another translation value. A shared platform-owned message
+`web-admin`, `ios-system`, or `android-system`. Delivery metadata controls
+generated output; it does not create another translation value. A shared platform-owned message
 may target both native systems. System-delivered messages do not accept runtime
 variables unless the target platform resource format explicitly supports and
 tests that contract.
+
+The authoring catalog is bounded to 4,000 messages independently of each
+delivery representation. `runtime` retains the 2,000-message v2 limit, while
+the legacy listener projection retains its 1,000-message limit. `web-admin`
+accepts only `admin.*` keys and has its own 2,000-message and 256-KiB bundle
+limits. Assigning new Web-only administrator copy to this target does not add
+it to an existing public runtime bundle. Never move an already published
+`runtime` key to another target while a supported client may still package it.
 
 The initial variable types are `string`, `number`, `date`, and `time`. Add a
 new type only with formatter support and tests on Web and both native platforms.
@@ -209,11 +222,14 @@ Variable names are semantic and named; positional placeholders such as `%@`,
 `%1$s`, `{0}`, and string interpolation inside views are not allowed in new
 catalog messages.
 
-All published locales must satisfy both invariants:
+All canonical locale sources must satisfy both invariants:
 
 1. Their message-key set is exactly the key set in `catalog.json`.
 2. For every key, their parsed named-variable set exactly matches the catalog,
    including variables inside plural or select branches.
+
+Generated locale bundles select their key sets by delivery target; every
+locale in a delivery group has the same complete key set and variable contract.
 
 ICU MessageFormat 1 is the initial wire syntax because mature parsers are
 available today. Hide it behind a small `MessageFormatter` boundary on each
@@ -247,6 +263,24 @@ checks that every key of the iOS and Android packaged `en-US.json` exists in
 the generated `en-US` and `zh-Hans` bundles with the same variable names the
 native clients read (their `{name}` / `{name,` pattern); it is skipped
 otherwise.
+
+New Page-management copy uses `web-admin` delivery and is packaged with the
+lazy Web administrator page rather than the listener startup bundle. The page
+uses the active application locale, with its packaged `en-US` messages as the
+final fallback, and the same plain ICU and named-variable validation as runtime
+copy. These release-owned strings do not depend on the runtime localization endpoint
+or a writable cache; changing them requires a Web release. They are generated from the same
+canonical locale JSON, not maintained separately. Existing administrator keys
+already published through v2 remain in that runtime contract.
+
+The generator writes the scoped manifest and locale bundles under
+`localization/generated/web-admin/`. The Page route loads only the selected
+scoped locale asynchronously, suspending until the complete pack is available
+so confirmations never mix languages. A catalog without any `web-admin` keys
+produces no scoped files; generation removes stale scoped manifests and bundles
+along with obsolete locale files in the existing delivery groups. Native
+synchronization continues to copy only the runtime manifest and `en-US`
+fallback, so a change confined to scoped copy leaves those files unchanged.
 
 Until migration is complete, existing native resource systems remain valid:
 
@@ -374,12 +408,14 @@ GET /api/localizations/v2/manifest
 GET /api/localizations/v2/bundles/{locale}
 ```
 
-The v2 catalog is bounded to 2,000 messages and 256 KiB. The generator also
-writes `generated/legacy/manifest.json` and its `bundles/`, excluding `admin.*`.
+The v2 runtime namespace is bounded to 2,000 messages and 256 KiB. The generator
+also writes `generated/legacy/manifest.json` and its `bundles/`, excluding `admin.*`.
 The existing v1 endpoints serve that independently revised listener namespace
 with a 1,000-message bound. This preserves existing native readers without
 changing their accepted schema or silently discarding keys. Native clients that
 consume the complete catalog use v2 and package the full generated fallback.
+The Web-only `web-admin` artifacts are release assets, not a new API namespace;
+they are never included in the v1 or v2 response.
 
 The manifest response is intentionally small:
 
@@ -420,8 +456,8 @@ on-disk locale file:
 
 The revision is an opaque digest of the generated canonical `runtime` message
 map; clients compare it for equality only. A change limited to platform-owned
-copy therefore does not cause installed clients to download an unchanged
-runtime bundle. Both endpoints return a strong `ETag` derived from the complete
+or scoped Web administrator copy therefore does not cause installed clients to
+download an unchanged runtime bundle. Both endpoints return a strong `ETag` derived from the complete
 representation and accept `If-None-Match`. Bundle responses also return
 `Content-Language` with the exact published tag. Public caching may store
 responses; `Cache-Control: public, max-age=0, must-revalidate` keeps the
