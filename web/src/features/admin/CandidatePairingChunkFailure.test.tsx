@@ -25,7 +25,7 @@ test('a pairing panel whose chunk cannot load asks for a reload after the sectio
   expect(notFit.compareDocumentPosition(alert) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(alert.compareDocumentPosition(none) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   const card = within(screen.getByRole('region', { name: 'Possible match (1 release)' }));
-  const albumOnly = card.getByRole('button', { name: 'Use Album values only (title, Artists, label, release date)', hidden: true });
+  const albumOnly = card.getByRole('button', { name: 'Use Album values only', hidden: true });
   for (const button of [none, albumOnly]) expect(button).toBeEnabled();
   fireEvent.click(albumOnly); expect(onChoose).toHaveBeenLastCalledWith(pairingEditions[0]);
   fireEvent.click(none); expect(onChoose).toHaveBeenLastCalledWith(null);

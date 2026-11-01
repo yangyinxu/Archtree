@@ -15,6 +15,7 @@
  *   - the review's identity rows and the Album page's search line never mention AI or Luna
  *   - the Album page's lookup entry names MusicBrainz and says it is free, and its confirmation says Luna AI (paid) never starts
  *   - the review's Luna AI confirmation names the free lookup in its warning, offers waiting for it as free, and its free lookup controls say they are free
+ *   - every review lookup phase reads as a verb phrase after the running headline's "正在"
  * @end-catalog */
 
 import enBundle from '../../../../localization/generated/bundles/en-US.json';
@@ -72,7 +73,7 @@ const reviewLookupProse = [...['queued_status', 'running_status',
 const lookupControls = [...['retry', 'submit', 'box', 'name', 'kind_album', 'kind_song', 'choose', 'choose_none'].map(control => `admin.lookup.${control}`),
   'admin.summary.keep_mine', 'admin.summary.use_lookup',
   ...['keep_current', 'use_musicbrainz', 'use_itunes', 'keep_all_current', 'use_all_musicbrainz', 'use_all_itunes', 'create', 'lookup_choose_album_only',
-    'lookup_choose_again', 'lookup_replace_confirm', 'lookup_replace_now', 'lookup_other_options', 'lookup_editions_choose', 'lookup_choose_edition', 'lookup_choose_edition_album_only',
+    'lookup_choose_again', 'lookup_replace_confirm', 'lookup_replace_now', 'lookup_editions_choose', 'lookup_choose_edition', 'lookup_choose_edition_album_only',
     'lookup_retry_free', 'lookup_submit_free', 'lookup_log_show', 'lookup_log_hide', 'lookup_try_another']
     .map(control => `admin.catalog_review.${control}`), 'admin.workbench.review_lookup', 'admin.catalog_review.lookup_details',
   // The action bar's controls other than its Luna AI wait reasons.
@@ -160,4 +161,10 @@ test('the review\'s Luna AI confirmation names the free lookup in its warning, o
     expect(message, `${locale} ${key}`).toMatch(free[locale]);
     expect(message, `${locale} ${key}`).not.toMatch(/Luna|\bAI\b|AI/);
   }
+});
+
+test('every review lookup phase reads as a verb phrase after the running headline\'s "正在"', () => {
+  const phases = family('admin.catalog_review.lookup_phase_');
+  expect(phases.length).toBeGreaterThan(0);
+  for (const key of phases) expect(locales['zh-Hans'][key], key).not.toMatch(/^(在|[A-Za-z])/);
 });

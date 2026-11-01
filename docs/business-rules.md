@@ -2349,7 +2349,7 @@ The wire protocol and operational bounds are documented in
   saving the selected ones, alone or when requesting the update, compares
   again. Positions
   giving Track Numbers alone are proposed unselected, and the name box stays
-  available. After the name box, the review also offers pairing the
+  available. Besides the name box, the review also offers pairing the
   members by hand with a release that they fit in more than one way and whose
   title makes it a possible match: the administrator gives each member a
   distinct track of that release it can pair with, and saving stores those

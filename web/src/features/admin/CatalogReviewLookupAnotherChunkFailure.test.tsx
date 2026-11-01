@@ -7,18 +7,18 @@ import { AdminCatalogReviewPage } from './AdminCatalogReviewPage';
 import { catalogReview, reviewId, reviewJson, session, viewer } from './catalogReviewFixtures.testSupport';
 
 /**
- * A deploy removed the old hashed chunk of the name box: the page asks for a reload where the box opens, under the row of
- * alternatives, whose toggle still closes it, while the status line and the rest of the page stay usable. All names and
- * identifiers are synthetic.
+ * A deploy removed the page's name-box chunk (CatalogReviewLookupAnother.tsx): the page asks for a reload where the box opens,
+ * under the row of alternatives, whose toggle still closes it, while the status line and the rest of the page stay usable. All
+ * names and identifiers are synthetic.
  */
-vi.mock('./LookupBox', () => { throw new TypeError('Failed to fetch dynamically imported module'); });
+vi.mock('./CatalogReviewLookupAnother', () => { throw new TypeError('Failed to fetch dynamically imported module'); });
 
 beforeEach(() => {
   adminWorkspace.reset(); adminWorkspace.authorize(captureAccountOperation(viewer), true, true, undefined, { editing: true, visibility: true }); adminWorkspace.select('admin');
 });
 afterEach(() => { cleanup(); adminWorkspace.reset(); vi.unstubAllGlobals(); });
 
-test('a name box chunk that cannot load asks for a reload where the box opens, and its toggle and the status line stay usable', async () => {
+test('a page name-box chunk that cannot load asks for a reload where the box opens, and its toggle and the status line stay usable', async () => {
   const item = catalogReview();
   vi.stubGlobal('fetch', vi.fn(async (path: string) => reviewJson(path.endsWith('/lookup') ? { lookup: null, revision: 1, valueRevision: 0,
     summary: { waiting: { lookup: false, analysis: false }, needsAnswer: { tie: false, conflicts: [] }, lookupAvailable: true, primaryArtists: [] } } : { item, receipt: null })));

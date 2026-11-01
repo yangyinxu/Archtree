@@ -10,6 +10,7 @@
  *   - a run that failed says the lookup has not finished, with when and which retry, why retries ran out or it stopped, and the free retry as the next step
  *   - without a run the lookup has not run: the name box is next where lookup is configured, else the shared not-configured sentence
  *   - while Luna AI runs its headline replaces the lookup's, alone keeping whether the name box is next, beside an active lookup both are named
+ *   - where this server cannot run lookup, an ended run names neither the free retry nor the name box, keeping its headline; applied lines stay
  * @end-catalog */
 
 import type { ReviewLookupView } from './importLookupApi';
@@ -39,11 +40,11 @@ const bestOf = (pairing: 'unique' | 'ambiguous' = 'ambiguous') => view([...['Syn
 ...[11, 12, 13, 14].map(n => candidate(n, 'Synthetic Best BIBLE', { unknown: 3, local: 3, pairing })),
 candidate(15, 'Synthetic Single', { status: 'notMatching', pairing: 'none', local: 3 })], { disclosure: { unknownLocalDurations: 3, unknownLocalDiscNumbers: 3, partialComparison: false } });
 const discNumbers = (count: number) => ({ numbers: {}, count, disc: true }), trackNumbers = (count: number) => ({ numbers: {}, count, disc: false });
-const bestOfContext = { status: 'lookup.no_match', luna: false, members: 3, searched: 'Synthetic Best BIBLE／Synthetic Singer', artists: ['Synthetic Singer'], now: 0, numbers: discNumbers(3) };
+const bestOfContext = { status: 'lookup.no_match', available: true, luna: false, members: 3, searched: 'Synthetic Best BIBLE／Synthetic Singer', artists: ['Synthetic Singer'], now: 0, numbers: discNumbers(3) };
 /** An Album without members: releases found by its title alone, six of them with exactly its title. */
 const numberOnes = () => view(Array.from({ length: 12 }, (_, index) => candidate(index + 1, index % 2 ? `Other ${index}` : 'Synthetic Number Ones', { local: 0, pairing: 'unique' })));
 const live = (extra: Partial<ReviewLookupView> = {}) => ({ ...pairingLookupResponse().lookup!, ...extra });
-const liveContext = { status: 'lookup.no_match', luna: false, members: 2, searched: 'Synthetic Live Album 2', artists: ['Synthetic Live Artist -Romanized-'], now: 0, numbers: discNumbers(2) };
+const liveContext = { status: 'lookup.no_match', available: true, luna: false, members: 2, searched: 'Synthetic Live Album 2', artists: ['Synthetic Live Artist -Romanized-'], now: 0, numbers: discNumbers(2) };
 const message = (key: string, values?: Record<string, string | number>) => ({ key, values });
 const cr = (key: string, values?: Record<string, string | number>) => message(`catalog_review.${key}`, values);
 /** The parts of a line a test reads: icon, headline, sentence and whether the name box is next. */
@@ -90,7 +91,11 @@ test('a tie, an offered release, none applied and an applied release keep their 
   expect(reviewStatusLine({ ...applied, disclosure: { unknownLocalDurations: 3, unknownLocalDiscNumbers: 0, partialComparison: false } }, { ...liveContext, status: 'lookup.applied' }).line)
     .toEqual(cr('lookup_line_unverified', { count: 3 }));
   expect(reviewStatusLine({ ...applied, disclosure: null }, { ...liveContext, status: 'lookup.applied' }).line).toBeNull();
-  expect(read(reviewStatusLine(applied, { ...liveContext, status: 'lookup.applied_itunes_unchecked' }))).toMatchObject({ tone: 'alert', head: { key: 'lookup.applied_itunes_unchecked' }, line: null });
+  // An iTunes-only result keeps the short applied headline and says in one sentence whether MusicBrainz checked it.
+  expect(read(reviewStatusLine(applied, { ...liveContext, status: 'lookup.applied_itunes_unchecked' }))).toEqual({ tone: 'alert',
+    head: message('lookup.applied', { title: 'Synthetic Live Album 2' }), line: cr('lookup_line_itunes', { checked: 'no' }), box: false });
+  expect(read(reviewStatusLine(applied, { ...liveContext, status: 'lookup.applied_itunes' }))).toEqual({ tone: 'check',
+    head: message('lookup.applied', { title: 'Synthetic Live Album 2' }), line: cr('lookup_line_itunes', { checked: 'yes' }), box: false });
 });
 
 test('an active run names its phase and counts with the draft usable meanwhile, its time and that it keeps running in the log', () => {
@@ -145,4 +150,20 @@ test('while Luna AI runs its headline replaces the lookup\'s, alone keeping whet
   const running = view([], { state: 'running', progress: { phase: 'details', done: 3, total: 8, startedAt, updatedAt: startedAt } });
   expect(reviewStatusLine(running, { ...liveContext, status: 'lookup.active', luna: true, now: Date.parse(startedAt) + 3_000 })).toEqual({ tone: 'clock', head: cr('status_both_running'),
     line: cr('status_both_line'), notes: [cr('lookup_elapsed', { elapsed: '0:03' }), cr('lookup_keeps_running')], box: false });
+});
+
+test('where this server cannot run lookup, an ended run names neither the free retry nor the name box, keeping its headline; applied lines stay', () => {
+  const notConfigured = message('lookup.not_configured'), off = { ...liveContext, available: false };
+  // A completed run with and without releases the tracks fit, no release and an incomplete run.
+  expect(read(reviewStatusLine(live(), { ...off, status: 'lookup.no_match' }))).toEqual({ tone: 'check', head: cr('lookup_head_complete', { count: 1 }), line: notConfigured, box: false });
+  expect(read(reviewStatusLine(view([]), { ...off, status: 'lookup.no_match' }))).toEqual({ tone: 'search', head: cr('lookup_head_empty'), line: notConfigured, box: false });
+  expect(read(reviewStatusLine(view([]), { ...off, status: 'lookup.no_release' }))).toEqual({ tone: 'search', head: cr('lookup_head_empty'), line: notConfigured, box: false });
+  const ended = (state: ReviewLookupView['state'], issue: ReviewLookupView['issue'], status: string) => read(reviewStatusLine(view([], { state, issue }), { ...off, status }));
+  const failed = cr('lookup_head_failed');
+  expect(ended('complete', 'sourceBusy', 'lookup.incomplete')).toEqual({ tone: 'alert', head: failed, line: notConfigured, box: false });
+  expect(ended('stopped', null, 'lookup.stopped')).toEqual({ tone: 'alert', head: failed, line: notConfigured, box: false });
+  expect(ended('unavailable', 'sourceBusy', 'lookup.unavailable')).toEqual({ tone: 'alert', head: failed, line: notConfigured, box: false });
+  // An applied release names no hidden control, so it keeps its own line.
+  const again = pairedLookupResponse(pairingApplication(pairingEditions[0], false)).lookup!;
+  expect(reviewStatusLine(again, { ...off, status: 'lookup.applied' }).line).toEqual(cr('lookup_line_again'));
 });

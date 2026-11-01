@@ -1394,8 +1394,10 @@ section follows it: **Check the proposed changes**, the numbers proposed from
 titles (see **Numbers proposed from titles** below) with the optional
 title-prefix cleanup after the rows, then the update range (see below), then the
 review's lookup details (`CatalogReviewLookupDetails.tsx`, its own chunk, the
-**Metadata lookup** region: how many answers and records are still needed, the
-identity rows, the results, the free retry and the collapsed **Reference
+**Metadata lookup** region: how many optional lookup answers are open, whose
+fields stay out of this update until answered, the identity rows (which say how
+many Artists or labels can still be matched or created, likewise outside this
+update until chosen), the results, the free retry and the collapsed **Reference
 releases**), then any notice that the saved draft changed (a conflict). A row of
 alternatives comes next, labelled "不对？" (**Not right?**): **Look up another
 name** while lookup is available, which opens the name box
@@ -1861,7 +1863,13 @@ the review's own words where the import's wording names files, tags or the
 import: before a
 review's first run it says lookup has not run, with the name box next, and where
 lookup is not configured (`lookupAvailable` false) it says so and offers neither
-a retry nor the name box (nor **Look up another name**). The status line reads
+a retry nor the name box (nor **Look up another name**); after an ended run
+whose sentence would name the free retry or the name box, the status line keeps
+its headline and says lookup is not configured instead (the superseded, tie,
+single-choice and applied lines name neither and stay). After an iTunes-only
+result was applied the headline names the applied release and one sentence says
+it is iTunes-only, not checked against MusicBrainz or without a MusicBrainz
+release, with its values flagged for checking. The status line reads
 `GET /catalog-reviews/:id/lookup`, which the details and the name box share, for each
 review revision and, while online, every 3 seconds while a lookup is queued or
 running or waits on a busy source and every 10 seconds while it waits out an
@@ -1964,9 +1972,12 @@ status. Once MusicBrainz's automatic retries ran out with nothing matched, the
 status says whether there were too many requests or it stayed unavailable, with
 **Retry lookup**, and names no paid step.
 Queued and running runs add **Lookup keeps running if you leave this page.** to
-the log after the time. The log also holds, after a run, its record (the time
-taken, the searches sent and the releases examined), the names it searched and
-its steps; it starts hidden after a completed or superseded run. While a
+the log after the time, on the same line. While a run is active the log stays
+short, as in the design: that line, the MusicBrainz or iTunes wait when the run
+stalls, and only the step in progress (else the last one reached), so the
+proposals stay in the first screen. After a run the log holds its record (the
+time taken, the searches sent and the releases examined), the names it searched
+and every step; it starts hidden after a completed or superseded run. While a
 run is queued, running or retrying, submitting the name box first asks (**This
 stops the current lookup and starts a new one with the name above.**, with
 **Stop and look up again** and **Cancel**), since the server replaces an active
@@ -2034,20 +2045,17 @@ the searches it sent whose text is shown, in order (**This lookup searched for
 "X" · Artist, then "X" alone, then …**), never one the run may not have sent; a
 run that completed after MusicBrainz's retries ran out (issue `sourceBusy` or
 `sourceUnavailable`) may not have sent its searches and shows no such line.
-After a completed run the name box also folds behind its
-look-up-another-name control, a disclosure reachable by keyboard that keeps the
-box mounted and prefilled, unless the status makes the box the next step: no
-release (where the box opens with the hint "可尝试去掉副标题"), nothing to
-search, no release the tracks fit (also when iTunes was unavailable), an Album
-without members, or Disc and Track Numbers needed where the titles propose no
-Disc and Track Numbers (owner rules, next-step bullet). The box
-stays open before any run, while a run is queued, running or retrying, and after
-a run that ended otherwise. It folds as it mounts, and also when a run completes
-while the page is open, but then only while the box is untouched (its name,
-Artist and kind as mounted, no question open and the focus outside it), so a box
-the administrator is using never folds. It unfolds whenever the status makes it
-the next step again, as after saved numbers whose free comparison still finds no
-single pairing.
+The name box (`CatalogReviewLookupAnother.tsx`) is not part of these steps. It
+sits under the page's row of alternatives, opened by **Look up another name**,
+and is unmounted while closed. Its Cancel button closes it and returns focus to
+that control. It opens by itself only where the status line makes it the next
+step: no release, where the box carries the hint "可尝试去掉副标题"; nothing to
+search; no release the tracks fit, also when iTunes was unavailable; an Album
+without members; Disc and Track Numbers needed where the titles propose none;
+no run yet; or a run superseded. It stays closed by default while a run is
+queued, running or retrying, and after any other result. The administrator's
+choice to open or close it holds for that run. A new run drops that choice, so
+the status line decides again.
 
 The review chooser (the import chooser is unchanged) lists, while the run has no
 matching group, **Possible matches** open, one card per release naming its
@@ -2075,7 +2083,7 @@ could not be fetched. The missing-file row count appears only when the pairing
 is single or the Album has no members (its rows without a file are shown only on
 admin pages); otherwise the card says that using the release writes Album values
 only, with no expected tracklist or track details, except on a possible match
-whose choice sits under **Other options**, which says so there, and **Where each track sits on
+that writes Album values only, and **Where each track sits on
 the release** shows only for a single pairing of an Album with members. A card
 whose pairing the
 positions or the half-second tier made single (`pairedBy`) also says, as a
@@ -2084,24 +2092,24 @@ positions the saved titles start with, as **(1-01 and 1-02)**, or the first and
 last when there are more than three), **Paired by: the track numbers in the file
 names** or **Paired by: the closest durations**, and while any candidate carries
 it the unknown-Disc-Number disclosure stays out. On a possible match with
-members whose pairing is not single, **Use this release** moves under **Other
-options** as **Use Album values only (title, Artists, label, release date)**
-with that warning, enabled exactly when the plain button would be, and each
-other edition in that state is offered for its Album values only too; the card
-also offers **Pair tracks by hand** (below) before **Other options**. While no
-possible match pairs with the members in exactly one way, the first such card
-says, in place of the unknown-Disc-Number disclosure, how many members the
-numbers proposed from titles give a number (saving them then compares again for
-free or, where a member has no duration, lets the release be used for its
-tracklist), or, where the titles propose nothing, that the tracks can be paired
-with it by hand or the numbers entered by hand. The candidate this run chose without a pairing
+members whose pairing is not single, **Use this release** becomes **Use Album
+values only** ("使用专辑资料"), the card's first button, enabled exactly when the
+plain button would be, and each other edition in that state is offered for its
+Album values only too; **Pair tracks by hand** (below) follows it as the second
+button. Such a card gives no hint of its own: the status line names the next
+step (checking the numbers proposed from titles, or the name box), and while the
+titles propose numbers for such a match the unknown-Disc-Number disclosure stays
+out. Where every possible match is such a card, the **Reference releases** note
+says the track pairing is not confirmed, nothing needs deciding now and these
+actions use Album values only and bring in no tracklist ("暂无法确认曲目对应，
+无需现在决定。…"); otherwise it says what using a release writes. The candidate this run chose without a pairing
 (`applied.pairs` null) whose pairing is now single offers **Use this release
 again (with track details)** on its card, a primary button where it is not
 folded, and, while the run has matching groups,
 also above the folded list; choosing it again computes its values anew, so it
 brings in the paired member values and the expected tracklist. Where the run's
 only matching group of a partial comparison is offered, or a tie needs an
-answer, the review chooser does not repeat the summary's status sentence: it
+answer, the review chooser does not repeat the status line's sentence: it
 only names the region with it. The offered release's card names its editions and
 lets each other one be chosen, as a possible match's does, and its **Use this
 release** is the primary button, since choosing it is the next step; **Use none
@@ -2137,9 +2145,11 @@ Numbers from titles giving both are selected in the update range; Track Numbers
 from titles giving them alone are unselected and marked as read from the titles
 only, to be checked (owner rules, Catalog Visibility and Administration).
 
-The editing section's table (`CatalogReviewProposalTable.tsx`, its own chunk) lists each member with its captured title (a cleaned
-or edited draft title after an arrow), and its Disc and Track Number inputs,
-each showing the draft value, else the proposal. When any captured number is not
+The editing section's table (`CatalogReviewProposalTable.tsx`, its own chunk) has a visible column header ("曲目 / 标题" and "碟号 /
+曲号", or only "曲号" where no Disc Number was captured) and lists each member with its captured title (a cleaned
+or edited draft title after an arrow), and its Disc and Track Number inputs as
+one pair joined by "/" beside the title at every width (also on a phone), each
+showing the draft value, else the proposal. When any captured number is not
 empty, a column gives the original numbers and each cell is marked as filling an
 empty value or replacing a non-empty one (the original struck through), so a
 replacement is never unmarked; otherwise one note says every original number is
@@ -3533,7 +3543,7 @@ roll back to:
   comparison's `pairedBy` out of a review's lookup view, which this Web reads as
   no lookup steps, no searched names and no pairing note: the summary then shows
   the earlier progress line and the shared retrying status, while the stopped
-  and exhausted copy, the name-box fold and the hidden superseded retry still
+  and exhausted copy, the name box opening by itself and the hidden superseded retry still
   work (they read the run's state and issue and the review's source), with the
   Album link but no steps. A Web tab opened before them cannot parse a review
   view carrying either key, so reload open admin Web tabs after deploying or

@@ -2,8 +2,9 @@
  * The existing-Album review page's one status line (CatalogReviewStatus.tsx, design v3): a short headline, one sentence and the
  * lines its Details log starts with, read from the lookup view and the shared next step (lookupNextStep.ts). Owner rules:
  * docs/business-rules.md (Administrator Metadata Lookup, next-step bullet): the sentence names the next step, the free retry where
- * the shared step offers it and the name box where nothing was found or the numbers cannot be proposed; Luna AI is never a next
- * step, and while it runs (alone or beside the lookup) the headline says so. Pure; only the status line's chunk imports it.
+ * the shared step offers it and the name box where nothing was found or the numbers cannot be proposed; where this server cannot
+ * run lookup, it says lookup is not configured and names neither the retry nor the name box, which the page then hides. Luna AI is
+ * never a next step, and while it runs (alone or beside the lookup) the headline says so. Pure; only the status line's chunk imports it.
  */
 import type { ReviewLookupView } from './importLookupApi';
 import { lookupActive } from './lookupNextStep';
@@ -22,7 +23,7 @@ export const elapsedText = (ms: number) => { const seconds = Math.floor(Math.max
 /** The message key of a progress phase, which the status line formats into its running headline. */
 export const progressPhaseKey = (phase: string) => `catalog_review.lookup_phase_${phase}`;
 
-type Context = { status: string; luna: boolean; members: number; searched: string; artists: readonly string[]; numbers: TitleNumbers | null; now: number;
+type Context = { status: string; available: boolean; luna: boolean; members: number; searched: string; artists: readonly string[]; numbers: TitleNumbers | null; now: number;
   time?: (at: string) => string };
 
 /**
@@ -32,7 +33,9 @@ type Context = { status: string; luna: boolean; members: number; searched: strin
  * finished; a completed run names how many possible releases it found (reviewLookupStatus.ts, `reviewReleaseCount`), and, where
  * nothing matched, why no edition is confirmed: an Album without tracks, members without a duration or a pairing that is not
  * single (checking the numbers the titles propose is next where they give every member a Disc and Track Number, else the name box),
- * or a single pairing a release's unknown duration left unconfirmed (using it is next).
+ * or a single pairing a release's unknown duration left unconfirmed (using it is next). Where this server cannot run lookup
+ * (`available` false), an ended run whose sentence would name the free retry or the name box keeps its headline and says lookup
+ * is not configured instead; the superseded, tie, single-choice and applied lines name neither and stay as they are.
  */
 function lookupLine(lookup: ReviewLookupView | null, c: Context): StatusLine {
   const { status } = c, state = lookup?.state, issue = lookup?.issue, line = (tone: StatusLine['tone'], head: Message, sentence: Message | null, box = false): StatusLine =>
@@ -48,6 +51,10 @@ function lookupLine(lookup: ReviewLookupView | null, c: Context): StatusLine {
     const retry = lookup.timeline?.retry;
     return line('alert', failed, retry ? cr(`lookup_retry_${issue === 'sourceUnavailable' ? 'unavailable' : 'busy'}`, { source: retry.source === 'itunes' ? 'iTunes' : 'MusicBrainz',
       time: c.time ? c.time(retry.at) : retry.at, attempt: retry.attempt, limit: retry.limit }) : { key: status });
+  }
+  if (lookup && !c.available && !/^lookup\.(applied|tie|single_choice|superseded|not_configured)/.test(status)) {
+    const own = lookupLine(lookup, { ...c, available: true });
+    return { ...own, line: { key: 'lookup.not_configured' }, box: false };
   }
   if (status === 'lookup.unavailable' && (issue === 'sourceBusy' || issue === 'sourceUnavailable')) return line('alert', failed, cr(`lookup_exhausted_${issue === 'sourceBusy' ? 'busy' : 'unavailable'}`));
   if (state === 'stopped' && (issue === 'permissionLost' || issue === 'grantExpired')) return line('alert', failed, cr(`lookup_stopped_${issue === 'grantExpired' ? 'time' : 'permission'}`));
@@ -75,7 +82,9 @@ function lookupLine(lookup: ReviewLookupView | null, c: Context): StatusLine {
     const unknown = lookup.disclosure?.unknownLocalDurations ?? 0;
     return line('check', { key: status, values: { title } }, reviewAppliedAgain(lookup, status) ? cr('lookup_line_again') : unknown ? cr('lookup_line_unverified', { count: unknown }) : null);
   }
-  return line(status === 'lookup.applied_itunes_unchecked' ? 'alert' : 'check', { key: status, values: { title } }, null);
+  if (status === 'lookup.applied_itunes_unchecked' || status === 'lookup.applied_itunes') return line(status === 'lookup.applied_itunes_unchecked' ? 'alert' : 'check',
+    { key: 'lookup.applied', values: { title } }, cr('lookup_line_itunes', { checked: status === 'lookup.applied_itunes_unchecked' ? 'no' : 'yes' }));
+  return line('check', { key: status, values: { title } }, null);
 }
 
 /**

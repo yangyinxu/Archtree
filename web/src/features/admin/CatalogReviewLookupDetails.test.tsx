@@ -37,7 +37,7 @@
  *   - an active run says whether it is queued or which step runs, with its counts and that the draft can be checked meanwhile; its Details log holds the time since it started and that it keeps running
  *   - the polite status of a running step does not change between polls; only the elapsed time in its log moves
  *   - while a run is active, a name is looked up only after confirming that it stops that run; Cancel sends nothing
- *   - the open-answer counters lead the lookup details after the status line, then the identity rows, and the details and identity rows carry the lookup and identity anchors
+ *   - the optional lookup questions lead the lookup details after the status line, then the identity rows, which say once how many records are open; the details and identity rows carry the lookup and identity anchors
  *   - an iTunes-only result checked against MusicBrainz, and an artist mismatch, keep the results open with their values to check once nothing else is open
  *   - once an applied release leaves nothing open the results fold under one disclosure, which stays open while an answer or an active run waits; the identity rows sit outside it
  *   - a release applied for its Album values only keeps the results open while its tracks pair in more than one way and the titles propose the numbers, saying after them why and what saving them does
@@ -243,11 +243,13 @@ test('bulk answers send every open conflict, members included, in one request; o
   rendered = mount(item, withLookup(lookup => { lookup.needsAnswer.conflicts = ['album.title']; }));
   await within(rendered.section()).findByRole('region', { name: 'Lookup values that differ from the Album\'s' });
   expect(screen.queryByRole('button', { name: 'Keep all current' })).not.toBeInTheDocument();
-  expect(screen.getByText('Lookup answers still needed: 1')).toHaveAttribute('role', 'status');
+  expect(screen.getByText('1 lookup question is open; its field stays out of this update until you answer it.')).toHaveAttribute('role', 'status');
   cleanup();
   // A new run is active: the earlier application's conflicts are shown, but their answers wait.
   rendered = mount(item, withLookup(lookup => { lookup.run = 2; lookup.state = 'running'; }));
   await within(rendered.section()).findByRole('region', { name: 'Lookup values that differ from the Album\'s' });
+  // The reference releases wait for the run to end, though the view still carries the earlier run's candidates.
+  expect(screen.queryByText(/^Reference releases/)).not.toBeInTheDocument();
   for (const name of ['Keep all current', 'Use all MusicBrainz', 'Keep current', 'Use MusicBrainz']) for (const button of screen.getAllByRole('button', { name })) expect(button).toBeDisabled();
 });
 
@@ -370,7 +372,7 @@ test('a tie offers the review\'s candidates with its own copy and applies nothin
   const tie = await within(section()).findByRole('region', { name: 'Several releases match this Album\'s tracks. Choose one, or none.' });
   fireEvent.click(within(tie).getAllByRole('button', { name: 'Use this release' })[1]);
   expect(onRun).toHaveBeenCalledWith('lookup/choose', { run: 1, candidateKey: reviewTieLookupResponse().lookup!.candidates[1].key });
-  expect(screen.getByText('Lookup answers still needed: 1')).toBeInTheDocument();
+  expect(screen.getByText('1 lookup question is open; its field stays out of this update until you answer it.')).toBeInTheDocument();
   for (const name of ['Track Artists', 'Artists and label']) expect(screen.queryByRole('region', { name })).not.toBeInTheDocument();
   // The review's saved tracklist still shows where its members sit.
   expect(within(screen.getByRole('region', { name: 'Expected tracklist' })).getByText('3 rows, 1 without a file')).toBeInTheDocument();
@@ -464,7 +466,7 @@ test('a value lookup could not apply reads as its own reason, Album values and t
   expect(within(members).getAllByRole('listitem').map(item => item.textContent)).toEqual(['2 · Synthetic second trackUnchanged: its own release track has no usable artist credit']);
   // Nothing was filled or answered, and nothing is waiting for an answer.
   expect(within(section()).queryByText('Lookup values applied or answered')).not.toBeInTheDocument();
-  expect(within(section()).queryByText(/^Lookup answers still needed/)).not.toBeInTheDocument();
+  expect(within(section()).queryByText(/lookup questions\? \(is\|are\) open/)).not.toBeInTheDocument();
   // The tracklist was not applied, so the review's saved rows show.
   expect(within(within(section()).getByRole('region', { name: 'Expected tracklist' })).getByText('3 rows, 1 without a file')).toBeInTheDocument();
 });
@@ -506,7 +508,7 @@ test('answered conflicts leave the conflicts and fold away once with the answer 
   expect(within(members).getAllByRole('listitem')[0].textContent).toBe('1 · Synthetic first trackSynthetic release track Artist · MusicBrainz value used');
   expect(within(members).queryByRole('button')).not.toBeInTheDocument();
   expect(within(section()).queryByRole('region', { name: 'Lookup values that differ from the Album\'s' })).not.toBeInTheDocument();
-  expect(within(section()).queryByText(/^Lookup answers still needed/)).not.toBeInTheDocument();
+  expect(within(section()).queryByText(/lookup questions\? \(is\|are\) open/)).not.toBeInTheDocument();
 });
 
 test('each lookup outcome reads in the review\'s own words, with the retry only where lookup stopped short, and nothing applied shows no applied rows', async () => {
@@ -618,9 +620,11 @@ test('a possible release whose tracks pair in more than one way leads the status
   // The page's proposal table holds the numbers: the summary offers no fill of its own and nothing is primary here.
   expect(within(section()).queryByRole('button', { name: /^Fill/ })).not.toBeInTheDocument();
   expect(primaries(section())).toHaveLength(0);
-  // The possible release's card says how many tracks the proposal gives a number.
+  // The status line names the proposed numbers, so the possible release's card gives no hint of its own and offers its Album
+  // values only first.
   const card = await within(section()).findByRole('region', { name: 'Possible match (1 release)' });
-  expect(within(card).getByText(proposedHint)).toBeInTheDocument();
+  expect(within(card).queryByText(proposedHint)).not.toBeInTheDocument();
+  expect(within(card).getAllByRole('button', { hidden: true })[0]).toHaveTextContent('Use Album values only');
   expect(onRun).not.toHaveBeenCalled();
   cleanup();
   // The proposal reads the captured titles, so a draft title cleaned of its position since still gives it.
@@ -645,24 +649,23 @@ test('the review names the cause where nothing matched: members without a durati
   expect(screen.getByRole('button', { name: 'Look up another name' })).toHaveAttribute('aria-expanded', 'true');
   expect(primaries(rendered.section())).toHaveLength(0);
   cleanup();
-  // Captured titles without positions: the name box, pairing by hand or numbers entered by manual editing, said once, and nothing is primary.
+  // Captured titles without positions: the name box or numbers entered by manual editing, said once by the status line; the card
+  // only offers pairing by hand, and nothing is primary.
   const plain = retitled(pairingReview(), title => title.slice(5));
   rendered = mount(plain, pairingLookupResponse());
   await expectStatus(completeOne, 'The tracks fit a release in more than one way, so no edition is confirmed yet. Look up another name, or enter the numbers by editing manually.');
   expect(screen.getByRole('button', { name: 'Look up another name' })).toHaveAttribute('aria-expanded', 'true');
-  expect(within(rendered.section()).getAllByText('You can pair the tracks with this release by hand, or enter or correct Disc and Track Numbers by editing manually, where saving the completion draft compares again for free.'))
-    .toHaveLength(1);
   const pair = await within(rendered.section()).findByRole('button', { name: 'Pair tracks by hand' });
   expect(pair).not.toHaveClass(styles.primary);
   expect(primaries(rendered.section())).toHaveLength(0);
   cleanup();
   // Captured titles with Track Numbers alone: the same cause, and since their proposal is unselected (for checking), a plain save
-  // writes none of them, so the card offers pairing by hand or manual editing rather than promising that saving compares again.
+  // writes none of them, so nothing promises that saving compares again; the card offers pairing by hand.
   rendered = mount(retitled(pairingReview(), (_title, index) => `0${index + 1}. Synthetic song ${index + 1}`), pairingLookupResponse());
   await expectStatus(completeOne, /^The tracks fit a release in more than one way, so no edition is confirmed yet\. Look up another name/);
   expect(primaries(rendered.section())).toHaveLength(0);
-  expect(await within(rendered.section()).findByText('You can pair the tracks with this release by hand, or enter or correct Disc and Track Numbers by editing manually, where saving the completion draft compares again for free.'))
-    .toBeInTheDocument();
+  expect(await within(rendered.section()).findByRole('button', { name: 'Pair tracks by hand', hidden: true })).toBeInTheDocument();
+  expect(within(rendered.section()).queryByText(/^You can pair the tracks with this release by hand/)).not.toBeInTheDocument();
   expect(within(rendered.section()).queryByText(proposedHint)).not.toBeInTheDocument();
   expect(within(rendered.section()).queryByRole('button', { name: /^Fill/ })).not.toBeInTheDocument();
   cleanup();
@@ -692,7 +695,7 @@ test('once saved numbers make a possible release pair in one way while durations
 test('once saved numbers make the release match, its offer is said once, as the status, and Use this release on its card naming both editions is the only primary button', async () => {
   const saved = pairingReview(); saved.draft.tracks = saved.draft.tracks.map((track, index) => ({ ...track, discNumber: 1, trackNumber: index + 1 }));
   const { section, onRun } = mount(saved, pairedLookupResponse());
-  const offer = /^A release whose tracks match was found/;
+  const offer = /^One release matches the tracks/;
   await expectStatus(completeOne, offer);
   const offered = await within(section()).findByRole('region', { name: offer });
   expect(within(section()).getAllByText(offer)).toHaveLength(1);
@@ -780,16 +783,17 @@ test('while a run is active, a name is looked up only after confirming that it s
   expect(within(box).queryByRole('alert')).not.toBeInTheDocument();
 });
 
-test('the open-answer counters lead the lookup details after the status line, then the identity rows, and the details and identity rows carry the lookup and identity anchors', async () => {
+test('the optional lookup questions lead the lookup details after the status line, then the identity rows, which say once how many records are open; the details and identity rows carry the lookup and identity anchors', async () => {
   const { details } = mount(applied());
-  const counter = await screen.findByText('Lookup answers still needed: 3');
+  const counter = await screen.findByText('3 lookup questions are open; their fields stay out of this update until you answer them.');
   expect(details()).toContainElement(counter);
   expect(details().firstElementChild).toBe(counter);
   expect(statusLine().compareDocumentPosition(counter) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  // The records to choose follow it once the identity rows are read, and the identity rows follow both.
-  await waitFor(() => expect(counter.nextElementSibling).toHaveTextContent('1 Artist or label still needs a choice: reuse an existing one or create a new one.'));
-  expect(counter.nextElementSibling).toHaveAttribute('role', 'status');
-  expect(counter.nextElementSibling!.nextElementSibling).toHaveAttribute('id', 'catalog-review-identities');
+  // The identity rows follow it and say themselves, once, how many records can still be chosen (outside this update until then).
+  expect(counter.nextElementSibling).toHaveAttribute('id', 'catalog-review-identities');
+  const identities = details().querySelector('#catalog-review-identities') as HTMLElement;
+  await waitFor(() => expect(within(identities).getByText('1 Artist or label can still be matched to an existing record or created; until then it stays out of this update.')).toHaveAttribute('role', 'status'));
+  expect(within(details()).getAllByText(/can still be matched to an existing record/)).toHaveLength(1);
   expect(details()).toHaveAttribute('id', 'catalog-review-lookup');
   // The identity rows carry the anchor the update range links to.
   expect(details().querySelector('#catalog-review-identities')).toContainElement(within(details()).getByRole('region', { name: 'Artists and label' }));
@@ -829,7 +833,7 @@ test('once an applied release leaves nothing open the results fold under one dis
   const fold = () => screen.getByText('Lookup results and applied values').closest('details')!;
   // Answers still open: the disclosure is open.
   mount(applied());
-  await screen.findByText('Lookup answers still needed: 3');
+  await screen.findByText('3 lookup questions are open; their fields stay out of this update until you answer them.');
   expect(fold()).toHaveAttribute('open');
   cleanup();
   // Every answer given while an identity row still needs one: the identity rows sit before the fold, outside it, so it folds.
@@ -878,10 +882,10 @@ test('a release applied for its Album values only keeps the results open while i
   };
   await show(pairingReview());
   expect(fold()).toHaveAttribute('open');
-  // The card in the reference releases and the lines after the results, outside both, say it: why the tracks are not applied and
-  // what saving the proposed numbers does, before the reference releases. Nothing offers a fill.
+  // The lines after the results, outside the fold and the reference releases, say it once: why the tracks are not applied and
+  // what saving the proposed numbers does, before the reference releases, whose card repeats neither. Nothing offers a fill.
   const card = await within(releases()).findByRole('region', { name: 'Possible match (1 release)' });
-  expect(within(card).getByText(proposedHint)).toBeInTheDocument();
+  expect(within(card).queryByText(proposedHint)).not.toBeInTheDocument();
   const outside = (text: string | RegExp) => screen.queryAllByText(text).filter(element => !fold().contains(element) && !releases().contains(element));
   const [why] = outside('This Album\'s tracks do not pair with the applied release in exactly one way, so track values and track Artists are not applied.');
   const [hint] = outside(proposedHint);
@@ -941,7 +945,8 @@ test('while a run is active its steps follow the status, and after a completed r
     progress: { phase: 'details', done: 5, total: 12, startedAt: new Date(Date.now() - 30_000).toISOString(), updatedAt }, timeline: pairingRunningTimeline(updatedAt) }); }, pairingLookupResponse());
   const first = mount(pairingReview(), running);
   const steps = await within(first.section()).findByRole('list', { name: 'Lookup steps' });
-  expect(within(steps).getAllByRole('listitem')[4]).toHaveTextContent('● Read release details (5 of 12 releases) (in progress)');
+  // While it runs the log holds only the step in progress.
+  expect(within(steps).getAllByRole('listitem').map(item => item.textContent)).toEqual(['● Read release details (5 of 12 releases) (in progress)']);
   // The wait counts on this page's clock from when it first saw the run's last step, so the first read shows none however old
   // the server says that step is, and a later read of the same step does.
   expect(within(first.section()).queryByText(/^Waiting for/)).not.toBeInTheDocument();

@@ -77,7 +77,7 @@ test('a shared identity names its Album entry and each track entry and needs a c
   expect(within(guest).getByRole('radio', { name: 'Reuse the existing Synthetic guest' })).toHaveAccessibleDescription(`Visibility: Public · ${nameOnly}`);
   expect(within(guest).getByRole('radio', { name: 'Create Synthetic guest as new' })).toHaveAccessibleDescription('Created with the Album\'s visibility: Public · Choose this when none of the above is the same');
   expect(within(guest).queryByRole('combobox')).not.toBeInTheDocument();
-  expect(screen.getByText('1 Artist or label still needs a choice: reuse an existing one or create a new one.')).toHaveAttribute('role', 'status');
+  expect(screen.getByText('1 Artist or label can still be matched to an existing record or created; until then it stays out of this update.')).toHaveAttribute('role', 'status');
   expect(screen.queryByRole('button', { name: 'Save decisions' })).not.toBeInTheDocument();
 });
 

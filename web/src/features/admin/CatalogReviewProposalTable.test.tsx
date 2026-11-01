@@ -56,6 +56,10 @@ const inputs = ['Disc number of track 1', 'Track number of track 1', 'Disc numbe
 test('with every original number empty, one note says so and the inputs show the proposal, which the table reports with the draft it shows', () => {
   const { table, view } = mount(pairingReview());
   expect(inputs.map(number)).toEqual(['1', '1', '1', '2']);
+  // A visible column header names the title column and the number pair; each title shows without a position prefix.
+  expect(within(table()).getByText('Track / Title')).toBeVisible();
+  expect(within(table()).getByText('Disc number / Track number')).toBeVisible();
+  expect(within(table()).getAllByRole('listitem').map(row => row.querySelector('strong')!.textContent)).toEqual(pairingReview().source.tracks.map(track => track.title));
   expect(within(table()).getByText('Every original number is empty; these are proposed from the titles.')).toBeVisible();
   expect(within(table()).getByText('The numbers proposed from the track titles are included in this update; check them, or adjust the range.')).toBeVisible();
   expect(within(table()).queryByText(/^Original:/)).not.toBeInTheDocument();
@@ -175,7 +179,7 @@ test('a 44-track Album on three discs sums up the proposal and folds its uniform
   expect(within(table()).getByText('44 tracks · 3 discs · Numbers from the titles (1.01 to 3.14)')).toBeVisible();
   // The edited row stays open, before the three disc disclosures.
   const open = table().querySelector('fieldset > ol')!;
-  expect(within(open as HTMLElement).getAllByRole('listitem').map(row => row.querySelector('strong')!.textContent)).toEqual(['20 · 2.05.Synthetic long song 20']);
+  expect(within(open as HTMLElement).getAllByRole('listitem').map(row => row.querySelector('strong')!.textContent)).toEqual(['2.05.Synthetic long song 20']);
   const folds = [...table().querySelectorAll('details')];
   expect(folds.map(fold => fold.querySelector('summary')!.textContent)).toEqual(['Disc 1 · 15 tracks', 'Disc 2 · 14 tracks', 'Disc 3 · 14 tracks']);
   expect(folds.every(fold => !fold.open)).toBe(true);
@@ -200,7 +204,7 @@ test('on a 44-track Album the cleanup\'s titles keep the uniform rows folded per
   fireEvent.click(within(table()).getByRole('checkbox', { name: 'Also remove the position from the track titles (optional)' }));
   expect(view().shown.tracks[43].title).toBe('Synthetic long song 44');
   const open = table().querySelector('fieldset > ol')!;
-  expect(within(open as HTMLElement).getAllByRole('listitem').map(row => row.querySelector('strong')!.textContent)).toEqual(['7 · 1.07.Synthetic long song 7']);
+  expect(within(open as HTMLElement).getAllByRole('listitem').map(row => row.querySelector('strong')!.textContent)).toEqual(['1.07.Synthetic long song 7']);
   expect([...table().querySelectorAll('details')].map(fold => fold.querySelector('summary')!.textContent))
     .toEqual(['Disc 1 · 14 tracks', 'Disc 2 · 15 tracks', 'Disc 3 · 14 tracks']);
 });

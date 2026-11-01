@@ -4,7 +4,7 @@
  *   Functions: lookup, running, show, items, rows, notes, only
  *   Constants: startedAt, searches, titles
  * Tests
- *   - while a run is active its steps read in order with what each searched, their states and counts, without a live region
+ *   - while a run is active its log shows only the step in progress, else the last one reached, with its counts, without a live region
  *   - a running run that shows no new step for more than five seconds of this page's clock says it waits for MusicBrainz, iTunes in the iTunes phase, and a queued or retrying run never does
  *   - after a run its Details log keeps its record with the time taken, searches and releases, then what it searched, then its steps
  *   - a stopped run shows its record without the names searched, and the steps it never reached read as not run
@@ -54,14 +54,21 @@ const searches = ['✓ Search by Album name and Artist: "Synthetic Live Album 2"
   '✓ Search by Album name and Artist: "Synthetic Live Album 2" · Synthetic Live Artist -Romanized-'];
 const titles = '"Synthetic second song" · Synthetic Live Artist and "Synthetic opening" · Synthetic Live Artist';
 
-test('while a run is active its steps read in order with what each searched, their states and counts, without a live region', () => {
+test('while a run is active its log shows only the step in progress, else the last one reached, with its counts, without a live region', () => {
   const { container } = show(running('2026-10-22T01:25:28.000Z'));
-  expect(rows()).toEqual([...searches, `○ Search by track title: ${titles} (not started yet)`, '● Read release details (5 of 12 releases) (in progress)', '○ iTunes fallback (not started yet)',
-    '○ Check the Albums iTunes returned on MusicBrainz (not started yet)', '○ Read Artist and label aliases (not started yet)']);
+  expect(rows()).toEqual(['● Read release details (5 of 12 releases) (in progress)']);
   expect(container.querySelector('[role="status"], [aria-live]')).toBeNull();
   // Open, not folded, and no record or names searched while it runs.
   expect(container.querySelector('details')).toBeNull();
   expect(screen.queryByText(/^This lookup searched/)).not.toBeInTheDocument();
+  // Between steps (none in progress) it keeps the last step reached; the full list returns once the run ends.
+  cleanup();
+  const between = running('2026-10-22T01:25:28.000Z'), steps = between.timeline!.steps.map(step => step.kind === 'details' ? { ...step, state: 'pending' as const } : step);
+  show({ ...between, timeline: { ...between.timeline!, steps } });
+  expect(rows()).toEqual([searches[2]]);
+  cleanup();
+  show(lookup());
+  expect(rows().length).toBeGreaterThan(1);
 });
 
 test('a running run that shows no new step for more than five seconds of this page\'s clock says it waits for MusicBrainz, iTunes in the iTunes phase, and a queued or retrying run never does', () => {
@@ -88,7 +95,7 @@ test('a running run that shows no new step for more than five seconds of this pa
   for (const other of [running('2026-10-22T01:25:00.000Z', { state: 'queued' }), running('2026-10-22T01:25:00.000Z', { state: 'retrying' })]) {
     render(element(other, now)).rerender(element(other, now + 60_000));
     expect(screen.queryByText(/^Waiting for/)).not.toBeInTheDocument();
-    expect(rows()).toHaveLength(8);
+    expect(rows()).toEqual(['● Read release details (5 of 12 releases) (in progress)']);
     cleanup();
   }
 });
@@ -228,9 +235,10 @@ test('the status line\'s notes lead the log of an active run, and show on their 
   const now = Date.parse('2026-10-22T01:25:30.000Z'), noted = ['Running 0:38', 'Lookup keeps running after you leave this page.'];
   render(<MemoryRouter><LookupProgress lookup={running('2026-10-22T01:25:28.000Z')} now={now} notes={noted} albumHref={null} /></MemoryRouter>);
   const toggle = screen.getByRole('button', { name: 'Hide details' }), log = document.getElementById(toggle.getAttribute('aria-controls')!)!;
-  expect([...log.querySelectorAll('p')].slice(0, 2).map(line => line.textContent)).toEqual(noted);
+  // On one line, as the design's two-line running log.
+  expect(log.querySelector('p')!.textContent).toBe(noted.join(' · '));
   fireEvent.click(toggle);
-  expect(screen.getByText(noted[0])).not.toBeVisible();
+  expect(screen.getByText(noted.join(' · '))).not.toBeVisible();
   cleanup();
   render(<MemoryRouter><LookupProgress lookup={{ ...running('2026-10-22T01:25:28.000Z'), timeline: undefined }} now={now} notes={noted} albumHref={null} /></MemoryRouter>);
   expect(screen.queryByRole('button')).not.toBeInTheDocument();

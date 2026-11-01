@@ -2118,7 +2118,7 @@
       "variables": {}
     },
     "admin.catalog_review.identity_answers": {
-      "description": "Administrator workbench: existing-Album review summary, how many identity rows (Artists and the label) still need a choice between an existing record and a new one.",
+      "description": "Administrator workbench: existing-Album review identity rows, how many Artists and labels can still be matched to an existing record or created; until then they stay out of this update.",
       "delivery": [
         "runtime"
       ],
@@ -2433,7 +2433,7 @@
       }
     },
     "admin.catalog_review.lookup_album_only_copy": {
-      "description": "Administrator workbench: existing-Album review candidate chooser, under Other options, warning that using only the Album values brings in no expected tracklist or track details.",
+      "description": "Administrator workbench: existing-Album review, Reference releases note when every possible match writes Album values only: the track pairing is not confirmed, nothing needs deciding now, and no tracklist comes in.",
       "delivery": [
         "runtime"
       ],
@@ -2572,7 +2572,7 @@
       "variables": {}
     },
     "admin.catalog_review.lookup_choose_album_only": {
-      "description": "Administrator workbench: existing-Album review candidate chooser, button under Other options that applies only the release's Album values to the completion draft.",
+      "description": "Administrator workbench: existing-Album review candidate chooser, first button on a possible-match card whose tracks pair in more than one way: applies only the release's Album values to the completion draft.",
       "delivery": [
         "runtime"
       ],
@@ -2773,6 +2773,15 @@
       ],
       "variables": {}
     },
+    "admin.catalog_review.lookup_line_itunes": {
+      "description": "Administrator workbench: existing-Album review page, status line sentence after an iTunes-only result was applied: whether it was not checked against MusicBrainz (no) or MusicBrainz has no release for it (yes); its values are flagged for checking.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "checked": "string"
+      }
+    },
     "admin.catalog_review.lookup_line_name": {
       "description": "Administrator workbench: existing-Album review page, status line sentence when the releases the tracks fit cannot be confirmed (members without a duration, or a pairing that is not single) and the titles propose no Disc and Track Numbers: the name box or manual editing is next.",
       "delivery": [
@@ -2860,13 +2869,6 @@
     },
     "admin.catalog_review.lookup_no_tracklist": {
       "description": "Administrator workbench: existing-Album review candidate chooser, in place of the missing-file row count when the tracks do not pair with the release in exactly one way.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
-    "admin.catalog_review.lookup_other_options": {
-      "description": "Administrator workbench: existing-Album review candidate chooser, folded group of less common choices on a release card.",
       "delivery": [
         "runtime"
       ],
@@ -3201,7 +3203,7 @@
       }
     },
     "admin.catalog_review.lookup_single_choice": {
-      "description": "Administrator workbench: existing-Album review summary, status and chooser heading when the only matching release of a partial comparison is offered, not applied.",
+      "description": "Administrator workbench: existing-Album review page, status line sentence when the only matching release of a partial comparison is offered, not applied: check it in Reference releases to use it.",
       "delivery": [
         "runtime"
       ],
@@ -3749,7 +3751,7 @@
       "variables": {}
     },
     "admin.catalog_review.needs_answers": {
-      "description": "Administrator workbench: existing-Album review summary, how many lookup answers are still needed.",
+      "description": "Administrator workbench: existing-Album review lookup details, how many optional lookup questions are open; their fields stay out of this update until answered.",
       "delivery": [
         "runtime"
       ],

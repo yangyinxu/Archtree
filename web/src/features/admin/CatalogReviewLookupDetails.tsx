@@ -45,8 +45,9 @@ function Results({ fold, label, children }: { fold: boolean; label: string | nul
  * The lookup details of an existing-Album review, after the update range (design v3; owner rules: docs/business-rules.md, Catalog
  * Visibility and Administration, existing-Album reviews; Administrator Metadata Lookup). They present what the server decides and
  * never start Luna; the status line above (CatalogReviewStatus.tsx) says the lookup's status and next step, and the name box opens
- * from the page's row of alternatives (CatalogReviewLookupAnother.tsx). In order: how many lookup answers and identity records are
- * still needed; the identity rows (`catalog-review-identities`, the update range's link), directly after the range; the results:
+ * from the page's row of alternatives (CatalogReviewLookupAnother.tsx). In order: how many optional lookup answers are open (their
+ * fields stay out of this update until answered); the identity rows (`catalog-review-identities`, the update range's link), which
+ * say themselves how many identity records are open, directly after the range; the results:
  * conflicts answered one by one or all at once by buttons that name the applied candidate's source (MusicBrainz or iTunes), the
  * values to check, each member's track Artist row with its reason, the expected tracklist with its missing-file rows and the values
  * that need no answer; for a release this run applied for its Album values only whose tracks still pair in more than one way while
@@ -168,7 +169,6 @@ export function CatalogReviewLookupDetails({ item, disabled, error, onRun }: {
   // Named without a heading of its own (design v3 shows none): its h3 sections follow the status line's heading.
   return <section id="catalog-review-lookup" aria-label={t('catalog_review.lookup_title')} className={styles.lookupDetails} tabIndex={-1}>
     {answers > 0 && <p role="status">{t('catalog_review.needs_answers', { count: answers })}</p>}
-    {identityNeeded > 0 && <p role="status">{t('catalog_review.identity_answers', { count: identityNeeded })}</p>}
     {identities && <div id="catalog-review-identities"><Suspense fallback={null}>
       <CatalogReviewIdentities item={item} disabled={busy} onSave={decisions => onRun('decisions', { decisions })} /></Suspense></div>}
     {resultsShown && <Results fold={settled} label={shown && t('catalog_review.lookup_details')}>{body}</Results>}

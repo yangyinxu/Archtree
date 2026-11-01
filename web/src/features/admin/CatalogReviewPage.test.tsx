@@ -395,8 +395,11 @@ test('reopening and manual editing touch only the private review, preserving cat
 test('Luna analysis requires its own confirmation and a lost acknowledgement never retries automatically', async () => {
   const item = catalogReview(); item.analysis = { ...item.analysis, state: 'idle', generation: 0, operationId: null, completedChunks: 0, totalChunks: 0, attemptsUsed: 0 }; item.suggestions = [];
   const bodies: string[] = [];
-  vi.stubGlobal('fetch', vi.fn(async (_path: string, init: RequestInit) => {
+  let reads = 0;
+  vi.stubGlobal('fetch', vi.fn(async (path: string, init: RequestInit) => {
     if (init.method === 'POST') { bodies.push(String(init.body)); throw new TypeError('Synthetic connection loss'); }
+    // The header's artwork read of the Album is no review read.
+    if (!path.endsWith(`/catalog/album/${albumId}`)) reads++;
     return reviewJson({ item, receipt: null });
   }));
   mountPage(); fireEvent.click(await screen.findByRole('button', { name: 'Use Luna AI (paid)' }));
@@ -405,7 +408,10 @@ test('Luna analysis requires its own confirmation and a lost acknowledgement nev
   expect(bodies).toEqual([]);
   fireEvent.click(dialog.getByRole('button', { name: 'Start Luna AI analysis (paid)' }));
   const retry = await screen.findByRole('button', { name: 'Retry original operation' });
+  // Only after an observed re-read of the review (and a settle step for any retry it might trigger) is the lone POST meaningful.
+  const counted = reads;
   refocus();
+  await waitFor(() => expect(reads).toBeGreaterThan(counted));
   await reread();
   expect(bodies).toHaveLength(1);
   fireEvent.click(retry); await waitFor(() => expect(bodies).toHaveLength(2));

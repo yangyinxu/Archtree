@@ -54,7 +54,7 @@ export function CatalogReviewStatus({ item, onNext }: { item: CatalogReview; onN
   // saved numbers give the numbers the review page proposes (catalogReviewProposal.ts reads them the same way).
   const submitted = lookup?.input.submitted, searched = submitted?.kind === 'album' ? submitted.text : item.draft.album.title;
   const artists = item.draft.album.artists.filter(entry => entry.role === 'primary').map(entry => entry.name);
-  const line = summary ? reviewStatusLine(lookup, { status: lookupNextStep(lookup, { available: summary.lookupAvailable, uploadsWaiting: false }).status,
+  const line = summary ? reviewStatusLine(lookup, { status: lookupNextStep(lookup, { available: summary.lookupAvailable, uploadsWaiting: false }).status, available: summary.lookupAvailable,
     luna: ['queued', 'running'].includes(item.analysis.state), members: item.draft.tracks.length, searched, artists, now: query.dataUpdatedAt || Date.now(),
     numbers: titleNumbers(item.source.tracks.map(track => ({ ...item.draft.tracks.find(value => value.slotId === track.slotId)!, title: track.title })),
       new Set(item.source.tracks.filter(track => track.discNumber !== undefined).map(track => track.slotId))),

@@ -3,7 +3,8 @@
  *   Types: Candidate, ReviewCandidate, ReviewProps
  *   Functions: release, key, comparison, candidate, group, view, applied, mount, unfold, subset,
  *              reviewCandidate, reviewView, mountReview, live
- *   Constants: importId, viewerId, pairingMounts, reviewTracks, liveReview, ambiguousReason, fillHint
+ *   Constants: importId, viewerId, pairingMounts, reviewTracks, liveReview, ambiguousReason, fillHint,
+ *              albumOnlyNote
  * Tests
  *   - the folded list gives each release its status, label, date and track count, and says how a non-matching one differs
  *   - the tie view repeats only the values that differ, here the disc and track order, and needs one release or none
@@ -20,11 +21,11 @@
  *   - a review tie, the offered single choice, unverified releases and the disclosures speak of the Album's tracks; an import keeps its file wording
  *   - a review release first found through a track title is marked so in the tie view, the offered single choice and the folded list; another release and any import candidate are not
  *   - while nothing matched as a group, a review lists possible matches open as one card per release with its editions, then the partial comparison, naming the iTunes fallback where it left results out, then the other sections folded, then none
- *   - a possible match whose members pair in no single way points at the proposed numbers first and keeps choosing it, as Album values only, under Other options
+ *   - a possible match whose members pair in no single way offers its Album values only first, then pairing by hand, with no hint of its own
  *   - the release this run applied without a pairing can be used again once its pairing is single, above the folded list; with a pairing it stays applied
  *   - a review says its offer or tie only as the summary's status: the region keeps it as its name, the offered card names its editions and Use this release is primary; an import keeps its heading
  *   - every edition of a grouped release stays choosable in the review sections, for its Album values only where the card writes no tracklist
- *   - among several possible releases only the first points at the proposed numbers, and a release whose members have no duration is then used rather than compared again
+ *   - among several possible releases no card points at the proposed numbers, each offers its Album values only, and the note says nothing needs deciding now
  *   - an import view keeps its flat folded list and status sentences even with unverified candidates of the same title
  *   - a review's possible matches load their previews at once, and a folded section's only once it is opened
  *   - a review card says how its pairing was made single: by the titles' track numbers, naming them, or the file names' or the closest durations; without it, or on the import page, no such line shows
@@ -330,7 +331,7 @@ test('a review tie, the offered single choice, unverified releases and the discl
   expect(screen.queryByText(/^Not verified:/)).not.toBeInTheDocument();
   cleanup();
   mountReview(reviewView({ candidates: [reviewCandidate(1)], groups: [group(1, [[1, 1, 'First']])], disclosure: { unknownLocalDurations: 0, unknownLocalDiscNumbers: 0, partialComparison: true } }));
-  expect(screen.getByRole('region', { name: /^A release whose tracks match was found/ })).toBeInTheDocument();
+  expect(screen.getByRole('region', { name: /^One release matches the tracks/ })).toBeInTheDocument();
   cleanup();
   mount(view({ candidates: [candidate(1)], groups: [group(1, [[1, 1, 'First']])], disclosure: { unknownLocalDurations: 0, unknownLocalDiscNumbers: 0, partialComparison: true } }));
   expect(screen.getByRole('region', { name: /^A release that matches these files was found/ })).toBeInTheDocument();
@@ -350,7 +351,7 @@ test('a review release first found through a track title is marked so in the tie
   cleanup();
   mountReview(reviewView({ candidates: [reviewCandidate(1, { byTrackTitle: true })], groups: [group(1, [[1, 1, 'First']])],
     disclosure: { unknownLocalDurations: 0, unknownLocalDiscNumbers: 0, partialComparison: true } }));
-  expect(within(screen.getByRole('region', { name: /^A release whose tracks match was found/ })).getByText(marked)).toBeInTheDocument();
+  expect(within(screen.getByRole('region', { name: /^One release matches the tracks/ })).getByText(marked)).toBeInTheDocument();
   cleanup();
   // An import view never carries the key; even a candidate given one is not marked outside a review.
   mount(view({ candidates: [{ ...candidate(1), byTrackTitle: true } as Candidate] }));
@@ -363,6 +364,7 @@ const live = (extra: Partial<ReviewLookupView> = {}): ReviewLookupView => ({ ...
 const liveReview = { searched: 'Synthetic Live Album 2', artists: ['Synthetic Live Artist -Romanized-'] };
 const ambiguousReason = 'Both tracks fit this release, but in more than one way, so their positions are unclear';
 const fillHint = '2 tracks have no Disc or Track Number. This page proposes the numbers from the track titles; saving them compares again for free.';
+const albumOnlyNote = 'Track pairing is not confirmed yet, and nothing needs deciding now. These actions use Album values only and bring in no tracklist.';
 
 test('while nothing matched as a group, a review lists possible matches open as one card per release with its editions, then the partial comparison, naming the iTunes fallback where it left results out, then the other sections folded, then none', () => {
   const onChoose = mountReview(live(), liveReview);
@@ -378,9 +380,10 @@ test('while nothing matched as a group, a review lists possible matches open as 
   // No pair list and no rows promise for a pairing that is not single.
   expect(within(card).queryByText(/Where each track sits on the release/)).not.toBeInTheDocument();
   expect(within(card).queryByText(/rows? without a file/)).not.toBeInTheDocument();
-  // Its choice is under Other options, which says it writes Album values only; the card face does not say it again.
+  // Its first choice writes Album values only, which the disclosure's note says once; the card face does not say it again.
   expect(within(card).queryByText(/^Using this release writes Album values only/)).not.toBeInTheDocument();
-  expect(within(card.querySelector('details')!).getByText(/^Writes Album values only/)).toBeInTheDocument();
+  expect(within(card).getAllByRole('button').map(button => button.textContent)).toEqual(['Use Album values only', 'Pair tracks by hand', 'Use Album values only from the CD (JP) edition']);
+  expect(screen.getByText(albumOnlyNote)).toBeInTheDocument();
   // The ten that do not fit are one folded section; nothing else fits, so there is no other section and no flat list.
   const notFit = screen.getByText('Releases that do not fit or could not be read (10)');
   expect(notFit.closest('details')!.open).toBe(false);
@@ -404,29 +407,28 @@ test('while nothing matched as a group, a review lists possible matches open as 
   expect(screen.queryByText(/^Not every release found/)).not.toBeInTheDocument();
 });
 
-test('a possible match whose members pair in no single way points at the proposed numbers first and keeps choosing it, as Album values only, under Other options', () => {
+test('a possible match whose members pair in no single way offers its Album values only first, then pairing by hand, with no hint of its own', () => {
   let onChoose = mountReview(live(), { ...liveReview, numbers: 2 });
   let card = within(screen.getByRole('region', { name: 'Possible match (1 release)' }));
   expect(card.queryByRole('button', { name: 'Use this release' })).not.toBeInTheDocument();
-  // The numbers are proposed on the review page, so the card only says so: it offers no fill of its own, and Pair tracks by hand
-  // follows the hint in its own row of actions.
-  const hint = card.getByText(fillHint), pair = card.getByRole('button', { name: 'Pair tracks by hand' });
+  // The status line names the next step (the numbers proposed on the review page), so the card says nothing of them: one row of
+  // actions, Use Album values only first and Pair tracks by hand second, with no fill and no Other options fold.
+  const albumOnly = card.getByRole('button', { name: 'Use Album values only' }), pair = card.getByRole('button', { name: 'Pair tracks by hand' });
+  expect(card.queryByText(fillHint)).not.toBeInTheDocument();
   expect(card.queryByRole('button', { name: /^Fill/ })).not.toBeInTheDocument();
+  expect(card.queryByText('Other options')).not.toBeInTheDocument();
   expect(pair.parentElement).toHaveClass(styles.actions);
-  expect(hint.compareDocumentPosition(pair) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  // The proposed-numbers hint stands in for the unknown Disc Numbers line.
+  expect(albumOnly.parentElement).toBe(pair.parentElement);
+  expect(albumOnly.compareDocumentPosition(pair) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  // The proposed numbers still stand in for the unknown Disc Numbers line.
   expect(screen.queryByText(/^Tracks without a disc number/)).not.toBeInTheDocument();
-  const options = card.getByText('Other options').closest('details')!;
-  expect(options.open).toBe(false);
-  expect(within(options).getByText('Writes Album values only, with no expected tracklist or track details, because the tracks do not pair with this release in exactly one way; values that differ from the current Album values need an answer each.')).toBeInTheDocument();
-  const albumOnly = within(options).getByRole('button', { name: 'Use Album values only (title, Artists, label, release date)' });
   expect(albumOnly).toBeEnabled(); expect(albumOnly).toHaveAccessibleDescription('Synthetic Live Album 2 · Synthetic Live Artist');
   fireEvent.click(albumOnly); expect(onChoose).toHaveBeenCalledWith(pairingEditions[0]);
   cleanup();
-  // Without numbers in the titles the card says they can be entered by hand; the unknown Disc Numbers line stays.
+  // Without numbers in the titles the card still gives no hint; the unknown Disc Numbers line stays.
   mountReview(live(), liveReview);
   card = within(screen.getByRole('region', { name: /^Possible match/ }));
-  expect(card.getByText('You can pair the tracks with this release by hand, or enter or correct Disc and Track Numbers by editing manually, where saving the completion draft compares again for free.')).toBeInTheDocument();
+  expect(card.queryByText(/^You can pair the tracks with this release by hand/)).not.toBeInTheDocument();
   expect(screen.getByText('Tracks without a disc number: 2. They can pair with a track on any disc, so their positions may be unclear.')).toBeInTheDocument();
   cleanup();
   // A disabled chooser disables every button.
@@ -482,7 +484,7 @@ test('the release this run applied without a pairing can be used again once its 
 });
 
 test('a review says its offer or tie only as the summary\'s status: the region keeps it as its name, the offered card names its editions and Use this release is primary; an import keeps its heading', () => {
-  const offer = /^A release whose tracks match was found/;
+  const offer = /^One release matches the tracks/;
   const onChoose = mountReview(pairedLookupResponse().lookup!, liveReview);
   const region = screen.getByRole('region', { name: offer });
   expect(screen.queryByText(offer)).toBeNull();
@@ -537,26 +539,26 @@ test('every edition of a grouped release stays choosable in the review sections,
   fireEvent.click(within(fold).getByRole('button', { name: 'Use the CD (JP) edition' })); expect(onChoose).toHaveBeenCalledWith(pairingEditions[1]);
 });
 
-test('among several possible releases only the first points at the proposed numbers, and a release whose members have no duration is then used rather than compared again', () => {
+test('among several possible releases no card points at the proposed numbers, each offers its Album values only, and the note says nothing needs deciding now', () => {
   const two = live({ candidates: live().candidates.map(entry => entry.key === pairingEditions[1] ? { ...entry, barcode: '4006381339999' } : entry) });
   mountReview(two, { ...liveReview, numbers: 2 });
   const possible = screen.getByRole('region', { name: 'Possible matches (2 releases)' });
   const cards = within(possible).getAllByRole('listitem').filter(item => item.querySelector('strong'));
   expect(cards).toHaveLength(2);
-  expect(within(cards[0]).getByText(fillHint)).toBeInTheDocument();
-  expect(within(possible).getAllByText(fillHint)).toHaveLength(1);
-  expect(within(cards[1]).queryByText(fillHint)).not.toBeInTheDocument();
-  expect(within(cards[1]).getByRole('button', { name: 'Use Album values only (title, Artists, label, release date)' })).toBeInTheDocument();
+  expect(within(possible).queryByText(fillHint)).not.toBeInTheDocument();
+  for (const card of cards) expect(within(card).getByRole('button', { name: 'Use Album values only' })).toBeInTheDocument();
+  expect(screen.getByText(albumOnlyNote)).toBeInTheDocument();
   cleanup();
+  // Members without a duration change nothing on the cards: no hint, whatever the titles propose.
   const durations = live({ candidates: live().candidates.map(entry => entry.status === 'unverified' ? { ...entry, comparison: { ...entry.comparison!, unknownLocalDurations: 2 } } : entry),
     disclosure: { unknownLocalDurations: 2, unknownLocalDiscNumbers: 2, partialComparison: true } });
-  mountReview(durations, { ...liveReview, numbers: 2 });
-  expect(screen.getByText('2 tracks have no Disc or Track Number. This page proposes the numbers from the track titles; after saving them, '
-    + 'use this release to bring in its expected tracklist.')).toBeInTheDocument();
-  expect(screen.queryByText(fillHint)).not.toBeInTheDocument();
-  cleanup();
-  mountReview(durations, liveReview);
-  expect(screen.getByText('You can pair the tracks with this release by hand, or enter Disc and Track Numbers by editing manually; after saving the completion draft, use this release to bring in its expected tracklist.')).toBeInTheDocument();
+  for (const numbers of [2, 0]) {
+    mountReview(durations, { ...liveReview, numbers });
+    expect(screen.queryByText(/^2 tracks have no Disc or Track Number/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^You can pair the tracks with this release by hand/)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Use Album values only' })).toBeInTheDocument();
+    cleanup();
+  }
 });
 
 test('an import view keeps its flat folded list and status sentences even with unverified candidates of the same title', () => {
@@ -589,7 +591,7 @@ test('a review card says how its pairing was made single: by the titles\' track 
   for (const [value, line] of Object.entries(lines) as [keyof typeof lines, string][]) {
     mountReview(pairedBy(value), liveReview);
     // The offered release's card says it once; the folded list's cards say it too.
-    const offered = screen.getByRole('region', { name: /^A release whose tracks match was found/ });
+    const offered = screen.getByRole('region', { name: /^One release matches the tracks/ });
     expect(within(offered).getAllByText(line)).toHaveLength(1);
     expect(screen.getAllByText(line).length).toBeGreaterThan(1);
     cleanup();
@@ -597,10 +599,10 @@ test('a review card says how its pairing was made single: by the titles\' track 
   // Titles that start with their positions name them: up to three, else the first and the last.
   const numbered = (titles: string[]) => titles.map((title, index) => ({ slotId: `10000000-0000-4000-8000-00000000000${index + 1}`, title }));
   mountReview(pairedBy('titlePositions'), { ...liveReview, tracks: numbered(['1-01 Synthetic opening', '1-02 Synthetic second song']) });
-  expect(within(screen.getByRole('region', { name: /^A release whose tracks match was found/ })).getByText('Paired by: the track numbers in the titles (1-01 and 1-02)')).toBeInTheDocument();
+  expect(within(screen.getByRole('region', { name: /^One release matches the tracks/ })).getByText('Paired by: the track numbers in the titles (1-01 and 1-02)')).toBeInTheDocument();
   cleanup();
   mountReview(pairedBy('titlePositions'), { ...liveReview, tracks: numbered(['1.01.Synthetic a', '1.02.Synthetic b', '1.03.Synthetic c', '2.01.Synthetic d']) });
-  expect(within(screen.getByRole('region', { name: /^A release whose tracks match was found/ })).getByText('Paired by: the track numbers in the titles (1.01 … 2.01)')).toBeInTheDocument();
+  expect(within(screen.getByRole('region', { name: /^One release matches the tracks/ })).getByText('Paired by: the track numbers in the titles (1.01 … 2.01)')).toBeInTheDocument();
   cleanup();
   mountReview(pairedBy(undefined), liveReview);
   expect(screen.queryByText(/^Paired by/)).not.toBeInTheDocument();
@@ -641,10 +643,9 @@ test('a possible match whose members pair in more than one way offers pairing by
   expect(opener).toHaveClass(styles.button); expect(opener).not.toHaveClass(styles.primary);
   expect(opener).toHaveAccessibleDescription('Synthetic Live Album 2 · Synthetic Live Artist');
   expect(opener).toHaveAttribute('aria-expanded', 'false');
-  // It follows the fill-unavailable line and precedes Other options.
-  const line = card.getByText(/^You can pair the tracks with this release by hand/), options = card.getByText('Other options').closest('details')!;
-  expect(line.compareDocumentPosition(opener) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  expect(opener.compareDocumentPosition(options) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  // It is the second action, after Use Album values only.
+  const albumOnly = card.getByRole('button', { name: 'Use Album values only' });
+  expect(albumOnly.compareDocumentPosition(opener) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   fireEvent.click(opener);
   const panel = await screen.findByRole('region', { name: 'Synthetic pairing panel' });
   expect(opener).toHaveAttribute('aria-expanded', 'true');
@@ -656,7 +657,6 @@ test('a possible match whose members pair in more than one way offers pairing by
   expect(panel.compareDocumentPosition(none) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(card.queryByRole('region', { name: 'Synthetic pairing panel' })).not.toBeInTheDocument();
   // While it saves, the chooser's other choices wait.
-  const albumOnly = card.getByRole('button', { name: 'Use Album values only (title, Artists, label, release date)', hidden: true });
   fireEvent.click(within(panel).getByRole('button', { name: 'busy' }));
   for (const button of [none, albumOnly, opener]) expect(button).toBeDisabled();
   fireEvent.click(within(panel).getByRole('button', { name: 'idle' }));
@@ -773,9 +773,13 @@ test('a review\'s chooser sits in one collapsed Reference releases disclosure th
   const releases = screen.getByText('Reference releases · 1 possible edition').closest('details')!;
   expect(releases.open).toBe(false);
   releases.open = true;
-  expect(within(releases).getByText(/^Using a release writes its Album values, and its tracklist where the tracks pair, to the draft;/)).toBeVisible();
-  // The choice applies the whole release (values, tracklist and pairs where they pair), never the Album values alone.
-  expect(within(releases).getByText(/^Using a release/).textContent).not.toMatch(/values only/);
+  // Every possible match writes Album values only here, so the note says nothing needs deciding now and no tracklist comes in.
+  expect(within(releases).getByText(albumOnlyNote)).toBeVisible();
+  expect(within(releases).queryByText(/^Using a release/)).not.toBeInTheDocument();
+  cleanup();
+  // Where a release applies in full, the note says what using one writes (values, tracklist and pairs where they pair).
+  mountReview(pairedLookupResponse().lookup!, liveReview);
+  expect(screen.getByText(/^Using a release writes its Album values, and its tracklist where the tracks pair, to the draft;/)).toBeVisible();
   cleanup();
   // An offered release needs a choice: open.
   mountReview(pairedLookupResponse().lookup!, liveReview);

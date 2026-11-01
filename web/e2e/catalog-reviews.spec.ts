@@ -1601,7 +1601,8 @@ test('an iTunes-only lookup result names iTunes on its answers and flags every v
   const release = reviewItunesLookupResponse().lookup!.candidates[0].title!;
   const identities = summary.getByRole('region', { name: label('admin.catalog_review.identities_title'), exact: true });
   await expect(identities).toBeVisible();
-  await expect(statusLine(page).getByText(label('admin.lookup.applied_itunes_unchecked', { title: release }), { exact: true })).toBeVisible();
+  // The status line keeps the short applied headline and says in one sentence that the result is iTunes-only and unchecked.
+  await expectStatusLine(page, message('admin.lookup.applied', { title: release }), message('admin.catalog_review.lookup_line_itunes', { checked: 'no' }));
   // The answers name iTunes, never MusicBrainz, one by one and all at once.
   const conflicts = summary.getByRole('region', { name: label('admin.catalog_review.conflicts'), exact: true });
   await expect(summary.getByRole('button', { name: label('admin.catalog_review.use_all_itunes'), exact: true })).toBeVisible();
@@ -1722,29 +1723,31 @@ for (const variant of localizedViewports) {
     await expect(page.getByRole('tablist')).toHaveCount(0);
     await expect(barPrimary(page)).toHaveText(label('admin.catalog_review.apply_action', { count: 4 }));
     // Possible matches come first, open: one card for the release's two editions, why its tracks leave their positions unclear, no
-    // rows promised, how many tracks the proposal gives numbers and choosing kept as Album values only under Other options. The
-    // releases the tracks do not fit are the only other section, folded, and Use none of these follows.
+    // rows promised and Use Album values only as its first action, Pair tracks by hand second. The releases the tracks do not fit
+    // are the only other section, folded, and Use none of these follows.
     const possible = summary.getByRole('region', { name: message('admin.catalog_review.lookup_section_possible', { count: 1 }), exact: true });
     const card = possible.getByRole('listitem').filter({ has: page.locator('strong') });
     await expect(card).toHaveCount(1);
     await expect(card.locator('strong')).toHaveText('Synthetic Live Album 2 · Synthetic Live Artist');
     await expect(card.getByText(message('admin.catalog_review.lookup_editions', { count: 2, editions: 'Digital Media (XW) · CD (JP)' }), { exact: true })).toBeVisible();
     await expect(card.getByText(message('admin.catalog_review.lookup_reason_ambiguous', { count: 2 }), { exact: true })).toBeVisible();
-    // Choosing it is under Other options, which says it writes Album values only; the card face does not say so again.
+    // The disclosure's note says once that these choices write Album values only; the card face does not say so again, and the
+    // status line, not the card, names the proposed numbers.
     await expect(card.getByText(label('admin.catalog_review.lookup_no_tracklist'), { exact: true })).toHaveCount(0);
-    await expect(card.getByText(label('admin.catalog_review.lookup_album_only_copy'), { exact: true })).toHaveCount(1);
+    await expect(card.getByText(label('admin.catalog_review.lookup_album_only_copy'), { exact: true })).toHaveCount(0);
+    await expect(releasesFold(page).getByText(label('admin.catalog_review.lookup_album_only_copy'), { exact: true })).toBeVisible();
     await expect(card.getByText(message('admin.catalog_review.lookup_missing_rows', { count: 18 }), { exact: true })).toHaveCount(0);
-    await expect(card.getByText(message('admin.catalog_review.lookup_fill_hint', { count: 2 }), { exact: true })).toBeVisible();
+    await expect(card.getByText(message('admin.catalog_review.lookup_fill_hint', { count: 2 }), { exact: true })).toHaveCount(0);
     expect(await classList(card.getByRole('button', { name: label('admin.catalog_review.lookup_pair_by_hand'), exact: true }))).not.toEqual(primary);
     await expect(card.getByRole('button', { name: label('admin.lookup.choose'), exact: true })).toHaveCount(0);
-    await expect(card.getByText(label('admin.catalog_review.lookup_other_options'), { exact: true })).toBeVisible();
+    await expect(card.getByRole('button').first()).toHaveText(label('admin.catalog_review.lookup_choose_album_only'));
     await expect(card.getByText(label('admin.catalog_review.lookup_editions_choose'), { exact: true })).toBeVisible();
     for (const button of await summary.getByRole('button').all()) expect(await classList(button)).not.toEqual(primary);
     // The releases the tracks do not fit fold on their own. Nothing is applied, so the results show no fold of their own: the only
-    // disclosures are the Reference releases one (opened above), the card's two and that one.
+    // disclosures are the Reference releases one (opened above), the card's editions one and that one.
     await expect(summary.getByText(label('admin.catalog_review.lookup_details'), { exact: true })).toHaveCount(0);
     await expect(summary.locator('summary:visible')).toHaveText([message('admin.catalog_review.lookup_releases', { count: 1 }),
-      label('admin.catalog_review.lookup_other_options'), label('admin.catalog_review.lookup_editions_choose'), message('admin.catalog_review.lookup_section_not_fit', { count: 10 })]);
+      label('admin.catalog_review.lookup_editions_choose'), message('admin.catalog_review.lookup_section_not_fit', { count: 10 })]);
     const folds = summary.locator('details').filter({ has: page.locator(':scope > summary', { hasText: message('admin.catalog_review.lookup_section_not_fit', { count: 10 }) }) });
     await expect(folds).toHaveCount(1);
     await expect(folds).not.toHaveAttribute('open');
@@ -1822,26 +1825,26 @@ for (const variant of localizedViewports) {
     const summary = page.getByRole('region', { name: label('admin.catalog_review.lookup_title'), exact: true });
     const possible = summary.getByRole('region', { name: message('admin.catalog_review.lookup_section_possible', { count: 1 }), exact: true });
     const chooses = () => api.writes.filter(write => write.path.endsWith('/lookup/choose')).map(write => [write.body.run, write.body.candidateKey]);
-    // Chosen under Other options before its numbers are saved, the release writes Album values only: no tracklist and no track values.
+    // Chosen for its Album values only before its numbers are saved, the release writes no tracklist and no track values, as the
+    // disclosure's note says.
     await openReleases(page);
-    await possible.getByText(label('admin.catalog_review.lookup_other_options'), { exact: true }).click();
-    await expect(possible.getByText(label('admin.catalog_review.lookup_album_only_copy'), { exact: true })).toBeVisible();
+    await expect(releasesFold(page).getByText(label('admin.catalog_review.lookup_album_only_copy'), { exact: true })).toBeVisible();
     await possible.getByRole('button', { name: label('admin.catalog_review.lookup_choose_album_only'), exact: true }).click();
     await expect.poll(chooses).toEqual([[3, pairingEditions[0]]]);
     await expect(statusLine(page).getByText(label('admin.lookup.applied', { title: 'Synthetic Live Album 2' }), { exact: true })).toBeVisible();
     // The tracks still pair in more than one way and the titles propose the numbers, so the results stay open: they explain the
-    // tracks and keep the card's hint in view.
+    // tracks and say what saving the numbers does.
     const results = summary.locator('details').filter({ has: page.getByText(label('admin.catalog_review.lookup_details'), { exact: true }) });
     await expect(results).toHaveJSProperty('open', true);
     const noPairing = summary.getByRole('region', { name: label('admin.catalog_review.members_title'), exact: true }).getByText(label('admin.catalog_review.member_no_pairing'), { exact: true });
     await expect(noPairing).toBeVisible();
     await expect(summary.getByRole('region', { name: label('admin.catalog.album_expected'), exact: true })).toHaveCount(0);
     await expect(possible.getByRole('button', { name: label('admin.lookup.chosen'), exact: true, includeHidden: true })).toBeDisabled();
-    // The status is no longer a no match: the card keeps its hint, and lines after the results say why the tracks are not applied and
-    // what saving the proposed numbers does, before the reference releases and the row of alternatives.
+    // The status is no longer a no match: lines after the results say why the tracks are not applied and what saving the proposed
+    // numbers does, before the reference releases (whose card gives no hint) and the row of alternatives.
     const why = summary.getByText(label('admin.catalog_review.member_no_pairing'), { exact: true }), hint = summary.getByText(message('admin.catalog_review.lookup_fill_hint', { count: 2 }), { exact: true });
-    await expect(why).toHaveCount(2); await expect(hint).toHaveCount(2);
-    await expect(releasesFold(page).getByText(message('admin.catalog_review.lookup_fill_hint', { count: 2 }), { exact: true })).toHaveCount(1);
+    await expect(why).toHaveCount(2); await expect(hint).toHaveCount(1);
+    await expect(releasesFold(page).getByText(message('admin.catalog_review.lookup_fill_hint', { count: 2 }), { exact: true })).toHaveCount(0);
     // Measured in one frame: the Update step's button takes focus once nothing is left to answer, and the page scrolls smoothly to it.
     const order = [statusLine(page).getByText(label('admin.lookup.applied', { title: 'Synthetic Live Album 2' }), { exact: true }), why.first(), hint.first(), releasesFold(page),
       anotherName(page)];
@@ -1899,7 +1902,8 @@ for (const variant of localizedViewports) {
     await expect(statusLine(page)).not.toContainText(/Luna|AI/);
     await openReleases(page);
     const possible = summary.getByRole('region', { name: message('admin.catalog_review.lookup_section_possible', { count: 1 }), exact: true });
-    await expect(possible.getByText(label('admin.catalog_review.lookup_fill_unavailable'), { exact: true })).toBeVisible();
+    await expect(possible.getByText(label('admin.catalog_review.lookup_fill_unavailable'), { exact: true })).toHaveCount(0);
+    await expect(possible.getByRole('button', { name: label('admin.catalog_review.lookup_choose_album_only'), exact: true })).toBeVisible();
     await expect(page.getByRole('region', { name: label('admin.catalog_review.proposal_title'), exact: true })).toHaveCount(0);
     const opener = possible.getByRole('button', { name: label('admin.catalog_review.lookup_pair_by_hand'), exact: true });
     expect(await classList(opener)).not.toEqual(await classList(barPrimary(page)));
@@ -2110,7 +2114,7 @@ async function reenter(page: Page) {
 
 for (const variant of localizedViewports) {
   const { width } = variant;
-  test(`a review lookup lists its steps in the status line's Details log while it runs, notes a wait for MusicBrainz, and keeps them with the names it searched behind Details once finished at ${width}px ${variant.locale}`, async ({ page }) => {
+  test(`a review lookup shows its step in progress in the status line's Details log while it runs, notes a wait for MusicBrainz, and keeps every step with the names it searched behind Details once finished at ${width}px ${variant.locale}`, async ({ page }) => {
     locale = variant.locale; test.setTimeout(60_000);
     await page.setViewportSize({ width, height: width === 1280 ? 720 : 844 });
     const ago = (seconds: number) => new Date(Date.now() - seconds * 1_000).toISOString(), updatedAt = ago(12);
@@ -2119,15 +2123,11 @@ for (const variant of localizedViewports) {
     const api = await setup(page); api.seed(quietPairingReview(), running);
     await enter(page, `/finitude/admin/catalog-reviews/${reviewId}`);
     const summary = page.getByRole('region', { name: label('admin.catalog_review.lookup_title'), exact: true });
-    // While it runs, the steps follow the status line in run order, each with what it searched, its state and its counts.
+    // While it runs, the log stays short (design v3): the notes on one line and only the step in progress, with its counts.
     const steps = statusLine(page).getByRole('list', { name: label('admin.catalog_review.lookup_steps'), exact: true });
     const rows = steps.getByRole('listitem');
-    await expect(rows).toHaveCount(8);
-    await expect(rows.nth(0)).toHaveText(label('admin.catalog_review.lookup_step_done', { step: label('admin.catalog_review.lookup_step_album_artist', { text: 'Synthetic Live Album 2', artist: 'Synthetic Live Artist' }) }));
-    await expect(rows.nth(1)).toHaveText(label('admin.catalog_review.lookup_step_done', { step: label('admin.catalog_review.lookup_step_album', { text: 'Synthetic Live Album 2' }) }));
-    for (const title of ['Synthetic second song', 'Synthetic opening']) await expect(rows.nth(3)).toContainText(quoted(title, 'Synthetic Live Artist'));
-    await expect(rows.nth(4)).toHaveText(label('admin.catalog_review.lookup_step_active', { step: message('admin.catalog_review.lookup_step_counted_details', { done: 5, total: 12 }) }));
-    await expect(rows.nth(5)).toHaveText(label('admin.catalog_review.lookup_step_pending', { step: label('admin.catalog_review.lookup_step_itunes') }));
+    await expect(rows).toHaveCount(1);
+    await expect(rows.nth(0)).toHaveText(label('admin.catalog_review.lookup_step_active', { step: message('admin.catalog_review.lookup_step_counted_details', { done: 5, total: 12 }) }));
     // Once the page has seen no new step for more than five seconds of its own clock (reads every 3 seconds), it says it waits for
     // MusicBrainz, and none of it is a live region. The stand-in seconds stay below 1000, which a plural formats without a group
     // separator.
@@ -2153,6 +2153,10 @@ for (const variant of localizedViewports) {
     await details.click();
     await expect(record).toBeVisible(); await expect(steps).toBeVisible();
     await expect(statusLine(page).getByText(searched, { exact: true })).toBeVisible();
+    // Once finished, every step shows in run order, each with what it searched, its state and its counts.
+    await expect(rows).toHaveCount(8);
+    await expect(rows.nth(0)).toHaveText(label('admin.catalog_review.lookup_step_done', { step: label('admin.catalog_review.lookup_step_album_artist', { text: 'Synthetic Live Album 2', artist: 'Synthetic Live Artist' }) }));
+    await expect(rows.nth(1)).toHaveText(label('admin.catalog_review.lookup_step_done', { step: label('admin.catalog_review.lookup_step_album', { text: 'Synthetic Live Album 2' }) }));
     await expect(rows.nth(3)).toHaveText(label('admin.catalog_review.lookup_step_done', { step: label('admin.catalog_review.lookup_step_track_title',
       { titles: await page.evaluate(([titles, language]) => new Intl.ListFormat(language, { type: 'conjunction' }).format(titles), [[quoted('Synthetic second song', 'Synthetic Live Artist'),
         quoted('Synthetic opening', 'Synthetic Live Artist')], locale] as const) }) }));
@@ -2236,7 +2240,7 @@ for (const variant of [{ width: 1280, height: 800, locale: 'zh-Hans' }, { width:
     await expect(statusLine(page).getByRole('button', { name: label('admin.catalog_review.lookup_log_show'), exact: true })).toHaveAttribute('aria-expanded', 'false');
     const searched = escapedText(label('admin.catalog_review.lookup_searched', { searches: 'SEARCHES' })).replace('SEARCHES', '.+');
     await expect(statusLine(page).getByText(new RegExp(`^${searched}$`))).toBeHidden();
-    await expect(page.getByText(label('admin.catalog_review.lookup_releases_copy'), { exact: true })).toBeHidden();
+    await expect(page.getByText(label('admin.catalog_review.lookup_album_only_copy'), { exact: true })).toBeHidden();
     // The reference releases are collapsed and count what the status counts: possible releases, never the records examined.
     await expect(releasesFold(page).locator(':scope > summary')).toHaveText(message('admin.catalog_review.lookup_releases', { count: 4 }));
     await expect(releasesFold(page)).toHaveJSProperty('open', false);
@@ -2251,11 +2255,24 @@ for (const variant of [{ width: 1280, height: 800, locale: 'zh-Hans' }, { width:
       const [statusTop, headingTop, releasesTop] = await tops(page, statusLine(page), heading, releasesFold(page));
       expect(statusTop).toBeLessThan(headingTop); expect(headingTop).toBeLessThan(releasesTop);
     }
-    // The order: status line, proposals, update range, reference releases, the row of alternatives, then the paid Luna AI button,
-    // which never shares the bar update's primary classes.
+    // The table names its columns, and each row keeps its Disc and Track Numbers together beside the title, inside the card, also
+    // on a phone.
+    await expect(proposals.getByText(`${label('admin.field.disc_number')} / ${label('admin.field.track_number')}`, { exact: true })).toBeVisible();
+    for (const position of [1, 2, 3]) {
+      const [disc, track] = (['disc_number', 'track_number'] as const).map(field => page.getByRole('spinbutton', { name: label('admin.catalog_review.number_label', { position, field: label(`admin.field.${field}`) }), exact: true }));
+      const row = proposals.locator('li').filter({ has: disc });
+      const [discBox, trackBox, rowBox] = await Promise.all([disc.boundingBox(), track.boundingBox(), row.boundingBox()]);
+      expect(Math.abs(discBox!.y - trackBox!.y), `row ${position}`).toBeLessThan(1);
+      expect(discBox!.x).toBeLessThan(trackBox!.x);
+      expect(trackBox!.x + trackBox!.width, `row ${position}`).toBeLessThanOrEqual(rowBox!.x + rowBox!.width + 0.5);
+    }
+    // The order: status line, proposals with the title cleanup after their last row, update range, reference releases, the row of
+    // alternatives, then the paid Luna AI button, which never shares the bar update's primary classes.
     const alternatives = page.getByRole('group', { name: label('admin.catalog_review.alternatives'), exact: true });
     const luna = page.getByRole('button', { name: label('admin.catalog_review.analysis_confirm'), exact: true });
-    const order = await tops(page, statusLine(page), proposals, page.locator('#catalog-review-range'), releasesFold(page), alternatives, luna);
+    const cleanupBox = proposals.getByRole('checkbox', { name: label('admin.catalog_review.proposal_cleanup'), exact: true });
+    const lastRow = page.getByRole('spinbutton', { name: label('admin.catalog_review.number_label', { position: 3, field: label('admin.field.disc_number') }), exact: true });
+    const order = await tops(page, statusLine(page), proposals, lastRow, cleanupBox, page.locator('#catalog-review-range'), releasesFold(page), alternatives, luna);
     for (let index = 1; index < order.length; index += 1) expect(order[index], String(index)).toBeGreaterThan(order[index - 1]);
     expect(await classList(luna)).not.toEqual(await classList(barPrimary(page)));
     // The bar: its plain note and the update counting six fields; the name box is not the next step, so it stays closed.
@@ -2265,6 +2282,30 @@ for (const variant of [{ width: 1280, height: 800, locale: 'zh-Hans' }, { width:
     await expect(page.getByRole('textbox', { name: label('admin.lookup.name'), exact: true })).toHaveCount(0);
     await capture(page, `50-v3-first-screen-${height}`, width, false);
     await reflow(page);
+    expect(api.writes).toEqual([]);
+  });
+}
+
+// While a lookup runs (reference 13), its Details log stays two short lines, so the proposed changes still start above the bar. At
+// 1000x515 the open log leaves the heading just below the bar (it can be collapsed with Hide details), so that size is not pinned.
+for (const variant of [{ width: 1280, height: 800 }, { width: 390, height: 844 }] as const) {
+  const { width, height } = variant;
+  test(`a running lookup keeps the proposed changes in the first screen above the action bar at ${width}x${height} zh-Hans`, async ({ page }) => {
+    locale = 'zh-Hans';
+    await page.setViewportSize({ width, height });
+    const ago = (seconds: number) => new Date(Date.now() - seconds * 1_000).toISOString(), updatedAt = ago(2);
+    const running: ReviewView = { ...durationsLookupResponse().lookup!, state: 'running', outcome: null, candidates: [], groups: [], preselection: null, disclosure: null, applied: null,
+      blocking: true, itunes: 'notQueried', progress: { phase: 'details', done: 3, total: 8, startedAt: ago(21), updatedAt }, timeline: pairingRunningTimeline(updatedAt) };
+    const api = await setup(page); api.seed(durationsReview(), running);
+    await enter(page, `/finitude/admin/catalog-reviews/${reviewId}`);
+    await expect(statusLine(page).getByRole('list', { name: label('admin.catalog_review.lookup_steps'), exact: true }).getByRole('listitem')).toHaveCount(1);
+    await expect(statusLine(page).getByRole('button', { name: label('admin.catalog_review.lookup_log_hide'), exact: true })).toHaveAttribute('aria-expanded', 'true');
+    // No reference releases while the run is active.
+    await expect(releasesFold(page)).toHaveCount(0);
+    await resetMainScroll(page);
+    const heading = page.getByRole('heading', { name: label('admin.catalog_review.proposal_title'), exact: true });
+    const [headingTop, barTop] = await tops(page, heading, actionBar(page));
+    expect(headingTop).toBeLessThan(barTop);
     expect(api.writes).toEqual([]);
   });
 }
@@ -2754,7 +2795,7 @@ for (const variant of localizedViewports) {
       { exact: true })).toBeVisible();
     const open = table.locator('fieldset > ol > li');
     await expect(open).toHaveCount(1);
-    await expect(open.locator('strong')).toHaveText('20 · 2.06.Synthetic long song 20');
+    await expect(open.locator('strong')).toHaveText('2.06.Synthetic long song 20');
     await expect(open.getByText(label('admin.catalog_review.proposal_flag_gap'), { exact: true })).toBeVisible();
     const flagged = (field: 'disc_number' | 'track_number') => open.getByRole('spinbutton', { name: label('admin.catalog_review.number_label', { position: 20, field: label(`admin.field.${field}`) }), exact: true });
     await expect(flagged('disc_number')).toHaveValue('2'); await expect(flagged('track_number')).toHaveValue('6');

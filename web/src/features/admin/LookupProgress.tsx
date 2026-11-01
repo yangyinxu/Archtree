@@ -15,13 +15,13 @@ const STAGES: readonly string[] = ['details', 'itunes', 'bridge', 'aliases'];
 /**
  * The Details log of an existing-Album review's lookup run (its own lazy chunk, review only; when it cannot load, the status line
  * renders nothing in its place, or asks for a reload where it would carry the Album link). While a run is queued, running or
- * retrying: the status line's `notes` (the time it has waited or run, that it keeps running after the page is left), then its steps
- * in order with what each searched, their states and counts (each stage naming what it counts, the bridge also the titles it
- * found), and while a running run has shown no new step for more than five seconds of this page's clock (`now`, the summary's last
- * read), that it waits for MusicBrainz (iTunes in the iTunes phase). After a run: its record (time taken, the MusicBrainz name
- * searches and iTunes searches sent, and releases examined), then, after a run that completed with no issue, the names it
- * searched, then its steps; any other ended run, also one that completed after MusicBrainz's retries ran out, shows its steps
- * the same way without the names. A search the run may not have sent reads as such and is never named or counted. An iTunes step
+ * retrying, the log stays short (design v3, two lines): the status line's `notes` on one line (the time it has waited or run, that
+ * it keeps running after the page is left), while a running run has shown no new step for more than five seconds of this page's
+ * clock (`now`, the summary's last read) that it waits for MusicBrainz (iTunes in the iTunes phase), and only the step in progress
+ * (else the last one reached) with what it searched, its state and counts (each stage naming what it counts, the bridge also the
+ * titles it found). Once the run ends the full step list appears: its record (time taken, the MusicBrainz name searches and iTunes
+ * searches sent, and releases examined), then, after a run that completed with no issue, the names it searched, then every step;
+ * any other ended run, also one that completed after MusicBrainz's retries ran out, shows its steps the same way without the names. A search the run may not have sent reads as such and is never named or counted. An iTunes step
  * that left results out of the comparison, and a bridge step naming the titles iTunes returned, add a line saying so. With
  * `albumHref` (a run that ended because the Album changed) the link to open the Album and start a new completion stays in view,
  * also without a timeline. The log is no live region, as every poll changes it.
@@ -68,18 +68,23 @@ export function LookupProgress({ lookup, now, notes = [], albumHref }: { lookup:
   // titles it found.
   const counted = (step: Step, total: number) => STAGES.includes(step.kind) ? t(`catalog_review.lookup_step_counted_${step.kind}${step.kind === 'bridge' && step.texts?.length ? '_titles' : ''}`,
     { done: step.done ?? 0, total, titles: titles(step) }) : t('catalog_review.lookup_step_counted', { step: label(step), done: step.done ?? 0, total });
-  const rows = <ol aria-label={t('catalog_review.lookup_steps')} className={styles.muted} style={{ listStyle: 'none', paddingLeft: 0 }}>{timeline.steps.map((step, index) =>
+  const list = (steps: readonly Step[]) => <ol aria-label={t('catalog_review.lookup_steps')} className={styles.muted} style={{ listStyle: 'none', paddingLeft: 0 }}>{steps.map((step, index) =>
     <li key={`${step.kind}${index}`}>{t(`catalog_review.lookup_step_${mark(step)}`, { step: step.total ? counted(step, step.total) : label(step) })}
       {note(step) && <span style={{ display: 'block', paddingInlineStart: '1.2em' }}>{note(step)}</span>}</li>)}</ol>;
   const log = (body: ReactNode) => <div id={`${id}-log`} className={styles.lookupLog} hidden={!open}>{body}</div>;
   if (active) {
-    const wait = gateWaitSeconds(lookup, now, seen.current!.since);
-    return <>{button}{below(log(<>{noted}{wait !== null && <p className={styles.muted}>{t('catalog_review.lookup_gate_wait', { source: lookup.progress?.phase === 'itunes' ? 'iTunes' : 'MusicBrainz', seconds: wait })}</p>}{rows}</>))}</>;
+    // Short while it runs: the notes on one line and only the step in progress (else the last one reached), so the proposals
+    // stay in the first screen; the full list follows once the run ends.
+    const wait = gateWaitSeconds(lookup, now, seen.current!.since), running = timeline.steps.filter(step => step.state === 'active');
+    const current = running.length ? running : timeline.steps.filter(step => step.state !== 'pending').slice(-1);
+    return <>{button}{below(log(<>{notes.length > 0 && <p className={styles.meta}>{notes.join(' · ')}</p>}
+      {wait !== null && <p className={styles.muted}>{t('catalog_review.lookup_gate_wait', { source: lookup.progress?.phase === 'itunes' ? 'iTunes' : 'MusicBrainz', seconds: wait })}</p>}
+      {current.length > 0 && list(current)}</>))}</>;
   }
   // A run that completed after MusicBrainz's retries ran out (its issue says so) may not have sent the searches it lists.
   const searched = lookup.state === 'complete' && lookup.issue === null ? searchedTexts(timeline) : [];
   return <>{button}{below(<>{link}
     {log(<>{noted}<p className={styles.details}>{t('catalog_review.lookup_log', lookupRecord(lookup)!)}</p>
       {searched.length > 0 && <p className={styles.meta}>{t('catalog_review.lookup_searched', { searches: searched.map((entry, index) => index
-        ? t(entry.artist ? 'catalog_review.lookup_searched_then' : 'catalog_review.lookup_searched_then_alone', { item: quote(entry) }) : quote(entry)).join('') })}</p>}{rows}</>)}</>)}</>;
+        ? t(entry.artist ? 'catalog_review.lookup_searched_then' : 'catalog_review.lookup_searched_then_alone', { item: quote(entry) }) : quote(entry)).join('') })}</p>}{list(timeline.steps)}</>)}</>)}</>;
 }
