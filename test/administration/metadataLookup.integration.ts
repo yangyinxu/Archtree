@@ -50,7 +50,7 @@
  *   - a run whose stored progress cannot be advanced is retried after its lease and stays bounded by its grant
  *   - a manual retry replaces a run waiting for an automatic retry and waits for the gate, and a retry past the grant ends the run unavailable
  *   - a release-ID query answered by a merged release keeps the fetched release under its current ID and ranks it
- *   - a fetched release stores each track's own artist credit, one equal to the release's as the marker, and no response carries one
+ *   - a fetched release keeps raw track credits private while the administrator sees bounded usable track Artist choices
  *   - a submitted run's first 503 with Retry-After 0 is retried as busy within seconds and then waits, never 30 seconds
  *   - a matching MusicBrainz release sends nothing to iTunes
  *   - iTunes unavailable while MusicBrainz answered: the run retries iTunes automatically, blocking Publish, then completes with MusicBrainz's answer and iTunes unavailable
@@ -97,6 +97,7 @@ import { randomUUID } from 'node:crypto';
 import { after, before, beforeEach, test } from 'node:test';
 import { Collection, ObjectId } from 'mongodb';
 import { getDatabaseClient, getDb } from '../../src/infrastructure/database';
+import { searchListenerContent } from '../../src/services/listener/listenerContentService';
 import { startMongoReplicaSet, type MongoReplicaSetHarness } from '../support/mongoReplicaSet';
 import { AdminImportError, type AdminImportResponse, type ImportEmbeddedTagsV2 } from '../../src/administration/import/adminImportContract';
 import sharp from 'sharp';
@@ -1118,7 +1119,7 @@ test('a release-ID query answered by a merged release keeps the fetched release 
     assert.deepEqual([record.ranking!.preselection?.candidateKey, record.ranking!.preselection?.basis], [`musicbrainz:${mbid(2)}`, 'onlyMatchingGroup']);
 });
 
-test('a fetched release stores each track\'s own artist credit, one equal to the release\'s as the marker, and no response carries one', async () => {
+test('a fetched release keeps raw track credits private while the administrator sees bounded usable track Artist choices', async () => {
     const releaseId = '00000000-0000-4000-8000-000000000020', lengths = [200_000, 210_000, 220_000, 230_000, 240_000, 250_000];
     const id = await seeded(6, index => v2({ album: 'Synthetic Album', albumArtists: ['Synthetic Ensemble'], durationMs: lengths[index] }));
     await requestAutomaticMetadataLookup(by, id, 'upload');
@@ -1131,8 +1132,35 @@ test('a fetched release stores each track\'s own artist credit, one equal to the
     // Read back from MongoDB: the marker, a credit of its own, and no credit where MusicBrainz gave none or an invalid one.
     assert.deepEqual(record.candidates[0].release!.media[0].tracks.map(track => typeof track.artistCredit === 'string' || track.artistCredit === undefined
         ? track.artistCredit ?? null : track.artistCredit.map(credit => credit.name)), ['release', ['Synthetic A', 'Synthetic B'], ['Various Artists'], null, null, null]);
-    const responses = [await getAdminImport(by, id), await listAdminImports(by, {}), await getAdminImportLookup(by, id)].map(value => JSON.stringify(value));
-    for (const response of responses) for (const text of ['Synthetic B', 'Various Artists', '000000000a02', '000000000a03', 'artistCredit']) assert.equal(response.includes(text), false, text);
+    const detail = await getAdminImport(by, id), inventory = await listAdminImports(by, {}), reviewed = await getAdminImportLookup(by, id);
+    const artists = [
+        { name: 'Synthetic A', role: 'primary', joinPhrase: ' feat. ', musicBrainzId: '00000000-0000-4000-8000-000000000a02' },
+        { name: 'Synthetic B', role: 'featured', joinPhrase: null, musicBrainzId: '00000000-0000-4000-8000-000000000a03' }
+    ];
+    // The release choice and publication summary expose only usable, bounded entries, not the fetched artist-credit objects.
+    assert.deepEqual(reviewed.lookup!.groups[0].proposal.trackArtists, [{ discNumber: 1, trackNumber: 2, artists }]);
+    const slotId = detail.item.manifest.files[1].slotId;
+    assert.deepEqual(reviewed.summary.trackArtists!.map(track => ({ slotId: track.slotId, entries: track.entries.map(({ key: _key, identity: _identity, ...entry }) => entry) })), [{ slotId, entries: artists }]);
+    assert.deepEqual(reviewed.summary.trackIdentities!.map(({ name, musicBrainzId, slotIds }) => ({ name, musicBrainzId, slotIds })),
+        artists.map(({ name, musicBrainzId }) => ({ name, musicBrainzId, slotIds: [slotId] })));
+    assert.deepEqual(reviewed.summary.inheritsAlbum, detail.item.manifest.files.slice(2).map(file => file.slotId));
+    for (const response of [detail, inventory].map(value => JSON.stringify(value))) {
+        for (const text of ['Synthetic B', '000000000a02', '000000000a03']) assert.equal(response.includes(text), false, text);
+    }
+    for (const response of [detail, inventory, reviewed].map(value => JSON.stringify(value))) {
+        for (const text of ['Various Artists', 'Synthetic Broken', 'Synthetic Member 51', '000000000b01', '000000000c33', 'artistCredit', 'artist-credit', '"recordingId":', '"artistId":']) {
+            assert.equal(response.includes(text), false, text);
+        }
+    }
+    // Lookup still publishes nothing: private staged identities never enter the public listener response.
+    const publicSearch = await searchListenerContent('Synthetic');
+    assert.deepEqual([publicSearch.artists, publicSearch.albums, publicSearch.audioTracks], [[], [], []]);
+    assert.equal(JSON.stringify(publicSearch).includes('musicBrainzId'), false);
+    const listener = new ObjectId();
+    await getDb()!.collection('users').insertOne({ _id: listener, role: 'user', email: 'track-credit-listener@example.test' });
+    for (const read of [() => getAdminImport(listener.toHexString(), id), () => listAdminImports(listener.toHexString(), {}), () => getAdminImportLookup(listener.toHexString(), id)]) {
+        await assert.rejects(read(), code('ADMIN_IMPORT_ADMIN_REQUIRED'));
+    }
 });
 
 test('a submitted run\'s first 503 with Retry-After 0 is retried as busy within seconds and then waits, never 30 seconds', async () => {
