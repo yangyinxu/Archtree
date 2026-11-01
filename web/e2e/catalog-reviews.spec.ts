@@ -521,8 +521,12 @@ async function enter(page: Page, path: string) {
     await page.getByRole('dialog', { name: english['language.dialog.title'] }).getByRole('radio', { name: '简体中文', exact: true }).click();
     await expect(page.locator('html')).toHaveAttribute('lang', 'zh-Hans');
   }
-  await expectStandaloneAdministration(page, 'user');
-  await page.getByRole('button', { name: label('admin.view.switch_admin'), exact: true }).click();
+  await expectStandaloneAdministration(page);
+  const userView = page.getByRole('button', { name: label('admin.view.current_user'), exact: true });
+  const adminView = page.getByRole('button', { name: label('admin.view.current_admin'), exact: true });
+  // A fresh context enters explicitly; returning in this account restores its verified selection.
+  await expect(userView.or(adminView)).toBeVisible();
+  if (await userView.isVisible()) await page.getByRole('button', { name: label('admin.view.switch_admin'), exact: true }).click();
   await expectStandaloneAdministration(page, 'admin');
 }
 
