@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 import { artistEntry, capabilities, detail, entryKey, lookupResponse, projectId, session, slotId, slotTwo, viewer } from '../src/features/admin/adminFixtures.testSupport';
 
 /** Independent track Credits are explicitly visible, deselectable and frozen in the publication request. */
-test('a new Album reviews track Artists, deselects a guest from the keyboard and publishes only the reviewed selection', async ({ page }) => {
+test('a new Album reviews track Artists, deselects a guest from the keyboard and publishes only the reviewed selection', async ({ page }, info) => {
   let item = detail(); item.suggestions = []; item.draft.album.title = 'Lorem Album'; item.draft.album.artists = [artistEntry('Lorem Lead')];
   item.capabilities = { analysis: false, upload: true, publish: true }; item.upload = { ready: 2, total: 2, available: true }; item.publication = 'notStarted';
   item.draft.tracks.forEach((track, index) => { track.title = `Song ${index + 1}`; track.discNumber = 1; track.trackNumber = index + 1; });
@@ -30,6 +30,7 @@ test('a new Album reviews track Artists, deselects a guest from the keyboard and
   const summary = page.getByRole('region', { name: 'Review and publish', exact: true });
   await summary.getByText('Values that need no answer').click();
   await expect(summary.getByText('Track Artists: Lorem Lead feat. Ipsum Guest')).toBeVisible();
+  await summary.screenshot({ path: info.outputPath('track-artists-summary.png') });
   await summary.getByRole('button', { name: 'Review and approve publishing' }).click();
   const dialog = page.getByRole('dialog'), select = dialog.getByRole('checkbox', { name: 'Use track Artists for Disc 1 · Track 2 · Song 2' });
   await expect(select).toBeChecked();
@@ -39,8 +40,13 @@ test('a new Album reviews track Artists, deselects a guest from the keyboard and
   await expect(select).not.toBeChecked();
   await expect(dialog.getByText('Uses Album primary Artists: Lorem Lead')).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await dialog.screenshot({ path: info.outputPath('track-artists-confirmation-320.png') });
   await dialog.getByRole('button', { name: 'Publish Album', exact: true }).click();
-  await expect(page.getByRole('link', { name: 'Edit published Album' })).toBeVisible();
+  await expect(dialog).toBeHidden();
+  await page.getByRole('tab', { name: 'Publish', exact: true }).click();
+  const published = page.getByRole('tabpanel', { name: 'Publish', exact: true });
+  await expect(published.getByRole('status')).toHaveText('The Album publication is confirmed.');
+  await expect(published.getByRole('link', { name: 'Edit published Album' })).toHaveAttribute('href', `/finitude/admin/catalog/album/${'1'.repeat(24)}`);
   expect(writes).toHaveLength(1);
   expect(writes[0].trackArtists).toEqual([{ slotId: slotTwo, selected: false }]);
   expect(writes[0].approvalDigest).toBe('e'.repeat(64));
