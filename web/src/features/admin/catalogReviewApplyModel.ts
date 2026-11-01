@@ -189,10 +189,11 @@ export function reviewApplyModel({ item: saved, draft: edited, lookup, summary, 
         idWrite: write && { musicBrainzId: write.musicBrainzId, replaces: write.replaces, record: write.replaces ? records[0]?.name ?? null : null } };
     });
   // Positions as the Album page places them after the apply; a group already shared in the catalog blocks only once a selected
-  // number moves a member into it. A selected number outside the server's bounds blocks too (stored ones are always within).
-  const claimed: Record<string, string[]> = {}, outside: string[] = [], positions: ApplyPositionBlock[] = [];
+  // number moves a member into it. A number outside the server's bounds blocks too, selected or not, since the save that precedes
+  // the update writes every edit (saved and stored ones are always within).
+  const claimed: Record<string, string[]> = {}, positions: ApplyPositionBlock[] = [];
+  const outside = draft.tracks.filter(value => !/^[1-9]\d{0,2}:[1-9]\d{0,3}$/.test(`${value.discNumber ?? 1}:${value.trackNumber ?? 1}`)).map(value => value.slotId);
   for (const value of members().values()) {
-    if (!/^[1-9]\d{0,2}:[1-9]\d{0,3}$/.test(`${value.discNumber ?? 1}:${value.trackNumber ?? 1}`)) outside.push(value.slotId);
     const at = positionOf(value);
     if (at) (claimed[at] ??= []).push(value.slotId);
   }

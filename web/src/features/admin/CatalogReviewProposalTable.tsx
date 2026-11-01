@@ -56,17 +56,21 @@ export function CatalogReviewProposalTable({ item, base, edits, cleaned, disable
     const source = sources.find(track => track.slotId === row.slotId)!, track = shownTrack(row.slotId), at = position(row.slotId);
     const notes = [...flags(row), ...(proposal.form === 'track' && view.numbers[row.slotId]?.trackNumber !== undefined && edits.tracks?.[row.slotId]?.trackNumber === undefined
       ? [t('catalog_review.proposal_track_only')] : [])];
+    // Each input is described by its cell's fill or overwrite mark and its row's notes, which its own name would otherwise leave out.
+    const rowId = `${id}-row-${at}`, marked = (kind: ProposalCell | null) => kind === 'overwrite' || column && kind === 'fill';
     const input = (field: Field, max: number, kind: ProposalCell | null) => <label className={styles.field}>
-      {column && kind === 'fill' && <span className={styles.badge}>{t('catalog_review.proposal_fill')}</span>}
-      {kind === 'overwrite' && <span className={styles.badge}>{t('catalog_review.proposal_overwrite')} <s>{source[field]}</s></span>}
+      {column && kind === 'fill' && <span id={`${rowId}-${field}-mark`} className={styles.badge}>{t('catalog_review.proposal_fill')}</span>}
+      {kind === 'overwrite' && <span id={`${rowId}-${field}-mark`} className={styles.badge}>{t('catalog_review.proposal_overwrite')} <s>{source[field]}</s></span>}
       <input className={styles.input} style={{ width: '5.5rem' }} type="number" min={1} max={max} data-number={`${row.slotId}:${field}`} value={track[field] ?? ''}
-        aria-label={t('catalog_review.number_label', { position: at, field: t(`field.${field}`) })} onChange={event => change(row.slotId, field, event.target.value)} /></label>;
+        aria-label={t('catalog_review.number_label', { position: at, field: t(`field.${field}`) })}
+        aria-describedby={[marked(kind) && `${rowId}-${field}-mark`, notes.length > 0 && `${rowId}-notes`].filter(Boolean).join(' ') || undefined}
+        onChange={event => change(row.slotId, field, event.target.value)} /></label>;
     return <li key={row.slotId} className={styles.track}>
       <div style={{ flex: '1 1 12rem', minWidth: 0 }}><strong>{`${at} · ${row.title}`}</strong>
         {track.title !== row.title && <div>{`→ ${track.title}`}</div>}
         {column && <div className={styles.meta}>{t('catalog_review.proposal_original', { numbers: [...(source.discNumber === undefined ? [] : [source.discNumber]), source.trackNumber]
           .map(value => value ?? '—').join(' / ') })}</div>}
-        {notes.length > 0 && <div className={styles.badges}>{notes.map(note => <span key={note} className={styles.badge}>{note}</span>)}</div>}</div>
+        {notes.length > 0 && <div id={`${rowId}-notes`} className={styles.badges}>{notes.map(note => <span key={note} className={styles.badge}>{note}</span>)}</div>}</div>
       {cells[row.slotId].discNumber !== null && input('discNumber', 999, cells[row.slotId].discNumber)}{input('trackNumber', 9999, cells[row.slotId].trackNumber)}</li>;
   };
   const open = long ? proposal.rows.filter(exception) : proposal.rows, discs = new Map<number, TitleProposalRow[]>();

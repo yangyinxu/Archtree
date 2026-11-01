@@ -3639,6 +3639,16 @@
         "elapsed": "string"
       }
     },
+    "admin.catalog_review.luna_budget": {
+      "description": "Administrator workbench: existing-Album review Luna AI confirmation, the Luna AI runs and paid AI calls left for this project.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "attempts": "number",
+        "runs": "number"
+      }
+    },
     "admin.catalog_review.luna_concurrent_copy": {
       "description": "Administrator workbench: existing-Album review Luna AI confirmation, warning text while the free metadata lookup is still running.",
       "delivery": [
@@ -4427,6 +4437,20 @@
       ],
       "variables": {}
     },
+    "admin.catalog_review.status_both_running": {
+      "description": "Administrator workbench: existing-Album review status row, while the free metadata lookup and Luna AI both run.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.status_meanwhile": {
+      "description": "Administrator workbench: existing-Album review status row, muted line while the update waits for metadata lookup or Luna AI: the draft can be checked and edited meanwhile.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.catalog_review.suggestions_title": {
       "description": "Administrator workbench: existing-Album review page, heading of the section listing Luna AI suggestions while some wait.",
       "delivery": [
@@ -4551,7 +4575,7 @@
       }
     },
     "admin.catalog_review.waiting_lookup": {
-      "description": "Administrator workbench: existing-Album review summary, applying waits while metadata lookup runs or retries automatically.",
+      "description": "Administrator workbench: existing-Album review action bar, why the update waits while metadata lookup runs or retries automatically.",
       "delivery": [
         "runtime"
       ],

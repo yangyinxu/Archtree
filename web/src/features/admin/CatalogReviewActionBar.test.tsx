@@ -7,6 +7,10 @@
  *   - a save refused because another administrator changed the review says the conflict once, at the bar, which describes the waiting primary, until the saved version is loaded
  *   - an apply refused because the workbench was updated asks for a reload once, at the top of the page with its button, never again at the bar
  *   - a save-only attempt whose response was lost keeps its intent: the bar retries the same save, which returns to editing with the draft saved
+ *   - saving alone keeps the focus on its button while it saves, then gives it to the primary, and the bar's one polite status says each step
+ *   - a refused save-only keeps its button and the focus on it
+ *   - going back from the confirmation says in the bar's polite status that the draft stays saved
+ *   - an unselected typed number out of range holds the update and saving alone, naming the track, and sends nothing
  *   - when the save that prepares the update finds extra release data, the confirmation says it was not added and the apply leaves it out
  *   - a selected typed number that puts two tracks at one position holds the update, naming both tracks
  *   - an apply refused because the source changed leads to the stale view: the old draft read-only, Discard completion kept and the latest Album offered
@@ -211,16 +215,81 @@ test('a save-only attempt whose response was lost keeps its intent: the bar retr
   });
   mountPage();
   await readyUpdate('Update original Album (4)');
-  fireEvent.click(screen.getByRole('button', { name: 'Save draft only' }));
+  const only = screen.getByRole('button', { name: 'Save draft only' });
+  only.focus(); fireEvent.click(only);
   expect(await screen.findByText('The outcome is unconfirmed. Retry the same operation or refresh its saved status.')).toHaveAttribute('role', 'alert');
-  // The bar alone offers the retry.
+  // The bar alone offers the retry, which takes the focus the gone save-only button held.
   const retry = screen.getByRole('button', { name: 'Retry original operation' });
+  expect(retry).toHaveFocus();
   expect(screen.getAllByRole('button', { name: 'Retry original operation' })).toHaveLength(1);
   fireEvent.click(retry);
   await screen.findByText('Saved to private draft');
   expect(writes.map(write => write.body.operationId)).toEqual([writes[0].body.operationId, writes[0].body.operationId]);
   expect(screen.queryByRole('dialog', { name: 'Confirm this update' })).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Save draft only' })).not.toBeInTheDocument();
+});
+
+test('saving alone keeps the focus on its button while it saves, then gives it to the primary, and the bar\'s one polite status says each step', async () => {
+  const state = { item: pairingReview() }; let answer: (() => void) | null = null;
+  route(state, (_path, body) => new Promise<Response>(resolve => {
+    answer = () => { state.item = saved(state.item, body); resolve(reviewJson({ item: state.item, receipt: state.item.receipts[0] })); };
+  }));
+  mountPage();
+  await readyUpdate('Update original Album (4)');
+  const bar = within(screen.getByRole('region', { name: 'Current step' })), live = bar.getByRole('status');
+  expect(live).toBeEmptyDOMElement();
+  const only = screen.getByRole('button', { name: 'Save draft only' });
+  only.focus(); fireEvent.click(only);
+  // While it saves, the button stays, held, with the focus on it; the status says the draft is being saved.
+  await waitFor(() => expect(live).toHaveTextContent('Saving the draft…'));
+  expect(only).toHaveFocus();
+  expect(only).toHaveAttribute('aria-disabled', 'true');
+  expect(only).toHaveAccessibleDescription('Saving the draft…');
+  await act(async () => { answer!(); });
+  // Saved with nothing left to save, its button goes and the primary takes the focus; the same status says it was saved.
+  await waitFor(() => expect(bar.getByRole('status')).toHaveTextContent('Saved to private draft'));
+  expect(bar.getByRole('status')).toBe(live);
+  expect(screen.queryByRole('button', { name: 'Save draft only' })).not.toBeInTheDocument();
+  await waitFor(() => expect(screen.getByRole('button', { name: /^Update original Album/ })).toHaveFocus());
+});
+
+test('a refused save-only keeps its button and the focus on it', async () => {
+  route({ item: pairingReview() }, () => reviewJson({ code: 'ADMIN_IMPORT_INVALID_INPUT' }, 400));
+  mountPage();
+  await readyUpdate('Update original Album (4)');
+  const only = screen.getByRole('button', { name: 'Save draft only' });
+  only.focus(); fireEvent.click(only);
+  expect(await screen.findByText(/^The draft was not saved; your changes are kept\./)).toHaveAttribute('role', 'alert');
+  expect(screen.getByRole('button', { name: 'Save draft only' })).toBe(only);
+  expect(only).toHaveFocus();
+  expect(only).not.toHaveAttribute('aria-disabled');
+});
+
+test('going back from the confirmation says in the bar\'s polite status that the draft stays saved', async () => {
+  const state = { item: pairingReview() };
+  route(state, (_path, body) => { state.item = saved(state.item, body); return reviewJson({ item: state.item, receipt: state.item.receipts[0] }); });
+  mountPage();
+  fireEvent.click(await readyUpdate('Update original Album (4)'));
+  fireEvent.click(await screen.findByRole('button', { name: 'Back to adjust' }));
+  await waitFor(() => expect(within(screen.getByRole('region', { name: 'Current step' })).getByRole('status'))
+    .toHaveTextContent('Your draft stays saved. The original Album is unchanged.'));
+});
+
+test('an unselected typed number out of range holds the update and saving alone, naming the track, and sends nothing', async () => {
+  const { writes } = route({ item: pairingReview() }, () => reviewJson({ code: 'unexpected' }, 500)); mountPage();
+  await readyUpdate('Update original Album (4)');
+  fireEvent.change(screen.getByRole('spinbutton', { name: 'Track number of track 2' }), { target: { value: '10000' } });
+  // The typed number arrives unselected, but the save before the update would write it.
+  expect(await screen.findByRole('checkbox', { name: /^Track number · 1-02 Synthetic second song \(Live\)/ })).not.toBeChecked();
+  const reason = 'These tracks have numbers out of range (Disc 1–999, Track 1–9999): 2 · 1-02 Synthetic second song (Live)';
+  const update = screen.getByRole('button', { name: /^Update original Album/ }), only = screen.getByRole('button', { name: 'Save draft only' });
+  await waitFor(() => expect(update).toHaveAccessibleDescription(reason));
+  expect(update).toHaveAttribute('aria-disabled', 'true');
+  expect(only).toHaveAttribute('aria-disabled', 'true');
+  expect(only).toHaveAccessibleDescription(reason);
+  fireEvent.click(update); fireEvent.click(only);
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); });
+  expect(writes).toEqual([]);
 });
 
 test('when the save that prepares the update finds extra release data, the confirmation says it was not added and the apply leaves it out', async () => {

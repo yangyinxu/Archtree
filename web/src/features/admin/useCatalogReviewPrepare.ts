@@ -142,33 +142,38 @@ export function useCatalogReviewPrepare({ id, command, item, model, reads, refet
   /** Ends this hook's operation: nothing left to resume. */
   const done = () => { pending.current = null; adminWorkspace.forget(buffer); };
 
-  // Each settled run of this hook's own operation moves the state; any other command run on the page is left alone.
-  useEffect(() => command.subscribe(() => {
-    const snapshot = command.getSnapshot(), mine = pending.current;
-    if (snapshot.running) { running.current = snapshot.intent?.operationId ?? null; return; }
-    const op = running.current; running.current = null;
-    if (!mine || op !== mine.op) return;
-    if (snapshot.result?.receipt.operationId === mine.op) {
-      done();
-      const saved = snapshot.result.item;
-      if (mine.mode === 'apply') setState({ ...idle, phase: 'success', applied: saved });
-      else if (mine.mode === 'save') setState({ ...idle, notice: 'saved' });
-      else {
-        target.current = { ...target.current, revision: saved.revision, valueRevision: saved.valueRevision, advanced: saved.valueRevision > target.current.valueRevision };
-        setState({ ...idle, phase: 'reading' });
+  // Each settled run of this hook's own operation moves the state; any other command run on the page is left alone. The listener
+  // also runs once as it subscribes: a resumed run that settled between the render that read it and this subscription (which
+  // AdminCommand does not replay) is handled as if its notice had arrived.
+  useEffect(() => {
+    const listener = () => {
+      const snapshot = command.getSnapshot(), mine = pending.current;
+      if (snapshot.running) { running.current = snapshot.intent?.operationId ?? null; return; }
+      const op = running.current; running.current = null;
+      if (!mine || op !== mine.op) return;
+      if (snapshot.result?.receipt.operationId === mine.op) {
+        done();
+        const saved = snapshot.result.item;
+        if (mine.mode === 'apply') setState({ ...idle, phase: 'success', applied: saved });
+        else if (mine.mode === 'save') setState({ ...idle, notice: 'saved' });
+        else {
+          target.current = { ...target.current, revision: saved.revision, valueRevision: saved.valueRevision, advanced: saved.valueRevision > target.current.valueRevision };
+          setState({ ...idle, phase: 'reading' });
+        }
+      } else if (snapshot.error === 'unknown' && snapshot.intent?.operationId === mine.op) {
+        setState(previous => ({ ...idle, phase: mine.mode === 'apply' ? 'unknown' : 'save_unknown', notice: 'unknown', saveOnlyFailed: mine.mode !== 'apply' && mine.only,
+          frozen: mine.mode === 'apply' ? previous.frozen : null }));
+      } else if (snapshot.error) {
+        // A definite refusal: nothing to retry. Every one reads the review, its summary and its identity rows again.
+        done(); reread();
+        const error = snapshot.error;
+        setState(error === 'stale' ? { ...idle, phase: 'stale', notice: error }
+          : mine.mode === 'apply' ? { ...idle, phase: error === 'review_required' ? 'review_required' : 'editing', notice: error }
+            : { ...idle, phase: 'save_failed', notice: error, saveOnlyFailed: mine.only });
       }
-    } else if (snapshot.error === 'unknown' && snapshot.intent?.operationId === mine.op) {
-      setState(previous => ({ ...idle, phase: mine.mode === 'apply' ? 'unknown' : 'save_unknown', notice: 'unknown', saveOnlyFailed: mine.mode !== 'apply' && mine.only,
-        frozen: mine.mode === 'apply' ? previous.frozen : null }));
-    } else if (snapshot.error) {
-      // A definite refusal: nothing to retry. Every one reads the review, its summary and its identity rows again.
-      done(); reread();
-      const error = snapshot.error;
-      setState(error === 'stale' ? { ...idle, phase: 'stale', notice: error }
-        : mine.mode === 'apply' ? { ...idle, phase: error === 'review_required' ? 'review_required' : 'editing', notice: error }
-          : { ...idle, phase: 'save_failed', notice: error, saveOnlyFailed: mine.only });
-    }
-  }), [command]);
+    };
+    const off = command.subscribe(listener); listener(); return off;
+  }, [command]);
   // A refused save's alert says the unsaved values are kept; once the editor moves to a newer saved draft (the conflict panel's
   // Load saved version), they are not, and the refusal no longer stands: the review is plainly editable again, and the command
   // drops the refusal so the page does not say it either.

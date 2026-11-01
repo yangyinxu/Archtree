@@ -80,6 +80,9 @@ test('a stored number adds the original numbers in text, marks each filled cell,
   fireEvent.change(screen.getByRole('spinbutton', { name: 'Track number of track 2' }), { target: { value: '4' } });
   const marker = within(table()).getByText('Replaces');
   expect(marker.querySelector('s')).toHaveTextContent('2');
+  // The input's own name leaves the marks out, so they describe it: the replacement with the value it replaces, or the fill.
+  expect(screen.getByRole('spinbutton', { name: 'Track number of track 2' })).toHaveAccessibleDescription(/^Replaces\s*2$/);
+  expect(screen.getByRole('spinbutton', { name: 'Disc number of track 2' })).toHaveAccessibleDescription('Fills');
   expect(view().shown.tracks[1].trackNumber).toBe(4);
   expect(view().edits).toEqual({ album: undefined, tracks: { [slotTwo]: { trackNumber: 4 } } });
 });
@@ -113,6 +116,8 @@ test('titles giving Track Numbers alone are proposed, marked for checking and no
   const { table, view } = mount(retitled(pairingReview(), ['01 - Synthetic overture', '02 - Synthetic song']));
   expect(inputs.map(number)).toEqual(['', '1', '', '2']);
   expect(within(table()).getAllByText('Track Number read from the title only; please check')).toHaveLength(2);
+  // The row's note describes its input.
+  expect(screen.getByRole('spinbutton', { name: 'Track number of track 2' })).toHaveAccessibleDescription('Track Number read from the title only; please check');
   expect(within(table()).queryByText(/are included in this update/)).not.toBeInTheDocument();
   // They are not preselected: the Update selection defaults carry no number for them.
   expect(view().proposed.numbers.size).toBe(0);
@@ -120,6 +125,7 @@ test('titles giving Track Numbers alone are proposed, marked for checking and no
   fireEvent.change(screen.getByRole('spinbutton', { name: 'Track number of track 2' }), { target: { value: '2' } });
   fireEvent.change(screen.getByRole('spinbutton', { name: 'Track number of track 2' }), { target: { value: '3' } });
   expect(within(table()).getAllByText('Track Number read from the title only; please check')).toHaveLength(1);
+  expect(screen.getByRole('spinbutton', { name: 'Track number of track 2' })).not.toHaveAttribute('aria-describedby');
 });
 
 test('the optional cleanup, off by default, previews each cleaned title and chooses it, never touches a title the administrator edited, and turning it off restores the others', () => {

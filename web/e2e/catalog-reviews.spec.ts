@@ -16,7 +16,7 @@
  *   Variables: locale
  * Tests
  *   - private Album covers disappear on User view or role loss and make no later private image reads
- *   - an existing-Album review looks up a typed name with an optional Artist and shows both again with its run, while Look up stays in the first screen
+ *   - an existing-Album review looks up a typed name with an optional Artist and shows both again with its run, while the lookup status stays in the first screen and Look up comes before the proposed numbers
  *   - without metadata lookup the Album page creates a completion for manual editing, then opens it, and another one is an explicit choice
  *   - an Album that cannot have a completion shows the action disabled with its reason
  *   - an iTunes-only lookup result names iTunes on its answers and flags every value it wrote
@@ -1340,7 +1340,7 @@ for (const variant of localizedViewports) {
   });
 }
 
-test('an existing-Album review looks up a typed name with an optional Artist and shows both again with its run, while Look up stays in the first screen', async ({ page }) => {
+test('an existing-Album review looks up a typed name with an optional Artist and shows both again with its run, while the lookup status stays in the first screen and Look up comes before the proposed numbers', async ({ page }) => {
   locale = 'en-US';
   await page.setViewportSize({ width: 1280, height: 720 });
   const api = await setup(page); api.ready();
@@ -1349,7 +1349,7 @@ test('an existing-Album review looks up a typed name with an optional Artist and
   await enter(page, `/finitude/admin/catalog-reviews/${reviewId}`);
   const summary = page.getByRole('region', { name: label('admin.catalog_review.lookup_title'), exact: true });
   await expect(summary.getByText(label('admin.catalog_review.lookup_not_started'), { exact: true })).toBeVisible();
-  // The Artist field shares the name's row and its hint follows Look up, so Look up stays in the first main screen.
+  // The Artist field shares the name's row and its hint follows Look up, so Look up still comes before the proposed numbers and the draft editor.
   await expectLookupFirst(page);
   const box = summary.getByRole('group', { name: label('admin.lookup.box'), exact: true });
   const name = box.getByRole('textbox', { name: label('admin.lookup.name'), exact: true }), artist = box.getByRole('textbox', { name: label('admin.lookup.artist'), exact: true });

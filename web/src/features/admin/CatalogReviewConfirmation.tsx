@@ -60,7 +60,8 @@ export function CatalogReviewUnknown({ frozen, queried, focus }: { frozen: Catal
   useEffect(() => { if (focus) heading.current?.focus(); }, [focus]);
   return <section aria-labelledby="catalog-review-unknown" className={styles.panel}>
     <h2 id="catalog-review-unknown" ref={heading} tabIndex={-1}>{t('catalog_review.unknown_title')}</h2>
-    <p>{t(queried ? 'catalog_review.unknown_pending' : 'catalog_review.unknown_copy')}</p>
+    {/* A polite status, mounted throughout, so a query that finds the review still unapplied is announced. */}
+    <p role="status">{t(queried ? 'catalog_review.unknown_pending' : 'catalog_review.unknown_copy')}</p>
     {frozen && <CatalogReviewCompactRows item={frozen.item} fields={frozen.selection.fields} members={frozen.selection.memberCredits} items={frozen.selection.items} done={false} />}
     <p className={styles.muted}>{t('catalog_review.unknown_note')}</p>
   </section>;

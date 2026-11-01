@@ -1369,7 +1369,8 @@ still read it. Card dates (**Last changed:**) follow the interface language, as
 on the import page.
 Saving the draft alone (the action bar's secondary save-only button, "仅保存草稿"
 in Simplified Chinese, shown only while the draft has unsaved edits or selected
-pending proposals, or after a save-only attempt failed, never primary) changes
+pending proposals, or after a save-only attempt failed until loading the saved
+version ends that refusal, never primary) changes
 only the private draft and sends only the values edited since the saved draft
 was loaded (an edit changed back is no change) and the selected proposals, so it never
 overwrites another value saved meanwhile; it stays available while lookup or
@@ -1386,15 +1387,19 @@ stripped), the draft's primary Artist names and how many local tracks the review
 captured. One status row follows, a polite status naming the first that applies
 (while the update is being prepared, the action bar says so instead, below):
 metadata lookup and Luna AI both running, Luna AI
-running, a lookup queued, running or retrying with its progress, a lookup that
+running (either while Luna AI is queued or running), a lookup queued, running or retrying with its progress, a lookup that
 did not finish, no release found, a release used, or the completed lookup's
-result (the review's lookup summary below words each); a quieter line under it
-says what the administrator can do meanwhile, such as checking and editing the
-proposed numbers while the update waits for lookup. All numbers come from the
+result (the review's lookup summary below words each); a quieter line under it,
+while the update waits for lookup or Luna AI, says the administrator can check
+and edit the draft meanwhile and confirm the update afterwards (why the update
+waits is the action bar's alone). All numbers come from the
 lookup view, never a client timer. A details toggle beside the status shows or
-hides the lookup steps and log. The editing section follows: the numbers
-proposed from titles (see **Numbers proposed from titles** below) with the
-optional title-prefix cleanup, the update range (see below), the identity rows, the reference releases and any conflict notes. A row
+hides the lookup steps and log. The status row opens the review's **Metadata
+lookup** summary (described below: the steps, the name box, the reference
+releases, any conflict notes and the identity rows). The editing section
+follows it: the numbers proposed from titles (see **Numbers proposed from
+titles** below) with the optional title-prefix cleanup, then the update range
+(see below), then any notice that the saved draft changed (a conflict). A row
 of alternatives comes next, labelled "不对？" (**Not right?**): manual
 editing, which opens the draft editor (`CatalogReviewDraftEditor.tsx`, its own
 chunk) in place below the row for the Album title and date and each Track's
@@ -1516,7 +1521,8 @@ return to the plain ones, and a lookup that ends never starts Luna AI. The
 confirmation gives the project's remaining Luna AI runs and paid calls from the
 review detail's `analysis` (runs left are 2 minus `generation`, calls left
 `maxAttempts` minus `attemptsUsed`) and says when this is the project's last
-Luna AI analysis (one run left). No review read supplies the daily allowance
+Luna AI analysis: its runs left, as far as its paid calls left cover a whole run
+(one call for the Album and one per ten tracks), equal one. No review read supplies the daily allowance
 (only the import summary's `analysis.daily` does), so the review's confirmation
 does not show it until a server field adds it. Its suggestions arrive
 unticked in the Luna AI section and change the draft only when adopted; an
@@ -1527,7 +1533,7 @@ Track Number, and that its title was updated) and per Album value, grouped on a
 long Album as the confirmation groups them, under a heading counting the fields
 written that takes the focus when this page's update led there, with when the
 original Album was updated (in the interface language), and, behind the **What
-was updated** disclosure (an applied review keeps no original values), each field
+was updated** disclosure (it names the fields, not their former values), each field
 the apply wrote (`applied.fields`, named as in the selection: the Album's title, date,
 Artists, label and expected tracklist, and each Track's title, Disc and Track
 Number, a Track named by its quoted title as the selection names it, by its
@@ -1537,8 +1543,11 @@ original Album's tracks, or that only track Artists were updated when the apply
 wrote no listed field, and the release its metadata lookup applied, if any, with its
 source. A line then says how the edition stands: matched where lookup
 preselected the release it used (`applied.choice` `preselected`, its basis a
-match and nothing left unchecked), or else that the edition remains unconfirmed,
-naming a release the administrator chose without a match; checking the edition
+match and nothing left unchecked) or the administrator chose one whose candidate
+is matching with nothing left unchecked (`applied.choice` `chosen`, such as a
+tie's answer among matching groups), or else that the edition remains
+unconfirmed, naming a release the administrator chose without a match (a chosen
+release whose candidate is not matching); checking the edition
 further is optional and takes a new completion. It offers no **Update original
 Album** and no count; the action bar's only button opens the original Album.
 **Discard completion** (never primary) ends the row of alternatives on an
@@ -1723,8 +1732,11 @@ bar's height as it grows (an alert, a wrapped reason), so a focused field and it
 outline are never hidden behind it. It is absent from the discarded notice and the
 Admin view gate. Its primary **Update original Album (N)**, N being the range's
 count, waits while lookup runs and while Luna AI runs (it names both when both
-run; stopping Luna AI leaves the lookup reason), while a Disc or Track Number is
-out of range (Disc 1–999, Track 1–9999, as the review save accepts) or two
+run; stopping Luna AI leaves the lookup reason), while a Disc or Track Number the
+draft holds is out of range (Disc 1–999, Track 1–9999, as the review save
+accepts), selected or not, since the save before the update writes every edit
+(said before the lookup and Luna AI reasons, and holding the save-only button
+too, which that reason then describes), or two
 members would sit at one Disc and Track position after the selected numbers (a
 missing Disc Number counting as 1; it names them), while nothing is selected,
 and while a selected list's identity needs a record (it names them); it also
@@ -1740,7 +1752,8 @@ proposals, never an unselected one, as one ordinary review save (`PATCH
 when a member's own number changed, and waits until the detail, the lookup
 summary and the identity read are all at the saved revision and value revision.
 Meanwhile the bar says the draft is being saved, then that the saved numbers and
-the update range are being checked, as its only live status; the confirmation
+the update range are being checked, in its one polite status, which also says
+a settled save-only and a return to adjusting; the confirmation
 says the stored candidates were compared again only when the save changed a
 number and the run completed with candidates, and otherwise that the saved
 numbers and the update range were checked. When the save advanced the value revision (its re-rank applied
@@ -1753,13 +1766,21 @@ and shows its message as an alert at the bar (said there only, never again at
 the top of the page; when another administrator's save made the edits
 conflicting, the editing section keeps only its button to load the saved
 version, and loading it ends the refusal, as the values it kept are gone: the
-alert goes and the primary updates again), whose primary, relabelled **Retry preparing the
+alert goes, the primary updates again and the save-only button shows only for
+new edits), whose primary, relabelled **Retry preparing the
 confirmation** ("重试准备确认") and keeping the focus, retries the
 preparation; a save whose outcome is unknown keeps its intent, and the bar's
 **Retry original operation** sends the same save again, after which the page
 returns to editing with the draft saved, so the update is requested again.
 Saving the draft alone, the bar's secondary button, saves the same way without
-preparing.
+preparing. While that save runs its button stays, held (`aria-disabled`) and
+described by the progress, so a focus on it stays; once it saved with nothing
+left to save, or its outcome is unknown, the button goes and the focus it held
+moves to the primary, while a refused one keeps its button and the focus. The
+bar's one polite status stays mounted: it says the progress, then **Saved to
+private draft** or that going back kept the draft saved. The unknown view's own
+sentence is a polite status too, so a query that finds the review still
+unapplied is announced.
 
 The confirmation is inline above the bar, a region named as a dialog but not
 modal, with the focus on its back button, which its summary sentence describes,
@@ -2104,7 +2125,9 @@ each showing the draft value, else the proposal. When any captured number is not
 empty, a column gives the original numbers and each cell is marked as filling an
 empty value or replacing a non-empty one (the original struck through), so a
 replacement is never unmarked; otherwise one note says every original number is
-empty. Inputs accept Disc 1–999 and Track 1–9999, as the review save does. A
+empty. A cell's mark and its row's notes (such as a Track Number read from the
+title only) also describe its inputs (`aria-describedby`), so a screen reader
+says them with the field. Inputs accept Disc 1–999 and Track 1–9999, as the review save does. A
 pending proposal is not an unsaved edit: it starts nothing, keeps the lookup and
 Luna AI controls usable and is not given to Luna; a typed number is an edit.
 Requesting the update, or saving the draft alone, saves the selected proposed
@@ -3280,10 +3303,14 @@ roll back to:
   and `keptTracklist`. Reload open admin Web tabs across deploy or rollback.
 - The review page's action bar, inline confirmation and outcome views (the v3
   review page) raise no floor: they call only the routes and send only the
-  bodies the release before them already admits. They retire the Web-only
-  `admin.catalog_review.*` keys of the removed step bar and modal confirmation
-  (`view_changes_plain`, `steps_label`, `steps_ready`, every `step_*` key and
-  `apply_confirm_copy`), which no native client packages. The other keys the
+  bodies the release before them already admits. The review lookup read adds
+  `summary.primaryArtists`, which a Web tab opened before this release cannot
+  parse (its summary is strict); this release's Web reads a summary without it
+  as an empty list, as before the review is captured. They retire the Web-only
+  `admin.catalog_review.*` keys of the removed step bar, modal confirmation and
+  Fill Disc and Track Numbers button (`view_changes_plain`, `steps_label`,
+  `steps_ready`, every `step_*` key, `apply_confirm_copy`, `fill_numbers` and
+  `fill_numbers_done`), which no native client packages. The other keys the
   removed tabs, Update tab, modal confirmation, draft form and suggestion empty
   states used (`draft_tab`, `review_tab`, `apply_tab`, `view_changes`,
   `save_draft`, `save_draft_first`, `draft_saved`, `apply_title`, `apply_copy`,

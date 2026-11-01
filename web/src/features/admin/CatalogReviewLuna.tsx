@@ -32,8 +32,9 @@ export function lunaRunsLeft(item: CatalogReview): number {
  * summary's cached read, which the summary keeps polling), it warns that free results are pending and offers Wait for free results,
  * which only closes it, beside Start Luna AI anyway (paid); once the lookup ends its labels turn into Cancel and Start Luna AI
  * analysis (paid) in place, and nothing starts until one is pressed: Luna AI never starts by itself. A run that starts meanwhile
- * (also from another tab) or an applied review closes it for good. When the project has exactly
- * one Luna AI run left (lunaRunsLeft) it says this is the last. Starting calls `onAnalyze`, which sends the review's current
+ * (also from another tab) or an applied review closes it for good. It gives the project's Luna AI
+ * runs left (two less the runs used) and paid calls left, and when the project has exactly one Luna AI run left (lunaRunsLeft: its
+ * runs left, as far as its paid calls left cover a whole run) it says this is the last. Starting calls `onAnalyze`, which sends the review's current
  * revision; it stays unavailable while `canAnalyze` is false or a change is `busy`.
  */
 export function CatalogReviewLuna({ item, active, canAnalyze, busy, onAnalyze, onStop }: { item: CatalogReview; active: boolean; canAnalyze: boolean; busy: boolean;
@@ -70,6 +71,7 @@ export function CatalogReviewLuna({ item, active, canAnalyze, busy, onAnalyze, o
       <h3 id={`${uid}-title`}>{t('catalog_review.analysis_confirm_title')}</h3>
       {waiting && <div role="note" className={styles.notice}><strong>{t('catalog_review.luna_concurrent_title')}</strong><p>{t('catalog_review.luna_concurrent_copy')}</p></div>}
       <p id={`${uid}-copy`}>{t('catalog_review.analysis_copy')}</p>
+      <p>{t('catalog_review.luna_budget', { runs: Math.max(0, LUNA_RUNS - item.analysis.generation), attempts: Math.max(0, item.analysis.maxAttempts - item.analysis.attemptsUsed) })}</p>
       {lunaRunsLeft(item) === 1 && <p>{t('catalog_review.luna_last_run')}</p>}
       <div className={styles.dialogActions}>
         <button ref={safe} className={styles.button} type="button" onClick={close}>{t(waiting ? 'catalog_review.luna_wait' : 'common.cancel')}</button>

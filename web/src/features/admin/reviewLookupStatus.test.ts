@@ -24,7 +24,7 @@
 import type { ReviewLookupView } from './importLookupApi';
 import { pairedLookupResponse, pairingApplication, pairingEditions, pairingLookupResponse } from './catalogReviewLookupFixtures.testSupport';
 import { candidateReason, editionKey, elapsedText, normalizedTitle, releaseGroups, reviewAppliedAgain, reviewLookupFit, reviewLookupStatus, reviewSections, titleLeadingPosition, titleNumbers, titlePosition,
-  titleRest, titleTier } from './reviewLookupStatus';
+  titleTier } from './reviewLookupStatus';
 
 /**
  * The review's own reading of its lookup view, without rendering: normalized titles, releases and their editions, the sections,
@@ -232,10 +232,11 @@ test('a track title\'s position reads as written, of the forms the numbers are f
 });
 
 test('a track title\'s rest is exactly its text after the position, whitespace collapsed as the server keeps it, and a title without a position has none', () => {
+  const rest = (title: string) => titleLeadingPosition(title)?.rest ?? null;
   expect(['1-01 Yorugaonokokuhaku(Live)', '1.01.雪の華', '1.01. 創生(Instrumental)', '01 - 序曲', '2-12 Synthetic  Song ', ' 01  X', '01 . X', '1-01 \u2014 X', '01 ...Baby One More Time',
-    '01 -X', '7 Rings'].map(titleRest)).toEqual(['Yorugaonokokuhaku(Live)', '雪の華', '創生(Instrumental)', '序曲', 'Synthetic Song', 'X', 'X', 'X', '...Baby One More Time', '-X', 'Rings']);
+    '01 -X', '7 Rings'].map(rest)).toEqual(['Yorugaonokokuhaku(Live)', '雪の華', '創生(Instrumental)', '序曲', 'Synthetic Song', 'X', 'X', 'X', '...Baby One More Time', '-X', 'Rings']);
   // No position: a year, a prefix the server does not read, a zero, no text after the separator, or a title over 1024 characters.
-  expect(['1999 X', 'Disc2-03 X', '01_X', '12) X', '01-X', '0 X', '1-0 X', '0-1 X', '01', '01.', 'X', '', `01 ${'x'.repeat(1022)}`].map(titleRest)).toEqual(Array(13).fill(null));
+  expect(['1999 X', 'Disc2-03 X', '01_X', '12) X', '01-X', '0 X', '1-0 X', '0-1 X', '01', '01.', 'X', '', `01 ${'x'.repeat(1022)}`].map(rest)).toEqual(Array(13).fill(null));
   expect([titleLeadingPosition('2-12 Synthetic'), titleLeadingPosition('012 Synthetic'), titleLeadingPosition('0 X')]).toEqual([{ discNumber: 2, trackNumber: 12, rest: 'Synthetic' },
     { discNumber: null, trackNumber: 12, rest: 'Synthetic' }, null]);
 });

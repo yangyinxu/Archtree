@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "locale": "zh-Hans",
-  "revision": "sha256-nDJOLyrFFrFoABEjcn4NU3PXVE8GMknOb_6sQUmaXTI",
+  "revision": "sha256-A4PNgBJkg6YIjb4EIvT5Wj-1pUTR95EpXWJvvq5E9HI",
   "messages": {
     "account.common.back_account": "← 返回账户",
     "account.common.checking": "正在检查你的账户…",
@@ -484,6 +484,7 @@
     "admin.catalog_review.lookup_unknown_durations": "有 {count} 首曲目没有时长，所以对应的发行无法自动确认。",
     "admin.catalog_review.lookup_unpairable": "此发行中没有曲目可以对应：{tracks}",
     "admin.catalog_review.lookup_waited": "已等 {elapsed}",
+    "admin.catalog_review.luna_budget": "此项目剩余：{runs} 次 Luna AI，{attempts} 次付费 AI 调用。",
     "admin.catalog_review.luna_concurrent_copy": "等待免费结果后，可能无需使用付费分析。仍启动 Luna AI 会使用本项目的付费额度，两项任务将并行运行。",
     "admin.catalog_review.luna_concurrent_title": "免费元数据查找仍在进行",
     "admin.catalog_review.luna_failed_quiet": "Luna AI（付费，可选）：上次运行没有成功，可以忽略。",
@@ -588,6 +589,8 @@
     "admin.catalog_review.stale_copy": "这份补全已过期，不能覆盖后来保存的内容。旧草稿只读，不能再次提交。",
     "admin.catalog_review.stale_draft": "查看旧草稿",
     "admin.catalog_review.stale_title": "这份补全已过期",
+    "admin.catalog_review.status_both_running": "免费查找与 Luna AI 均在进行",
+    "admin.catalog_review.status_meanwhile": "等待期间可先检查和编辑草稿，之后再确认更新。",
     "admin.catalog_review.suggestions_title": "Luna AI 建议",
     "admin.catalog_review.target_album": "专辑",
     "admin.catalog_review.target_track": "曲目",

@@ -64,7 +64,8 @@ function Results({ fold, pairing, label, children }: { fold: boolean; pairing: R
  * review's brief offers none (where the Album changed, the step list's chunk links to the Album instead); an active run's
  * progress, whose elapsed time and the note that it keeps running after the page is left sit beside the polite status, outside
  * it, so each poll does not announce them; the status row, which keeps that status mounted in one place whether or not a run
- * exists or its steps' chunk has loaded; the run's steps (LookupProgress.tsx, its own chunk, which adds a Details button to the
+ * exists or its steps' chunk has loaded, and which names Luna AI running (with the lookup or alone) before the lookup's own status,
+ * with a muted line under it, while the update waits for either, saying the draft can be checked and edited meanwhile; the run's steps (LookupProgress.tsx, its own chunk, which adds a Details button to the
  * status row and leaves it alone when it cannot load, or asks for a reload where it would carry the Album link): shown
  * under the status while a run is active or after it failed, with a note while a running run waits for its source, else behind
  * Details, and after a completed run the names searched; the name box prefilled with the saved Album title and its optional Artist
@@ -82,8 +83,8 @@ function Results({ fold, pairing, label, children }: { fold: boolean; pairing: R
  * the status says, with why its tracks are not applied) and flags no iTunes-only value or artist mismatch, which are never collapsed,
  * everything after the name box folds under one disclosure, never while the chooser's pairing panel is open (`Results`); it stays
  * mounted, so unsaved identity choices survive the fold. The
- * panel carries the anchors the step bar links to: the panel (`catalog-review-lookup`), its first open answer
- * (`catalog-review-answers`) and its identity rows (`catalog-review-identities`).
+ * panel carries `catalog-review-lookup` (the focus target after the chooser's pairing panel closes) and its identity rows carry
+ * `catalog-review-identities` (the update range's link).
  * Answers wait while a run is active. A read showing a newer revision or value revision (lookup applications change only
  * the latter) reads the review detail again; a refused answer reads this summary and the identity rows again. A chunk it loads
  * that cannot load asks for a reload in its place.
@@ -133,7 +134,7 @@ export function CatalogReviewSummary({ item, disabled, error, onRun }: {
   const statusText = refined ? refined.messages.map(say).reduce((text, next) => `${text}${text.endsWith('。') ? '' : ' '}${next}`)
     : t(reviewLookupKey(status), { title: release });
   // A previous revision's read shown while the current one loads takes no answer.
-  const busy = disabled || query.isPlaceholderData, answering = busy || lookupActive(lookup?.state);
+  const busy = disabled || query.isPlaceholderData, active = lookupActive(lookup?.state), answering = busy || active;
   const { needed, open, answers } = openLookupAnswers(lookup);
   const albumOpen = open.filter(conflict => !memberPath(conflict.path)), conflictPaths = new Set((applied?.conflicts ?? []).map(conflict => conflict.path));
   const source = applied?.source === 'itunes' ? 'iTunes' : 'MusicBrainz', use = applied?.source === 'itunes' ? 'itunes' : 'musicbrainz';
@@ -177,8 +178,7 @@ export function CatalogReviewSummary({ item, disabled, error, onRun }: {
   // box stays open to look up again); the name box is the next step where the status says so, or where nothing was found or matched.
   const closed = lookup?.state === 'superseded';
   const boxNext = refined ? refined.box === true : ['lookup.no_match', 'lookup.no_release', 'lookup.no_query', 'lookup.itunes_unavailable'].includes(status);
-  // `first`: the first open answer, which the step bar's Answer questions step links to (the bulk answers carry it when shown).
-  const section = (name: string, heading: string, body: ReactNode, first = false) => <section id={first ? 'catalog-review-answers' : undefined} aria-labelledby={`${id}-${name}`}>
+  const section = (name: string, heading: string, body: ReactNode) => <section aria-labelledby={`${id}-${name}`}>
     <h3 id={`${id}-${name}`}>{heading}</h3>{body}</section>;
   const identityNeeded = identity.data ? identity.data.identities.filter(row => row.needsAnswer).length + (identity.data.label?.needsAnswer ? 1 : 0) : 0;
   const identityOpen = !identity.data || identityNeeded > 0;
@@ -186,16 +186,16 @@ export function CatalogReviewSummary({ item, disabled, error, onRun }: {
   // the numbers, says so under the status: its tracks are not applied until saved numbers pair them.
   const numbersOpen = Boolean(numbers?.count && shown?.pairs === null && shown.run === lookup?.run && appliedCandidate?.comparison?.subset?.pairing === 'ambiguous');
   // iTunes-only values and an artist mismatch are flagged and never collapsed (owner rules), so they keep the results open.
-  const settled = Boolean(shown) && shown!.source !== 'itunes' && !mismatch && !lookupActive(lookup?.state) && answers === 0 && !retry && !refined && !identityOpen && !numbersOpen;
+  const settled = Boolean(shown) && shown!.source !== 'itunes' && !mismatch && !active && answers === 0 && !retry && !refined && !identityOpen && !numbersOpen;
   const body = <>
     {lookup?.state === 'complete' && lookup.candidates.length > 0 && <Suspense fallback={null}><CandidateChooser projectId={item.id} viewerId={access.viewerId} lookup={lookup}
       review={{ tracks: item.draft.tracks, searched, artists, numbers: proposed }} disabled={busy} onChoose={candidateKey => onRun('lookup/choose', { run: lookup.run, candidateKey })}
       onPairing={open => { pairing.current = open; }} /></Suspense>}
     {/* The bulk answers cover every open conflict, the members' included, so they also serve member conflicts alone. */}
-    {open.length >= 2 && <div className={styles.actions} id="catalog-review-answers">
+    {open.length >= 2 && <div className={styles.actions}>
       <button type="button" className={styles.button} disabled={answering} onClick={() => resolve(open, 'mine')}>{t('catalog_review.keep_all_current')}</button>
       <button type="button" className={styles.button} disabled={answering} onClick={() => resolve(open, 'lookup')}>{t(`catalog_review.use_all_${use}`)}</button></div>}
-    {albumOpen.length > 0 && section('conflicts', t('catalog_review.conflicts'), <ul className={styles.cards}>{albumOpen.map(conflict => card(conflict, conflictHeading(conflict)))}</ul>, open.length < 2)}
+    {albumOpen.length > 0 && section('conflicts', t('catalog_review.conflicts'), <ul className={styles.cards}>{albumOpen.map(conflict => card(conflict, conflictHeading(conflict)))}</ul>)}
     {(itunes.length > 0 || mismatch || flagged.length > 0) && <ul aria-label={t('summary.flagged')}>
       {mismatch && <li>{t('catalog_review.artist_mismatch')}</li>}
       {itunes.map(path => <li key={path}>{`${label(path)} · ${lookupValueText(lookupValueAt(item.draft, path))} · ${itunesMark}`}</li>)}
@@ -206,7 +206,7 @@ export function CatalogReviewSummary({ item, disabled, error, onRun }: {
       {members.rows.length > 0 && <ul className={styles.cards}>{members.rows.map(row => row.state === 'conflict' ? card(row.conflict, member(row.slotId))
         : <li key={row.slotId} className={styles.card}><strong>{member(row.slotId)}</strong><p>{row.state === 'filled' ? `${entriesByline(row.entries) || '—'} · ${t('catalog_review.member_filled')}`
           : row.state === 'answered' ? `${lookupValueText(row.conflict.lookup)} · ${answered(row.conflict)}`
-            : t(row.reason === 'unpaired' ? 'catalog_review.member_unpaired' : `catalog_review.flag_${row.reason}`)}</p></li>)}</ul>}</>, open.length === 1 && !albumOpen.length)}
+            : t(row.reason === 'unpaired' ? 'catalog_review.member_unpaired' : `catalog_review.flag_${row.reason}`)}</p></li>)}</ul>}</>)}
     {preview && section('expected', t('catalog.album_expected'), <>
       <p>{t('catalog_review.expected_rows', { rows: preview.rows.length, noFile: preview.noFile })}</p>
       <p className={styles.muted}>{t('catalog_review.expected_copy')}</p>
@@ -218,9 +218,12 @@ export function CatalogReviewSummary({ item, disabled, error, onRun }: {
     {folded.length > 0 && <details className={styles.details}><summary>{t('catalog_review.values_handled')}</summary><dl>
       {folded.map(([path, text]) => <div key={path}><dt>{label(path)}</dt><dd>{text}</dd></div>)}</dl></details>}
   </>;
-  // A full-width bracket or full stop carries its own space, and a dot parts the time from the keeps-running note.
-  const statusRow = <p><span role="status">{statusText}</span>{refined?.elapsed && `${/[）」』]$/u.test(statusText) ? '' : ' '}· ${say(refined.elapsed)}`}
-    {lookupActive(lookup?.state) && <>{refined?.elapsed ? ' · ' : statusText.endsWith('。') ? '' : ' '}<span className={styles.muted}>{t('catalog_review.lookup_keeps_running')}</span></>}</p>;
+  // Luna AI running (with the lookup or alone) comes before the lookup's own status; a full-width bracket or full stop carries its
+  // own space, and a dot parts the time from the keeps-running note.
+  const luna = ['queued', 'running'].includes(item.analysis.state);
+  const headline = luna ? t(active ? 'catalog_review.status_both_running' : 'workbench.review_analyzing') : statusText;
+  const statusRow = <p><span role="status">{headline}</span>{refined?.elapsed && `${/[）」』]$/u.test(headline) ? '' : ' '}· ${say(refined.elapsed)}`}
+    {active && <>{refined?.elapsed ? ' · ' : headline.endsWith('。') ? '' : ' '}<span className={styles.muted}>{t('catalog_review.lookup_keeps_running')}</span></>}</p>;
   // Focusable for the candidate chooser, which returns focus here once its pairing panel closes without its opener.
   return <section id="catalog-review-lookup" aria-labelledby={`${id}-title`} className={styles.panel} tabIndex={-1}>
     <h2 id={`${id}-title`}>{t('catalog_review.lookup_title')}</h2>
@@ -229,7 +232,8 @@ export function CatalogReviewSummary({ item, disabled, error, onRun }: {
     <div className={styles.statusRow}>{statusRow}
       {lookup && <Suspense fallback={null}><LookupProgress lookup={lookup} now={query.dataUpdatedAt || Date.now()}
         albumHref={closed && item.sourceStatus === 'changed' ? `/admin/catalog/album/${item.source.album.id}` : null} /></Suspense>}</div>
-    {summary.waiting.lookup && <p role="status">{t('catalog_review.waiting_lookup')}</p>}
+    {/* What can be done meanwhile; the action bar says why the update waits. */}
+    {(summary.waiting.lookup || luna) && <p className={styles.muted}>{t('catalog_review.status_meanwhile')}</p>}
     {answers > 0 && <p role="status">{t('catalog_review.needs_answers', { count: answers })}</p>}
     {identityNeeded > 0 && <p role="status">{t('catalog_review.identity_answers', { count: identityNeeded })}</p>}
     {retry && !closed && <div className={styles.actions}><button type="button" className={`${styles.button} ${styles.primary}`} disabled={busy} onClick={() => onRun('lookup/retry', {})}>{t('catalog_review.lookup_retry_free')}</button></div>}
@@ -237,7 +241,7 @@ export function CatalogReviewSummary({ item, disabled, error, onRun }: {
       <p>{t(`catalog_review.lookup_fill_${proposed ? 'hint' : 'unavailable'}${appliedCandidate!.comparison!.unknownLocalDurations ? '_durations' : ''}`, { count: proposed })}</p></>}
     {summary.lookupAvailable && <Suspense fallback={null}><LookupBox key={box} lookup={lookup} rootLabel="" defaultText={item.draft.album.title} mode="review" disabled={busy}
       defaultArtist={byline} defaultArtistImplicit={implicit} hint={['lookup.no_match', 'lookup.no_release'].includes(status)}
-      active={lookupActive(lookup?.state)} fold={lookup?.state === 'complete' && !boxNext} onSubmit={(kind, text, artist) => onRun('lookup', { kind, text, ...(artist ? { artist } : {}) })} /></Suspense>}
+      active={active} fold={lookup?.state === 'complete' && !boxNext} onSubmit={(kind, text, artist) => onRun('lookup', { kind, text, ...(artist ? { artist } : {}) })} /></Suspense>}
     <Results fold={settled} pairing={pairing} label={shown && t('catalog_review.lookup_details')}>{body}</Results>
   </section>;
 }

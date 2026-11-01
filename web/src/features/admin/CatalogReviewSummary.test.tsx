@@ -25,7 +25,7 @@
  *   - the review's saved tracklist shows with its rows without a file when the applied release offers none, and when nothing is applied
  *   - answered conflicts leave the conflicts and fold away once with the answer given and the source used; an answered member says the same in its row
  *   - each lookup outcome reads in the review's own words, with the retry only where lookup stopped short, and nothing applied shows no applied rows
- *   - while a run is active or retried applying is said to wait for it
+ *   - while the update waits for a run or Luna AI, the status row names Luna AI first and a muted line says the draft can be checked meanwhile, never why the update waits
  *   - identity rows wait until the review's Album is current again, and are never read meanwhile
  *   - the summary polls while its run is active and stops once it is unmounted
  *   - a possible release whose tracks pair in more than one way leads the status, which points at the numbers proposed from the captured titles, with no fill and no primary button
@@ -36,7 +36,7 @@
  *   - an active run says whether it is queued or which step runs, with its counts and, beside the status, the time since it started and that it keeps running
  *   - the polite status of a running step does not change between polls; only the elapsed time beside it moves
  *   - while a run is active, a name is looked up only after confirming that it stops that run; Cancel sends nothing
- *   - the open-answer counters follow the status line, before the candidates, and the panel has the anchors the step bar links to
+ *   - the open-answer counters follow the status line, before the candidates, and the panel and its identity rows carry the lookup and identity anchors
  *   - an iTunes-only result checked against MusicBrainz, and an artist mismatch, keep the results open with their values to check once nothing else is open
  *   - once an applied release leaves nothing open the results fold under one disclosure, which stays open while an answer, an identity row or an active run waits
  *   - a release applied for its Album values only keeps the results open while its tracks pair in more than one way and the titles propose the numbers, saying under the status why and what saving them does
@@ -504,15 +504,30 @@ test('each lookup outcome reads in the review\'s own words, with the retry only 
   }
 });
 
-test('while a run is active or retried applying is said to wait for it', async () => {
+test('while the update waits for a run or Luna AI, the status row names Luna AI first and a muted line says the draft can be checked meanwhile, never why the update waits', async () => {
+  const meanwhile = 'While you wait, you can check and edit the draft, then confirm the update.';
   const response = withLookup(lookup => { Object.assign(lookup, { run: 2, state: 'retrying', issue: 'sourceBusy', candidates: [], groups: [], preselection: null }); });
   response.summary.waiting.lookup = true;
   const { section } = mount(applied(), response);
-  expect(await within(section()).findByText('The original Album can be updated once metadata lookup finishes.')).toHaveAttribute('role', 'status');
+  expect(await within(section()).findByText(meanwhile)).not.toHaveAttribute('role');
+  // Why the update waits is the action bar's alone.
+  expect(within(section()).queryByText('The original Album can be updated once metadata lookup finishes.')).not.toBeInTheDocument();
+  cleanup();
+  // Luna AI running beside the lookup leads the status row.
+  const running = (state: 'queued' | 'running'): CatalogReview => ({ ...applied(), analysis: { ...applied().analysis, state } });
+  const both = mount(running('running'), response);
+  expect(await within(both.section()).findByText('Free lookup and Luna AI are both running')).toHaveAttribute('role', 'status');
+  expect(within(both.section()).getByText(meanwhile)).toBeVisible();
+  cleanup();
+  // Luna AI alone (queued counts): its status replaces the lookup's.
+  const alone = mount(running('queued'));
+  expect(await within(alone.section()).findByText('Luna AI running')).toHaveAttribute('role', 'status');
+  expect(within(alone.section()).queryByText(/^Applied release:/)).not.toBeInTheDocument();
+  expect(within(alone.section()).getByText(meanwhile)).toBeVisible();
   cleanup();
   mount(applied());
   await screen.findByText('Applied release: Synthetic catalog Album (Complete)');
-  expect(screen.queryByText(/^The original Album can be updated once metadata lookup finishes/)).not.toBeInTheDocument();
+  expect(screen.queryByText(meanwhile)).not.toBeInTheDocument();
 });
 
 test('identity rows wait until the review\'s Album is current again, and are never read meanwhile', async () => {
@@ -723,7 +738,7 @@ test('while a run is active, a name is looked up only after confirming that it s
   expect(within(box).queryByRole('alert')).not.toBeInTheDocument();
 });
 
-test('the open-answer counters follow the status line, before the candidates, and the panel has the anchors the step bar links to', async () => {
+test('the open-answer counters follow the status line, before the candidates, and the panel and its identity rows carry the lookup and identity anchors', async () => {
   const { section } = mount(applied());
   const counter = await within(section()).findByText('Lookup answers still needed: 3');
   expect(counter.previousElementSibling).toHaveTextContent('Applied release: Synthetic catalog Album (Complete)');
@@ -732,8 +747,7 @@ test('the open-answer counters follow the status line, before the candidates, an
   expect(counter.nextElementSibling).toHaveAttribute('role', 'status');
   expect(counter.compareDocumentPosition(within(section()).getByRole('group', { name: 'Look up by name' })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(section()).toHaveAttribute('id', 'catalog-review-lookup');
-  // The first open answer (here the bulk answers) and the identity rows carry the anchors of the Answer questions step.
-  expect(section().querySelector('#catalog-review-answers')).toContainElement(within(section()).getByRole('button', { name: 'Keep all current' }));
+  // The identity rows carry the anchor the update range links to.
   expect(section().querySelector('#catalog-review-identities')).toContainElement(within(section()).getByRole('region', { name: 'Artists and label' }));
 });
 

@@ -7,8 +7,8 @@ import styles from './adminStyles';
 
 /**
  * The review's lookup brief from the summary's cached read (never polled from here; the review page's own brief,
- * reviewLookupBrief.ts), as the steps and the Luna AI controls read it. A free retry is promised only while the source is current.
- * Shared by the steps chunk (CatalogReviewSteps.tsx) and the Luna AI chunk (CatalogReviewLuna.tsx).
+ * reviewLookupBrief.ts), as the Luna AI controls read it. A free retry is promised only while the source is current. Used by the
+ * Luna AI chunk (CatalogReviewLuna.tsx).
  */
 export function useReviewBrief(item: CatalogReview) {
   const access = useAdminAccess(), captured = item.draft.album.expectedTracklist !== undefined;
@@ -20,8 +20,8 @@ export function useReviewBrief(item: CatalogReview) {
 }
 
 /**
- * Luna AI's status as one muted line, labelled Luna AI (paid, optional): beside its controls, or under an applied completion's
- * steps. A failed run while the lookup path leads (`quiet`, only then) says calmly that it can be ignored.
+ * Luna AI's status as one muted line, labelled Luna AI (paid, optional): beside its controls, or in the applied view
+ * (CatalogReviewApplied.tsx). A failed run while the lookup path leads (`quiet`, only then) says calmly that it can be ignored.
  */
 export function LunaStatus({ item, quiet = false }: { item: CatalogReview; quiet?: boolean }) {
   const t = useAdminText(), pending = item.suggestions.filter(value => value.decision === 'pending').length;

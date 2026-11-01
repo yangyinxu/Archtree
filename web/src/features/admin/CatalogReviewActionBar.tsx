@@ -8,7 +8,7 @@
  *              quiet, pageOwned
  * @end-catalog */
 
-import { lazy, Suspense, useEffect, useId, useRef, useState, type ComponentProps, type ComponentType, type ReactNode, type RefObject } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useId, useRef, useState, type ComponentProps, type ComponentType, type ReactNode, type RefObject } from 'react';
 import { Link } from 'react-router';
 import { useAdminText } from './AdminAccess';
 import type { CatalogReview, ReviewDraft, ReviewDraftChange } from './catalogReviewApi';
@@ -89,25 +89,39 @@ function BarBody({ bar, item, prepare, model, count, compared, shown, saveable, 
   item: CatalogReview; prepare: CatalogReviewPrepare; model: ReturnType<typeof useReviewApplyModel>['model']; count: number; compared: boolean; shown: ReviewDraft;
   saveable: boolean; online: boolean; conflict: boolean; busy: boolean; onState: (state: CatalogReviewBarState) => void }) {
   const t = useAdminText(), id = useId(), { phase, notice, frozen } = prepare;
-  const primary = useRef<HTMLButtonElement>(null), back = useRef<HTMLButtonElement>(null), previous = useRef(phase);
+  const primary = useRef<HTMLButtonElement>(null), back = useRef<HTMLButtonElement>(null), save = useRef<HTMLButtonElement>(null), previous = useRef(phase);
+  const node = useRef<HTMLDivElement | null>(null), attach = useCallback((element: HTMLDivElement | null) => { node.current = element; bar(element); }, [bar]);
   // Whether the confirmation's chunk could not load: confirming then waits for a reload.
   const [missing, setMissing] = useState(false);
   // Whether this mount's own apply became unknown (never one resumed as unknown): only then does the unknown view take the focus.
   const [lost, setLost] = useState(false);
   useEffect(() => onState({ phase, notice }), [phase, notice]);
+  // Whether a save-only settled while its button still shows: once that button goes (nothing left to save, or an unknown outcome),
+  // the focus it held, still in the bar or lost to the body, goes to the primary; a refused one keeps its button, and the focus.
+  const settledSave = useRef(false);
   // The confirmation focuses its back button (it scrolls itself into view); leaving it focuses the primary button again.
   useEffect(() => {
+    settledSave.current = previous.current === 'saving_only' ? phase !== 'saving_only' : settledSave.current && phase === previous.current;
     if (phase === 'frozen' && previous.current !== 'frozen') back.current?.focus({ preventScroll: true });
     else if (previous.current === 'frozen' && editablePhases.includes(phase)) primary.current?.focus();
     if (phase === 'unknown' && previous.current === 'applying') setLost(true);
     previous.current = phase;
   }, [phase]);
+  useEffect(() => {
+    if (!settledSave.current || save.current) return;
+    settledSave.current = false;
+    const active = document.activeElement;
+    if (!active || active === document.body || node.current?.contains(active)) primary.current?.focus();
+  });
   const applied = item.state === 'applied', stale = !applied && (item.sourceStatus !== 'current' || phase === 'stale');
   const name = (slotId: string) => { const index = shown.tracks.findIndex(track => track.slotId === slotId); return `${index + 1} · ${shown.tracks[index]?.title || '—'}`; };
-  const luna = ['queued', 'running'].includes(item.analysis.state), lookup = model.blocking.lookup, position = model.blocking.positions[0];
+  const luna = ['queued', 'running'].includes(item.analysis.state), lookup = model.blocking.lookup;
+  // A number out of bounds holds the save as well as the update (the save writes every edit), so it is said before what only the
+  // update waits for.
+  const range = model.blocking.positions.find(value => value.reason === 'range'), position = range ?? model.blocking.positions[0];
   // Why the update waits, the first that applies; never unselected work, nor a lookup that failed or found nothing.
   const reason = !online ? t('common.offline') : conflict ? t('common.conflict') : busy ? t('catalog_review.bar_wait_operation')
-    : !item.capabilities.apply ? t('catalog_review.unavailable') : lookup && luna ? t('catalog_review.bar_wait_both') : lookup ? t('catalog_review.waiting_lookup')
+    : range ? t('catalog_review.positions_range', { tracks: range.slotIds.map(name).join(', ') }) : !item.capabilities.apply ? t('catalog_review.unavailable') : lookup && luna ? t('catalog_review.bar_wait_both') : lookup ? t('catalog_review.waiting_lookup')
       : luna ? t('catalog_review.bar_wait_luna') : position ? t(`catalog_review.positions_${position.reason}`, { tracks: position.slotIds.map(name).join(', ') })
         : model.blocking.identities.length ? t('catalog_review.identity_answers_first', { names: model.blocking.identities.join(', ') })
           : count === 0 ? t('catalog_review.bar_nothing') : prepare.busy ? t('common.loading') : null;
@@ -116,7 +130,12 @@ function BarBody({ bar, item, prepare, model, count, compared, shown, saveable, 
     aria-disabled={wait !== null || undefined} aria-describedby={wait ? `${id}-reason` : undefined} onClick={() => { if (wait === null) onClick(); }}>{text}</button>;
   const secondary = (text: string, onClick: () => void, disabled: boolean, ref?: RefObject<HTMLButtonElement | null>) => <button ref={ref} type="button" className={styles.button}
     disabled={disabled} aria-describedby={ref === back ? `${id}-summary` : undefined} onClick={onClick}>{text}</button>;
-  // `wait` is why the primary button waits, the text describing it; `progress` makes it the prepare progress, the bar's only live status.
+  // The save-only button, held (`aria-disabled`, so a focus on it stays) while its save runs or a number is out of bounds, which the
+  // reason describing it names.
+  const saveOnly = (held: boolean) => <button ref={save} id="catalog-review-save" type="button" className={styles.button} disabled={!online || conflict || busy || !saveable}
+    aria-disabled={held || undefined} aria-describedby={held ? `${id}-reason` : undefined} onClick={() => { if (!held) prepare.saveOnly(); }}>{t('catalog_review.bar_save_only')}</button>;
+  // `wait` is why the primary button waits, the text describing it; `progress` makes it the prepare progress, said in the bar's one
+  // polite status, which otherwise says a settled outcome (`status`).
   // The secondary and primary controls keep their places in every phase, so the primary button keeps the focus as its label changes.
   let heading = t('catalog_review.bar_heading'), status: ReactNode = null, alert: ReactNode = null, wait: string | null = null, progress = false, second: ReactNode = null,
     first: ReactNode = null, above: ReactNode = null, said = false;
@@ -147,6 +166,8 @@ function BarBody({ bar, item, prepare, model, count, compared, shown, saveable, 
     first = button(t('catalog_review.bar_confirm', { count: confirmCount }), prepare.confirm, wait);
   } else if (phase === 'saving' || phase === 'reading' || phase === 'saving_only') {
     progress = true; wait = t(phase === 'reading' ? 'catalog_review.bar_checking' : 'catalog_review.bar_saving');
+    if (phase === 'saving_only') second = <button ref={save} id="catalog-review-save" type="button" className={styles.button} aria-disabled aria-describedby={`${id}-reason`}
+      onClick={() => undefined}>{t('catalog_review.bar_save_only')}</button>;
     first = button(phase === 'saving_only' ? t('catalog_review.apply_action', { count }) : t('catalog_review.bar_preparing'), prepare.prepare, wait);
   } else {
     // Editing: a refused save or a refusal of the update is an alert at the bar; a settled outcome is said plainly.
@@ -161,16 +182,17 @@ function BarBody({ bar, item, prepare, model, count, compared, shown, saveable, 
       .filter((text): text is string => Boolean(text)) : [];
     if (details.length) alert = <>{alert}{alert ? ' ' : ''}{details.join(' ')}</>;
     wait = reason;
-    second = (saveable || prepare.saveOnlyFailed) && <button id="catalog-review-save" type="button" className={styles.button}
-      disabled={!online || conflict || busy || !saveable} onClick={prepare.saveOnly}>{t('catalog_review.bar_save_only')}</button>;
+    second = (saveable || prepare.saveOnlyFailed) && saveOnly(Boolean(range));
     first = button(failed && !prepare.saveOnlyFailed ? t('catalog_review.bar_retry_prepare') : t('catalog_review.apply_action', { count }), prepare.prepare, wait);
   }
   return <>{above}
-    <div ref={bar} id="catalog-review-bar" className={styles.bar} role="region" aria-labelledby={`${id}-heading`}>
+    <div ref={attach} id="catalog-review-bar" className={styles.bar} role="region" aria-labelledby={`${id}-heading`}>
       <div className={styles.barText}><h2 id={`${id}-heading`} className={styles.barHeading}>{heading}</h2>
         {alert && <p id={said ? `${id}-reason` : undefined} role="alert" className={styles.error}>{alert}</p>}
-        {status && <p className={styles.meta}>{status}</p>}
-        {wait && !said && <p id={`${id}-reason`} role={progress ? 'status' : undefined} className={styles.meta}>{wait}</p>}</div>
+        {progress && status && <p className={styles.meta}>{status}</p>}
+        {/* Always mounted, so what it says next is announced: the progress while preparing, saving or querying, else a settled outcome. */}
+        <p id={progress && !said ? `${id}-reason` : undefined} role="status" className={styles.meta}>{progress ? wait : status}</p>
+        {wait && !said && !progress && <p id={`${id}-reason`} className={styles.meta}>{wait}</p>}</div>
       <div className={styles.barActions}>{second}{first}</div>
     </div></>;
 }

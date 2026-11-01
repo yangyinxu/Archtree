@@ -931,7 +931,7 @@ test('a captured review saves only changed editable values, never its expected t
       item = { ...item, revision: receipt.revision, draft: withChanges(item.draft, body.changes), receipts: [receipt] };
       return reviewJson({ item, receipt });
     }
-    // The step bar reads a captured review's lookup summary and identity rows.
+    // The summary and the identity rows read a captured review's lookup summary and identity read.
     return reviewJson(path.endsWith('/lookup') ? notStarted() : path.endsWith('/candidates') ? reviewIdentityResponse() : { item, receipt: null });
   }));
   mountPage(); await openEditor();

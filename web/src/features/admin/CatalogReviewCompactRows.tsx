@@ -15,8 +15,9 @@ const present = (rows: (Row | false)[]) => rows.filter((row): row is Row => Bool
  * row per affected Track, its new title with its new Disc and Track Number and a title change, then one per Album value, then one
  * line for the members whose Credits change. `fields` and `members` are what the update writes and `item.draft` holds the new
  * values. Before the update (`done` false) the wording is neutral ("标题修改"); after it, each row says it was updated. On a long
- * Album, numbers that fill empty values (`items` gives each one's original value; without them every number counts as a fill) and
- * title changes are grouped into one line each, while a number that replaces a stored value keeps its own row.
+ * Album, numbers that fill empty values (`items` gives each one's original value; without them, as on the applied view, the
+ * review's captured source does) and title changes are grouped into one line each, while a number that replaces a stored value
+ * keeps its own row.
  */
 export function CatalogReviewCompactRows({ item, fields, members, items, done }: { item: CatalogReview; fields: readonly ReviewField[]; members: readonly string[];
   items?: readonly ApplyItem[]; done: boolean }) {
@@ -24,9 +25,12 @@ export function CatalogReviewCompactRows({ item, fields, members, items, done }:
   const status = (key: 'title' | 'change') => t(key === 'title' ? (done ? 'catalog_review.compact_title_done' : 'catalog_review.compact_title')
     : done ? 'catalog_review.compact_done' : 'catalog_review.compact_change');
   const fieldsOf = (slotId: string) => new Set(fields.filter(value => value.scope === 'track' && value.slotId === slotId).map(value => value.field));
-  // A number replaces a stored value when its item shows a non-empty original.
-  const replaces = (slotId: string) => Boolean(items?.some(entry => entry.slotId === slotId && (entry.field === 'discNumber' || entry.field === 'trackNumber')
-    && entry.value.kind === 'value' && entry.value.baseline !== null && entry.value.baseline !== ''));
+  // A number replaces a stored value when its item shows a non-empty original; without items, when the review's captured source
+  // held one for a number the update wrote.
+  const replaces = (slotId: string) => items ? items.some(entry => entry.slotId === slotId && (entry.field === 'discNumber' || entry.field === 'trackNumber')
+    && entry.value.kind === 'value' && entry.value.baseline !== null && entry.value.baseline !== '')
+    : (() => { const written = fieldsOf(slotId), stored = item.source.tracks.find(track => track.slotId === slotId);
+      return Boolean(stored && (written.has('discNumber') && stored.discNumber != null || written.has('trackNumber') && stored.trackNumber !== null)); })();
   const rows: Row[] = [];
   let filled = 0, titled = 0;
   for (const track of tracks) {

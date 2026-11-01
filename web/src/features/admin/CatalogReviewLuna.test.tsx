@@ -6,7 +6,7 @@
  *   - a failed Luna AI run is one quiet line that can be ignored while the lookup leads, saying only an unknown outcome that keeps it from starting
  *   - Use Luna AI (paid) opens an inline, non-modal confirmation focused on Cancel; Cancel and Escape start nothing and return the focus, and only its start button starts Luna AI
  *   - while the free lookup runs the confirmation warns and offers waiting, which starts nothing; once the lookup ends its labels change in place and Luna AI still waits to be started
- *   - the confirmation says when this is the project's last Luna AI run, by its runs and its paid calls left
+ *   - the confirmation gives the project's runs and paid calls left and says when this is its last Luna AI run, by its runs and its paid calls left
  *   - the start button waits while Luna AI cannot run or a change is busy, and a run that starts meanwhile closes the confirmation for good
  *   - a run that starts while the focus is outside the confirmation closes it without moving the focus
  * @end-catalog */
@@ -165,7 +165,7 @@ test('while the free lookup runs the confirmation warns and offers waiting, whic
   expect(onAnalyze).toHaveBeenCalledOnce();
 });
 
-test('the confirmation says when this is the project\'s last Luna AI run, by its runs and its paid calls left', async () => {
+test('the confirmation gives the project\'s runs and paid calls left and says when this is its last Luna AI run, by its runs and its paid calls left', async () => {
   const last = 'This is the project\'s last Luna AI analysis.';
   // One run used of two: the last.
   const used = catalogReview();
@@ -173,11 +173,14 @@ test('the confirmation says when this is the project\'s last Luna AI run, by its
   const { dialog, rerender } = confirmable(used, notStarted);
   fireEvent.click(screen.getByRole('button', { name: 'Use Luna AI again (paid)' }));
   expect(within(dialog()).getByText(last)).toBeVisible();
+  const budget = (item: CatalogReview) => `Left for this project: ${2 - item.analysis.generation} Luna AI runs and ${item.analysis.maxAttempts - item.analysis.attemptsUsed} paid AI calls.`;
+  expect(within(dialog()).getByText(budget(used))).toBeVisible();
   // No run used: two left, so it says nothing of a last run.
   const fresh = idle(catalogReview());
   expect(lunaRunsLeft(fresh)).toBe(2);
   rerender(fresh);
   expect(within(dialog()).queryByText(last)).not.toBeInTheDocument();
+  expect(within(dialog()).getByText(budget(fresh))).toBeVisible();
   // Paid calls left that cover one more run (one for the Album and one per ten tracks) make it the last too, as none left makes none.
   const calls = { ...fresh, analysis: { ...fresh.analysis, attemptsUsed: fresh.analysis.maxAttempts - 3 } };
   expect(lunaRunsLeft(calls)).toBe(1);

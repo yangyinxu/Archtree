@@ -10,7 +10,7 @@ const link = (text: string) => /:\/\/|^www\./i.test(text);
  * folder-name run, the folder name for editing; otherwise with `defaultText` (an existing-Album review's saved Album title). An
  * optional Artist name beside it, prefilled from the last submitted run, credits that run's searches in place of the files' tags
  * (`import`) or the Album's primary Artists (`review`); an empty one is sent as none, and an Artist alone never looks up. Both
- * share one row and the hint follows Look up, so Look up stays in the first screen. It accepts names only, keeps no history (no
+ * share one row and the hint follows Look up, so Look up stays compact and comes before the proposed numbers. It accepts names only, keeps no history (no
  * autocomplete and nothing stored) and is not listener Search: it neither uses the search landmark nor restores global music
  * search to the administration layout. While the review's run is queued, running or retrying (`active`), Look up first asks
  * whether to stop that run for the new name, since the server replaces an active run on submission; the box stays usable, as

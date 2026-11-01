@@ -27,7 +27,8 @@
 
 import { act, cleanup, render, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { z } from 'zod';
 import { captureAccountOperation } from '../../api/accountEpoch';
 import { useAdminAccess } from './AdminAccess';
 import { adminEndpointRequest } from './adminTransport';
@@ -38,6 +39,7 @@ import { capturedCatalogReview, reviewId, reviewJson, session, slotId, slotTwo, 
 import type { ReviewIdentityResponse, ReviewLookupResponse } from './catalogReviewLookupApi';
 import { guestHandle, reviewAfterLookup, reviewIdentityResponse, reviewLookupResponse } from './catalogReviewLookupFixtures.testSupport';
 import { catalogReviewKey } from './catalogReviewSummaryQuery';
+import { AdminCommand } from './useAdminCommand';
 import { useCatalogReviewCommand } from './useCatalogReviewCommand';
 import { catalogReviewRefusals, useCatalogReviewPrepare } from './useCatalogReviewPrepare';
 import { useReviewApplyModel } from './useReviewApplyModel';
@@ -560,4 +562,28 @@ test('a pending save or apply resumes after the page mounts again, with its froz
     expect(second.body, String(only)).toEqual(first.body);
     expect(writes(api, 'POST', '/apply'), String(only)).toHaveLength(0);
   }
+});
+
+test.each([
+  ['a refusal', 'review_required'],
+  ['its receipt', 'success']
+] as const)('a resumed apply that settles with %s before the hook subscribes still leaves applying', (_case, phase) => {
+  const item = capturedCatalogReview(), operationId = '11111111-1111-4111-8111-111111111111';
+  const command = new AdminCommand<{ item: CatalogReview; receipt: { operationId: string; revision: number; kind: 'apply' } }>(z.any());
+  // AdminCommand's update is private: the test drives its snapshots directly, as a run would.
+  const update = (next: unknown) => (command as unknown as { update: (state: unknown) => void }).update(next);
+  update({ running: true, intent: { path: `/catalog-reviews/${reviewId}/apply`, method: 'POST', operationId, body: '{}' }, result: null, error: null });
+  const settled = phase === 'success' ? { running: false, intent: null, result: { item: { ...item, state: 'applied' }, receipt: { operationId, revision: item.revision, kind: 'apply' } }, error: null }
+    : { running: false, intent: null, result: null, error: 'review_required' };
+  const seen: string[] = [];
+  function Hook() {
+    const prepare = useCatalogReviewPrepare({ id: reviewId, command, item, model: null, reads: [], refetch: async () => ({ isError: true }), revision: item.revision,
+      changes: () => [], intended: () => [], onChoices: () => undefined } as unknown as Parameters<typeof useCatalogReviewPrepare>[0]);
+    seen.push(prepare.phase); return null;
+  }
+  // A sibling's layout effect runs after the hook's render and before its passive effect subscribes: the settle falls in between.
+  function SettleBeforeSubscribe() { useLayoutEffect(() => { update(settled); }, []); return null; }
+  render(<QueryClientProvider client={new QueryClient()}><Hook /><SettleBeforeSubscribe /></QueryClientProvider>);
+  expect(seen[0]).toBe('applying');
+  expect(seen.at(-1)).toBe(phase);
 });

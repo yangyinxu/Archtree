@@ -73,6 +73,8 @@
 .bar { position:sticky;bottom:0;z-index:2;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:.5rem 1rem;margin-top:1.5rem;padding:.75rem 1rem;background:var(--color-surface-raised);border-top:1px solid var(--color-border-strong); }
 .barText { flex:1 1 14rem;min-width:0;font-size:.85rem; }
 .barText p { margin:.2rem 0 0; }
+/* The bar's polite status stays mounted while it says nothing, taking no room. */
+.barText p:empty { margin:0; }
 .barHeading { font-size:.8rem;margin:0; }
 .barActions { display:flex;flex-wrap:wrap;gap:.6rem;justify-content:end; }
 .barActions>* { min-height:2.75rem; }

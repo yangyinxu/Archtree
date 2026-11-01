@@ -2,8 +2,8 @@
  * Exports
  *   Types: Message, ReviewSections, TitleLeadingPosition, TitleNumbers, ReviewLookupFit, ReviewStatus
  *   Functions: normalizedTitle, titleTier, editionKey, releaseGroups, reviewSections, titlePosition,
- *              titleLeadingPosition, titleRest, titleNumbers, reviewLookupFit, reviewAppliedAgain,
- *              candidateReason, elapsedText, progressPhaseKey, reviewLookupStatus
+ *              titleLeadingPosition, titleNumbers, reviewLookupFit, reviewAppliedAgain, candidateReason,
+ *              elapsedText, progressPhaseKey, reviewLookupStatus
  * Internal
  *   Types: Candidate, Cause
  *   Functions: fold, spaced, nameParts, positionText, reason
@@ -102,8 +102,6 @@ export const titleLeadingPosition = (title: string): TitleLeadingPosition | null
   const discNumber = match[3] === undefined ? Number(match[1]) : null, trackNumber = Number(match[3] ?? match[2]);
   return (discNumber ?? 1) >= 1 && trackNumber >= 1 ? { discNumber, trackNumber, rest: text.slice(match[0].length) } : null;
 };
-/** The text a title keeps once exactly its leading position is removed (the server's `rest`), or null without a position. */
-export const titleRest = (title: string) => titleLeadingPosition(title)?.rest ?? null;
 export type TitleNumbers = {
   /** The empty numbers to fill, by slot; a Disc Number only from a Disc-and-Track position and only where it was captured. */
   numbers: Record<string, { discNumber?: number; trackNumber?: number }>;

@@ -21,7 +21,7 @@
  *   - Disc and Track Numbers a title proposal fills into empty values arrive selected, also once saved; Track Numbers alone, replaced values and edited numbers do not
  *   - a cleaned title arrives selected but waits for its member's Disc and Track Number, selected or already stored; an untouched title is never held
  *   - an unsaved draft is counted with the same item bases as once saved, so explicit choices survive the save, and only the saved review is ready
- *   - two members left at one position block the update where a selected number moves one there, a missing Disc Number counting as 1; selected numbers out of bounds block too
+ *   - two members left at one position block the update where a selected number moves one there, a missing Disc Number counting as 1; numbers out of bounds block too, selected or not
  *   - a label whose identity needs an answer arrives unselected, and selected once it is answered
  *   - a 44-track Album on three discs counts 88 proposed numbers and 44 cleaned titles; a member typed onto another's position blocks the update and names both
  *   - a number the administrator saves away from its title leaves every other proposed number and cleaned title as it was before the save
@@ -376,7 +376,7 @@ test('an unsaved draft is counted with the same item bases as once saved, so exp
   expect(reviewApplyModel({ item: { ...item, draft }, draft: structuredClone(draft), lookup: null, summary: null, waiting: null, identity: null, choices }).ready).toBe(false);
 });
 
-test('two members left at one position block the update where a selected number moves one there, a missing Disc Number counting as 1; selected numbers out of bounds block too', () => {
+test('two members left at one position block the update where a selected number moves one there, a missing Disc Number counting as 1; numbers out of bounds block too, selected or not', () => {
   const item = catalogReview(); item.suggestions = [];
   // The second member typed into the first member's Track 1, on no Disc and on Disc 1: both share position 1:1 once selected.
   for (const disc of [null, 1]) {
@@ -393,11 +393,11 @@ test('two members left at one position block the update where a selected number 
   const shared = { ...item, source: { ...item.source, tracks: item.source.tracks.map(track => ({ ...track, trackNumber: 1 })) },
     draft: { ...item.draft, album: { ...item.draft.album, title: 'Edited synthetic Album' }, tracks: item.draft.tracks.map(track => ({ ...track, trackNumber: 1 })) } };
   expect(drafted(shared, {}, { 'album::title': true })).toMatchObject({ ready: true, blocking: { positions: [] } });
-  // A selected number out of the server's bounds blocks; unselected, it is not applied.
+  // A number out of the server's bounds blocks, selected or not: the save before the update writes every edit.
   const both = { [trackKey(slotTwo, 'discNumber')]: true, [trackKey(slotTwo, 'trackNumber')]: true };
   for (const [disc, track] of [[1000, 2], [1, 10_000], [0, 2], [1, 0], [1, 1.5]]) {
     const draft = { ...item.draft, tracks: item.draft.tracks.map(value => value.slotId === slotTwo ? { ...value, discNumber: disc, trackNumber: track } : value) };
-    expect(drafted(item, { draft }).blocking.positions, `${disc}-${track}`).toEqual([]);
+    expect(drafted(item, { draft }).blocking.positions, `${disc}-${track}`).toEqual([{ reason: 'range', slotIds: [slotTwo] }]);
     expect(drafted(item, { draft }, both).blocking.positions, `${disc}-${track}`).toEqual([{ reason: 'range', slotIds: [slotTwo] }]);
   }
   const bounds = { ...item.draft, tracks: item.draft.tracks.map(value => value.slotId === slotTwo ? { ...value, discNumber: 999, trackNumber: 9999 } : value) };

@@ -46,8 +46,9 @@ const status = [...family('admin.analysis.'),
   ...['analysis_limit', 'analysis_running', 'empty_attention', 'empty_cancelled', 'empty_no_suggestions'].map(copy => `admin.catalog_review.${copy}`),
   // Why the action bar's update waits for Luna AI, and the section of Luna AI suggestions.
   ...['bar_wait_luna', 'bar_wait_both', 'suggestions_title'].map(copy => `admin.catalog_review.${copy}`),
-  // The review's inline Luna AI confirmation (its concurrent-lookup warning and its last run) and why discarding waits for Luna AI.
-  ...['luna_concurrent_copy', 'luna_last_run', 'discard_luna'].map(copy => `admin.catalog_review.${copy}`),
+  // The review's inline Luna AI confirmation (its concurrent-lookup warning, its runs and calls left and its last run), why discarding
+  // waits for Luna AI, and the status row while Luna AI runs beside the lookup.
+  ...['luna_concurrent_copy', 'luna_budget', 'luna_last_run', 'discard_luna', 'status_both_running'].map(copy => `admin.catalog_review.${copy}`),
   // A review change refused while Luna AI analyzes the completion.
   'admin.common.analysis_active'];
 const lookupProse = [...['incomplete', 'itunes_unavailable', 'no_match', 'no_query', 'no_release', 'not_configured', 'not_started', 'stopped', 'unavailable'].map(state => `admin.lookup.${state}`),
@@ -60,7 +61,7 @@ const reviewLookupProse = [...['no_match', 'empty_album', 'add_artist', 'possibl
   ...family('admin.catalog_review.lookup_cause_'), ...family('admin.catalog_review.lookup_phase_'), ...family('admin.catalog_review.lookup_section_'),
   'admin.catalog_review.member_paired_since',
   // The header, the numbers proposed from titles and the update range: free, the draft's own values.
-  'admin.catalog_review.local_tracks', 'admin.catalog_review.number_label', 'admin.catalog_review.title_needs_numbers', 'admin.catalog_review.manual_edit',
+  'admin.catalog_review.local_tracks', 'admin.catalog_review.number_label', 'admin.catalog_review.status_meanwhile', 'admin.catalog_review.title_needs_numbers', 'admin.catalog_review.manual_edit',
   ...family('admin.catalog_review.proposal_'), ...family('admin.catalog_review.range_'), ...family('admin.catalog_review.positions_'),
   // The lookup status on workbench cards, the Album page's note, the applied view, the inline confirmation, the compact rows and the
   // stale and unknown views.

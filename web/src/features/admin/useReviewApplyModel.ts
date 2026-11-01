@@ -5,9 +5,10 @@ import { reviewApplyModel, type ApplyChoice, type ProposedValues } from './catal
 import { catalogReviewCandidatesQuery, catalogReviewSummaryQuery } from './catalogReviewSummaryQuery';
 
 /**
- * The Update original Album step's model and the reads it rests on (the summary's cached read, never polled from here, and the
- * identity read of a review captured for lookup whose source is current), shared by that step and the step bar's count
- * (CatalogReviewApplyCount in CatalogReviewApply.tsx), so both count the same changes: the selected fields and members. `draft`
+ * The update's model and the reads it rests on (the summary's cached read, never polled from here, and the identity read of a
+ * review captured for lookup whose source is current), shared by the update range (CatalogReviewRange.tsx) and the sticky action
+ * bar (CatalogReviewActionBar.tsx, whose prepare hook useCatalogReviewPrepare.ts reads it), so they count the same changes: the
+ * selected fields and members. `draft`
  * counts the editor's draft (never ready; leave it out for the saved review's readiness) and `proposed` gives the title proposal's defaults (catalogReviewProposal.ts).
  */
 export function useReviewApplyModel(item: CatalogReview, choices: Readonly<Record<string, ApplyChoice>>, { draft, proposed }: { draft?: ReviewDraft; proposed?: ProposedValues } = {}) {
