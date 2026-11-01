@@ -594,9 +594,12 @@ export const reusesOneArtistTwice = (raw: readonly unknown[]) => {
  * ADMIN_IMPORT_DUPLICATE_STALE). An Artist or label decision binds the entry's or label's current ID (`boundMusicBrainzId`). A set
  * that reuses an existing Album (an append) applies no entry or label, so their reuse decisions are kept shape-checked but never
  * looked up and never block it. A reuse, replace or create-distinct decision on an Album entry or the label makes that value the
- * administrator's own (a track-only identity's never does: track Artist entries stay automatic); nothing else is written.
+ * administrator's own (a track-only identity's never does: track Artist entries stay automatic); nothing else is written. Approval
+ * may omit known unused track-only Artist keys: those rows keep every shape, binding and uniqueness check but read no catalog
+ * revision and produce no saved decision or administrator-owned value.
  */
-export async function parseImportDecisions(doc: AdminImportDocument, draft: ImportDraftV2, raw: unknown, session: ClientSession): Promise<ImportDecisionV2[]> {
+export async function parseImportDecisions(doc: AdminImportDocument, draft: ImportDraftV2, raw: unknown, session: ClientSession,
+    options: { omitArtistKeys?: ReadonlySet<string> } = {}): Promise<ImportDecisionV2[]> {
     if (!Array.isArray(raw) || raw.length > DRAFT_V2_LIMITS.decisions || reusesOneArtistTwice(raw)) return invalidImport();
     const seen = new Set<string>(), decisions: ImportDecisionV2[] = [], entries = importIdentityEntries(draft);
     const append = raw.some(item => Boolean(item) && typeof item === 'object' && !Array.isArray(item) && (item as Record<string, unknown>).scope === 'album' && (item as Record<string, unknown>).action === 'reuse');
@@ -616,10 +619,11 @@ export async function parseImportDecisions(doc: AdminImportDocument, draft: Impo
         // The MusicBrainz ID an Artist or label decision binds: the entry's or the label's current one.
         const boundMusicBrainzId = scope === 'artist' ? entry!.musicBrainzId ?? null : scope === 'label' ? draft.album.label!.musicBrainzId ?? null : undefined;
         if (decision.action === 'replace' && !boundMusicBrainzId) return invalidImport();
+        const omitted = scope === 'artist' && options.omitArtistKeys?.has(entry!.key);
         if (decision.action === 'reuse' || decision.action === 'replace') {
             if (!objectId(decision.candidateId) || typeof decision.candidateRevision !== 'string' || !/^[a-f0-9]{64}$/.test(decision.candidateRevision)) return invalidImport();
             // An append applies no entry or label: their saved decisions are kept but never block it.
-            if (!(append && (scope === 'artist' || scope === 'label'))) {
+            if (!omitted && !(append && (scope === 'artist' || scope === 'label'))) {
                 const kind = scope === 'label' ? 'organization' : scope;
                 const target = await getDb()!.collection(IMPORT_CANDIDATE_COLLECTIONS[kind]).findOne({ _id: new ObjectId(decision.candidateId), ...readyImportCandidate(kind) }, { session, projection: importCandidateProjection });
                 if (!target || importCandidateRow(kind, target).revision !== decision.candidateRevision) throw conflict('ADMIN_IMPORT_DUPLICATE_STALE');
@@ -628,6 +632,7 @@ export async function parseImportDecisions(doc: AdminImportDocument, draft: Impo
                 if (decision.action === 'replace') { const held = keepableMusicBrainzId(target.musicBrainzId); if (!held || held === boundMusicBrainzId) throw conflict('ADMIN_IMPORT_DUPLICATE_STALE'); }
             }
         } else if (decision.candidateId !== null || decision.candidateRevision !== null) return invalidImport();
+        if (omitted) continue;
         if ((scope === 'label' || draft.album.artists.some(item => item.key === entry?.key)) && decision.action !== 'skip') markAdministratorValues(doc.draftOrigins ??= {}, [scope === 'artist' ? 'album.artists' : 'album.label']);
         const { slotId, action, candidateId, candidateRevision } = decision as unknown as ImportDecisionV2;
         decisions.push({ scope, slotId, action, candidateId, candidateRevision, entryKey: entry?.key ?? null, boundName, ...(boundMusicBrainzId !== undefined ? { boundMusicBrainzId } : {}) });

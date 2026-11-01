@@ -14,6 +14,7 @@
  *   - two track entries decided to reuse one Artist (a rewritten document) are refused, writing nothing
  *   - the worker rechecks a format-4 approval: a new name candidate for a preselected track-only Artist, a changed reused one, and a rewritten approval mint nothing
  *   - a format-4 approval replays its original intent and resumes an interrupted copy with the same track-only identities once
+ *   - unused track-only Artist decisions still reject malformed rows and duplicate entries before exclusion
  * @end-catalog */
 
 /**
@@ -325,3 +326,25 @@ for (const exclusion of ['deselect', 'skip'] as const) {
         assert.deepEqual(await counts(), { artists: 2, albums: 1, audioTracks: exclusion === 'skip' ? 1 : 2 });
     });
 }
+
+test('unused track-only Artist decisions still reject malformed rows and duplicate entries before exclusion', async () => {
+    const storage = new Storage(), { item, slots } = await project(storage, [[lead(), guest('Unused Guest', null)], null]);
+    const valid = { scope: 'artist', slotId: null, entryKey: handle('name:unused guest'), boundName: 'Unused Guest',
+        action: 'create-distinct', candidateId: null, candidateRevision: null };
+    const before = await stored(item.id);
+    const malformed = [
+        [{ ...valid, garbage: true }], [{ ...valid, action: 'invent' }], [{ ...valid, candidateId: new ObjectId().toHexString() }],
+        [{ ...valid, action: 'reuse', candidateId: 'not-an-id', candidateRevision: 'a'.repeat(64) }],
+        [{ ...valid, action: 'reuse', candidateId: new ObjectId().toHexString(), candidateRevision: 'not-a-revision' }],
+        [{ ...valid, slotId: slots[0] }], [{ ...valid, boundName: 7 }], [valid, valid]
+    ];
+    for (const exclusion of ['deselect', 'skip'] as const) for (const invalid of malformed) {
+        const decisions = exclusion === 'skip' ? [...invalid, { scope: 'track', slotId: slots[0], entryKey: null, boundName: null,
+            action: 'skip', candidateId: null, candidateRevision: null }] : invalid;
+        await assert.rejects(publishAdminImport(by, item.id, approvalBody(item, { decisions, trackArtists: [{ slotId: slots[0], selected: exclusion === 'skip' }] })),
+            code('ADMIN_IMPORT_INVALID_INPUT'), `${exclusion}: ${JSON.stringify(decisions)}`);
+        assert.deepEqual(await stored(item.id), before);
+    }
+    assert.deepEqual(await counts(), { artists: 0, albums: 0, audioTracks: 0 });
+    assert.equal(storage.copies, 0);
+});

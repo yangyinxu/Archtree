@@ -60,7 +60,7 @@ export async function saveImportApproval(doc: AdminImportDocument, body: Record<
     const shown = importCoverChoice(doc);
     const draft = storedDraftV2(doc), before = structuredClone(draft);
     // A deselected or skipped track cannot make an otherwise unused Artist revision a prerequisite of approval.
-    // Only known track-only identities are omitted here; unknown entries still fail strict decision parsing.
+    // Every row still passes strict parsing; only known unused track-only identities skip catalog revision reads and retention.
     const selections = (body.trackArtists ?? []) as { slotId: string; selected: boolean }[];
     const row = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
     const submitted = body.decisions as unknown[];
@@ -68,8 +68,8 @@ export async function saveImportApproval(doc: AdminImportDocument, body: Record<
         ...submitted.filter(row).filter(item => item.scope === 'track' && item.action === 'skip').map(item => item.slotId as string)]);
     const trackOnly = new Set(importTrackArtistPlan(draft).identities.map(identity => identity.key));
     const needed = new Set(importIdentityEntries(draft, excluded).map(entry => entry.key));
-    const decisions = submitted.filter(item => !row(item) || item.scope !== 'artist' || !trackOnly.has(item.entryKey as string) || needed.has(item.entryKey as string));
-    doc.decisions = await parseImportDecisions(doc, draft, decisions, session);
+    const omitted = new Set([...trackOnly].filter(key => !needed.has(key)));
+    doc.decisions = await parseImportDecisions(doc, draft, submitted, session, { omitArtistKeys: omitted });
     if (body.changes.length) applyAdministratorChanges({ draft, draftOrigins: doc.draftOrigins ??= {} },
         parseDraftChanges(body.changes, doc.manifest, draft, { names: importMusicBrainzNameMap(doc.musicBrainzNames, draft) }), importDraftV2View(draft, doc.manifest, doc._id.toHexString()));
     if (!draftWithinSizeLimit(before, draft)) invalidImport();
