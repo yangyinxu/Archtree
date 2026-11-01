@@ -12384,14 +12384,14 @@
       "variables": {}
     },
     "playlist.detail.table.duration": {
-      "description": "Playlist table heading for duration.",
+      "description": "Tooltip of the clock column in MediaTrack tables (Album and Playlist).",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "playlist.detail.table.title": {
-      "description": "Playlist table heading for MediaTrack title.",
+      "description": "MediaTrack table column heading for the title (Album and Playlist).",
       "delivery": [
         "runtime"
       ],
@@ -12442,7 +12442,7 @@
       "variables": {}
     },
     "playlist.duration.hours": {
-      "description": "Playlist duration containing hours and minutes.",
+      "description": "Total duration of an Album or Playlist, containing hours and minutes.",
       "delivery": [
         "runtime"
       ],
@@ -12452,7 +12452,7 @@
       }
     },
     "playlist.duration.minutes": {
-      "description": "Playlist duration in minutes.",
+      "description": "Total duration of an Album or Playlist, in minutes.",
       "delivery": [
         "runtime"
       ],

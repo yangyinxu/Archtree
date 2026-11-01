@@ -12,6 +12,10 @@ test('parses m:ss and h:mm:ss, and rejects missing or malformed durations', () =
   expect(durationSeconds('42')).toBeNull();
   expect(durationSeconds('1:2:3:4')).toBeNull();
   expect(durationSeconds('a:10')).toBeNull();
+  for (const malformed of ['1:', ':30', '1:2', '1:60', '1:60:00', '1.5:30', '1e2:30', ' 1:30', '-1:30', '9007199254740991:00']) {
+    expect(durationSeconds(malformed)).toBeNull();
+  }
+  expect(durationSeconds('90:00')).toBe(5400);
 });
 
 test('a total is known only when every duration is known', () => {

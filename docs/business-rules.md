@@ -608,10 +608,24 @@ The wire protocol and operational bounds are documented in
   sans-serif stack led by Helvetica Neue, Helvetica, and Arial, with explicit
   CJK and emoji fallbacks. It does not download, bundle, or hotlink Spotify's
   proprietary typefaces.
-- In an Album MediaTrack list, the actively playing row uses the Web accent for
-  its title and replaces the row number with animated music bars. Highlighting
-  that row by pointer or keyboard replaces the bars with the Pause action;
-  Reduce Motion keeps the indicator static.
+- In Album and Playlist MediaTrack lists, the current row uses the Web accent
+  for its title. While it plays, its number becomes animated music bars, and
+  pointer or keyboard highlight replaces the bars with Pause. While it is
+  paused, the number stays in the accent and activating the row resumes the
+  page's queue. Reduce Motion keeps the indicator static.
+- On Finitude Web, Album and Playlist detail pages share one header: artwork,
+  type label, title, and a byline with the MediaTrack count and the total
+  duration when every counted duration is known. A Playlist counts only its
+  ready MediaTracks toward the duration and names how many members are
+  unavailable. Below the header, one prominent Play reflects this page's queue
+  (Pause while that queue plays, resume while it is paused), followed by a
+  Shuffle toggle that mirrors the shared player state without changing which
+  MediaTrack Play starts from. When the header scrolls away, a compact bar
+  keeps the title and the same Play control in view. Row actions other than
+  the duration appear on pointer hover or keyboard focus, remain visible on
+  touch devices, and Save remains present while signed out. The Album page
+  lists its Credits, including the label, below its MediaTracks, after the
+  full release date when the month is known.
 - This presentation contract is Web-only. Finitude retains its own name, mark,
   artwork, copy, components, and supported capabilities; the rule does not
   authorize Spotify assets or an iOS theme change.

@@ -2,12 +2,9 @@ import type { LocalizationContextValue } from '../../localization/LocalizationPr
 
 /** Parses an `m:ss` or `h:mm:ss` duration into seconds; null when it is missing or malformed. */
 export const durationSeconds = (duration: string | null) => {
-  if (!duration) return null;
-  const parts = duration.split(':').map(Number);
-  if (parts.length < 2 || parts.length > 3 || parts.some((part) => !Number.isFinite(part) || part < 0)) {
-    return null;
-  }
-  return parts.reduce((total, part) => total * 60 + part, 0);
+  if (!duration || !/^\d+:[0-5]\d(?::[0-5]\d)?$/.test(duration)) return null;
+  const seconds = duration.split(':').reduce((total, part) => total * 60 + Number(part), 0);
+  return Number.isSafeInteger(seconds) ? seconds : null;
 };
 
 /** Sums MediaTrack durations; null when any duration is unknown, so a partial total never shows. */

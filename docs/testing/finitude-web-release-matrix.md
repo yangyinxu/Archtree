@@ -40,8 +40,11 @@ Audio-to-Video and Video-to-Audio queue transitions, a full right-side Video
 queue, recoverable failure without a fabricated fallback, no media-mode switch,
 and no duplicate activity write. Responsive-shell coverage verifies the exact
 1008, 1007, 800, 799, 768, and 767 px panel boundaries, the 72 px compact
-Library rail, delayed Now Playing dismissal, the narrow Album hero, and player
-identity while the real Now Playing control closes and restores the pane.
+Library rail, delayed Now Playing dismissal, the narrow Album and Playlist
+heroes (each keeps a 128 px cover inside the 416 px main pane, and the MediaTrack
+column header docks directly under the compact bar once the hero scrolls away),
+and player identity while the real Now Playing control closes and restores the
+pane.
 Search coverage verifies cancellable debounced result previews without history
 writes, explicit history commits, and committed query restoration through
 browser Back and Forward on the narrow page field. At 1440 px it verifies the
@@ -642,8 +645,8 @@ player control still works.
   and does not open Login automatically.
 - Confirm signed-out New Playlist remains visible, announces the sign-in
   requirement, and does not open Login automatically.
-- With a signed-in listener, create and rename a Playlist, add multiple
-  MediaTracks, reject a duplicate without moving it, use Move Up/Down, start
+- With a signed-in listener, create a Playlist, rename it from the header's
+  More menu, add multiple MediaTracks, reject a duplicate without moving it, use Move Up/Down, start
   playback from the middle, remove one member, and delete the Playlist. Confirm
   the active queue remains unchanged after the source Playlist is edited or
   deleted.
