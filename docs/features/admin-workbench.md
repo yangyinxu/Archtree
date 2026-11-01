@@ -78,6 +78,17 @@ Every response rechecks the current administrator session, ready owner and exact
 before delivery. It never exposes the legacy URL or changes storage, and does
 not satisfy the separate historical-URL migration requirement for hiding content.
 
+The Web header shows the selected view with an icon and a single-line role.
+Its choice menu marks the active view, supports arrow keys, Home/End and Escape,
+and closes on outside interaction. The browser stores only the explicit
+`admin` or `user` presentation choice under
+`finitude:admin-view:v1:<encoded-account-id>` in local storage. A new capability
+authorization for that account restores it; loading, session reconciliation and
+permission resets never overwrite it. Missing, invalid or unavailable storage
+falls back to User on a new authorization. Account/role loss still immediately
+clears private buffers and fences old operations; the saved choice grants no
+access and contains no draft or operation state.
+
 The Web import editor uses Draft, Review, Files and Publish sections.
 Section navigation retains account-fenced local work and does not dispatch a
 mutation. Saving sends only the values the administrator changed, each with

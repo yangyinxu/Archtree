@@ -76,6 +76,7 @@
   gap: 0.65rem;
   justify-self: start;
   letter-spacing: -0.025em;
+  max-width: 100%;
   min-width: 0;
   text-decoration: none;
 }

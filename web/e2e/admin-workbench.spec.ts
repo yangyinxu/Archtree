@@ -7,11 +7,14 @@
  *              publishFromSummary, expectLunaAfterLookup, noOverflow
  * Tests
  *   - admin explicitly opens workbench, adopts only selected suggestion, and User view hides private project
+ *   - administrator view survives reload and revisits after capability verification, while an explicit User choice stays selected
+ *   - a remembered administrator view cannot reopen private projects after current permission is refused
  *   - cancelled cover cleanup remains reachable when the owner disappears, without restoring private metadata
  *   - reopening a visited catalog owner after a confirmed deletion drops its old buffer and cancels with a null revision
  *   - an unconfirmed publication can be cancelled and reviewed while exact cleanup keeps a new approval locked
  *   - ordinary account has no admin switch and requests no admin data
  *   - mobile administrator control and workbench remain accessible without horizontal overflow
+ *   - the view menu supports keyboard selection and dismissal within desktop and narrow mobile viewports
  *   - private upload retries the same multipart operation and publication waits for confirmed completion
  *   - existing catalog edits and Page placement visibility require separate explicit approvals
  *   - a cover uploaded from this computer on an Album page is staged once, confirmed in the existing dialog and replaces the cover, while a GIF is refused locally
@@ -209,9 +212,65 @@ test('admin explicitly opens workbench, adopts only selected suggestion, and Use
   await page.getByRole('heading', { name: 'Suggested Album', exact: true }).scrollIntoViewIfNeeded();
   await page.screenshot({ path: '/tmp/finitude-admin-workbench-review.png', fullPage: true });
   await page.getByRole('button', { name: 'Current view: Admin' }).click();
-  await page.getByRole('button', { name: 'User', exact: true }).click();
+  await page.getByRole('menuitemradio', { name: 'User', exact: true }).click();
   await expect(page).toHaveURL(/\/finitude\/?$/);
   await expect(page.getByRole('heading', { name: 'Suggested Album' })).toHaveCount(0);
+});
+
+test('administrator view survives reload and revisits after capability verification, while an explicit User choice stays selected', async ({ page }) => {
+  const writes = await setup(page);
+  await page.goto('/finitude/admin/imports');
+  await page.getByRole('button', { name: 'Switch to Admin view' }).click();
+  await expect(page.getByRole('link', { name: 'Synthetic Album', exact: true })).toBeVisible();
+
+  let release!: () => void;
+  const verification = new Promise<void>(resolve => { release = resolve; });
+  let checking = false, projectReads = 0;
+  page.on('request', request => { if (new URL(request.url()).pathname === '/api/admin/v1/imports') projectReads++; });
+  await page.route('**/api/admin/v1/capabilities', async route => {
+    checking = true;
+    await verification;
+    await route.fulfill({ json: capabilities, headers: { 'X-Finitude-Account-Viewer': viewer, 'Cache-Control': 'no-store' } });
+  });
+  await page.reload();
+  try {
+    await expect.poll(() => checking).toBe(true);
+    await expect(page.getByRole('button', { name: /Current view:/ })).toHaveCount(0);
+    await expect(page.getByRole('link', { name: 'Synthetic Album', exact: true })).toHaveCount(0);
+    expect(projectReads).toBe(0);
+  } finally { release(); }
+  await expectStandaloneAdministration(page, 'Current view: Admin');
+  await expect(page.getByRole('link', { name: 'Synthetic Album', exact: true })).toBeVisible();
+  await page.goto('/finitude/admin/imports/new');
+  await expectStandaloneAdministration(page, 'Current view: Admin');
+  await expect(page.getByRole('button', { name: 'Switch to Admin view' })).toHaveCount(0);
+
+  await page.getByRole('button', { name: 'Current view: Admin' }).click();
+  await page.getByRole('menuitemradio', { name: 'User', exact: true }).click();
+  await expect(page).toHaveURL(/\/finitude\/?$/);
+  await page.reload();
+  await expect(page.getByRole('button', { name: 'Current view: User' })).toBeVisible();
+  await page.goto('/finitude/admin/imports');
+  await expectStandaloneAdministration(page, 'Current view: User');
+  await expect(page.getByRole('button', { name: 'Switch to Admin view' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Synthetic Album', exact: true })).toHaveCount(0);
+  expect(writes).toHaveLength(0);
+});
+
+test('a remembered administrator view cannot reopen private projects after current permission is refused', async ({ page }) => {
+  await setup(page);
+  await page.goto('/finitude/admin/imports');
+  await page.getByRole('button', { name: 'Switch to Admin view' }).click();
+  await expect(page.getByRole('link', { name: 'Synthetic Album', exact: true })).toBeVisible();
+  let projectReads = 0;
+  page.on('request', request => { if (new URL(request.url()).pathname === '/api/admin/v1/imports') projectReads++; });
+  await page.route('**/api/admin/v1/capabilities', route => route.fulfill({ status: 403, json: { code: 'ADMIN_REQUIRED' }, headers: { 'X-Finitude-Account-Viewer': viewer, 'Cache-Control': 'no-store' } }));
+  await page.reload();
+  await expect(page.getByText('Switch to Admin view to open the workbench. Current administrator access is required.')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Try again' })).toBeVisible();
+  await expect(page.getByRole('button', { name: /Current view:/ })).toHaveCount(0);
+  await expect(page.getByRole('link', { name: 'Synthetic Album', exact: true })).toHaveCount(0);
+  expect(projectReads).toBe(0);
 });
 
 test('cancelled cover cleanup remains reachable when the owner disappears, without restoring private metadata', async ({ page }, testInfo) => {
@@ -241,7 +300,7 @@ test('cancelled cover cleanup remains reachable when the owner disappears, witho
   await expect(page.getByText('The cover change is cancelled. Unused image cleanup still needs attention.').first()).toBeVisible();
   expect(writes[0].body.expectedRevision).toBe(item.revision);expect(writes[0].body.operationId).not.toBe(original);
   await page.goto('/finitude/admin/catalog');
-  await page.getByRole('button',{name:'Switch to Admin view'}).click();
+  await expect(page.getByRole('button', { name: 'Current view: Admin' })).toBeVisible();
   await page.getByRole('button',{name:'Artists',exact:true}).click();
   await page.locator('summary').filter({hasText:'Recover cover operations for an item'}).click();
   await page.getByRole('textbox',{name:'Known catalog item ID'}).fill(id);
@@ -404,6 +463,50 @@ test('mobile administrator control and workbench remain accessible without horiz
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
   await page.screenshot({ path: '/tmp/finitude-admin-workbench-mobile.png', fullPage: true });
+});
+
+test('the view menu supports keyboard selection and dismissal within desktop and narrow mobile viewports', async ({ page }) => {
+  await setup(page);
+  await page.goto('/finitude/admin/imports');
+  await page.getByRole('button', { name: 'Switch to Admin view' }).click();
+  for (const width of [1440, 320]) {
+    await page.setViewportSize({ width, height: 900 });
+    const trigger = page.getByRole('button', { name: 'Current view: Admin' });
+    const brandBounds = await page.getByRole('banner').getByRole('link', { name: 'Finitude home', exact: true }).boundingBox();
+    const triggerBounds = await trigger.boundingBox();
+    expect(brandBounds!.x + brandBounds!.width).toBeLessThanOrEqual(triggerBounds!.x);
+    await trigger.focus();
+    await trigger.press('ArrowDown');
+    const menu = page.getByRole('menu');
+    const admin = menu.getByRole('menuitemradio', { name: 'Admin', exact: true });
+    const user = menu.getByRole('menuitemradio', { name: 'User', exact: true });
+    await expect(admin).toBeFocused();
+    await expect(admin).toHaveAttribute('aria-checked', 'true');
+    await expect(user).toHaveAttribute('aria-checked', 'false');
+    await admin.press('ArrowDown');
+    await expect(user).toBeFocused();
+    await user.press('Home');
+    await expect(admin).toBeFocused();
+    await admin.press('End');
+    await expect(user).toBeFocused();
+    await user.press('Escape');
+    await expect(menu).toHaveCount(0);
+    await expect(trigger).toBeFocused();
+    await trigger.click();
+    await expect(admin).toBeFocused();
+    const bounds = await menu.boundingBox();
+    expect(bounds!.x).toBeGreaterThanOrEqual(0);
+    expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width);
+    expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+    await page.screenshot({ path: `/tmp/finitude-admin-view-menu-${width === 320 ? 'mobile' : 'desktop'}.png`, fullPage: true });
+    await admin.press('Shift+Tab');
+    await expect(menu).toHaveCount(0);
+    await expect(trigger).toBeFocused();
+    await trigger.click();
+    await page.getByRole('button', { name: 'Refresh status', exact: true }).click();
+    await expect(menu).toHaveCount(0);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  }
 });
 
 
@@ -572,7 +675,7 @@ test('one approval uploads files sequentially and leaving Admin view stops after
   await expect(page.getByRole('textbox', { name: 'Folder or Album context' })).toHaveValue('Synthetic Folder');
   await page.getByRole('button', { name: 'Create import and upload files' }).click();
   await expect.poll(() => server.uploads.length).toBe(1);
-  await page.getByRole('button', { name: 'Current view: Admin' }).click(); await page.getByRole('button', { name: 'User', exact: true }).click();
+  await page.getByRole('button', { name: 'Current view: Admin' }).click(); await page.getByRole('menuitemradio', { name: 'User', exact: true }).click();
   await expect(page).toHaveURL(/\/finitude\/?$/);
   release(); await page.waitForTimeout(300); expect(server.uploads).toHaveLength(1);
   await page.goBack(); await page.getByRole('button', { name: 'Switch to Admin view' }).click();

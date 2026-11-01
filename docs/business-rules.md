@@ -709,7 +709,11 @@ The wire protocol and operational bounds are documented in
   Media storage stays private, and public and private application responses
   never redirect to hidden object locations.
 - On Web, admins switch between Admin and User views without signing out or rebuilding
-  listening state. User view is the default; leaving Admin view hides private
+  listening state. User view is the first-use default. This browser remembers
+  each account's explicit choice across reloads, return visits and session
+  reconciliation; a remembered Admin view resumes only after the current
+  account's administrator role and capabilities are verified. Another account
+  never inherits that selection. Leaving Admin view hides private
   presentation, cancels private reads and stops previews. Unsaved drafts and
   unknown catalog/import operation intents may remain only in account-fenced memory and resume
   after current capabilities are verified. Account or role loss clears them.

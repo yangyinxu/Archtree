@@ -317,7 +317,7 @@ test('keeps real Audio and Video playback alive through dedicated Admin transiti
   expect(initial.count).toBe(1); expect(initial.sourcePath).toBe(videoPath);
   const enterAdmin = async () => {
     await page.getByRole('button', { name: 'Current view: User', exact: true }).click();
-    await page.getByRole('button', { name: 'Admin', exact: true }).click();
+    await page.getByRole('menuitemradio', { name: 'Admin', exact: true }).click();
     await page.getByRole('banner').getByRole('link', { name: 'Workbench', exact: true }).click();
     await expect(page).toHaveURL(/\/finitude\/admin\/imports$/);
     await expect(page.getByRole('main').getByRole('heading', { name: 'Workbench', exact: true })).toBeVisible();
@@ -332,7 +332,7 @@ test('keeps real Audio and Video playback alive through dedicated Admin transiti
   };
   const returnUser = async () => {
     await page.getByRole('button', { name: 'Current view: Admin', exact: true }).click();
-    await page.getByRole('button', { name: 'User', exact: true }).click();
+    await page.getByRole('menuitemradio', { name: 'User', exact: true }).click();
     await expect(page).toHaveURL(/\/finitude\/?$/);
     await expect(page.getByRole('navigation', { name: 'Primary', exact: true }).first()).toBeVisible();
     await expect(player).toBeVisible();

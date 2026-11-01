@@ -104,7 +104,7 @@ test('FLAC and WAV batch converts with production CSP, retains sources and reuse
   await expect(page.getByText('MP3 ready locally', { exact: true })).toHaveCount(2);
   await expect(page.getByText('Lossless source retained on this device', { exact: true })).toHaveCount(2);
   await expect(page.getByRole('button', { name: 'Download MP3', exact: true })).toHaveCount(2);
-  await page.reload(); await page.getByRole('button', { name: 'Switch to Admin view' }).click();
+  await page.reload(); await expect(page.getByRole('button', { name: 'Current view: Admin' })).toBeVisible();
   await expect(page.getByText('MP3 ready locally', { exact: true })).toHaveCount(2);
   await expect(page.getByRole('button', { name: 'Convert / resume Album' })).toBeDisabled();
   expect(errors).toEqual([]);
@@ -207,7 +207,7 @@ test('lost upload response reconciles the same operation and deletes only the co
   await page.getByRole('button', { name: 'Convert / resume Album' }).click(); await expect(page.getByText('MP3 ready locally', { exact: true })).toBeVisible();
   const submit = async () => { await page.getByRole('button', { name: 'Review MP3 replacement' }).click(); await page.getByRole('dialog').getByRole('button', { name: 'Upload / reconcile MP3s' }).click(); };
   await submit(); await expect(page.getByText('Needs attention; files retained', { exact: true })).toBeVisible();
-  await page.reload(); await page.getByRole('button', { name: 'Switch to Admin view' }).click(); await submit();
+  await page.reload(); await expect(page.getByRole('button', { name: 'Current view: Admin' })).toBeVisible(); await submit();
   await expect(page.getByText('MP3 confirmed online; local MP3 cache removed', { exact: true })).toBeVisible();
   await expect(page.getByText('Lossless source retained on this device', { exact: true })).toBeVisible();
   expect(uploadCount).toBe(1); expect(reads).toBeGreaterThan(0);

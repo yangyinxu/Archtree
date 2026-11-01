@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from 'react';
 import { captureAccountOperation, isAccountOperationCurrent, subscribeToAccountEpoch, type AccountOperationGuard } from '../../api/accountEpoch';
+import { readAdminViewPreference, writeAdminViewPreference } from './adminViewPreference';
 
 export interface AdminWorkspaceState {
   viewerId: string;
@@ -41,7 +42,7 @@ export const adminWorkspace = {
     const same = state.viewerId === guard.viewerId && state.epoch === guard.epoch;
     if (!same) buffers.clear();
     state = { viewerId: guard.viewerId, epoch: guard.epoch, authorized: true, imports, analysis, authority, catalogEditing: catalog.editing, catalogVisibility: catalog.visibility, conversion, reloadRequired: state.reloadRequired,
-      mode: same ? state.mode : 'user', generation: same ? state.generation : state.generation + 1 };
+      mode: same ? state.mode : readAdminViewPreference(guard.viewerId), generation: same ? state.generation : state.generation + 1 };
     emit();
   },
   /** Suspension, authorization and view changes keep this flag; a reset re-detects it on the next admin response. */
@@ -51,6 +52,7 @@ export const adminWorkspace = {
   },
   select(mode: 'user' | 'admin') {
     if (!state.authorized || !isAccountOperationCurrent(state)) return;
+    writeAdminViewPreference(state.viewerId, mode);
     if (state.mode === mode) return;
     state = { ...state, mode, generation: state.generation + 1 }; emit();
   },

@@ -793,7 +793,7 @@ test('private Album covers disappear on User view or role loss and make no later
   const coverName = label('content.album.cover_alt', { title: 'Synthetic catalog Album' });
   await expectDecodedPrivateCover(page.getByRole('img', { name: coverName, exact: true }));
   await page.getByRole('button', { name: label('admin.view.current_admin'), exact: true }).click();
-  await page.getByRole('button', { name: label('admin.view.user'), exact: true }).click();
+  await page.getByRole('menuitemradio', { name: label('admin.view.user'), exact: true }).click();
   await expect(page).toHaveURL(/\/finitude\/?$/); await expect(page.getByRole('img', { name: coverName, exact: true })).toHaveCount(0);
   const afterUser = api.reads.filter(path => path === privateCoverPath).length;
   await page.goto(`/finitude/admin/catalog/album/${albumId}`); await expect(page.getByText(label('admin.view.required'))).toBeVisible();
@@ -965,7 +965,7 @@ for (const kind of ['artist', 'audioTrack'] as const) {
     api.recoverArtwork(); await page.getByRole('button', { name: label('admin.common.refresh'), exact: true }).first().click();
     await expectDecodedPrivateCover(artwork, kind); expect(api.reads.filter(path => path === artworkPath).length).toBeGreaterThan(afterFailure);
     await page.getByRole('button', { name: label('admin.view.current_admin'), exact: true }).click();
-    await page.getByRole('button', { name: label('admin.view.user'), exact: true }).click();
+    await page.getByRole('menuitemradio', { name: label('admin.view.user'), exact: true }).click();
     await expect(page).toHaveURL(/\/finitude\/?$/); await expect(artwork).toHaveCount(0);
     const afterUser = api.reads.filter(path => path === artworkPath).length;
     await page.goto(`/finitude/admin/catalog/${kind}/${item.id}`); await expect(page.getByText(label('admin.view.required'))).toBeVisible();
@@ -1051,7 +1051,7 @@ for (const variant of localizedViewports) {
     expect(api.writes.filter(value => value.path.endsWith('/analyze'))).toHaveLength(1);
     // While Luna AI runs, the update waits and says so in the bar.
     await expect(actionBar(page).getByText(label('admin.catalog_review.bar_wait_luna'), { exact: true })).toBeVisible();
-    await page.reload(); await page.getByRole('button', { name: label('admin.view.switch_admin') }).click();
+    await page.reload(); await expect(page.getByRole('button', { name: label('admin.view.current_admin') })).toBeVisible();
     await expect(page.getByRole('button', { name: label('admin.analysis.stop') })).toBeVisible();
     expect(api.writes.filter(value => value.path.endsWith('/analyze'))).toHaveLength(1);
     api.finish(); await refocus(page);
@@ -2106,9 +2106,9 @@ type ReviewView = NonNullable<ReviewLookupResponse['lookup']>;
 /** A searched text as the lookup steps quote it, with the Artist name its search was credited to. */
 const quoted = (text: string, artist?: string) => artist ? label('admin.catalog_review.lookup_step_quoted_artist', { text, artist }) : label('admin.catalog_review.lookup_step_quoted', { text });
 const escapedText = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-/** Reloads the page and enters Admin view again, keeping the chosen language. */
+/** Reloads the page and waits for the remembered Admin view, keeping the chosen language. */
 async function reenter(page: Page) {
-  await page.reload(); await page.getByRole('button', { name: label('admin.view.switch_admin'), exact: true }).click();
+  await page.reload(); await expect(page.getByRole('button', { name: label('admin.view.current_admin'), exact: true })).toBeVisible();
   await expectStandaloneAdministration(page, 'admin');
 }
 
@@ -3061,7 +3061,7 @@ test('User view and revoked role remove private reviews and stop their requests'
   await openManualEdit(page);
   await expect(page.getByRole('textbox', { name: label('admin.field.title'), exact: true })).toHaveValue('Synthetic catalog Album');
   await page.getByRole('button', { name: 'Current view: Admin' }).click();
-  await page.getByRole('button', { name: 'User', exact: true }).click();
+  await page.getByRole('menuitemradio', { name: 'User', exact: true }).click();
   await expect(page).toHaveURL(/\/finitude\/?$/);
   const afterUser = api.reads.filter(path => path.includes('/catalog-reviews')).length;
   await page.goto(`/finitude/admin/catalog-reviews/${reviewId}`);
