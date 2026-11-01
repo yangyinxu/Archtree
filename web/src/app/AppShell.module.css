@@ -439,6 +439,11 @@
     overflow-y: auto;
   }
 
+  /* Five 44px navigation targets still fit before the scrollable Playlist section. */
+  .navigation {
+    gap: 0;
+  }
+
   /* Preserve Playlist height so it cannot overlap the scrollable language footer. */
   .sidebar > section {
     flex: none;
