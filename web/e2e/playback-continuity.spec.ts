@@ -188,8 +188,17 @@ test('preserves one media element, queue, and elapsed time through every shell p
   await page.getByRole('link', { name: 'Search' }).click();
   await expect(page).toHaveURL(/\/finitude\/search$/);
   activeTime = await expectActiveMedia(page, initialProbe.identity, activeTime, videoPath);
-  await expect(page.getByRole('main')).toBeHidden();
+  // Listener navigation shows the requested page; the same Video continues in the right panel.
+  await expect(page.getByRole('main')).toBeVisible();
+  await expect(theater).toHaveCount(0);
+  await expect(aside.getByRole('img', { name: 'First Light video' })).toBeVisible();
   await expect(player).toContainText('First Light');
+  const videoToggle = player.getByRole('button', { name: 'Video', exact: true });
+  await expect(videoToggle).toHaveAttribute('aria-pressed', 'false');
+  await videoToggle.click();
+  await expect(theater).toBeVisible();
+  await expect(page.getByRole('main')).toBeHidden();
+  activeTime = await expectActiveMedia(page, initialProbe.identity, activeTime, videoPath);
   await page.goBack();
   await expect(page).toHaveURL(new RegExp(`/finitude/albums/${catalogIds.album}$`));
   activeTime = await expectActiveMedia(page, initialProbe.identity, activeTime, videoPath);

@@ -9,6 +9,7 @@
  *   - the management layout remains independent during authority suspension and identity reconciliation
  *   - round trips through management preserve the player queue, position and listener panel choice
  *   - ongoing Video retains its mounted surface without obscuring management content
+ *   - listener navigation minimizes the Video theater until the listener restores it
  *   - resizes and restores wide panels without remounting the player
  *   - removes panel separators when the compact shell takes control
  *   - shows authentication-required Library instead of an empty success
@@ -255,6 +256,38 @@ test('ongoing Video retains its mounted surface without obscuring management con
   await user.click(screen.getByRole('link', { name: 'Listener route' }));
   expect(within(surface as HTMLElement).getByRole('heading', { name: 'Synthetic video' })).toBe(surface?.querySelector('h1'));
   expect(surface?.parentElement).not.toHaveAttribute('hidden');
+});
+
+test('listener navigation minimizes the Video theater until the listener restores it', async () => {
+  const user = userEvent.setup();
+  const item: PlayerQueueItem = { id: 'synthetic-video', title: 'Synthetic video', artworkUrl: '', artistNames: ['Synthetic artist'], mediaType: 'video', streamUrl: '' };
+  const snapshot = { ...playerStore.getSnapshot(), queue: [item], currentIndex: 0, currentItem: item, status: 'playing' as const, currentTime: 42 };
+  vi.spyOn(playerStore, 'getSnapshot').mockReturnValue(snapshot);
+  const { container } = renderAdminShell('/', 'user');
+  const theater = () => container.querySelector('[aria-labelledby="video-theater-title"]');
+  await waitFor(() => expect(theater()).toBeInTheDocument());
+  expect(screen.getByRole('main', { hidden: true })).toHaveAttribute('inert');
+
+  // The brand points at the current Home address, which previously left the theater covering it.
+  await user.click(screen.getByRole('link', { name: 'Finitude home' }));
+  expect(theater()).toBeNull();
+  expect(screen.getByRole('main')).not.toHaveAttribute('inert');
+  expect(screen.getByRole('main')).toHaveTextContent('Workspace content');
+  expect(container.querySelector('[data-video-playing]')).toBeNull();
+  const aside = container.querySelector('#now-playing-aside') as HTMLElement;
+  expect(await within(aside).findByRole('img', { name: 'Synthetic video video' })).toBeInTheDocument();
+  const toggle = await screen.findByRole('button', { name: 'Video' });
+  expect(toggle).toHaveAttribute('aria-pressed', 'false');
+  expect(playerStore.getSnapshot()).toBe(snapshot);
+
+  await user.click(toggle);
+  await waitFor(() => expect(theater()).toBeInTheDocument());
+  expect(within(aside).queryByRole('img', { name: 'Synthetic video video' })).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Video', hidden: true })).toHaveAttribute('aria-pressed', 'true');
+
+  await user.click(within(screen.getByRole('complementary', { name: 'Finitude Library' })).getByRole('link', { name: 'Search' }));
+  expect(theater()).toBeNull();
+  expect(screen.getByRole('main')).toHaveTextContent('Workspace content');
 });
 
 test('resizes and restores wide panels without remounting the player', async () => {

@@ -1424,6 +1424,12 @@ The wire protocol and operational bounds are documented in
   for Audio. Video automatically replaces the center workspace with a
   contain-fit theater and uses the right panel for the playback queue. Video
   offers no cover-only or audio-only mode switch.
+- Listener navigation while a Video is current (the brand, primary
+  navigation, search, links, Back/Forward) minimizes the theater: the requested
+  page shows and the same Video keeps playing in the right panel. The player
+  bar's Video toggle restores or minimizes the theater; a MediaTrack becoming
+  current, including the same Video again, restores the automatic theater. A
+  management round trip leaves the theater as it was.
 - Audio and Video use one long-lived media element, queue, elapsed clock,
   transport, Shuffle/Repeat state, playback origin, and activity identity.
   Automatic queue advancement changes presentation from the next MediaTrack's

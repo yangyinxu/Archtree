@@ -34,11 +34,12 @@ export type IconName =
   | 'search'
   | 'shuffle'
   | 'next'
+  | 'video'
   | 'volume'
   | 'volume-off';
 
 export type PlaybackIconName = 'expand' | 'panel-right' | 'pause' | 'play' | 'previous'
-  | 'repeat' | 'repeat-one' | 'shuffle' | 'next' | 'volume' | 'volume-off';
+  | 'repeat' | 'repeat-one' | 'shuffle' | 'next' | 'video' | 'volume' | 'volume-off';
 const PlaybackIcon = lazy(() => import('./DeferredPlaybackIcon'));
 
 const icons: Partial<Record<IconName, LucideIcon>> = {

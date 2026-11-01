@@ -4,7 +4,7 @@
  * Internal
  *   Types: CompactGesture, PlayerBarProps, TransportControlsProps
  *   Functions: isEditableTarget, readMobileViewport, onNextFrame, useMobileViewport, trapDialogFocus,
- *              TransportControls
+ *              VideoTheaterNavigation, TransportControls
  *   Constants: MOBILE_PLAYER_QUERY, VERTICAL_GESTURE_THRESHOLD, HORIZONTAL_GESTURE_THRESHOLD,
  *              GESTURE_FEEDBACK_THRESHOLD, MAX_HORIZONTAL_FEEDBACK, GESTURE_AXIS_RATIO
  * @end-catalog */
@@ -17,6 +17,7 @@ import {
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent
 } from 'react';
+import { useLocation } from 'react-router';
 
 import { Artwork } from './Artwork';
 import { Icon } from './Icon';
@@ -117,7 +118,27 @@ interface PlayerBarProps {
   /** The shell owns this presentation state so playback never remounts with the side pane. */
   nowPlayingOpen?: boolean;
   onToggleNowPlaying?: () => void;
+  /** The shell owns whether a current Video's theater covers the routed page; omitted outside the shell. */
+  onTheaterMinimized?: (minimized: boolean) => void;
+  theaterMinimized?: boolean;
 }
+
+/** Minimizes the Video theater on listener navigation; a management round trip leaves it as it was. */
+const VideoTheaterNavigation = ({ active, onMinimized }: {
+  active: boolean;
+  onMinimized: (minimized: boolean) => void;
+}) => {
+  const location = useLocation();
+  const previous = useRef({ active, key: location.key });
+
+  useEffect(() => {
+    const last = previous.current;
+    previous.current = { active, key: location.key };
+    if (last.key !== location.key && last.active && active) onMinimized(true);
+  }, [active, location.key, onMinimized]);
+
+  return null;
+};
 
 interface TransportControlsProps {
   player: PlayerSnapshot;
@@ -220,7 +241,9 @@ export const PlayerBar = ({
   active = true,
   nowPlayingOpen = false,
   onToggleNowPlaying,
-  store = playerStore
+  onTheaterMinimized,
+  store = playerStore,
+  theaterMinimized = false
 }: PlayerBarProps) => {
   const player = usePlayer(store);
   const { t } = useLocalization();
@@ -276,6 +299,11 @@ export const PlayerBar = ({
   useEffect(() => {
     if (!mobile && expanded) setExpanded(false);
   }, [expanded, mobile]);
+
+  // Each MediaTrack that becomes current, including the same Video again, starts in its automatic presentation.
+  useEffect(() => {
+    onTheaterMinimized?.(false);
+  }, [current, onTheaterMinimized]);
 
   useEffect(() => {
     if (expanded) expandedCloseButton.current?.focus();
@@ -457,6 +485,7 @@ export const PlayerBar = ({
 
   return (
     <>
+      {onTheaterMinimized && current?.mediaType === 'video' && <VideoTheaterNavigation active={active} onMinimized={onTheaterMinimized} />}
       <section
         aria-hidden={helpOpen || (mobile && expanded) || undefined}
         className={styles.player}
@@ -533,6 +562,19 @@ export const PlayerBar = ({
               type="button"
             >
               <Icon name="panel-right" />
+            </button>
+          )}
+          {onTheaterMinimized && current?.mediaType === 'video' && !mobile && (
+            <button
+              aria-pressed={!theaterMinimized}
+              aria-label={t('common.label.video')}
+              className={`${styles.secondaryControl} ${styles.nowPlayingToggle} ${styles.videoTheaterToggle}`}
+              data-active={!theaterMinimized || undefined}
+              onClick={() => onTheaterMinimized(!theaterMinimized)}
+              title={t('common.label.video')}
+              type="button"
+            >
+              <Icon name="video" />
             </button>
           )}
           <button

@@ -7,6 +7,7 @@
  * @end-catalog */
 
 import { Artwork } from './Artwork';
+import { SharedVideoSurface } from './SharedVideoSurface';
 import {
   playerStore,
   type PlayerStore
@@ -18,10 +19,12 @@ import { useLocalization } from '../localization/LocalizationProvider';
 interface NowPlayingAsideProps {
   /** Tests and alternate shells may inject the same store boundary used by PlayerBar. */
   store?: PlayerStore;
+  /** Hosts the current Video here while the shell shows the routed page instead of the theater. */
+  theaterMinimized?: boolean;
 }
 
 /** Presents read-only playback context without owning media, queue, or activity writes. */
-export const NowPlayingAside = ({ store = playerStore }: NowPlayingAsideProps) => {
+export const NowPlayingAside = ({ store = playerStore, theaterMinimized = false }: NowPlayingAsideProps) => {
   const player = usePlayerQueue(store);
   const { t } = useLocalization();
   const current = player.currentItem;
@@ -50,6 +53,8 @@ export const NowPlayingAside = ({ store = playerStore }: NowPlayingAsideProps) =
           <p className={styles.eyebrow}>{t('now_playing.eyebrow')}</p>
           <h2 title={current.title}>{current.title}</h2>
         </header>
+
+        {theaterMinimized && <SharedVideoSurface store={store} title={current.title} />}
 
         <div className={styles.queueCurrent} aria-current="true">
           <Artwork

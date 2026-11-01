@@ -631,8 +631,10 @@ player control still works.
   order beginning with Up Next, and no Audio/Video or cover-only switch is
   present. Advance Video → Audio → Video and confirm elapsed time, queue,
   Shuffle, and Repeat remain owned by one player while the presentation follows
-  each item. A simulated Video failure must remain recoverable without
-  fabricating an Audio fallback.
+  each item. While Video plays, select the brand or a primary destination and
+  confirm the page shows, the Video continues in the right panel, and the
+  player bar's Video toggle restores the theater. A simulated Video failure
+  must remain recoverable without fabricating an Audio fallback.
 - Hover the seek track without changing playback, commit pointer seeking only
   on release, seek by keyboard, change volume, mute, open keyboard help, and
   recover from a stream failure without a gesture-only dependency.

@@ -75,7 +75,7 @@ const PrimaryNavigation = ({ mobile = false }: { mobile?: boolean }) => {
       {destinations.filter((destination) => socialEnabled || destination.path !== '/social').map((destination) => {
         const label = t(destination.labelKey);
         const libraryOwnsRoute = destination.path === '/library'
-          && (location.pathname === '/playlists' || location.pathname.startsWith('/playlists/'));
+          && /^\/playlists(\/|$)/.test(location.pathname);
         return (
           <NavLink
             aria-current={libraryOwnsRoute ? 'page' : undefined}
@@ -104,10 +104,12 @@ const AppShellContent = () => {
   const shellRef = useRef<HTMLDivElement>(null);
   const player = usePlayer(playerStore);
   const { t } = useLocalization();
+  const [theaterMinimized, setTheaterMinimized] = useState(false);
   const videoPlaying = player.currentItem?.mediaType === 'video';
-  const adminRoute = location.pathname === '/admin' || location.pathname.startsWith('/admin/');
+  const adminRoute = /^\/admin(\/|$)/.test(location.pathname);
   const effectiveNowPlayingOpen = videoPlaying || nowPlayingOpen;
-  const listenerVideoVisible = videoPlaying && !adminRoute;
+  const videoTheaterOpen = videoPlaying && !theaterMinimized;
+  const listenerVideoVisible = videoTheaterOpen && !adminRoute;
 
   useEffect(() => {
     if (typeof window.matchMedia !== 'function') {
@@ -192,7 +194,7 @@ const AppShellContent = () => {
         >
           <Outlet />
         </main>
-        {videoPlaying && (
+        {videoTheaterOpen && (
           <div className={styles.videoSlot} aria-hidden={adminRoute || undefined} hidden={adminRoute} inert={adminRoute || undefined}>
             <Suspense fallback={<div className={styles.videoLoading} aria-hidden="true" />}>
               <VideoTheater />
@@ -210,7 +212,7 @@ const AppShellContent = () => {
         inert={adminRoute || !effectiveNowPlayingOpen ? true : undefined}
       >
         <Suspense fallback={<div className={styles.asideLoading} aria-hidden="true" />}>
-          <NowPlayingAside />
+          <NowPlayingAside theaterMinimized={theaterMinimized} />
         </Suspense>
       </aside>
 
@@ -222,6 +224,8 @@ const AppShellContent = () => {
             onToggleNowPlaying={videoPlaying
               ? undefined
               : () => setNowPlayingOpen((open) => !open)}
+            onTheaterMinimized={setTheaterMinimized}
+            theaterMinimized={theaterMinimized}
           />
         </Suspense>
       </div>

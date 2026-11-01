@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useLayoutEffect, useRef } from 'react';
 
 import type { PlayerStore } from '../player';
 import styles from './SharedVideoSurface.module.css';
@@ -21,7 +21,8 @@ export const SharedVideoSurface = ({
   const host = useRef<HTMLDivElement>(null);
   const { t } = useLocalization();
 
-  useEffect(() => {
+  // Layout timing hands the element over before React removes this host, so the browser never sees it leave the document and pause.
+  useLayoutEffect(() => {
     if (!host.current) return undefined;
     return store.attachMediaElement(host.current);
   }, [store]);
