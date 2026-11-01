@@ -1,4 +1,4 @@
-import { lazy, Suspense, type ReactNode } from 'react';
+import { lazy, Suspense, type ComponentType, type ReactNode } from 'react';
 import { createBrowserRouter, type RouteObject } from 'react-router';
 
 import { AppShell } from './AppShell';
@@ -6,23 +6,30 @@ import { NotFoundPage, RouteErrorPage } from './RouteErrorPage';
 import styles from '../styles/Pages.module.css';
 import { useLocalization } from '../localization/LocalizationProvider';
 
+/**
+ * A lazy page from its module's named export. Naming the export once keeps the bundler from repeating it in the
+ * initial route table, whose bytes count toward every listener route's budget.
+ */
+const page = <Name extends string, Props extends object>(load: () => Promise<Record<Name, ComponentType<Props>>>, name: Name) =>
+  lazy(() => load().then(module => ({ default: module[name] })));
+
 const AdminRouter = lazy(() => import('../features/admin/AdminRouter'));
-const AccountPage = lazy(() => import('../features/account/AccountPage').then(({ AccountPage }) => ({ default: AccountPage })));
-const AccountSessionsPage = lazy(() => import('../features/account/AccountSessionsPage').then(({ AccountSessionsPage }) => ({ default: AccountSessionsPage })));
-const ChangePasswordPage = lazy(() => import('../features/account/ChangePasswordPage').then(({ ChangePasswordPage }) => ({ default: ChangePasswordPage })));
-const LoginPage = lazy(() => import('../features/account/LoginPage').then(({ LoginPage }) => ({ default: LoginPage })));
-const AlbumPage = lazy(() => import('../features/catalog/AlbumPage').then(({ AlbumPage }) => ({ default: AlbumPage })));
-const ArtistPage = lazy(() => import('../features/catalog/ArtistPage').then(({ ArtistPage }) => ({ default: ArtistPage })));
-const OrganizationPage = lazy(() => import('../features/catalog/OrganizationPage').then(({ OrganizationPage }) => ({ default: OrganizationPage })));
-const HomePage = lazy(() => import('../features/home/HomePage').then(({ HomePage }) => ({ default: HomePage })));
-const LibraryPage = lazy(() => import('../features/library/LibraryPage').then(({ LibraryPage }) => ({ default: LibraryPage })));
-const PlaylistDetailPage = lazy(() => import('../features/playlists/PlaylistDetailPage').then(({ PlaylistDetailPage }) => ({ default: PlaylistDetailPage })));
-const PlaylistFeatureGate = lazy(() => import('../features/playlists/PlaylistFeatureGate').then(({ PlaylistFeatureGate }) => ({ default: PlaylistFeatureGate })));
-const PlaylistIndexPage = lazy(() => import('../features/playlists/PlaylistIndexPage').then(({ PlaylistIndexPage }) => ({ default: PlaylistIndexPage })));
-const SearchPage = lazy(() => import('../features/search/SearchPage').then(({ SearchPage }) => ({ default: SearchPage })));
-const SocialPage = lazy(() => import('../features/social/SocialPage').then(({ SocialPage }) => ({ default: SocialPage })));
-const RoomInvitationsPage = lazy(() => import('../features/social/RoomInvitationsPage').then(({ RoomInvitationsPage }) => ({ default: RoomInvitationsPage })));
-const MusicSharesPage = lazy(() => import('../features/social/MusicSharesPage').then(({ MusicSharesPage }) => ({ default: MusicSharesPage })));
+const AccountPage = page(() => import('../features/account/AccountPage'), 'AccountPage');
+const AccountSessionsPage = page(() => import('../features/account/AccountSessionsPage'), 'AccountSessionsPage');
+const ChangePasswordPage = page(() => import('../features/account/ChangePasswordPage'), 'ChangePasswordPage');
+const LoginPage = page(() => import('../features/account/LoginPage'), 'LoginPage');
+const AlbumPage = page(() => import('../features/catalog/AlbumPage'), 'AlbumPage');
+const ArtistPage = page(() => import('../features/catalog/ArtistPage'), 'ArtistPage');
+const OrganizationPage = page(() => import('../features/catalog/OrganizationPage'), 'OrganizationPage');
+const HomePage = page(() => import('../features/home/HomePage'), 'HomePage');
+const LibraryPage = page(() => import('../features/library/LibraryPage'), 'LibraryPage');
+const PlaylistDetailPage = page(() => import('../features/playlists/PlaylistDetailPage'), 'PlaylistDetailPage');
+const PlaylistFeatureGate = page(() => import('../features/playlists/PlaylistFeatureGate'), 'PlaylistFeatureGate');
+const PlaylistIndexPage = page(() => import('../features/playlists/PlaylistIndexPage'), 'PlaylistIndexPage');
+const SearchPage = page(() => import('../features/search/SearchPage'), 'SearchPage');
+const SocialPage = page(() => import('../features/social/SocialPage'), 'SocialPage');
+const RoomInvitationsPage = page(() => import('../features/social/RoomInvitationsPage'), 'RoomInvitationsPage');
+const MusicSharesPage = page(() => import('../features/social/MusicSharesPage'), 'MusicSharesPage');
 
 /** Provides an announced route placeholder while a page-specific bundle loads. */
 const RouteLoadingPage = () => {
