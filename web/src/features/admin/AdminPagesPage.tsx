@@ -7,7 +7,7 @@
  *   Constants: PageOrderList, PageOrderNotice, PageOrderApproval
  * @end-catalog */
 
-import { lazy, Suspense, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useId, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { RefreshCw } from 'lucide-react';
 import { ModalDialog } from '../../components/ModalDialog';
@@ -89,6 +89,8 @@ function PageItems({ slug, onSelect }: { slug: PageSlug; onSelect: (value: PageS
   useEffect(() => { if (orderConfirm && orderStale) orderRecovery.current?.focus(); }, [orderConfirm, orderStale]);
   const page = query.data?.page;
   const canOrder = Boolean(page && eligibleOrder(page));
+  // Several placements sharing one legacy identity keep the entry visible but disabled, with the reason.
+  const orderAmbiguous = Boolean(page && page.items.length > 1 && !canOrder), orderUnavailable = useId();
   const presentation = { text: t, styles, renderIcon: (item: AdminPage['items'][number], size: number) => <PagePlacementTypeIcon item={item} size={size} /> };
   const changed = draft ? draft.items.filter((item, index) => draft.originalIds[index] !== item.itemId).length : 0;
   /** Begins from a confirmed snapshot, never an uncertain operation's frozen payload. */
@@ -115,7 +117,8 @@ function PageItems({ slug, onSelect }: { slug: PageSlug; onSelect: (value: PageS
     <button type="button" className={styles.refresh} disabled={command.running} onClick={command.command.retry}>{t('common.retry_operation')}</button></>;
   const conflictActions = <><button type="button" ref={orderRecovery} className={styles.refresh} disabled={query.isFetching} onClick={cancelOrder}>{t('pages.order_cancel')}</button>
     <button type="button" className={styles.refresh} disabled={query.isFetching} onClick={() => void restartOrder()}>{t('pages.order_restart')}</button></>;
-  const refresh = <button type="button" className={styles.refresh} disabled={query.isFetching || Boolean(draft)} onClick={() => void query.refetch()}>
+  // A later refresh or write supersedes the previous save confirmation.
+  const refresh = <button type="button" className={styles.refresh} disabled={query.isFetching || Boolean(draft)} onClick={() => { setSaved(false); void query.refetch(); }}>
     <RefreshCw size={17} aria-hidden className={query.isFetching && query.data ? styles.spinning : undefined} />
     {t(query.isFetching && query.data ? 'pages.refreshing' : 'common.refresh')}
   </button>;
@@ -131,9 +134,11 @@ function PageItems({ slug, onSelect }: { slug: PageSlug; onSelect: (value: PageS
       {!orderFailure && !(operationOrder && command.intent && !draft) && command.error !== 'conflict' && refresh}
       {draft && !orderFailure ? <><button type="button" className={styles.refresh} disabled={command.running} onClick={cancelOrder}>{t('pages.order_cancel')}</button>
         <button type="button" ref={orderAction} className={styles.refresh} disabled={locked || dragging || !changed || orderStale || orderFailure} onClick={() => setOrderConfirm(true)}>{t('pages.order_save')}</button></>
-        : !draft && canOrder && <button type="button" ref={orderAction} className={styles.refresh} disabled={locked || query.isFetching || orderFailure || !access.catalogEditing} onClick={() => { if (page) beginOrder(page); }}>{t('pages.order_adjust')}</button>}
+        : !draft && (canOrder || orderAmbiguous) && <button type="button" ref={orderAction} className={styles.refresh} aria-describedby={orderAmbiguous ? orderUnavailable : undefined}
+          disabled={!canOrder || locked || query.isFetching || orderFailure || !access.catalogEditing} onClick={() => { if (page) beginOrder(page); }}>{t('pages.order_adjust')}</button>}
     </div></div>
     <div className={styles.overview}><h2>{draft ? t('pages.order_heading', { count: changed }) : <>{t('catalog.' + slug)}{query.data && <> · {t('pages.item_count', { count: query.data.page.items.length })}</>}</>}</h2><p>{t(draft ? 'pages.order_hint' : 'pages.order')}</p></div>
+    {!draft && orderAmbiguous && <p id={orderUnavailable} className={styles.refreshStatus}>{t('pages.order_identity')}</p>}
     {saved && <p className={styles.refreshStatus} role="status">{t('pages.order_saved')}</p>}
     {draft && orderStale && !orderConfirm && !orderFailure && <div className={styles.notice} role="alert"><p>{t('pages.order_stale')}</p><div className={styles.noticeActions}>{conflictActions}</div></div>}
     {query.isPending && <p className={styles.state} role="status">{t('common.loading')}</p>}
@@ -151,7 +156,7 @@ function PageItems({ slug, onSelect }: { slug: PageSlug; onSelect: (value: PageS
       {command.error === 'conflict' && refresh}
     </div>}
     {draft ? <Suspense fallback={<p className={styles.state} role="status">{t('common.loading')}</p>}><PageOrderList {...presentation} renderVisibility={item => <PagePlacementVisibility item={item} />} renderMetadata={item => <><PagePlacementMetadata item={item} /><PageReferenceWarning item={item} /></>} review={draft} disabled={locked || orderStale || orderConfirm} onDragging={setDragging} onChange={items => setDraft(current => current ? { ...current, items } : current)} /></Suspense> : query.data && (query.data.page.items.length ? <ol className={styles.list} aria-label={t('pages.order_current')}>
-      {query.data.page.items.map((item, index) => <PagePlacementRow key={item.itemId} item={item} index={index} locked={locked || orderFailure}
+      {query.data.page.items.map((item, index) => <PagePlacementRow key={orderAmbiguous ? item.itemId + ':' + index : item.itemId} item={item} index={index} locked={locked || orderFailure}
         pending={command.running && operationTarget?.item.itemId === item.itemId}
         onChange={(opener, fallback) => {
           returnFocus.current = opener; pendingFocus.current = fallback;
@@ -183,7 +188,7 @@ function PageItems({ slug, onSelect }: { slug: PageSlug; onSelect: (value: PageS
         <button type="button" ref={cancel} className={styles.refresh} onClick={() => setTarget(null)}>{t('common.cancel')}</button>
         <button type="button" className={styles.refresh + ' ' + styles.confirm} disabled={locked || stale} onClick={() => {
           const guard = adminWorkspace.capture();
-          adminWorkspace.retain(contextKey, target, guard); setOperationTarget(target);
+          setSaved(false); adminWorkspace.retain(contextKey, target, guard); setOperationTarget(target);
           // The mutation disables its opener; Details remains an enabled focus destination.
           returnFocus.current = pendingFocus.current;
           void client.cancelQueries({ queryKey });

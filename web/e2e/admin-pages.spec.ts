@@ -434,6 +434,11 @@ for (const locale of ['en-US', 'zh-Hans'] as const) {
       expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
       await page.screenshot({ path: info.outputPath(`synthetic-order-draft-${locale}-${width}.png`), fullPage: true });
       const save = page.getByRole('button', { name: copy.save, exact: true });
+      if (width === 640) {
+        // The action group wraps as one row rather than leaving Save order alone on a second line.
+        const cancelTop = (await page.getByRole('button', { name: copy.cancel, exact: true }).boundingBox())!.y;
+        expect(Math.abs((await save.boundingBox())!.y - cancelTop)).toBeLessThan(2);
+      }
       await save.click();
       const dialog = page.getByRole('dialog', { name: copy.confirmation, exact: true });
       await expectOrder(dialog.getByRole('list', { name: copy.nextOrder, exact: true }), wantedNames);

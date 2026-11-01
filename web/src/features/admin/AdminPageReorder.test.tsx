@@ -17,6 +17,8 @@
  *   - entering and cancelling adjustment preserve a usable keyboard focus destination
  *   - receipt capacity refusal is definite and permits cancellation without retaining an original-operation retry
  *   - an unclassified HTTP 429 retains the exact uncertain order instead of assuming a definite refusal
+ *   - placements sharing one legacy identity keep the order entry disabled with its reason
+ *   - a later refresh or visibility write clears the previous order confirmation
  * @end-catalog */
 
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
@@ -417,4 +419,42 @@ test('an unclassified HTTP 429 retains the exact uncertain order instead of assu
   await screen.findByText('Order saved.');
   expect(writes).toHaveLength(2);
   expect(writes[1]).toEqual(writes[0]);
+});
+
+test('placements sharing one legacy identity keep the order entry disabled with its reason', async () => {
+  const items = placements(); items[2] = { ...items[2], itemId: items[0].itemId };
+  vi.stubGlobal('fetch', vi.fn(async () => json({ page: page(items) })));
+  await mount();
+  const entry = await screen.findByRole('button', { name: 'Adjust order' });
+  expect(entry).toBeDisabled();
+  expect(entry).toHaveAccessibleDescription(/missing or ambiguous identities/);
+  expect(screen.getByRole('heading', { name: '1 · Featured releases' })).toBeVisible();
+  expect(screen.getByRole('heading', { name: '3 · Missing collection' })).toBeVisible();
+});
+
+test('a later refresh or visibility write clears the previous order confirmation', async () => {
+  let saved = page();
+  vi.stubGlobal('fetch', vi.fn(async (_path: string, init: RequestInit = {}) => {
+    if (init.method === 'POST' || init.method === 'PATCH') {
+      const body = JSON.parse(String(init.body));
+      saved = page(saved.items, changedRevision);
+      return json({ page: saved, receipt: { operationId: body.operationId } });
+    }
+    return json({ page: saved });
+  }));
+  await mount();
+  const dialog = await reviewMove();
+  fireEvent.click(dialog.getByRole('button', { name: 'Confirm save order' }));
+  expect(await screen.findByText(/^Order saved\.?$/)).toBeVisible();
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Refresh status' })).toBeEnabled());
+  fireEvent.click(screen.getByRole('button', { name: 'Refresh status' }));
+  expect(screen.queryByText(/^Order saved\.?$/)).not.toBeInTheDocument();
+
+  const second = await reviewMove();
+  fireEvent.click(second.getByRole('button', { name: 'Confirm save order' }));
+  expect(await screen.findByText(/^Order saved\.?$/)).toBeVisible();
+  await waitFor(() => expect(row('Featured releases').getByRole('button', { name: 'Hide this placement' })).toBeEnabled());
+  fireEvent.click(row('Featured releases').getByRole('button', { name: 'Hide this placement' }));
+  fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Hide this placement' }));
+  expect(screen.queryByText(/^Order saved\.?$/)).not.toBeInTheDocument();
 });
