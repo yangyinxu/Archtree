@@ -1442,7 +1442,7 @@ test('an import created for an Album makes numbering its primary next step once 
   expect(await classes(number)).toEqual(await classes(luna));
   // Once every upload is confirmed it is the next step: primary, under its line, and still waiting for a click.
   server.summary = { append: true, forAlbum: target, appendTracklist: tracklist };
-  await page.reload(); await page.getByRole('button', { name: 'Switch to Admin view' }).click();
+  await page.reload(); await expect(page.getByRole('button', { name: 'Current view: Admin' })).toBeVisible();
   await expect(next).toBeVisible();
   const lunaClasses = await classes(luna);
   expect((await classes(number)).filter(name => !lunaClasses.includes(name))).not.toEqual([]);
