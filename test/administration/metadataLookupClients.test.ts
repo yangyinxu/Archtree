@@ -17,7 +17,7 @@
  *   - every malformed synthetic MusicBrainz answer is invalid or unavailable, never a no-match, and is not cached
  *   - redirects are refused off host before a second lookup and after three hops
  *   - unknown fields are dropped and a placeholder barcode becomes no barcode
- *   - a release lookup keeps each track's own artist credit, leaves out an invalid or over-bound one for its track only, and ranks and proposes as without track credits
+ *   - a release lookup keeps each track's own artist credit, leaves out an invalid or over-bound one for its track only, and distinguishes independent track credits in its import group
  *   - trimming a raw release answer with the release shape keeps its valid track credits, and trimming that projection again changes nothing
  *   - a medium's pregap and data tracks are counted as left out, an invalid one is not counted, and the release still parses
  *   - artist and label alias lookups have fixed URLs, refuse a malformed ID before sending, and keep names in a fixed order without search hints
@@ -339,7 +339,7 @@ test('unknown fields are dropped and a placeholder barcode becomes no barcode', 
     assert.equal(placeholder.barcode, null); assert.equal(placeholder.barcodeText, '0000000000000');
 });
 
-test('a release lookup keeps each track\'s own artist credit, leaves out an invalid or over-bound one for its track only, and ranks and proposes as without track credits', async () => {
+test('a release lookup keeps each track\'s own artist credit, leaves out an invalid or over-bound one for its track only, and distinguishes independent track credits in its import group', async () => {
     const file = 'musicbrainz/synthetic-release-track-credits.json';
     const { musicBrainz } = clients(exchangesOf(file));
     const release = (await musicBrainz.lookupRelease(syntheticId(file), call()))!;
@@ -353,7 +353,7 @@ test('a release lookup keeps each track\'s own artist credit, leaves out an inva
             { name: 'Synthetic B', role: 'featured', joinPhrase: null, musicBrainzId: tracks[1].artistCredit![1].artistId }] },
         { reason: 'placeholder' }, { reason: 'missing' }, { reason: 'missing' }, { reason: 'missing' }]);
     assert.equal(release.trackCount, 6);
-    // The same body without any track credit parses to the same release apart from them, and ranks and proposes alike.
+    // Album values are unchanged; the exact import group separately records its independent track credit.
     const body = structuredClone(loadLookupFixture(file).exchanges[0].body) as { media: { tracks: Record<string, unknown>[] }[] };
     for (const medium of body.media) for (const track of medium.tracks) delete track['artist-credit'];
     const plain = parseMusicBrainzRelease(body), stripped = structuredClone(release);
@@ -364,7 +364,8 @@ test('a release lookup keeps each track\'s own artist credit, leaves out an inva
         discNumber: null, trackNumber: track.position, artistTags: ['Synthetic Lead'], identifiers: { releaseId: null, barcode: null, catalogNumber: null } }));
     const candidate = (value: typeof release) => ({ key: `musicbrainz:${value.releaseId}`, source: 'musicbrainz' as const, releaseId: value.releaseId, summary: null, release: value });
     const ranked = rankLookupCandidates([candidate(release)], files);
-    assert.deepEqual(ranked, rankLookupCandidates([candidate(plain)], files));
+    assert.notEqual(ranked.groups[0].groupKey, rankLookupCandidates([candidate(plain)], files).groups[0].groupKey);
+    assert.deepEqual(ranked.groups[0].proposal.trackArtists?.map(track => [track.discNumber, track.trackNumber, track.artists.map(artist => artist.name)]), [[1, 2, ['Synthetic A', 'Synthetic B']]]);
     assert.deepEqual([ranked.candidates[0].status, ranked.preselection?.basis], ['matching', 'onlyMatchingGroup']);
 });
 

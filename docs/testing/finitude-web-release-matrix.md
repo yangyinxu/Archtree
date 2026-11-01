@@ -58,6 +58,14 @@ Run `npm run build` before the browser gate; the guide build validates its curat
 source references and internal links. The preview verifies document presentation,
 not production account access or deployment.
 
+The `admin-import-track-artists.spec.ts` gate verifies a new Album's independent
+track Artist byline, its selected-by-default publication checkbox, keyboard
+deselection at 320 px, and the approval body excluding the unused track-only
+identity. Unit tests also hold approval when the track-Artists chunk cannot
+load or the Album Artist comparison has unsaved changes. Disposable MongoDB
+tests verify format-4 Credits, shared identities, stale approvals, append
+inheritance, interrupted copies and original-intent recovery without duplicates.
+
 The administrator workbench spec covers the one-approval import upload queue:
 creating an import uploads every selected file one request at a time with no
 per-file dialog, and Resume after reselection reports each file's own result.

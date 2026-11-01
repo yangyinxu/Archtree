@@ -141,8 +141,8 @@ export async function performLookupStep(clients: LookupStepClients, action: Look
 /**
  * The credited artists and the first label whose aliases a run looks up: candidates in ranked order (the preselected one first,
  * then the ranking's order), each fetched release's credited artist IDs in credit order and then its first label's ID, and with
- * `trackArtists` (a review run, whose member credits compare with track credits) then the artist IDs its audio tracks credit, in
- * track order, before the next release; each once, never a placeholder, at most `JOB.aliasLookups`. An iTunes-only candidate
+ * `trackArtists` (every run: a review's member credits and an import's track Artist entries compare with track credits) then the
+ * artist IDs its audio tracks credit, in track order, before the next release; each once, never a placeholder, at most `JOB.aliasLookups`. An iTunes-only candidate
  * credits no MusicBrainz ID, so it adds none.
  */
 export function lookupAliasTargets(candidates: readonly StoredLookupCandidate[], ranking: Pick<StoredLookupRanking, 'candidates' | 'preselection'> | null,
@@ -404,7 +404,7 @@ export function proceedLookupRun(record: MetadataLookupRecord, doc: AdminImportD
             if (collected.action) return running(collected.action, 'itunes');
         }
         // Aliases follow in ranked order; an exhausted source is not asked again for them.
-        const targets = musicBrainzExhausted ? [] : lookupAliasTargets(next.candidates, rank().ranking, { trackArtists: subset });
+        const targets = musicBrainzExhausted ? [] : lookupAliasTargets(next.candidates, rank().ranking, { trackArtists: true });
         if (targets.length) next = { ...next, aliases: targets };
     }
     const target = (Array.isArray(next.aliases) ? next.aliases : []).find(entry => entry.state === 'pending');

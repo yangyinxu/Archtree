@@ -1065,9 +1065,9 @@ test('two candidates differing only in a paired track\'s credit form two groups,
     // A track credit equal to the release's groups with its marker.
     const spelledOut = synthetic(153, [{ lengths: deluxe.media[0].tracks.map(track => track.lengthMs), credits: credits([lead], 'release') }]);
     assert.equal(entryOf(subset([candidate(base), candidate(spelledOut)], threeMembers), spelledOut).groupKey, entryOf(ranked, base).groupKey);
-    // The exact import comparison ignores track credits.
+    // Exact import comparisons also keep independent track credits in separate groups.
     const exact = rankLookupCandidates([candidate(base), candidate(pairedGuest)], files(deluxe.media[0].tracks.map(track => track.lengthMs)));
-    assert.equal(exact.groups.length, 1);
+    assert.equal(exact.groups.length, 2);
 });
 
 test('stored track credits of an unknown shape propose nothing for their members and group like tracks without credits, never throwing', () => {

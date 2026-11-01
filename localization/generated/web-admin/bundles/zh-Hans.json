@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "locale": "zh-Hans",
-  "revision": "sha256-QvLy1A0kAOUBYJ_dUOAaffrygm0ghN1ZLmzcboOXQ7M",
+  "revision": "sha256-tU1Wn2CTMhGEg2LdRjqUGZX8whb7iZFVRHz4v6c1rcE",
   "messages": {
     "admin.album_import.add": "向此专辑添加文件",
     "admin.album_import.append_note": "这些文件会成为此专辑的新曲目，并采用专辑的主要艺术家、曲目顺序和可见度。专辑自身的标题、艺术家、厂牌、封面和可见度保持不变。",
@@ -88,6 +88,15 @@
     "admin.pages.refreshing_copy": "正在刷新，当前显示上次读取的内容。",
     "admin.pages.scope": "仅调整此位置的可见度，不会改变其他位置、原始内容或可复用的轮播、网格、列表定义。",
     "admin.pages.subtitle": "管理首页与资料库的展示位置。",
-    "admin.pages.updating": "处理中…"
+    "admin.pages.updating": "处理中…",
+    "admin.track_artists.album_primary": "使用专辑主要艺术家：{byline}",
+    "admin.track_artists.byline": "曲目艺术家：{byline}",
+    "admin.track_artists.copy": "所选曲目将使用配对发行曲目的艺术家署名。这些署名只保留在曲目上，不会改变专辑艺术家。取消勾选可改用专辑主要艺术家。",
+    "admin.track_artists.inherits": "配对发行曲目没有可用的艺术家列表，将使用专辑主要艺术家。",
+    "admin.track_artists.more_tracks": "另有 {count} 首曲目",
+    "admin.track_artists.review_row": "{name} · 曲目艺术家：{tracks}",
+    "admin.track_artists.save_artists_first": "请先保存或撤销专辑艺术家更改，再确认这些曲目艺术家。",
+    "admin.track_artists.title": "曲目艺术家",
+    "admin.track_artists.use_own": "为 {track} 使用曲目艺术家"
   }
 }

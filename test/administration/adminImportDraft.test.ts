@@ -589,7 +589,7 @@ test('an approval is format 3 with entries of a key, name and primary or feature
         ['an unnamed label', { snapshot: withAlbum({ label: { musicBrainzId: null } as unknown as ImportDraftV2['album']['label'] }), ...frozen }], ['a missing Disc Number', { snapshot: { ...draft(), tracks: [tracks[0], { slotId: slotB, title: '', trackNumber: null }] }, ...frozen }],
         ['an artistName beside entries', { snapshot: { ...draft(), album: { ...draft().album, artistName: 'A' } }, ...frozen }]
     ] as const) assert.equal(importPublicationFormat({ schemaVersion: 3, ...value } as Parameters<typeof importPublicationFormat>[0]), null, label);
-    assert.equal(importPublicationFormat({ schemaVersion: 4, snapshot: draft(), ...frozen }), null, 'a newer format');
+    assert.equal(importPublicationFormat({ schemaVersion: 4, snapshot: draft(), ...frozen }), null, 'an incomplete format-4 approval');
 });
 
 test('a format-2 approval may leave every Disc Number unknown, as long as each track has the field', () => {

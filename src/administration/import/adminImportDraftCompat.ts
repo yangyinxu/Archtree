@@ -196,14 +196,20 @@ function entriesView(raw: unknown, strict: boolean): ImportArtistEntry[] | null 
 const labelView = (raw: unknown): ImportLabelEntry | null =>
     isRecord(raw) && typeof raw.name === 'string' && raw.name.length >= 1 && raw.name.length <= 200 ? { name: raw.name, musicBrainzId: normalizeMusicBrainzId(raw.musicBrainzId) } : null;
 const discView = (value: unknown) => Number.isInteger(value) && (value as number) >= 1 && (value as number) <= 999 ? value as number : null;
-/** Draft v2 view of any stored draft: a v1 draft converts; otherwise known fields only, one track per slot in stored order. */
-export function importDraftV2View(raw: unknown, manifest: ImportManifest, importId: string): ImportDraftV2 {
+/**
+ * Draft v2 view of any stored draft: a v1 draft converts; otherwise known fields only, one track per slot in stored order. With
+ * `trackArtists` (server reads of an import only, never the editor's DTO), a track whose stored Artist entries read strictly as a
+ * non-empty list also carries them.
+ */
+export function importDraftV2View(raw: unknown, manifest: ImportManifest, importId: string, options: { trackArtists?: boolean } = {}): ImportDraftV2 {
     if (v1Shaped(raw)) return importDraftV2FromV1(legacyDraftView(raw, manifest), importId);
     const draft = isRecord(raw) ? raw : {}, album = isRecord(draft.album) ? draft.album : {};
     const slots = new Set(manifest.files.map(file => file.slotId)), seen = new Set<string>(), tracks: ImportDraftV2['tracks'] = [];
     for (const track of list(draft.tracks)) {
         if (!isRecord(track) || typeof track.slotId !== 'string' || !slots.has(track.slotId) || seen.has(track.slotId)) continue;
-        seen.add(track.slotId); tracks.push({ slotId: track.slotId, title: text(track.title, 300), discNumber: discView(track.discNumber), trackNumber: position(track.trackNumber) });
+        const entries = options.trackArtists ? entriesView(track.artists, true) : null;
+        seen.add(track.slotId); tracks.push({ slotId: track.slotId, title: text(track.title, 300), discNumber: discView(track.discNumber), trackNumber: position(track.trackNumber),
+            ...(entries?.length ? { artists: entries } : {}) });
     }
     for (const file of manifest.files) if (!seen.has(file.slotId)) tracks.push({ slotId: file.slotId, title: '', discNumber: null, trackNumber: null });
     return { album: { title: text(album.title, 300), artists: entriesView(album.artists, false) ?? [], label: labelView(album.label), releaseDate: date(album.releaseDate),
@@ -345,8 +351,9 @@ export function legacyPublishedView(publication?: ImportPublication): AdminImpor
     return { albumId: publication.albumId, artistId: publication.artistId, trackIds: publication.tracks.map(track => track.id) };
 }
 /**
- * Published identities for the editor: format 3 lists every credited Artist (in Credit order, once each) and the label; formats 1
- * and 2 map their Artist to [artistId]; anything malformed is null.
+ * Published identities for the editor: format 3 lists every credited Artist (in Credit order, once each) and the label, and format 4
+ * also each Artist only its Tracks credit, after the Album's; formats 1 and 2 map their Artist to [artistId]; anything malformed is
+ * null.
  */
 export function importPublishedV2View(publication?: ImportPublication): ImportPublishedV2 | null {
     const legacy = legacyPublishedView(publication); if (!legacy || !publication) return null;
@@ -354,7 +361,11 @@ export function importPublishedV2View(publication?: ImportPublication): ImportPu
     if (!Array.isArray(artists)) return { albumId: legacy.albumId, artistIds: [legacy.artistId], organizationId: null, trackIds: legacy.trackIds };
     if (artists.length < 1 || artists.length > 50 || !artists.every(artist => isRecord(artist) && objectId(artist.artistId))) return null;
     if (label !== null && !(isRecord(label) && objectId(label.organizationId))) return null;
-    return { albumId: legacy.albumId, artistIds: [...new Set(artists.map(artist => artist.artistId as string))], organizationId: isRecord(label) ? label.organizationId as string : null, trackIds: legacy.trackIds };
+    const trackOnly = publication.schemaVersion === 4 && Array.isArray(publication.trackIdentities) ? publication.trackIdentities : [];
+    if (!trackOnly.every(artist => isRecord(artist) && objectId(artist.artistId))) return null;
+    const artistIds = [...new Set([...artists, ...trackOnly].map(artist => artist.artistId as string))];
+    if (artistIds.length > 50) return null;
+    return { albumId: legacy.albumId, artistIds, organizationId: isRecord(label) ? label.organizationId as string : null, trackIds: legacy.trackIds };
 }
 /** Publication state, recovery and catalog identities as a v1 client reads them; cleanup is pending only while cancelled. */
 export function legacyPublicationView(publication: ImportPublication | undefined, actorId: string): Pick<AdminImportDetail, 'publication' | 'publicationRecovery' | 'published'> {

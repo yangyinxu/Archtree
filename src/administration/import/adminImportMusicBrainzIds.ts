@@ -31,10 +31,11 @@ import { readyOrganizationLifecycleFilter } from '../../services/catalog/organiz
 /** Names lookup found per MusicBrainz ID: stored on the import document and frozen into a publication. */
 export type ImportMusicBrainzNames = { musicBrainzId: string; names: string[] }[];
 /**
- * One entry per Artist entry and the label (21 IDs) and at most 32 names per ID. An existing-Album review keeps one per identity
- * and the label instead (REVIEW_LOOKUP_LIMITS.identities + 1, 513 IDs).
+ * One entry per Artist entry, track-only identity (an import's identity draft, importIdentityDraft) and the label (41 IDs: the Album
+ * entries' first, which a release before track Artist entries reads as its first 21) and at most 32 names per ID. An existing-Album
+ * review keeps one per identity and the label instead (REVIEW_LOOKUP_LIMITS.identities + 1, 513 IDs).
  */
-export const IMPORT_MUSICBRAINZ_NAME_LIMITS = Object.freeze({ ids: 21, names: 32, name: 200 });
+export const IMPORT_MUSICBRAINZ_NAME_LIMITS = Object.freeze({ ids: 41, names: 32, name: 200 });
 /** Whose IDs names are kept for: an import's Album entries and label, or also a review's member entries (`review`). */
 type CarriedOptions = { review?: boolean };
 const idBound = (options: CarriedOptions) => options.review ? REVIEW_LOOKUP_LIMITS.identities + 1 : IMPORT_MUSICBRAINZ_NAME_LIMITS.ids;
@@ -82,7 +83,7 @@ export function importMusicBrainzNameMap(stored: unknown, draft: ImportDraftV2, 
     return map;
 }
 /**
- * The stored names of still-carried IDs merged with newly `found` ones (stored first), fold-deduplicated and bounded to 21 IDs in
+ * The stored names of still-carried IDs merged with newly `found` ones (stored first), fold-deduplicated and bounded to 41 IDs in
  * draft order and 32 names each. A review (`review`) also keeps the IDs its members' entries carry, up to 513 IDs. Pure.
  */
 export function mergeImportMusicBrainzNames(stored: unknown, found: ReadonlyMap<string, readonly string[]>, draft: ImportDraftV2, options: CarriedOptions = {}): ImportMusicBrainzNames {

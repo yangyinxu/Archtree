@@ -899,7 +899,7 @@ test('Artist and label decisions bind by key and name, make those values the adm
         ['an unknown entry', [decision('artist', { entryKey: randomUUID(), boundName: 'Lorem' })]], ['an Artist decision naming no entry', [decision('artist')]], ['a label decision naming an entry', [decision('label', { entryKey: e1, boundName: 'Sit Records Ltd' })]],
         ['an Album decision naming an entry', [decision('album', { entryKey: e1 })]], ['two decisions for one entry', [decision('artist', lorem), decision('artist', { ...lorem, action: 'skip' })]],
         ['two entries reusing one Artist', [decision('artist', { ...lorem, ...reused }), decision('artist', { entryKey: e3, boundName: 'Dolor', ...reused })]], ['an unknown scope', [decision('organization')]],
-        ['123 decisions', Array.from({ length: 123 }, () => decision('album'))],
+        ['143 decisions', Array.from({ length: 143 }, () => decision('album'))],
         ['an Album decision binding a name', [decision('album', { boundName: 'Synthetic Album' })]], ['a track-less bound name that is not text', [decision('artist', { ...lorem, boundName: 7 })]],
         ['a bound name over 200 characters', [decision('artist', { ...lorem, boundName: 'n'.repeat(201) })]]
     ] as const) await assert.rejects(async () => decideAdminImportDuplicates(by, id, { ...mutation(renamed.item.revision), decisions }), errorCode('ADMIN_IMPORT_INVALID_INPUT'), label);

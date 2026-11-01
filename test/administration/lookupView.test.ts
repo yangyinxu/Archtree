@@ -103,15 +103,16 @@ test('the view allowlists evidence: no link, ISRC, recording ID, account, grant,
     assert.deepEqual([view.applied!.choice, view.applied!.basis, view.applied!.candidateKey, view.applied!.values.map(value => value.path).slice(0, 2), view.applied!.conflicts, view.applied!.flagged,
         view.applied!.source, view.applied!.notChecked], ['preselected', 'onlyMatchingGroup', `musicbrainz:${mbid(1)}`, ['album.title', 'album.artists'], [], [], 'musicbrainz', false]);
     assert.deepEqual([view.needsAnswer, view.blocking, view.itunes], [{ tie: false, conflicts: [] }, false, 'notQueried']);
-    // Stored track credits, the same-as-release marker included, give the same view as none.
+    // Independent track credits are projected as source evidence; an agreeing same-as-release marker adds nothing.
     const guest = { name: 'Synthetic Guest', joinPhrase: '', artistId: mbid(3), artistName: 'Synthetic Guest' };
     const credited = release(1, { media: [{ position: 1, format: 'CD', tracks: [{ ...track(1, 'First Song'), artistCredit: release(1).artistCredit }, { ...track(2, 'Second Song'), artistCredit: [guest] }] }] });
     const storedOf = (value: MusicBrainzRelease) => withCandidateRelease([{ ...stored(value), release: null, details: 'pending' }], 0, value);
     assert.deepEqual(storedOf(credited)[0].release!.media[0].tracks.map(item => item.artistCredit), ['release', [guest]]);
     const viewOf = (candidates: StoredLookupCandidate[]) => { const shown = project(); return importLookupView(applyPreselectedLookup(shown, record(shown, candidates), now).record, shown)!; };
     const withCredits = viewOf(storedOf(credited));
-    assert.deepEqual(withCredits, viewOf(storedOf(release(1))));
-    assert.equal(JSON.stringify(withCredits).includes('Synthetic Guest'), false);
+    assert.deepEqual(withCredits.groups[0].proposal.trackArtists, [{ discNumber: 1, trackNumber: 2, artists: [{ name: 'Synthetic Guest', role: 'primary', joinPhrase: null, musicBrainzId: mbid(3) }] }]);
+    assert.notEqual(withCredits.groups[0].groupKey, viewOf(storedOf(release(1))).groups[0].groupKey);
+    for (const secret of ['recordingId', 'actorId', 'leaseOwner', '://']) assert.equal(JSON.stringify(withCredits).includes(secret), false);
 });
 
 test('candidates follow the ranking when ranked and the stored order as incomplete otherwise; an unreadable record is no view', () => {

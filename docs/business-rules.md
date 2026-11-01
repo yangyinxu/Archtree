@@ -1915,11 +1915,29 @@ The wire protocol and operational bounds are documented in
   featured Artist Credit with its join phrase, then the label as an Album Credit
   with role `label` whose subject is an Organization. A new label Organization
   has the label type and a reused one keeps its own; the label is never an
-  Artist or a plain text field. The MediaTracks of a new Album receive its
-  ordered primary Artist Credits with their join phrases; featured entries and
-  the label stay on the Album. New Artists and Organizations take the draft's
-  visibility. Imports do not yet support an Album without a primary Artist, such
-  as a compilation, and never suggest a stand-in Artist for one.
+  Artist or a plain text field. A new Album's MediaTracks ordinarily receive
+  its ordered primary Artist Credits with their join phrases; the label stays
+  on the Album. When the applied release pairs every selected file by position
+  with exactly one release track, each file may instead receive that release
+  track's own ordered primary and featured Artist Credits, with their join
+  phrases. A usable list has at least one primary Artist and at most 20 entries.
+  These Credits stay on the MediaTrack and never promote an Artist to the Album.
+  Import release groups remain distinct when their independent track Artists
+  differ, and the release choice shows those differences before applying one.
+  The summary shows each differing track's Artists. Publication lists those
+  tracks selected by default, their roles, join phrases and identity decisions;
+  deselecting one uses the Album's primary Credits. An unusable or missing list,
+  a repeated identity within one track, or a track exceeding the import's limit
+  of 20 track-only identities also uses the Album's primary Credits, explained
+  in the summary. Shared identities use one decision across Album and tracks;
+  track-only identities follow the same candidate, revision and MusicBrainz ID
+  rules as Album Artists. Deselected or skipped tracks create no unused Artists.
+  Another release or no release replaces or clears these automatic lists;
+  these lists stay automatic after approval, and administrators and Luna never
+  type or change them. Appends keep inheriting the target Album's primary
+  Credits and ignore the imported track lists.
+  New Artists and Organizations take the draft's visibility. Imports do not yet
+  support an Album without a primary Artist, such as a compilation, and never suggest a stand-in Artist for one.
 - After uploads and metadata lookup, an import opens on one Review and publish
   summary. It shows the draft values, the Artist entries with their roles and
   join phrases, the label, the disc and track order, identity decisions, the

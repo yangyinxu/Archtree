@@ -4,8 +4,8 @@
  * leaves the saved draft as it was. Owner rules: docs/business-rules.md (Administrator Album Imports).
  */
 import type { ClientSession } from 'mongodb';
-import { AdminImportError, IMPORT_APPROVAL_FIELDS, invalidImport } from './adminImportContract';
-import { DRAFT_V2_LIMITS, hasOwn, retainBoundDecisions, type ImportDraftV2 } from './adminImportDraft';
+import { ADMIN_IMPORT_LIMITS, AdminImportError, IMPORT_APPROVAL_FIELDS, invalidImport, uuid } from './adminImportContract';
+import { DRAFT_V2_LIMITS, hasOwn, importIdentityEntries, importTrackArtistPlan, retainBoundDecisions, type ImportDraftV2 } from './adminImportDraft';
 import { importDraftV2View } from './adminImportDraftCompat';
 import { importCoverSelectable } from './adminImportMediaTypes';
 import { chooseImportCover, importAlbumNotCreated, importCoverChoice } from './adminImportCoverAutomation';
@@ -17,10 +17,11 @@ import type { MetadataLookupRecord } from '../lookup/metadataLookupRecord';
 
 /**
  * Bounds a publish body's approval fields before its intent is fingerprinted: changes as a field save bounds them (none allowed),
- * decisions as /decisions bounds them (at most 122 flat records of at most 1 KB, two entries never reusing one Artist), a cover
- * slot and a digest of at most 64 characters, the optional shown `preselections` as at most 122 well-formed preselections
- * (shownPreselectionKey) and the optional shown `musicBrainzIds` as at most 21 well-formed ID writes (shownMusicBrainzIdWriteKey).
- * A body that predates one-step approval has none of them and passes; every body this release admits passes, so a lost-response
+ * decisions as /decisions bounds them (at most 142 flat records of at most 1 KB, two entries never reusing one Artist), a cover
+ * slot and a digest of at most 64 characters, the optional shown `preselections` as at most 142 well-formed preselections
+ * (shownPreselectionKey), the optional shown `musicBrainzIds` as at most 41 well-formed ID writes (shownMusicBrainzIdWriteKey) and
+ * the optional `trackArtists` as at most 100 items, each exactly `{slotId, selected}` with a distinct UUID slot and a boolean. A
+ * body that predates one-step approval has none of them and passes; every body this release admits passes, so a lost-response
  * replay is never refused.
  */
 export function boundImportApproval(body: Record<string, unknown>): void {
@@ -33,6 +34,12 @@ export function boundImportApproval(body: Record<string, unknown>): void {
         || body.preselections.some(item => !boundedJson(item, 1, 1_000) || shownPreselectionKey(item) === null))) invalidImport();
     if (hasOwn(body, 'musicBrainzIds') && (!Array.isArray(body.musicBrainzIds) || body.musicBrainzIds.length > IMPORT_MUSICBRAINZ_NAME_LIMITS.ids
         || body.musicBrainzIds.some(item => !boundedJson(item, 1, 300) || shownMusicBrainzIdWriteKey(item) === null))) invalidImport();
+    if (hasOwn(body, 'trackArtists')) {
+        const items = body.trackArtists;
+        if (!Array.isArray(items) || items.length > ADMIN_IMPORT_LIMITS.files || items.some(item => !item || typeof item !== 'object' || Array.isArray(item) || Object.keys(item).length !== 2
+            || !uuid((item as Record<string, unknown>).slotId) || typeof (item as Record<string, unknown>).selected !== 'boolean')
+            || new Set(items.map(item => (item as { slotId: string }).slotId.toLowerCase())).size !== items.length) invalidImport();
+    }
 }
 
 /**
@@ -52,7 +59,17 @@ export async function saveImportApproval(doc: AdminImportDocument, body: Record<
     if (adminImportDetail(doc, actor, undefined, lookup).approvalDigest !== body.approvalDigest) throw new AdminImportError(409, 'ADMIN_IMPORT_APPROVAL_STALE');
     const shown = importCoverChoice(doc);
     const draft = storedDraftV2(doc), before = structuredClone(draft);
-    doc.decisions = await parseImportDecisions(doc, draft, body.decisions, session);
+    // A deselected or skipped track cannot make an otherwise unused Artist revision a prerequisite of approval.
+    // Only known track-only identities are omitted here; unknown entries still fail strict decision parsing.
+    const selections = (body.trackArtists ?? []) as { slotId: string; selected: boolean }[];
+    const row = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+    const submitted = body.decisions as unknown[];
+    const excluded = new Set([...selections.filter(item => !item.selected).map(item => item.slotId),
+        ...submitted.filter(row).filter(item => item.scope === 'track' && item.action === 'skip').map(item => item.slotId as string)]);
+    const trackOnly = new Set(importTrackArtistPlan(draft).identities.map(identity => identity.key));
+    const needed = new Set(importIdentityEntries(draft, excluded).map(entry => entry.key));
+    const decisions = submitted.filter(item => !row(item) || item.scope !== 'artist' || !trackOnly.has(item.entryKey as string) || needed.has(item.entryKey as string));
+    doc.decisions = await parseImportDecisions(doc, draft, decisions, session);
     if (body.changes.length) applyAdministratorChanges({ draft, draftOrigins: doc.draftOrigins ??= {} },
         parseDraftChanges(body.changes, doc.manifest, draft, { names: importMusicBrainzNameMap(doc.musicBrainzNames, draft) }), importDraftV2View(draft, doc.manifest, doc._id.toHexString()));
     if (!draftWithinSizeLimit(before, draft)) invalidImport();

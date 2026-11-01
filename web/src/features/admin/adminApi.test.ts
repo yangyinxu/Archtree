@@ -244,7 +244,7 @@ test('the server Draft v2 projection parses strictly with its approval digest, b
     // A decision without entryKey (an outdated shape), or one on an unknown scope, is refused.
     { ...projected, decisions: [{ scope: decision.scope, slotId: decision.slotId, action: decision.action, candidateId: decision.candidateId, candidateRevision: decision.candidateRevision }] },
     { ...projected, decisions: [{ ...decision, scope: 'organization' }] }, { ...projected, decisions: [{ ...decision, entryKey: 'not-a-key' }] },
-    { ...projected, decisions: Array(123).fill(decision) },
+    { ...projected, decisions: Array(143).fill(decision) },
     // A decision without its bound name is an outdated shape too.
     { ...projected, decisions: [{ scope: decision.scope, slotId: decision.slotId, entryKey: decision.entryKey, action: decision.action, candidateId: decision.candidateId, candidateRevision: decision.candidateRevision }] },
     { ...projected, decisions: [{ ...decision, boundName: 'n'.repeat(201) }] },

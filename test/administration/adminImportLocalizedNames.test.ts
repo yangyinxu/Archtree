@@ -24,9 +24,9 @@ test('an import keeps the localized name groups that hold a current Artist entry
     assert.deepEqual(cleaned, [['Isekaijoucho', 'ヰ世界情緒', 'Fifth', 'Sixth']]);
     assert.equal(cleaned[0].length, IMPORT_LOCALIZED_NAME_LIMITS.names);
     assert.deepEqual(mergeImportLocalizedNames([['Only']], [['Only', 'only']], draft('Only')), []);
-    // Malformed stored or found values read as none; at most 21 groups are kept.
+    // Malformed stored or found values read as none; at most 41 groups are kept (an import's Album entries and track-only identities).
     assert.deepEqual(mergeImportLocalizedNames('x', [7 as never, ['a']], draft('a')), []);
-    const many = Array.from({ length: 30 }, (_unused, index) => [`Name ${index}`, `名 ${index}`]);
+    const many = Array.from({ length: 50 }, (_unused, index) => [`Name ${index}`, `名 ${index}`]);
     assert.equal(mergeImportLocalizedNames(many, [], draft(...many.map(group => group[0]))).length, IMPORT_LOCALIZED_NAME_LIMITS.groups);
     assert.deepEqual([cleanLocalizedName(' A '), cleanLocalizedName(''), cleanLocalizedName(7), cleanLocalizedName('a\u0000b')], ['A', null, null, null]);
 });

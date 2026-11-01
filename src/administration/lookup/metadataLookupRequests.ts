@@ -76,7 +76,8 @@ export type ImportLookupResponse = { lookup: ImportLookupView | null; revision: 
 /**
  * The import's lookup view (null before any run), its revision and automatic-write counter, and the Review and publish summary
  * state (importSummaryView) read in the same snapshot: with the provider calls used today, this server's lookup configuration
- * and the identity rows of the saved draft that neither a saved decision nor a preselection answers (the candidates Review reads),
+ * and the identity rows of the saved draft that neither a saved decision nor a preselection answers (the candidates Review reads;
+ * a track-only identity is answered in Review or by deselecting its tracks in the confirmation, so it is not counted),
  * and, for a saved append whose publication is not complete, its target's expected tracklist and members (readAppendTarget).
  * `musicBrainzNames` are the names lookup found for each MusicBrainz ID the saved draft carries: a renamed entry keeps its ID
  * only under one of them.
@@ -87,7 +88,8 @@ export async function getAdminImportLookup(actor: string, id: string, configurat
         const doc = await importCollection().findOne({ _id: new ObjectId(id), ...importPurposeFilter }, { session });
         if (!doc) throw notFound();
         const stored = await importLookupRecord(doc._id, session), now = new Date(), identity = await importSavedIdentity(doc, session);
-        const preselections = importIdentityPreselections(identity.draft, identity.decisions, identity.candidates);
+        // Preselections cover the track-only identities too (the identity draft); the summary's count reads the saved draft's rows only.
+        const preselections = importIdentityPreselections(identity.identityDraft, identity.decisions, identity.candidates);
         const identityAnswers = importIdentityAnswers(identity.draft, identity.decisions, preselections);
         // A complete publication lists no rows (importSummaryView), so its target is not read.
         const appendTarget = doc.media?.publication?.state === 'complete' ? null : await readAppendTarget(identity.decisions, session);

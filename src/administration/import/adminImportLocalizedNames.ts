@@ -10,10 +10,11 @@ import { REVIEW_LOOKUP_LIMITS } from '../lookup/lookupReviewValues';
  */
 export type ImportLocalizedNames = string[][];
 /**
- * At most 21 groups (one per Artist entry, and one spare), of at most 4 names of at most 200 characters each. An existing-Album
- * review (`review`), whose members' entries name artists too, keeps one group per review identity instead (512 groups).
+ * At most 41 groups (one per Artist entry and track-only identity of an import's identity draft, and one spare), of at most 4 names
+ * of at most 200 characters each. An existing-Album review (`review`), whose members' entries name artists too, keeps one group per
+ * review identity instead (512 groups).
  */
-export const IMPORT_LOCALIZED_NAME_LIMITS = Object.freeze({ groups: 21, names: 4, name: 200 });
+export const IMPORT_LOCALIZED_NAME_LIMITS = Object.freeze({ groups: 41, names: 4, name: 200 });
 /** Whose names groups are kept for: an import's Album entries, or also a review's member entries (`review`). */
 type LocalizedOptions = { review?: boolean };
 const groupBound = (options: LocalizedOptions) => options.review ? REVIEW_LOOKUP_LIMITS.identities : IMPORT_LOCALIZED_NAME_LIMITS.groups;

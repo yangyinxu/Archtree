@@ -170,9 +170,18 @@ function proposalView(raw: unknown): LookupProposal | null {
     const numbered = tracks.map(track => isRecord(track) && count(track.discNumber) !== null && count(track.trackNumber) !== null && text(track.title) !== null
         ? { discNumber: track.discNumber as number, trackNumber: track.trackNumber as number, title: track.title as string } : null);
     if (entries.some(entry => entry === null) || numbered.some(track => track === null)) return null;
+    // Independent track credits are evidence in exact import groups, bounded and projected just like Album Artist entries.
+    const own = raw.trackArtists === undefined ? [] : Array.isArray(raw.trackArtists) ? raw.trackArtists : null;
+    if (!own || own.length > LIMITS.tracks) return null;
+    const trackArtists = own.map(track => {
+        if (!isRecord(track) || count(track.discNumber) === null || count(track.trackNumber) === null || !Array.isArray(track.artists) || track.artists.length < 1 || track.artists.length > 20) return null;
+        const nested = proposalView({ albumTitle: '', artists: track.artists, label: null, releaseDate: null, tracks: [] });
+        return nested ? { discNumber: track.discNumber as number, trackNumber: track.trackNumber as number, artists: nested.artists } : null;
+    });
+    if (trackArtists.some(track => track === null)) return null;
     return { albumTitle, artists: entries as LookupProposal['artists'], label: raw.label as string | null,
         labelMusicBrainzId: raw.label === null ? null : normalizeMusicBrainzId(raw.labelMusicBrainzId), releaseDate: raw.releaseDate === null ? null : date(raw.releaseDate),
-        tracks: numbered as LookupProposal['tracks'] };
+        tracks: numbered as LookupProposal['tracks'], ...(trackArtists.length ? { trackArtists: trackArtists as NonNullable<LookupProposal['trackArtists']> } : {}) };
 }
 
 const position = (value: unknown, max: number): number | null => Number.isSafeInteger(value) && (value as number) >= 1 && (value as number) <= max ? value as number : null;

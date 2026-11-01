@@ -23,7 +23,7 @@
  *   - after the details, a run looks up the aliases of its credited artists and first label once each, never a placeholder, and ranks with them
  *   - alias lookups are bounded to 16 per run, a source failure fails every remaining target and ranks at once without an attempt, and a record without aliases completes
  *   - alias targets follow the ranking with the preselection first, each release's credits then its first label, each ID once, never a placeholder or an unfetched release, at most 16
- *   - an import run fetches a release whose tracks carry credits, an invalid one included, stores them compactly, never looks up a track-only artist and ranks as without them
+ *   - an import run fetches a release whose tracks carry credits, an invalid one included, stores them compactly, looks up a track-only artist after the release's and records independent track credits in its import group
  *   - Pandora Call romanized: MusicBrainz finds nothing, iTunes gives the Japanese title, and the bridge finds the singles in MusicBrainz
  *   - a barcode is looked up in iTunes when MusicBrainz finds nothing for it, and the collection it names is searched again in MusicBrainz
  *   - a MusicBrainz matching group never starts the iTunes stage, and a run planned from identifiers iTunes cannot search has none
@@ -586,7 +586,7 @@ test('alias targets follow the ranking with the preselection first, each release
     assert.deepEqual(lookupAliasTargets([unfetched], null), []);
 });
 
-test('an import run fetches a release whose tracks carry credits, an invalid one included, stores them compactly, never looks up a track-only artist and ranks as without them', async () => {
+test('an import run fetches a release whose tracks carry credits, an invalid one included, stores them compactly, looks up a track-only artist after the release\'s and records independent track credits in its import group', async () => {
     const doc = project(3, index => tags({ album: 'Synthetic Album', albumArtists: ['Synthetic Ensemble'], durationMs: [200_000, 210_000, 220_000][index] }));
     const record = runOf(doc), queries = record.queries as { query: MusicBrainzReleaseQuery }[];
     const lead = { name: 'Synthetic Ensemble', joinphrase: '', artist: { id: mbid(30), name: 'Synthetic Ensemble' } };
@@ -596,7 +596,8 @@ test('an import run fetches a release whose tracks carry credits, an invalid one
         media: [{ position: 1, format: 'CD', tracks: [200_000, 210_000, 220_000].map((length, index) => ({ position: index + 1, number: String(index + 1), title: `Synthetic Track ${index + 1}`,
             length, recording: { id: mbid(900 + index), length }, ...(trackCredits ? { 'artist-credit': trackCredits[index] } : {}) })) }] });
     const run = async (trackCredits: unknown[] | null) => {
-        const client = clientOf([...queries.map(query => searchAnswer(query.query, [[mbid(1), 3]])), answer(trackCredits), aliasAnswer('artist', mbid(30), ['Synthetic Ensemble'])]);
+        const client = clientOf([...queries.map(query => searchAnswer(query.query, [[mbid(1), 3]])), answer(trackCredits), aliasAnswer('artist', mbid(30), ['Synthetic Ensemble']),
+            ...(trackCredits ? [aliasAnswer('artist', mbid(31), ['Synthetic Guest'])] : [])]);
         return { done: await drive(record, doc, client), client };
     };
     const credited = await run([[lead], featuring, invalid]), plain = await run(null);
@@ -605,13 +606,15 @@ test('an import run fetches a release whose tracks carry credits, an invalid one
     assert.deepEqual(stored.release!.media[0].tracks.map(track => track.artistCredit), ['release', [
         { name: 'Synthetic Ensemble', joinPhrase: ' feat. ', artistId: mbid(30), artistName: 'Synthetic Ensemble' },
         { name: 'Synthetic Guest', joinPhrase: '', artistId: mbid(31), artistName: 'Synthetic Guest' }], undefined]);
-    // Only the release's credited artist is looked up, and the stored candidate is otherwise the one without track credits.
-    assert.deepEqual(aliasLookups(credited.client), [musicBrainzUrls.artistAliases(mbid(30)).href]);
-    assert.deepEqual(aliasLookups(credited.client), aliasLookups(plain.client));
+    // The release's credited artist is looked up first, then the artist only a track credits (an import's track Artist entries
+    // read its aliases); the invalid ID is never asked, and the stored candidate is otherwise the one without track credits.
+    assert.deepEqual(aliasLookups(credited.client), [musicBrainzUrls.artistAliases(mbid(30)).href, musicBrainzUrls.artistAliases(mbid(31)).href]);
+    assert.deepEqual(aliasLookups(plain.client), [musicBrainzUrls.artistAliases(mbid(30)).href]);
     const withoutCredits = structuredClone(stored);
     for (const track of withoutCredits.release!.media[0].tracks) delete track.artistCredit;
     assert.deepEqual(withoutCredits, plain.done.candidates[0]);
-    assert.deepEqual(credited.done.ranking, plain.done.ranking);
+    assert.notEqual(credited.done.ranking!.groups[0].groupKey, plain.done.ranking!.groups[0].groupKey);
+    assert.deepEqual(credited.done.ranking!.groups[0].proposal.trackArtists?.map(track => [track.discNumber, track.trackNumber, track.artists.map(artist => artist.name)]), [[1, 2, ['Synthetic Ensemble', 'Synthetic Guest']]]);
     assert.equal(credited.done.ranking!.preselection?.basis, 'onlyMatchingGroup');
 });
 

@@ -36,6 +36,7 @@
  *   - a review's chooser sits in one collapsed Reference releases disclosure that counts the possible releases and says what using one does, open only while choosing is the next step; an import has none
  *   - the Reference releases disclosure never folds under an open pairing panel whose save's re-rank applies the release, and closing the panel leaves it open
  *   - a release card whose records show the same details says nothing tells them apart and numbers their edition buttons, never taking them for one edition
+ *   - releases differing only in independent track Artists show those bylines before either is chosen
  * @end-catalog */
 
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
@@ -860,4 +861,15 @@ test('a release card whose records show the same details says nothing tells them
   expect(cards.getByText('0000000000017')).toBeInTheDocument(); expect(cards.getByText('0000000000024')).toBeInTheDocument();
   expect(screen.queryByText(/cannot tell them apart/)).not.toBeInTheDocument();
   expect(screen.queryByText('Choose another edition')).not.toBeInTheDocument();
+});
+
+
+test('releases differing only in independent track Artists show those bylines before either is chosen', async () => {
+  const first: ImportLookupView['groups'][number] = group(1, [[1, 1, 'Song']]), second: ImportLookupView['groups'][number] = group(2, [[1, 1, 'Song']]);
+  second.proposal.trackArtists = [{ discNumber: 1, trackNumber: 1, artists: [{ name: 'Independent Guest', role: 'primary', joinPhrase: null, musicBrainzId: null }] }];
+  const onChoose = mount(view({ candidates: [candidate(1), candidate(2)], groups: [first, second], needsAnswer: { tie: true, conflicts: [] } }));
+  expect(await screen.findByText('Uses Album primary Artists: Synthetic Lead')).toBeInTheDocument();
+  expect(await screen.findByText(/Disc 1 · Track 1 · Independent Guest/)).toBeInTheDocument();
+  expect(screen.getAllByText('Track Artists', { selector: 'dt' })).toHaveLength(2);
+  expect(onChoose).not.toHaveBeenCalled();
 });

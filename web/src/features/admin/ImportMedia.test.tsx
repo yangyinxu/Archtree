@@ -33,7 +33,7 @@
  *   - an append confirmation marks the Album values, cover, entries and label not applied and lists existing members
  *   - an append confirmation lists a file with identical bytes on the target as already on the Album and an unmatched file as new, sending those preselections beside the Album decision, and incomplete member matches hold every track
  *   - an append confirmation lists the missing-file rows the shown draft's new tracks fill, with its unsaved changes and without numbering
- *   - an append approval waits for the summary read to answer, and a failed read shows its error without holding the approval, while a new Album without Luna suggestions never reads it
+ *   - an append approval waits for the summary read to answer, and a failed read shows its error without holding the approval, while a new Album requires a successful summary read
  *   - Review decisions that append to another Album than the saved one show a note instead of the saved target's rows, and never hold the approval
  *   - an append confirmation whose summary read failed approves without rows, and reads it again when reopened, then lists the rows
  *   - an append whose target has no expected tracklist, or whose summary read lists another Album's rows, shows no rows and approves once that read answers
@@ -579,7 +579,7 @@ test('an append confirmation lists the missing-file rows the shown draft\'s new 
   expect((await within(checklistValue('Album\'s expected tracklist')).findAllByRole('listitem'))[0]).toHaveTextContent('Disc 1 · Track 1 · First Disc Opening · Row Disc 1 · Track 1: Opening · This row already has a file');
 });
 
-test('an append approval waits for the summary read to answer, and a failed read shows its error without holding the approval, while a new Album without Luna suggestions never reads it', async () => {
+test('an append approval waits for the summary read to answer, and a failed read shows its error without holding the approval, while a new Album requires a successful summary read', async () => {
   const { item, target } = appendReviewed(), summaryRead = deferred<Response>(), candidates = candidatesEndpoint([target]);
   vi.stubGlobal('fetch', vi.fn((path: string) => /\/lookup$/.test(path) ? summaryRead.promise : candidates(path)));
   mount(item, new AdminMutation(), 'publication'); fireEvent.click(screen.getByRole('button', { name: 'Publish Album' }));
@@ -595,8 +595,10 @@ test('an append approval waits for the summary read to answer, and a failed read
   cleanup();
   const reads: string[] = [], fresh = { ...item, decisions: distinct() };
   vi.stubGlobal('fetch', vi.fn(async (path: string) => { reads.push(path); return /\/lookup$/.test(path) ? json({ code: 'unexpected' }, 500) : json({ items: [], memberMatchesComplete: true }); }));
-  mount(fresh, new AdminMutation(), 'publication'); fireEvent.click(screen.getByRole('button', { name: 'Publish Album' })); await approve();
-  expect(reads.some(path => path.endsWith('/lookup'))).toBe(false);
+  mount(fresh, new AdminMutation(), 'publication'); fireEvent.click(screen.getByRole('button', { name: 'Publish Album' }));
+  expect(await within(screen.getByRole('dialog')).findByRole('alert')).toHaveTextContent('The request could not be confirmed. Your saved draft is retained.');
+  expect(within(screen.getByRole('dialog')).getByRole('button', { name: 'Publish Album' })).toBeDisabled();
+  expect(reads.some(path => path.endsWith('/lookup'))).toBe(true);
 });
 
 test('Review decisions that append to another Album than the saved one show a note instead of the saved target\'s rows, and never hold the approval', async () => {

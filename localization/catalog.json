@@ -8870,6 +8870,80 @@
       ],
       "variables": {}
     },
+    "admin.track_artists.album_primary": {
+      "description": "Confirmation fallback when independent track Artist Credits are deselected.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {
+        "byline": "string"
+      }
+    },
+    "admin.track_artists.byline": {
+      "description": "Summary of the independent Artists credited on one track.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {
+        "byline": "string"
+      }
+    },
+    "admin.track_artists.copy": {
+      "description": "Explains the explicit per-track Artist selection and its Album-primary fallback.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.track_artists.inherits": {
+      "description": "Explains a paired track without a usable bounded Artist list.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.track_artists.more_tracks": {
+      "description": "Additional tracks beyond the first three named in an Artist identity row.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.track_artists.review_row": {
+      "description": "Identity-decision row for an Artist credited only by tracks of an imported Album.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {
+        "name": "string",
+        "tracks": "string"
+      }
+    },
+    "admin.track_artists.save_artists_first": {
+      "description": "Blocks approval when independent track Artists were compared with older Album Artists.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.track_artists.title": {
+      "description": "Heading for independent per-track Artist Credits in an import publication confirmation.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.track_artists.use_own": {
+      "description": "Checkbox selecting the independent Artist Credits for a named track.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {
+        "track": "string"
+      }
+    },
     "admin.upload.check_again": {
       "description": "Checks an upload of unknown outcome against storage without sending bytes.",
       "delivery": [
