@@ -4,6 +4,8 @@
  *   Functions: render, setMobileViewport, playerFixture
  *   Constants: tracks, stores
  * Tests
+ *   - desktop timeline paints actual buffered ranges and resets them for a new MediaTrack
+ *   - mobile compact and expanded timelines share buffered ranges without changing playback
  *   - opens and closes the mobile expanded surface without creating another player
  *   - mobile expanded player hosts the same video-capable transport
  *   - keeps a mouse tap on the compact identity button instead of capturing it as a swipe
@@ -47,7 +49,16 @@ class PlayerBarAudio implements PlayerAudio {
   error = null;
   playbackRate = 1;
   preload = '';
+  bufferedRanges: Array<{ start: number; end: number }> = [];
   private readonly listeners = new Map<string, Set<() => void>>();
+
+  get buffered() {
+    return {
+      length: this.bufferedRanges.length,
+      start: (index: number) => this.bufferedRanges[index].start,
+      end: (index: number) => this.bufferedRanges[index].end
+    };
+  }
 
   async play(): Promise<void> {
     this.paused = false;
@@ -129,6 +140,7 @@ const playerFixture = async (initialIndex = 0) => {
   const store = createPlayerStore({ audioFactory, mediaSession: null });
   stores.push(store);
   await store.launchAlbumQueue(tracks, initialIndex, { autoplay: false });
+  await vi.dynamicImportSettled();
   audio.currentTime = 30;
   audio.emit('durationchange');
   audio.emit('timeupdate');
@@ -137,6 +149,56 @@ const playerFixture = async (initialIndex = 0) => {
 
 afterEach(() => {
   act(() => stores.splice(0).forEach((store) => store.destroy()));
+});
+
+test('desktop timeline paints actual buffered ranges and resets them for a new MediaTrack', async () => {
+  setMobileViewport(false);
+  const { audio, store } = await playerFixture();
+  render(<PlayerBar store={store} />);
+  const slider = screen.getByRole('slider', { name: 'Playback position' });
+  act(() => {
+    audio.bufferedRanges = [{ start: 0, end: 90 }, { start: 126, end: 162 }];
+    audio.emit('progress');
+  });
+  const buffered = slider.parentElement!.style.getPropertyValue('--seek-buffered');
+  expect(buffered).toContain('var(--color-text-subtle) 0% 50%');
+  expect(buffered).toContain('transparent 50%, transparent 70%');
+  expect(buffered).toContain('var(--color-text-subtle) 70% 90%');
+  expect(slider).toHaveValue('30');
+
+  await act(() => store.next());
+  expect(slider.parentElement!.style.getPropertyValue('--seek-buffered')).toBe('none');
+  expect(slider).toHaveValue('0');
+});
+
+test('mobile compact and expanded timelines share buffered ranges without changing playback', async () => {
+  setMobileViewport(true);
+  const user = userEvent.setup();
+  const { audio, audioFactory, store } = await playerFixture();
+  render(<PlayerBar store={store} />);
+  act(() => {
+    audio.bufferedRanges = [{ start: 0, end: 90 }, { start: 126, end: 162 }];
+    audio.emit('progress');
+  });
+  const compact = document.querySelector<HTMLElement>('[data-buffered-progress="compact"]')!;
+  const buffered = compact.style.getPropertyValue('--seek-buffered');
+  expect(buffered).toContain('transparent 50%, transparent 70%');
+  expect(compact).toHaveAttribute('aria-hidden', 'true');
+
+  await user.click(screen.getByRole('button', { name: 'Open Now Playing: Still Water' }));
+  const expanded = screen.getByRole('dialog', { name: 'Still Water' });
+  const slider = within(expanded).getByRole('slider', { name: 'Playback position' });
+  expect(slider.parentElement!.style.getPropertyValue('--seek-buffered')).toBe(buffered);
+  expect(slider).toHaveValue('30');
+  expect(audioFactory).toHaveBeenCalledTimes(1);
+
+  act(() => {
+    audio.bufferedRanges = [];
+    audio.emit('progress');
+  });
+  expect(compact.style.getPropertyValue('--seek-buffered')).toBe('none');
+  expect(slider.parentElement!.style.getPropertyValue('--seek-buffered')).toBe('none');
+  expect(store.getSnapshot().currentTime).toBe(30);
 });
 
 test('opens and closes the mobile expanded surface without creating another player', async () => {

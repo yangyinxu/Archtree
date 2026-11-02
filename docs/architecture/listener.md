@@ -72,6 +72,19 @@ The feature's new `videos.*` interface messages use the generated, release-owned
 native fallback key sets; the delivery contract remains in
 [localization.md](../features/localization.md).
 
+The shared Web player copies the media element's `buffered` TimeRanges into
+immutable `PlayerSnapshot.bufferedRanges` on progress, metadata, duration,
+clock, and seek events. Readings match the selected source and its nonempty
+`currentSrc`, require loaded metadata and finite duration, and retain separate
+intervals rather than reporting only the furthest buffered time. Source changes
+and native `emptied`/`loadstart` events clear them. Equal ranges retain their
+array identity to avoid publishing redundant player snapshots. Desktop, mobile
+compact, and expanded timelines render these same browser-only observations;
+neither listener DTOs nor native playback contracts change.
+The range reader loads on the first shared media-element creation, catches up
+from the current source when ready, and never delays native playback or a queue
+launch promise. A failed presentation-chunk request leaves transport usable.
+
 ### Compatibility policy
 
 - Finitude Web's public catalog and collection schemas discard unknown additive

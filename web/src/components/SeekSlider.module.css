@@ -26,8 +26,10 @@
     linear-gradient(
       to right,
       var(--seek-preview-color) 0 var(--seek-preview),
-      var(--seek-track-color) var(--seek-preview) 100%
-    );
+      transparent var(--seek-preview) 100%
+    ),
+    var(--seek-buffered),
+    linear-gradient(var(--seek-track-color), var(--seek-track-color));
   background-position: center;
   background-repeat: no-repeat;
   background-size: 100% 4px;

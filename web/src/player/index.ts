@@ -10,6 +10,7 @@ export type {
 export type {
   CreatePlayerStoreOptions,
   PlayerAudio,
+  PlayerBufferedRange,
   PlayerErrorCode,
   PlayerErrorState,
   PlayerLaunchOptions,

@@ -16,6 +16,8 @@ import {
 
 import styles from './SeekSlider.module.css';
 import { useLocalization } from '../localization/LocalizationProvider';
+import type { PlayerBufferedRange } from '../player/types';
+import { bufferedProgressGradient } from './bufferedProgressGradient';
 
 const clamp = (value: number, minimum: number, maximum: number) =>
   Math.min(Math.max(value, minimum), maximum);
@@ -29,17 +31,25 @@ export const formatPlaybackTime = (seconds: number) => {
 type SeekStyle = CSSProperties & {
   '--seek-progress': string;
   '--seek-preview': string;
+  '--seek-buffered': string;
 };
 
 interface SeekSliderProps {
   currentTime: number;
   duration: number;
+  bufferedRanges?: readonly PlayerBufferedRange[];
   itemKey?: string;
   onSeek(time: number): void;
 }
 
 /** Previews pointer seeking locally and commits only the listener's final position. */
-export const SeekSlider = ({ currentTime, duration, itemKey, onSeek }: SeekSliderProps) => {
+export const SeekSlider = ({
+  currentTime,
+  duration,
+  bufferedRanges = [],
+  itemKey,
+  onSeek
+}: SeekSliderProps) => {
   const { t } = useLocalization();
   const [previewTime, setPreviewTime] = useState<number | null>(null);
   const [scrubTime, setScrubTime] = useState<number | null>(null);
@@ -56,7 +66,8 @@ export const SeekSlider = ({ currentTime, duration, itemKey, onSeek }: SeekSlide
     : (previewTime / safeDuration) * 100;
   const seekStyle: SeekStyle = {
     '--seek-progress': `${progressPercent}%`,
-    '--seek-preview': `${previewPercent}%`
+    '--seek-preview': `${previewPercent}%`,
+    '--seek-buffered': bufferedProgressGradient(bufferedRanges, safeDuration)
   };
 
   useEffect(() => {

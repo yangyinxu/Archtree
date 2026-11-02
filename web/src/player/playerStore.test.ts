@@ -5,6 +5,8 @@
  * Tests
  *   - a 500-entry queue reuses its upcoming items across 500 clock updates without hiding progress
  *   - metadata, transport, volume and duplicate clock events retain queue identity and no-op snapshots
+ *   - publishes immutable native buffer intervals without filling gaps or changing playback
+ *   - clears buffer on source replacement and rejects previous-source progress
  *   - upcoming items refresh for selection, Shuffle, Repeat and a replacement queue
  *   - owns one lazy audio instance and copies an album queue before launch
  *   - a Video MediaTrack loads its one stream without a presentation-mode choice
@@ -55,7 +57,18 @@ class FakeAudio implements PlayerAudio {
   pauseCalls = 0;
   loadCalls = 0;
   failures: unknown[] = [];
+  currentSrc = '';
+  bufferedIntervals: Array<readonly [number, number]> = [];
   private readonly listeners = new Map<string, Set<() => void>>();
+
+  get buffered() {
+    const intervals = this.bufferedIntervals;
+    return {
+      length: intervals.length,
+      start: (index: number) => intervals[index][0],
+      end: (index: number) => intervals[index][1]
+    };
+  }
 
   async play(): Promise<void> {
     this.playCalls += 1;
@@ -242,6 +255,83 @@ test('metadata, transport, volume and duplicate clock events retain queue identi
   expect(store.getSnapshot()).toBe(unchanged);
   expect(listener).not.toHaveBeenCalled();
   stop(); store.destroy();
+});
+
+test('publishes immutable native buffer intervals without filling gaps or changing playback', async () => {
+  const audio = new FakeAudio();
+  const store = createPlayerStore({ audioFactory: () => audio, mediaSession: null });
+  await store.launchQueue(tracks, 0, { autoplay: false });
+  await vi.dynamicImportSettled();
+  audio.duration = 180;
+  audio.bufferedIntervals = [[0, 30], [90, 120]];
+  audio.emit('loadedmetadata');
+  const initial = store.getSnapshot();
+  expect(initial.bufferedRanges).toEqual([{ start: 0, end: 30 }, { start: 90, end: 120 }]);
+  expect(Object.isFrozen(initial.bufferedRanges)).toBe(true);
+  expect(Object.isFrozen(initial.bufferedRanges[0])).toBe(true);
+
+  const listener = vi.fn();
+  const stop = store.subscribe(listener);
+  audio.emit('progress');
+  audio.emit('timeupdate');
+  audio.emit('durationchange');
+  expect(store.getSnapshot()).toBe(initial);
+  expect(listener).not.toHaveBeenCalled();
+
+  audio.bufferedIntervals = [[0, 45], [90, 135]];
+  audio.emit('progress');
+  expect(store.getSnapshot().bufferedRanges).toEqual([{ start: 0, end: 45 }, { start: 90, end: 135 }]);
+  expect(initial.bufferedRanges[0].end).toBe(30);
+  expect(store.getSnapshot().upNextItems).toBe(initial.upNextItems);
+  expect(store.getSnapshot().status).toBe('paused');
+  expect(store.getSnapshot().currentTime).toBe(0);
+  const buffered = store.getSnapshot().bufferedRanges;
+  await store.play();
+  store.pause();
+  expect(store.getSnapshot().bufferedRanges).toBe(buffered);
+
+  store.seek(100);
+  audio.bufferedIntervals = [[90, 140]];
+  audio.emit('seeked');
+  expect(store.getSnapshot().currentTime).toBe(100);
+  expect(store.getSnapshot().bufferedRanges).toEqual([{ start: 90, end: 140 }]);
+  audio.bufferedIntervals = [[95, 115]];
+  audio.emit('timeupdate');
+  expect(store.getSnapshot().bufferedRanges).toEqual([{ start: 95, end: 115 }]);
+  audio.emit('emptied');
+  expect(store.getSnapshot().bufferedRanges).toEqual([]);
+  stop(); store.destroy();
+});
+
+test('clears buffer on source replacement and rejects previous-source progress', async () => {
+  const audio = new FakeAudio();
+  const store = createPlayerStore({ audioFactory: () => audio, mediaSession: null });
+  await store.launchQueue(tracks, 0, { autoplay: false });
+  await vi.dynamicImportSettled();
+  audio.duration = 180;
+  audio.currentSrc = new URL(tracks[0].streamUrl, location.href).href;
+  audio.bufferedIntervals = [[0, 180]];
+  audio.emit('loadedmetadata');
+  expect(store.getSnapshot().bufferedRanges).toEqual([{ start: 0, end: 180 }]);
+  await store.next();
+  expect(store.getSnapshot().bufferedRanges).toEqual([]);
+  audio.emit('progress');
+  expect(store.getSnapshot().bufferedRanges).toEqual([]);
+
+  audio.currentSrc = new URL(tracks[1].streamUrl, location.href).href;
+  audio.bufferedIntervals = [[0, 10]];
+  audio.emit('loadedmetadata');
+  expect(store.getSnapshot().bufferedRanges).toEqual([{ start: 0, end: 10 }]);
+  audio.emit('loadstart');
+  expect(store.getSnapshot().bufferedRanges).toEqual([]);
+  audio.emit('progress');
+  await store.launchStandalone(tracks[2], { autoplay: false });
+  expect(store.getSnapshot().bufferedRanges).toEqual([]);
+  await store.launchQueue([], 0);
+  expect(store.getSnapshot().bufferedRanges).toEqual([]);
+  audio.emit('progress');
+  expect(store.getSnapshot().bufferedRanges).toEqual([]);
+  store.destroy();
 });
 
 test('upcoming items refresh for selection, Shuffle, Repeat and a replacement queue', async () => {

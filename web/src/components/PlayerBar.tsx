@@ -14,6 +14,7 @@ import {
   useRef,
   useState,
   useSyncExternalStore,
+  type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent
@@ -24,6 +25,7 @@ import { Artwork } from './Artwork';
 import { Icon } from './Icon';
 import { SharedVideoSurface, videoTheaterToggleId } from './SharedVideoSurface';
 import { SeekSlider, formatPlaybackTime } from './SeekSlider';
+import { bufferedProgressGradient } from './bufferedProgressGradient';
 import {
   localizedPlayerError,
   playerStore,
@@ -556,6 +558,7 @@ export const PlayerBar = ({
             <SeekSlider
               currentTime={player.currentTime}
               duration={current ? player.duration : 0}
+              bufferedRanges={player.bufferedRanges}
               itemKey={current?.id}
               onSeek={(time) => store.seek(time)}
             />
@@ -629,11 +632,14 @@ export const PlayerBar = ({
         </div>
 
         {mobile && current && player.duration > 0 && (
-          <progress
+          <span
             aria-hidden="true"
             className={styles.miniProgress}
-            max={player.duration}
-            value={Math.min(player.currentTime, player.duration)}
+            data-buffered-progress="compact"
+            style={{
+              '--seek-progress': `${Math.max(0, Math.min(player.currentTime, player.duration)) / player.duration * 100}%`,
+              '--seek-buffered': bufferedProgressGradient(player.bufferedRanges, player.duration)
+            } as CSSProperties}
           />
         )}
       </section>
@@ -703,6 +709,7 @@ export const PlayerBar = ({
               <SeekSlider
                 currentTime={player.currentTime}
                 duration={player.duration}
+                bufferedRanges={player.bufferedRanges}
                 itemKey={current.id}
                 onSeek={(time) => store.seek(time)}
               />

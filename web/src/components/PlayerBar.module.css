@@ -692,8 +692,14 @@
   }
 
   .miniProgress {
-    appearance: none;
-    background: var(--color-player-ghost);
+    background:
+      linear-gradient(
+        to right,
+        var(--color-accent) 0 var(--seek-progress),
+        transparent var(--seek-progress) 100%
+      ),
+      var(--seek-buffered),
+      var(--color-player-ghost);
     border: 0;
     bottom: 0;
     display: block;
@@ -703,18 +709,6 @@
     position: absolute;
     right: 0.65rem;
     width: auto;
-  }
-
-  .miniProgress::-webkit-progress-bar {
-    background: var(--color-player-ghost);
-  }
-
-  .miniProgress::-webkit-progress-value {
-    background: var(--color-accent);
-  }
-
-  .miniProgress::-moz-progress-bar {
-    background: var(--color-accent);
   }
 }
 

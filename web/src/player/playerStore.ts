@@ -5,7 +5,7 @@
  * Internal
  *   Functions: clamp, finiteOrZero, playerError, classifyPlaybackFailure, classifyMediaError, initialSnapshot,
  *              defaultAudioFactory
- *   Constants: DEFAULT_SKIP_SECONDS, PREVIOUS_RESTART_SECONDS, errorMessages
+ *   Constants: DEFAULT_SKIP_SECONDS, PREVIOUS_RESTART_SECONDS, EMPTY_BUFFERED_RANGES, errorMessages
  * @end-catalog */
 
 import type {
@@ -29,6 +29,7 @@ import type { createRoomPlaybackController, RoomPlaybackState } from './roomPlay
 
 const DEFAULT_SKIP_SECONDS = 10;
 const PREVIOUS_RESTART_SECONDS = 3;
+const EMPTY_BUFFERED_RANGES = Object.freeze([]);
 
 const errorMessages: Record<PlayerErrorCode, string> = {
   autoplayBlocked: 'Playback is ready. Select play to continue.',
@@ -97,6 +98,7 @@ const initialSnapshot = (
   isBuffering: false,
   currentTime: 0,
   duration: 0,
+  bufferedRanges: EMPTY_BUFFERED_RANGES,
   volume,
   muted,
   shuffleEnabled,
@@ -145,6 +147,7 @@ export const createPlayerStore = (
   );
   let audio: PlayerAudio | null = null;
   let audioCreationAttempted = false;
+  let bufferReader: typeof import('./bufferedRanges').default | undefined;
   let sourceGeneration = 0;
   let playAttemptGeneration = 0;
   let lastReportedPlaybackError = '';
@@ -293,27 +296,37 @@ export const createPlayerStore = (
 
   const readAudioTime = (target: PlayerAudio) => finiteOrZero(target.currentTime);
   const readAudioDuration = (target: PlayerAudio) => finiteOrZero(target.duration);
+  const readAudioBuffer = (target: PlayerAudio) => bufferReader?.(
+    target, snapshot.currentItem?.streamUrl ?? '', snapshot.bufferedRanges
+  ) ?? EMPTY_BUFFERED_RANGES;
 
   const bindAudio = (target: PlayerAudio) => {
     const handlers: Record<string, () => void> = {
       loadstart: () => {
         if (!snapshot.currentItem || destroyed) return;
-        updateSnapshot({ status: 'loading', isBuffering: true });
+        updateSnapshot({ status: 'loading', isBuffering: true, bufferedRanges: EMPTY_BUFFERED_RANGES });
+      },
+      emptied: () => {
+        updateSnapshot({ bufferedRanges: EMPTY_BUFFERED_RANGES });
+      },
+      progress: () => {
+        updateSnapshot({ bufferedRanges: readAudioBuffer(target) });
       },
       loadedmetadata: () => {
         if (!snapshot.currentItem || destroyed) return;
         updateSnapshot({
           duration: readAudioDuration(target),
-          currentTime: readAudioTime(target)
+          currentTime: readAudioTime(target),
+          bufferedRanges: readAudioBuffer(target)
         });
       },
       durationchange: () => {
         if (!snapshot.currentItem || destroyed) return;
-        updateSnapshot({ duration: readAudioDuration(target) });
+        updateSnapshot({ duration: readAudioDuration(target), bufferedRanges: readAudioBuffer(target) });
       },
       timeupdate: () => {
         if (!snapshot.currentItem || destroyed) return;
-        updateSnapshot({ currentTime: readAudioTime(target) });
+        updateSnapshot({ currentTime: readAudioTime(target), bufferedRanges: readAudioBuffer(target) });
       },
       play: () => {
         if (!snapshot.currentItem || destroyed) return;
@@ -339,7 +352,7 @@ export const createPlayerStore = (
       },
       canplay: () => {
         if (!snapshot.currentItem || destroyed) return;
-        updateSnapshot({ isBuffering: false });
+        updateSnapshot({ isBuffering: false, bufferedRanges: readAudioBuffer(target) });
       },
       volumechange: () => {
         if (destroyed) return;
@@ -360,10 +373,12 @@ export const createPlayerStore = (
         });
       },
       ended: () => { void handleEnded(target); },
-      seeking: () => undefined,
+      seeking: () => {
+        updateSnapshot({ bufferedRanges: readAudioBuffer(target) });
+      },
       seeked: () => {
         if (!snapshot.currentItem || destroyed) return;
-        updateSnapshot({ currentTime: readAudioTime(target) });
+        updateSnapshot({ currentTime: readAudioTime(target), bufferedRanges: readAudioBuffer(target) });
       }
     };
 
@@ -392,6 +407,12 @@ export const createPlayerStore = (
       candidate.muted = snapshot.muted;
       bindAudio(candidate);
       audio = candidate;
+      // Buffer observation loads with first playback; native play() keeps its original gesture timing.
+      void import('./bufferedRanges').then(({ default: readBufferedRanges }) => {
+        if (destroyed) return;
+        bufferReader = readBufferedRanges;
+        updateSnapshot({ bufferedRanges: readAudioBuffer(candidate!) });
+      }).catch(() => undefined);
       syncMediaSurface();
       return audio;
     } catch {
@@ -466,6 +487,7 @@ export const createPlayerStore = (
       isBuffering: true,
       currentTime: 0,
       duration: 0,
+      bufferedRanges: EMPTY_BUFFERED_RANGES,
       error: null
     });
 
@@ -612,6 +634,7 @@ export const createPlayerStore = (
       isBuffering: false,
       currentTime: 0,
       duration: 0,
+      bufferedRanges: EMPTY_BUFFERED_RANGES,
       error: null
     });
 
@@ -656,6 +679,7 @@ export const createPlayerStore = (
       isBuffering: true,
       currentTime: 0,
       duration: 0,
+      bufferedRanges: EMPTY_BUFFERED_RANGES,
       error: null
     });
     await activateIndex(
@@ -725,6 +749,7 @@ export const createPlayerStore = (
         isBuffering: true,
         currentTime: 0,
         duration: 0,
+        bufferedRanges: EMPTY_BUFFERED_RANGES,
         error: null
       });
       await activateIndex(0, launchOptions.autoplay ?? true, 0);

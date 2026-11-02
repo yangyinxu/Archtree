@@ -1513,6 +1513,11 @@ The wire protocol and operational bounds are documented in
   state. Starting playback keeps the current route visible, and navigation
   inside the listener does not replace or restart that player. Audio and Video
   MediaTracks use that same player.
+- Web player timelines distinguish elapsed playback, buffered streaming ranges,
+  and the remaining unbuffered track. Compact and expanded surfaces use the
+  same current source's buffer, preserve gaps after seeking, and clear the
+  previous source's ranges when the MediaTrack changes. Buffered bytes do not
+  imply an offline download or guaranteed continued availability.
 - On hover-capable Web devices with a fine pointer, a Video MediaTrack card may
   show a short, muted, looping preview of that MediaTrack after a mouse rests on
   it for about half a second. A preview is decoration, not playback: it uses its
