@@ -31,4 +31,3 @@ export function VideoUploadCover({ project, draft, localUrl, disabled, onImage, 
     {picking && localUrl && <Suspense fallback={<p role="status">{t('common.loading')}</p>}><VideoFramePicker url={localUrl} onClose={() => setPicking(false)} onChoose={time => { onFrame(time); setPicking(false); }} /></Suspense>}
   </section>;
 }
-

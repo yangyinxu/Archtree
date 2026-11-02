@@ -49,4 +49,3 @@
 .entryCard:has(button:disabled){color:var(--color-text-muted)}
 @media(max-width:767px){.entries{grid-template-columns:1fr}
 }
-
