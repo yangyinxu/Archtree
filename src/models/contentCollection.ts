@@ -25,7 +25,7 @@ const maximumManualItems = 500;
 export type CollectionPresentation = 'grid' | 'list';
 export type CollectionMode = 'manual' | 'dynamic';
 export type CollectionContentType = 'album' | 'audioTrack';
-export type CollectionDynamicSource = 'downloadedAlbums' | 'downloadedSongs';
+export type CollectionDynamicSource = 'downloadedAlbums' | 'downloadedSongs' | 'publicVideos';
 
 export interface ContentCollectionItemRef {
     contentType: CollectionContentType;
@@ -45,7 +45,7 @@ const moveByIndex = <T>(items: T[], fromIndex: number, toIndex: number) => {
     return copy;
 };
 
-/** Reusable homogeneous Grid/List definition; device-local sources resolve in the client. */
+/** Reusable Grid/List definition; Downloads resolve on-device and the singleton publicVideos source on the server. */
 export class ContentCollection {
     name: string;
     presentation: CollectionPresentation;

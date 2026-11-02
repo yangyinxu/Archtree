@@ -6,7 +6,7 @@
  *   Constants: layout, stateLabels
  * @end-catalog */
 
-import { useEffect, useRef, type CSSProperties } from 'react';
+import { Suspense, useEffect, useRef, type CSSProperties } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router';
 import { useLocalization } from '../../localization/LocalizationProvider';
@@ -14,6 +14,7 @@ import { useAdminAccess, useAdminText } from './AdminAccess';
 import { adminEndpointRequest } from './adminTransport';
 import { catalogAlbumTracksSchema, expectedSummary, expectedSummaryVariables, type CatalogAlbumExpectedRow,
   type CatalogAlbumExpectedSummary, type CatalogAlbumTrack } from './catalogAlbumTracksApi';
+import { CatalogAlbumFilesLink } from './CatalogAlbumFilesLink';
 import styles from './adminStyles';
 
 // Inline layout keeps this lazily loaded section out of the shared administrator stylesheet and class map.
@@ -45,7 +46,9 @@ const expectedDuration = (ms: number) => {
  * Read-only member list of an Album page in the Album order. Ordering and editing stay on each MediaTrack's own catalog
  * page, which only a ready MediaTrack has; the editor rereads this list (`refresh`) after its Refresh, a newer Album revision
  * and a refused clear. With an expected tracklist, members are listed on its rows by Disc then Track Number, keeping their
- * Album-order numbers; a row without a member has no file yet, and members at no row's position are listed after the rows.
+ * Album-order numbers; a row without a member has no file yet, and members at no row's position are listed after the rows. Rows
+ * without a file offer Upload missing files (New import for this Album) when imports are available and the Album has a primary
+ * Artist Credit, and otherwise say only a Content Manager Audio upload can fill them.
  * Clear is offered only for a current read, so its confirmation names the rows read after the revision the clear is sent at.
  */
 export function CatalogAlbumTracks({ id, refresh, primaryArtistCredit, onClearExpected, clearDisabled = false }: {
@@ -104,6 +107,8 @@ export function CatalogAlbumTracks({ id, refresh, primaryArtistCredit, onClearEx
     return <>
       <div style={layout.summary}>
         <p style={layout.summaryText}>{summary ? t('catalog.album_expected_summary', expectedSummaryVariables(summary, locale)) : t('catalog.album_expected')}</p>
+        {/* Rows without a file can be filled by an import for this Album, which needs a primary Artist Credit; otherwise only by Content Manager. */}
+        {summary && summary.noFile > 0 && primaryArtistCredit === true && access.imports && <Suspense fallback={null}><CatalogAlbumFilesLink id={id} missing /></Suspense>}
         {summary && summary.noFile > 0 && primaryArtistCredit === false && <p className={styles.muted} style={layout.note}>{t('catalog.album_expected_upload_only')}</p>}
         {onClearExpected && <button className={styles.button} type="button" disabled={clearBlocked}
           onClick={() => { if (!clearBlocked) onClearExpected(summary); }}>{t('catalog.album_expected_clear')}</button>}

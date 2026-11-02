@@ -2,12 +2,13 @@
  * Exports
  *   Types: DeferredAlbumLaunchResult
  *   Classes: DeferredAlbumLoadTimeoutError
- *   Functions: queueItemFromTrack, launchStandalonePlayback, launchAlbumPlayback, launchAlbumPlaybackAfterLoad,
+ *   Functions: launchFromSource, playbackSourcePath, resetPlaybackSource, queueItemFromTrack,
+ *              launchStandalonePlayback, launchAlbumPlayback, launchAlbumPlaybackAfterLoad,
  *              launchPlaylistPlayback
  *   Constants: deferredAlbumLoadLimitMs
  * Internal
- *   Functions: recordAfterPlaybackStarts, launchAlbumQueue, withinIntentWindow
- *   Variables: latestPlaybackLaunch, latestDeferredAlbumIntent
+ *   Functions: albumPath, recordAfterPlaybackStarts, launchAlbumQueue, withinIntentWindow
+ *   Variables: source, latestPlaybackLaunch, latestDeferredAlbumIntent
  * @end-catalog */
 
 import type { AudioTrackSummary } from '../../api/contentSchemas';
@@ -19,6 +20,33 @@ import {
   type PlaybackActivityEvent,
   type PlayerQueueItem
 } from '../../player';
+
+let source: { path: string; queue: readonly PlayerQueueItem[]; guard?: AccountOperationGuard } | null = null;
+
+/**
+ * Runs one launch and remembers the listener page it came from, keyed to the exact queue the
+ * launch created. A launch the player refuses leaves the queue, and so the previous page, as it was.
+ * An account-owned page also captures its account epoch so a retained public queue reveals no
+ * private page identity after the account changes.
+ */
+export const launchFromSource = (
+  path: string | null,
+  launch: () => Promise<void>,
+  guard?: AccountOperationGuard
+) => {
+  const previousQueue = playerStore.getSnapshot().queue;
+  const launched = launch();
+  const { queue } = playerStore.getSnapshot();
+  if (queue !== previousQueue) source = path ? { path, queue, guard } : null;
+  return launched;
+};
+
+/** Names the page that owns this queue; a newer launch, a room or a cleared queue has none. */
+export const playbackSourcePath = (queue: readonly PlayerQueueItem[]) =>
+  source?.queue === queue && (!source.guard || isAccountOperationCurrent(source.guard)) ? source.path : undefined;
+
+/** Lets tests start from a player that no page has launched. */
+export const resetPlaybackSource = () => { source = null; };
 
 let latestPlaybackLaunch = 0;
 
@@ -32,6 +60,8 @@ export const queueItemFromTrack = (track: AudioTrackSummary): PlayerQueueItem =>
   mediaType: track.mediaType,
   streamUrl: track.streamUrl
 });
+
+const albumPath = (albumId: string) => `/albums/${encodeURIComponent(albumId)}`;
 
 const recordAfterPlaybackStarts = (
   guard: AccountOperationGuard | undefined,
@@ -60,7 +90,11 @@ export const launchStandalonePlayback = async (
 ) => {
   const launchGeneration = ++latestPlaybackLaunch;
   const guard = viewerId ? captureAccountOperation(viewerId) : undefined;
-  await playerStore.launchStandalone(queueItemFromTrack(track));
+  // A lone MediaTrack has no queue page of its own, so its Album is where the listener returns.
+  await launchFromSource(
+    track.albumId ? albumPath(track.albumId) : null,
+    () => playerStore.launchStandalone(queueItemFromTrack(track))
+  );
   recordAfterPlaybackStarts(
     guard,
     { type: 'standaloneTrack', trackId: track.id },
@@ -81,7 +115,10 @@ const launchAlbumQueue = async (
     ? tracks.findIndex((track) => track.id === requestedTrackId)
     : -1;
   const initialIndex = requestedIndex >= 0 ? requestedIndex : 0;
-  await playerStore.launchAlbumQueue(tracks.map(queueItemFromTrack), initialIndex);
+  await launchFromSource(
+    albumPath(albumId),
+    () => playerStore.launchAlbumQueue(tracks.map(queueItemFromTrack), initialIndex)
+  );
   recordAfterPlaybackStarts(
     guard,
     requestedIndex >= 0
@@ -174,6 +211,7 @@ export const launchAlbumPlaybackAfterLoad = async (
 
 /** Launches a ready-only Playlist snapshot and records only its explicit start track. */
 export const launchPlaylistPlayback = async (
+  playlistId: string,
   tracks: AudioTrackSummary[],
   viewerId?: string | null,
   requestedTrackId?: string
@@ -185,7 +223,11 @@ export const launchPlaylistPlayback = async (
   const initialIndex = requestedIndex >= 0 ? requestedIndex : 0;
   const launchGeneration = ++latestPlaybackLaunch;
   const guard = viewerId ? captureAccountOperation(viewerId) : undefined;
-  await playerStore.launchQueue(tracks.map(queueItemFromTrack), initialIndex);
+  await launchFromSource(
+    `/playlists/${encodeURIComponent(playlistId)}`,
+    () => playerStore.launchQueue(tracks.map(queueItemFromTrack), initialIndex),
+    guard ?? captureAccountOperation('')
+  );
   recordAfterPlaybackStarts(
     guard,
     { type: 'playlistTrack', trackId: tracks[initialIndex].id },

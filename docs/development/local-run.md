@@ -13,13 +13,23 @@ second process with `npm run dev:web`, then open
 `/finitude` and supports listener deep links. Requests to the legacy `/listen`
 prefix permanently redirect to the equivalent `/finitude` path. The Web build
 measures every initial route's unique compressed JavaScript and fails if any
-route exceeds the reviewed 150 KiB gzip budget. It also caps the complete
-emitted stylesheet payload at 35 KiB gzip, emitted fonts at 128 KiB, bundled
+route exceeds the reviewed 152 KiB gzip budget. It also caps the complete
+emitted stylesheet payload at 42.5 KiB gzip (including the lazy administrator
+Video task/workbench styles and the approved immersive Video cards). The
+immersive card stylesheet is about 1.7 KiB gzip and loads with that view; the
+compact view switch shares the Video route's presentation chunk. The remaining
+limits are emitted fonts at 128 KiB, bundled
 images at 256 KiB total, and any one bundled image at 128 KiB. Catalog artwork
 continues to load through listener DTOs rather than being bundled into the app.
 Production CSS Modules use compact scoped identifiers; development and test
 builds retain readable defaults. Exported module keys and style declarations are
 unchanged.
+
+Restart the `npm run dev` process after changing server code or configuration;
+rebuilding the listener bundle does not restart that process. On an unavailable
+Home page, **Try again** first retries a failed browser-session load, then loads
+Home for the resolved viewer. When the session already succeeded, it retries
+only Home and retains that session.
 
 To test MediaTrack replacement locally, sign in as an administrator at
 `http://localhost:8080/content/manage`, create or select a MediaTrack, and use
@@ -64,6 +74,16 @@ return `400`, while cross-scope, lifecycle-changed, or stale cursors return
 `409`. Anonymous Home collection pages may use the public catalog cache;
 authenticated Home and Library collection pages remain private and
 non-cacheable so account-viewer identity headers never enter a shared cache.
+`GET /api/listener/v1/videos?limit=&cursor=` backs the Web Video page: ready,
+published, publicly visible Video MediaTracks newest first as allowlisted
+MediaTrack DTOs in `items`, 24 per page by default and at most 48. `nextCursor`
+is the last returned MediaTrack ID, or `null` on the last page; unknown query
+parameters, a malformed limit, or a malformed cursor return `400`. The response
+is public and non-cacheable like the other catalog reads. Cursors must be exactly
+24 hexadecimal characters; repeated, nested, empty or whitespace-padded values
+are rejected. Each page rechecks current MediaTrack and assigned-Album access
+before sorting or limiting, so lifecycle changes remove unavailable results on
+the next read. Newer inserted IDs do not shift an in-progress traversal.
 Device-local Downloaded Grid/List definitions return
 `collection_source_not_server_backed` and are never populated from server
 catalog data. Public media streaming is limited to database-confirmed `ready`

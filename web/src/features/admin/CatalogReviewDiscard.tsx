@@ -1,7 +1,6 @@
 import { useEffect, useId, useRef, useState, useSyncExternalStore } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { z } from 'zod';
-import { ModalDialog } from '../../components/ModalDialog';
 import { useAdminAccess, useAdminText } from './AdminAccess';
 import { adminWorkspace } from './adminWorkspace';
 import { AdminCommand } from './useAdminCommand';
@@ -20,20 +19,21 @@ const idleState = { running: false, intent: null }, idle = { subscribe: () => ()
 
 /**
  * Discard completion for an unapplied Album completion (owner rules: docs/business-rules.md, Catalog Visibility and
- * Administration). Never primary: it opens a confirmation that names the catalog Album (the draft title only as secondary text when
- * it differs), says what is lost and that the catalog does not change, and focuses Cancel. Confirming sends the revision the
+ * Administration). Never primary: it opens an inline, non-modal confirmation below it that names the catalog Album (the draft title
+ * only as secondary text when it differs) and says once what is lost and that the original Album does not change, and focuses
+ * Cancel, which (as Escape) closes it and returns the focus to the action. Confirming sends the revision the
  * confirmation showed, and the server decides whether a later administrator change makes it stale. The command is buffered per
  * review, so an unknown outcome is retried only with its original intent. Once the review is discarded, by this command or
  * elsewhere (a refusal as `discarded`), it forgets the review's buffers, calls `onDiscarded` (the caller navigates), drops the
  * review's reads and reads the rest of the queue and eligibility again; a refusal (stale, Luna AI active, applied) reads them
- * again too. `reason` names why it is `disabled`. The review page's own change (its buffered save, Luna AI or apply command)
+ * again too. `reason` names why it is `disabled`, as visible text the action is described by. The review page's own change (its buffered save, Luna AI or apply command)
  * also disables it while running or unconfirmed, on the page and on the queue card alike.
  */
 export function CatalogReviewDiscard({ id: reviewId, albumId, albumTitle, draftTitle, expectedRevision, disabled, reason, onDiscarded }: {
   id: string; albumId: string; albumTitle: string; draftTitle: string; expectedRevision: number; disabled: boolean; reason: string | null; onDiscarded?: () => void;
 }) {
   const t = useAdminText(), access = useAdminAccess(), online = useOnline(), client = useQueryClient(), uid = useId();
-  const cancel = useRef<HTMLButtonElement>(null);
+  const cancel = useRef<HTMLButtonElement>(null), opener = useRef<HTMLButtonElement>(null);
   // The revision the open confirmation showed: confirming binds it, never a newer one read meanwhile.
   const [shown, setShown] = useState<number | null>(null);
   const [command] = useState(() => {
@@ -60,22 +60,29 @@ export function CatalogReviewDiscard({ id: reviewId, albumId, albumTitle, draftT
   const found = adminWorkspace.buffer(`catalog-review-command:${reviewId}`), own = found instanceof AdminCommand ? found : idle;
   const page = useSyncExternalStore<{ running: boolean; intent: unknown }>(own.subscribe, own.getSnapshot, own.getSnapshot);
   const locked = disabled || !online || state.running || Boolean(state.intent) || page.running || Boolean(page.intent);
+  // The open confirmation takes the focus on its Cancel; closing it returns the focus to the action.
+  useEffect(() => { if (shown !== null) cancel.current?.focus(); }, [shown !== null]);
+  const close = () => { setShown(null); opener.current?.focus(); };
   return <>
-    <div className={styles.actions}><button className={styles.button} type="button" disabled={locked}
-      aria-describedby={disabled && reason ? `${uid}-reason` : undefined} onClick={() => setShown(expectedRevision)}>{t('catalog_review.discard')}</button></div>
-    {disabled && reason && <p id={`${uid}-reason`} className={styles.muted}>{t(reason)}</p>}
+    {/* The reason sits beside the action, as visible text that also describes it. */}
+    <div className={styles.actions} style={{ alignItems: 'center' }}><button ref={opener} className={styles.button} type="button" disabled={locked}
+      aria-describedby={disabled && reason ? `${uid}-reason` : undefined} aria-expanded={shown !== null} aria-controls={shown !== null ? `${uid}-confirm` : undefined}
+      onClick={() => setShown(expectedRevision)}>{t('catalog_review.discard')}</button>
+      {disabled && reason && <small id={`${uid}-reason`} className={styles.muted} style={{ margin: 0 }}>{t(reason)}</small>}</div>
     {state.error && <div role="alert" className={styles.error}><p>{t(state.error.startsWith('discard_') ? `catalog_review.${state.error}` : `common.${state.error}`)}</p>
       {state.intent && <button className={styles.button} type="button" disabled={state.running || !online} onClick={command.retry}>{t('common.retry_operation')}</button>}</div>}
-    {shown !== null && <ModalDialog title={t('catalog_review.discard_title')} description={t('catalog_review.discard_copy')}
-      headerContent={<div className={styles.target}><strong>{albumTitle || t('common.untitled')}</strong>
-        {draftTitle && draftTitle !== albumTitle && <p className={styles.muted}>{draftTitle}</p>}</div>}
-      initialFocusRef={cancel} onClose={() => setShown(null)}>
-      <div className={styles.dialogActions}><button ref={cancel} className={styles.button} type="button" onClick={() => setShown(null)}>{t('common.cancel')}</button>
+    {shown !== null && <section id={`${uid}-confirm`} role="dialog" aria-modal="false" aria-labelledby={`${uid}-title`} aria-describedby={`${uid}-copy`} className={styles.card}
+      onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); close(); } }}>
+      <h3 id={`${uid}-title`}>{t('catalog_review.discard_title')}</h3>
+      <div className={styles.target}><strong>{albumTitle || t('common.untitled')}</strong>
+        {draftTitle && draftTitle !== albumTitle && <p className={styles.muted}>{draftTitle}</p>}</div>
+      <p id={`${uid}-copy`}>{t('catalog_review.discard_copy')}</p>
+      <div className={styles.dialogActions}><button ref={cancel} className={styles.button} type="button" onClick={close}>{t('common.cancel')}</button>
         <button className={styles.button} type="button" disabled={locked} onClick={() => {
           const revision = shown;
-          setShown(null);
+          close();
           command.run(`/catalog-reviews/${reviewId}/discard`, { expectedRevision: revision }, 'POST');
         }}>{t('catalog_review.discard_confirm')}</button></div>
-    </ModalDialog>}
+    </section>}
   </>;
 }

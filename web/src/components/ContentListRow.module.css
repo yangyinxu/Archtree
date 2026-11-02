@@ -71,12 +71,6 @@
   margin-top: 0.18rem;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .row {
-    transition: none;
-  }
-}
-
 @media (forced-colors: active) {
   .row {
     border: 1px solid ButtonBorder;

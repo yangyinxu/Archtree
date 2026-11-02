@@ -19,21 +19,22 @@ import type { ImportDecision, ImportDraftV2 } from './adminApi';
 const id = z.string().regex(/^[a-f0-9]{24}$/), uuid = z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
 const mbid = z.string().regex(/^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/);
 /**
- * At most 20 candidates per Artist name (the saved entries' and those pending Luna proposals would write, 40 names), per label
- * name and per Album title (the saved one and one proposed each), 20 for the saved and 20 for the proposed track titles, one
- * verified byte match per staged file (100), at most 300 byte or title matches among Album members, one record holding each
- * entry's or the label's MusicBrainz ID (21), 20 records named as lookup found for each such ID (420) and 20 Artists named with an
- * iTunes localized name lookup found for each Artist name (800): 2561. `musicBrainzId` names the ID an Artist or Organization
+ * At most 20 candidates per Artist name (the saved entries', the track-only identities' and those pending Luna proposals would
+ * write, 60 names), per label name and per Album title (the saved one and one proposed each), 20 for the saved and 20 for the
+ * proposed track titles, one verified byte match per staged file (100), at most 300 byte or title matches among Album members, one
+ * record holding each entry's or the label's MusicBrainz ID (41), 20 records named as lookup found for each such ID (820) and 20
+ * Artists named with an iTunes localized name lookup found for each Artist name (1200), and the saved append target and the Album
+ * the import was created for as Album candidates whatever the draft title (2): 3783. `musicBrainzId` names the ID an Artist or Organization
  * holds; `aliasOf` the ID whose found name matched; `localizedOf` the Artist name whose localized name matched. A response without
- * `memberMatchesComplete` counts as incomplete, so no append file is preselected from it. `unavailable` names the Artist names, labels or Album titles (at most 44) whose same-name, same-ID, alias or
+ * `memberMatchesComplete` counts as incomplete, so no append file is preselected from it. `unavailable` names the Artist names, labels or Album titles (at most 64) whose same-name, same-ID, alias or
  * localized-name record is malformed, or whose localized-name record is listed for another row: never a candidate, yet never preselected over.
  */
 export const candidatesSchema = z.object({
   items: z.array(z.object({ kind: z.enum(['artist', 'organization', 'album', 'track']), id, label: z.string(), revision: z.string(), albumId: id.nullable(), visibility: z.enum(['public', 'hidden']),
     match: z.enum(['name', 'sha256', 'musicBrainzId', 'alias', 'localizedName']), matchedSlotIds: z.array(uuid).max(100), automaticReuse: z.literal(false), musicBrainzId: mbid.optional(), aliasOf: mbid.optional(),
-    localizedOf: z.string().max(200).optional() }).strict()).max(2561),
+    localizedOf: z.string().max(200).optional() }).strict()).max(3783),
   memberMatchesComplete: z.boolean().default(false),
-  unavailable: z.array(z.object({ kind: z.enum(['artist', 'organization', 'album']), label: z.string() }).strict()).max(44).default([])
+  unavailable: z.array(z.object({ kind: z.enum(['artist', 'organization', 'album']), label: z.string() }).strict()).max(64).default([])
 }).strict();
 export type ImportCandidates = z.infer<typeof candidatesSchema>;
 export type ImportCandidate = ImportCandidates['items'][number];

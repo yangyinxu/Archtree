@@ -5,12 +5,12 @@
  *          RankedLookupCandidate, RankedLookupGroup, LookupPreselection, RankedLookup, LookupTrackArtists,
  *          LookupComparisonMode
  *   Functions: lookupTrackCountPlausible, legacyDurationEvidence, lookupCreditEntries, proposalForRelease,
- *              lookupTrackCredit, trackArtistProposal, lookupTrackAssignment, lookupSubsetAssignment,
- *              rankLookupCandidates
+ *              lookupTrackCredit, trackArtistProposal, lookupTrackAssignment, lookupTrackArtistAssignment,
+ *              lookupSubsetAssignment, rankLookupCandidates
  * Internal
- *   Functions: clean, folded, isRecord, canonical, groupKeyFor, subsetGroupKeyFor, byText, orderedFiles,
- *              compareRelease, compareSubset, artistMismatchFor, sharedIdentifier, usableRelease,
- *              distinctCandidates
+ *   Functions: clean, folded, isRecord, importArtistProposal, canonical, groupKeyFor, subsetGroupKeyFor,
+ *              byText, orderedFiles, compareRelease, compareSubset, artistMismatchFor, sharedIdentifier,
+ *              usableRelease, distinctCandidates
  *   Constants: featuring
  * @end-catalog */
 
@@ -71,6 +71,8 @@ export type LookupProposal = {
     labelMusicBrainzId: string | null;
     releaseDate: LookupDate | null;
     tracks: { discNumber: number; trackNumber: number; title: string }[];
+    /** Exact import groups also name usable track credits that differ from inherited Album primaries. */
+    trackArtists?: { discNumber: number; trackNumber: number; artists: LookupProposal['artists'] }[];
 };
 export type LookupMatchStatus = 'matching' | 'unverified' | 'notMatching' | 'incomplete';
 export type LookupDifference = 'trackCount' | 'discCount' | 'duration';
@@ -210,6 +212,20 @@ export function trackArtistProposal(release: Pick<MusicBrainzRelease, 'artistCre
     return artists.length ? { artists } : { reason: 'placeholder' };
 }
 
+/** Exact import groups include each usable independent track credit, so differing guest Artists cannot be collapsed into one automatic choice. */
+function importArtistProposal(release: MusicBrainzRelease, proposal: LookupProposal): LookupProposal {
+    const primary = proposal.artists.filter(entry => entry.role === 'primary');
+    const normalized = (entries: LookupProposal['artists']) => entries.map((entry, index) => [entry.musicBrainzId ?? folded(entry.name), entry.role,
+        index < entries.length - 1 ? entry.joinPhrase ?? ', ' : null]);
+    const inherited = canonical(normalized(primary));
+    const trackArtists = release.media.filter(medium => medium.tracks.length).flatMap((medium, index) => medium.tracks.flatMap(track => {
+        const own = trackArtistProposal(release, track);
+        return 'artists' in own && own.artists.length <= 20 && own.artists.some(entry => entry.role === 'primary') && canonical(normalized(own.artists)) !== inherited
+            ? [{ discNumber: index + 1, trackNumber: track.position, artists: own.artists }] : [];
+    }));
+    return trackArtists.length ? { ...proposal, trackArtists } : proposal;
+}
+
 const canonical = (value: unknown): string => {
     if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
     if (value && typeof value === 'object') return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonical((value as Record<string, unknown>)[key])}`).join(',')}}`;
@@ -254,6 +270,17 @@ export const lookupTrackAssignment = (release: MusicBrainzRelease, files: readon
     const tracks = proposalForRelease(release).tracks, ordered = orderedFiles(files);
     if (!ordered.length || tracks.length !== ordered.length) return null;
     return ordered.map((file, index) => ({ slotId: file.slotId, ...tracks[index] }));
+};
+
+/**
+ * Each local file's release track Artist entries when the track counts agree, paired as lookupTrackAssignment pairs them (the track
+ * at the same position among the media that have tracks), from that track's own credit (trackArtistProposal). Null when the counts
+ * differ. Pure.
+ */
+export const lookupTrackArtistAssignment = (release: MusicBrainzRelease, files: readonly LocalFileEvidence[]): { slotId: string; artists: LookupTrackArtists }[] | null => {
+    const tracks = release.media.filter(medium => medium.tracks.length).flatMap(medium => medium.tracks), ordered = orderedFiles(files);
+    if (!ordered.length || tracks.length !== ordered.length) return null;
+    return ordered.map((file, index) => ({ slotId: file.slotId, artists: trackArtistProposal(release, tracks[index]) }));
 };
 
 /**
@@ -422,7 +449,7 @@ const distinctCandidates = (candidates: readonly LookupCandidate[]) => {
  * identifier that names one that is not preselects nothing, and neither does an only matching group it represents.
  *
  * `comparison: 'subset'` compares an existing Album's members (`files`) with each release's audio tracks (compareSubset) and adds
- * `subset` to each comparison and `completeness` to the result; the default `exact` comparison is unchanged. In subset mode an
+ * `subset` to each comparison and `completeness` to the result; the default `exact` compares every file and keeps independent track credits in its groups. In subset mode an
  * incomplete candidate that could have at least as many audio tracks as members makes the comparison partial, and one that could
  * have exactly as many breaks `completeness.exact`, as does `exactSearchComplete: false` (a search that left out such a release;
  * it defaults to `searchComplete`). After the identifier rules, while `completeness.exact` holds, the one matching group whose
@@ -450,7 +477,7 @@ export const rankLookupCandidates = (candidates: readonly LookupCandidate[], fil
                 order, frontArtwork: release.frontArtwork === true, release, source, preselectable, notChecked, audioTrackCount: audioCount };
         }
         const { comparison, status, order } = compareRelease(release, sorted, toleranceMs);
-        const proposal = proposalForRelease(release);
+        const proposal = importArtistProposal(release, proposalForRelease(release));
         return { key: candidate.key, releaseId: candidate.releaseId, status, comparison, proposal,
             groupKey: status === 'matching' ? groupKeyFor(proposal, source) : null, artistMismatch: artistMismatchFor(release, files, options.aliases, options.localized),
             order, frontArtwork: release.frontArtwork === true, release, source, preselectable, notChecked, audioTrackCount: null };

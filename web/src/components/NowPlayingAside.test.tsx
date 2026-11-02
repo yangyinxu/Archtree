@@ -7,10 +7,13 @@
  *   - shows only current metadata and the store-derived effective next item
  *   - labels the current soundtrack honestly when Repeat One is effective
  *   - a Video MediaTrack shows the playback queue and no media-mode switch
+ *   - a minimized Video plays at the top of the panel, returns to the theater, and offers fullscreen
+ *   - focus inside the minimized Video moves to the player-bar Video toggle when it leaves
  *   - a 500-entry Video queue has zero panel commits during 500 elapsed-clock updates
  * @end-catalog */
 
 import { act, render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { Profiler } from 'react';
 
 import { createPlayerStore } from '../player';
@@ -121,6 +124,80 @@ test('a Video MediaTrack shows the playback queue and no media-mode switch', asy
   expect(within(queue).queryByRole('group', { name: 'Playback media' })).not.toBeInTheDocument();
   expect(audio.src).toBe('/video/still-water.mp4');
   expect(audioFactory).toHaveBeenCalledTimes(1);
+});
+
+test('a minimized Video plays at the top of the panel, returns to the theater, and offers fullscreen', async () => {
+  const user = userEvent.setup();
+  // A real element lets the panel host it and request fullscreen on it; jsdom cannot load media.
+  const video = document.createElement('video');
+  video.load = () => undefined;
+  video.pause = () => undefined;
+  const requestFullscreen = vi.fn(async () => undefined);
+  video.requestFullscreen = requestFullscreen;
+  const store = createPlayerStore({ audioFactory: () => video, mediaSession: null });
+  stores.push(store);
+  await store.launchQueue([{ ...tracks[0], mediaType: 'video', streamUrl: '/video/still-water.mp4' }], 0, { autoplay: false });
+  const onTheaterMinimized = vi.fn();
+  const view = render(<NowPlayingAside onTheaterMinimized={onTheaterMinimized} store={store} theaterMinimized />);
+
+  const surface = screen.getByRole('img', { name: 'Still Water video' });
+  expect(surface).toContainElement(video);
+  await user.click(screen.getByRole('button', { name: 'Still Water video' }));
+  expect(onTheaterMinimized).toHaveBeenCalledWith(false);
+
+  await user.click(screen.getByRole('button', { name: 'Enter video fullscreen' }));
+  expect(requestFullscreen).toHaveBeenCalledTimes(1);
+  expect(video.controls).toBe(true);
+
+  // Exiting fullscreen restores the custom surface without replacing the playing element.
+  act(() => { document.dispatchEvent(new Event('fullscreenchange')); });
+  expect(video.controls).toBe(false);
+  expect(screen.getByRole('img', { name: 'Still Water video' })).toContainElement(video);
+
+  view.rerender(<NowPlayingAside onTheaterMinimized={onTheaterMinimized} store={store} />);
+  expect(screen.queryByRole('img', { name: 'Still Water video' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Enter video fullscreen' })).not.toBeInTheDocument();
+});
+
+test.each(['unsupported', 'rejected'] as const)('a %s fullscreen request keeps the panel player usable', async (failure) => {
+  const user = userEvent.setup();
+  const video = document.createElement('video');
+  video.load = () => undefined;
+  video.pause = () => undefined;
+  if (failure === 'rejected') video.requestFullscreen = vi.fn().mockRejectedValue(new Error('Fullscreen unavailable'));
+  const store = createPlayerStore({ audioFactory: () => video, mediaSession: null });
+  stores.push(store);
+  await store.launchQueue([{ ...tracks[0], mediaType: 'video', streamUrl: '/video/still-water.mp4' }], 0, { autoplay: false });
+  const before = store.getSnapshot();
+  const onTheaterMinimized = vi.fn();
+  render(<NowPlayingAside onTheaterMinimized={onTheaterMinimized} store={store} theaterMinimized />);
+
+  await user.click(screen.getByRole('button', { name: 'Enter video fullscreen' }));
+
+  expect(video.controls).toBe(false);
+  expect(video).toHaveAttribute('aria-hidden', 'true');
+  expect(store.getSnapshot()).toBe(before);
+  expect(screen.getByRole('img', { name: 'Still Water video' })).toContainElement(video);
+  await user.click(screen.getByRole('button', { name: 'Still Water video' }));
+  expect(onTheaterMinimized).toHaveBeenCalledWith(false);
+});
+
+test('focus inside the minimized Video moves to the player-bar Video toggle when it leaves', async () => {
+  const store = createPlayerStore({ audioFactory: () => new AsideAudio(), mediaSession: null });
+  stores.push(store);
+  await store.launchQueue([{ ...tracks[0], mediaType: 'video', streamUrl: '/video/still-water.mp4' }], 0, { autoplay: false });
+  const panel = (minimized: boolean) => (
+    <>
+      <NowPlayingAside onTheaterMinimized={vi.fn()} store={store} theaterMinimized={minimized} />
+      <button id="video-theater-toggle" type="button">Video</button>
+    </>
+  );
+  const view = render(panel(true));
+  screen.getByRole('button', { name: 'Enter video fullscreen' }).focus();
+
+  view.rerender(panel(false));
+  await act(async () => { await Promise.resolve(); });
+  expect(screen.getByRole('button', { name: 'Video' })).toHaveFocus();
 });
 
 test('a 500-entry Video queue has zero panel commits during 500 elapsed-clock updates', async () => {

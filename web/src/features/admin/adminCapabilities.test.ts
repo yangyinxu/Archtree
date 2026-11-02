@@ -19,3 +19,11 @@ test('the server capabilities parse with and without metadata lookup, and lookup
   expect(capabilitySchema.safeParse({ ...server, metadataLookup: {} }).success).toBe(false);
   expect(capabilitySchema.safeParse({ ...server, lookup: { available: true } }).success).toBe(false);
 });
+
+test('Video capabilities are optional for older servers and expose only safe admission limits', () => {
+  const videoUploads = { enabled: false, maxFileBytes: 512 * 1024 ** 2, acceptedExtensions: ['mp4', 'mov', 'm4v'] };
+  expect(capabilitySchema.parse({ ...server, videoUploads }).videoUploads).toEqual(videoUploads);
+  expect(capabilitySchema.safeParse({ ...server, videoUploads: { ...videoUploads, bucket: 'private' } }).success).toBe(false);
+  expect(capabilitySchema.safeParse({ ...server, videoUploads: { ...videoUploads, maxFileBytes: 0 } }).success).toBe(false);
+  for (const acceptedExtensions of [['mov', 'mp4', 'm4v'], ['mp4', 'mov', 'm4v', 'avi'], ['mp4', 'mov']]) expect(capabilitySchema.safeParse({ ...server, videoUploads: { ...videoUploads, acceptedExtensions } }).success).toBe(false);
+});

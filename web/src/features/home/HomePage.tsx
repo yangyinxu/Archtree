@@ -39,7 +39,7 @@ export const HomePage = () => {
         <h1 className={styles.pageTitle} id="home-title">{homeTitle}</h1>
       </header>
 
-      {resolving.data || session.isPending || home.isPending ? (
+      {resolving.data || session.isPending || !session.isError && home.isPending ? (
         <section className={styles.panel} aria-busy="true" aria-label={t('home.loading.label')}>
           <div>
             <p className={styles.eyebrow}>{t('home.loading.eyebrow')}</p>
@@ -52,7 +52,7 @@ export const HomePage = () => {
             <h2 className={styles.panelTitle}>{t('home.error.title')}</h2>
             <p className={styles.panelCopy}>{t('home.error.copy')}</p>
             <div className={`${styles.actions} ${styles.panelActions}`}>
-              <button className={`${styles.button} ${styles.buttonSecondary}`} onClick={() => home.refetch()} type="button">{t('common.action.try_again')}</button>
+              <button className={`${styles.button} ${styles.buttonSecondary}`} onClick={() => { void (session.isError ? session.refetch() : home.refetch()); }} type="button">{t('common.action.try_again')}</button>
             </div>
           </div>
         </section>

@@ -40,7 +40,7 @@ import {
     CatalogCreditRole
 } from '../../models/catalogCredit';
 import { validStoredCredits } from './artistAlbumClassificationService';
-import { catalogDisplayByline, displayBylineField, toBylineCredit } from './catalogByline';
+import { catalogDisplayByline, displayBylineField, personalDisplayByline, toBylineCredit } from './catalogByline';
 import { catalogCreditRollout } from '../../config/catalogCreditRollout';
 
 export interface PublicSimpleDate {
@@ -160,7 +160,8 @@ const audioTrackProjection = {
     contentType: 1,
     videoAsset: 1,
     credits: 1,
-    attributionStatus: 1
+    attributionStatus: 1,
+    personalAttribution: 1
 };
 
 const queryTimeoutMs = 3_000;
@@ -265,7 +266,9 @@ const publicDisplayByline = (
  * Projects Credit fields through an explicit allowlist matching PublicCatalogCredit, so stored
  * internals such as creditId or a join phrase never reach the legacy public response.
  */
-const publicCreditFields = (owner: any, subjectNames?: ReadonlyMap<string, string>) => {
+const publicCreditFields = (owner: any, subjectNames?: ReadonlyMap<string, string>, personal = false) => {
+    const byline = personal ? personalDisplayByline(owner) : null;
+    if (byline) return { credits: [], displayByline: byline, attributionStatus: 'unknown' as const };
     const credits = validStoredCredits(owner);
     if (!credits) return {};
     const resolved = resolvedCredits(credits, subjectNames);
@@ -289,7 +292,7 @@ export const resolvePublicCatalogBylines = async (owners: any[]) => {
     return new Map(owners.flatMap((owner): Array<[string, string]> => {
         const id = String(owner?._id ?? '');
         const credits = validStoredCredits(owner);
-        const byline = credits ? publicDisplayByline(owner, resolvedCredits(credits, subjectNames)) : '';
+        const byline = personalDisplayByline(owner) ?? (credits ? publicDisplayByline(owner, resolvedCredits(credits, subjectNames)) : '');
         return id && byline ? [[id, byline]] : [];
     }));
 };
@@ -345,7 +348,7 @@ export const toPublicAudioTrack = (
         coverArtUrl: resolvedCoverArtUrl(track),
         displayCoverArtUrl: resolvedCoverArtUrl(track) || resolvedCoverArtUrl(album),
         albumId: visibleAlbumId,
-        artistIds: uniqueObjectIdStrings(Array.isArray(track?.artistIds) ? track.artistIds : [])
+        artistIds: uniqueObjectIdStrings(personalDisplayByline(track) === null && Array.isArray(track?.artistIds) ? track.artistIds : [])
             .filter((id) => visibleArtistIds === undefined || visibleArtistIds.has(id)),
         genres: (Array.isArray(track?.genres) ? track.genres : [])
             .map(normalizedText)
@@ -355,7 +358,7 @@ export const toPublicAudioTrack = (
         format: publicFormat(track?.format),
         mediaType: activeMediaTypeForTrack(track),
         streamUrl: `/content/mediaTrack/stream/${encodeURIComponent(String(track._id))}`,
-        ...publicCreditFields(track, subjectNames)
+        ...publicCreditFields(track, subjectNames, true)
     };
 };
 

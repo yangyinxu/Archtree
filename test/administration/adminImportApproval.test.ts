@@ -17,23 +17,34 @@ const invalid = (body: Record<string, unknown>, label: string) => assert.throws(
 test('a publish body from before one-step approval and every bounded approval pass before the fingerprint', () => {
     boundImportApproval({ operationId, expectedRevision: 3 });
     boundImportApproval(valid); boundImportApproval({ ...valid, changes: [], decisions: [], selectedCoverSlotId: null });
-    boundImportApproval({ ...valid, changes: Array.from({ length: 305 }, () => change), decisions: Array.from({ length: 122 }, () => decision), selectedCoverSlotId: `embedded-${operationId}` });
+    boundImportApproval({ ...valid, changes: Array.from({ length: 305 }, () => change), decisions: Array.from({ length: 142 }, () => decision), selectedCoverSlotId: `embedded-${operationId}` });
     // The longest bound name, in three-byte characters, still fits a reuse decision's 1 KB bound.
     boundImportApproval({ ...valid, decisions: [{ ...decision, scope: 'artist', entryKey: '00000009-0000-4000-8000-0000000000e1', boundName: '名'.repeat(200), action: 'reuse', candidateId: 'f'.repeat(24), candidateRevision: 'c'.repeat(64) }] });
     // A partial body or a malformed digest passes here and is refused after receipt lookup, so a stored receipt of that operation
     // still answers it as an operation conflict.
     const { approvalDigest: _digest, ...partial } = valid;
     boundImportApproval(partial); boundImportApproval({ ...valid, approvalDigest: 'Z'.repeat(64) });
-    // The MusicBrainz IDs a confirmation showed: at most 21 well-formed writes.
+    // The MusicBrainz IDs a confirmation showed: at most 41 well-formed writes.
     const write = { scope: 'artist', entryKey: '00000009-0000-4000-8000-0000000000e1', musicBrainzId: '00000000-0000-4000-8000-0000000000a1', replaces: null };
     boundImportApproval({ ...valid, musicBrainzIds: [] });
     boundImportApproval({ ...valid, musicBrainzIds: [write, { scope: 'label', entryKey: null, musicBrainzId: '00000000-0000-4000-8000-0000000000a2', replaces: '00000000-0000-4000-8000-0000000000a3' }] });
-    boundImportApproval({ ...valid, musicBrainzIds: Array.from({ length: 21 }, () => write) });
+    boundImportApproval({ ...valid, musicBrainzIds: Array.from({ length: 41 }, () => write) });
+    // The tracks the confirmation listed with their own Artists: at most 100 distinct slots, each ticked or not.
+    const slot = (index: number) => `00000009-0000-4000-8000-${index.toString(16).padStart(12, '0')}`;
+    boundImportApproval({ ...valid, trackArtists: [] });
+    boundImportApproval({ ...valid, trackArtists: Array.from({ length: 100 }, (_, index) => ({ slotId: slot(index + 1), selected: index % 2 === 0 })) });
+});
+
+test('shown track selections that are malformed, repeated or too many are invalid input before the fingerprint', () => {
+    const slotId = '00000009-0000-4000-8000-0000000000f1', item = { slotId, selected: true };
+    for (const [label, trackArtists] of [['not a list', item], ['101 items', Array.from({ length: 101 }, (_, index) => ({ slotId: `00000009-0000-4000-8000-${(index + 1).toString(16).padStart(12, '0')}`, selected: true }))],
+        ['a repeated slot', [item, { slotId: slotId.toUpperCase(), selected: false }]], ['an extra key', [{ ...item, extra: 1 }]], ['a missing tick', [{ slotId }]],
+        ['a tick that is not boolean', [{ slotId, selected: 'yes' }]], ['a slot that is no UUID', [{ slotId: 'slot', selected: true }]], ['null', null]] as const) invalid({ ...valid, trackArtists }, label);
 });
 
 test('shown MusicBrainz ID writes that are malformed, too many or nested are invalid input before the fingerprint', () => {
     const write = { scope: 'artist', entryKey: '00000009-0000-4000-8000-0000000000e1', musicBrainzId: '00000000-0000-4000-8000-0000000000a1', replaces: null };
-    for (const [label, musicBrainzIds] of [['not a list', write], ['22 writes', Array.from({ length: 22 }, () => write)], ['an extra key', [{ ...write, extra: 1 }]],
+    for (const [label, musicBrainzIds] of [['not a list', write], ['42 writes', Array.from({ length: 42 }, () => write)], ['an extra key', [{ ...write, extra: 1 }]],
         ['a malformed ID', [{ ...write, musicBrainzId: 'x' }]], ['a nested ID', [{ ...write, musicBrainzId: [write.musicBrainzId] }]], ['a label with an entry', [{ ...write, scope: 'label' }]],
         ['a placeholder', [{ ...write, musicBrainzId: '89ad4ac3-39f7-470e-963a-56509c546377' }]], ['null', null]] as const) invalid({ ...valid, musicBrainzIds }, label);
 });
@@ -43,7 +54,7 @@ test('approval fields that are unbounded, nested too deep or of the wrong type a
     for (const [label, fields] of [
         ['changes nested too deep', { changes: [{ ...change, base: deep }] }], ['a change over a draft', { changes: [{ ...change, value: 'v'.repeat(48_001) }] }],
         ['too many changes', { changes: Array.from({ length: 306 }, () => change) }], ['changes that are not a list', { changes: { 0: change } }], ['a change with an extra key', { changes: [{ ...change, extra: 1 }] }],
-        ['more than 122 decisions', { decisions: Array.from({ length: 123 }, () => decision) }], ['a nested decision', { decisions: [{ ...decision, scope: ['album'] }] }],
+        ['more than 142 decisions', { decisions: Array.from({ length: 143 }, () => decision) }], ['a nested decision', { decisions: [{ ...decision, scope: ['album'] }] }],
         ['a decision over 1 KB', { decisions: [{ ...decision, candidateRevision: 'r'.repeat(1_000) }] }], ['decisions nested too deep', { decisions: [deep] }], ['decisions that are not a list', { decisions: null }],
         ['a cover that is not text', { selectedCoverSlotId: 7 }], ['a cover over 64 characters', { selectedCoverSlotId: 'c'.repeat(65) }],
         ['a digest that is not text', { approvalDigest: null }], ['a digest over 64 characters', { approvalDigest: 'a'.repeat(65) }],

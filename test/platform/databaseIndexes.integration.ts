@@ -38,7 +38,7 @@ test('real Mongo indexes are verified, missing uniqueness fails closed, and dupl
   const receipt = await db.collection<{ _id: string }>('schemaMigrations')
     .findOne({ _id: requiredIndexRevision });
   assert.ok(receipt);
-  assert.equal(requiredIndexRevision, 'required-indexes-v12-catalog-cover-uploads');
+  assert.equal(requiredIndexRevision, 'required-indexes-v13-import-published-album');
   const linkIndexes = await db.collection('emailLinkTokens').listIndexes().toArray();
   const byKey = (key: Record<string, number>) => linkIndexes.find(index => JSON.stringify(index.key) === JSON.stringify(key));
   assert.ok(byKey({ email: 1, purpose: 1 }), 'link cleanup within registration transactions is indexed');

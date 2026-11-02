@@ -39,6 +39,8 @@
  *   - the exact-count group is preselected over a matching deluxe group, but not when a left-out release could have exactly as many tracks
  *   - an incomplete candidate with more tracks than members blocks only the only-group rule, and one with fewer audio tracks blocks nothing
  *   - the only matching group of a complete subset comparison is preselected, and two groups are a tie
+ *   - an identifier every member carries breaks a tie of matching groups, also over the exact-count group, by the one matching candidate it matches alone
+ *   - an identifier never preselects an unverified or non-matching release, and the next rule still applies
  *   - a CD edition and its CD+DVD edition with equal Album values and audio tracks form one group, preselected by its exact track count
  *   - members tagged with the Disc Number an import wrote pair on a CD after a video disc, as that disc number
  *   - equal proposals with different row durations or pairings form two groups and a tie, while equal ones share a group
@@ -771,6 +773,38 @@ test('the only matching group of a complete subset comparison is preselected, an
     assert.deepEqual([tagged.preselection?.candidateKey, tagged.preselection?.basis], [candidate(other).key, 'releaseId']);
 });
 
+test('an identifier every member carries breaks a tie of matching groups, also over the exact-count group, by the one matching candidate it matches alone', () => {
+    const other = synthetic(102, [{ lengths: [200_000, 230_000, 260_000, 290_000, 320_000], titles: ['A', 'B', 'C', 'D', 'E'] }], { barcode: '4006381333931' });
+    const labelled = synthetic(103, [{ lengths: [200_000, 230_000, 260_000, 290_000], titles: ['F', 'G', 'H', 'I'] }],
+        { labels: [{ name: 'Synthetic Label', labelId: mbid(950), catalogNumber: 'SYN-0001' }] });
+    const tagged = (identifiers: Partial<typeof noIdentifiers>) => threeMembers.map(one => ({ ...one, identifiers: { ...noIdentifiers, ...identifiers } }));
+    const pick = (ranked: RankedLookup) => [ranked.preselection?.candidateKey ?? null, ranked.preselection?.basis ?? null];
+    assert.deepEqual(pick(subset([candidate(deluxe), candidate(other), candidate(labelled)], threeMembers)), [null, null]);
+    assert.deepEqual(pick(subset([candidate(deluxe), candidate(other), candidate(labelled)], tagged({ barcode: '4006381333931' }))), [candidate(other).key, 'barcode']);
+    assert.deepEqual(pick(subset([candidate(deluxe), candidate(other), candidate(labelled)], tagged({ catalogNumber: 'syn-0001' }))), [candidate(labelled).key, 'catalogNumber']);
+    // It runs before the exact-count preference: the standard edition would otherwise be preselected.
+    assert.equal(subset([candidate(standard), candidate(deluxe)], threeMembers).preselection?.basis, 'exactTrackCount');
+    assert.deepEqual(pick(subset([candidate(standard), candidate(deluxe)], tagged({ releaseId: deluxe.releaseId }))), [candidate(deluxe).key, 'releaseId']);
+    // A release ID that matches no candidate, or the same barcode on two matching candidates, preselects nothing by itself, and the
+    // next rule decides.
+    assert.deepEqual(pick(subset([candidate(standard), candidate(deluxe)], tagged({ releaseId: mbid(999) }))), [candidate(standard).key, 'exactTrackCount']);
+    const twin = synthetic(104, [{ lengths: [200_000, 230_000, 260_000, 290_000, 320_000], titles: ['J', 'K', 'L', 'M', 'N'] }], { barcode: '4006381333931' });
+    assert.deepEqual(pick(subset([candidate(other), candidate(twin)], tagged({ barcode: '4006381333931' }))), [null, null]);
+});
+
+test('an identifier never preselects an unverified or non-matching release, and the next rule still applies', () => {
+    // The identified release has a track no member fits (not matching), or a member whose duration is unknown leaves it unverified.
+    const mismatched = synthetic(105, [{ lengths: [200_000, 230_000, 400_000, 290_000] }]);
+    const identified = (value: MusicBrainzRelease, members: LocalFileEvidence[]) => members.map(one => ({ ...one, identifiers: { ...noIdentifiers, releaseId: value.releaseId } }));
+    const notMatching = subset([candidate(mismatched), candidate(deluxe)], identified(mismatched, threeMembers));
+    assert.equal(entryOf(notMatching, mismatched).status, 'notMatching');
+    assert.deepEqual([notMatching.preselection?.candidateKey, notMatching.preselection?.basis], [candidate(deluxe).key, 'onlyMatchingGroup']);
+    const unknown = [file(0, 200_000), file(1, 230_000), file(2, null)];
+    const unverified = subset([candidate(deluxe)], identified(deluxe, unknown));
+    assert.equal(entryOf(unverified, deluxe).status, 'unverified');
+    assert.equal(unverified.preselection, null);
+});
+
 test('a CD edition and its CD+DVD edition with equal Album values and audio tracks form one group, preselected by its exact track count', () => {
     const lengths = [200_000, 230_000, 260_000, 290_000];
     const cd = synthetic(113, [{ lengths }]), cdDvd = synthetic(114, [{ lengths }, { format: 'DVD-Video', lengths: [400_000, 410_000], titles: ['Video A', 'Video B'] }]);
@@ -1031,9 +1065,9 @@ test('two candidates differing only in a paired track\'s credit form two groups,
     // A track credit equal to the release's groups with its marker.
     const spelledOut = synthetic(153, [{ lengths: deluxe.media[0].tracks.map(track => track.lengthMs), credits: credits([lead], 'release') }]);
     assert.equal(entryOf(subset([candidate(base), candidate(spelledOut)], threeMembers), spelledOut).groupKey, entryOf(ranked, base).groupKey);
-    // The exact import comparison ignores track credits.
+    // Exact import comparisons also keep independent track credits in separate groups.
     const exact = rankLookupCandidates([candidate(base), candidate(pairedGuest)], files(deluxe.media[0].tracks.map(track => track.lengthMs)));
-    assert.equal(exact.groups.length, 1);
+    assert.equal(exact.groups.length, 2);
 });
 
 test('stored track credits of an unknown shape propose nothing for their members and group like tracks without credits, never throwing', () => {

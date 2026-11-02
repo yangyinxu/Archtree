@@ -2,9 +2,10 @@
  * Exports
  *   Classes: ListenerCollectionPageError
  *   Functions: getListenerHome, getListenerCollectionPage, searchListenerContent, getListenerAlbum,
- *              getListenerArtist, getListenerOrganization, getListenerAudioTrack, sanitizeListenerLibraryPage,
- *              listListenerLibrary, getListenerRecentlyPlayed
- *   Constants: maximumListenerCollectionPageSize, defaultListenerCollectionPageSize
+ *              getListenerArtist, getListenerOrganization, getListenerAudioTrack, summarizeListenerVideos,
+ *              listListenerVideos, sanitizeListenerLibraryPage, listListenerLibrary, getListenerRecentlyPlayed
+ *   Constants: maximumListenerCollectionPageSize, defaultListenerCollectionPageSize,
+ *              maximumListenerVideoPageSize, defaultListenerVideoPageSize, isListenerVideoCursor
  *   Re-exports: * from '../../contracts/listenerV1'
  * Internal
  *   Types: ListenerContentRef, CatalogContext, OrderedListenerPageItem, OrderedCollectionRef,
@@ -47,11 +48,12 @@ import {
 } from '../catalog/albumReferenceFenceService';
 import { AttributionStatus } from '../../models/catalogCredit';
 import { artistAlbumSection, validStoredCredits } from '../catalog/artistAlbumClassificationService';
-import { catalogDisplayByline, displayBylineField, toBylineCredit } from '../catalog/catalogByline';
+import { catalogDisplayByline, displayBylineField, personalDisplayByline, toBylineCredit } from '../catalog/catalogByline';
 import { Carousel } from '../../models/carousel';
 import { catalogCreditRollout } from '../../config/catalogCreditRollout';
 import { pageItemIdentity } from '../../utils/pageItemIdentity';
 import { getJwtSecret } from '../auth/authSessionService';
+import { decodeVideoGridCursor, encodeVideoGridCursor, isVideoGridCursor, readVideoGridPageTracks, readVideoGridState, VideoPageError } from '../content/videoPageService';
 
 import type {
     ListenerDate,
@@ -72,7 +74,8 @@ import type {
     ListenerAlbum,
     ListenerArtist,
     ListenerOrganization,
-    ListenerTrack
+    ListenerTrack,
+    ListenerVideos
 } from '../../contracts/listenerV1';
 
 // Preserve existing server imports while the canonical contract stays persistence-free.
@@ -109,6 +112,8 @@ const maximumAlbumTracks = 500;
 const maximumHydratedAlbumTracks = 10_000;
 export const maximumListenerCollectionPageSize = 100;
 export const defaultListenerCollectionPageSize = 20;
+export const maximumListenerVideoPageSize = 48;
+export const defaultListenerVideoPageSize = 24;
 const queryTimeoutMs = 3_000;
 
 const artistProjection = {
@@ -153,7 +158,8 @@ const audioTrackProjection = {
     videoAsset: 1,
     releaseDate: 1,
     credits: 1,
-    attributionStatus: 1
+    attributionStatus: 1,
+    personalAttribution: 1
 };
 const readyAudioFilter = readyAudioStorageFilter;
 
@@ -461,7 +467,9 @@ const createCatalogContext = async (
     return { albumsById, tracksById, artistsById, artists, organizationsById };
 };
 
-const creditProjectionForOwner = (owner: any, context: CatalogContext) => {
+const creditProjectionForOwner = (owner: any, context: CatalogContext, personal = false) => {
+    const byline = personal ? personalDisplayByline(owner) : null;
+    if (byline) return { credits: [], displayByline: byline, attributionStatus: 'unknown' as const };
     const credits = validStoredCredits(owner);
     if (!credits) return {};
     const resolved = credits.map((credit) => ({
@@ -478,13 +486,13 @@ const creditProjectionForOwner = (owner: any, context: CatalogContext) => {
         role: credit.role,
         order: credit.order
     }] : []);
-    const byline = catalogDisplayByline(
+    const catalogByline = catalogDisplayByline(
         owner.attributionStatus as AttributionStatus,
         resolved.map(({ credit, name }) => toBylineCredit(credit, name))
     );
     return {
         credits: publicCredits,
-        ...displayBylineField(byline),
+        ...displayBylineField(catalogByline),
         attributionStatus: owner.attributionStatus as AttributionStatus
     };
 };
@@ -549,13 +557,13 @@ const toAudioTrackSummary = (
         id: String(track._id),
         title: normalizeText(track?.title),
         artworkUrl: resolvedCoverArtUrl(track) || resolvedCoverArtUrl(album),
-        artistNames,
+        artistNames: personalDisplayByline(track) === null ? artistNames : [],
         albumId,
         albumTitle: album ? normalizeText(album.title) || null : null,
         duration: normalizeText(track?.duration) || null,
         mediaType: activeMediaTypeForTrack(track),
         streamUrl: `/content/mediaTrack/stream/${encodeURIComponent(String(track._id))}`,
-        ...creditProjectionForOwner(track, context)
+        ...creditProjectionForOwner(track, context, true)
     };
 };
 
@@ -1191,6 +1199,38 @@ export const getListenerAudioTrack = async (audioTrackId: string): Promise<Liste
     if (!track) return null;
     const context = await createCatalogContext([], [track]);
     return { audioTrack: toAudioTrackSummary(track, context) };
+};
+
+/** Cursors are bounded signed snapshot tokens; structured values are never query operators. */
+export const isListenerVideoCursor = isVideoGridCursor;
+
+/** Shares the allowlisted Video card projection with administrator ordering reviews. */
+export const summarizeListenerVideos = async (tracks: any[]) => {
+    const context = await createCatalogContext([], tracks);
+    return tracks.map(track => toAudioTrackSummary(track, context));
+};
+
+/**
+ * Lists the configured Video Grid with newly eligible Videos appended after saved order.
+ * Every continuation checks its complete visibility/order snapshot before returning a slice.
+ */
+export const listListenerVideos = async (limit: number, cursor?: string): Promise<ListenerVideos> => {
+    const boundedLimit = Math.max(1, Math.min(Math.floor(limit), maximumListenerVideoPageSize));
+    const anchor = cursor ? decodeVideoGridCursor(cursor) : null;
+    const state = await readVideoGridState();
+    if (anchor && (anchor.revision !== state.revision || String(state.tracks[anchor.index]?._id) !== anchor.id)) {
+        throw new VideoPageError(409, 'stale_video_cursor');
+    }
+    const start = anchor ? anchor.index + 1 : 0;
+    const page = state.tracks.slice(start, start + boundedLimit);
+    const last = page[page.length - 1];
+    const tracks = await readVideoGridPageTracks(page.map(track => String(track._id)));
+    return {
+        items: await summarizeListenerVideos(tracks),
+        defaultView: state.defaultView,
+        nextCursor: state.tracks.length > start + boundedLimit && last
+            ? encodeVideoGridCursor(state.revision, start + page.length - 1, String(last._id)) : null
+    };
 };
 
 /** Strips lifecycle and ownership fields from the existing paginated Library result. */

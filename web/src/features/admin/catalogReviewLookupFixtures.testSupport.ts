@@ -3,14 +3,15 @@
  *   Functions: reviewRows, releaseTrackEntries, reviewLookupResponse, reviewItunesLookupResponse,
  *              reviewTieLookupResponse, reviewAfterLookup, reviewIdentityResponse, pairingRows, pairingReview,
  *              pairingLookupResponse, pairingApplication, pairedLookupResponse, handPairingRows,
- *              unnumberedPairingReview, handPairingResponse, pairingTimeline, pairingRunningTimeline
+ *              unnumberedPairingReview, longAlbumReview, handPairingResponse, pairingTimeline,
+ *              pairingRunningTimeline, durationsReview, durationsLookupResponse, durationsTimeline
  *   Constants: reviewRelease, reviewCandidateKey, otherReviewRelease, guestEntryKey, guestTrackEntryKey,
  *              guestHandle, leadHandle, leadRecordId, guestCandidateId, leadMusicBrainzId,
- *              leadOtherMusicBrainzId, leadCreditId, pairingEditions
+ *              leadOtherMusicBrainzId, leadCreditId, pairingEditions, longAlbumDiscs
  * Internal
  *   Types: Overrides, PairingCandidate, PairingTimeline
- *   Functions: entry, pairingEdition, pairingSearches
- *   Constants: groupKey, pairingTrackTitles
+ *   Functions: entry, pairingEdition, pairingSearches, durationsSlot
+ *   Constants: groupKey, pairingTrackTitles, durationsTitles
  * @end-catalog */
 
 import type { ImportArtistEntry } from './adminNamingSchema';
@@ -74,7 +75,7 @@ export function reviewLookupResponse(overrides: Overrides = {}): ReviewLookupRes
     staleFiles: [], needsAnswer: { tie: false, conflicts }, blocking: true, itunes: 'notQueried', ...overrides
   };
   return { lookup, revision: 1, valueRevision: 1, summary: { waiting: { lookup: false, analysis: false }, needsAnswer: { tie: lookup.needsAnswer.tie, conflicts: lookup.needsAnswer.conflicts },
-    lookupAvailable: true } };
+    lookupAvailable: true, primaryArtists: ['Synthetic catalog Artist'] } };
 }
 
 /** The same application from an iTunes-only candidate not checked against MusicBrainz: its values are flagged and its answers say iTunes. */
@@ -178,7 +179,8 @@ export function pairingLookupResponse(): ReviewLookupResponse {
     input: { trigger: 'submitted', submitted: { kind: 'album', text: 'Synthetic Live Album 2' } }, candidates: [...others, pairingEdition(0), pairingEdition(1)], groups: [],
     preselection: null, disclosure: { unknownLocalDurations: 0, unknownLocalDiscNumbers: 2, partialComparison: true }, applied: null, staleFiles: [],
     needsAnswer: { tie: false, conflicts: [] }, blocking: false, itunes: 'answered' };
-  return { lookup, revision: 1, valueRevision: 0, summary: { waiting: { lookup: false, analysis: false }, needsAnswer: { tie: false, conflicts: [] }, lookupAvailable: true } };
+  return { lookup, revision: 1, valueRevision: 0, summary: { waiting: { lookup: false, analysis: false }, needsAnswer: { tie: false, conflicts: [] }, lookupAvailable: true,
+    primaryArtists: ['Synthetic Live Artist -Romanized-'] } };
 }
 /**
  * An application of `key` from that run: with `paired`, through the single pairing the saved numbers make (the label, date,
@@ -218,6 +220,23 @@ export function unnumberedPairingReview(): CatalogReview {
   return { ...item, source: { ...item.source, tracks: item.source.tracks.map((track, index) => ({ ...track, title: titles[index] })) },
     draft: { ...item.draft, tracks: item.draft.tracks.map((track, index) => ({ ...track, title: titles[index] })) } };
 }
+/** The disc sizes of the long Album (longAlbumReview): 44 tracks on three discs. */
+export const longAlbumDiscs = [15, 15, 14] as const;
+/**
+ * A review of a 44-track Album on three discs whose captured titles start with their positions, "1.01." through "3.14."
+ * ("1.01.Synthetic long song 1"), while no member has a Disc or Track Number, the Disc Number captured as none; captured for
+ * lookup, with no expected tracklist and no lookup applied. Slot IDs end in the member's Album position.
+ */
+export function longAlbumReview(): CatalogReview {
+  const item = capturedCatalogReview(), positions = longAlbumDiscs.flatMap((count, disc) => Array.from({ length: count }, (_, index) => [disc + 1, index + 1]));
+  const slot = (index: number) => `20000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`;
+  const titles = positions.map(([disc, track], index) => `${disc}.${String(track).padStart(2, '0')}.Synthetic long song ${index + 1}`);
+  return { ...item, suggestions: [],
+    source: { album: { ...item.source.album, title: 'Synthetic Long Album' }, tracks: titles.map((title, index) => ({ slotId: slot(index), id: `${'d'.repeat(22)}${(index + 1).toString(16).padStart(2, '0')}`,
+      revision: item.source.album.revision, title, discNumber: null, trackNumber: null, originalFileName: null })) },
+    draft: { album: { ...item.draft.album, title: 'Synthetic Long Album', expectedTracklist: null },
+      tracks: titles.map((title, index) => ({ slotId: slot(index), title, discNumber: null, trackNumber: null, artists: [] })) } };
+}
 /**
  * The pairing read (GET …/lookup/candidates/:key/pairing) of that review's release at `revision`: the first member may take 1-1 or
  * 2-2, the second only 1-2, which every pairing gives it; neither has saved numbers, and both may save a Disc Number.
@@ -250,4 +269,50 @@ export function pairingRunningTimeline(updatedAt: string): PairingTimeline {
   return { steps: [...pairingSearches(), { kind: 'trackTitle', state: 'pending', texts: pairingTrackTitles }, { kind: 'details', state: 'active', done: 5, total: 12 },
     { kind: 'itunes', state: 'pending' }, { kind: 'bridge', state: 'pending' }, { kind: 'aliases', state: 'pending' }], trackTitleSearch: { state: 'pending' },
   startedAt: '2026-10-22T01:24:52.000Z', updatedAt, completedAt: null, retry: null };
+}
+
+/** The three members of the durations review, numbered only in their titles ("1.01.", as the owner's Album was captured). */
+const durationsTitles = ['1.01.Synthetic snow', '1.02.Synthetic will', '1.03.Synthetic colors'];
+const durationsSlot = (index: number) => `30000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`;
+/**
+ * A captured review like the design's first screen: "Synthetic Bible Album" with three members whose titles carry their positions
+ * but which have no Disc or Track Number (the Disc Number captured as none), no expected tracklist, and Luna AI idle with no
+ * suggestions, so the page proposes six numbers.
+ */
+export function durationsReview(): CatalogReview {
+  const item = capturedCatalogReview();
+  return { ...item, suggestions: [], analysis: { ...item.analysis, state: 'idle', generation: 0, operationId: null, completedChunks: 0, totalChunks: 0, attemptsUsed: 0 },
+    source: { album: { ...item.source.album, title: 'Synthetic Bible Album' }, tracks: durationsTitles.map((title, index) => ({ slotId: durationsSlot(index),
+      id: `${'e'.repeat(22)}${(index + 1).toString(16).padStart(2, '0')}`, revision: item.source.album.revision, title, discNumber: null, trackNumber: null, originalFileName: null })) },
+    draft: { album: { ...item.draft.album, title: 'Synthetic Bible Album', expectedTracklist: null },
+      tracks: durationsTitles.map((title, index) => ({ slotId: durationsSlot(index), title, discNumber: null, trackNumber: null, artists: [] })) } };
+}
+/**
+ * The completed automatic run of that review: 14 releases its tracks fit, none matched, none applied. Four carry exactly its
+ * title, each a release of its own (3 CD, 3 CD + Blu-ray and two Digital Media, one of those without a catalogue number or
+ * barcode); ten are similar titles ("… (Instrumental) N"). Every member lacks a duration, so each pairs in more than one way.
+ */
+export function durationsLookupResponse(): ReviewLookupResponse {
+  const candidate = (n: number, title: string, formats: string[], ids = true): PairingCandidate => ({ ...pairingEdition(0), key: `musicbrainz:0000000b-0000-4000-8000-0000000001${String(n).padStart(2, '0')}`,
+    releaseId: `0000000b-0000-4000-8000-0000000001${String(n).padStart(2, '0')}`, title, artist: 'Synthetic catalog Artist', label: 'Synthetic Bible Label', country: 'JP',
+    catalogNumber: ids ? `SYN-B${n}` : null, barcode: ids ? String(4006381334000 + n) : null, date: { year: 2019, month: 1, day: 30 }, formats, trackCount: 45, artistMismatch: false,
+    comparison: { trackCount: { local: 3, candidate: 45 }, discCount: { local: null, candidate: 3 }, differences: [], unknownLocalDurations: 3, unknownCandidateDurations: 0,
+      subset: { leftOutTracks: 0, pairing: 'ambiguous', pairs: [], missingTrackCount: 42, unpairableSlotIds: [] } } });
+  const lookup: NonNullable<ReviewLookupResponse['lookup']> = { run: 1, state: 'complete', issue: null, outcome: 'candidates', input: { trigger: 'catalog', submitted: null },
+    candidates: [candidate(1, 'Synthetic Bible Album', ['CD', 'CD', 'CD']), candidate(2, 'Synthetic Bible Album', ['CD', 'CD', 'CD', 'Blu-ray']),
+      candidate(3, 'Synthetic Bible Album', ['Digital Media']), candidate(4, 'Synthetic Bible Album', ['Digital Media'], false),
+      ...Array.from({ length: 10 }, (_, index) => candidate(index + 5, `Synthetic Bible Album (Instrumental) ${index + 1}`, ['Digital Media']))],
+    groups: [], preselection: null, disclosure: { unknownLocalDurations: 3, unknownLocalDiscNumbers: 3, partialComparison: false }, applied: null, staleFiles: [],
+    needsAnswer: { tie: false, conflicts: [] }, blocking: false, itunes: 'answered' };
+  return { lookup, revision: 1, valueRevision: 0, summary: { waiting: { lookup: false, analysis: false }, needsAnswer: { tie: false, conflicts: [] }, lookupAvailable: true,
+    primaryArtists: ['Synthetic catalog Artist'] } };
+}
+/** That run's timeline: four title searches, release details 16 of 16 and the Artist aliases, completed 51 seconds after it started. */
+export function durationsTimeline(): PairingTimeline {
+  const texts = (text: string, artist?: string) => [{ text, ...(artist ? { artist } : {}) }];
+  return { steps: [{ kind: 'albumArtist', state: 'done', texts: texts('Synthetic Bible Album', 'Synthetic catalog Artist') }, { kind: 'album', state: 'done', texts: texts('Synthetic Bible Album') },
+    { kind: 'albumArtist', state: 'done', texts: texts('Synthetic Bible Album／Synthetic catalog Artist', 'Synthetic catalog Artist') },
+    { kind: 'album', state: 'done', texts: texts('Synthetic Bible Album／Synthetic catalog Artist') }, { kind: 'details', state: 'done', done: 16, total: 16 },
+    { kind: 'aliases', state: 'done', done: 2, total: 2 }], trackTitleSearch: { state: 'notNeeded' }, startedAt: '2026-10-31T01:00:00.000Z', updatedAt: '2026-10-31T01:00:51.000Z',
+  completedAt: '2026-10-31T01:00:51.000Z', retry: null };
 }

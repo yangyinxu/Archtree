@@ -6,6 +6,7 @@
  *              resolveCatalogReviewLookup, saveCatalogReview, adoptCatalogReviewSuggestions
  * Internal
  *   Functions: notFound
+ *   Constants: PRIMARY_ARTISTS
  * @end-catalog */
 
 /**
@@ -26,6 +27,7 @@ import { importCollection, importLookupRecord, mutateAdminProject, parseAdminPro
 import { parseDraftPath } from '../import/adminImportValueState';
 import { isLookupCandidateKey } from './lookupContract';
 import { catalogReviewPairingView, type CatalogReviewPairingResponse } from './lookupPairingView';
+import { catalogReviewPrimaryNames } from './lookupReviewEvidence';
 import { catalogReviewLookupView, type CatalogReviewLookupView } from './lookupView';
 import { chooseLookupCandidate, lookupAnswersNeeded, resolveLookupConflicts } from './lookupValueApplication';
 import { parseLookupAnswers, parseLookupChoice, parseLookupSubmission, storeLookupRecord } from './metadataLookupRequests';
@@ -36,10 +38,15 @@ import {
 
 /**
  * What a review waits for: an active run (`waiting.lookup`, from the run's own state: one that can still send a request, as apply
- * checks) or analysis (queued, running, or a stopped call still settling, as apply checks), the answers lookup needs, and whether
- * this server offers lookup at all.
+ * checks) or analysis (queued, running, or a stopped call still settling, as apply checks), the answers lookup needs, whether
+ * this server offers lookup at all, and the names a name submitted without an Artist name is searched with (`primaryArtists`:
+ * catalogReviewPrimaryNames, empty before the review is captured for lookup), so the name box can tell whether its prefilled
+ * Artists are those names.
  */
-export type CatalogReviewLookupSummary = { waiting: { lookup: boolean; analysis: boolean }; needsAnswer: { tie: boolean; conflicts: string[] }; lookupAvailable: boolean };
+export type CatalogReviewLookupSummary = { waiting: { lookup: boolean; analysis: boolean }; needsAnswer: { tie: boolean; conflicts: string[] }; lookupAvailable: boolean;
+    primaryArtists: string[] };
+/** At most this many primary Artist names of at most this length are sent; a capture beyond either sends none. */
+const PRIMARY_ARTISTS = { count: 100, length: 1000 } as const;
 /** `valueRevision` counts lookup applications, which change the draft without a new `revision`, so a reader notices them. */
 export type CatalogReviewLookupResponse = { lookup: CatalogReviewLookupView | null; revision: number; valueRevision: number; summary: CatalogReviewLookupSummary };
 const notFound = () => new AdminImportError(404, 'ADMIN_CATALOG_REVIEW_NOT_FOUND');
@@ -47,8 +54,8 @@ const notFound = () => new AdminImportError(404, 'ADMIN_CATALOG_REVIEW_NOT_FOUND
 /**
  * The review's lookup view (null before any run, with its timeline), its revision and value revision and its summary, read in
  * one snapshot. Of its server-only capture the review is read without the expected tracklist and member durations; the view's
- * timeline reads only the credited names in it, to admit the Artist names the run searched (catalogReviewSearchTexts), and
- * nothing of the capture is projected into the response. An applied review reads too. A malformed ID or a project that is not a
+ * timeline reads only the credited names in it, to admit the Artist names the run searched (catalogReviewSearchTexts), and of the
+ * capture only the shown primary Artist names are projected into the response (`summary.primaryArtists`). An applied review reads too. A malformed ID or a project that is not a
  * review is not found.
  */
 export async function getCatalogReviewLookup(actor: string, id: string, configuration: () => MetadataLookupConfiguration = metadataLookupConfiguration): Promise<CatalogReviewLookupResponse> {
@@ -59,7 +66,7 @@ export async function getCatalogReviewLookup(actor: string, id: string, configur
         if (!doc) throw notFound();
         const stored = await importLookupRecord(doc._id, session), needed = lookupAnswersNeeded(stored, doc, { append: false });
         const slots = new Set((Array.isArray(doc.manifest?.files) ? doc.manifest.files : []).map(file => file.slotId));
-        const available = configuration().available, analysis = doc.analysis;
+        const available = configuration().available, analysis = doc.analysis, names = catalogReviewPrimaryNames(doc);
         return {
             lookup: stored ? catalogReviewLookupView(stored, doc, { timeline: true }) : null, revision: doc.revision,
             valueRevision: Number.isSafeInteger(doc.valueRevision) && doc.valueRevision! >= 0 ? doc.valueRevision! : 0,
@@ -69,7 +76,8 @@ export async function getCatalogReviewLookup(actor: string, id: string, configur
                 waiting: { lookup: lookupRunActive(stored, new Date(), available),
                     analysis: analysis?.state === 'queued' || analysis?.state === 'running' || (Array.isArray(analysis?.chunks) && analysis.chunks.some(chunk => chunk?.state === 'inflight')) },
                 needsAnswer: { tie: needed.tie, conflicts: needed.conflicts.filter(path => !path.startsWith('tracks.') || slots.has(path.split('.')[1])) },
-                lookupAvailable: available
+                lookupAvailable: available,
+                primaryArtists: names.length <= PRIMARY_ARTISTS.count && names.every(name => name.length <= PRIMARY_ARTISTS.length) ? names : []
             }
         };
     });

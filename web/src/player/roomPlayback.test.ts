@@ -575,6 +575,7 @@ test('explicit UI and MediaSession actions emit frozen expected-state intents wi
 
 test('room mode refuses unrelated browse queue launches and keeps shuffle/repeat and volume personal', async () => {
   const { room, store, audio, onIntent } = setup();
+  expect(store.isRoomPlaybackActive()).toBe(true);
   await room.apply(frame(0));
   audio.ready();
   await expect(store.launchQueue(queue, 2)).rejects.toThrow('Leave room');
@@ -587,6 +588,8 @@ test('room mode refuses unrelated browse queue launches and keeps shuffle/repeat
   store.toggleShuffle(); store.cycleRepeatMode(); store.setVolume(0.25); store.toggleMute();
   expect(store.getSnapshot()).toMatchObject({ currentItem: { id: queue[0].id }, shuffleEnabled: false, repeatMode: 'off', volume: 0.25, muted: true });
   expect(onIntent).not.toHaveBeenCalled();
+  room.detach();
+  expect(store.isRoomPlaybackActive()).toBe(false);
   store.destroy();
 });
 

@@ -4,12 +4,14 @@
  *   Functions: catalogReviewLookupTimeline
  *   Constants: LOOKUP_TIMELINE_LIMITS
  * Internal
- *   Functions: isRecord, list, count, instant, fields, titleSearch, musicBrainzExhausted, trackTitleSearchView
+ *   Functions: isRecord, list, count, instant, fields, titleSearch, identifierStep, musicBrainzExhausted,
+ *              trackTitleSearchView
  * @end-catalog */
 
 /**
- * An existing-Album review run's timeline, as its lookup view shows it (lookupView.ts): the run's planned title searches, its
- * Track-title searches and its stages (release details, the iTunes fallback, its MusicBrainz bridge and the alias lookups) as
+ * An existing-Album review run's timeline, as its lookup view shows it (lookupView.ts): the run's planned searches of its captured
+ * import identifiers (each naming only its basis and, for a release ID, whether it is the release the imports applied or the one
+ * in their files' tags, never a value) and its title searches, its Track-title searches and its stages (release details, the iTunes fallback, its MusicBrainz bridge and the alias lookups) as
  * bounded steps with their states and counts; the texts those searches sent, each shown only when it is the review's own
  * (catalogReviewSearchTexts) or, for an answered bridge search, a title a shown candidate already carries; the derived state of the
  * Track-title searches; the stored automatic retry with its attempt; and the run's times. Built from stored fields only: a
@@ -26,7 +28,8 @@ import type { AdminImportDocument } from '../import/adminImportService';
 import { METADATA_LOOKUP_JOB_LIMITS } from './lookupContract';
 import { storedItunesStage } from './lookupItunesStage';
 import { isFallbackLookupQuery, isTrackTitleLookupQuery } from './lookupQueryPlanner';
-import { catalogReviewSearchTexts, catalogReviewTrackTitleSkip, comparableSearchText } from './lookupReviewEvidence';
+import { normalizeMusicBrainzId } from './lookupIdentifiers';
+import { catalogReviewIdentifiers, catalogReviewSearchTexts, catalogReviewTrackTitleSkip, comparableSearchText, type CatalogReviewIdentifiers } from './lookupReviewEvidence';
 import { trackTitleWeight, UNCREDITED_TRACK_TITLE_MIN_WEIGHT, type TrackTitleSkip } from './lookupTrackTitles';
 import { isBlockingLookupState } from './metadataLookupRecord';
 
@@ -35,28 +38,32 @@ export type ViewLookupStepState = 'done' | 'unconfirmed' | 'active' | 'pending' 
 /** One searched text and the Artist name its search was credited to, each at most 200 characters. */
 export type ViewSearchText = { text: string; artist?: string };
 /**
- * One step. A title search (`albumArtist`, `album`, `songArtist`, `song`) carries its one text; the Track-title step its titles;
+ * One step. A search of a captured import identifier (`releaseId`, with `from`: the release the imports applied or the release ID
+ * in their files' tags; `barcode`; `catalogNumber`) carries nothing else. A title search (`albumArtist`, `album`, `songArtist`,
+ * `song`) carries its one text; the Track-title step its titles;
  * `details`, `itunes`, `bridge` and `aliases` their settled and total requests (`done` at most `total`, both within 100), the
- * bridge also the answered searches' titles a shown candidate carries. `partial` marks an iTunes step whose stage left a plausible
+ * bridge also the answered searches' titles a shown candidate carries, and `byBarcode` when every result those searches came from
+ * was answered by an iTunes lookup of the captured barcode, not by a name search. `partial` marks an iTunes step whose stage left a plausible
  * result out of the comparison (its result bound, or a collection lookup iTunes never answered), which makes the run's comparison
  * partial. The Track titles sent for certain and those that may not have been sent are two `trackTitle` steps.
  */
-export type ViewLookupStep = { kind: 'albumArtist' | 'album' | 'songArtist' | 'song' | 'trackTitle' | 'details' | 'itunes' | 'bridge' | 'aliases';
-    state: ViewLookupStepState; done?: number; total?: number; texts?: ViewSearchText[]; partial?: true };
+export type ViewLookupStep = { kind: 'releaseId' | 'barcode' | 'catalogNumber' | 'albumArtist' | 'album' | 'songArtist' | 'song' | 'trackTitle' | 'details' | 'itunes' | 'bridge' | 'aliases';
+    state: ViewLookupStepState; from?: 'import' | 'tags'; done?: number; total?: number; texts?: ViewSearchText[]; partial?: true; byBarcode?: true };
 /**
  * The run's Track-title searches: sent, not needed (the title searches preselected or matched), not yet decided, or skipped
- * because no title could be searched (the picker's reason) or MusicBrainz stayed unavailable.
+ * because no title could be searched (the picker's reason), the captured identifiers' searches used their room under the query
+ * bound (`noRoom`) or MusicBrainz stayed unavailable.
  */
-export type ViewTrackTitleSearch = { state: 'sent' | 'notNeeded' | 'pending' } | { state: 'skipped'; reason: TrackTitleSkip | 'unavailable' };
+export type ViewTrackTitleSearch = { state: 'sent' | 'notNeeded' | 'pending' } | { state: 'skipped'; reason: TrackTitleSkip | 'noRoom' | 'unavailable' };
 /**
- * A review run's timeline: at most 12 steps in the order a run takes them (title searches, Track titles, release details, iTunes,
+ * A review run's timeline: at most 12 steps in the order a run takes them (identifier and title searches, Track titles, release details, iTunes,
  * bridge, aliases), the Track-title search state where one can be said, the run's start, last-step and end times, and while it
  * waits for an automatic retry, when, for which source, and which retry of how many it is.
  */
 export type ViewLookupTimeline = { steps: ViewLookupStep[]; trackTitleSearch?: ViewTrackTitleSearch; startedAt: string; updatedAt: string; completedAt: string | null;
     retry: { at: string; source: 'musicbrainz' | 'itunes'; attempt: number; limit: number } | null };
 
-/** Steps, title-search steps (the planned-query bound), texts per step, characters per text and the bound of a step's counts. */
+/** Steps, identifier and title-search steps together (the planned-query bound), texts per step, characters per text and the bound of a step's counts. */
 export const LOOKUP_TIMELINE_LIMITS = Object.freeze({ steps: 12, searches: 6, texts: 4, text: 200, count: 100 });
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 const list = (value: unknown): unknown[] => Array.isArray(value) ? value : [];
@@ -68,6 +75,18 @@ const fields = (query: unknown): Record<string, unknown> => isRecord(query) && i
 /** A title search of the plan: a release search by Album text or a recording search by song text, never a fallback. */
 const titleSearch = (query: unknown) => isRecord(query) && !isFallbackLookupQuery(query) && isRecord(query.query)
     && ((query.kind === 'musicBrainzReleaseSearch' && query.basis === 'albumText') || (query.kind === 'musicBrainzRecordingSearch' && query.basis === 'songText'));
+/**
+ * The step of a planned search of a captured import identifier, or null: the release lookup of the review's release ID (with where
+ * it came from), or its barcode or catalogue-number search, only while the capture holds that identifier; never a fallback.
+ */
+function identifierStep(query: unknown, ids: CatalogReviewIdentifiers): Pick<ViewLookupStep, 'kind' | 'from'> | null {
+    if (!isRecord(query) || isFallbackLookupQuery(query)) return null;
+    if (query.kind === 'musicBrainzRelease' && query.basis === 'releaseId') {
+        return ids.releaseId && ids.releaseFrom && normalizeMusicBrainzId(query.releaseId) === ids.releaseId ? { kind: 'releaseId', from: ids.releaseFrom } : null;
+    }
+    if (query.kind !== 'musicBrainzReleaseSearch' || !isRecord(query.query)) return null;
+    return query.basis === 'barcode' && ids.barcode ? { kind: 'barcode' } : query.basis === 'catalogNumber' && ids.catalogNumber ? { kind: 'catalogNumber' } : null;
+}
 
 /** Whether MusicBrainz's automatic retries ran out during the run. */
 const musicBrainzExhausted = (raw: Record<string, unknown>) => isRecord(raw.exhausted) && (raw.exhausted.musicbrainz === 'sourceBusy' || raw.exhausted.musicbrainz === 'sourceUnavailable');
@@ -108,16 +127,18 @@ export function catalogReviewLookupTimeline(raw: Record<string, unknown>, doc: A
         const text = shown(query[field]), artist = query.artist === undefined ? undefined : shown(query.artist);
         return text === null || artist === null ? null : { text, ...(artist ? { artist } : {}) };
     };
-    const steps: ViewLookupStep[] = [];
-    // Title searches before the Track-title tail: sent below `queryIndex` (unconfirmed where the run may have stopped short of
-    // them), the one at it sending, later ones waiting, and once the search phase is over, one never reached (the candidate bound
-    // ended the searches) skipped.
+    const steps: ViewLookupStep[] = [], ids = catalogReviewIdentifiers(doc);
+    // Identifier and title searches before the Track-title tail: sent below `queryIndex` (unconfirmed where the run may have stopped
+    // short of them), the one at it sending, later ones waiting, and once the search phase is over, one never reached (the candidate
+    // bound ended the searches) skipped. An identifier search shows no value.
     (first >= 0 ? queries.slice(0, first) : queries).forEach((query, index) => {
-        if (!titleSearch(query) || steps.length >= LOOKUP_TIMELINE_LIMITS.searches) return;
-        const values = fields(query), release = (query as Record<string, unknown>).kind === 'musicBrainzReleaseSearch', credited = typeof values.artist === 'string';
-        const text = entry(values, release ? 'release' : 'recording');
+        const identifier = titleSearch(query) ? null : identifierStep(query, ids);
+        if ((!identifier && !titleSearch(query)) || steps.length >= LOOKUP_TIMELINE_LIMITS.searches) return;
         const state: ViewLookupStepState = raw.state === 'queued' ? 'pending' : running && phase === 'search' && index === at ? 'active'
             : index < at ? exhausted || (partial && index > 0) ? 'unconfirmed' : 'done' : phase === 'search' && !complete ? 'pending' : 'skipped';
+        if (identifier) { steps.push({ ...identifier, state }); return; }
+        const values = fields(query), release = (query as Record<string, unknown>).kind === 'musicBrainzReleaseSearch', credited = typeof values.artist === 'string';
+        const text = entry(values, release ? 'release' : 'recording');
         steps.push({ kind: release ? credited ? 'albumArtist' : 'album' : credited ? 'songArtist' : 'song', state, ...(text ? { texts: [text] } : {}) });
     });
     const decision = trackTitleSearchView(raw, doc, queries);
@@ -149,12 +170,16 @@ export function catalogReviewLookupTimeline(raw: Record<string, unknown>, doc: A
             ...(stage.state === 'unavailable' ? {} : bounded(stage.requestIndex, stage.requests.length)), ...(stage.state !== 'unavailable' && !stage.complete ? { partial: true as const } : {}) });
         // Only an answered bridge search names its title: one left unsent when MusicBrainz's retries ran out checked nothing.
         const bridge = stage.bridge, titles = new Set(candidateTitles.map(comparableSearchText).filter(Boolean));
-        const texts = [...new Set((bridge ?? []).filter((_query, index) => stage.bridgeOutcomes[index] === 'found' || stage.bridgeOutcomes[index] === 'none')
-            .map(query => fields(query)).map(values => values.release ?? values.recording)
-            .filter((value): value is string => typeof value === 'string' && value.length <= LOOKUP_TIMELINE_LIMITS.text && titles.has(comparableSearchText(value))))]
-            .slice(0, LOOKUP_TIMELINE_LIMITS.texts).map(text => ({ text }));
+        const titleOf = (query: unknown) => { const values = fields(query), value = values.release ?? values.recording;
+            return typeof value === 'string' && value.length <= LOOKUP_TIMELINE_LIMITS.text && titles.has(comparableSearchText(value)) ? value : null; };
+        const named = (bridge ?? []).filter((query, index) => (stage.bridgeOutcomes[index] === 'found' || stage.bridgeOutcomes[index] === 'none') && titleOf(query) !== null);
+        const texts = [...new Set(named.map(query => titleOf(query)!))].slice(0, LOOKUP_TIMELINE_LIMITS.texts).map(text => ({ text }));
+        // Results answered by the barcode's UPC lookup keep that barcode; a bridge naming only such results came from the barcode.
+        const upc = new Set(stage.items.filter(item => item.barcode !== null).map(item => item.key));
+        const byBarcode = named.length > 0 && named.every(query => query.itemKeys.length > 0 && query.itemKeys.every(key => upc.has(key)));
         steps.push({ kind: 'bridge', state: bridge === null ? complete ? 'skipped' : 'pending' : !bridge.length ? 'skipped' : running && phase === 'bridge' ? 'active'
-            : stage.bridgeIndex >= bridge.length ? 'done' : 'pending', ...(bridge?.length ? bounded(stage.bridgeIndex, bridge.length) : {}), ...(texts.length ? { texts } : {}) });
+            : stage.bridgeIndex >= bridge.length ? 'done' : 'pending', ...(bridge?.length ? bounded(stage.bridgeIndex, bridge.length) : {}), ...(texts.length ? { texts } : {}),
+            ...(texts.length && byBarcode ? { byBarcode: true as const } : {}) });
     } else {
         // Without a stage a completed run did not need the fallback (or had no iTunes request); any other run has not reached it.
         steps.push({ kind: 'itunes', state: complete ? 'skipped' : 'pending' });

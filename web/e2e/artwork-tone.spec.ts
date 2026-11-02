@@ -2,9 +2,11 @@
  * Internal
  *   Functions: installManagedCovers, json, toneOf, expectWholeTitle, contrast
  *   Constants: coverIds, covers, longTitle, neutralHero, neutralPane, untintedPane, compactPlayName, toneAlbum,
- *              toneHome
+ *              tonePlaylist, toneHome
  * Tests
  *   - tints the Album header from its artwork, fits a long title, and reveals the compact header
+ *   - the action bar band carries the Album tone below the hero
+ *   - tints the Playlist header from its artwork and reveals the compact header
  *   - Home follows the hovered or focused media card tone and falls back to neutral
  *   - animates tone changes over 600 ms unless reduced motion is requested
  *   - keeps the Album header and compact header usable on a phone
@@ -15,9 +17,12 @@ import type { Locator, Page } from '@playwright/test';
 import { fileURLToPath } from 'node:url';
 
 import type { ListenerAlbum, ListenerHome } from '../src/api/contentSchemas';
+import type { PlaylistDetail } from '../src/api/playlists';
 
 import { albumFixture, catalogIds, trackFixtures } from './fixtures/catalog';
+import { privatePlaylistDetail } from './fixtures/privateListener';
 import { expectNoUnownedAxeViolations } from './support/accessibility';
+import { installPrivateListenerRoutes } from './support/privateRoutes';
 import { expect, test } from './support/test';
 
 const coverIds = {
@@ -44,6 +49,25 @@ const toneAlbum = {
     streamUrl: `/content/mediaTrack/stream/e2e-tone-track-${index + 1}`
   }))
 } satisfies ListenerAlbum;
+
+// Enough ready members for the Playlist header to scroll out of the 1440 x 900 main pane.
+const tonePlaylist = {
+  ...privatePlaylistDetail,
+  itemCount: 20,
+  artworkUrl: `/content/images/${coverIds.night}`,
+  items: Array.from({ length: 20 }, (_, index) => ({
+    itemId: `e2e-tone-item-${index + 1}`,
+    audioTrackId: `e2e-tone-member-${index + 1}`,
+    addedAt: '2026-08-04T13:00:00.000Z',
+    availability: 'ready' as const,
+    audioTrack: {
+      ...trackFixtures[1],
+      id: `e2e-tone-member-${index + 1}`,
+      title: `Tone Member ${index + 1}`,
+      streamUrl: `/content/mediaTrack/stream/e2e-tone-member-${index + 1}`
+    }
+  }))
+} satisfies PlaylistDetail;
 
 const toneHome = {
   title: 'Tone room',
@@ -152,6 +176,51 @@ test('tints the Album header from its artwork, fits a long title, and reveals th
 
   await main.evaluate((element) => element.scrollTo({ top: 0 }));
   await expect(compactPlay).toHaveCount(0);
+});
+
+test('the action bar band carries the Album tone below the hero', async ({ page }) => {
+  await page.route(`**/api/listener/v1/albums/${catalogIds.album}`, (route) => route.fulfill(json(toneAlbum)));
+  await page.setViewportSize({ width: 1_440, height: 900 });
+  await page.goto(`/finitude/albums/${catalogIds.album}`);
+
+  const hero = page.locator('header').filter({ has: page.getByRole('heading', { level: 1, name: longTitle }) });
+  await expect.poll(() => toneOf(hero)).not.toBe(neutralHero);
+  const actionBar = hero.getByRole('button', { name: 'Play', exact: true }).locator('..');
+  const band = await actionBar.evaluate((element) => {
+    const style = getComputedStyle(element, '::before');
+    return {
+      image: style.backgroundImage,
+      tone: style.getPropertyValue('--tone-color').trim(),
+      height: Number.parseFloat(style.height),
+      barHeight: element.getBoundingClientRect().height
+    };
+  });
+  expect(band.image).not.toBe('none');
+  expect(band.tone).toBe(await toneOf(hero));
+  // The band runs past the bar, behind the column header and the first rows.
+  expect(band.height).toBeGreaterThan(band.barHeight);
+});
+
+test('tints the Playlist header from its artwork and reveals the compact header', async ({ page }) => {
+  await installPrivateListenerRoutes(page, { playlistDetail: tonePlaylist });
+  await page.setViewportSize({ width: 1_440, height: 900 });
+  await page.goto(`/finitude/playlists/${tonePlaylist.id}`);
+
+  const main = page.getByRole('main');
+  const hero = page.locator('header').filter({ has: page.getByRole('heading', { level: 1, name: tonePlaylist.name }) });
+  await expect.poll(() => toneOf(hero)).not.toBe(neutralHero);
+  expect(contrast('rgb(255, 255, 255)', await toneOf(hero))).toBeGreaterThanOrEqual(4.5);
+  // Like the Album page, the header paints the tone and the main pane stays untinted.
+  expect(await toneOf(main)).toBe(untintedPane);
+  await expect(hero.getByText('Private Playlist', { exact: true })).toHaveCSS('color', 'rgb(255, 255, 255)');
+
+  const compactPlay = page.getByRole('button', { name: `Play ${tonePlaylist.name}` });
+  await expect(compactPlay).toHaveCount(0);
+  await main.evaluate((element) => element.scrollTo({ top: element.scrollHeight }));
+  await expect(compactPlay).toBeVisible();
+  const barTone = await toneOf(compactPlay.locator('..'));
+  expect(barTone).not.toBe(neutralPane);
+  expect(contrast('rgb(255, 255, 255)', barTone)).toBeGreaterThanOrEqual(4.5);
 });
 
 test('Home follows the hovered or focused media card tone and falls back to neutral', async ({ page }) => {

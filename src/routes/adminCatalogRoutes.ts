@@ -14,6 +14,8 @@ import { defaultImportObjectStorage } from '../administration/import/adminImport
 import { catalogCoverUploadPreflight, uploadAdminCatalogCover } from '../administration/catalog/adminCatalogCoverUpload';
 import { limitMediaConcurrencyFor } from '../middleware/mediaDeliveryMiddleware';
 import { replaceAdminCatalogCover, clearAdminCatalogCover, listAdminCatalogCoverOperations, reconcileAdminCatalogCover, cancelAdminCatalogCover, type AdminCatalogCoverDependencies } from '../administration/catalog/adminCatalogCoverService';
+import { reorderAdminPage } from '../services/content/adminPageOrderService';
+import { editAdminVideoGrid, getAdminVideoGrid } from '../services/content/adminVideoPageService';
 
 /** Media elements cannot send the viewer header; the non-secret viewer is still only a session fence. */
 const requireAdminCatalogViewer: express.RequestHandler = (req, res, next) => {
@@ -33,7 +35,9 @@ const requireAdminCatalogViewer: express.RequestHandler = (req, res, next) => {
 export const createAdminCatalogRouter = (dependencies: AdminCatalogCoverDependencies = {}) => {
     const router = express.Router();
     router.use((_req, res, next) => { res.setHeader('Cache-Control', 'private, no-store'); next(); });
-    router.use(requireAuth, requireAdmin, requireAdminCatalogViewer, express.json({ limit: '64kb', strict: true }));
+    router.use(requireAuth, requireAdmin, requireAdminCatalogViewer);
+    // A complete 5,000-ID Video order needs more room; unrelated catalog writes keep their original cap.
+    router.use((req, res, next) => express.json({ limit: req.path === '/pages/videos/grid' && req.method === 'PATCH' ? '192kb' : '64kb', strict: true })(req, res, next));
     const run = (handler: (actor: string, req: express.Request) => Promise<unknown>): express.RequestHandler => async (req, res) => {
         try { res.json(await runRequestWork(req, () => handler((req as AuthenticatedRequest).auth!.userId, req))); }
         catch (error: any) {
@@ -61,7 +65,10 @@ export const createAdminCatalogRouter = (dependencies: AdminCatalogCoverDependen
     router.post('/catalog/:kind/:id/cover-operations/:operationId/cancel', asyncHandler(run((actor, req) => cancelAdminCatalogCover(actor, adminCatalogKind(req.params.kind), req.params.id, req.params.operationId, req.body, dependencies))));
     router.get('/catalog/:kind/:id/artwork', limitMediaConcurrencyFor('artwork'), asyncHandler(adminCatalogArtwork));
     router.get('/catalog/audioTrack/:id/media', limitMediaConcurrencyFor('playback'), asyncHandler(adminCatalogMedia));
+    router.get('/pages/videos/grid', asyncHandler(run(actor => getAdminVideoGrid(actor))));
+    router.patch('/pages/videos/grid', asyncHandler(run((actor, req) => editAdminVideoGrid(actor, req.body))));
     router.get('/pages/:slug', asyncHandler(run((actor, req) => getAdminPage(actor, req.params.slug))));
+    router.post('/pages/:slug/reorder', asyncHandler(run((actor, req) => reorderAdminPage(actor, req.params.slug, req.body))));
     router.patch('/pages/:slug/items/:itemId', asyncHandler(run((actor, req) => editAdminPageItem(actor, req.params.slug, req.params.itemId, req.body))));
     return router;
 };

@@ -16,7 +16,8 @@ import {
   homeCollectionPageFixture,
   homePageItemIds,
   homeFixture,
-  searchFixture
+  searchFixture,
+  trackFixtures
 } from '../fixtures/catalog';
 
 export interface BrowserApiCall {
@@ -212,6 +213,10 @@ export const installSignedOutApi = async (page: Page): Promise<BrowserApiFixture
     }
     if (call.method === 'GET' && call.pathname === '/api/listener/v1/home') {
       await jsonResponse(route, 200, homeFixture);
+      return;
+    }
+    if (call.method === 'GET' && call.pathname === '/api/listener/v1/videos') {
+      await jsonResponse(route, 200, { items: [trackFixtures[0]], nextCursor: null });
       return;
     }
     if (call.method === 'GET'

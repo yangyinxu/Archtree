@@ -4,7 +4,7 @@
  *   Constants: target, otherAlbum
  *   Variables: next
  * Tests
- *   - the candidates schema accepts 2561 items and 44 unavailable names, defaulting an absent member flag to incomplete and absent names to none, and refuses more, unknown keys and automatic reuse
+ *   - the candidates schema accepts 3783 items and 64 unavailable names, defaulting an absent member flag to incomplete and absent names to none, and refuses more, unknown keys and automatic reuse
  *   - a same-name record too malformed to be a candidate holds its row, and names compare as the server does whatever the browser locale
  *   - with no candidates every saved row is preselected as new, an explicit decision wins, and a name candidate holds only its own row
  *   - a row shown under another name than the saved one is never preselected: a renamed entry or label, a changed title or a new unsaved entry
@@ -39,14 +39,14 @@ const appendTo = (...tracks: ImportDecision[]) => [decision('album', { action: '
 /** Each preselection as `scope:slot-or-entry:action[:candidate]`. */
 const rows = (decisions: readonly ImportDecision[]) => decisions.map(value => [value.scope, value.slotId ?? value.entryKey ?? '-', value.action, ...(value.candidateId ? [value.candidateId] : [])].join(':'));
 
-test('the candidates schema accepts 2561 items and 44 unavailable names, defaulting an absent member flag to incomplete and absent names to none, and refuses more, unknown keys and automatic reuse', () => {
+test('the candidates schema accepts 3783 items and 64 unavailable names, defaulting an absent member flag to incomplete and absent names to none, and refuses more, unknown keys and automatic reuse', () => {
   const item = candidate('organization', 'Sit Records', { visibility: 'hidden' }), name = { kind: 'artist', label: 'Lorem' };
   expect(candidatesSchema.parse({ items: [item] })).toEqual({ items: [item], memberMatchesComplete: false, unavailable: [] });
-  expect(candidatesSchema.safeParse({ items: Array(2561).fill(item), memberMatchesComplete: true, unavailable: Array(44).fill(name) }).success).toBe(true);
+  expect(candidatesSchema.safeParse({ items: Array(3783).fill(item), memberMatchesComplete: true, unavailable: Array(64).fill(name) }).success).toBe(true);
   // An iTunes localized name names the Artist name it was found for.
   expect(candidatesSchema.safeParse({ items: [{ ...item, kind: 'artist', match: 'localizedName', localizedOf: 'Lorem Ensemble' }] }).success).toBe(true);
-  for (const body of [{ items: Array(2562).fill(item) }, { items: [{ ...item, localizedOf: 'x'.repeat(201) }] }, { items: [{ ...item, localizedOf: 7 }] }, { items: [{ ...item, match: 'other' }] }, { items: [{ ...item, musicBrainzId: 'not-an-id' }] }, { items: [{ ...item, aliasOf: 'X0000000-0000-4000-8000-000000000001' }] }, { items: [{ ...item, kind: 'label' }] }, { items: [{ ...item, automaticReuse: true }] }, { items: [], memberMatchesComplete: true, extra: 1 }, { items: [{ ...item, extra: 1 }] },
-    { items: [], unavailable: Array(45).fill(name) }, { items: [], unavailable: [{ ...name, kind: 'track' }] }, { items: [], unavailable: [{ ...name, id: item.id }] }])
+  for (const body of [{ items: Array(3784).fill(item) }, { items: [{ ...item, localizedOf: 'x'.repeat(201) }] }, { items: [{ ...item, localizedOf: 7 }] }, { items: [{ ...item, match: 'other' }] }, { items: [{ ...item, musicBrainzId: 'not-an-id' }] }, { items: [{ ...item, aliasOf: 'X0000000-0000-4000-8000-000000000001' }] }, { items: [{ ...item, kind: 'label' }] }, { items: [{ ...item, automaticReuse: true }] }, { items: [], memberMatchesComplete: true, extra: 1 }, { items: [{ ...item, extra: 1 }] },
+    { items: [], unavailable: Array(65).fill(name) }, { items: [], unavailable: [{ ...name, kind: 'track' }] }, { items: [], unavailable: [{ ...name, id: item.id }] }])
     expect(candidatesSchema.safeParse(body).success).toBe(false);
 });
 

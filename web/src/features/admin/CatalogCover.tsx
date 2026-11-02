@@ -2,13 +2,13 @@
  * Exports
  *   Functions: CatalogCover
  * Internal
- *   Types: UploadIntent
+ *   Types: FrameOrigin, UploadIntent
  *   Functions: importSchemas, loadUpload
- *   Constants: operationSchema, resultSchema, listSchema, idle
+ *   Constants: VideoActions, VideoFramePicker, operationSchema, resultSchema, listSchema, idle
  *   Variables: uploadModule
  * @end-catalog */
 
-import { useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { z } from 'zod';
 import { ModalDialog } from '../../components/ModalDialog';
@@ -20,6 +20,10 @@ import { useOnline } from './useAdminOnline';
 import { adminWorkspace } from './adminWorkspace';
 import styles from './adminStyles';
 import type { CoverUpload } from './catalogCoverUpload';
+import type { VideoFrame } from './videoFrame';
+
+const VideoActions = lazy(() => import('./CatalogVideoCoverActions'));
+const VideoFramePicker = lazy(() => import('./VideoFramePicker'));
 
 // Import schemas load with the first source search, as conversionImportBridge loads them, keeping this route in its JavaScript budget.
 const importSchemas = () => import('./adminApi');
@@ -29,20 +33,26 @@ const listSchema = z.object({ items: z.array(operationSchema.extend({operationId
 // Upload helpers load on the first file choice; a failed load is retried by the next choice.
 let uploadModule: Promise<typeof import('./catalogCoverUpload')> | undefined;
 const loadUpload = () => uploadModule ??= import('./catalogCoverUpload').catch(error => { uploadModule = undefined; throw error; });
+/** A frame keeps the catalog snapshot whose protected media was decoded, even when its upload finishes later. */
+type FrameOrigin = { revision: string; mediaUrl: string; label: string };
 /** An upload sent under `owner`; an unknown outcome keeps it, with its in-memory bytes, for Retry until the view or account changes. */
-type UploadIntent = { upload: CoverUpload; operationId: string; owner: AdminGuard };
+type UploadIntent = { upload: CoverUpload; operationId: string; owner: AdminGuard; frameOrigin?: FrameOrigin };
 /** `ready` is a staged upload whose confirmation waits behind another open dialog, offered as Use this image until dropped like a kept upload. */
-const idle: { running: boolean; intent: UploadIntent | null; message: string | null; ready?: { uploadId: string; bytes: Blob } } = { running: false, intent: null, message: null };
+const idle: { running: boolean; intent: UploadIntent | null; message: string | null; ready?: { uploadId: string; bytes: Blob; frameOrigin?: FrameOrigin } } = { running: false, intent: null, message: null };
 /** Existing cover changes copy an explicitly chosen ready private image; they never adopt a draft automatically. */
 export function CatalogCover({item,kind,id,disabled,approvalDisabled=false,onConfirmed,onRemoved}:{item:CatalogItem|null;kind:CatalogKind;id:string;disabled:boolean;approvalDisabled?:boolean;onConfirmed:(item:CatalogItem)=>void;onRemoved:()=>void}) {
   const t=useAdminText(),access=useAdminAccess(),online=useOnline(),path=`/catalog/${kind}/${id}`;
   const [choosing,setChoosing]=useState(false),[search,setSearch]=useState(''),[queryText,setQueryText]=useState(''),[project,setProject]=useState<string|null>(null);
   const [approval,setApproval]=useState<{revision:string;label:string;source:{importId:string;slotId:string;expectedSourceRevision:number}|{uploadId:string}|null;preview?:string}|null>(null);
   const [cancellation,setCancellation]=useState<{operationId:string;revision:string|null;label:string}|null>(null);
-  const [upload,setUpload]=useState(idle),picker=useRef<HTMLInputElement>(null),uploadRef=useRef<HTMLButtonElement>(null),dialogOpen=useRef(false);dialogOpen.current=Boolean(approval||cancellation);
+  const [frameSource,setFrameSource]=useState<(FrameOrigin & { owner: AdminGuard; unavailableMessage: string })|null>(null);
+  const [upload,setUpload]=useState(idle),picker=useRef<HTMLInputElement>(null),uploadRef=useRef<HTMLButtonElement>(null),dialogOpen=useRef(false);dialogOpen.current=Boolean(approval||cancellation||frameSource);
   const label = item ? ('name' in item.fields ? item.fields.name : item.fields.title) || t('common.untitled') : t('cover.title');
   // A finished upload binds the item as it is then, not as it was when the file was chosen.
   const latest=useRef({item,label});latest.current={item,label};
+  const video = item?.kind === 'audioTrack' && item.mediaType === 'video';
+  // The catalog revision also fences the active media identity behind this stable application URL.
+  const matchesFrame = (origin: FrameOrigin) => latest.current.item?.revision === origin.revision && latest.current.item.mediaUrl === origin.mediaUrl;
   const cancel=useRef<HTMLButtonElement>(null);
   const pendingApproval = useRef<string | null>(null);
   const mutation=useAdminCommand(`cover:${kind}:${id}`,resultSchema.refine(value=>value.item===null||value.item.kind===kind&&value.item.id===id));
@@ -58,20 +68,24 @@ export function CatalogCover({item,kind,id,disabled,approvalDisabled=false,onCon
   useEffect(()=>{if(mutation.result){setOutcome({...mutation.result.coverOperation, operationId:pendingApproval.current ?? mutation.result.receipt.operationId});if(mutation.result.item)onConfirmed(mutation.result.item);else onRemoved();setUpload(value=>value.ready?idle:value);mutation.command.acknowledge();void operations.refetch();}},[mutation.result]);
   // The preview URL is revoked when its approval closes and on unmount; a view or account change drops a kept upload and its approval.
   useEffect(()=>{const preview=approval?.preview;return()=>{if(preview)URL.revokeObjectURL(preview);};},[approval?.preview]);
-  useEffect(()=>()=>{setUpload(idle);setApproval(value=>value?.source&&'uploadId' in value.source?null:value);},[access.active,access.viewerId,access.epoch,access.generation]);
-  // Opens a staged upload's confirmation, bound to the item as it is then; its preview URL is made only here.
+  useEffect(()=>()=>{setUpload(idle);setFrameSource(null);setApproval(value=>value?.source&&'uploadId' in value.source?null:value);},[access.active,access.viewerId,access.epoch,access.generation]);
+  // Files bind the current item; a decoded frame keeps the source revision it was selected from.
+  // A staged upload's preview URL is made only here.
   // Use this image leaves with its upload, so it first moves focus to the upload button, where the confirmation returns it.
-  const openApproval=(ready:NonNullable<typeof idle.ready>)=>{const now=latest.current;if(now.item)setApproval({revision:now.item.revision,label:now.label,source:{uploadId:ready.uploadId},preview:URL.createObjectURL(ready.bytes)});};
-  const send=async(intent:UploadIntent)=>{
+  const openApproval=(ready:NonNullable<typeof idle.ready>)=>{const now=latest.current;if(now.item)setApproval({revision:ready.frameOrigin?.revision??now.item.revision,label:ready.frameOrigin?.label??now.label,source:{uploadId:ready.uploadId},preview:URL.createObjectURL(ready.bytes)});};
+  const send=async(intent:UploadIntent,retry=false)=>{
     if(!adminWorkspace.current(intent.owner))return;
     setUpload({running:true,intent,message:null});
     let m:typeof import('./catalogCoverUpload');
     try{m=await loadUpload();}catch{if(adminWorkspace.current(intent.owner))setUpload({...idle,message:'common.reload'});return;}
+    // Reconcile unknown transfers with the original bytes, but never send a newly captured stale frame.
+    if(!adminWorkspace.current(intent.owner))return;
+    if(intent.frameOrigin&&!retry&&!matchesFrame(intent.frameOrigin)){setUpload({...idle,message:'common.conflict'});return;}
     try{
       const uploadId=await m.uploadCatalogCover(kind,id,intent.upload,intent.operationId,intent.owner);
       if(!adminWorkspace.current(intent.owner))return;
       // Never a second modal: while any dialog is open (this panel's read from state) the upload waits as Use this image; an unused one is deleted a day later.
-      const ready={uploadId,bytes:intent.upload.bytes};if(dialogOpen.current||document.querySelector('[role="dialog"][aria-modal="true"]'))setUpload({...idle,ready});else{setUpload(idle);openApproval(ready);}
+      const ready={uploadId,bytes:intent.upload.bytes,frameOrigin:intent.frameOrigin};if(dialogOpen.current||document.querySelector('[role="dialog"][aria-modal="true"]'))setUpload({...idle,ready});else{setUpload(idle);openApproval(ready);}
     }catch(error){if(!adminWorkspace.current(intent.owner))return;const refusal=m.coverUploadRefusal(error);setUpload({running:false,intent:refusal.keep?intent:null,message:refusal.message});}
   };
   const choose=async(file:File)=>{
@@ -84,18 +98,29 @@ export function CatalogCover({item,kind,id,disabled,approvalDisabled=false,onCon
     if('refusal' in read){setUpload({...idle,message:read.refusal});return;}
     void send({upload:read,operationId:crypto.randomUUID(),owner});
   };
+  // Published frames use the normal image-upload lifecycle, without reopening a cleaned private source.
+  const capture = (frame: VideoFrame) => {
+    const source = frameSource; setFrameSource(null);
+    if(!source||newDisabled||!adminWorkspace.current(source.owner)||!current())return;
+    if(!matchesFrame(source)){setUpload({...idle,message:'common.conflict'});return;}
+    const { owner, unavailableMessage: _unavailableMessage, ...frameOrigin } = source;
+    void send({upload:{bytes:frame.blob,type:'image/jpeg',filename:'Video frame.jpg'},operationId:crypto.randomUUID(),owner,frameOrigin});
+  };
   const visibleOperations = operations.data?.items.map(operation => operation.operationId === outcome?.operationId ? { ...operation, ...outcome } : operation);
   const outcomeKey=(operation:z.infer<typeof operationSchema>)=>operation.state==='cancelled'?operation.cleanupPending?'cover.cancelled_cleanup':'cover.cancelled':operation.state==='complete'?operation.cleanupPending?'cover.cleanup_pending':'cover.complete':'cover.pending';
   if(!access.active)return null;
   return <section className={styles.panel}><header className={styles.sectionHeader}><div><h2>{t('cover.title')}</h2>{item && <p className={styles.muted}>{t('cover.editor_copy')}</p>}</div><button className={styles.button} disabled={operations.isFetching||recoveryDisabled} onClick={()=>{if(!recoveryDisabled&&current())void operations.refetch();}}>{t('common.refresh')}</button></header>
-    {item && <div className={styles.actions}><button className={styles.button} disabled={newDisabled} onClick={()=>setChoosing(!choosing)}>{t('cover.choose')}</button><button ref={uploadRef} className={styles.button} disabled={newDisabled} onClick={()=>picker.current?.click()}>{t('cover.upload')}</button><input hidden ref={picker} type="file" accept="image/jpeg,image/png,image/webp" disabled={newDisabled} onChange={event=>{const file=event.currentTarget.files?.[0];event.currentTarget.value='';if(file)void choose(file);}}/>{item?.coverUrl&&<button className={styles.button} disabled={newDisabled} onClick={()=>setApproval({revision:item.revision,label,source:null})}>{t('cover.clear')}</button>}{upload.ready&&<button className={styles.button} disabled={newDisabled} onClick={()=>{if(upload.ready&&!newDisabled&&current()){uploadRef.current?.focus();openApproval(upload.ready);setUpload(idle);}}}>{t('cover.use')}</button>}</div>}
+    {item && <div className={styles.actions}><button className={styles.button} disabled={newDisabled} onClick={()=>setChoosing(!choosing)}>{t('cover.choose')}</button>{video ? <Suspense fallback={<p role="status">{t('common.loading')}</p>}><VideoActions disabled={newDisabled} canFrame={Boolean(item.mediaUrl)} canClear={Boolean(item.coverUrl)} uploadRef={uploadRef}
+      onUpload={()=>picker.current?.click()} onFrame={unavailableMessage=>{if(!newDisabled&&current()&&item.mediaUrl)setFrameSource({revision:item.revision,mediaUrl:item.mediaUrl,label,owner:adminWorkspace.capture(),unavailableMessage});}} onClear={()=>{if(!newDisabled&&current())setApproval({revision:item.revision,label,source:null});}} /></Suspense> : <><button ref={uploadRef} className={styles.button} disabled={newDisabled} onClick={()=>picker.current?.click()}>{t('cover.upload')}</button>{item.coverUrl&&<button className={styles.button} disabled={newDisabled} onClick={()=>setApproval({revision:item.revision,label,source:null})}>{t('cover.clear')}</button>}</>}
+      <input hidden ref={picker} type="file" accept="image/jpeg,image/png,image/webp" disabled={newDisabled} onChange={event=>{const file=event.currentTarget.files?.[0];event.currentTarget.value='';if(file)void choose(file);}}/>{upload.ready&&<button className={styles.button} disabled={newDisabled} onClick={()=>{if(upload.ready&&!newDisabled&&current()){uploadRef.current?.focus();openApproval(upload.ready);setUpload(idle);}}}>{t('cover.use')}</button>}</div>}
     {mutation.error&&<div role="alert"><p>{t(`common.${mutation.error}`)}</p>{mutation.error==='reload'&&<button className={styles.button} type="button" onClick={()=>window.location.reload()}>{t('common.reload_action')}</button>}{mutation.intent&&<button className={styles.button} disabled={recoveryDisabled} onClick={()=>{if(!recoveryDisabled&&current())mutation.command.retry();}}>{t('common.retry_operation')}</button>}</div>}
     {upload.running&&<p role="status">{t('cover.uploading')}</p>}
-    {upload.message&&<div role="alert"><p>{t(upload.message)}</p>{upload.message==='common.reload'&&<button className={styles.button} type="button" onClick={()=>window.location.reload()}>{t('common.reload_action')}</button>}{upload.intent&&<><button className={styles.button} disabled={recoveryDisabled||upload.running} onClick={()=>{if(upload.intent&&current()&&adminWorkspace.current(upload.intent.owner))void send(upload.intent);}}>{t('common.retry_operation')}</button><button className={styles.button} onClick={()=>setUpload(idle)}>{t('common.cancel')}</button></>}</div>}
+    {upload.message&&<div role="alert"><p>{t(upload.message)}</p>{upload.message==='common.reload'&&<button className={styles.button} type="button" onClick={()=>window.location.reload()}>{t('common.reload_action')}</button>}{upload.intent&&<><button className={styles.button} disabled={recoveryDisabled||upload.running} onClick={()=>{if(upload.intent&&current()&&adminWorkspace.current(upload.intent.owner))void send(upload.intent,true);}}>{t('common.retry_operation')}</button><button className={styles.button} onClick={()=>setUpload(idle)}>{t('common.cancel')}</button></>}</div>}
     {outcome&&!visibleOperations?.some(operation=>operation.operationId === outcome.operationId && (!['complete','cancelled'].includes(operation.state)||operation.cleanupPending))&&<p role="status" className={styles.notice}>{t(outcomeKey(outcome))}</p>}
     {operations.isPending&&<p role="status">{t('common.loading')}</p>}
     {operations.isError&&<p role="alert">{t('common.error')}</p>}
     {visibleOperations?.filter(operation=>!['complete','cancelled'].includes(operation.state)||operation.cleanupPending).map(operation=><div key={operation.operationId} className={styles.recovery}><p>{t(outcomeKey(operation))}</p><div className={styles.actions}>{(operation.state==='cancelled'?operation.cleanupPending:operation.startedByMe)&&<button className={styles.button} disabled={locked} onClick={()=>{if(locked||!current())return;pendingApproval.current=operation.operationId;mutation.command.reconcile(`${path}/cover-operations/${operation.operationId}/reconcile`,operation.operationId);}}>{t(operation.state === 'cancelled' ? 'action.recover' : 'action.resume')}</button>}{!['complete','cancelled'].includes(operation.state)&&<button className={styles.button} disabled={locked} onClick={()=>{if(!locked&&current())setCancellation({operationId:operation.operationId,revision:item?.revision??null,label});}}>{t('action.cancel_approval')}</button>}</div></div>)}
+    {frameSource&&<Suspense fallback={<p role="status">{t('common.loading')}</p>}><VideoFramePicker url={`${frameSource.mediaUrl}?viewer=${encodeURIComponent(frameSource.owner.viewerId)}`} onClose={()=>setFrameSource(null)} onChoose={()=>undefined} onCapture={capture} unavailableMessage={frameSource.unavailableMessage}/></Suspense>}
     {choosing&&item&&<>
       <div className={styles.toolbar}><label>{t('workbench.search')}<input className={styles.input} maxLength={100} value={search} onChange={event=>setSearch(event.target.value)}/></label><button className={styles.button} onClick={()=>{setQueryText(search.trim());setProject(null);}}>{t('workbench.search')}</button></div>
       {imports.isPending&&<p role="status">{t('common.loading')}</p>}{imports.isError&&<p role="alert">{t('common.error')}</p>}

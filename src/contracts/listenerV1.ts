@@ -4,7 +4,8 @@
  *          ListenerArtistSummary, ListenerOrganizationSummary, ListenerAlbumSummary, ListenerAudioTrackSummary,
  *          ListenerCatalogCredit, ListenerPlayableSummary, ListenerPresentation, ListenerHomeItem,
  *          ListenerHomeSection, ListenerPageSlug, ListenerCollectionPageRef, ListenerCollectionPage,
- *          ListenerHome, ListenerSearch, ListenerAlbum, ListenerArtist, ListenerOrganization, ListenerTrack
+ *          ListenerHome, ListenerSearch, ListenerAlbum, ListenerArtist, ListenerOrganization, ListenerTrack,
+ *          ListenerVideos
  * @end-catalog */
 
 /**
@@ -100,6 +101,7 @@ export interface ListenerHomeSection {
     items: ListenerHomeItem[];
 }
 
+/** Legacy/native page-scoped collection routes; the Web Video Grid has its own browsing contract. */
 export type ListenerPageSlug = 'home' | 'library';
 
 /** A stable ordered reference into one page-scoped collection response. */
@@ -169,4 +171,11 @@ export interface ListenerOrganization {
 /** One playable MediaTrack detail response. */
 export interface ListenerTrack {
     audioTrack: ListenerAudioTrackSummary;
+}
+
+/** One snapshot-bound page of ready public Videos, using the administrator's default card view. */
+export interface ListenerVideos {
+    items: ListenerAudioTrackSummary[];
+    nextCursor: string | null;
+    defaultView: 'grid' | 'immersive';
 }

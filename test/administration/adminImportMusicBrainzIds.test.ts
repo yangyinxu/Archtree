@@ -8,8 +8,8 @@
  *   - replace needs a record holding another ID and no record holding the new one
  *   - the writes of frozen identities follow the draft: Artist entries in order, then the label
  *   - a confirmation must show exactly the computed writes, in any order, each well formed
- *   - found names are kept only for carried IDs, cleaned, fold-deduplicated and bounded to 21 IDs of 32 names
- *   - a review also keeps names for IDs only its members' entries carry, up to 513 IDs; an import never reads member entries and keeps its 21
+ *   - found names are kept only for carried IDs, cleaned, fold-deduplicated and bounded to 41 IDs of 32 names
+ *   - a review also keeps names for IDs only its members' entries carry, up to 513 IDs; an import never reads member entries and keeps its 41
  * @end-catalog */
 
 /**
@@ -91,7 +91,7 @@ test('a confirmation must show exactly the computed writes, in any order, each w
     assert.equal(sameMusicBrainzIdWrites([writes[0], { bad: true }], writes), false);
 });
 
-test('found names are kept only for carried IDs, cleaned, fold-deduplicated and bounded to 21 IDs of 32 names', () => {
+test('found names are kept only for carried IDs, cleaned, fold-deduplicated and bounded to 41 IDs of 32 names', () => {
     const value = draft([id(1), id(2)], id(9));
     const stored = [{ musicBrainzId: id(1), names: ['  Café ', 'CAFÉ', 'Second\u200bName', 'n'.repeat(201), 7, 'Alias'] }, { musicBrainzId: id(5), names: ['Not Carried'] },
         { musicBrainzId: 'bad', names: ['x'] }, null, { musicBrainzId: id(9) }];
@@ -102,13 +102,15 @@ test('found names are kept only for carried IDs, cleaned, fold-deduplicated and 
     assert.deepEqual(merged, [{ musicBrainzId: id(1), names: ['Café', 'Alias', 'Third'] }, { musicBrainzId: id(9), names: ['Synthetic Label'] }]);
     const many = new Map([[id(1), Array.from({ length: 40 }, (_unused, index) => `Name ${index}`)]]);
     assert.equal(mergeImportMusicBrainzNames([], many, value)[0].names.length, IMPORT_MUSICBRAINZ_NAME_LIMITS.names);
-    const wide = draft(Array.from({ length: 20 }, (_unused, index) => id(index + 1)), id(99));
-    const found = new Map<string, readonly string[]>([...Array.from({ length: 20 }, (_unused, index): [string, string[]] => [id(index + 1), [`A${index}`]]), [id(99), ['Label']]]);
+    // An import's identity draft carries up to 40 Artist IDs (Album entries and track-only identities) and the label's.
+    const wide = draft(Array.from({ length: 45 }, (_unused, index) => id(index + 1)), id(99));
+    const found = new Map<string, readonly string[]>([...Array.from({ length: 45 }, (_unused, index): [string, string[]] => [id(index + 1), [`A${index}`]]), [id(99), ['Label']]]);
     assert.equal(mergeImportMusicBrainzNames([], found, wide).length, IMPORT_MUSICBRAINZ_NAME_LIMITS.ids);
+    assert.equal(IMPORT_MUSICBRAINZ_NAME_LIMITS.ids, 41);
     assert.deepEqual(mergeImportMusicBrainzNames(stored, new Map(), draft([null], undefined)), []);
 });
 
-test('a review also keeps names for IDs only its members\' entries carry, up to 513 IDs; an import never reads member entries and keeps its 21', () => {
+test('a review also keeps names for IDs only its members\' entries carry, up to 513 IDs; an import never reads member entries and keeps its 41', () => {
     // A review's draft: the Album's entries and label, and each member's entries (a malformed list carries nothing).
     const review = (album: (string | null)[], labelId: string | null, members: (string | null)[][]): ImportDraftV2 => ({ ...draft(album, labelId),
         tracks: [...members.map((ids, index) => ({ slotId: key(100 + index), title: '', discNumber: null, trackNumber: null,
@@ -122,11 +124,11 @@ test('a review also keeps names for IDs only its members\' entries carry, up to 
     const stored = [{ musicBrainzId: id(3), names: ['Stored Member Name'] }];
     assert.deepEqual([...importMusicBrainzNameMap(stored, value, { review: true })], [[id(3), ['Stored Member Name']]]);
     assert.deepEqual([...importMusicBrainzNameMap(stored, value)], []);
-    // The review bound is one per identity and the label; the import bound stays at 21.
+    // The review bound is one per identity and the label; the import bound stays at 41.
     const wide = review([], null, Array.from({ length: 600 }, (_unused, index) => [id(index + 1)]));
     const many = new Map(Array.from({ length: 600 }, (_unused, index) => [id(index + 1), [`Name ${index}`]] as [string, string[]]));
     const kept = mergeImportMusicBrainzNames([], many, wide, { review: true });
-    assert.deepEqual([kept.length, IMPORT_MUSICBRAINZ_NAME_LIMITS.ids], [513, 21]);
+    assert.deepEqual([kept.length, IMPORT_MUSICBRAINZ_NAME_LIMITS.ids], [513, 41]);
     assert.equal(importMusicBrainzNameMap(kept, wide, { review: true }).size, 513);
     assert.equal(importMusicBrainzNameMap(kept, wide).size, 0);
 });

@@ -49,8 +49,9 @@ export type ImportDuplicateCandidate = { kind: 'artist' | 'organization' | 'albu
 /**
  * The duplicate candidates of one import: at most 920 name candidates (the saved draft's names and those pending Luna proposals
  * would write), one verified byte match per staged hash (at most 100), 300 Album-member matches, one exact MusicBrainz ID match per
- * entry and the label (21), 20 alias matches each (420) and 20 localized-name matches for each of at most 40 Artist names (800): at
- * most 2561 items. `unavailable` names each Artist name, label or Album title (at most 44) whose same-name, same-ID, alias or
+ * entry and the label (21), 20 alias matches each (420), 20 localized-name matches for each of at most 40 Artist names (800) and
+ * the saved append target and the Album the import was created for as Album candidates whatever the draft title (2): at most
+ * 2563 items. `unavailable` names each Artist name, label or Album title (at most 44) whose same-name, same-ID, alias or
  * localized-name record is malformed, or whose localized-name record is listed (once) for another row: it is no selectable
  * candidate of that row, yet it keeps that row from being preselected.
  */

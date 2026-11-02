@@ -18,6 +18,12 @@
  *   - removing the only member focuses the MediaTracks heading
  *   - searches ready MediaTracks and adds the selected result to an empty Playlist
  *   - skips unavailable members when snapshotting the persisted Playlist order
+ *   - the playing Playlist row shows Pause with aria-current
+ *   - the Album column links to /albums/:id
+ *   - the compact header reveals after the hero scrolls out, and its Play launches the ready queue
+ *   - the hero Play shows Pause while this Playlist's ready queue plays
+ *   - a paused Playlist queue resumes from the hero Play without relaunching
+ *   - the hero byline joins the MediaTrack count, total duration and unavailable count
  * @end-catalog */
 
 import type { ReactNode } from 'react';
@@ -29,6 +35,7 @@ import { MemoryRouter, Route, Routes } from 'react-router';
 import { browserSessionQueryKey } from '../../api/session';
 import { listenerCapabilitiesQueryKey } from '../../api/listenerCapabilities';
 import { playerStore } from '../../player';
+import { observeHero } from '../../test/observeHero';
 import { PlaylistDetailPage } from './PlaylistDetailPage';
 import { PlaylistFeatureGate } from './PlaylistFeatureGate';
 import { PlaylistIndexPage } from './PlaylistIndexPage';
@@ -352,7 +359,14 @@ test('renames then deletes with the latest confirmed revision and Cancel-first f
   renderPlaylistRoutes('/playlists/playlist-1', <h1>Playlist index after delete</h1>);
 
   expect(await screen.findByRole('heading', { name: 'Quiet sequence' })).toBeInTheDocument();
-  await user.click(screen.getByRole('button', { name: 'Rename' }));
+  // Rename lives in the More menu; cancelling returns focus to its trigger.
+  const more = screen.getByRole('button', { name: 'More actions for Quiet sequence' });
+  await user.click(more);
+  await user.click(screen.getByRole('menuitem', { name: 'Rename' }));
+  await user.click(await screen.findByRole('button', { name: 'Cancel' }));
+  await waitFor(() => expect(more).toHaveFocus());
+  await user.click(more);
+  await user.click(screen.getByRole('menuitem', { name: 'Rename' }));
   const nameInput = await screen.findByRole('textbox', { name: 'Name' });
   await waitFor(() => expect(nameInput).toHaveFocus());
   await user.clear(nameInput);
@@ -510,4 +524,147 @@ test('skips unavailable members when snapshotting the persisted Playlist order',
     expect.objectContaining({ id: firstTrack.id }),
     expect.objectContaining({ id: secondTrack.id })
   ], 0);
+});
+
+test('the playing Playlist row shows Pause with aria-current', async () => {
+  const user = userEvent.setup();
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(detail)));
+  const snapshot = playerStore.getSnapshot();
+  vi.spyOn(playerStore, 'getSnapshot').mockReturnValue({
+    ...snapshot,
+    currentIndex: 1,
+    currentItem: secondTrack,
+    queue: [firstTrack, secondTrack],
+    status: 'playing'
+  });
+  const pause = vi.spyOn(playerStore, 'pause').mockImplementation(() => undefined);
+  const launch = vi.spyOn(playerStore, 'launchQueue').mockResolvedValue();
+  renderPlaylistRoutes('/playlists/playlist-1');
+
+  const list = await screen.findByRole('list', { name: 'Quiet sequence MediaTracks' });
+  const current = within(list).getByRole('button', { name: 'Pause' });
+  expect(current).toHaveAttribute('aria-current', 'true');
+  expect(current.closest('li')).toHaveTextContent('Dawn');
+  expect(within(list).getByRole('button', { name: 'Play Night' })).not.toHaveAttribute('aria-current');
+
+  await user.click(current);
+  expect(pause).toHaveBeenCalledOnce();
+  expect(launch).not.toHaveBeenCalled();
+});
+
+test('the Album column links to /albums/:id', async () => {
+  const onAlbum = { ...firstTrack, albumId: 'album-7', albumTitle: 'Night Geometry' };
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
+    ...detail,
+    items: [{ ...detail.items[0], audioTrack: onAlbum }, detail.items[1]]
+  })));
+  renderPlaylistRoutes('/playlists/playlist-1');
+
+  const list = await screen.findByRole('list', { name: 'Quiet sequence MediaTracks' });
+  expect(within(list).getByRole('link', { name: 'Night Geometry' })).toHaveAttribute('href', '/albums/album-7');
+});
+
+test('the compact header reveals after the hero scrolls out, and its Play launches the ready queue', async () => {
+  const user = userEvent.setup();
+  const launch = vi.spyOn(playerStore, 'launchQueue').mockResolvedValue();
+  const { observers, scrollHeroOut, scrollHeroBack } = observeHero();
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(detail)));
+  renderPlaylistRoutes('/playlists/playlist-1');
+
+  const heading = await screen.findByRole('heading', { level: 1, name: 'Quiet sequence' });
+  expect(observers.at(-1)!.targets).toEqual([heading.closest('header')]);
+  const compactPlay = { name: 'Play Quiet sequence' };
+  expect(screen.queryByRole('button', compactPlay)).not.toBeInTheDocument();
+
+  scrollHeroOut();
+  await user.click(screen.getByRole('button', compactPlay));
+  expect(launch).toHaveBeenCalledWith([
+    expect.objectContaining({ id: firstTrack.id }),
+    expect.objectContaining({ id: secondTrack.id })
+  ], 0);
+  expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
+
+  scrollHeroBack();
+  expect(screen.queryByRole('button', compactPlay)).not.toBeInTheDocument();
+});
+
+test('the hero Play shows Pause while this Playlist\'s ready queue plays', async () => {
+  const user = userEvent.setup();
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(detail)));
+  vi.spyOn(playerStore, 'getSnapshot').mockReturnValue({
+    ...playerStore.getSnapshot(),
+    currentIndex: 0,
+    currentItem: firstTrack,
+    queue: [firstTrack, secondTrack],
+    status: 'playing'
+  });
+  const pause = vi.spyOn(playerStore, 'pause').mockImplementation(() => undefined);
+  const launch = vi.spyOn(playerStore, 'launchQueue').mockResolvedValue();
+  renderPlaylistRoutes('/playlists/playlist-1');
+
+  const heading = await screen.findByRole('heading', { level: 1, name: 'Quiet sequence' });
+  const hero = heading.closest('header')!;
+  expect(within(hero).queryByRole('button', { name: 'Play' })).not.toBeInTheDocument();
+  await user.click(within(hero).getByRole('button', { name: 'Pause' }));
+  expect(pause).toHaveBeenCalledOnce();
+  expect(launch).not.toHaveBeenCalled();
+});
+
+test('a paused Playlist queue resumes from the hero Play without relaunching', async () => {
+  const user = userEvent.setup();
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(detail)));
+  vi.spyOn(playerStore, 'getSnapshot').mockReturnValue({
+    ...playerStore.getSnapshot(),
+    currentIndex: 1,
+    currentItem: secondTrack,
+    queue: [firstTrack, secondTrack],
+    status: 'paused'
+  });
+  const play = vi.spyOn(playerStore, 'play').mockResolvedValue();
+  const launch = vi.spyOn(playerStore, 'launchQueue').mockResolvedValue();
+  renderPlaylistRoutes('/playlists/playlist-1');
+
+  const hero = (await screen.findByRole('heading', { level: 1, name: 'Quiet sequence' })).closest('header')!;
+  await user.click(within(hero).getByRole('button', { name: 'Play' }));
+  expect(play).toHaveBeenCalledOnce();
+  expect(launch).not.toHaveBeenCalled();
+});
+
+test.each(['playing', 'paused'] as const)('Playlist controls never reuse a matching %s Room queue', async (status) => {
+  const user = userEvent.setup();
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(detail)));
+  vi.spyOn(playerStore, 'getSnapshot').mockReturnValue({
+    ...playerStore.getSnapshot(), currentIndex: 0, currentItem: firstTrack,
+    queue: [firstTrack, secondTrack], status
+  });
+  vi.spyOn(playerStore, 'isRoomPlaybackActive').mockReturnValue(true);
+  const pause = vi.spyOn(playerStore, 'pause').mockImplementation(() => undefined);
+  const play = vi.spyOn(playerStore, 'play').mockResolvedValue();
+  const launch = vi.spyOn(playerStore, 'launchQueue').mockResolvedValue();
+  renderPlaylistRoutes('/playlists/playlist-1');
+  const hero = (await screen.findByRole('heading', { level: 1, name: 'Quiet sequence' })).closest('header')!;
+
+  await user.click(within(hero).getByRole('button', { name: 'Play' }));
+  await user.click(screen.getByRole('button', { name: 'Play Night' }));
+
+  expect(launch).toHaveBeenCalledTimes(2);
+  expect(play).not.toHaveBeenCalled();
+  expect(pause).not.toHaveBeenCalled();
+});
+
+test('the hero byline joins the MediaTrack count, total duration and unavailable count', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
+    ...detail,
+    itemCount: 3,
+    items: [...detail.items, {
+      itemId: 'item-gone', audioTrackId: 'track-gone', addedAt: '2026-08-04T12:03:00.000Z',
+      availability: 'unavailable', audioTrack: null
+    }]
+  })));
+  renderPlaylistRoutes('/playlists/playlist-1');
+
+  const heading = await screen.findByRole('heading', { level: 1, name: 'Quiet sequence' });
+  expect(heading.closest('header')!.querySelector('p:last-of-type'))
+    .toHaveTextContent('3 MediaTracks • 6 min • 1 unavailable');
+  expect(screen.getByText('Private Playlist')).toBeInTheDocument();
 });

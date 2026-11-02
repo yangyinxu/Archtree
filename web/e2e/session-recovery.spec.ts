@@ -4,11 +4,13 @@
  *   Constants: viewer
  * Tests
  *   - a delayed old-account 401 cannot sign out the account installed by another tab
+ *   - Home retries a failed session bootstrap before requesting the authenticated Home
  * @end-catalog */
 
 import type { Route } from '@playwright/test';
 
 import { privateViewerSession } from './fixtures/privateListener';
+import { homeFixture } from './fixtures/catalog';
 import { installPrivateListenerRoutes } from './support/privateRoutes';
 import { installNonSocialProfileRoute, installSignedOutApi } from './support/apiRoutes';
 import { expect, test } from './support/test';
@@ -128,5 +130,43 @@ test('a delayed old-account 401 cannot sign out the account installed by another
   } finally {
     releaseHistory();
     await otherTab.close();
+  }
+});
+
+test('Home retries a failed session bootstrap before requesting the authenticated Home', async ({ page }) => {
+  await installPrivateListenerRoutes(page);
+  let recover = false, sessionReads = 0;
+  let releaseSession!: () => void;
+  const sessionGate = new Promise<void>(resolve => { releaseSession = resolve; });
+  const homeViewers: Array<string | undefined> = [];
+  await page.route('**/auth/browser/session', async route => {
+    sessionReads += 1;
+    if (!recover) return json(route, { message: 'Unavailable' }, 503);
+    await sessionGate;
+    return json(route, privateViewerSession);
+  });
+  await page.route('**/api/listener/v1/home', route => {
+    homeViewers.push(route.request().headers()['x-finitude-account-viewer']);
+    expect(homeViewers.at(-1)).toBe(viewer);
+    return json(route, homeFixture);
+  });
+  try {
+    await page.goto('/finitude');
+    const main = page.getByRole('main');
+    await expect(main.getByRole('heading', { name: 'Home is taking a quiet moment' })).toBeVisible();
+    await expect(main.getByRole('region', { name: 'Loading Home' })).toHaveCount(0);
+    expect(homeViewers).toEqual([]);
+    const failedReads = sessionReads;
+    recover = true;
+    await main.getByRole('button', { name: 'Try again', exact: true }).click();
+    await expect.poll(() => sessionReads).toBeGreaterThan(failedReads);
+    // The authoritative session is still pending, so no anonymous or stale-viewer Home may be requested.
+    expect(homeViewers).toEqual([]);
+    releaseSession();
+    await expect(main.getByRole('region', { name: 'Featured albums', exact: true })).toBeVisible();
+    expect(homeViewers).toEqual([viewer]);
+    await expect(main.getByRole('heading', { name: 'Home is taking a quiet moment' })).toHaveCount(0);
+  } finally {
+    releaseSession();
   }
 });

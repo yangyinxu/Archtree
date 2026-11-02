@@ -25,7 +25,8 @@
  * the applied pairing (`pairs`), while its run is queued, running or retrying `progress` (its phase, the done and total counts of
  * that phase's bounded steps and the run's start and last-step times; numbers and times only), and, on the lookup read, for every
  * run it can read that planned a search `timeline` (lookupTimelineView.ts): its searches and stages as bounded steps (a search
- * the record cannot vouch was sent as unconfirmed), the texts its searches sent where each is the review's own saved title,
+ * the record cannot vouch was sent as unconfirmed; a search of a captured import identifier only as its basis and, for a release
+ * ID, where it came from, never its value), the texts its searches sent where each is the review's own saved title,
  * Artist name or Track title or the run's submitted name and Artist name, or an answered bridge search's title a shown candidate
  * carries (never a filename, folder name, label, identifier, iTunes term or artist), the derived Track-title search state, the
  * stored retry time with its attempt, and the run's times. An import's view never carries them. Pure.
@@ -169,9 +170,18 @@ function proposalView(raw: unknown): LookupProposal | null {
     const numbered = tracks.map(track => isRecord(track) && count(track.discNumber) !== null && count(track.trackNumber) !== null && text(track.title) !== null
         ? { discNumber: track.discNumber as number, trackNumber: track.trackNumber as number, title: track.title as string } : null);
     if (entries.some(entry => entry === null) || numbered.some(track => track === null)) return null;
+    // Independent track credits are evidence in exact import groups, bounded and projected just like Album Artist entries.
+    const own = raw.trackArtists === undefined ? [] : Array.isArray(raw.trackArtists) ? raw.trackArtists : null;
+    if (!own || own.length > LIMITS.tracks) return null;
+    const trackArtists = own.map(track => {
+        if (!isRecord(track) || count(track.discNumber) === null || count(track.trackNumber) === null || !Array.isArray(track.artists) || track.artists.length < 1 || track.artists.length > 20) return null;
+        const nested = proposalView({ albumTitle: '', artists: track.artists, label: null, releaseDate: null, tracks: [] });
+        return nested ? { discNumber: track.discNumber as number, trackNumber: track.trackNumber as number, artists: nested.artists } : null;
+    });
+    if (trackArtists.some(track => track === null)) return null;
     return { albumTitle, artists: entries as LookupProposal['artists'], label: raw.label as string | null,
         labelMusicBrainzId: raw.label === null ? null : normalizeMusicBrainzId(raw.labelMusicBrainzId), releaseDate: raw.releaseDate === null ? null : date(raw.releaseDate),
-        tracks: numbered as LookupProposal['tracks'] };
+        tracks: numbered as LookupProposal['tracks'], ...(trackArtists.length ? { trackArtists: trackArtists as NonNullable<LookupProposal['trackArtists']> } : {}) };
 }
 
 const position = (value: unknown, max: number): number | null => Number.isSafeInteger(value) && (value as number) >= 1 && (value as number) <= max ? value as number : null;

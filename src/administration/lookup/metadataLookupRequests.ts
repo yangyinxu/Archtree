@@ -24,6 +24,7 @@ import {
     dailyAnalysisAttemptsUsed, importCollection, importLookupRecord, importPurposeFilter, importSavedIdentity, mutateAdminImport, parseAdminProjectMutation, withImportAdmin
 } from '../import/adminImportService';
 import { importIdentityPreselections } from '../import/adminImportIdentity';
+import { importAlbumMemberPositions } from '../import/adminImportAlbumTarget';
 import { importIdentityAnswers, importSummaryView, type ImportAppendTarget, type ImportSummaryView } from '../import/adminImportSummary';
 import { metadataLookupConfiguration, type MetadataLookupConfiguration } from '../../config/metadataLookup';
 import { boundedJson, parseDraftPath } from '../import/adminImportValueState';
@@ -66,9 +67,7 @@ async function readAppendTarget(decisions: readonly ImportDecisionV2[], session:
     const db = getDb()!, bound = ADMIN_IMPORT_LIMITS.appendTargetMembers;
     const album = await db.collection('albums').findOne({ _id: new ObjectId(reuse.candidateId), ...readyAlbumLifecycleFilter }, { session, projection: { expectedTracklist: 1, audioTrackIds: 1 }, maxTimeMS: 3_000 });
     if (!album || !hasStoredExpectedTracklist({ expectedTracklist: album.expectedTracklist }) || !Array.isArray(album.audioTrackIds) || album.audioTrackIds.length > bound) return null;
-    const ids = [...new Set(album.audioTrackIds.flatMap((value: unknown) => { const id = String(value ?? '').trim().toLowerCase(); return objectId(id) ? [id] : []; }))];
-    const members = ids.length ? await db.collection('audioTracks').find({ _id: { $in: ids.map(value => new ObjectId(value)) } }, { session, projection: { discNumber: 1, trackNumber: 1 }, maxTimeMS: 3_000 })
-        .limit(bound).toArray() : [];
+    const members = await importAlbumMemberPositions(album.audioTrackIds, session);
     return { albumId: album._id.toHexString(), tracklist: album.expectedTracklist, members: members.map(member => ({ discNumber: member.discNumber, trackNumber: member.trackNumber })) };
 }
 
@@ -77,7 +76,8 @@ export type ImportLookupResponse = { lookup: ImportLookupView | null; revision: 
 /**
  * The import's lookup view (null before any run), its revision and automatic-write counter, and the Review and publish summary
  * state (importSummaryView) read in the same snapshot: with the provider calls used today, this server's lookup configuration
- * and the identity rows of the saved draft that neither a saved decision nor a preselection answers (the candidates Review reads),
+ * and the identity rows of the saved draft that neither a saved decision nor a preselection answers (the candidates Review reads;
+ * a track-only identity is answered in Review or by deselecting its tracks in the confirmation, so it is not counted),
  * and, for a saved append whose publication is not complete, its target's expected tracklist and members (readAppendTarget).
  * `musicBrainzNames` are the names lookup found for each MusicBrainz ID the saved draft carries: a renamed entry keeps its ID
  * only under one of them.
@@ -88,7 +88,8 @@ export async function getAdminImportLookup(actor: string, id: string, configurat
         const doc = await importCollection().findOne({ _id: new ObjectId(id), ...importPurposeFilter }, { session });
         if (!doc) throw notFound();
         const stored = await importLookupRecord(doc._id, session), now = new Date(), identity = await importSavedIdentity(doc, session);
-        const preselections = importIdentityPreselections(identity.draft, identity.decisions, identity.candidates);
+        // Preselections cover the track-only identities too (the identity draft); the summary's count reads the saved draft's rows only.
+        const preselections = importIdentityPreselections(identity.identityDraft, identity.decisions, identity.candidates);
         const identityAnswers = importIdentityAnswers(identity.draft, identity.decisions, preselections);
         // A complete publication lists no rows (importSummaryView), so its target is not read.
         const appendTarget = doc.media?.publication?.state === 'complete' ? null : await readAppendTarget(identity.decisions, session);

@@ -1,0 +1,44 @@
+.page { container: video-browser / inline-size; }
+
+.header { align-items: center; display: flex; flex-wrap: wrap; gap: 1rem; justify-content: space-between; margin-bottom: 1.5rem; }
+.header h1 { margin: 0; }
+.viewSwitch { background: var(--color-surface-raised); border-radius: var(--radius-pill); display: inline-flex; gap: .2rem; padding: .25rem; }
+.viewSwitch button { align-items: center; background: transparent; border: 1px solid transparent; border-radius: var(--radius-pill); color: var(--color-text-muted); display: flex; font: inherit; font-size: .8rem; gap: .45rem; min-height: 2.35rem; padding: .45rem .85rem; }
+.viewSwitch button[aria-pressed='true'] { background: var(--color-text); color: var(--color-surface); }
+
+/* The visible page heading is shared by both views; the Grid retains its accessible section name. */
+.page [id='listener-section-videos'] { clip: rect(0 0 0 0); clip-path: inset(50%); height: 1px; overflow: hidden; position: absolute; white-space: nowrap; width: 1px; }
+
+/* Wide cards need wider Grid columns: at least 16rem of 16:9 artwork, one column on phones. */
+.page [data-presentation='grid'] {
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, calc(16rem + 2 * var(--card-inset))), 1fr));
+}
+
+.immersiveGrid {
+  display: grid;
+  gap: var(--space-5);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  list-style: none;
+  margin: 0 auto;
+  max-width: min(64rem, calc(max(24rem, 100dvh - 19rem) * 1.538 + 1.5rem));
+  padding: 0;
+}
+.immersiveGrid > li { min-width: 0; }
+.empty { background: var(--color-surface-raised); border-radius: var(--radius-md); color: var(--color-text-muted); margin: 0; padding: var(--space-4); }
+
+@container video-browser (max-width: 38rem) {
+  .immersiveGrid { grid-template-columns: minmax(0, 1fr); max-width: 27rem; }
+}
+
+@media (forced-colors: active) {
+  .viewSwitch button { border-color: ButtonText; }
+  .viewSwitch button[aria-pressed='true'] { background: Highlight; color: HighlightText; }
+}
+
+.pagination {
+  align-items: center;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin-top: var(--space-6);
+}

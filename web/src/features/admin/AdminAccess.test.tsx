@@ -7,7 +7,6 @@
  *   - standalone administration omits the redundant workbench shortcut while its view switch remains effective
  *   - late capability response cannot revive private access after explicit permission rejection
  *   - account epoch synchronously erases private presentation and buffers, including same-user ABA
- *   - an unfamiliar view label stays complete without a guessed line break
  *   - reconnecting neither rechecks capability nor suspends the Admin view a running upload queue depends on
  *   - leaving Admin view opens Home as a new entry, so Back returns to the gated administration page
  *   - an outdated capability schema offers a page reload instead of an ordinary retry
@@ -17,7 +16,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { onlineManager, QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, useLocation, useNavigate } from 'react-router';
 import { AdminGate } from './AdminAccess';
-import { AdminControls, AdminViewLabel } from './AdminControls';
+import { AdminControls } from './AdminControls';
 import { adminWorkspace } from './adminWorkspace';
 import { adminRequest } from './adminApi';
 import { z } from 'zod';
@@ -30,7 +29,7 @@ const mount = (role = 'admin', hideWorkbenchLink = false) => {
   render(<QueryClientProvider client={client}><MemoryRouter><AdminControls hideWorkbenchLink={hideWorkbenchLink} /><AdminGate><p>Private workbench</p></AdminGate></MemoryRouter></QueryClientProvider>);
   return client;
 };
-beforeEach(() => adminWorkspace.reset());
+beforeEach(() => { window.localStorage.clear(); adminWorkspace.reset(); });
 afterEach(() => { cleanup(); adminWorkspace.reset(); vi.unstubAllGlobals(); });
 
 test('ordinary users never fetch admin capability or render its switch', async () => {
@@ -48,7 +47,7 @@ test('confirmed administrators start in User view; explicit switch preserves acc
   expect(screen.getByRole('link', { name: 'Workbench' })).toHaveAttribute('href', '/admin/imports');
   const epoch = adminWorkspace.getSnapshot().epoch; expect(epoch).toBeGreaterThanOrEqual(before);
   fireEvent.click(screen.getByRole('button', { name: 'Current view: Admin' }));
-  fireEvent.click(screen.getByRole('button', { name: 'User' }));
+  fireEvent.click(screen.getByRole('menuitemradio', { name: 'User' }));
   expect(screen.queryByText('Private workbench')).not.toBeInTheDocument();
   expect(adminWorkspace.getSnapshot().epoch).toBe(epoch); expect(fetch).toHaveBeenCalledTimes(2);
 });
@@ -58,7 +57,7 @@ test('standalone administration omits the redundant workbench shortcut while its
   await screen.findByText('Private workbench');
   expect(screen.queryByRole('link', { name: 'Workbench' })).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'Current view: Admin' }));
-  fireEvent.click(screen.getByRole('button', { name: 'User' }));
+  fireEvent.click(screen.getByRole('menuitemradio', { name: 'User' }));
   expect(screen.queryByText('Private workbench')).not.toBeInTheDocument();
   expect(adminWorkspace.getSnapshot().mode).toBe('user');
 });
@@ -86,31 +85,13 @@ test('account epoch synchronously erases private presentation and buffers, inclu
   act(() => { advanceAccountEpoch(); client.setQueryData(['browser-session'], null); });
   expect(adminWorkspace.buffer('sensitive')).toBeUndefined(); expect(screen.queryByText('Private workbench')).not.toBeInTheDocument();
   act(() => { advanceAccountEpoch(); client.setQueryData(['browser-session'], session); });
-  await screen.findByRole('button', { name: 'Current view: User' });
-  expect(adminWorkspace.getSnapshot().viewerId).toBe(viewer); expect(screen.queryByText('Private workbench')).not.toBeInTheDocument();
+  await screen.findByRole('button', { name: 'Current view: Admin' });
+  expect(adminWorkspace.getSnapshot().viewerId).toBe(viewer);
+  expect(adminWorkspace.buffer('sensitive')).toBeUndefined();
+  expect(screen.getByText('Private workbench')).toBeVisible();
 });
 
 
-test.each([
-  ['Current view: Admin', 'Admin', 'Current view:'],
-  ['Current view: User', 'User', 'Current view:'],
-  ['当前视角：管理员', '管理员', '当前视角：'],
-  ['当前视角：用户', '用户', '当前视角：']
-])('view label %s intentionally separates its intact role', (label, role, prefix) => {
-  render(<button aria-label={label}><AdminViewLabel label={label} role={role} /></button>);
-  const button = screen.getByRole('button', { name: label });
-  expect(button.children).toHaveLength(1);
-  expect(button.firstElementChild?.tagName).toBe('SPAN');
-  expect(button.querySelector(':scope > br')).toBeNull();
-  expect(button.firstChild).toHaveTextContent(prefix);
-  expect(button.querySelector('br')).not.toBeNull();
-  expect(screen.getByText(role)).toHaveStyle({ whiteSpace: 'nowrap' });
-});
-test('an unfamiliar view label stays complete without a guessed line break', () => {
-  render(<AdminViewLabel label="View changed" role="Admin" />);
-  expect(screen.getByText('View changed')).toBeVisible();
-  expect(document.querySelector('br')).toBeNull();
-});
 test('reconnecting neither rechecks capability nor suspends the Admin view a running upload queue depends on', async () => {
   const fetch = vi.fn(async () => json(capabilities)); vi.stubGlobal('fetch', fetch); const client = mount();
   fireEvent.click(await screen.findByRole('button', { name: 'Switch to Admin view' })); await screen.findByText('Private workbench');
@@ -126,7 +107,7 @@ test('leaving Admin view opens Home as a new entry, so Back returns to the gated
   const Probe = () => { const location = useLocation(), navigate = useNavigate(); return <><output aria-label="Path">{location.pathname}</output><button type="button" onClick={() => navigate(-1)}>Back</button></>; };
   render(<QueryClientProvider client={client}><MemoryRouter initialEntries={['/admin/imports/new', '/admin/imports/x']} initialIndex={1}><AdminControls /><AdminGate><p>Private workbench</p></AdminGate><Probe /></MemoryRouter></QueryClientProvider>);
   fireEvent.click(await screen.findByRole('button', { name: 'Switch to Admin view' })); await screen.findByText('Private workbench');
-  fireEvent.click(screen.getByRole('button', { name: 'Current view: Admin' })); fireEvent.click(screen.getByRole('button', { name: 'User' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Current view: Admin' })); fireEvent.click(screen.getByRole('menuitemradio', { name: 'User' }));
   expect(screen.getByRole('status', { name: 'Path' })).toHaveTextContent(/^\/$/);
   // Replacing the administration entry would make Back skip it, or leave the app when it was the first entry.
   fireEvent.click(screen.getByRole('button', { name: 'Back' }));

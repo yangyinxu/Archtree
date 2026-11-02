@@ -9,6 +9,7 @@
  *   - the management layout remains independent during authority suspension and identity reconciliation
  *   - round trips through management preserve the player queue, position and listener panel choice
  *   - ongoing Video retains its mounted surface without obscuring management content
+ *   - listener navigation minimizes the Video theater to the panel until the listener restores it
  *   - resizes and restores wide panels without remounting the player
  *   - removes panel separators when the compact shell takes control
  *   - shows authentication-required Library instead of an empty success
@@ -122,6 +123,7 @@ test('renders responsive navigation and exactly one persistent player surface', 
   expect(screen.getByRole('link', { name: 'Skip to main content' })).toHaveAttribute('href', '#main-content');
   expect(container.querySelectorAll('nav[aria-label="Primary"]')).toHaveLength(2);
   expect(screen.getAllByRole('link', { name: 'Library' })).toHaveLength(1);
+  expect(screen.getByRole('link', { name: 'Video' })).toHaveAttribute('href', '/videos');
   expect(screen.queryByText('Your Library', { exact: true })).not.toBeInTheDocument();
   expect(await screen.findAllByRole('region', { name: 'Now playing' })).toHaveLength(1);
 });
@@ -255,6 +257,48 @@ test('ongoing Video retains its mounted surface without obscuring management con
   await user.click(screen.getByRole('link', { name: 'Listener route' }));
   expect(within(surface as HTMLElement).getByRole('heading', { name: 'Synthetic video' })).toBe(surface?.querySelector('h1'));
   expect(surface?.parentElement).not.toHaveAttribute('hidden');
+});
+
+test('listener navigation minimizes the Video theater to the panel until the listener restores it', async () => {
+  const user = userEvent.setup();
+  const item: PlayerQueueItem = { id: 'synthetic-video', title: 'Synthetic video', artworkUrl: '', artistNames: ['Synthetic artist'], mediaType: 'video', streamUrl: '' };
+  const snapshot = { ...playerStore.getSnapshot(), queue: [item], currentIndex: 0, currentItem: item, status: 'playing' as const, currentTime: 42 };
+  vi.spyOn(playerStore, 'getSnapshot').mockReturnValue(snapshot);
+  const { container } = renderAdminShell('/', 'user');
+  const theater = () => container.querySelector('[aria-labelledby="video-theater-title"]');
+  await waitFor(() => expect(theater()).toBeInTheDocument());
+  expect(screen.getByRole('main', { hidden: true })).toHaveAttribute('inert');
+
+  // The brand points at the current Home address, which previously left the theater covering it.
+  await user.click(screen.getByRole('link', { name: 'Finitude home' }));
+  expect(theater()).toBeNull();
+  expect(screen.getByRole('main')).not.toHaveAttribute('inert');
+  expect(screen.getByRole('main')).toHaveTextContent('Workspace content');
+  expect(container.querySelector('[data-video-playing]')).toBeNull();
+  const aside = container.querySelector('#now-playing-aside') as HTMLElement;
+  expect(await within(aside).findByRole('img', { name: 'Synthetic video video' })).toBeInTheDocument();
+  expect(within(aside).getByRole('button', { name: 'Enter video fullscreen' })).toBeInTheDocument();
+  const player = await screen.findByRole('region', { name: 'Now playing' });
+  const toggle = await within(player).findByRole('button', { name: 'Video' });
+  expect(toggle).toHaveAttribute('aria-pressed', 'false');
+  expect(playerStore.getSnapshot()).toBe(snapshot);
+
+  // Selecting the panel Video returns it to the theater, as the player-bar toggle does.
+  await user.click(within(aside).getByRole('button', { name: 'Synthetic video video' }));
+  await waitFor(() => expect(theater()).toBeInTheDocument());
+  expect(within(aside).queryByRole('img', { name: 'Synthetic video video' })).not.toBeInTheDocument();
+  expect(toggle).toHaveAttribute('aria-pressed', 'true');
+  // The selected panel control left with the panel Video, so focus continues on the toggle.
+  await waitFor(() => expect(toggle).toHaveFocus());
+
+  await user.click(toggle);
+  expect(theater()).toBeNull();
+  await user.click(toggle);
+  await waitFor(() => expect(theater()).toBeInTheDocument());
+
+  await user.click(within(screen.getByRole('complementary', { name: 'Finitude Library' })).getByRole('link', { name: 'Search' }));
+  expect(theater()).toBeNull();
+  expect(screen.getByRole('main')).toHaveTextContent('Workspace content');
 });
 
 test('resizes and restores wide panels without remounting the player', async () => {

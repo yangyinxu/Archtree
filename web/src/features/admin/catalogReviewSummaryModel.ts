@@ -91,8 +91,8 @@ export function expectedRowMembers(rows: readonly ExpectedRow[], tracks: readonl
 
 /**
  * The applied candidate's conflicts the lookup still needs answered (`open`, of the paths the view lists as `needed`) and the lookup
- * answers a review waits for: those conflicts, plus one for a tie. The summary, its step bar (reviewLookupBrief.ts) and the
- * server's lookup brief count the same.
+ * answers a review waits for: those conflicts, plus one for a tie. The summary, the review's lookup brief (reviewLookupBrief.ts,
+ * read by the Luna AI controls) and the server's lookup brief count the same.
  */
 export function openLookupAnswers(lookup: ReviewLookupView | null): { needed: ReadonlySet<string>; open: ReviewConflict[]; answers: number } {
   const needed = new Set(lookup?.needsAnswer.conflicts ?? []), open = (lookup?.applied?.conflicts ?? []).filter(conflict => needed.has(conflict.path));

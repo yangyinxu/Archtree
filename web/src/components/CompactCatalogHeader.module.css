@@ -1,0 +1,74 @@
+/* Zero-height sticky anchor: the bar overlays the page without taking layout space. */
+.compactHeader {
+  height: 0;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+/* The inline tone stays the pane tone (white text at AA); the veil only darkens it. */
+.compactBar {
+  align-items: center;
+  background: linear-gradient(rgb(0 0 0 / 0.4), rgb(0 0 0 / 0.4)), var(--tone-color);
+  display: flex;
+  gap: 0.75rem;
+  height: 4rem;
+  left: 0;
+  opacity: 0;
+  padding: 0 clamp(1rem, 3cqi, 1.5rem);
+  pointer-events: none;
+  position: absolute;
+  right: 0;
+  transition:
+    opacity var(--motion-medium) var(--ease-standard),
+    --tone-color var(--motion-tone) var(--ease-standard);
+}
+
+.compactHeader[data-visible] .compactBar {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.compactBar > span {
+  color: var(--color-text);
+  font-size: 1.5rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The hero Play (DetailHero.module.css), one size smaller. */
+.compactBar > button {
+  block-size: 3rem;
+  inline-size: 3rem;
+  margin: 0;
+}
+
+.compactBar > button svg {
+  block-size: 1.25rem;
+  inline-size: 1.25rem;
+}
+
+/* Focus scrolling keeps controls below the visible bar and the docked column header (WCAG 2.4.11). */
+main:has(> .compactHeader[data-visible]) {
+  scroll-padding-top: 6.75rem;
+}
+
+/* A docked column header needs its own surface, or rows would scroll visibly beneath it. */
+main:has(> .compactHeader[data-visible]) [data-track-table-header] {
+  background: var(--color-surface-low);
+}
+
+@media (forced-colors: active) {
+  .compactBar {
+    border-block-end: 1px solid CanvasText;
+  }
+}
+
+@media (max-width: 520px) {
+  .compactBar > span {
+    font-size: 1.1rem;
+  }
+}

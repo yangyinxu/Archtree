@@ -12,6 +12,7 @@ import type { Db, CreateIndexesOptions, IndexSpecification, Document } from 'mon
 import { catalogSearchCollections } from '../utils/catalogSearch';
 import { adminImportIndexes } from '../administration/import/adminImportService';
 import { adminConversionIndexes } from '../administration/conversion/conversionService';
+import { adminVideoIndexes } from '../models/adminVideoProject';
 import { metadataLookupIndexes } from '../administration/lookup/lookupContract';
 import { adminImportLookupCoverIndexes } from '../administration/import/adminImportMediaTypes';
 import { MUSICBRAINZ_ID_INDEX_NAMES, musicBrainzIdPartialFilter } from '../utils/musicBrainzId';
@@ -31,6 +32,7 @@ export const databaseIndexes: Array<{
   }> = [
     ...adminImportIndexes,
     ...adminConversionIndexes,
+    ...adminVideoIndexes,
     ...metadataLookupIndexes,
     // Optional: the lookup cover pass's claim stays correct without it, so it needs no required-index revision.
     ...adminImportLookupCoverIndexes,
@@ -170,7 +172,7 @@ export const databaseIndexes: Array<{
       catalogSearchIndexKeys.map(keys => ({ collection, keys })))
   ];
 
-export const requiredIndexRevision = 'required-indexes-v12-catalog-cover-uploads';
+export const requiredIndexRevision = 'required-indexes-v13-import-published-album';
 const requiredIndexes = databaseIndexes.filter(index => index.options?.unique === true || index.required);
 
 /** Reports a static schema identifier without retaining database errors or user values. */

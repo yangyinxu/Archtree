@@ -1011,6 +1011,136 @@
       ],
       "variables": {}
     },
+    "admin.album_import.add": {
+      "description": "Administrator Album page: hero link that opens import creation for this Album.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.album_import.append_note": {
+      "description": "Administrator import creation for an Album: what an append changes and keeps.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.album_import.back": {
+      "description": "Administrator import creation for an Album: link back to the target Album page.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.album_import.create_refused": {
+      "description": "Administrator import creation for an Album: the create was refused although the Album can still take files.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.album_import.intro": {
+      "description": "Administrator import creation for an Album: introduction above the target card.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.album_import.lookup_note": {
+      "description": "Administrator import creation for an Album: no automatic metadata lookup.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.album_import.match_changed": {
+      "description": "Administrator import Review: a chosen record changed since it was chosen (disabled select option).",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.album_import.no_file_rows": {
+      "description": "Administrator import creation for an Album: how many rows of the target Album's expected tracklist have no file.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.album_import.no_primary": {
+      "description": "Administrator import creation for an Album: the target has no primary Artist Credit.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.album_import.number_next": {
+      "description": "Administrator import summary for an Album with rows without a file: the numbering button is the next step.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.album_import.primary_not_ready": {
+      "description": "Administrator import creation for an Album: a primary Artist of the target is not ready.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.album_import.read_error": {
+      "description": "Administrator import creation for an Album: the target Album read failed (shown with Try again).",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.album_import.target": {
+      "description": "Administrator import creation for an Album: heading of the target Album card.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.album_import.title": {
+      "description": "Administrator import creation for an Album: page heading.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.album_import.too_large": {
+      "description": "Administrator import creation for an Album: the target lists more members than an append allows.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {
+        "max": "number"
+      }
+    },
+    "admin.album_import.unavailable": {
+      "description": "Administrator import creation for an Album: the target is missing or not a ready Album.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.album_import.unreadable": {
+      "description": "Administrator import creation for an Album: the target's saved title or visibility cannot be read.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.album_import.upload_missing": {
+      "description": "Administrator Album page: link beside the expected tracklist summary while rows have no file; opens import creation for this Album.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
     "admin.analysis.budget_daily": {
       "description": "Administrator workbench: paid Luna AI confirmation, the paid Luna AI calls left today across the deployment.",
       "delivery": [
@@ -1242,6 +1372,13 @@
       ],
       "variables": {}
     },
+    "admin.catalog_review.alternatives": {
+      "description": "Administrator workbench: existing-Album review page, label of the row of alternatives (manual editing, Discard completion) after the update range.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.catalog_review.analysis_again": {
       "description": "Existing-Album review: starts another paid Luna AI run; names Luna, AI and paid.",
       "delivery": [
@@ -1300,6 +1437,40 @@
     },
     "admin.catalog_review.applied_copy": {
       "description": "This review is complete and read-only. Open the Album to make further edits or create a new review.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.applied_count": {
+      "description": "Administrator workbench: existing-Album review page, heading of the applied view with the number of fields the update wrote.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.catalog_review.applied_edition_chosen": {
+      "description": "Administrator workbench: existing-Album review page, applied view: the administrator chose the release used without a match.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "title": "string"
+      }
+    },
+    "admin.catalog_review.applied_edition_matched": {
+      "description": "Administrator workbench: existing-Album review page, applied view: lookup preselected the release it used on a match.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "title": "string"
+      }
+    },
+    "admin.catalog_review.applied_edition_unconfirmed": {
+      "description": "Administrator workbench: existing-Album review page, applied view: no release was matched; checking the edition takes a new completion.",
       "delivery": [
         "runtime"
       ],
@@ -1365,35 +1536,28 @@
       }
     },
     "admin.catalog_review.apply_confirm": {
-      "description": "Confirm updating the original Album",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
-    "admin.catalog_review.apply_confirm_copy": {
-      "description": "Album completion, Update original Album confirmation: only the changes listed update the Album, never its audio files, cover or visibility, and no track with audio is added or removed.",
+      "description": "Unused on the Web since the v3 review page; kept while native clients package it. Confirm updating the original Album",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.catalog_review.apply_copy": {
-      "description": "Album completion, Update original Album step: lookup values arrive checked and can be unchecked; only checked changes update the Album, never its audio files, cover or visibility, and no track with audio is added or removed.",
+      "description": "Unused on the Web since the v3 review page; kept while native clients package it. Album completion, Update original Album step: lookup values arrive checked and can be unchecked; only checked changes update the Album, never its audio files, cover or visibility, and no track with audio is added or removed.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.catalog_review.apply_tab": {
-      "description": "Update original Album",
+      "description": "Unused on the Web since the v3 review page; kept while native clients package it. Update original Album",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.catalog_review.apply_title": {
-      "description": "Choose changes for the existing Album",
+      "description": "Unused on the Web since the v3 review page; kept while native clients package it. Choose changes for the existing Album",
       "delivery": [
         "runtime"
       ],
@@ -1432,6 +1596,344 @@
     },
     "admin.catalog_review.attribution_none": {
       "description": "Album completion confirmation: a member whose attribution state is not stored.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.bar_applied": {
+      "description": "Administrator workbench: existing-Album review page, action bar note on an applied completion.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.bar_applying": {
+      "description": "Administrator workbench: existing-Album review page, action bar progress while the update is applied.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.bar_back": {
+      "description": "Administrator workbench: existing-Album review page, action bar button that leaves the inline update confirmation; the saved draft stays.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.bar_changed": {
+      "description": "Administrator workbench: existing-Album review page, preparing returned to editing because the review changed past its save.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.bar_checking": {
+      "description": "Administrator workbench: existing-Album review page, action bar progress while the saved review is read again before the confirmation.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.bar_confirm": {
+      "description": "Administrator workbench: existing-Album review page, action bar primary button that confirms the update with its count of changes.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.catalog_review.bar_confirm_note": {
+      "description": "Administrator workbench: existing-Album review page, action bar note while the inline update confirmation shows.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.bar_heading": {
+      "description": "Administrator workbench: existing-Album review page, action bar heading (hidden at narrow widths).",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.bar_heading_confirm": {
+      "description": "Administrator workbench: existing-Album review page, action bar heading while the inline update confirmation shows.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.bar_nothing": {
+      "description": "Administrator workbench: existing-Album review page, why the update waits: nothing is selected.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.bar_open_album": {
+      "description": "Administrator workbench: existing-Album review page, action bar link to the original Album once the update is applied.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.bar_open_latest": {
+      "description": "Administrator workbench: existing-Album review page, action bar link to the latest Album from an out-of-date completion.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.bar_outdated": {
+      "description": "Administrator workbench: existing-Album review page, why the confirmation cannot be confirmed: the review changed since it was frozen.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.bar_preparing": {
+      "description": "Administrator workbench: existing-Album review page, action bar primary button label while the update is prepared.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.bar_query": {
+      "description": "Administrator workbench: existing-Album review page, action bar primary button that reads the outcome of an update whose response was lost.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.bar_querying": {
+      "description": "Administrator workbench: existing-Album review page, action bar progress while the outcome of an unknown update is read.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.bar_ready_note": {
+      "description": "Administrator workbench: existing-Album review page, action bar, note under its heading while editing with changes to save: nothing changes the original Album before the final confirmation.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.bar_retry_prepare": {
+      "description": "Administrator workbench: existing-Album review page, action bar primary button after the save that prepares the update was refused.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.bar_retry_same": {
+      "description": "Administrator workbench: existing-Album review page, action bar secondary button that sends the same update operation again.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.bar_review_items": {
+      "description": "Administrator workbench: existing-Album review page, preparing returned to editing: the changes that are no longer selected or now wait.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "items": "string"
+      }
+    },
+    "admin.catalog_review.bar_save_failed": {
+      "description": "Administrator workbench: existing-Album review page, action bar alert when a save was refused.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.bar_save_only": {
+      "description": "Administrator workbench: existing-Album review page, action bar secondary button that saves the draft without preparing the update.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.bar_saved_note": {
+      "description": "Administrator workbench: existing-Album review page, action bar, note under its heading while editing once the draft is saved and nothing is unsaved.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.bar_saving": {
+      "description": "Administrator workbench: existing-Album review page, action bar progress while the draft saves.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.bar_wait_both": {
+      "description": "Administrator workbench: existing-Album review page, why the update waits: metadata lookup and Luna AI both run.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.bar_wait_luna": {
+      "description": "Administrator workbench: existing-Album review page, why the update waits: Luna AI is queued or running.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.bar_wait_operation": {
+      "description": "Administrator workbench: existing-Album review page, why the update waits: another change of this review runs or waits for its outcome.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.compact_change": {
+      "description": "Administrator workbench: existing-Album review page, compact row before the update: the value changes.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.compact_done": {
+      "description": "Administrator workbench: existing-Album review page, compact row after the update: the value was updated.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.compact_members": {
+      "description": "Administrator workbench: existing-Album review page, compact row: the members whose track Artists change.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.catalog_review.compact_numbers": {
+      "description": "Administrator workbench: existing-Album review page, grouped compact row of a long Album before the update.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.catalog_review.compact_numbers_done": {
+      "description": "Administrator workbench: existing-Album review page, grouped compact row of a long Album after the update.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.catalog_review.compact_position": {
+      "description": "Administrator workbench: existing-Album review page, compact row: a track's new Disc and Track Number.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "disc": "number",
+        "track": "string"
+      }
+    },
+    "admin.catalog_review.compact_title": {
+      "description": "Administrator workbench: existing-Album review page, compact row before the update: the track title changes.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.compact_title_done": {
+      "description": "Administrator workbench: existing-Album review page, compact row after the update: the track title was updated.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.compact_titles": {
+      "description": "Administrator workbench: existing-Album review page, grouped compact row of a long Album before the update.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.catalog_review.compact_titles_done": {
+      "description": "Administrator workbench: existing-Album review page, grouped compact row of a long Album after the update.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.catalog_review.compact_track": {
+      "description": "Administrator workbench: existing-Album review page, compact row: a track's new Track Number.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "track": "string"
+      }
+    },
+    "admin.catalog_review.confirm_checked": {
+      "description": "Administrator workbench: existing-Album review page, inline update confirmation: the saved review was read again.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.confirm_compared": {
+      "description": "Administrator workbench: existing-Album review page, inline update confirmation: the save changed a number, so the stored candidates were compared again.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.confirm_extra": {
+      "description": "Administrator workbench: existing-Album review page, inline update confirmation: the save found release values that are left unselected.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.confirm_full": {
+      "description": "Administrator workbench: existing-Album review page, disclosure with every selected change and its original and new value.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.catalog_review.confirm_summary": {
+      "description": "Administrator workbench: existing-Album review page, inline update confirmation summary with its count of changes.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.catalog_review.confirm_title": {
+      "description": "Administrator workbench: existing-Album review page, title of the inline update confirmation.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.confirm_unchanged": {
+      "description": "Administrator workbench: existing-Album review page, inline update confirmation: what the update never changes.",
       "delivery": [
         "runtime"
       ],
@@ -1575,14 +2077,14 @@
       "variables": {}
     },
     "admin.catalog_review.draft_saved": {
-      "description": "Album completion editor: status after the private completion draft is saved.",
+      "description": "Unused on the Web since the v3 review page; kept while native clients package it. Album completion editor: status after the private completion draft is saved.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.catalog_review.draft_tab": {
-      "description": "Edit draft",
+      "description": "Unused on the Web since the v3 review page; kept while native clients package it. Edit draft",
       "delivery": [
         "runtime"
       ],
@@ -1603,49 +2105,49 @@
       "variables": {}
     },
     "admin.catalog_review.empty_artist": {
-      "description": "Administrator catalog review: Review is empty except for Artist and label identity hints, which are shown below and confirmed in the original Album.",
+      "description": "Unused on the Web since the v3 review page; kept while native clients package it. Administrator catalog review: Review is empty except for Artist and label identity hints, which are shown below and confirmed in the original Album.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.catalog_review.empty_attention": {
-      "description": "Existing-Album review: Luna AI needs attention; check the issue shown or keep editing by hand.",
+      "description": "Unused on the Web since the v3 review page; kept while native clients package it. Existing-Album review: Luna AI needs attention; check the issue shown or keep editing by hand.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.catalog_review.empty_cancelled": {
-      "description": "Existing-Album review: Luna AI was stopped; the draft stays editable by hand.",
+      "description": "Unused on the Web since the v3 review page; kept while native clients package it. Existing-Album review: Luna AI was stopped; the draft stays editable by hand.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.catalog_review.empty_handled": {
-      "description": "Suggestions have been handled. The saved review draft has no changes to apply.",
+      "description": "Unused on the Web since the v3 review page; kept while native clients package it. Suggestions have been handled. The saved review draft has no changes to apply.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.catalog_review.empty_idle": {
-      "description": "Existing-Album review: Luna AI has not run yet; editing by hand comes first, then paid Luna AI.",
+      "description": "Unused on the Web since the v3 review page; kept while native clients package it. Existing-Album review: Luna AI has not run yet; editing by hand comes first, then paid Luna AI.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.catalog_review.empty_no_suggestions": {
-      "description": "Existing-Album review: Luna AI suggested no changes; the draft stays editable by hand.",
+      "description": "Unused on the Web since the v3 review page; kept while native clients package it. Existing-Album review: Luna AI suggested no changes; the draft stays editable by hand.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.catalog_review.empty_ready": {
-      "description": "Changes are saved to the draft. The original Album has not been updated yet.",
+      "description": "Unused on the Web since the v3 review page; kept while native clients package it. Changes are saved to the draft. The original Album has not been updated yet.",
       "delivery": [
         "runtime"
       ],
@@ -1674,22 +2176,6 @@
         "runtime"
       ],
       "variables": {}
-    },
-    "admin.catalog_review.fill_numbers": {
-      "description": "Administrator workbench: existing-Album review summary and candidate chooser, button that fills the empty Disc and Track Numbers of the Edit draft tab from the positions at the start of the track titles, unsaved, and opens that tab.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
-    "admin.catalog_review.fill_numbers_done": {
-      "description": "Album completion editor: status after Fill Disc and Track Numbers from titles, how many tracks got numbers; they are unsaved until Save completion draft.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {
-        "count": "number"
-      }
     },
     "admin.catalog_review.flag_characters": {
       "description": "Administrator workbench: existing-Album review summary, flag: a release value with characters that cannot be saved is not applied.",
@@ -1762,7 +2248,7 @@
       "variables": {}
     },
     "admin.catalog_review.identity_answers": {
-      "description": "Administrator workbench: existing-Album review summary, how many identity rows (Artists and the label) still need a choice between an existing record and a new one.",
+      "description": "Administrator workbench: existing-Album review identity rows, how many Artists and labels can still be matched to an existing record or created; until then they stay out of this update.",
       "delivery": [
         "runtime"
       ],
@@ -2067,28 +2553,21 @@
       ],
       "variables": {}
     },
-    "admin.catalog_review.lookup_add_artist": {
-      "description": "Administrator workbench: existing-Album review summary, below the status for an Album without tracks when the lookup used no Artist name; adding one in the name box narrows the results.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
-    "admin.catalog_review.lookup_album_only_copy": {
-      "description": "Administrator workbench: existing-Album review candidate chooser, under Other options, warning that using only the Album values brings in no expected tracklist or track details.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
-    "admin.catalog_review.lookup_applied_album_only": {
-      "description": "Administrator workbench: existing-Album review summary, status when the release applied without a pairing now pairs in exactly one way, so using it again brings in its tracklist; names that release.",
+    "admin.catalog_review.local_tracks": {
+      "description": "Administrator workbench: existing-Album review page, header line after the primary Artist names: how many local tracks the review captured.",
       "delivery": [
         "runtime"
       ],
       "variables": {
-        "title": "string"
+        "count": "number"
       }
+    },
+    "admin.catalog_review.lookup_album_only_copy": {
+      "description": "Administrator workbench: existing-Album review, Reference releases note when every possible match writes Album values only: the track pairing is not confirmed, nothing needs deciding now, and no tracklist comes in.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
     },
     "admin.catalog_review.lookup_applied_none": {
       "description": "Administrator workbench: existing-Album review summary, status when no release is applied and the Album's saved values are kept.",
@@ -2208,70 +2687,6 @@
       ],
       "variables": {}
     },
-    "admin.catalog_review.lookup_cause_durations": {
-      "description": "Administrator workbench: existing-Album review summary, status cause after the found sentence: members have no duration; the next step is filling the Disc and Track Numbers from the titles, saving, then choosing the release.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {
-        "unknown": "number"
-      }
-    },
-    "admin.catalog_review.lookup_cause_durations_manual": {
-      "description": "Administrator workbench: existing-Album review summary, status cause after the found sentence: members have no duration and the titles give no Disc and Track Numbers to fill; another name or numbers entered by hand.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {
-        "unknown": "number"
-      }
-    },
-    "admin.catalog_review.lookup_cause_durations_pair": {
-      "description": "Administrator workbench: existing-Album review summary, status cause after the found sentence: members have no duration, filling numbers from the titles is not the next step and a possible match is listed; another name, pairing by hand or numbers entered in Edit draft (the tab name), the last two bringing in the tracklist.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {
-        "unknown": "number"
-      }
-    },
-    "admin.catalog_review.lookup_cause_paired_durations": {
-      "description": "Administrator workbench: existing-Album review summary, status cause after the found sentence: the tracks pair with a release in exactly one way but members have no duration; the next step is using that release.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {
-        "unknown": "number"
-      }
-    },
-    "admin.catalog_review.lookup_cause_pairing": {
-      "description": "Administrator workbench: existing-Album review summary, status cause after the found sentence: the tracks fit in more than one way; the next step is filling the Disc and Track Numbers from the titles and saving, which compares again for free.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
-    "admin.catalog_review.lookup_cause_pairing_manual": {
-      "description": "Administrator workbench: existing-Album review summary, status cause after the found sentence: the tracks fit in more than one way and the titles give no Disc and Track Numbers to fill; another name or numbers entered by hand.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
-    "admin.catalog_review.lookup_cause_pairing_pair": {
-      "description": "Administrator workbench: existing-Album review summary, status cause after the found sentence: the tracks fit in more than one way, filling numbers from the titles is not the next step and a possible match is listed; another name, pairing by hand or numbers entered in Edit draft (the tab name).",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
-    "admin.catalog_review.lookup_cause_release_durations": {
-      "description": "Administrator workbench: existing-Album review summary, status cause after the found sentence: the tracks pair in exactly one way but the release's paired tracks lack a duration; the next step is using that release.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
     "admin.catalog_review.lookup_choose_again": {
       "description": "Administrator workbench: existing-Album review candidate chooser, button on the release already applied without a track pairing, choosing it again now that the tracks pair in exactly one way.",
       "delivery": [
@@ -2287,7 +2702,7 @@
       "variables": {}
     },
     "admin.catalog_review.lookup_choose_album_only": {
-      "description": "Administrator workbench: existing-Album review candidate chooser, button under Other options that applies only the release's Album values to the completion draft.",
+      "description": "Administrator workbench: existing-Album review candidate chooser, first button on a possible-match card whose tracks pair in more than one way: applies only the release's Album values to the completion draft.",
       "delivery": [
         "runtime"
       ],
@@ -2365,15 +2780,6 @@
         "elapsed": "string"
       }
     },
-    "admin.catalog_review.lookup_empty_album": {
-      "description": "Administrator workbench: existing-Album review summary, status when nothing matches because the Album has no tracks, with how many releases have a matching name.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {
-        "count": "number"
-      }
-    },
     "admin.catalog_review.lookup_exhausted_busy": {
       "description": "Administrator workbench: existing-Album review summary, status when MusicBrainz answered with too many requests (or this server's request bound for it stayed busy) until the automatic retries ran out; the free retry button follows.",
       "delivery": [
@@ -2389,7 +2795,7 @@
       "variables": {}
     },
     "admin.catalog_review.lookup_fill_hint": {
-      "description": "Administrator workbench: existing-Album review candidate chooser, beside Fill Disc and Track Numbers from titles, how many of the Album's tracks lack a Disc or Track Number.",
+      "description": "Administrator workbench: existing-Album review candidate chooser and summary: how many of the Album's tracks lack a Disc or Track Number, which the page proposes from the titles; saving them compares again.",
       "delivery": [
         "runtime"
       ],
@@ -2398,7 +2804,7 @@
       }
     },
     "admin.catalog_review.lookup_fill_hint_durations": {
-      "description": "Administrator workbench: existing-Album review candidate chooser, possible-match card hint when members without a duration have no numbers: they can be filled from the titles, then the release used.",
+      "description": "Administrator workbench: existing-Album review candidate chooser and summary, when members without a duration have no numbers: the page proposes them from the titles; after saving them, the release is used.",
       "delivery": [
         "runtime"
       ],
@@ -2407,28 +2813,18 @@
       }
     },
     "admin.catalog_review.lookup_fill_unavailable": {
-      "description": "Administrator workbench: existing-Album review candidate chooser, possible-match card, in place of Fill Disc and Track Numbers from titles when nothing can be filled from the track titles: pairing by hand (the button that follows) or numbers entered in Edit draft (the tab name).",
+      "description": "Administrator workbench: existing-Album review candidate chooser, possible-match card, when the titles propose no numbers: pairing by hand (the button that follows) or numbers entered by manual editing (the Edit manually control).",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.catalog_review.lookup_fill_unavailable_durations": {
-      "description": "Administrator workbench: existing-Album review candidate chooser, possible-match card when members without a duration have no numbers the titles can give: pairing by hand (the button that follows), or numbers entered in Edit draft, then the release used.",
+      "description": "Administrator workbench: existing-Album review candidate chooser, possible-match card with members without a duration, when the titles propose no numbers: pairing by hand or numbers entered by manual editing, then the release used.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
-    },
-    "admin.catalog_review.lookup_fit_found": {
-      "description": "Administrator workbench: existing-Album review summary, first sentence of the status when releases the tracks may fit were found but none has a title that agrees with the searched Album name; names the first.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {
-        "count": "number",
-        "title": "string"
-      }
     },
     "admin.catalog_review.lookup_gate_wait": {
       "description": "Administrator workbench: existing-Album review summary, above the lookup steps while a run is running and its last progress is more than 5 seconds old: the source it waits for (MusicBrainz or iTunes) and the seconds since.",
@@ -2440,8 +2836,31 @@
         "source": "string"
       }
     },
-    "admin.catalog_review.lookup_itunes_note": {
-      "description": "Administrator workbench: existing-Album review summary, last sentence of a refined status when the iTunes fallback was unavailable.",
+    "admin.catalog_review.lookup_head_complete": {
+      "description": "Administrator workbench: existing-Album review page, status line headline after a completed lookup, with how many possible releases it found (the same count as Reference releases).",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.catalog_review.lookup_head_empty": {
+      "description": "Administrator workbench: existing-Album review page, status line headline when a completed lookup found nothing to confirm.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_head_failed": {
+      "description": "Administrator workbench: existing-Album review page, status line headline when the lookup is retrying, failed, stopped or was superseded.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_head_none": {
+      "description": "Administrator workbench: existing-Album review page, status line headline when the review has no lookup run (not started, or not configured on this server).",
       "delivery": [
         "runtime"
       ],
@@ -2463,6 +2882,86 @@
         "count": "number"
       }
     },
+    "admin.catalog_review.lookup_line_again": {
+      "description": "Administrator workbench: existing-Album review page, status line sentence after a release was applied for its Album values only and a saved number has since made its pairing single.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_line_empty": {
+      "description": "Administrator workbench: existing-Album review page, status line sentence when nothing was found or no lookup ran: the name box is the next step.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_line_failed": {
+      "description": "Administrator workbench: existing-Album review page, status line sentence when the lookup failed: the free retry is the next step.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_line_itunes": {
+      "description": "Administrator workbench: existing-Album review page, status line sentence after an iTunes-only result was applied: whether it was not checked against MusicBrainz (no) or MusicBrainz has no release for it (yes); its values are flagged for checking.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "checked": "string"
+      }
+    },
+    "admin.catalog_review.lookup_line_name": {
+      "description": "Administrator workbench: existing-Album review page, status line sentence when the releases the tracks fit cannot be confirmed (members without a duration, or a pairing that is not single) and the titles propose no Disc and Track Numbers: the name box or manual editing is next.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "unknown": "number"
+      }
+    },
+    "admin.catalog_review.lookup_line_no_tracks": {
+      "description": "Administrator workbench: existing-Album review page, status line sentence when the Album has no tracks, so no release matches by its tracks.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_line_numbers": {
+      "description": "Administrator workbench: existing-Album review page, status line sentence when the releases the tracks fit cannot be confirmed and the titles propose the numbers: checking them is next.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "unknown": "number"
+      }
+    },
+    "admin.catalog_review.lookup_line_running": {
+      "description": "Administrator workbench: existing-Album review page, status line sentence while the lookup is queued or running.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_line_unverified": {
+      "description": "Administrator workbench: existing-Album review page, status line sentence after a release was applied while some tracks have no duration.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.catalog_review.lookup_line_use": {
+      "description": "Administrator workbench: existing-Album review page, status line sentence when the tracks pair with a reference release in one way that durations left unconfirmed: using it is next.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "unknown": "number"
+      }
+    },
     "admin.catalog_review.lookup_log": {
       "description": "Administrator workbench: existing-Album review summary, disclosure that folds a finished run's steps: how long the run took (whole minutes, 0 for under a minute, and seconds), how many searches the steps list as sent (the MusicBrainz name searches and the iTunes searches) and how many releases it found.",
       "delivery": [
@@ -2475,6 +2974,20 @@
         "seconds": "number"
       }
     },
+    "admin.catalog_review.lookup_log_hide": {
+      "description": "Administrator workbench: existing-Album review lookup status row, button that hides the lookup's steps and record again.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_log_show": {
+      "description": "Administrator workbench: existing-Album review lookup status row, button that shows the lookup's steps and record below the status.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.catalog_review.lookup_missing_rows": {
       "description": "Administrator workbench: existing-Album review summary, candidate chooser, for a single pairing or an Album without tracks: choosing brings in the expected tracklist with this many rows without a file.",
       "delivery": [
@@ -2484,36 +2997,8 @@
         "count": "number"
       }
     },
-    "admin.catalog_review.lookup_no_match": {
-      "description": "Administrator workbench: existing-Album review summary, status when no release matches the Album's tracks.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
-    "admin.catalog_review.lookup_no_query": {
-      "description": "Administrator workbench: existing-Album review summary, status when the Album has no saved title to look up.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
     "admin.catalog_review.lookup_no_tracklist": {
       "description": "Administrator workbench: existing-Album review candidate chooser, in place of the missing-file row count when the tracks do not pair with the release in exactly one way.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
-    "admin.catalog_review.lookup_not_started": {
-      "description": "Administrator workbench: existing-Album review summary, status before any metadata lookup run, offering the name box or Luna AI (paid).",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
-    "admin.catalog_review.lookup_other_options": {
-      "description": "Administrator workbench: existing-Album review candidate chooser, folded group of less common choices on a release card.",
       "delivery": [
         "runtime"
       ],
@@ -2615,16 +3100,6 @@
       ],
       "variables": {}
     },
-    "admin.catalog_review.lookup_possible_found": {
-      "description": "Administrator workbench: existing-Album review summary, first sentence of the status when releases whose title agrees with the searched Album name could match the tracks; names the first such release.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {
-        "count": "number",
-        "title": "string"
-      }
-    },
     "admin.catalog_review.lookup_queued_status": {
       "description": "Administrator workbench: existing-Album review summary, status while the lookup waits to start (the time waited is shown beside it).",
       "delivery": [
@@ -2699,6 +3174,31 @@
         "local": "number"
       }
     },
+    "admin.catalog_review.lookup_records_alike": {
+      "description": "Administrator workbench: existing-Album review candidate chooser, note on a release card whose records show identical details.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.catalog_review.lookup_releases": {
+      "description": "Administrator workbench: existing-Album review candidate chooser, disclosure label naming how many release records the tracks may fit.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.catalog_review.lookup_releases_copy": {
+      "description": "Administrator workbench: existing-Album review candidate chooser, what using a release does, under the reference releases disclosure.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.catalog_review.lookup_replace_confirm": {
       "description": "Administrator workbench: existing-Album review name box, button confirming a new lookup that replaces the queued, running or retrying one.",
       "delivery": [
@@ -2738,6 +3238,13 @@
         "source": "string",
         "time": "string"
       }
+    },
+    "admin.catalog_review.lookup_retry_free": {
+      "description": "Administrator workbench: existing-Album review lookup summary, button that retries the free metadata lookup run.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
     },
     "admin.catalog_review.lookup_retry_unavailable": {
       "description": "Administrator workbench: existing-Album review summary, status while the run waits for an automatic retry because a source failed or timed out: the source (MusicBrainz or iTunes), the retry time, which automatic retry it is and how many there are at most; the free retry button follows.",
@@ -2826,7 +3333,7 @@
       }
     },
     "admin.catalog_review.lookup_single_choice": {
-      "description": "Administrator workbench: existing-Album review summary, status and chooser heading when the only matching release of a partial comparison is offered, not applied.",
+      "description": "Administrator workbench: existing-Album review page, status line sentence when the only matching release of a partial comparison is offered, not applied: check it in Reference releases to use it.",
       "delivery": [
         "runtime"
       ],
@@ -3157,6 +3664,20 @@
       ],
       "variables": {}
     },
+    "admin.catalog_review.lookup_submit_free": {
+      "description": "Administrator workbench: existing-Album review name box, submit button that starts a free metadata lookup for the typed name.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.lookup_subtitle_hint": {
+      "description": "Administrator workbench: existing-Album review name box, hint under the name after a completed lookup found no release to use.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.catalog_review.lookup_superseded": {
       "description": "Administrator workbench: existing-Album review summary, status when the run ended because the Album or its tracks changed or are no longer ready.",
       "delivery": [
@@ -3186,7 +3707,7 @@
       "variables": {}
     },
     "admin.catalog_review.lookup_try_another": {
-      "description": "Administrator workbench: existing-Album review summary, disclosure that folds the name box after a completed run when the status does not make it the next step.",
+      "description": "Administrator workbench: existing-Album review page, button in the row of alternatives that opens the name box to look up another name (also opened by itself when the status line makes the name box the next step).",
       "delivery": [
         "runtime"
       ],
@@ -3228,8 +3749,60 @@
         "elapsed": "string"
       }
     },
+    "admin.catalog_review.luna_budget": {
+      "description": "Administrator workbench: existing-Album review Luna AI confirmation, the Luna AI runs and paid AI calls left for this project.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "attempts": "number",
+        "runs": "number"
+      }
+    },
+    "admin.catalog_review.luna_concurrent_copy": {
+      "description": "Administrator workbench: existing-Album review Luna AI confirmation, warning text while the free metadata lookup is still running.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.luna_concurrent_title": {
+      "description": "Administrator workbench: existing-Album review Luna AI confirmation, warning title while the free metadata lookup is queued, running or retrying.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.catalog_review.luna_failed_quiet": {
       "description": "Administrator workbench: Album completion page, one quiet line for a Luna AI run that did not succeed while the metadata lookup leads: it can be ignored.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.luna_last_run": {
+      "description": "Administrator workbench: existing-Album review Luna AI confirmation, note when the project has exactly one Luna AI run left.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.luna_start": {
+      "description": "Administrator workbench: existing-Album review Luna AI confirmation, button that starts paid Luna AI.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.luna_start_anyway": {
+      "description": "Administrator workbench: existing-Album review Luna AI confirmation, button that starts paid Luna AI while the free lookup still runs.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.luna_wait": {
+      "description": "Administrator workbench: existing-Album review Luna AI confirmation, button that closes it without starting Luna AI while the free lookup runs.",
       "delivery": [
         "runtime"
       ],
@@ -3308,7 +3881,7 @@
       "variables": {}
     },
     "admin.catalog_review.needs_answers": {
-      "description": "Administrator workbench: existing-Album review summary, how many lookup answers are still needed.",
+      "description": "Administrator workbench: existing-Album review lookup details, how many optional lookup questions are open; their fields stay out of this update until answered.",
       "delivery": [
         "runtime"
       ],
@@ -3324,11 +3897,21 @@
       "variables": {}
     },
     "admin.catalog_review.no_changes": {
-      "description": "Existing-Album review: the saved draft has no changes to apply; edit it or review Luna AI suggestions first.",
+      "description": "Unused on the Web since the v3 review page; kept while native clients package it. Existing-Album review: the saved draft has no changes to apply; edit it or review Luna AI suggestions first.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
+    },
+    "admin.catalog_review.number_label": {
+      "description": "Administrator workbench: existing-Album review page, proposal table: accessible name of a Disc or Track Number input; field is the field name, position the track's Album position.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "field": "string",
+        "position": "number"
+      }
     },
     "admin.catalog_review.number_with_tracklist": {
       "description": "Administrator workbench: existing-Album review, Update original Album step; a Disc or Track Number metadata lookup filled through its pairing cannot be selected because it applies only with the expected tracklist.",
@@ -3500,7 +4083,7 @@
       "variables": {}
     },
     "admin.catalog_review.pairing_copy": {
-      "description": "Administrator workbench: existing-Album review pairing panel, how the choices are listed: only release tracks the track can pair with by duration, closest first; every release track for a track without a duration; a track with its own Disc or Track Number (captured from the catalog or saved by the administrator) lists only release tracks at that number, which only Edit draft changes.",
+      "description": "Administrator workbench: existing-Album review pairing panel, how the choices are listed: only release tracks the track can pair with by duration, closest first; every release track for a track without a duration; a track with its own Disc or Track Number (captured from the catalog or saved by the administrator) lists only release tracks at that number, which only manual editing changes.",
       "delivery": [
         "runtime"
       ],
@@ -3619,6 +4202,247 @@
         "title": "string"
       }
     },
+    "admin.catalog_review.positions_duplicate": {
+      "description": "Administrator workbench: existing-Album review page, update range: the tracks the selected numbers would leave at one Disc and Track position.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "tracks": "string"
+      }
+    },
+    "admin.catalog_review.positions_range": {
+      "description": "Administrator workbench: existing-Album review page, update range: the tracks whose selected numbers are out of range.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "tracks": "string"
+      }
+    },
+    "admin.catalog_review.proposal_cleanup": {
+      "description": "Administrator workbench: existing-Album review page, optional checkbox, off by default, that also removes the position from the draft titles still as captured.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.proposal_copy": {
+      "description": "Administrator workbench: existing-Album review page, under the proposal table heading while titles giving Disc and Track Numbers propose numbers, which the update selects.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.proposal_disc": {
+      "description": "Administrator workbench: existing-Album review page, long Album proposal table: disclosure of one disc's uniform proposed rows, with its track count.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number",
+        "disc": "number"
+      }
+    },
+    "admin.catalog_review.proposal_empty_originals": {
+      "description": "Administrator workbench: existing-Album review page, proposal table note in place of the original-numbers column, when every captured Disc and Track Number is empty.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.proposal_fill": {
+      "description": "Administrator workbench: existing-Album review page, text marker on a number or value that fills an empty catalog value.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.proposal_flag_disagrees": {
+      "description": "Administrator workbench: existing-Album review page, proposal table reason: the track's own Disc or Track Number (captured, saved or filled by lookup) differs from its title's position.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.proposal_flag_disc_not_captured": {
+      "description": "Administrator workbench: existing-Album review page, proposal table reason: the review captured no Disc Number for the track while the titles name several discs.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.proposal_flag_duplicate": {
+      "description": "Administrator workbench: existing-Album review page, proposal table reason: an earlier track's title gives the same position.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.proposal_flag_form_mismatch": {
+      "description": "Administrator workbench: existing-Album review page, proposal table reason: the title gives a Track Number alone while the others give Disc and Track Numbers, or the reverse.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.proposal_flag_gap": {
+      "description": "Administrator workbench: existing-Album review page, proposal table note that does not stop the proposal: the Track Numbers on this disc skip before this track.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.proposal_flag_lone_track_only": {
+      "description": "Administrator workbench: existing-Album review page, proposal table reason: an Album with one track reads only a Disc and zero-padded Track Number, such as 1-01.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.proposal_flag_no_position": {
+      "description": "Administrator workbench: existing-Album review page, proposal table reason: the captured title starts with no position (such as 1999 X or Disc2-03).",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.proposal_flag_not_increasing": {
+      "description": "Administrator workbench: existing-Album review page, proposal table reason: the position is not after the previous track's in Album order.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.proposal_long": {
+      "description": "Administrator workbench: existing-Album review page, long Album proposal table summary: how many tracks on how many discs.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "discs": "number",
+        "tracks": "number"
+      }
+    },
+    "admin.catalog_review.proposal_long_range": {
+      "description": "Administrator workbench: existing-Album review page, long Album proposal table summary, after the counts: the first and last positions as the titles write them.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "first": "string",
+        "last": "string"
+      }
+    },
+    "admin.catalog_review.proposal_original": {
+      "description": "Administrator workbench: existing-Album review page, proposal table row: the Disc and Track Number the catalog stores, slash-separated, a dash for an empty one.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "numbers": "string"
+      }
+    },
+    "admin.catalog_review.proposal_overwrite": {
+      "description": "Administrator workbench: existing-Album review page, text marker on a number or value that replaces a non-empty catalog value, shown before the struck-through original.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.proposal_stopped": {
+      "description": "Administrator workbench: existing-Album review page, proposal table: introduces the tracks whose titles stop the whole proposal, each listed with its reason.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.proposal_title": {
+      "description": "Administrator workbench: existing-Album review page, heading of the table of Disc and Track Numbers proposed from the captured track titles.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.proposal_track_only": {
+      "description": "Administrator workbench: existing-Album review page, proposal table row marker: a Track Number proposed from titles giving Track Numbers alone, proposed unselected for checking.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.range_album_title": {
+      "description": "Administrator workbench: existing-Album review page, update range group of the Album title.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.range_credits": {
+      "description": "Administrator workbench: existing-Album review page, update range group of the Album's Artist entries, label, member Credits and expected tracklist.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.range_group_count": {
+      "description": "Administrator workbench: existing-Album review page, update range group: how many of its items are selected.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "selected": "number",
+        "total": "number"
+      }
+    },
+    "admin.catalog_review.range_identities_link": {
+      "description": "Administrator workbench: existing-Album review page, update range: link to the identity rows, after the names that still need a record chosen.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.range_items": {
+      "description": "Administrator workbench: existing-Album review page, update range group: disclosure listing each item with its original and new value.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.range_numbers": {
+      "description": "Administrator workbench: existing-Album review page, update range group of Disc and Track Numbers.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.range_numbers_disc": {
+      "description": "Administrator workbench: existing-Album review page, update range group of one disc's Disc and Track Numbers on a long Album.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "disc": "number"
+      }
+    },
+    "admin.catalog_review.range_summary": {
+      "description": "Administrator workbench: existing-Album review page, update range disclosure summary: how many changes are selected, as items, and that it opens to adjust them.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.catalog_review.range_titles": {
+      "description": "Administrator workbench: existing-Album review page, update range group of Track titles, with how many it lists.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
     "admin.catalog_review.review_copy": {
       "description": "Adopting suggestions saves them to the draft. Then choose which changes to apply to the original Album.",
       "delivery": [
@@ -3627,21 +4451,21 @@
       "variables": {}
     },
     "admin.catalog_review.review_tab": {
-      "description": "Existing-Album review: tab that lists the Luna AI suggestions to review.",
+      "description": "Unused on the Web since the v3 review page; kept while native clients package it. Existing-Album review: tab that lists the Luna AI suggestions to review.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.catalog_review.save_draft": {
-      "description": "Album completion editor: button saving the private completion draft.",
+      "description": "Unused on the Web since the v3 review page; kept while native clients package it. Album completion editor: button saving the private completion draft.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "admin.catalog_review.save_draft_first": {
-      "description": "Existing-Album review: unsaved draft edits must be saved before looking up metadata, using Luna AI, adopting suggestions or updating the original Album.",
+      "description": "Unused on the Web since the v3 review page; kept while native clients package it. Existing-Album review: unsaved draft edits must be saved before looking up metadata, using Luna AI, adopting suggestions or updating the original Album.",
       "delivery": [
         "runtime"
       ],
@@ -3680,7 +4504,7 @@
       }
     },
     "admin.catalog_review.selected": {
-      "description": "count changes selected",
+      "description": "Unused on the Web since the v3 review page; kept while native clients package it. count changes selected",
       "delivery": [
         "runtime"
       ],
@@ -3702,148 +4526,57 @@
       ],
       "variables": {}
     },
-    "admin.catalog_review.step_answer": {
-      "description": "Administrator workbench: label of an Album completion's second step, answering what lookup and the identity rows ask.",
+    "admin.catalog_review.stale_copy": {
+      "description": "Administrator workbench: existing-Album review page, stale view: why nothing can be updated.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
-    "admin.catalog_review.step_answers_choose": {
-      "description": "Administrator workbench: second completion step's state: a release must be chosen in the lookup summary.",
+    "admin.catalog_review.stale_draft": {
+      "description": "Administrator workbench: existing-Album review page, stale view disclosure with the old draft, read-only.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
-    "admin.catalog_review.step_answers_count": {
-      "description": "Administrator workbench: second completion step's state: how many lookup answers are still needed, as the lookup summary, the workbench card and the Album page count them.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {
-        "count": "number"
-      }
-    },
-    "admin.catalog_review.step_answers_identity": {
-      "description": "Administrator workbench: second completion step's state: how many Artists or labels (existing or new) still need to be chosen in the identity rows; shown beside the lookup answers count, or alone.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {
-        "count": "number"
-      }
-    },
-    "admin.catalog_review.step_answers_none": {
-      "description": "Administrator workbench: second completion step's state: nothing is left waiting for an answer.",
+    "admin.catalog_review.stale_title": {
+      "description": "Administrator workbench: existing-Album review page, heading of the stale view.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
-    "admin.catalog_review.step_answers_numbers": {
-      "description": "Administrator workbench: second completion step's state: Disc and Track Numbers must be entered before a release can be used.",
+    "admin.catalog_review.status_both_line": {
+      "description": "Administrator workbench: existing-Album review page, status line sentence while the free lookup and Luna AI both run.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
-    "admin.catalog_review.step_find": {
-      "description": "Administrator workbench: label of an Album completion's first step, finding a release with metadata lookup.",
+    "admin.catalog_review.status_both_running": {
+      "description": "Administrator workbench: existing-Album review status row, while the free metadata lookup and Luna AI both run.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
-    "admin.catalog_review.step_find_applied": {
-      "description": "Administrator workbench: first completion step's state: the release metadata lookup applied, by title.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {
-        "title": "string"
-      }
-    },
-    "admin.catalog_review.step_find_matching": {
-      "description": "Administrator workbench: first completion step's state: matching releases were found and wait for a choice.",
+    "admin.catalog_review.status_luna": {
+      "description": "Administrator workbench: existing-Album review page, status line headline while Luna AI analyzes the completion.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
-    "admin.catalog_review.step_find_possible": {
-      "description": "Administrator workbench: first completion step's state: how many releases the tracks may fit (for an Album without tracks, releases with its name) were found.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {
-        "count": "number"
-      }
-    },
-    "admin.catalog_review.step_update": {
-      "description": "Administrator workbench: label of an Album completion's third step, updating the original Album.",
+    "admin.catalog_review.status_luna_line": {
+      "description": "Administrator workbench: existing-Album review page, status line sentence while Luna AI analyzes the completion.",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
-    "admin.catalog_review.step_update_after_choose": {
-      "description": "Administrator workbench: third completion step's state while the second step asks for a release choice: the update comes after it.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
-    "admin.catalog_review.step_update_after_numbers": {
-      "description": "Administrator workbench: third completion step's state while the second step asks for Disc and Track Numbers: the update comes after them.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
-    "admin.catalog_review.step_update_count": {
-      "description": "Administrator workbench: third completion step's state: how many changes are selected in Update original Album.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {
-        "count": "number"
-      }
-    },
-    "admin.catalog_review.step_update_done": {
-      "description": "Administrator workbench: third completion step's state once applied: when the original Album was updated, a date and time in the interface language.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {
-        "date": "string"
-      }
-    },
-    "admin.catalog_review.step_update_none": {
-      "description": "Administrator workbench: third completion step's state: the completion draft has no change to apply yet.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
-    "admin.catalog_review.step_update_unselected": {
-      "description": "Administrator workbench: third completion step's state: changes are listed in Update original Album but none is selected yet (manual values are not selected by default), so they are to be selected there.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {
-        "count": "number"
-      }
-    },
-    "admin.catalog_review.steps_label": {
-      "description": "Administrator workbench: accessible name of an Album completion's three steps above its metadata lookup summary.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
-    "admin.catalog_review.steps_ready": {
-      "description": "Administrator workbench: line under the completion steps once nothing is left to answer and changes are ready to apply.",
+    "admin.catalog_review.suggestions_title": {
+      "description": "Administrator workbench: existing-Album review page, heading of the section listing Luna AI suggestions while some wait.",
       "delivery": [
         "runtime"
       ],
@@ -3870,8 +4603,43 @@
       ],
       "variables": {}
     },
+    "admin.catalog_review.title_needs_numbers": {
+      "description": "Administrator workbench: existing-Album review page, update range: why a Track title cleaned of its position cannot be selected: it applies only with its track's Disc and Track Number.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.catalog_review.unavailable": {
       "description": "Catalog editing and new reviews are currently turned off. You can view saved information and recover existing operations.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.unknown_copy": {
+      "description": "Administrator workbench: existing-Album review page, unknown view: what a lost response means.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.unknown_note": {
+      "description": "Administrator workbench: existing-Album review page, unknown view: checking or retrying never updates twice.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.unknown_pending": {
+      "description": "Administrator workbench: existing-Album review page, unknown view once a read found the review still unapplied.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.catalog_review.unknown_title": {
+      "description": "Administrator workbench: existing-Album review page, heading of the view of an update whose response was lost.",
       "delivery": [
         "runtime"
       ],
@@ -3922,7 +4690,7 @@
       "variables": {}
     },
     "admin.catalog_review.view_changes": {
-      "description": "Review changes to apply ({count})",
+      "description": "Unused on the Web since the v3 review page; kept while native clients package it. Review changes to apply ({count})",
       "delivery": [
         "runtime"
       ],
@@ -3930,15 +4698,8 @@
         "count": "number"
       }
     },
-    "admin.catalog_review.view_changes_plain": {
-      "description": "Administrator workbench: button from the Review step's empty state to the Update original Album step, without a count.",
-      "delivery": [
-        "runtime"
-      ],
-      "variables": {}
-    },
     "admin.catalog_review.waiting_lookup": {
-      "description": "Administrator workbench: existing-Album review summary, applying waits while metadata lookup runs or retries automatically.",
+      "description": "Administrator workbench: existing-Album review action bar, why the update waits while metadata lookup runs or retries automatically.",
       "delivery": [
         "runtime"
       ],
@@ -4541,6 +5302,13 @@
       ],
       "variables": {}
     },
+    "admin.common.analysis_active": {
+      "description": "Administrator workbench: a change refused because Luna AI is analyzing the Album completion.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.common.append_primary_required": {
       "description": "Administrator workbench: publishing was refused because the existing Album an import appends to has no primary Artist Credit.",
       "delivery": [
@@ -4591,6 +5359,13 @@
       "variables": {
         "date": "string"
       }
+    },
+    "admin.common.left_confirmation": {
+      "description": "Administrator review page: after leaving the update confirmation, the saved draft stays and the original Album is unchanged.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
     },
     "admin.common.loading": {
       "description": "Administrator workbench: common loading.",
@@ -4704,6 +5479,13 @@
       ],
       "variables": {}
     },
+    "admin.common.review_required": {
+      "description": "Administrator workbench: an Album completion update refused because an identity or lookup answer needs review again.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
     "admin.common.saved": {
       "description": "Administrator workbench: common saved.",
       "delivery": [
@@ -4713,6 +5495,13 @@
     },
     "admin.common.saving": {
       "description": "Administrator workbench: common saving.",
+      "delivery": [
+        "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.common.stale": {
+      "description": "Administrator workbench: an Album completion update refused because its source Album changed.",
       "delivery": [
         "runtime"
       ],
@@ -6016,6 +6805,85 @@
       ],
       "variables": {}
     },
+    "admin.lookup_evidence.bridge_note_barcode": {
+      "description": "Administrator workbench: existing-Album review lookup steps: note under the bridge step when the Album titles it names came back from an iTunes lookup by the barcode in the file tags, not from a name search.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {
+        "titles": "string"
+      }
+    },
+    "admin.lookup_evidence.chosen_barcode": {
+      "description": "Administrator workbench: existing-Album review lookup log: the applied release was preselected by the barcode in the tags of every file.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.lookup_evidence.chosen_catalog_number": {
+      "description": "Administrator workbench: existing-Album review lookup log: the applied release was preselected by the catalogue number in the tags of every file.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.lookup_evidence.chosen_release_id_import": {
+      "description": "Administrator workbench: existing-Album review lookup log: the applied release was preselected by the release ID the import of the Album's files applied.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.lookup_evidence.chosen_release_id_tags": {
+      "description": "Administrator workbench: existing-Album review lookup log: the applied release was preselected by the release ID in the tags of every file.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.lookup_evidence.step_barcode": {
+      "description": "Administrator workbench: existing-Album review lookup steps: the release search by the barcode every file's tags carry (never shown as a value).",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.lookup_evidence.step_catalog_number": {
+      "description": "Administrator workbench: existing-Album review lookup steps: the release search by the catalogue number every file's tags carry (never shown as a value).",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.lookup_evidence.step_release_id_import": {
+      "description": "Administrator workbench: existing-Album review lookup steps: the release lookup by the release ID the import of the Album's files applied (never shown as a value).",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.lookup_evidence.step_release_id_tags": {
+      "description": "Administrator workbench: existing-Album review lookup steps: the release lookup by the release ID every file's tags carry (never shown as a value).",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.lookup_evidence.track_title_no_room": {
+      "description": "Administrator workbench: existing-Album review lookup steps: Track-title searches not run because the searches by the identifiers of the import that published the Album used the run's search limit.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.lookup_evidence.track_title_not_needed": {
+      "description": "Administrator workbench: existing-Album review lookup steps: Track-title searches not needed in a run that also looked up the import's identifiers, so a matching release was already found.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
     "admin.lookup.active": {
       "description": "Administrator workbench: import summary, metadata lookup is queued or running.",
       "delivery": [
@@ -6816,6 +7684,534 @@
       ],
       "variables": {}
     },
+    "admin.pages.confirm_hint": {
+      "description": "Administrator Page placements: confirm hint.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.confirm_stale": {
+      "description": "Administrator Page placements: confirm stale.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.conflict": {
+      "description": "Administrator Page placements: conflict.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.copied": {
+      "description": "Administrator Page placements: copied.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.copy": {
+      "description": "Administrator Page placements: copy.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.copy_failed": {
+      "description": "Administrator Page placements: copy failed.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.copy_reference": {
+      "description": "Administrator Page placements: copy reference.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.empty": {
+      "description": "Administrator Page placements: empty.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.hide_details": {
+      "description": "Administrator Page placements: hide details.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.item_count": {
+      "description": "Administrator Page placements: item count.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.pages.load_error": {
+      "description": "Administrator Page placements: load error.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.operation_error": {
+      "description": "Administrator Page placements: operation error.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.operation_target": {
+      "description": "Administrator Page placements: captured operation target and direction.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {
+        "action": "string",
+        "name": "string",
+        "position": "number"
+      }
+    },
+    "admin.pages.order": {
+      "description": "Administrator Page placements: order.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.order_adjust": {
+      "description": "Administrator Page ordering: adjust.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.order_back": {
+      "description": "Administrator Page ordering: back.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.order_cancel": {
+      "description": "Administrator Page ordering: cancel.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.order_capacity": {
+      "description": "Administrator Page ordering: a definite operation capacity refusal.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.order_changed": {
+      "description": "Administrator Page ordering: changed.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.pages.order_confirm": {
+      "description": "Administrator Page ordering: confirm.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.order_confirm_copy": {
+      "description": "Administrator Page ordering: confirm copy.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.order_confirm_title": {
+      "description": "Administrator Page ordering: confirm title.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.order_conflict": {
+      "description": "Administrator Page ordering: conflict.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.order_current": {
+      "description": "Administrator Page ordering: current.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.order_down": {
+      "description": "Administrator Page ordering: down.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {
+        "name": "string"
+      }
+    },
+    "admin.pages.order_down_short": {
+      "description": "Administrator Page ordering: down short.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.order_draft": {
+      "description": "Administrator Page ordering: draft.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.order_error": {
+      "description": "Administrator Page ordering: error.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.order_failed": {
+      "description": "Administrator Page ordering: failed.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.order_handle": {
+      "description": "Administrator Page ordering: handle.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {
+        "name": "string"
+      }
+    },
+    "admin.pages.order_heading": {
+      "description": "Administrator Page ordering: heading.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.pages.order_hint": {
+      "description": "Administrator Page ordering: hint.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.order_identity": {
+      "description": "Administrator Page ordering: identity.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.order_keyboard": {
+      "description": "Administrator Page ordering: keyboard.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.order_moved": {
+      "description": "Administrator Page ordering: moved.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {
+        "count": "number",
+        "name": "string",
+        "position": "number"
+      }
+    },
+    "admin.pages.order_new": {
+      "description": "Administrator Page ordering: new.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.order_original": {
+      "description": "Administrator Page ordering: original.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {
+        "position": "number"
+      }
+    },
+    "admin.pages.order_original_list": {
+      "description": "Administrator Page ordering: original list.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.order_restart": {
+      "description": "Administrator Page ordering: restart.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.order_save": {
+      "description": "Administrator Page ordering: save.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.order_saved": {
+      "description": "Administrator Page ordering: saved.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.order_saving": {
+      "description": "Administrator Page ordering: saving.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.order_saving_button": {
+      "description": "Administrator Page ordering: saving button.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.order_scope": {
+      "description": "Administrator Page ordering: scope.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.order_stale": {
+      "description": "Administrator Page ordering: stale.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.order_unknown": {
+      "description": "Administrator Page ordering: unknown.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {
+        "page": "string"
+      }
+    },
+    "admin.pages.order_unknown_copy": {
+      "description": "Administrator Page ordering: unknown copy.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.order_up": {
+      "description": "Administrator Page ordering: up.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {
+        "name": "string"
+      }
+    },
+    "admin.pages.order_up_short": {
+      "description": "Administrator Page ordering: up short.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.order_view_original": {
+      "description": "Administrator Page ordering: view original.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.reference_id": {
+      "description": "Administrator Page placements: reference id.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.reference_not_repaired": {
+      "description": "Administrator Page placements: reference not repaired.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.refreshing": {
+      "description": "Administrator Page placements: refreshing.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.refreshing_copy": {
+      "description": "Administrator Page placements: refreshing copy.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.scope": {
+      "description": "Administrator Page placements: scope.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.search": {
+      "description": "Administrator Page management: search.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.search_copy": {
+      "description": "Administrator Page management: search copy.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.subtitle": {
+      "description": "Administrator Page placements: subtitle.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.updating": {
+      "description": "Administrator Page placements: updating.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.video_capacity": {
+      "description": "Administrator Video Grid complete-order capacity refusal.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.video_confirm_copy": {
+      "description": "Administrator Page management: video confirm copy.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.video_confirm_title": {
+      "description": "Administrator Page management: video confirm title.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.video_copy": {
+      "description": "Administrator Page management: video copy.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.video_default": {
+      "description": "Administrator Page management: video default.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.video_edit": {
+      "description": "Administrator Page management: video edit.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.video_grid": {
+      "description": "Administrator Page management: video grid.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.video_immersive": {
+      "description": "Administrator Page management: video immersive.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.video_saved": {
+      "description": "Administrator Page management: video saved.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.video_scope": {
+      "description": "Administrator Page management: video scope.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.video_stale": {
+      "description": "Administrator Page management: video stale.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.video_unknown": {
+      "description": "Administrator Page management: video unknown.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.videos": {
+      "description": "Administrator Page management: videos.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
     "admin.publication.append_not_applied": {
       "description": "Administrator workbench: note before publishing an import that appends to an existing Album, naming the draft values that are not applied.",
       "delivery": [
@@ -7579,6 +8975,80 @@
       ],
       "variables": {}
     },
+    "admin.track_artists.album_primary": {
+      "description": "Confirmation fallback when independent track Artist Credits are deselected.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {
+        "byline": "string"
+      }
+    },
+    "admin.track_artists.byline": {
+      "description": "Summary of the independent Artists credited on one track.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {
+        "byline": "string"
+      }
+    },
+    "admin.track_artists.copy": {
+      "description": "Explains the explicit per-track Artist selection and its Album-primary fallback.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.track_artists.inherits": {
+      "description": "Explains a paired track without a usable bounded Artist list.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.track_artists.more_tracks": {
+      "description": "Additional tracks beyond the first three named in an Artist identity row.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {
+        "count": "number"
+      }
+    },
+    "admin.track_artists.review_row": {
+      "description": "Identity-decision row for an Artist credited only by tracks of an imported Album.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {
+        "name": "string",
+        "tracks": "string"
+      }
+    },
+    "admin.track_artists.save_artists_first": {
+      "description": "Blocks approval when independent track Artists were compared with older Album Artists.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.track_artists.title": {
+      "description": "Heading for independent per-track Artist Credits in an import publication confirmation.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.track_artists.use_own": {
+      "description": "Checkbox selecting the independent Artist Credits for a named track.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {
+        "track": "string"
+      }
+    },
     "admin.upload.check_again": {
       "description": "Checks an upload of unknown outcome against storage without sending bytes.",
       "delivery": [
@@ -7749,6 +9219,960 @@
       "description": "Row badge for the file currently uploading.",
       "delivery": [
         "runtime"
+      ],
+      "variables": {}
+    },
+    "admin.video.album": {
+      "description": "Administrator Video upload: Album (optional)",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.album_entry_help": {
+      "description": "Administrator Video upload: Upload an Album’s audio files and review its catalog details.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.album_hidden": {
+      "description": "Administrator Video upload: This Album is hidden, so the Video remains unavailable to listeners even with public Video visibility.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.album_visibility_help": {
+      "description": "Administrator Video upload: An associated Album’s visibility also controls whether this Video is available to listeners.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.another": {
+      "description": "Administrator Video upload: Upload another video",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.attribution": {
+      "description": "Administrator Video upload: Video attribution",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.attribution_catalog": {
+      "description": "Administrator Video upload: Artist / Organization",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.attribution_catalog_help": {
+      "description": "Administrator Video upload: Associate an existing Artist or Organization without creating a placeholder identity.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.attribution_self": {
+      "description": "Administrator Video upload: My own work",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.attribution_self_help": {
+      "description": "Administrator Video upload: Owned by your account. No Artist or Album is required.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.attribution_unknown": {
+      "description": "Administrator Video upload: Not yet documented",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.attribution_unknown_help": {
+      "description": "Administrator Video upload: Explicitly record unknown attribution without inventing an Artist.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.cancel": {
+      "description": "Administrator Video upload: Cancel this private task",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.cancel_confirm": {
+      "description": "Administrator Video upload: Confirm cancellation",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.cancel_help": {
+      "description": "Administrator Video upload: Cancel this task and request cleanup of its staged files. Failed cleanup stays traceable and can be retried.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.cancelled": {
+      "description": "Administrator Video upload: Task cancelled",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.choose": {
+      "description": "Administrator Video upload: Choose original video",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.cleanup_retry": {
+      "description": "Administrator Video upload: Retry cleanup",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.confirm": {
+      "description": "Administrator Video upload: Confirm Video publication",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.confirm_help": {
+      "description": "Administrator Video upload: The original is private and processing is complete. Confirm the captured details before publication.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.confirm_hidden": {
+      "description": "Administrator Video upload: Confirm save as hidden",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.confirm_publish": {
+      "description": "Administrator Video upload: Confirm publication",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.continue": {
+      "description": "Administrator Video upload: Continue task",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.conversion_entry_help": {
+      "description": "Administrator Video upload: Convert supported lossless audio locally without changing the existing catalog.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.cover": {
+      "description": "Administrator Video upload: Video cover",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.cover_automatic": {
+      "description": "Administrator Video upload: Use automatic cover",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.cover_frame": {
+      "description": "Administrator Video upload: Choose a Video frame",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.cover_help": {
+      "description": "Administrator Video upload: The server generates an automatic cover from this Video. You can replace it with an image or a selected frame.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.cover_inherited": {
+      "description": "Administrator Video upload: Inherited Album artwork",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.cover_none": {
+      "description": "Administrator Video upload: Use Album cover or default image",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.cover_pending": {
+      "description": "Administrator Video upload: No cover available yet",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.cover_placeholder": {
+      "description": "Administrator Video upload: Default image",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.cover_preview": {
+      "description": "Administrator Video upload: Selected Video cover",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.cover_published": {
+      "description": "Administrator Video upload: confirmed catalog cover after staged candidates are cleaned up.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.cover_reconcile": {
+      "description": "Administrator Video upload: Reconcile cover upload",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.cover_unknown": {
+      "description": "Administrator Video upload: The cover upload is unconfirmed. Refresh the task and reconcile its original operation before uploading another image.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.cover_upload": {
+      "description": "Administrator Video upload: Upload image",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.create_help": {
+      "description": "Administrator Video upload: Choosing a file creates a private task without uploading its bytes. Upload original video starts the transfer separately.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.file_invalid": {
+      "description": "Administrator Video upload: Choose an MP4, MOV or M4V video no larger than {size}.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {
+        "size": "string"
+      }
+    },
+    "admin.video.file_processing": {
+      "description": "Administrator Video upload: File and processing",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.frame_failed": {
+      "description": "Administrator Video upload: This frame could not be extracted. The video is retained; choose another frame or upload an image.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.frame_local_needed": {
+      "description": "Administrator Video upload: Reselect the original locally to preview and choose a frame; uploading an image is always optional.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.frame_preview": {
+      "description": "Administrator Video upload: Current decoded frame",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.frame_time": {
+      "description": "Administrator Video upload: Frame time (seconds)",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.frame_use": {
+      "description": "Administrator Video upload: Use this frame",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.hidden_help": {
+      "description": "Administrator Video upload: Hidden content remains accessible only to administrators.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.intro": {
+      "description": "Administrator Video upload: Upload the original privately, follow server processing, then confirm publication.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.local_preview": {
+      "description": "Administrator Video upload: Local preview",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.local_preview_help": {
+      "description": "Administrator Video upload: This preview uses your local original only; it does not represent the server output.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.lookup_close": {
+      "description": "Administrator Video upload: Close choices",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.lookup_empty": {
+      "description": "Administrator Video upload: No matching ready content. Try another name.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.lookup_open": {
+      "description": "Administrator Video upload: Open choices",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.manage": {
+      "description": "Administrator Video upload: Manage confirmed MediaTrack",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.metadata": {
+      "description": "Administrator Video upload: Publication details",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.metadata_required": {
+      "description": "Administrator Video upload: Enter a title and select an identity when catalog attribution is chosen. An Album is optional.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.new": {
+      "description": "Administrator Video upload: Upload Video",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.no_album": {
+      "description": "Administrator Video upload: No Album · publish independently",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.original_help": {
+      "description": "Administrator Video upload: MP4, MOV and M4V originals, including H.264 and HEVC/H.265, need no local conversion. The server checks playback compatibility after upload.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.original_supported": {
+      "description": "Administrator Video upload: Upload the original directly",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.personal": {
+      "description": "Administrator Video upload: Personal publication",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.plan_direct": {
+      "description": "Administrator Video upload: The original passes playback validation without re-encoding.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.plan_pending": {
+      "description": "Administrator Video upload: Playback compatibility is checked after source upload.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.plan_remux": {
+      "description": "Administrator Video upload: Adapting the container while preserving video encoding.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.plan_transcode": {
+      "description": "Administrator Video upload: Adapting playback only where required; the original stays traceable.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.preview": {
+      "description": "Administrator Video upload: Preview local video",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.preview_unavailable": {
+      "description": "Administrator Video upload: This device cannot preview the video. You can upload an image for its cover and continue uploading the original. Local playback support does not determine source acceptance.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.private_help": {
+      "description": "Administrator Video upload: The upload remains private until a separate publication confirmation. An uncertain result is reconciled before any new transfer.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.processing_failed": {
+      "description": "Administrator Video upload: The original is retained. Retry server processing without uploading it again.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.processing_issue_busy": {
+      "description": "Administrator Video upload: The server is processing another video. The original is retained; retry shortly without uploading it again.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.processing_issue_invalid": {
+      "description": "Administrator Video upload: The source could not be validated or uses an unsupported track layout. Keep this task for reference and choose another file in a new task.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.processing_issue_retry": {
+      "description": "Administrator Video upload: Processing did not finish. The original is retained; reconcile any uncertain upload, then retry server processing without re-uploading.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.processing_issue_timeout": {
+      "description": "Administrator Video upload: Processing exceeded its time limit. The original is retained; retry processing without uploading it again.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.processing_issue_unavailable": {
+      "description": "Administrator Video upload: Server video processing is currently unavailable. The original is retained; retry when the service is available.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.processing_retry": {
+      "description": "Administrator Video upload: Retry processing · no re-upload",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.public_name": {
+      "description": "Administrator Video upload: Public byline (optional)",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.public_name_help": {
+      "description": "Administrator Video upload: Only this explicit byline is public. Leave blank to show Personal publication.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.publication_failed": {
+      "description": "Administrator Video upload: Media processing succeeded; publication failed separately. Retry publication without uploading again.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.publication_retry": {
+      "description": "Administrator Video upload: Retry publication · no re-upload",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.publication_review_needed": {
+      "description": "Administrator Video upload: The references changed or the approval expired. Review the current publication details and confirm again; the original does not need to be uploaded again.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.published": {
+      "description": "Administrator Video upload: Video publication complete",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.published_cleanup": {
+      "description": "Administrator Video upload: Publication complete · temporary cleanup pending",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.published_help": {
+      "description": "Administrator published Video: Play the published video and update its cover here. Open the catalog to edit its publication details.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.published_preview": {
+      "description": "Protected administrator preview of the current published Video.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.published_preview_unavailable": {
+      "description": "Administrator published Video: This device cannot decode this published video for frame selection. Upload a cover image or use a browser that supports this video.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.queue": {
+      "description": "Administrator Video upload: Video upload tasks",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.queue_all": {
+      "description": "Administrator Video upload: All",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.queue_cancelled": {
+      "description": "Administrator Video upload: Cancelled",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.queue_cleanup": {
+      "description": "Administrator Video upload: Cleanup pending",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.queue_complete": {
+      "description": "Administrator Video upload: Published",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.queue_empty": {
+      "description": "Administrator Video upload: No Video tasks match this filter.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.queue_failed": {
+      "description": "Administrator Video upload: Needs attention",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.queue_progress": {
+      "description": "Administrator Video upload: In progress",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.queue_review": {
+      "description": "Administrator Video upload: Awaiting confirmation",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.queue_unknown": {
+      "description": "Administrator Video upload: Outcome unconfirmed",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.reconcile": {
+      "description": "Administrator Video upload: Reconcile original upload",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.recovery_unknown": {
+      "description": "Administrator Video upload: The operation result is not yet confirmed. Refresh this task before retrying the same operation.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.reference_unavailable": {
+      "description": "Administrator Video upload: A referenced identity or Album is no longer available. Update the selection and review publication again.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.refresh_published": {
+      "description": "Administrator published Video: Refresh video",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.reselect": {
+      "description": "Administrator Video upload: Select the same local file",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.reselect_mismatch": {
+      "description": "Administrator Video upload: Choose the same filename and size as this task. Create another task to upload a different video.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.review": {
+      "description": "Administrator Video upload: Review and publish",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.review_again": {
+      "description": "Administrator Video upload: Review publication again",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.save": {
+      "description": "Administrator Video upload: Save details",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.stage_0": {
+      "description": "Administrator Video upload: File selection",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.stage_1": {
+      "description": "Administrator Video upload: Original upload",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.stage_2": {
+      "description": "Administrator Video upload: Server validation and adaptation",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.stage_3": {
+      "description": "Administrator Video upload: Publication",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.stale": {
+      "description": "Administrator Video upload: The saved details or references changed. Close this dialog and review the current version.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.state_cancelled": {
+      "description": "Administrator Video upload: Cancelled",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.state_complete": {
+      "description": "Administrator Video upload: Complete",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.state_deleted": {
+      "description": "Administrator Video upload: Removed",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.state_failed": {
+      "description": "Administrator Video upload: Needs attention",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.state_idle": {
+      "description": "Administrator Video upload: Not started",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.state_pending": {
+      "description": "Administrator Video upload: Awaiting confirmation",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.state_queued": {
+      "description": "Administrator Video upload: Queued",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.state_ready": {
+      "description": "Administrator Video upload: Complete",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.state_running": {
+      "description": "Administrator Video upload: In progress",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.state_unknown": {
+      "description": "Administrator Video upload: Outcome unconfirmed",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.step_adapt": {
+      "description": "Administrator Video upload: Preparing the single playback object",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.step_cover": {
+      "description": "Administrator Video upload: Extracting default cover",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.step_inspect": {
+      "description": "Administrator Video upload: Inspecting container and codecs",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.step_validate": {
+      "description": "Administrator Video upload: Validating complete decoding",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.subject": {
+      "description": "Administrator Video upload: Artist / Organization",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.title": {
+      "description": "Administrator Video upload: Video title",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.transfer_conflict": {
+      "description": "Administrator Video upload: The task changed. Refresh it before trying again.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.transfer_error": {
+      "description": "Administrator Video upload: The transfer was refused. Refresh the task and check current permission.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.transfer_file": {
+      "description": "Administrator Video upload: The file was not accepted. Check its format and size; the task remains private.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.transfer_unknown": {
+      "description": "Administrator Video upload: Transfer outcome is unknown. Reconcile the original operation before sending bytes again.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.transmitting": {
+      "description": "Administrator Video upload: Transferring original bytes… Awaiting server confirmation.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.unavailable": {
+      "description": "Administrator Video upload: Video uploads are not available on this server.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.unknown_help": {
+      "description": "Administrator Video upload: The upload result is unconfirmed. Reconcile the original operation before replacing or uploading files.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.upload_original": {
+      "description": "Administrator Video upload: Upload original video",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.upload_record": {
+      "description": "Administrator published Video: Original upload record",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.video_entry_help": {
+      "description": "Administrator Video upload: Upload an original Video, follow processing and confirm publication.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.visibility": {
+      "description": "Administrator Video upload: Video visibility after publication",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.workbench": {
+      "description": "Administrator Video upload: Return to workbench",
+      "delivery": [
+        "web-admin"
       ],
       "variables": {}
     },
@@ -11302,14 +13726,14 @@
       "variables": {}
     },
     "playlist.detail.table.duration": {
-      "description": "Playlist table heading for duration.",
+      "description": "Tooltip of the clock column in MediaTrack tables (Album and Playlist).",
       "delivery": [
         "runtime"
       ],
       "variables": {}
     },
     "playlist.detail.table.title": {
-      "description": "Playlist table heading for MediaTrack title.",
+      "description": "MediaTrack table column heading for the title (Album and Playlist).",
       "delivery": [
         "runtime"
       ],
@@ -11360,7 +13784,7 @@
       "variables": {}
     },
     "playlist.duration.hours": {
-      "description": "Playlist duration containing hours and minutes.",
+      "description": "Total duration of an Album or Playlist, containing hours and minutes.",
       "delivery": [
         "runtime"
       ],
@@ -11370,7 +13794,7 @@
       }
     },
     "playlist.duration.minutes": {
-      "description": "Playlist duration in minutes.",
+      "description": "Total duration of an Album or Playlist, in minutes.",
       "delivery": [
         "runtime"
       ],
@@ -14022,6 +16446,119 @@
       "variables": {
         "title": "string"
       }
+    },
+    "videos.card.fill": {
+      "description": "Video card option that cover-fits media to fill the portrait card.",
+      "delivery": [
+        "web-listener"
+      ],
+      "variables": {}
+    },
+    "videos.card.frame_position": {
+      "description": "Visible label for the immersive Video card horizontal crop-position control.",
+      "delivery": [
+        "web-listener"
+      ],
+      "variables": {}
+    },
+    "videos.card.frame_position_label": {
+      "description": "Accessible label for the horizontal crop-position slider of a named Video card.",
+      "delivery": [
+        "web-listener"
+      ],
+      "variables": {
+        "title": "string"
+      }
+    },
+    "videos.card.full_frame": {
+      "description": "Video card option that contains the complete media frame within the portrait card.",
+      "delivery": [
+        "web-listener"
+      ],
+      "variables": {}
+    },
+    "videos.card.left": {
+      "description": "Left endpoint of the immersive Video card crop-position control.",
+      "delivery": [
+        "web-listener"
+      ],
+      "variables": {}
+    },
+    "videos.card.options": {
+      "description": "Accessible disclosure label for the local presentation options of a named Video card.",
+      "delivery": [
+        "web-listener"
+      ],
+      "variables": {
+        "title": "string"
+      }
+    },
+    "videos.card.right": {
+      "description": "Right endpoint of the immersive Video card crop-position control.",
+      "delivery": [
+        "web-listener"
+      ],
+      "variables": {}
+    },
+    "videos.preview.action": {
+      "description": "Accessible action that starts a named Video card muted decorative preview.",
+      "delivery": [
+        "web-listener"
+      ],
+      "variables": {
+        "title": "string"
+      }
+    },
+    "videos.preview.active": {
+      "description": "Visible action while an immersive Video card muted decorative preview is active.",
+      "delivery": [
+        "web-listener"
+      ],
+      "variables": {}
+    },
+    "videos.preview.label": {
+      "description": "Visible action that starts an immersive Video card muted decorative preview.",
+      "delivery": [
+        "web-listener"
+      ],
+      "variables": {}
+    },
+    "videos.preview.list": {
+      "description": "Accessible label for the immersive Video card collection.",
+      "delivery": [
+        "web-listener"
+      ],
+      "variables": {}
+    },
+    "videos.preview.stop": {
+      "description": "Accessible action that stops a named Video card muted decorative preview.",
+      "delivery": [
+        "web-listener"
+      ],
+      "variables": {
+        "title": "string"
+      }
+    },
+    "videos.view.grid": {
+      "description": "Video page selector for the traditional landscape-card grid.",
+      "delivery": [
+        "web-listener"
+      ],
+      "variables": {}
+    },
+    "videos.view.immersive": {
+      "description": "Video page selector for immersive portrait preview cards.",
+      "delivery": [
+        "web-listener"
+      ],
+      "variables": {}
+    },
+    "videos.view.label": {
+      "description": "Accessible label for the Video page browsing-view selector.",
+      "delivery": [
+        "web-listener"
+      ],
+      "variables": {}
     }
   }
 }

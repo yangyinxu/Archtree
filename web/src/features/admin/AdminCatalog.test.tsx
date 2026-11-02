@@ -5,6 +5,7 @@
  * Tests
  *   - Album inventory uses its private cover and title as one detail entry without repeated management actions
  *   - Album details display the saved cover and keep all management actions behind the detail entry
+ *   - an Album page offers Add files to this Album only with the imports capability and a saved primary Artist Credit, and not while it has unsaved edits
  *   - invalid catalog category falls back to Albums and category switches update the visible inventory
  *   - existing catalog save is explicit, partial and preserves unsaved edits on revision conflict
  *   - lost catalog response retries the same intent and leaving Admin destroys its private preview
@@ -52,7 +53,7 @@ import { catalogPatch } from './catalogApi';
 import { AdminPagesPage } from './AdminPagesPage';
 import { deferred, json, session, viewer } from './adminFixtures.testSupport';
 import { catalogReview, reviewEligibility } from './catalogReviewFixtures.testSupport';
-import type { CatalogItem, CatalogKind } from './catalogApi';
+import type { CatalogCredit, CatalogItem, CatalogKind } from './catalogApi';
 import styles from './adminStyles';
 // The Album page's Tracks section reads its own endpoint and is covered by CatalogAlbumTracks.test.tsx; here it only records what
 // the editor offers it.
@@ -117,6 +118,32 @@ test('Album details display the saved cover and keep all management actions behi
   // The completion comes first and the quieter row follows; manual editing is the details form below the hero.
   expect(heroControls()).toEqual(['Complete from MusicBrainz (free)', 'Convert to MP3', 'Refresh status']);
   expect(await screen.findByRole('textbox', { name: 'Title' })).toHaveValue(item.fields.title);
+});
+
+test('an Album page offers Add files to this Album only with the imports capability and a saved primary Artist Credit, and not while it has unsaved edits', async () => {
+  const artistId = '222222222222222222222222', primary = [{ creditId: 'credit-primary', subjectType: 'artist' as const, subjectId: artistId, role: 'primary' as const, order: 0 }];
+  const featured = [{ ...primary[0], role: 'featured' as const }];
+  const show = async (credits: CatalogCredit[] | null, imports = true) => {
+    adminWorkspace.reset(); adminWorkspace.authorize(captureAccountOperation(viewer), imports, true, undefined, { editing: true, visibility: true }, true); adminWorkspace.select('admin');
+    const item = { ...album(), fields: { ...album().fields, credits, attributionStatus: credits ? 'documented' as const : 'unknown' as const } };
+    vi.stubGlobal('fetch', vi.fn(async (path: string) => path.endsWith('/cover-operations') ? json({ items: [] })
+      : path.endsWith(`/catalog/artist/${artistId}`) ? json({ item: { ...album(), id: artistId, kind: 'artist', fields: { name: 'Synthetic primary', bio: '', birthDate: null, musicBrainzId: null } } }) : json({ item })));
+    mount(<AdminCatalogPage kind="album" id={item.id} />);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Complete from MusicBrainz (free)' })).toBeEnabled());
+    return item;
+  };
+  const item = await show(primary);
+  const link = await screen.findByRole('link', { name: 'Add files to this Album' });
+  expect(link).toHaveAttribute('href', `/admin/imports/new?album=${item.id}`);
+  expect(heroControls()).toEqual(['Complete from MusicBrainz (free)', 'Convert to MP3', 'Add files to this Album', 'Refresh status']);
+  // Like Convert to MP3, it is hidden while the Album has unsaved edits.
+  fireEvent.change(screen.getByRole('textbox', { name: 'Title' }), { target: { value: 'Unsaved Synthetic Title' } });
+  await waitFor(() => expect(screen.queryByRole('link', { name: 'Add files to this Album' })).not.toBeInTheDocument());
+  for (const [credits, imports] of [[primary, false], [featured, true], [null, true]] as const) {
+    cleanup(); await show(credits, imports);
+    expect(heroControls()).toEqual(['Complete from MusicBrainz (free)', 'Convert to MP3', 'Refresh status']);
+    expect(screen.queryByRole('link', { name: 'Add files to this Album' })).not.toBeInTheDocument();
+  }
 });
 
 test.each(['inventory', 'details'] as const)('explicit %s refresh retries a failed private cover without exposing a public URL', async mode => {
@@ -296,7 +323,7 @@ test('a transient catalog failure retains the account-fenced draft and its revis
 test('Page visibility patches only the confirmed occurrence and its captured page revision', async () => {
   const page = { slug: 'home', title: 'Home', revision: `cr_${'a'.repeat(43)}`, items: [{ itemId: '222222222222222222222222', itemType: 'carousel', referenceId: 'shared-carousel', order: 0, visibility: 'public', name: 'Featured releases', sourceMode: 'manual', referenceStatus: 'ready' }] }; const writes: any[] = [];
   vi.stubGlobal('fetch', vi.fn(async (path: string, init: RequestInit) => { if (init.method === 'PATCH') { const body = JSON.parse(String(init.body)); writes.push({ path, body }); return json({ page: { ...page, revision: `cr_${'b'.repeat(43)}`, items: [{ ...page.items[0], visibility: 'hidden' }] }, receipt: { operationId: body.operationId } }); } return json({ page }); }));
-  mount(<AdminPagesPage />); fireEvent.click(await screen.findByRole('button', { name: 'Hide this placement' })); expect(writes).toHaveLength(0);
+  await act(async () => mount(<AdminPagesPage />)); fireEvent.click(await screen.findByRole('button', { name: 'Hide this placement' })); expect(writes).toHaveLength(0);
   const dialog = within(screen.getByRole('dialog'));
   expect(dialog.getByText('1 · Featured releases')).toBeVisible();
   expect(dialog.getByText('Public → Hidden')).toBeVisible();
@@ -308,7 +335,7 @@ test('Page placements keep missing and unsupported references identifiable', asy
     { itemId: '333333333333333333333333', itemType: 'list', referenceId: 'old-list', order: 1, visibility: 'hidden', name: 'Legacy list', sourceMode: null, referenceStatus: 'unsupported' }
   ] };
   vi.stubGlobal('fetch', vi.fn(async () => json({ page })));
-  mount(<AdminPagesPage />);
+  await act(async () => mount(<AdminPagesPage />));
   expect(await screen.findByText('Referenced content is missing')).toBeVisible();
   expect(screen.getByText('Unsupported reference')).toBeVisible();
   expect(screen.getByRole('heading', { name: '1 · Unnamed placement' })).toBeVisible();
@@ -318,7 +345,7 @@ test('a placement rename or source change invalidates its open visibility approv
   let page = { slug: 'home', title: 'Home', revision: `cr_${'a'.repeat(43)}`, items: [{ itemId: '222222222222222222222222', itemType: 'grid', referenceId: 'shared-grid', order: 0, visibility: 'public', name: 'Featured releases', sourceMode: 'manual', referenceStatus: 'ready' }] };
   const writes: string[] = [];
   vi.stubGlobal('fetch', vi.fn(async (_path: string, init: RequestInit) => { if (init.method === 'PATCH') writes.push(String(init.body)); return json({ page }); }));
-  const client = mount(<AdminPagesPage />);
+  const client = await act(async () => mount(<AdminPagesPage />));
   fireEvent.click(await screen.findByRole('button', { name: 'Hide this placement' }));
   page = { ...page, revision: `cr_${'b'.repeat(43)}`, items: [{ ...page.items[0], name: 'Popular recordings', sourceMode: 'dynamic' }] };
   await act(async () => { await client.refetchQueries({ queryKey: ['admin-imports'] }); });

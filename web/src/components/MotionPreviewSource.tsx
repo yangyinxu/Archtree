@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import type { ReactNode } from 'react';
+import { useEffect, type ReactNode } from 'react';
 
 import { motionPreviewUrl, presentationCapabilitiesQuery } from '../api/presentationCapabilities';
 
@@ -9,6 +9,8 @@ export interface MotionPreviewSourceProps {
   streamUrl: string;
   /** Receives the chosen source and whether it is the dedicated clip rather than the full stream. */
   children: (source: string, isClip: boolean) => ReactNode;
+  /** A failed capability read cannot become an indefinitely pending explicit preview. */
+  onUnavailable?: () => void;
 }
 
 /**
@@ -18,8 +20,11 @@ export interface MotionPreviewSourceProps {
  * API client; importing that from the preview directly would add a stylesheet preload table to the
  * card's shared bundle.
  */
-export default function MotionPreviewSource({ mediaTrackId, streamUrl, children }: MotionPreviewSourceProps) {
+export default function MotionPreviewSource({ mediaTrackId, streamUrl, children, onUnavailable }: MotionPreviewSourceProps) {
   const capabilities = useQuery(presentationCapabilitiesQuery());
+  useEffect(() => {
+    if (!capabilities.data && capabilities.isError) onUnavailable?.();
+  }, [capabilities.data, capabilities.isError, onUnavailable]);
   // Unknown flags (still loading, or a failed read) show no preview rather than guessing: the public
   // stream is read only when the server says dedicated previews are disabled.
   if (!capabilities.data) return null;

@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useState } from 'react';
+import { useEffect, useLayoutEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useLocation, useNavigate } from 'react-router';
 import { ApiError } from '../../api/client';
@@ -7,15 +7,10 @@ import { captureAccountOperation } from '../../api/accountEpoch';
 import { enterAdminView, readCapabilities, useAdminText } from './AdminAccess';
 import { adminWorkspace, useAdminWorkspace } from './adminWorkspace';
 import { Icon } from '../../components/Icon';
+import { AdminViewSwitcher } from './AdminViewSwitcher';
+import styles from './AdminControls.module.css';
 import page from '../../styles/Pages.module.css';
-// The shell's view switch lives apart from AdminAccess.tsx, which every admin route loads, so no route carries the switch.
-const styles: Record<string, string> = { view: page.view, viewButton: page.viewButton, workbenchLink: page.workbenchLink, menu: page.menu, button: `${page.button} ${page.buttonSecondary}`, link: page.secondaryLink };
-
-/** One text wrapper keeps line breaks intact inside the shell flex button. */
-export function AdminViewLabel({ label, role }: { label: string; role: string }) {
-  const prefix = role && label.endsWith(role) ? label.slice(0, -role.length).trimEnd() : '';
-  return <span>{prefix ? <>{prefix}<br /><span style={{ whiteSpace: 'nowrap' }}>{role}</span></> : label}</span>;
-}
+const recoveryButton = `${page.button} ${page.buttonSecondary}`;
 
 /** The shell owns capability refresh; view changes never replace the player or account session. */
 export const AdminControls = ({ hideWorkbenchLink = false }: { hideWorkbenchLink?: boolean }) => {
@@ -26,7 +21,6 @@ export const AdminControls = ({ hideWorkbenchLink = false }: { hideWorkbenchLink
   const state = useAdminWorkspace();
   const navigate = useNavigate();
   const location = useLocation();
-  const [open, setOpen] = useState(false);
   const viewerId = !resolving.data && session.isSuccess && session.data?.user.role === 'admin' ? session.data.user.id : '';
   const epoch = captureAccountOperation(viewerId).epoch;
   const capabilities = useQuery({
@@ -69,17 +63,10 @@ export const AdminControls = ({ hideWorkbenchLink = false }: { hideWorkbenchLink
     if (leaving && adminWorkspace.getSnapshot().mode === 'user' && location.pathname.startsWith('/admin')) navigate('/');
   };
   if (!viewerId || capabilities.isFetching) return null;
-  if (state.reloadRequired && !state.authorized) return <button className={styles.button} type="button" title={t('common.reload')} onClick={() => window.location.reload()}>{t('common.reload_action')}</button>;
-  if (!state.authorized || state.viewerId !== viewerId || state.epoch !== epoch) return <button className={styles.button} type="button" title={t('view.required')} onClick={() => void capabilities.refetch()}>{t('common.retry')}</button>;
-  const viewLabel = t(state.mode === 'admin' ? 'view.current_admin' : 'view.current_user');
+  if (state.reloadRequired && !state.authorized) return <button className={recoveryButton} type="button" title={t('common.reload')} onClick={() => window.location.reload()}>{t('common.reload_action')}</button>;
+  if (!state.authorized || state.viewerId !== viewerId || state.epoch !== epoch) return <button className={recoveryButton} type="button" title={t('view.required')} onClick={() => void capabilities.refetch()}>{t('common.retry')}</button>;
   return <div className={styles.view}>
-    <button type="button" className={`${styles.button} ${styles.viewButton}`} aria-label={viewLabel} aria-expanded={open} aria-controls="admin-view-options"
-      onClick={() => setOpen(!open)}><AdminViewLabel label={viewLabel} role={t(`view.${state.mode}`)} /></button>
-    {open && <div id="admin-view-options" className={styles.menu} onKeyDown={(event) => { if (event.key === 'Escape') setOpen(false); }}>
-      {(['admin', 'user'] as const).map(mode => <button key={mode} aria-pressed={state.mode === mode}
-        className={styles.button} type="button" onClick={() => { if (mode === 'admin') void enterAdminView(); else leaveAdminView(); setOpen(false); }}>
-        {t(`view.${mode}`)}</button>)}
-    </div>}
-    {state.mode === 'admin' && !hideWorkbenchLink && <Link aria-label={t('workbench.title')} title={t('workbench.title')} className={`${styles.link} ${styles.workbenchLink}`} to="/admin/imports"><Icon name="library" /><span>{t('workbench.title')}</span></Link>}
+    <AdminViewSwitcher mode={state.mode} onSelect={mode => { if (mode === 'admin') void enterAdminView(); else leaveAdminView(); }} />
+    {state.mode === 'admin' && !hideWorkbenchLink && <Link aria-label={t('workbench.title')} title={t('workbench.title')} className={styles.workbenchLink} to="/admin/imports"><Icon name="library" /></Link>}
   </div>;
 };

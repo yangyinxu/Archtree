@@ -27,6 +27,51 @@ and checks both assignability and complete top-level keys against the canonical
 DTOs. Each nested public DTO is also checked independently. Updating only one side
 therefore fails type checking even when the difference is an optional field.
 
+The Web-only `/finitude/videos` route reads `GET /api/listener/v1/videos` through
+`web/src/api/listenerVideos.ts`. It adds a new response envelope without changing
+the existing Home, Search, Album, or native wire shapes. The service reuses the
+public MediaTrack visibility join before sorting and limiting, so a hidden or
+unavailable assigned Album cannot leak through pagination. The Video Page owns
+one Grid definition with the server-backed `publicVideos` source. Its saved
+Video references define priority order; newly eligible Videos follow by
+publication time, falling back to creation time and ObjectId timestamp, with
+ObjectId as a stable tie-breaker. Before the first approved configuration, the fallback remains
+newest first. Public reads scan only eligible identities and publication times
+to establish the order, then load full summary fields for at most 48 selected
+Videos. Eligibility is checked again on that bounded read; a disappearing member
+returns a stale-snapshot refusal. Each page includes the configured `defaultView`.
+Opaque continuation cursors bind the effective eligible order and configuration;
+an order or membership change returns `409 stale_video_cursor`, and the Web
+listener offers a fresh first-page read instead of silently mixing snapshots.
+The Web decoder bounds
+pages and cursors, rejects Audio and duplicate members, and strips additive fields
+before query caching. This remains public online browsing, with no download or
+browser-local media lifecycle.
+
+The Video page offers a 16:9 Grid and an immersive 10:13 card view over the same
+paginated query. The administrator chooses the default display; an explicit
+device-local view preference takes precedence and is independent of the account.
+When no valid local preference exists, an asynchronously loaded default applies.
+Changing the view only replaces the browse
+presentation; it does not recreate the shared player, launch a queue, or record
+playback activity. Immersive cards compose independent Preview, Save, framing,
+and Play or Pause controls rather than nesting buttons inside the ordinary
+whole-card Play target. Save retains the existing authenticated account boundary.
+Framing controls affect only CSS fitting and horizontal positioning; the public
+DTO and stored media, artwork, and preview objects do not change.
+
+The immersive Preview toggle reuses the shared single-preview intent and media
+source machinery. Explicit activation can serve keyboard, touch, and Reduce
+Motion users without enabling automatic previews for them. Forced colors,
+Save-Data, slow connections, unknown preview rollout state, and the existing
+failure suppression still retain artwork. View changes, Escape, leaving the
+card, a hidden page, or formal playback stop the decorative preview and release
+its request. Formal Play continues through the normal standalone launch policy.
+The feature's new `videos.*` interface messages use the generated, release-owned
+`web-listener` locale packs. They do not expand the public localization API or
+native fallback key sets; the delivery contract remains in
+[localization.md](../features/localization.md).
+
 ### Compatibility policy
 
 - Finitude Web's public catalog and collection schemas discard unknown additive
@@ -154,7 +199,7 @@ src/api/listenerContractCompatibility.test.ts src/player/playerStore.test.ts
 src/player/queueOrder.test.ts` for the focused wire and transport checks, followed
 by the normal full test/build and Listener playback/release gates for a release.
 The existing build measures every emitted entry's transitive gzip JavaScript
-against the unchanged 150 KiB limit; architectural splitting must not raise that
+against the reviewed 152 KiB limit; architectural splitting must not raise that
 limit merely to make the gate pass. Inspect future eager dependencies before adding them; the current budget has little spare capacity.
 
 

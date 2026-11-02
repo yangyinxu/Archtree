@@ -23,6 +23,7 @@ import { startAdminImportWorker } from './administration/import/adminImportServi
 import { startAdminImportPublisher } from './administration/import/adminImportPublisher';
 import { startAdminCatalogCoverWorker } from './administration/catalog/adminCatalogCoverService';
 import { startMetadataLookupWorker } from './administration/lookup/metadataLookupService';
+import { startAdminVideoWorker } from './services/media/adminVideoWorker';
 
 const positiveInteger = (value: string | undefined, fallback: number) => {
   const parsed = Number(value);
@@ -44,6 +45,7 @@ export interface ServerDependencies {
   startAdminImportPublisher?: () => () => Promise<void>;
   startAdminCatalogCoverWorker?: () => () => Promise<void>;
   startMetadataLookupWorker?: () => () => Promise<void>;
+  startAdminVideoWorker?: () => () => Promise<void>;
 }
 
 /** Resolves only after listening, and releases infrastructure on every startup failure. */
@@ -54,11 +56,12 @@ export const startServer = async (dependencies: ServerDependencies = {}): Promis
   let stopPublisher: (() => Promise<void>) | undefined;
   let stopImports: (() => Promise<void>) | undefined;
   let stopLookups: (() => Promise<void>) | undefined;
+  let stopVideos: (() => Promise<void>) | undefined;
   let stopSummary: (() => void) | undefined;
   const closeDatabase = async () => {
     stopSummary?.();
     rooms?.stop();
-    try { await Promise.allSettled([stopImports?.(), stopPublisher?.(), stopCovers?.(), stopLookups?.()]); await rooms?.release(); } finally { await disconnectDatabase(); }
+    try { await Promise.allSettled([stopImports?.(), stopPublisher?.(), stopCovers?.(), stopLookups?.(), stopVideos?.()]); await rooms?.release(); } finally { await disconnectDatabase(); }
   };
   const lifecycle = new ServerLifecycle();
   const server = new Server();
@@ -108,7 +111,8 @@ export const startServer = async (dependencies: ServerDependencies = {}): Promis
     stopPublisher = (dependencies.startAdminImportPublisher ?? (() => startAdminImportPublisher(undefined, undefined, track)))();
     stopCovers = (dependencies.startAdminCatalogCoverWorker ?? (() => startAdminCatalogCoverWorker(undefined, track)))();
     stopLookups = (dependencies.startMetadataLookupWorker ?? (() => startMetadataLookupWorker(undefined, undefined, track)))();
-    lifecycle.onDrain(() => { void stopImports?.(); void stopPublisher?.(); void stopCovers?.(); void stopLookups?.(); });
+    stopVideos = (dependencies.startAdminVideoWorker ?? (() => startAdminVideoWorker(undefined, track)))();
+    lifecycle.onDrain(() => { void stopImports?.(); void stopPublisher?.(); void stopCovers?.(); void stopLookups?.(); void stopVideos?.(); });
     console.log(JSON.stringify({ category: 'server_listening', accessTokenSeconds: accessTokenDurationSeconds() }));
     stopSummary = (dependencies.startOperationalSummary ?? (() => createOperationalSummary().start()))();
     const stopped = dependencies.stopped ?? (outcome => {

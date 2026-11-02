@@ -9,6 +9,8 @@
  *   - keeps a mouse tap on the compact identity button instead of capturing it as a swipe
  *   - handles conservative vertical and horizontal compact-player gestures
  *   - resets compact-player drag feedback when the pointer gesture is cancelled
+ *   - the desktop title links to the page its queue was launched from
+ *   - a new MediaTrack restores the theater only once fullscreen has ended
  *   - applies keyboard shortcuts outside editable fields and exposes accessible help
  *   - inactive player presentation removes shortcuts and dialogs while preserving playback
  *   - inactive compact player dismisses its expanded view without changing the track
@@ -23,9 +25,11 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactElement } from 'react';
 import { MemoryRouter } from 'react-router';
 import { browserSessionQueryKey } from '../api/session';
+import { advanceAccountEpoch, captureAccountOperation } from '../api/accountEpoch';
 import { listenerCapabilitiesWrapper, seedListenerCapabilities } from '../test/listenerCapabilities';
 
-import { createPlayerStore } from '../player';
+import { createPlayerStore, playerStore } from '../player';
+import { launchFromSource, resetPlaybackSource } from '../features/playback/launchPlayback';
 import type { PlayerAudio, PlayerQueueItem, PlayerStore } from '../player';
 import { PlayerBar } from './PlayerBar';
 
@@ -262,6 +266,77 @@ test('resets compact-player drag feedback when the pointer gesture is cancelled'
   expect(compact.style.getPropertyValue('--compact-swipe-x')).toBe('0px');
   expect(compact).not.toHaveAttribute('data-compact-dragging');
   expect(store.getSnapshot().currentItem?.id).toBe('track-1');
+});
+
+test('the desktop title links to the page its queue was launched from', async () => {
+  setMobileViewport(false);
+  resetPlaybackSource();
+  const store = createPlayerStore({ audioFactory: () => new PlayerBarAudio(), mediaSession: null });
+  stores.push(store);
+  // The source module watches the shared store; this fixture stands in for it.
+  vi.spyOn(playerStore, 'getSnapshot').mockImplementation(() => store.getSnapshot());
+  await launchFromSource('/playlists/playlist-1', () => store.launchQueue(tracks, 0, { autoplay: false }));
+  render(<MemoryRouter><PlayerBar store={store} /></MemoryRouter>);
+
+  const player = screen.getByRole('region', { name: 'Now playing' });
+  expect(within(player).getByRole('link', { name: 'Still Water' })).toHaveAttribute('href', '/playlists/playlist-1');
+
+  // Advancing within the queue keeps the Playlist as the source of the newly current track.
+  await act(() => store.next());
+  expect(within(player).getByRole('link', { name: 'Open Field' })).toHaveAttribute('href', '/playlists/playlist-1');
+
+  // A newer queue that no page launched has no page to return to.
+  await act(() => store.launchStandalone(tracks[1], { autoplay: false }));
+  expect(within(player).queryByRole('link')).not.toBeInTheDocument();
+  expect(within(player).getByText('Open Field')).toBeInTheDocument();
+});
+
+test.each(['playlist', 'album'] as const)('an account change updates the paused %s source without touching playback', async (kind) => {
+  setMobileViewport(false);
+  resetPlaybackSource();
+  const store = createPlayerStore({ audioFactory: () => new PlayerBarAudio(), mediaSession: null });
+  stores.push(store);
+  vi.spyOn(playerStore, 'getSnapshot').mockImplementation(() => store.getSnapshot());
+  const path = kind === 'playlist' ? '/playlists/private-playlist' : '/albums/public-album';
+  await launchFromSource(path, () => store.launchQueue(tracks, 0, { autoplay: false }),
+    kind === 'playlist' ? captureAccountOperation('viewer-1') : undefined);
+  const paused = store.getSnapshot();
+  expect(paused.status).toBe('paused');
+  render(<MemoryRouter><PlayerBar store={store} /></MemoryRouter>);
+  const player = screen.getByRole('region', { name: 'Now playing' });
+  expect(within(player).getByRole('link', { name: 'Still Water' })).toHaveAttribute('href', path);
+
+  act(() => { advanceAccountEpoch(); });
+
+  expect(store.getSnapshot()).toBe(paused);
+  if (kind === 'playlist') expect(within(player).queryByRole('link')).not.toBeInTheDocument();
+  else expect(within(player).getByRole('link', { name: 'Still Water' })).toHaveAttribute('href', path);
+});
+
+test('a new MediaTrack restores the theater only once fullscreen has ended', async () => {
+  setMobileViewport(false);
+  const { store } = await playerFixture();
+  const onTheaterMinimized = vi.fn();
+  let fullscreenElement: Element | null = null;
+  // jsdom has no Fullscreen API, so the test supplies the one property the player bar reads.
+  Object.defineProperty(document, 'fullscreenElement', { configurable: true, get: () => fullscreenElement });
+  onTestFinished(() => { Reflect.deleteProperty(document, 'fullscreenElement'); });
+  render(<MemoryRouter><PlayerBar onTheaterMinimized={onTheaterMinimized} store={store} theaterMinimized /></MemoryRouter>);
+  expect(onTheaterMinimized).toHaveBeenLastCalledWith(false);
+  onTheaterMinimized.mockClear();
+
+  // Restoring now would move the fullscreen element out of the panel and end fullscreen.
+  fullscreenElement = document.createElement('video');
+  await act(() => store.next());
+  expect(onTheaterMinimized).not.toHaveBeenCalled();
+
+  fullscreenElement = null;
+  act(() => { document.dispatchEvent(new Event('fullscreenchange')); });
+  expect(onTheaterMinimized).toHaveBeenCalledTimes(1);
+  expect(onTheaterMinimized).toHaveBeenCalledWith(false);
+  // A later, unrelated fullscreen exit leaves the listener's chosen presentation alone.
+  act(() => { document.dispatchEvent(new Event('fullscreenchange')); });
+  expect(onTheaterMinimized).toHaveBeenCalledTimes(1);
 });
 
 test('applies keyboard shortcuts outside editable fields and exposes accessible help', async () => {

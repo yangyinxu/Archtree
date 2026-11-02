@@ -113,6 +113,7 @@
  *   - an append preselection that stops holding after approval needs attention with identityConflict before any copy, while a title match on another Album changes nothing
  *   - byte matches have their own read: 25 files byte-identical to Tracks on another Album are all flagged, and no number of same-title Tracks hides one
  *   - an approval sending the preselections its confirmation showed freezes exactly them, and refuses, writing nothing, once an append file would flip between new and reuse
+ *   - an append created for an Album whose draft title differs from the Album's is approved after its reuse is chosen again at the Album's current revision
  *   - the summary takes an undecided append file from its identity preselection: a file byte-identical to a target member is reused and never numbered, while a new file is appended and numbered
  * @end-catalog */
 
@@ -1876,7 +1877,7 @@ test('an approval sending the preselections its confirmation showed freezes exac
     await assert.rejects(publishAdminImport(actor.toHexString(), item.id, approvalBody(reviewed, { preselections: asNew })), code('ADMIN_IMPORT_REVIEW_REQUIRED'));
     assert.deepEqual(await stored(item.id), before);
     // A malformed or forged preselection list is invalid input before any read.
-    for (const preselections of [[{ ...asNew[0], preselected: true }], [{ ...asNew[0], action: 'skip' }], Array(123).fill(asNew[0])])
+    for (const preselections of [[{ ...asNew[0], preselected: true }], [{ ...asNew[0], action: 'skip' }], Array(143).fill(asNew[0])])
         await assert.rejects(publishAdminImport(actor.toHexString(), item.id, approvalBody(reviewed, { preselections })), code('ADMIN_IMPORT_INVALID_INPUT'));
     // A fresh confirmation shows the reuse, and its approval freezes exactly that; the reverse flip is refused the same way.
     const asReuse = await confirmation(reviewed);
@@ -1886,6 +1887,29 @@ test('an approval sending the preselections its confirmation showed freezes exac
     await tracks.updateOne({ _id: new ObjectId(existing.trackIds[0]) }, { $set: { 'mediaByteHash.value': sha256 } });
     await publishAdminImport(actor.toHexString(), item.id, approvalBody(reviewed, { preselections: asReuse }));
     assert.deepEqual(((await stored(item.id)).media!.publication!.decisions as ImportDecisionV2[]).filter(value => value.scope === 'track').map(value => [value.action, value.candidateId, value.preselected]), [['reuse', existing.trackIds[0], true]]);
+});
+test('an append created for an Album whose draft title differs from the Album\'s is approved after its reuse is chosen again at the Album\'s current revision', async () => {
+    const storage = new Storage(), existing = await existingProject(storage), by = actor.toHexString(), slotId = randomUUID(), value = changedFile('09 - Added.wav', 60);
+    let { item } = await createAdminImport(by, { operationId: randomUUID(), manifest: { rootLabel: '', files: [{ slotId, filename: value.originalname, relativePath: value.originalname, byteLength: value.size }] },
+        targetAlbumId: existing.albumId });
+    assert.deepEqual([item.decisions.map(decision => [decision.scope, decision.action, decision.candidateId]), item.draft.album.title], [[['album', 'reuse', existing.albumId]], 'Synthetic Album']);
+    item = (await uploadAdminImportAsset(by, item.id, slotId, mutation(item.revision), value, storage)).item;
+    item = (await editImportDraft(by, item.id, item, draft => { draft.album.title = 'A Different Synthetic Title'; draft.tracks[0].title = 'Synthetic Added'; draft.tracks[0].trackNumber = 9; })).item;
+    // The Album changes after the import was created: the saved reuse is stale, and approval refuses it.
+    await getDb()!.collection('albums').updateOne({ _id: new ObjectId(existing.albumId) }, { $set: { releaseDate: { year: 2001, month: null, day: null } } });
+    const before = await stored(item.id);
+    await assert.rejects(publishAdminImport(by, item.id, approvalBody(item)), code('ADMIN_IMPORT_DUPLICATE_STALE'));
+    assert.deepEqual(await stored(item.id), before);
+    // Review lists the Album despite the different title, at its new revision, and choosing it again is approved and appends.
+    const reviewed = await appendTo(item, existing.albumId);
+    const preselections = importIdentityPreselections(reviewed.draft, reviewed.decisions as ImportDecisionV2[], await adminImportDuplicateCandidates(by, reviewed.id)).map(({ preselected: _, ...shown }) => shown);
+    assert.deepEqual(preselections.map(shown => [shown.scope, shown.slotId, shown.action]), [['track', slotId, 'create-distinct']]);
+    await publishAdminImport(by, item.id, approvalBody(reviewed, { preselections }));
+    await runAdminImportPublicationOnce(storage);
+    const done = (await getAdminImport(by, item.id)).item;
+    assert.deepEqual([done.publication, done.published!.albumId], ['complete', existing.albumId]);
+    const album = await getDb()!.collection('albums').findOne({ _id: new ObjectId(existing.albumId) });
+    assert.deepEqual([album!.title, album!.audioTrackIds.length], ['Synthetic Album', 2]);
 });
 test('the summary takes an undecided append file from its identity preselection: a file byte-identical to a target member is reused and never numbered, while a new file is appended and numbered', async () => {
     const storage = new Storage(), existing = await existingProject(storage);

@@ -4,7 +4,7 @@
  * Internal
  *   Types: CompactGesture, PlayerBarProps, TransportControlsProps
  *   Functions: isEditableTarget, readMobileViewport, onNextFrame, useMobileViewport, trapDialogFocus,
- *              TransportControls
+ *              VideoTheaterNavigation, TransportControls
  *   Constants: MOBILE_PLAYER_QUERY, VERTICAL_GESTURE_THRESHOLD, HORIZONTAL_GESTURE_THRESHOLD,
  *              GESTURE_FEEDBACK_THRESHOLD, MAX_HORIZONTAL_FEEDBACK, GESTURE_AXIS_RATIO
  * @end-catalog */
@@ -13,14 +13,16 @@ import {
   useEffect,
   useRef,
   useState,
+  useSyncExternalStore,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent
 } from 'react';
+import { Link, useLocation } from 'react-router';
 
 import { Artwork } from './Artwork';
 import { Icon } from './Icon';
-import { SharedVideoSurface } from './SharedVideoSurface';
+import { SharedVideoSurface, videoTheaterToggleId } from './SharedVideoSurface';
 import { SeekSlider, formatPlaybackTime } from './SeekSlider';
 import {
   localizedPlayerError,
@@ -32,6 +34,8 @@ import {
 import styles from './PlayerBar.module.css';
 import { useLocalization } from '../localization/LocalizationProvider';
 import { LazyRoomTrackButton } from '../features/social/LazyRoomTrackButton';
+import { playbackSourcePath } from '../features/playback/launchPlayback';
+import { subscribeToAccountEpoch } from '../api/accountEpoch';
 
 const MOBILE_PLAYER_QUERY = '(max-width: 767px)';
 const VERTICAL_GESTURE_THRESHOLD = 48;
@@ -117,7 +121,27 @@ interface PlayerBarProps {
   /** The shell owns this presentation state so playback never remounts with the side pane. */
   nowPlayingOpen?: boolean;
   onToggleNowPlaying?: () => void;
+  /** The shell owns whether a current Video's theater covers the routed page; omitted outside the shell. */
+  onTheaterMinimized?: (minimized: boolean) => void;
+  theaterMinimized?: boolean;
 }
+
+/** Minimizes the Video theater on listener navigation; a management round trip leaves it as it was. */
+const VideoTheaterNavigation = ({ active, onMinimized }: {
+  active: boolean;
+  onMinimized: (minimized: boolean) => void;
+}) => {
+  const location = useLocation();
+  const previous = useRef({ active, key: location.key });
+
+  useEffect(() => {
+    const last = previous.current;
+    previous.current = { active, key: location.key };
+    if (last.key !== location.key && last.active && active) onMinimized(true);
+  }, [active, location.key, onMinimized]);
+
+  return null;
+};
 
 interface TransportControlsProps {
   player: PlayerSnapshot;
@@ -220,7 +244,9 @@ export const PlayerBar = ({
   active = true,
   nowPlayingOpen = false,
   onToggleNowPlaying,
-  store = playerStore
+  onTheaterMinimized,
+  store = playerStore,
+  theaterMinimized = false
 }: PlayerBarProps) => {
   const player = usePlayer(store);
   const { t } = useLocalization();
@@ -276,6 +302,23 @@ export const PlayerBar = ({
   useEffect(() => {
     if (!mobile && expanded) setExpanded(false);
   }, [expanded, mobile]);
+
+  // Each MediaTrack that becomes current, including the same Video again, starts in its automatic
+  // presentation. Moving the element out of a fullscreen panel would end fullscreen, so that waits.
+  useEffect(() => {
+    if (!onTheaterMinimized) return undefined;
+    if (!document.fullscreenElement) {
+      onTheaterMinimized(false);
+      return undefined;
+    }
+    const restoreAfterFullscreen = () => {
+      if (document.fullscreenElement) return;
+      document.removeEventListener('fullscreenchange', restoreAfterFullscreen);
+      onTheaterMinimized(false);
+    };
+    document.addEventListener('fullscreenchange', restoreAfterFullscreen);
+    return () => document.removeEventListener('fullscreenchange', restoreAfterFullscreen);
+  }, [current, onTheaterMinimized]);
 
   useEffect(() => {
     if (expanded) expandedCloseButton.current?.focus();
@@ -422,6 +465,15 @@ export const PlayerBar = ({
     resetCompactGesture(event.currentTarget, event.pointerId);
   };
 
+  // An account transition must remove a private Playlist link even while playback is paused and
+  // its snapshot has no clock updates. Public Album sources remain available across accounts.
+  const queueSourcePath = useSyncExternalStore(
+    subscribeToAccountEpoch,
+    () => playbackSourcePath(player.queue),
+    () => undefined
+  );
+  // The compact mobile identity is itself a button, so only the desktop title links back to its page.
+  const sourcePath = mobile || !current ? undefined : queueSourcePath;
   const compactIdentity = (
     <>
       {current ? (
@@ -442,7 +494,11 @@ export const PlayerBar = ({
         />
       )}
       <span className={styles.copy}>
-        <span className={styles.title}>{current?.title || t('player.identity.nothing')}</span>
+        {sourcePath ? (
+          <Link className={`${styles.title} ${styles.titleLink}`} to={sourcePath}>{current?.title}</Link>
+        ) : (
+          <span className={styles.title}>{current?.title || t('player.identity.nothing')}</span>
+        )}
         <span className={styles.meta}>
           {current?.displayByline || current?.artistNames.join(', ') || (current
             ? t('now_playing.fallback_byline')
@@ -457,6 +513,7 @@ export const PlayerBar = ({
 
   return (
     <>
+      {onTheaterMinimized && current?.mediaType === 'video' && <VideoTheaterNavigation active={active} onMinimized={onTheaterMinimized} />}
       <section
         aria-hidden={helpOpen || (mobile && expanded) || undefined}
         className={styles.player}
@@ -533,6 +590,20 @@ export const PlayerBar = ({
               type="button"
             >
               <Icon name="panel-right" />
+            </button>
+          )}
+          {onTheaterMinimized && current?.mediaType === 'video' && !mobile && (
+            <button
+              aria-pressed={!theaterMinimized}
+              aria-label={t('common.label.video')}
+              className={`${styles.secondaryControl} ${styles.nowPlayingToggle} ${styles.videoTheaterToggle}`}
+              data-active={!theaterMinimized || undefined}
+              id={videoTheaterToggleId}
+              onClick={() => onTheaterMinimized(!theaterMinimized)}
+              title={t('common.label.video')}
+              type="button"
+            >
+              <Icon name="video" />
             </button>
           )}
           <button

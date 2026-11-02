@@ -27,6 +27,7 @@ import { adminCatalogEditableFields } from './adminCatalogService';
 import {
     catalogReviewCredits, catalogReviewEntryKey, convertLegacyCatalogReview, readableCatalogCapture, readCatalogReviewSource, readCatalogReviewSubjects
 } from './adminCatalogReviewService';
+import { readCatalogReviewImportEvidence } from './adminCatalogReviewImportEvidence';
 import type { CatalogReviewCapture, CatalogReviewCapturedCredit, CatalogReviewCapturedSubject, CatalogReviewMemberCapture, CatalogReviewMemberDuration } from './adminCatalogReviewContract';
 
 const fail = (status: number, code: string): never => { throw new AdminImportError(status, code); };
@@ -94,9 +95,11 @@ async function capturedCredits(session: ClientSession, ownerType: 'album' | 'aud
  * which the draft shows where it showed none), the Album's and each member's ordered Credits as the canonical Credit lifecycle
  * reads them (an unmigrated member's legacy Artist links as legacy unspecified Credits) with each credited record's name,
  * MusicBrainz ID and revision, each member's attribution state, the label state, whether every primary and featured Artist Credit
- * is shown, and the Album's expected tracklist. The Album's entries and label are rebuilt from the Credits read now (unchanged
+ * is shown, the Album's expected tracklist and, when its members came from completed imports, their import evidence
+ * (adminCatalogReviewImportEvidence.ts; null when none holds). The Album's entries and label are rebuilt from the Credits read now (unchanged
  * Credits keep their keys) and carry the records' MusicBrainz IDs. A format-3 review is only checked: its capture must be readable
- * and its source current; it is never captured again. Mutates `doc` only: a conversion advances its revision once and sets
+ * and its source current; it is never captured again, so its import evidence (absent on a capture stored before it existed) never
+ * changes. Mutates `doc` only: a conversion advances its revision once and sets
  * `updatedAt`, adding no receipt (so no administrator change at an earlier revision goes stale), while a check changes nothing. The
  * caller persists it in the same transaction, guarded by the revision it read. Refusals: 404 not a review, 409 applied, 409 reload
  * for a newer format, an unreadable capture or a converted draft format 3 cannot hold, and 409 source changed for a source that is
@@ -136,7 +139,10 @@ export async function catalogReviewForLookup(doc: AdminImportDocument, session: 
         if (member && member.discNumber === null) member.discNumber = track.discNumber;
     });
     for (const member of draft.tracks) if (member && typeof member === 'object') (member as typeof member & { artists: ImportArtistEntry[] }).artists = memberArtists.get(member.slotId) ?? [];
-    doc.catalogCapture = capture; doc.draftVersion = CATALOG_REVIEW_DRAFT_V3;
+    // Captured once with the rest: later changes to the imports or their lookup records never reach this review.
+    const importEvidence = await readCatalogReviewImportEvidence(String(source.album._id),
+        tracks.map((track, index) => ({ slotId: track.slotId, trackId: track.id, track: source.tracks[index] })), session);
+    doc.catalogCapture = { ...capture, importEvidence }; doc.draftVersion = CATALOG_REVIEW_DRAFT_V3;
     // A draft format 3 cannot hold (a stored track that is not an object) is refused before anything is stored.
     storedDraftV2(doc);
     // The draft changed without an administrator receipt, as a worker tick changes it: open confirmations see a new revision.

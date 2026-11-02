@@ -3,7 +3,7 @@
  *   Functions: ImportSummary
  * Internal
  *   Functions: RowsUnavailable
- *   Constants: LookupBox, ImportExpectedRows, CandidateChooser, ImportAnalysisConfirmation
+ *   Constants: LookupBox, ImportExpectedRows, TrackArtistsNote, CandidateChooser, ImportAnalysisConfirmation
  * @end-catalog */
 
 import { lazy, Suspense, useEffect, useId, useState, useSyncExternalStore, type ComponentProps, type ComponentType } from 'react';
@@ -12,6 +12,7 @@ import { useLocalization } from '../../localization/LocalizationProvider';
 import type { MessageKey } from '../../localization/contract';
 import { useAdminAccess, useAdminText } from './AdminAccess';
 import type { ImportExpectedRows as ExpectedRows } from './ImportExpectedRows';
+import type { TrackArtistsNote as TrackNote } from './ImportTrackArtists';
 import { importPath, lookupCoverName, type ImportDetail, type ImportDraftV2 } from './adminApi';
 import { adminWorkspace } from './adminWorkspace';
 import { entriesByline } from './artistEntriesByline';
@@ -34,6 +35,8 @@ function RowsUnavailable() { const t = useAdminText(); return <p role="alert">{t
 // An expected-rows chunk that cannot load (a deploy replaced it) asks for a reload in its place, keeping the page and its edits.
 const ImportExpectedRows = lazy<ComponentType<ComponentProps<typeof ExpectedRows>>>(() => import('./ImportExpectedRows')
   .then(module => ({ default: module.ImportExpectedRows }), () => ({ default: RowsUnavailable })));
+const TrackArtistsNote = lazy<ComponentType<ComponentProps<typeof TrackNote>>>(() => import('./ImportTrackArtists')
+  .then(module => ({ default: module.TrackArtistsNote }), () => ({ default: RowsUnavailable })));
 const CandidateChooser = lazy(() => import('./CandidateChooser').then(module => ({ default: module.CandidateChooser })));
 const ImportAnalysisConfirmation = lazy(() => import('./ImportAnalysisConfirmation').then(module => ({ default: module.ImportAnalysisConfirmation })));
 
@@ -76,9 +79,10 @@ export function ImportSummary({ item, operation, uploads, disabled, publishDisab
     return scope === 'album' ? name : t('summary.track_field', { position: item.draft.tracks.findIndex(track => track.slotId === slot) + 1, field: name });
   };
   const role = (value: string) => shared(`catalog.credit.${value}` as MessageKey);
-  // The status and whether the free retry is offered (lookupNextStep); Luna AI is never a next step.
+  // The status and whether the free retry is offered (lookupNextStep); Luna AI is never a next step. An import created for an
+  // Album runs no automatic lookup, so it never says lookup waits for uploads.
   const applied = lookup?.applied, tie = Boolean(lookup?.needsAnswer.tie), available = summary?.lookupAvailable !== false;
-  const { status, retry: retryOffered } = lookupNextStep(lookup, { available, uploadsWaiting: Boolean(summary?.waiting.uploads) });
+  const { status, retry: retryOffered } = lookupNextStep(lookup, { available, uploadsWaiting: Boolean(summary?.waiting.uploads) && !summary?.forAlbum });
   const release = lookup?.candidates.find(candidate => candidate.key === applied?.candidateKey)?.title ?? '—';
   // The server refuses Luna AI while the publication is locked or its cancelled approval still has cleanup pending.
   const locked = ['preparing', 'needsAttention', 'complete'].includes(item.publication), cleanupPending = item.publication === 'cancelled' && Boolean(item.publicationRecovery?.cleanupPending);
@@ -126,7 +130,7 @@ export function ImportSummary({ item, operation, uploads, disabled, publishDisab
       {tracklist && <Suspense fallback={null}><ImportExpectedRows heading tracklist={tracklist} filenames={item.manifest.files}
         tracks={draft.tracks.filter(track => tracklist.files.find(file => file.slotId === track.slotId)?.appended)}
         numbering={{ saved: item.draft, disabled: disabled || locked || data.revision !== item.revision || data.valueRevision !== item.valueRevision,
-          onSave: changes => operation.run(path, 'PATCH', { expectedRevision: item.revision, changes }) }} /></Suspense>}
+          next: Boolean(data.summary.forAlbum) && !waiting.includes('uploads'), onSave: changes => operation.run(path, 'PATCH', { expectedRevision: item.revision, changes }) }} /></Suspense>}
       {/* Luna AI is a paid, secondary alternative after every lookup control (retry, name box, chooser, conflict answers), in every
           lookup state; it is never the next step or the primary action. */}
       <div className={styles.actions}><button type="button" className={styles.button} disabled={disabled || !luna} onClick={() => setAnalyzing(true)}>{t('lookup.luna')}</button></div>
@@ -150,7 +154,10 @@ export function ImportSummary({ item, operation, uploads, disabled, publishDisab
           {(['public', 'hidden'] as const).map(value => <option key={value} value={value}>{t(`field.${value}`)}</option>)}</select>{append && ` · ${t('publication.not_applied')}`}</dd></div>
         <div><dt>{t('layout.selected_cover')}</dt><dd>{notApplied([cover === null ? t('media.no_cover') : cover === 'cover' ? t('media.manual_cover') : cover.startsWith('lookup-') ? lookupCoverName(t, cover) : t('media.cover_candidate'),
           item.coverChoice === 'automatic' && cover !== null && t('summary.cover_automatic')].filter(Boolean).join(' · '))}</dd></div>
-        <div><dt>{t('summary.tracks')}</dt><dd><ol>{approvalTrackOrder(draft.tracks).map(track => <li key={track.slotId}>{[t('publication.track_position', { disc: String(track.discNumber ?? 1), track: track.trackNumber === null ? '—' : String(track.trackNumber) }), track.title || t('common.untitled')].join(' · ')}</li>)}</ol></dd></div>
+        <div><dt>{t('summary.tracks')}</dt><dd><ol>{approvalTrackOrder(draft.tracks).map(track => <li key={track.slotId}>{[t('publication.track_position', { disc: String(track.discNumber ?? 1), track: track.trackNumber === null ? '—' : String(track.trackNumber) }), track.title || t('common.untitled')].join(' · ')}
+          {!append && (summary?.trackArtists?.some(item => item.slotId === track.slotId) || summary?.inheritsAlbum?.includes(track.slotId)) && <Suspense fallback={null}><TrackArtistsNote
+            entries={summary?.trackArtists?.find(item => item.slotId === track.slotId)?.entries} inherits={summary?.inheritsAlbum?.includes(track.slotId) ?? false} /></Suspense>}
+        </li>)}</ol></dd></div>
         <div><dt>{t('summary.identities')}</dt><dd>{t('summary.identities_saved', { count: item.decisions.length })}</dd></div>
         <div><dt>{t('stage.upload')}</dt><dd>{t('summary.uploads', { ready: item.upload.ready, total: item.upload.total })}{uploads.running ? ` · ${t('upload.uploading')}` : ''}</dd></div>
         {conflicts.filter(conflict => !needed.has(conflict.path)).map(conflict => row(conflict.path, `${valueText(conflict.lookup)} · ${t(conflict.answer === 'lookup' ? 'summary.used_lookup' : conflict.answer === 'mine' ? 'summary.kept_mine' : 'publication.not_applied')}`))}

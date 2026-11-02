@@ -23,6 +23,7 @@ and Finitude clients. Update it whenever an agreed business rule changes.
 - [Web Listener](#web-listener)
 - [Background and System Playback](#background-and-system-playback)
 - [Offline Downloads](#offline-downloads)
+- [Administrator Video Uploads](#administrator-video-uploads)
 - [Administrator Album Imports](#administrator-album-imports)
 - [Administrator Metadata Lookup](#administrator-metadata-lookup)
 - [Web Administrator Local MP3 Conversion](#web-administrator-local-mp3-conversion)
@@ -608,10 +609,24 @@ The wire protocol and operational bounds are documented in
   sans-serif stack led by Helvetica Neue, Helvetica, and Arial, with explicit
   CJK and emoji fallbacks. It does not download, bundle, or hotlink Spotify's
   proprietary typefaces.
-- In an Album MediaTrack list, the actively playing row uses the Web accent for
-  its title and replaces the row number with animated music bars. Highlighting
-  that row by pointer or keyboard replaces the bars with the Pause action;
-  Reduce Motion keeps the indicator static.
+- In Album and Playlist MediaTrack lists, the current row uses the Web accent
+  for its title. While it plays, its number becomes animated music bars, and
+  pointer or keyboard highlight replaces the bars with Pause. While it is
+  paused, the number stays in the accent and activating the row resumes the
+  page's queue. Reduce Motion keeps the indicator static.
+- On Finitude Web, Album and Playlist detail pages share one header: artwork,
+  type label, title, and a byline with the MediaTrack count and the total
+  duration when every counted duration is known. A Playlist counts only its
+  ready MediaTracks toward the duration and names how many members are
+  unavailable. Below the header, one prominent Play reflects this page's queue
+  (Pause while that queue plays, resume while it is paused), followed by a
+  Shuffle toggle that mirrors the shared player state without changing which
+  MediaTrack Play starts from. When the header scrolls away, a compact bar
+  keeps the title and the same Play control in view. Row actions other than
+  the duration appear on pointer hover or keyboard focus, remain visible on
+  touch devices, and Save remains present while signed out. The Album page
+  lists its Credits, including the label, below its MediaTracks, after the
+  full release date when the month is known.
 - This presentation contract is Web-only. Finitude retains its own name, mark,
   artwork, copy, components, and supported capabilities; the rule does not
   authorize Spotify assets or an iOS theme change.
@@ -709,7 +724,11 @@ The wire protocol and operational bounds are documented in
   Media storage stays private, and public and private application responses
   never redirect to hidden object locations.
 - On Web, admins switch between Admin and User views without signing out or rebuilding
-  listening state. User view is the default; leaving Admin view hides private
+  listening state. User view is the first-use default. This browser remembers
+  each account's explicit choice across reloads, return visits and session
+  reconciliation; a remembered Admin view resumes only after the current
+  account's administrator role and capabilities are verified. Another account
+  never inherits that selection. Leaving Admin view hides private
   presentation, cancels private reads and stops previews. Unsaved drafts and
   unknown catalog/import operation intents may remain only in account-fenced memory and resume
   after current capabilities are verified. Account or role loss clears them.
@@ -764,7 +783,18 @@ The wire protocol and operational bounds are documented in
   attribution state, the Album's ordered primary and featured Artist Credits
   and its first label Credit, the revision and MusicBrainz ID of each Artist
   and Organization those Credits name, and the Album's expected tracklist
-  rows. A member's legacy Artist relationships not yet migrated count as
+  rows. When the Album has members and each member is a MediaTrack that a
+  completed import published, not as a reused member, whose media is still
+  exactly the file that import staged, the review also captures import
+  evidence: the MusicBrainz release that every such import applied, when
+  they all applied the same one, else an embedded MusicBrainz release ID, and
+  an embedded barcode and catalogue number, each embedded identifier only
+  when every member's file carries it with one value. Otherwise, such as when
+  a member was uploaded through Content Manager or its media was replaced by
+  local MP3 conversion, the review captures no import evidence. Captured
+  evidence never changes with the imports afterwards, is private review
+  evidence that no view shows as a value, and is never given to Luna.
+  A member's legacy Artist relationships not yet migrated count as
   legacy unspecified Credits. Missing historical filenames and folder names
   remain explicitly unknown; an Album title is not presented as a source
   folder. The Web Album page's Complete from MusicBrainz action creates a
@@ -796,6 +826,26 @@ The wire protocol and operational bounds are documented in
   are labelled Luna AI, arrive unticked, and change the private draft only
   when the administrator accepts each one; Luna's Artist and label
   suggestions remain hints.
+- When every member's title the review captured starts with a position of
+  one form, as Track-title searches read them in Administrator Metadata
+  Lookup, the review page proposes those positions for each member's empty
+  Disc and Track Number when it opens, in every lookup state, beside each
+  member's current catalog value; a Disc Number is proposed only where the
+  review captured one. Nothing is proposed when any member's number, its
+  own or one lookup filled, differs from its title's position, or when the
+  titles span several discs and a member's Disc Number was not captured, and
+  the page names the members whose titles stop the proposal, so a proposal
+  never makes two members claim one position. A proposal never replaces a
+  member's own number or one lookup filled. Proposed numbers start nothing,
+  do not hold lookup or Luna controls as unsaved edits do, are not given to
+  Luna, and become the administrator's own only when they are selected and
+  saved; a save never writes an unselected proposal, which stays a proposal
+  and never constrains pairing. The administrator can also remove those
+  positions from the members' draft titles in one optional step, off by
+  default, which never changes a title the administrator edited and keeps
+  pairing on the captured titles; a title cleaned that way can be applied
+  only with its member's Disc and Track Number, or when the member already
+  has them.
 - Applying an existing-Album review is a separate explicit confirmation of
   selected saved changes, each shown with its saved and proposed value: the
   Album title and date, the Artist entries and the label with each new or
@@ -804,8 +854,21 @@ The wire protocol and operational bounds are documented in
   number of missing-file rows it adds, each Track's title, Disc Number and
   Track Number, and each member whose Credits change, with its current and
   new Credits and attribution state. Every value lookup filled and every
-  conflict answered with the lookup value arrives selected, and any can be
-  deselected. An expected tracklist can be selected only when, after the
+  conflict answered with the lookup value arrives selected, since answering a
+  conflict with the lookup value chooses it, except an Artist entry list or
+  label whose identity row still needs an explicit choice, which arrives
+  unselected until that row is answered. Disc and Track Numbers proposed from
+  titles giving both numbers, the same numbers once saved while they still
+  equal the Disc and Track Number the member's captured title gives and fill
+  an empty catalog value, and a saved Disc or Track Number at its member's
+  pair position that fills an empty catalog value, also arrive selected.
+  Turning on the optional title cleanup chooses the titles it cleans, which
+  are listed selected. Track Numbers proposed from titles giving them alone,
+  any other value that replaces a non-empty catalog value, other
+  administrator edits and accepted Luna suggestions arrive unselected, and each value is
+  marked as replacing or filling the catalog value. No two members may be
+  applied at one Disc and Track position. Any change can be deselected. An
+  expected tracklist can be selected only when, after the
   selected changes, every member its pairing placed sits at its row;
   otherwise the confirmation says which member is off its row. Disc and
   Track Numbers filled through a pairing can be applied only together with
@@ -814,6 +877,18 @@ The wire protocol and operational bounds are documented in
   primary Artist Credits change, the confirmation says that Album Credits
   are never copied to members and names each member whose Credits, after the
   selected changes, still name a replaced Artist.
+  On the Web, requesting the update first saves the draft's unsaved values as
+  an ordinary save, which re-ranks the stored candidates without a lookup run
+  when a member's own number changed, then shows the confirmation of the saved
+  values with the selection the administrator requested. A save that is
+  refused keeps the unsaved values and shows no confirmation; one whose
+  outcome is unknown is retried only with its original intent. Values that
+  this save's re-rank fills are listed as not selected and never enlarge the
+  requested selection, and the confirmation says so; when it adds a conflict
+  or an identity answer to a selected change, the review shows it instead of
+  the confirmation. Leaving the confirmation keeps the saved draft and leaves
+  the catalog unchanged. Editing and saving the draft alone stay available
+  while lookup or Luna runs; only requesting the update waits for them.
 - Applying is refused while the review's metadata lookup is queued, running or
   retrying automatically or its Luna analysis is queued or running, and waits
   only for the conflicts and identity rows of selected changes; a tie never
@@ -833,6 +908,17 @@ The wire protocol and operational bounds are documented in
   unchanged, and MediaTrack Credits change only as described below. Applied
   reviews remain read-only and cannot be discarded; further corrections use
   the current Web catalog editor or a new Web review.
+  While a review's source is not current, its page shows the draft
+  read-only, offers opening the Album to start a new review when the Album
+  still exists, and keeps discarding available; a refusal for a new identity
+  candidate, MusicBrainz ID holder or lookup answer instead keeps the review
+  editable. An update whose outcome is unknown is checked by reading the
+  review again: a review shown applied leads to its applied view and one
+  whose source is not current to the stale view; only while it is still
+  unapplied and current is the update retried, and only with its original
+  intent. An applied review's page says whether the
+  release it used was matched or, when none or one chosen without a match
+  was used, that the edition remains unconfirmed.
 - An administrator can discard an unapplied existing-Album review, whatever
   its source status, from its review page or from the workbench's review
   queue, through a separate confirmation that names the Album and says that
@@ -1142,6 +1228,9 @@ The wire protocol and operational bounds are documented in
   session, remote localization request, writable cache, or prior launch. A raw
   localization key, missing-variable marker, or blank translation is never
   listener-facing fallback copy.
+- Web-only feature copy packaged with its page follows the active application
+  language and includes readable packaged `en-US` fallback. It does not require
+  a remote translation request or writable cache and changes with a Web release.
 - Startup uses the valid last-known-good bundle for the resolved language, or
   packaged `en-US` when no such bundle exists. Every client checks for a newer
   published translation in the background on cold launch and does not block
@@ -1368,6 +1457,18 @@ The wire protocol and operational bounds are documented in
   for Audio. Video automatically replaces the center workspace with a
   contain-fit theater and uses the right panel for the playback queue. Video
   offers no cover-only or audio-only mode switch.
+- Listener navigation while a Video is current (the brand, primary
+  navigation, search, links, Back/Forward) minimizes the theater: the requested
+  page shows and the same Video keeps playing at the top of the right panel.
+  Selecting that panel Video, or the player bar's Video toggle, restores the
+  theater; the panel Video also offers fullscreen from its top-right corner. A
+  MediaTrack becoming current, including the same Video again, restores the
+  automatic theater. A management round trip leaves the theater as it was.
+- On wide Finitude Web layouts the player bar's MediaTrack title links back
+  to the page its queue was started from: the Album for an Album queue, the
+  Playlist for a Playlist queue, and the MediaTrack's Album for a single
+  MediaTrack. A queue no listener page started, such as room playback, or a
+  single MediaTrack without an Album, has no title link.
 - Audio and Video use one long-lived media element, queue, elapsed clock,
   transport, Shuffle/Repeat state, playback origin, and activity identity.
   Automatic queue advancement changes presentation from the next MediaTrack's
@@ -1419,15 +1520,42 @@ The wire protocol and operational bounds are documented in
   Shuffle/Repeat state, or system media controls, and never records Recently
   Played, listening status, telemetry, or social activity. Only one card
   previews at a time; leaving the card, hiding the page, or the MediaTrack
-  becoming current playback stops it and releases its request. Previews are
-  skipped with Reduce Motion, forced colors, Save-Data, slow connections, and
-  touch or hover-less pointers, and a failed preview is not retried in that
-  page session. While motion previews are enabled, the card reads only the
+  becoming current playback stops it and releases its request. Automatic
+  previews are skipped with Reduce Motion, forced colors, Save-Data, slow
+  connections, and touch or hover-less pointers. An immersive Video card also
+  offers an explicit muted Preview toggle for pointer, keyboard, and touch
+  users, including listeners who prefer Reduce Motion. Explicit previews still
+  respect forced colors, Save-Data, slow connections, and the same visibility,
+  lifecycle, and single-preview limits. Escape or changing the Video browsing
+  view stops any preview. A failed preview is not retried in that page session.
+  While motion previews are enabled, the card reads only the
   MediaTrack's motion preview, loops that whole clip from its start, and a
   Video without one keeps its artwork; while they are disabled, the card reads
   the public stream, so its one request shares the listener's media delivery
   limits until the preview stops. A card that cannot tell whether previews are
   enabled shows no preview.
+- The Web listener's primary navigation includes a Video page beside Home and
+  Library. Its single configured Grid includes every ready, published, publicly
+  visible Video MediaTrack, a page at a time. Administrators can manually order
+  these Videos and choose the default Grid or immersive display. Until the
+  first configuration is saved, Videos appear newest first; saving captures
+  the complete current order, and newly eligible Videos append at the end in
+  deterministic catalog order. Hidden, unavailable, deleted or Audio
+  MediaTracks never become visible through a saved order. Grid uses 16:9
+  cards; listeners may select an immersive view of
+  approximately 10:13 cards showing the same Videos, with overlaid artwork,
+  title, attribution, and separate Preview, Save, options, and Play or Pause
+  controls. An explicitly selected view is a device-local presentation preference,
+  independent of the account, and takes precedence over the administrator's
+  default. Switching views never changes the shared player,
+  queue, elapsed time, or playback activity. An immersive card's full-frame,
+  fill, and horizontal framing controls change only that card's local display;
+  they never edit media, artwork, metadata, or the stored preview. A missing or
+  unavailable preview keeps the artwork and does not prevent normal playback.
+  Audio MediaTracks never appear there, and a Video leaves it as soon as it
+  stops being ready, published, or public. Its cards use the same shared player
+  and normal standalone Play and Pause policy as other Video MediaTrack cards.
+  Native clients have no Video page or immersive card preview yet.
 - A Web MediaTrack card whose MediaTrack is currently playing offers Pause in
   place of Play. Pause keeps the queue and elapsed time and adds no Recently
   Played activity. Once paused, the card's Play action launches that MediaTrack
@@ -1632,6 +1760,111 @@ The wire protocol and operational bounds are documented in
 - A local audio asset may be owned by multiple device-local download entries.
   Removing one entry must not delete an asset still owned by another entry.
 
+## Administrator Video Uploads
+
+- Video upload is an additional administrator workbench workflow. Album upload,
+  Album import and completion queues, local MP3 conversion, catalog and Page
+  management, and the legacy Content Manager remain available. A Video project
+  is distinct from an Audio Album import and from replacing an existing
+  MediaTrack's active object. Native clients remain listener-only.
+- Each Video project is private and belongs to the authenticated initiating
+  administrator. Every project read, edit, source operation, preview and retry
+  checks that account and its current administrator role. Project IDs and file
+  IDs never grant access. Work in progress is durable; browser navigation and
+  reopening do not publish or silently restart an uncertain transfer.
+- A Video can explicitly belong to the current account without an Artist,
+  Organization or Album. Alternatively, the administrator chooses an existing
+  Artist or Organization, or explicitly records that attribution is unknown.
+  Album membership is independently optional and does not silently change that
+  attribution. These choices do not create placeholder catalog identities.
+- A personal public signature is optional and must be explicitly entered and
+  included in final publication confirmation. A blank signature displays
+  `个人发布`. Never derive a public signature from an email, private profile,
+  avatar or account identifier. The account relationship is private; public
+  allowlisted responses expose only the confirmed display byline. Personal
+  attribution does not add a User as a Catalog Credit or extend the existing
+  `documented`/`unknown` Catalog Credit status contract. With no Catalog Credits,
+  that status remains unknown while the personal display byline is independent.
+- Personal Video attribution does not change the existing account-deletion
+  rule for shared catalog provenance: an account that still owns such evidence
+  cannot be deleted. Unfinished private tasks and unconfirmed storage cleanup
+  must first be resolved without removing their only lifecycle evidence.
+- Admit original MP4, MOV and M4V files with actual H.264 or HEVC video without
+  requiring the browser to decode or transcode them. A filename, declared MIME
+  type, operating-system label or local preview failure never establishes the
+  encoded format or invalidates an otherwise admissible source. Silent Video
+  sources are supported. Ambiguous main streams or unsupported layouts require
+  an explained decision rather than silently choosing a different movie.
+- Transfer the original bytes privately before server processing. Report
+  transfer, complete source validation, necessary playback adaptation, final
+  publication and unfinished cleanup separately. Only actual work may advance
+  progress; byte transfer reaching its end does not mean the Video is ready or
+  published. Local preview failure leaves original upload and manual artwork
+  available and explains the device limitation.
+- The playback policy accepts MP4 carrying H.264/AVC 8-bit 4:2:0 or HEVC
+  Main/Main10 4:2:0 with an `hvc1` sample entry, with AAC or no audio. Compatible
+  HEVC does not require transcoding. Container, extra streams or metadata may
+  require a container-only remux while retaining the encoded movie. Other
+  admitted layouts may require an explicitly reported adaptation to the
+  supported profile. Preserve source resolution, orientation and content; do
+  not apply an undisclosed resize, downmix or quality change. Decoder support
+  varies across browsers and devices; admission never promises universal local
+  playback. An unavailable processor or encoder is a retryable operational
+  condition, not evidence that the uploaded original is invalid.
+- Select the main movie explicitly from validated stream metadata. An attached
+  still image is artwork, not a second main Video. Do not project camera tags,
+  location, device payloads, original local paths or free-form decoder output
+  into catalog metadata, public responses or logs. Remuxed/adapted playback
+  objects discard ancillary device/data streams and source metadata.
+- Offer a visible default cover: prefer a validated embedded still, otherwise
+  a frame at min(2 seconds, 10% duration), with a first-decodable-frame fallback.
+  Offer choosing another frame, uploading a custom image, restoring the default,
+  or explicitly using Album artwork/the normal placeholder. A failed automatic
+  cover does not invalidate the confirmed Video or repeat its transfer. All
+  stored covers undergo full image validation and metadata stripping.
+- A manual cover selection wins over automatic work. Source and cover operation
+  identities fence late results; an old source or earlier automatic result
+  never overwrites a newer source or manual choice. Publication confirmation
+  displays the actual cover and its origin, not a generic thumbnail.
+- Saving publication details or navigating never publishes. Final confirmation
+  freezes title, attribution, public signature, Album, visibility, exact source,
+  active output and cover identity/revision, and current catalog references.
+  A relevant edit or stale reference invalidates that approval instead of
+  rebasing it. Cancelling confirmation preserves the private task and completed
+  media work. Choosing another search query and dismissing a catalog selector
+  also preserves its committed selection.
+- Each source upload reserves a never-reused object identity and operation
+  before storage I/O. An unknown transfer outcome retains that same operation;
+  reconciliation verifies its exact recorded identity before another transfer
+  or replacement is permitted. Retry of server processing reuses the confirmed
+  private original. Retry of publication reuses the validated media and frozen
+  publication operation and never requires another source transfer.
+- Publication promotes exactly one active playback object to one ready
+  MediaTrack under the existing transactional reference and visibility fences.
+  The private original is processing/recovery evidence, not another publicly
+  selectable representation. A draft or partially copied output is never a
+  public MediaTrack. Successful publication with pending cleanup remains a
+  successful publication and reports cleanup separately.
+- A completed upload remains a record of its original confirmation. Its
+  published-content view plays the current ready MediaTrack as Video and allows
+  administrators to upload replacement artwork, choose a decoded frame from
+  the published playback object, or clear its own artwork to use the normal
+  Album/placeholder fallback. These actions use the existing catalog artwork
+  confirmation and recovery lifecycle; they do not reopen the upload or
+  require its cleaned private original. Current playback and artwork follow
+  the saved catalog content rather than the historical upload snapshot.
+- A frame chosen from published playback captures that saved media identity
+  and catalog revision. Staging the image alone changes no published artwork;
+  replacement requires a separate confirmation. A changed source, stale
+  revision, account or role refuses that confirmation without rebasing it.
+- Create, replace, cancel, retry and reconciliation retain every source,
+  adapted output, cover and publication-copy identity until its attachment or
+  exact deletion is confirmed. Cancellation fences active/late workers before
+  cleanup; failed or uncertain deletion remains traceable and retryable.
+  Account or role loss stops new private work and cannot authorize publication
+  or erase storage evidence. The Database and S3 Lifecycle rules apply to all
+  of these objects.
+
 ## Administrator Album Imports
 
 - Imports are private, durable administrator projects. The Web workbench
@@ -1661,7 +1894,17 @@ The wire protocol and operational bounds are documented in
   Leaving Admin view, losing the role, or a publication that locks the import's
   sources stops the queue after the current file, and navigation never restarts
   it. Files chosen without a folder need no typed folder name, and no folder
-  name is then sent to Luna or metadata lookup.
+  name is then sent to Luna or metadata lookup. An administrator may also create
+  an import for an existing Album from its Web Album page, which offers this
+  only while the Album has a primary Artist Credit. Its Album decision is then
+  reuse of that Album, an append, saved as if the administrator had chosen it,
+  so it needs no answer while it stays valid, and its draft starts with that
+  Album's title; creating it is refused, naming the reason, when that Album
+  could not be appended to, such as when it is not ready, has no primary Artist
+  Credit or credits a primary Artist that is not ready. An import created for
+  an Album, and any import whose Album decision is reuse, shows that Album as an
+  Album candidate whatever the draft's title, so a reuse that became stale can
+  be chosen again.
 - The import draft holds the Album title, ordered Artist entries, an optional
   label, the release date and visibility, and each track's title, Disc Number
   and Track Number. Each Artist entry has a name, a role of primary or
@@ -1832,11 +2075,29 @@ The wire protocol and operational bounds are documented in
   featured Artist Credit with its join phrase, then the label as an Album Credit
   with role `label` whose subject is an Organization. A new label Organization
   has the label type and a reused one keeps its own; the label is never an
-  Artist or a plain text field. The MediaTracks of a new Album receive its
-  ordered primary Artist Credits with their join phrases; featured entries and
-  the label stay on the Album. New Artists and Organizations take the draft's
-  visibility. Imports do not yet support an Album without a primary Artist, such
-  as a compilation, and never suggest a stand-in Artist for one.
+  Artist or a plain text field. A new Album's MediaTracks ordinarily receive
+  its ordered primary Artist Credits with their join phrases; the label stays
+  on the Album. When the applied release pairs every selected file by position
+  with exactly one release track, each file may instead receive that release
+  track's own ordered primary and featured Artist Credits, with their join
+  phrases. A usable list has at least one primary Artist and at most 20 entries.
+  These Credits stay on the MediaTrack and never promote an Artist to the Album.
+  Import release groups remain distinct when their independent track Artists
+  differ, and the release choice shows those differences before applying one.
+  The summary shows each differing track's Artists. Publication lists those
+  tracks selected by default, their roles, join phrases and identity decisions;
+  deselecting one uses the Album's primary Credits. An unusable or missing list,
+  a repeated identity within one track, or a track exceeding the import's limit
+  of 20 track-only identities also uses the Album's primary Credits, explained
+  in the summary. Shared identities use one decision across Album and tracks;
+  track-only identities follow the same candidate, revision and MusicBrainz ID
+  rules as Album Artists. Deselected or skipped tracks create no unused Artists.
+  Another release or no release replaces or clears these automatic lists;
+  these lists stay automatic after approval, and administrators and Luna never
+  type or change them. Appends keep inheriting the target Album's primary
+  Credits and ignore the imported track lists.
+  New Artists and Organizations take the draft's visibility. Imports do not yet
+  support an Album without a primary Artist, such as a compilation, and never suggest a stand-in Artist for one.
 - After uploads and metadata lookup, an import opens on one Review and publish
   summary. It shows the draft values, the Artist entries with their roles and
   join phrases, the label, the disc and track order, identity decisions, the
@@ -1912,7 +2173,10 @@ The wire protocol and operational bounds are documented in
   do not constrain the pairing and are replaced. Each file that every largest
   such pairing places at the same row takes that row's Disc and Track Number
   and, when its title is empty or automatic, the row's title, as the
-  administrator's own values; other files keep their values.
+  administrator's own values; other files keep their values. For an import
+  created for an Album with a missing-file row, numbering the files from the
+  expected tracklist is the summary's next step once every upload is confirmed;
+  it still waits for the administrator.
 - An existing-catalog cover approval copies a ready private image: one chosen
   from an import project or, on the Web detail page of an Album, Artist or
   MediaTrack, one the administrator uploads from their computer; Organizations
@@ -1959,20 +2223,23 @@ The wire protocol and operational bounds are documented in
   the selected folder's name, when there is one, which the name box shows for
   editing. Typing, saving and navigation never run metadata lookup, and
   reopening a project runs it only when its reconciliation confirms the last
-  selected upload. An existing-Album review looks up its Album: it runs
-  automatically once when a review is created where lookup is available, from
-  the Album's saved title and the names of its primary Artist Credits and,
-  when needed, its saved Track titles as described below, and runs when the
-  administrator submits an Album or song name, optionally with an Artist name,
-  or retries. iOS and Android do not offer metadata lookup.
+  selected upload. An import created for an Album runs no automatic lookup at
+  all; its name box remains available. An existing-Album review looks up its
+  Album: it runs automatically once when a review is created where lookup is
+  available, from any import evidence it captured, the Album's saved title and
+  the names of its primary Artist Credits and, when needed, its saved Track
+  titles as described below, and runs when the administrator submits an Album
+  or song name, optionally with an Artist name, or retries. iOS and Android do
+  not offer metadata lookup.
 - Metadata lookup accepts names, not links. The server queries only fixed,
   server-chosen services and never fetches an administrator-supplied URL. It
   sends only the submitted text and any submitted Artist name, cleaned tag
   text, a cleaned folder name or an existing Album's saved title, primary
   Artist names and at most two of its saved Track titles with the primary
   Artist names of those Tracks, terms taken from earlier results of the same
-  lookup, and embedded identifiers; every identifier or barcode used in a
-  query must match its expected format. An automatic lookup never sends file
+  lookup, and embedded identifiers, for an existing-Album review those of
+  its captured import evidence; every identifier or barcode used in a query
+  must match its expected format. An automatic lookup never sends file
   names, sends a folder name only when no usable tags exist, and no lookup
   sends account data or audio. A review's lookup never sends original
   filenames, and sends saved Track titles only to MusicBrainz, as described
@@ -2083,8 +2350,9 @@ The wire protocol and operational bounds are documented in
   a track whose duration is within half a second of its own, both known to the
   millisecond, which a release track length in whole seconds is not taken to be.
   Those positions are never sent, are not the member's own numbers and become
-  values only as the numbers lookup writes through that pairing; the ranking
-  records what decided it. A candidate matches only when its pairing is single
+  values only as the numbers lookup writes through that pairing, or as the
+  review page's proposal from titles once the administrator saves it; the
+  ranking records what decided it. A candidate matches only when its pairing is single
   and every paired duration is known. A release with fewer tracks than the Album
   has members never matches; a pairing that is not single, or a member or paired
   track without a duration, leaves it unverified; an Album without members
@@ -2094,7 +2362,7 @@ The wire protocol and operational bounds are documented in
   each member that no track of the release can pair with. Saving a review Disc
   or Track Number re-ranks the stored candidates without new requests; a re-rank
   is not a lookup run. While no candidate was chosen, a
-  re-rank that leaves exactly one preselectable group applies it as a
+  re-rank whose comparison preselects a candidate applies it as a
   preselection would. A re-rank never removes values already applied, and the
   expected tracklist then follows the placement check of applying the review.
   Searches admit, and the iTunes fallback keeps, releases with at least as
@@ -2123,24 +2391,31 @@ The wire protocol and operational bounds are documented in
   candidate stays selectable, one that does not match shows its differences, and
   the administrator may choose none.
 - In an existing-Album review, the names of the Album's primary Artist Credits
-  stand in for artist tags and no embedded identifier exists. Matching
-  candidates form different groups when their pairings, their expected
-  tracklists, durations included, or the track Artist entries they propose
-  for paired members differ. Among matching groups, one whose release has
-  exactly as many tracks as the Album has members is preferred: when no
-  release left out of the comparison could have exactly as many tracks as the
-  Album has members and exactly one such group exists, it is preselected even
-  when groups with more tracks also match; otherwise the only matching group
-  of a complete comparison is preselected, and two or more matching groups are
-  a tie. The view of differences also shows each candidate's track count, the
-  members it pairs and how many missing-file rows it would add.
+  stand in for artist tags. Its embedded identifiers are the import evidence
+  the review captured, as Catalog Visibility and Administration describes,
+  and none exist without it; they are looked up first, as an import's are.
+  Matching candidates form different groups when their pairings, their
+  expected tracklists, durations included, or the track Artist entries they
+  propose for paired members differ. The matching candidate that one of
+  those identifiers matches alone is preselected even among several matching
+  groups; an identifier never makes a candidate match. Otherwise, among
+  matching groups, one whose release has exactly as many tracks as the Album
+  has members is preferred: when no release left out of the comparison could
+  have exactly as many tracks as the Album has members and exactly one such
+  group exists, it is preselected even when groups with more tracks also
+  match; otherwise the only matching group of a complete comparison is
+  preselected, and two or more matching groups are a tie. The view of
+  differences also shows each candidate's track count, the members it pairs
+  and how many missing-file rows it would add, and the lookup details name
+  each captured identifier a run looked up or preselected by, never its value.
 - An existing-Album review's lookup, automatic or submitted, can also search
   MusicBrainz recordings by at most two of the Album's Track titles, as the
   review captured them from the catalog. It does so only when its searches
-  for the Album title or submitted name, once their releases are compared,
-  preselect nothing: for any reason, a tie included, when those searches name
-  no Artist because the Album shows no primary Artist name usable for search
-  and none was submitted; otherwise only because no candidate matches or the
+  for its captured identifiers and for the Album title or submitted name,
+  once their releases are compared, preselect nothing: for any reason, a tie
+  included, when its searches for that title or name credit no Artist
+  because the Album shows no primary Artist name usable for search and none
+  was submitted; otherwise only because no candidate matches or the
   comparison is partial. Track titles are compared and searched without a
   trailing version or featuring note and, when every member's title starts
   with a position, all of one form, either a Track Number or a Disc Number,
@@ -2246,11 +2521,11 @@ The wire protocol and operational bounds are documented in
   grant stores nothing and ends that lookup and its value application: the
   summary reports it as stopped, with a manual retry as the next step and Luna
   beside it, and Publish never waits for it. A changed file set runs one
-  automatic lookup again, within a small per-project limit, and replacing,
-  removing or reselecting a file marks its match evidence stale without
-  reverting values. Metadata lookup is independent of Luna generations: starting
-  or stopping Luna does not discard its results, and a lookup does not discard
-  Luna's.
+  automatic lookup again, within a small per-project limit, except in an import
+  created for an Album, and replacing, removing or reselecting a file marks its
+  match evidence stale without reverting values. Metadata lookup is independent
+  of Luna generations: starting or stopping Luna does not discard its results,
+  and a lookup does not discard Luna's.
 - A review's metadata lookup runs on the server under an expiring grant from
   the administrator's review creation, submission, manual retry or choice of a
   candidate, rechecks that administrator's role at every stored step, and binds
@@ -2285,12 +2560,14 @@ The wire protocol and operational bounds are documented in
   members have no duration, or the members fit a release in more than one way.
   When the members pair with a release in exactly one way, which a missing
   duration left unconfirmed, using that release is the next step and the name
-  box stays available. Otherwise, when their saved titles start with the
-  positions that Track-title lookup reads, the review offers filling the Disc
-  and Track Numbers the draft lacks from them, for the administrator to check
-  and save, which compares again. This is the next step when the titles give
-  both Disc and Track Numbers, and is otherwise offered after the name box,
-  which stays available. After the name box, the review also offers pairing the
+  box stays available. Otherwise, when the titles the review captured start
+  with the positions that Track-title lookup reads, the review page has
+  already proposed the Disc and Track Numbers they give, as Catalog
+  Visibility and Administration describes, for the administrator to check;
+  saving the selected ones, alone or when requesting the update, compares
+  again. Positions
+  giving Track Numbers alone are proposed unselected, and the name box stays
+  available. Besides the name box, the review also offers pairing the
   members by hand with a release that they fit in more than one way and whose
   title makes it a possible match: the administrator gives each member a
   distinct track of that release it can pair with, and saving stores those
@@ -2304,7 +2581,11 @@ The wire protocol and operational bounds are documented in
   lookup controls, never as the next step. An existing-Album review offers Luna
   the same way. Luna remains an explicitly confirmed paid step that shows the
   remaining project and daily budget; offering it starts nothing, a lookup
-  result never starts it, and it may also run beside applied lookup values. In
+  result never starts it, and it may also run beside applied lookup values.
+  While metadata lookup is queued or running, the Luna AI confirmation also
+  says that free lookup results are pending and offers waiting, which starts
+  nothing and keeps the lookup running; when the project has one Luna
+  analysis left, it says this is the last. In
   an import, Luna suggestions return to the summary labelled as Luna AI and are
   never collapsed: those for empty values or values from file tags arrive
   ticked, the others arrive unticked and keep the current value unless ticked,
@@ -2399,13 +2680,48 @@ The wire protocol and operational bounds are documented in
 - Grid and List definitions each have one source mode: manual or dynamic.
   Manual definitions contain explicitly curated content references; dynamic
   definitions resolve items from a declared source and cannot be manually
-  edited, reordered, or mixed with manual references.
+  edited, reordered, or mixed with manual references, except for the Video
+  page's public-Video source: its membership remains automatic while its
+  presentation default and complete Video order are administrator-controlled.
 - Content Manager administrators can add, remove, and reorder albums in a
   manual Grid. The initial manual Grid contract is album-only.
 - Content Manager shows every page's configured Carousel, Grid, and List items
   in persisted order, including each item's resolved name, source mode, and ID.
   Missing or unsupported references remain visible as warnings rather than
   disappearing from the page summary.
+- Web Page management uses a compact ordered list with inline reference details.
+  It lists Home, Library, Search and Video. Search is a functional page whose
+  query-driven results have no configured placements. Video has exactly one
+  Grid placement; its configuration changes the Videos inside that Grid,
+  rather than reordering top-level Page placements. Reading an unconfigured
+  Video page does not create persistent content; the first approved save
+  creates the Page and its Grid together.
+  It reads only the selected Page and shows its confirmed placement count; the
+  unselected Page's count remains unknown until selected. Visibility approval
+  identifies the exact placement and is invalidated by any change to the Page
+  revision. An uncertain operation retains its originally approved name and
+  visibility direction for an exact retry, even after a refresh or Page switch.
+- Web administrators adjust Page placement order in a separate local draft,
+  using drag handles, keyboard arrows or Move up/Move down controls. Hidden
+  placements and broken references remain in that order. Cancelling writes
+  nothing; saving requires explicit review of the complete new order and its
+  immediate listener effect. An unchanged draft cannot be submitted.
+- Page order approval binds the complete unique placement identities and the
+  whole Page revision. A stale approval cannot save; the administrator can
+  cancel or refresh and adjust again. The atomic write preserves placement
+  visibility, references and reusable definitions, backfills unique legacy
+  fallback identities, and rejects missing or ambiguous identities instead of
+  dropping their records. Sorting changes the Page revision and invalidates
+  already-open visibility approvals and listener collection cursors.
+- Visibility and order writes share the same per-Page administrator command.
+  While either is submitting or uncertain, no new write can start on that Page.
+  An uncertain order keeps its original operation identity, complete approved
+  order, revision and review context for an exact retry. A refresh may show the
+  latest server order alongside that retained intent, but neither replaces it
+  nor proves which operation applied. Only a confirmed receipt or definite
+  refusal resolves the command; version conflicts require a fresh review. An
+  incompatible response requires reloading the workbench without resending an
+  intent the current bundle cannot confirm.
 - Manual Lists can contain explicitly curated supported content references and
   preserve their configured order. Dynamic Lists resolve their ordering from
   their source definition.
@@ -2415,6 +2731,16 @@ The wire protocol and operational bounds are documented in
   dynamic list.
 - Dynamic Grid and List definitions expose only source configuration, filters,
   sort, and page size in Content Manager; their resolved items are read-only.
+  The Web Video Grid has a dedicated editor with drag handles, keyboard arrows
+  and Move up/Move down controls. Its default display and Video order form one
+  local draft and require explicit review before saving. Cancelling writes
+  nothing. Saving validates the complete membership and configuration against
+  its admitted snapshot; a detected edit or membership change requires a fresh
+  review. Videos becoming eligible after that snapshot append automatically.
+  An uncertain save retains its exact approved payload and operation
+  identity across Page switches and refreshes. A confirmed save persists the
+  Page, Grid and receipt together. Sorting invalidates existing Video cursors;
+  a stale traversal must restart explicitly from the first page.
 - A server-backed manual Grid or List is read through its parent Page item with
   a bounded opaque cursor. The cursor is bound to the Page item, collection,
   Page, collection, and ready-content visibility revisions, and—when the parent

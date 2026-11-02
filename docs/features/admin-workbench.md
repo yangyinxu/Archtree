@@ -21,6 +21,8 @@ below default closed; the flags among them accept only the literal `true`:
 | `ADMIN_IMPORT_S3_BUCKET_NAME` | Dedicated private staging bucket, distinct from `S3_BUCKET_NAME` |
 | `FINITUDE_ADMIN_IMPORT_PRIVATE_STORAGE_READY` | Operator assertion that the staging bucket denies public/CDN access |
 | `FINITUDE_MOTION_PREVIEWS_ENABLED` | Show the Motion preview panel for Video MediaTracks and serve public motion previews |
+| `VIDEO_FFMPEG_PATH`, `VIDEO_FFPROBE_PATH` | Optional absolute media-tool paths for main Video processing; otherwise use the installed room-audio tool directory or `PATH` |
+| `VIDEO_H264_ENCODER` | `libx264` (default) or explicitly configured `h264_videotoolbox` when an admitted main stream needs AVC adaptation; compliant AVC/HEVC streams are copied |
 
 An existing Album review needs no staging bucket; starting Luna also requires
 the imports flag and configured provider, and its metadata lookup the imports
@@ -77,6 +79,30 @@ capacity until its actual promise settles and has a separate native timeout.
 Every response rechecks the current administrator session, ready owner and exact source
 before delivery. It never exposes the legacy URL or changes storage, and does
 not satisfy the separate historical-URL migration requirement for hiding content.
+
+The Web header shows the selected view with an icon and a single-line role.
+Its choice menu marks the active view, supports arrow keys, Home/End and Escape,
+and closes on outside interaction. The browser stores only the explicit
+`admin` or `user` presentation choice under
+`finitude:admin-view:v1:<encoded-account-id>` in local storage. A new capability
+authorization for that account restores it; loading, session reconciliation and
+permission resets never overwrite it. Missing, invalid or unavailable storage
+falls back to User on a new authorization. Account/role loss still immediately
+clears private buffers and fences old operations; the saved choice grants no
+access and contains no draft or operation state.
+
+A new-Album import keeps the applied release's per-track Artist entries only
+when its tracks pair positionally with every selected file. The summary shows
+independent bylines and explains inheritance when a release track has no usable
+list or exceeds the bounded identity plan. Review resolves shared and track-only
+Artist identities; the publication confirmation lists each differing track,
+selected by default, and allows reverting it to the Album's primary Artists.
+The approval freezes only the identities its selected, non-skipped tracks need.
+Format-4 publication snapshots commit those track Credits, their Artists and
+MusicBrainz ID writes in the catalog transaction with the normal publication
+receipt. Existing format-1/2/3 approvals retain their frozen behavior. Appending
+continues to inherit the target Album's primary Credits. The `track_artists`
+copy is release-packaged `web-admin` content rather than a native runtime change.
 
 The Web import editor uses Draft, Review, Files and Publish sections.
 Section navigation retains account-fenced local work and does not dispatch a
@@ -163,8 +189,14 @@ the Album is new (explicitly or preselected). Creating a distinct record, or
 reusing another one, instead of the record holding the entry's ID records no ID.
 Reusing a record that holds a different ID keeps that ID, and reusing it while
 replacing its ID with the entry's is a separate choice, offered while no
-listed record holds the entry's ID. When the Album row reuses an existing
-Album, a file whose verified bytes match exactly one member of that Album, which
+listed record holds the entry's ID. The Album row also offers the Album a saved
+reuse names and the Album the import was created for (summary `forAlbum`),
+whatever their titles and without a match kind, and a reuse or replace whose
+record changed since it was chosen reads as changed ("This record changed since
+you chose it. Choose it again below to keep it.", release-packaged `web-admin`
+copy), so choosing that record again saves its current revision. When
+the Album row reuses an existing Album, a file whose verified bytes match
+exactly one member of that Album, which
 no other file matches and no other decision reuses, is preselected to reuse it,
 and a file matching no member by bytes or title is preselected as a new member;
 a title-only match, ambiguous bytes or an incomplete member list
@@ -207,9 +239,12 @@ neither Publish nor Approve. The server decides what holds Publish; the
 summary only presents it:
 
 - **Status and next step.** Not run yet while uploads are awaited, not run
-  although every needed file is uploaded (its automatic trigger failed; the name
-  box next), looking up (queued or running), retrying (busy or unavailable, next
-  step the free **Retry lookup**), unavailable after the automatic retries (the
+  although every needed file is uploaded (its automatic trigger failed, or the
+  import was created for an Album, which runs no automatic lookup: it shows
+  this not-started status whenever it has no run, also while uploads are
+  awaited, never the waiting-for-uploads one; the name box next),
+  looking up (queued or running), retrying (busy or unavailable, next step the
+  free **Retry lookup**), unavailable after the automatic retries (the
   retry still next), not configured (no next step; the name box where this
   server can now run lookup), stopped (the retry next), superseded (the retry
   next), no release or nothing to look up (the name box next), no matching
@@ -307,7 +342,8 @@ summary only presents it:
   more second for a legacy whole-second duration (both known). Flags need no
   answer and never hold Publish. While `numbering` is not empty, **Number from
   the Album's expected tracklist** (an ordinary secondary button after the
-  flagged values and before Luna AI, never the next step) saves it as one
+  flagged values and before Luna AI, never the next step, except as below) saves
+  it as one
   `PATCH /imports/:id` field save of each proposed file's
   `tracks.<slotId>.discNumber`, `.trackNumber` and, where proposed, `.title`,
   with the saved values as `base`, so they become the administrator's own. It
@@ -315,7 +351,12 @@ summary only presents it:
   the publication is locked, and while the summary read is of another revision
   or automatic-write revision; a changed numbered value is
   `409 ADMIN_IMPORT_FIELD_CONFLICT`, after which the page reads the project and
-  the summary again, as for any field conflict.
+  the summary again, as for any field conflict. In an import created for an
+  Album (summary `forAlbum`), once no upload is waiting on the server or in this
+  browser and `numbering` is not empty, the button is the summary's next step:
+  it takes the primary style, under the line "Next step: number these files from
+  the Album's expected tracklist." (release-packaged `web-admin` copy, loaded in
+  its own Suspense boundary), and still saves only when clicked.
 - **Folded.** Every other row: title, Artist entries with roles and join
   phrases, label, date, visibility (changed in place by a field save, public by
   default), cover (one chosen automatically says so, and a lookup cover is
@@ -442,6 +483,7 @@ previews, import/catalog/Page editors or upload controls.
   - [Value application](#value-application)
   - [Lookup routes](#lookup-routes)
   - [What lookup sends](#what-lookup-sends)
+- [Original Video projects](#original-video-projects)
 <!-- @end-catalog -->
 
 ## Device-local MP3 conversion
@@ -527,8 +569,9 @@ Import routes (relative to `/api/admin/v1`):
   `q` matches the folder label, the Album title and every Artist entry name, or
   the Artist name of a project still in format 1; a row's `artistName` is the
   first primary entry.
-- `POST /imports`: `{operationId, manifest, draft?}`; names and relative paths,
-  at most 100 files, never client S3 locations or absolute filesystem paths.
+- `POST /imports`: `{operationId, manifest, draft?, targetAlbumId?}`; names and
+  relative paths, at most 100 files, never client S3 locations or absolute
+  filesystem paths.
   `manifest.rootLabel` may be empty only when no `relativePath` contains a
   folder; Luna input then carries no folder name, and a suggestion citing
   folder evidence is rejected. Rolling back below this release keeps every
@@ -545,7 +588,45 @@ Import routes (relative to `/api/admin/v1`):
   `ADMIN_IMPORT_OPERATION_CONFLICT`. `draft` keeps the v1 shape and its frozen
   parser and fingerprint, so every earlier create receipt still replays; the
   new project is stored as Draft v2 (`draftVersion` 2), and a supplied v1
-  `draft` converts with every value the administrator's own.
+  `draft` converts with every value the administrator's own. An optional
+  `targetAlbumId` (24 lowercase hexadecimal digits, never with `draft`, else
+  `400 ADMIN_IMPORT_INVALID_INPUT`) creates the import for that Album. It enters
+  the create fingerprint only when present, so every earlier receipt and every
+  create without it replays unchanged, while a retry naming another target, or
+  dropping or adding one, is `409 ADMIN_IMPORT_OPERATION_CONFLICT`. Receipt
+  lookup comes first, so a replay returns the original project whatever the
+  Album has become, also while imports are disabled. Then, after admission
+  (`503 ADMIN_IMPORTS_DISABLED`), the target is checked as an append's is at
+  approval, and each refusal writes nothing: no ready Album with that ID, one
+  too malformed to be a candidate (an unclean saved title or a malformed
+  visibility), or one whose primary Artist Credits name an Artist that is not
+  ready is `409 ADMIN_IMPORT_TARGET_UNAVAILABLE`, an Album without a primary
+  Artist Credit is `409 ADMIN_IMPORT_APPEND_PRIMARY_REQUIRED`, and one listing
+  more than
+  `ADMIN_IMPORT_LIMITS.appendTargetMembers` (5000) member IDs is
+  `409 ADMIN_IMPORT_TARGET_TOO_LARGE`. Otherwise the same insert stores an
+  explicit Album decision `reuse` whose `candidateId` is that Album and whose
+  `candidateRevision` is its candidate revision read in that transaction, so the
+  import appends to it and its Album row needs no answer while that revision is
+  current; the draft's title starts as the Album's saved title, as the
+  administrator's own (left empty when the draft cannot hold it), since approval
+  needs a title even for an append. The server-only, never projected
+  `createdForAlbumId` records the Album; such an import never runs an automatic
+  metadata lookup (see [Triggers and grants](#triggers-and-grants)) and its
+  summary carries `forAlbum`, that Album's ID.
+- `GET /imports/album-targets/:albumId`: the create page's read of the Album an
+  import would add files to, also while imports are disabled:
+  `{albumId, refusal, album}`, where `refusal` is `null`, `unavailable` (no
+  ready Album), `unreadable` (a ready Album whose saved title or visibility
+  cannot be read), `primaryRequired`, `primaryNotReady` (a primary Artist that
+  is not ready) or `tooLarge`, as a targeted create would refuse, and `album` is
+  `null` exactly when `refusal` is `unavailable` or `unreadable`, else
+  `{title, primaryArtists, coverUrl, missingRows}`: the
+  cleaned saved title, the names of its ready primary
+  Artists in Credit order (at most 50), the private artwork URL
+  `/api/admin/v1/catalog/album/<id>/artwork` or `null`, and how many rows of a
+  valid stored expected tracklist no declared member fills (`null` without one
+  or over the member bound). A malformed ID is `400 ADMIN_IMPORT_INVALID_INPUT`.
 - `GET /imports/:id`: the private project with a Draft v2 `draft`. `album`
   holds `title`, `artists`, `label`, `releaseDate` and `visibility`, and each
   track holds `slotId`, `title`, `discNumber` and `trackNumber`. An Artist
@@ -781,8 +862,16 @@ Import routes (relative to `/api/admin/v1`):
   title is matched on its own, exactly and case-insensitively: at most 20
   ready Artists per name (kind `artist`), 20 ready Organizations of any type
   per label name (kind `organization`, `albumId` `null`) and 20 Albums per
-  title, beside at most 20 Track title candidates. Verified byte matches are
-  read on their own: for each staged file's hash, the first ready Track outside
+  title, beside at most 20 Track title candidates. The Album a saved Album
+  reuse names and the Album the import was created for (`createdForAlbumId`)
+  are also added, once each, when ready, not malformed and not already listed,
+  whatever their titles (`match: 'name'`), so a reuse whose revision is no
+  longer current, or that was replaced by another Album decision, can be chosen
+  again; preselections compare Album items by name only, so an Album listed by
+  ID under another title changes no preselection. Approval and the worker's
+  preselection recheck read the same candidates. Verified
+  byte matches are read on their own: for each staged file's hash, the first
+  ready Track outside
   the saved append target whose stored hash is bound to its current object, so
   at most 100, and no number of same-title Tracks hides one. Every ready Track
   on an Album candidate or on the saved append target whose verified bytes or
@@ -816,9 +905,11 @@ Import routes (relative to `/api/admin/v1`):
   MusicBrainz bridge](#itunes-fallback-and-musicbrainz-bridge)),
   one query adds up to 20 ready Artists named with another name of its group
   (`match: 'localizedName'`, `localizedOf` the name it was read for, upgrading
-  a row listed by name only, never one listed by ID or alias): at most 2561
-  items. Such a row blocks a preselected create of the entry or proposal with
-  that name; since a row is listed once, another name read whose localized
+  a row listed by name only, never one listed by ID or alias): at most 2563
+  items with the saved append target and the Album the import was created for.
+  Such a localized-name row blocks a
+  preselected create of the entry or proposal with that name; since a row is
+  listed once, another name read whose localized
   name it also is (a second entry of the same group, or a name beside the
   entry whose ID or alias lists it) is made `unavailable`, so its create is
   not preselected either. A label has no localized names. An Artist
@@ -1268,6 +1359,38 @@ fails that file before admission and stops the queue with a reload request and
 a Reload button beside the uploads; for other changes it shows that request and
 button on the refused action only.
 
+An Album page's **Add files to this Album** and **Upload missing files** open
+the create page as `/admin/imports/new?album=<id>`. It reads
+`GET /imports/album-targets/:albumId` and shows a Target Album card in place of
+the new-Album heading, above the file choosers: the cover, title and primary
+Artists and, when the Album keeps an expected tracklist and lists at most 5000
+members, how many rows have no file yet. The card says that the files become new
+tracks of that Album, whose own title, Artists, label, cover and visibility stay
+unchanged, and that metadata lookup does not run automatically for them.
+**Create import and upload files** then sends `targetAlbumId` with the manifest
+(never a draft), and the import that opens already appends to that Album. The
+choosers and Create stay disabled while the Album is read and when it cannot be
+used: a failed read offers a retry, and an Album the read does not find ready,
+one whose saved title or visibility cannot be read, one without a primary Artist
+Credit, one with a primary Artist that is not ready, or one over the member
+bound shows that reason in place of the card, with links back to the Album and
+to a new Album upload (which keeps the chosen files); a malformed `album` value
+reads as unavailable without a request, and a card chunk or copy that cannot
+load asks for a reload. A create refused as a conflict (any 409 without a
+message of its own, such as `ADMIN_IMPORT_TARGET_UNAVAILABLE` or
+`ADMIN_IMPORT_TARGET_TOO_LARGE`) or as `ADMIN_IMPORT_APPEND_PRIMARY_REQUIRED`
+reads the Album again; the card then names the reason, or, when the Album can
+still take files, says that it changed while the import was being created, in
+place of the generic refusal. The selected files, folder name and a pending
+create are the page's usual buffers, shared with the plain create page, and the
+page always shows what Create or Retry sends: while a create intent is pending,
+the page replaces itself with the page of that intent's target (the Album's, or
+the plain one), and files chosen for another target are dropped once no create
+is pending. The card and the Album page's two links are release-packaged
+`web-admin` copy (`admin.album_import.*`) in their own lazy chunks; the plain
+create page loads none of it. A link or the summary's next-step line whose copy
+cannot load is left out, and the page keeps working.
+
 The analysis worker admits two active projects globally and one per initiating
 admin, uses 24-hour grants and 120-second leases, and checkpoints every provider
 attempt before dispatch. A stopped analysis still occupies its actor/global slot
@@ -1304,9 +1427,14 @@ edits, catalog editing turned off, or the Album's ineligibility) is the
 buttons' accessible description, and a disabled completion button loses the
 accent so it never reads as the live action, as does every disabled primary
 button on the administrator pages (grey at full opacity), such as **Save pairing
-and use this release** while a track still needs a release track. **Convert to MP3** and **Refresh
-status** follow on a quieter row of their own, with fainter outlines, in the
-same keyboard order. On a single-column hero the completion buttons fill their
+and use this release** while a track still needs a release track. **Convert to
+MP3**, **Add files to this Album** (only while imports are available to the
+viewer and the saved Album has a primary Artist Credit, and, like Convert to
+MP3, hidden while the Album has unsaved edits or a save conflict; it opens New
+import for this Album) and **Refresh status** follow on a quieter row of their
+own, with
+fainter outlines, in the same keyboard order. On a single-column hero the
+completion buttons fill their
 row. The completion block keeps the primary button's place while its chunk and
 the eligibility read load, so the row below does not move, and the Album's copy
 is top-aligned with its cover, so rows the read adds only grow the hero
@@ -1367,86 +1495,89 @@ minutes after it first saw a lookup active (a run that never advances, such as
 one queued while imports are off); **Refresh status** and returning to the tab
 still read it. Card dates (**Last changed:**) follow the interface language, as
 on the import page.
-**Save completion draft**
-changes only the private draft and sends only the values edited since the saved
-draft was loaded (an edit changed back is no change), so it never overwrites
-another value saved meanwhile; **Update original Album** lists every change the
-apply can write (see below), lookup-filled and lookup-answered values preselected
-and deselectable, and confirms their frozen old/new values. A review page leads
-with its three steps in place of a status row: **① Find release**,
-**② Answer questions** and **③ Update original Album**, a group of label and
-value pairs that is no live region, so a poll announces nothing, one step per
-row at narrow widths. They load as one chunk with the Luna AI controls and the
-applied view; a chunk that cannot load leaves the steps out, while the Luna AI
-controls and the applied view ask for a reload in their place. A review
-captured for lookup shows a dash in each step until its lookup read lands, and
-while that read fails. On an unapplied review **Find release** links to the
-lookup summary; it reads the review's lookup view as the summary does, through
-the same brief as the list items (see `GET /catalog-reviews` below): not run,
-queued, running, retrying, the release applied by title (or, applied from
-iTunes, that a free retry can check it against MusicBrainz), a matching release
-found, how many releases that may fit were found (editions counted once), no
-release used, no matching release, or a lookup that did not finish or is
-unavailable, offering a free retry only while the review's source is current.
-**Answer questions** says **Disc and Track Numbers needed** where
-the summary's cause is the members' positions or missing durations,
-**Choose a release** for a tie or an offered match, else how many lookup
-answers are still needed (as the summary, the workbench card and the Album page
-count them) with how many records the identity rows still need beside them, or
-those records alone, **Choose a release** for a possible release that can be
-chosen or a release to use again, or **Nothing left to answer**; it links to the
-first open answer, else the identity rows, else the lookup summary, and shows a
-dash while a run is active and once applied. **Update original Album** shows
-how many changes the Update step has selected as it stands (that step's own
-count), how many it lists to select (manual values are not selected by
-default), **No changes yet**, or, once applied, **Updated** with the date and
-time in the interface language; while **Answer questions** asks for Disc and
-Track Numbers or a release choice, it says only that the update follows
-(**Update after entering Disc and Track Numbers** or **Update after choosing a
-release**) and the steps offer no button, even where the Update step lists saved
-numbers, so the page shows one next step. Otherwise, while that step lists
-changes, **Review changes to apply** opens it, with its count once something is
-selected. Once no lookup step is left (no active run, Disc and Track Numbers,
-choice or free retry), nothing is left to answer, Luna AI is not queued or
-running and the Update step's selection is ready to apply (the source current,
-a change selected, no identity row blocking it and its reads current), the
-steps add **Everything is answered; you can update the original Album.** as a
-polite status and that button becomes the primary one; with everything else
-clear but none of the listed changes selected yet, it is primary without a
-count or that line. When the last answer makes the changes ready and leaves the
-focus on the page or in a folded section, the focus moves to that button. Both
-show on the Edit draft tab only, and the button is disabled while the draft has
-unsaved edits. An applied review's steps offer **What was updated** instead,
-which opens the Update step. Once Luna AI was used (queued, running or a
+Saving the draft alone (the action bar's secondary save-only button, "仅保存草稿"
+in Simplified Chinese, shown only while the draft has unsaved edits or selected
+pending proposals, or after a save-only attempt failed until loading the saved
+version ends that refusal, never primary) changes
+only the private draft and sends only the values edited since the saved draft
+was loaded (an edit changed back is no change) and the selected proposals, so it never
+overwrites another value saved meanwhile; it stays available while lookup or
+Luna AI runs. **Update original Album (N)**, the action bar's primary button,
+first saves the same way, then shows an inline confirmation of the selected
+changes' frozen old/new values (see the action bar below). A review page has no
+tabs and no steps bar, and follows the v3 design's order. It leads with a header,
+a compact Album hero with the cover beside the title at every width (a small one
+on a phone) and no header buttons once the review is read (a review that cannot
+be read keeps **Refresh status** there), so the status line and the proposed
+changes below are in the first screen above the action bar: the Album's current
+artwork (the catalog Album read the Album page uses, `GET /catalog/album/:id`,
+loaded in its own chunk, with the artwork placeholder while that read is
+pending, fails or finds none), the captured Album title as stored (a trailing
+credit is never stripped), the draft's primary Artist names and how many local
+tracks the review captured. One status line follows (`CatalogReviewStatus.tsx`,
+its own chunk): an icon, a short headline that is the polite status, one
+sentence naming the next step, and a **Details** text button on the right that
+shows or hides the run's log (see the review's status line below). The editing
+section follows it: **Check the proposed changes**, the numbers proposed from
+titles (see **Numbers proposed from titles** below) with the optional
+title-prefix cleanup after the rows, then the update range (see below), then the
+review's lookup details (`CatalogReviewLookupDetails.tsx`, its own chunk, the
+**Metadata lookup** region: how many optional lookup answers are open, whose
+fields stay out of this update until answered, the identity rows (which say how
+many Artists or labels can still be matched or created, likewise outside this
+update until chosen), the results, the free retry and the collapsed **Reference
+releases**), then any notice that the saved draft changed (a conflict). A row of
+alternatives comes next, labelled "不对？" (**Not right?**): **Look up another
+name** while lookup is available, which opens the name box
+(`CatalogReviewLookupAnother.tsx`, its own chunk) below the row and opens it by
+itself where the status line makes it the next step (no match, no release,
+nothing to search, a lookup not started, a run superseded, or numbers the titles
+do not propose); the administrator's choice to open or close it holds for that
+run, and a new run (a name submitted, a retry) drops it; manual editing, which
+opens the draft editor (`CatalogReviewDraftEditor.tsx`, its own chunk) in place
+below the row for the Album title and date and each Track's title, Disc Number
+and Track Number; and **Discard completion**. A review whose source is not
+current shows its stale view, and an applied review its outcome view, instead
+(below).
+Once Luna AI was used (queued, running or a
 generation above 0), one muted line gives **Luna AI (paid, optional)** and its
-state: above the Luna AI controls on an unapplied review, under the steps on an
-applied one. A run that did not succeed reads **Last run did not succeed**, with
+state: above the Luna AI controls on an unapplied review, under the header on
+an applied one. A run that did not succeed reads **Last run did not succeed**, with
 its issue below; while the lookup leads (as on the workbench card), it is
 instead the one quiet line **Luna AI (paid, optional): the last run did not
 succeed; you can ignore it.**, and of its issues only an unknown provider
 outcome, which keeps Luna AI from starting, is said, muted. On an unapplied
-review the Luna AI controls and **Discard completion** follow the lookup summary
-under **Other actions**, a visible label rather than a fold, so Luna AI stays
-visible and secondary. Then an unapplied review shows its **Metadata lookup** summary,
-above its tabs and loaded as its own chunk (a chunk that cannot load, the
-summary's or one it loads, asks for a reload in its place, leaving manual
-editing usable): the lookup status, refined for a review (see the review's
-lookup summary below), with the free **Retry lookup** (or, for a run that
-ended because the Album changed, **Open the Album to start a new completion**)
-or, where entering the numbers is the next step, **Fill Disc and Track Numbers
-from titles** as its only primary button, or while a run is queued or running
-its progress line; right after the status, while a run is active, that the
-original Album can be updated once metadata lookup finishes, how many lookup answers are still needed and how many records the
-identity rows still need; the run's steps, open while a run is queued, running
-or retrying and, once it ended, folded under its record after a line naming
-what a completed run searched; the name box prefilled with the last submitted
-name and Artist name or else the
-saved Album title (its **Artist (optional)** hint says that an empty field uses
-the Album's primary Artists), which asks before it replaces a queued, running
-or retrying run, folded under **Didn't find it? Look up another name** after a
-completed run unless the status makes it the next step (see below), followed
-by the fill as a plain button where it is only
-offered; the candidate chooser (review copy about the Album's tracks; while the
+review the Luna AI controls follow the row of alternatives in a block of their
+own, never a fold, so Luna AI stays visible and secondary; Luna AI suggestions,
+while there are any, follow in their own section labelled Luna AI. The status
+line, the lookup details and the name box are the review's lookup parts, each
+its own chunk (a chunk that cannot load asks for a reload in its place, leaving
+the proposed numbers, manual editing and the action bar usable; without the
+status line no other name is offered, as its next step is unknown). The lookup
+details hold, in order: how many lookup answers are still needed and how many
+records the identity rows still need; the identity rows; the results (below);
+for a release applied for its Album values only whose tracks still pair in more
+than one way while the titles propose the numbers, a line saying why its tracks
+are not applied; the free **Retry lookup** (a plain button, never the page's
+primary, which is the action bar's update), not for a run that ended because the
+Album changed, whose status line links **Open the Album to start a new
+completion** instead; and the candidate chooser. The name box is prefilled with
+the last submitted name and Artist name or else the saved Album title and the
+draft's primary Artist names (its **Artist (optional)** hint says that an empty
+field uses the Album's primary Artists), offers **Cancel** beside its free
+submit, which closes it and returns the focus to **Look up another name**, asks
+before it replaces a queued, running or retrying run (**Look up another name**
+stays usable while a run is active, as automatic retries can last minutes), and,
+after a run that found no release, hints that a shorter name may help
+("可尝试去掉副标题");
+the candidate chooser, shown as **Reference releases · N possible editions**, N
+being the possible releases the status line counts too (the matching groups,
+else the release groups the tracks fit: the possible matches, else the other
+fits; never the records examined, which only the log counts), collapsed unless
+choosing a release is the next step (a tie, an offered release, a release to use
+again, or a release the tracks pair with in exactly one way), and folded again
+once that no longer holds (review
+copy about the Album's tracks; while the
 run has no matching group, possible matches first and the other releases in two
 folded sections; per candidate one short reason, the editions a release card
 groups, each choosable,
@@ -1493,53 +1624,81 @@ record's shows only beside it, so there is none when neither the lookup nor the
 captured Album supplied one, as with an iTunes-only result for Artists without
 MusicBrainz IDs; and **Lookup values applied or answered**, folded, each once.
 Once the release applied to the draft leaves nothing open (no active run, free
-retry, refined status, lookup answer or identity row that needs a record, and no
-release applied for its Album values only whose tracks still pair in more than
-one way while the titles can fill their Disc and Track Numbers, so that card's
-**Fill Disc and Track Numbers from titles** stays in view, also offered as a
-plain button under the status after a line that the tracks do not pair with the
-applied release in one way, so track values and track Artists are not applied,
-and the hint that the numbers can be filled from the titles) and is neither an
-iTunes-only result nor an artist mismatch, whose values to check are never
-collapsed (so an iTunes-only result never folds), everything after the name box
-folds under **Lookup results and applied values**, which opens again on request
-and by itself as soon as something opens, but never folds while the pairing panel
-(**Pair tracks by hand**, below) is open; it stays mounted, so unsaved identity
-choices survive it.
+retry or lookup answer, and no release applied for its Album values only whose
+tracks still pair in more than one way while the titles give their Disc and
+Track Numbers, which the line after the results then explains: the tracks do not
+pair with the applied release in one way, so track values and track Artists are
+not applied, and saving the numbers proposed from the titles compares again)
+and is neither an iTunes-only result nor an artist mismatch, whose values to
+check are never collapsed (so an iTunes-only result never folds), the results
+(the bulk answers, conflicts, values to check, Track Artists, the expected
+tracklist and the values applied or answered; never the identity rows or the
+reference releases, which sit outside them) fold under **Lookup results and
+applied values**, which opens again on request and by itself as soon as
+something opens; it stays mounted.
 Lookup controls are disabled while a command runs,
-offline, while the draft has unsaved or conflicting edits and while the source
+offline, while the draft has unsaved or conflicting edits (numbers proposed from
+titles and not yet saved are not edits) and while the source
 is not current, and answers also while a run is active; the summary polls while
 a run is active and reads the review detail again when its read shows a newer
 revision or `valueRevision`, which lookup applications advance at the same
-revision. An open Apply confirmation is disabled once the detail shows another
+revision. An open update confirmation is disabled once the detail shows another
 `valueRevision`, and its apply sends the one it showed, so a run that completed
 unseen is refused (`409 ADMIN_IMPORT_REVISION_CONFLICT`) and the page reads the
 review again. **Use Luna AI (paid)** (**Use Luna AI again (paid)** after a run)
-follows that summary, above the track editor, is never styled as the primary
-action and always has its own confirmation, titled "Use Luna AI? This is a paid
-AI service", whose confirm button keeps the primary style and repeats **Use Luna
-AI (paid)**; its suggestions arrive unticked in **Review Luna AI suggestions**
-and change the draft only when adopted. An applied review is read-only: its
-Update step shows **What was updated** in place of the selection, with when the
-original Album was updated (in the interface language), each field the apply
-wrote (`applied.fields`, named as in the selection: the Album's title, date,
+follows the row of alternatives, is never styled as the primary
+action and always has its own inline confirmation, titled "Use Luna AI? This is
+a paid AI service", whose confirm button repeats that it starts Luna AI and is
+paid and whose cancel button keeps the focus. While metadata lookup is queued,
+running or retrying, the confirmation adds a warning that free lookup results
+are still pending, its cancel button offers waiting for the free results
+instead, and its confirm button says Luna AI starts anyway (paid), so both run
+side by side; when the run ends while the confirmation is open, the labels
+return to the plain ones, and a lookup that ends never starts Luna AI. The
+confirmation gives the project's remaining Luna AI runs and paid calls from the
+review detail's `analysis` (runs left are 2 minus `generation`, calls left
+`maxAttempts` minus `attemptsUsed`) and says when this is the project's last
+Luna AI analysis: its runs left, as far as its paid calls left cover a whole run
+(one call for the Album and one per ten tracks), equal one. No review read supplies the daily allowance
+(only the import summary's `analysis.daily` does), so the review's confirmation
+does not show it until a server field adds it. Its suggestions arrive
+unticked in the Luna AI section and change the draft only when adopted; an
+adopted suggestion is listed in the update range unselected. An applied review
+is read-only: its outcome view gives what was updated in place of the
+selection, one compact row per affected Track (its title with its new Disc and
+Track Number, and that its title was updated) and per Album value, grouped on a
+long Album as the confirmation groups them, under a heading counting the fields
+written that takes the focus when this page's update led there, with when the
+original Album was updated (in the interface language), and, behind the **What
+was updated** disclosure (it names the fields, not their former values), each field
+the apply wrote (`applied.fields`, named as in the selection: the Album's title, date,
 Artists, label and expected tracklist, and each Track's title, Disc and Track
 Number, a Track named by its quoted title as the selection names it, by its
 position only when untitled), for a review captured for lookup a note that
 track Artist changes, if any, are not in the list and can be checked on the
 original Album's tracks, or that only track Artists were updated when the apply
 wrote no listed field, and the release its metadata lookup applied, if any, with its
-source. It offers no **Update original Album** and no count.
-**Discard completion** (never primary) follows the Luna AI controls on an
-unapplied review page, whatever its source status, and ends each unfinished card
+source. A line then says how the edition stands: matched where lookup
+preselected the release it used (`applied.choice` `preselected`, its basis a
+match and nothing left unchecked) or the administrator chose one whose candidate
+is matching with nothing left unchecked (`applied.choice` `chosen`, such as a
+tie's answer among matching groups), or else that the edition remains
+unconfirmed, naming a release the administrator chose without a match (a chosen
+release whose candidate is not matching); checking the edition
+further is optional and takes a new completion. It offers no **Update original
+Album** and no count; the action bar's only button opens the original Album.
+**Discard completion** (never primary) ends the row of alternatives on an
+unapplied review page, whatever its source status (the read-only stale view
+keeps it), and ends each unfinished card
 of the **Album completions** queue; an applied completion offers none. It is
-disabled offline, while Luna AI is queued or running (its description then says
-"Stop Luna AI before discarding this completion.") and while the review page's
-own change is unconfirmed; unsaved edits do not block it. Its confirmation names
+disabled offline, while Luna AI is queued or running (the reason, "Stop Luna AI
+before discarding this completion.", then shows as text beside it) and while
+the review page's own change is unconfirmed; unsaved edits do not block it. Its
+confirmation, inline on the review page and a dialog on the queue, names
 the catalog Album, with the draft title as secondary text when it differs, says
 what is lost and that the catalog does not change, puts initial focus on Cancel
 and sends the revision it showed. On success, or when another tab already
-discarded the review, it forgets the review's editor, stage and command buffers,
+discarded the review, it forgets the review's editor and command buffers,
 removes the review's reads and navigates to the Album page (to the queue when
 the source is unavailable), whose action then opens another open completion or
 creates a new one; the queue reads itself again, so the card disappears. A
@@ -1562,10 +1721,10 @@ history entry, so browser Back returns to that page, which shows the Admin view
 gate as any User view visit does and never restarts a stopped upload queue.
 The catalog uses artwork/name entries for Albums, Artists, MediaTracks and
 Organizations, with management actions on their detail pages: the hero groups
-them, an Album's completion first, then Convert to MP3 (Albums and
-MediaTracks) and Refresh status on a quieter row, and the details form below
-the hero is where manual edits are made. The inventory
-loads separately from editing controls. Its optional `kind=artist`,
+them, an Album's completion first, then Convert to MP3 (Albums and MediaTracks),
+Add files to this Album (Albums) and Refresh status on a quieter row, and the
+details form below the hero is where manual edits are made. The inventory loads
+separately from editing controls. Its optional `kind=artist`,
 `kind=audioTrack` or `kind=organization` query parameter selects a category;
 missing or unsupported values select Albums. Detail return links retain that
 category. Organizations use a name mark, matching listener details, and do not
@@ -1597,10 +1756,13 @@ state. A summary names the source (MusicBrainz or iTunes, untranslated), the
 date it was applied in the viewer's locale and time zone, its row count and how
 many rows have no file; on an Album without a primary Artist Credit (the append
 refusal's test, read from the saved Album) that has such a row, a note says only
-a Content Manager Audio upload can fill them. On a truncated Album a row's
-member may be past the read bound, so no row is marked No file yet, no note is
-shown and the summary reads only Expected tracklist. Administrators who may edit
-the catalog see Clear expected tracklist. It opens the catalog confirmation,
+a Content Manager Audio upload can fill them, and on one with a primary Artist
+Credit, while imports are available to the viewer, **Upload missing files**
+beside the summary opens the same New import for this Album as the hero's **Add
+files to this Album**. On a truncated Album a row's member may be past the read
+bound, so no row is marked No file yet, no note or link is shown and the summary
+reads only Expected tracklist. Administrators who may edit the catalog see Clear
+expected tracklist. It opens the catalog confirmation,
 which shows the summary against No expected tracklist and says that tracks,
 files, the Album order and listeners are unchanged, and sends the clear alone at
 the Album revision the confirmation captured. It is disabled while a field edit
@@ -1631,76 +1793,226 @@ Artist entries (the Album's ordered Artist Credits until lookup changes them),
 their join phrases and its label read-only, and offers a Disc Number field only
 for Tracks whose review captured one. Metadata lookup values and conflict
 answers change the Artist entries, the label, each member's track Artist entries
-and the expected tracklist only in the review's private draft. **Update original
-Album** (`CatalogReviewApply.tsx`, its pure model `catalogReviewApplyModel.ts`)
-lists, in this order, the Album's title and date, its Artist entries and label
+and the expected tracklist only in the review's private draft. The update range
+(`CatalogReviewRange.tsx`, its own chunk, with the pure model `catalogReviewApplyModel.ts`) is a
+disclosure in the editing section whose summary counts the selected changes
+(in "项", items, since member lines are not fields) and opens to adjust them:
+one group for the numbers (one per disc on a long Album), the Track titles
+(counted as one group), the Album date, the Album title, and the Artist
+entries, label, member Credits and expected tracklist, each with a checkbox that
+is mixed while only some of its items are selected and a nested disclosure
+listing each item with its original and new value. It lists, in this order,
+the Album's title and date, its Artist entries and label
 (current and new Credits, an IDs-only change said as such), the expected
 tracklist (the rows kept and the rows it stores, with their missing-file rows
 after the selected changes), each Track's title, Disc Number and Track Number,
 and one line per member whose Credits change (current and new Credits, every
 Credit removed, and its attribution change in a sentence: the track's Artist
-credits will be marked Documented, currently Unknown). It
+credits will be marked Documented, currently Unknown). Its count follows the
+draft as edited, unsaved values and proposals included, while whether the
+update is ready follows the saved review. It
 reads the review's lookup summary and its identity read (`GET /candidates`,
 whose `selection` names the Artist entry lists and label it shows and whose
 `keptTracklist` is the Album's captured tracklist): every review-only item (the
 Artist entries, label, tracklist and member lines) and every title, date or
 number lookup filled or that a conflict answered with the lookup value arrive
-selected, and so does a saved Disc or Track Number at its member's pair position
-(a number the administrator fixed, on which lookup re-ranked the pairing); any
-other manual or Luna-adopted change arrives unselected, and any can be
-deselected. An explicit choice is kept across reads while its item shows the
+selected, except an Artist entry list or label whose identity row still needs
+an answer, which arrives unselected until it is answered (the identity rows say
+whether it is in this update or not yet). Disc and Track Numbers proposed from
+titles giving both numbers also arrive selected, and so do the same numbers once
+saved, while they still equal the Disc and Track Number the member's captured
+title gives and fill an empty catalog value (so a reopened or returned-to review
+keeps that default), and a saved Disc or Track Number at its member's pair
+position (a number the administrator fixed, on which lookup re-ranked the
+pairing) that fills an empty catalog value. Titles the optional cleanup cleaned
+arrive selected, since turning it on chooses them (below). Track
+Numbers proposed from titles giving them alone (marked for checking), any other
+value that replaces a non-empty catalog value (marked as replacing, the original
+struck through), other manual changes and Luna-adopted changes arrive
+unselected, and any can be deselected (owner rules, Catalog Visibility and
+Administration). An explicit choice is kept across reads while its item shows the
 same saved values (the review draft's value, Artist entries or tracklist, never
-what identity decisions resolve), so saving identity decisions never undoes a
-deselection; a newer saved or looked-up value needs choosing again. A value
+what identity decisions resolve), so saving identity decisions, or the save
+that prepares the update, never undoes a choice; a newer saved or looked-up
+value needs choosing again. A value
 whose lookup conflict is unanswered cannot be selected and says to answer it
-first. The tracklist can be selected only while every member its pairing placed
+first. A Track title cleaned of its position can be selected only with its
+member's Disc and Track Number, or when the member already has both, otherwise
+its note says so. The tracklist can be selected only while every member its
+pairing placed
 sits at its row after the selected numbers, otherwise its note names each member
 off its row. A Disc or Track Number lookup filled through its pairing is
 selected only with that tracklist, or alone when the Album's kept tracklist
 places the member at a row with the same position, otherwise its note says it
 applies together with the expected tracklist; a deselected one waits for
-nothing, so it can always be selected again. When the Album's primary Artist Credits change, the step says Album
+nothing, so it can always be selected again. When the Album's primary Artist Credits change, the range says Album
 Credits are never copied to tracks and names each member whose Credits still
 credit a replaced Artist. Below the items it lists each Artist and label
 Organization the selected lists name: reused (hidden ones marked), created,
 named differently by bound entries, or still needing a record, with each
-MusicBrainz ID recorded or replaced. **Update original Album** waits while
-lookup or Luna runs, while a selected list's identity needs a record (it names
-them) and until both the lookup summary read and the identity read of this
-revision and value revision are in. Its confirmation, whose copy says only the
-listed changes update the Album, shows the same items, identities and note
-frozen, and sends
+MusicBrainz ID recorded or replaced.
+
+The action bar (`CatalogReviewActionBar.tsx`, its own chunk) sticks to the
+bottom of the viewport on an unapplied review and on its outcome views, with
+buttons at least 44 px high and its heading (**Current step**, "当前操作", or
+**Final confirmation**, "最后确认", while the confirmation shows) hidden at
+narrow widths. It reads the update model of the saved review and of the draft as
+edited, and runs the prepare and apply state machine
+(`useCatalogReviewPrepare.ts`) in a chunk of its own
+(`CatalogReviewPrepareControl.tsx`); the confirmation and the unknown view share
+another (`CatalogReviewConfirmation.tsx`, with the compact rows of
+`CatalogReviewCompactRows.tsx`), and the stale and applied views are their own
+(`CatalogReviewStale.tsx`, `CatalogReviewApplied.tsx`). A bar or state-machine
+chunk that cannot load asks for a reload in the bar's place, with nothing to
+press; a confirmation chunk that cannot load asks for a reload in its place and
+holds the confirm button with that reason, as nothing may be confirmed unseen. While it is
+shown, the page's scroll container (the shell's main area) keeps that much
+bottom scroll padding plus 12 px of room for a focus outline, following the
+bar's height as it grows (an alert, a wrapped reason), so a focused field and its
+outline are never hidden behind it. It is absent from the discarded notice and the
+Admin view gate. Its primary **Update original Album (N)**, N being the range's
+count, waits while lookup runs and while Luna AI runs (it names both when both
+run; stopping Luna AI leaves the lookup reason), while a Disc or Track Number the
+draft holds is out of range (Disc 1–999, Track 1–9999, as the review save
+accepts), selected or not, since the save before the update writes every edit
+(said before the lookup and Luna AI reasons, and holding the save-only button
+too, which that reason then describes), or two
+members would sit at one Disc and Track position after the selected numbers (a
+missing Disc Number counting as 1; it names them), while nothing is selected,
+and while a selected list's identity needs a record (it names them); it also
+waits offline, while the draft has conflicting edits, while another change of
+the review runs or waits for its outcome, and while the reads the update rests
+on catch up with the saved review (**Loading…**). It never
+waits for unselected work, nor for a lookup that failed or found nothing. The
+reason shows as text under the bar, which describes the button
+(`aria-disabled`), so it stays reachable by keyboard. While nothing holds the
+update and no save failed or needs checking, a plain note under the heading
+says what the update does instead: **The original Album changes only after you
+check and confirm.** ("核对确认后才更新原专辑。"), or, once the draft is saved
+with nothing unsaved, **Draft saved; the original Album has not changed. Next,
+check and confirm.**; it is neither live nor the button's description. Pressing it prepares the
+update: it notes the selected items, saves the unsaved values and the selected pending
+proposals, never an unselected one, as one ordinary review save (`PATCH
+/catalog-reviews/:id`, skipped when nothing changed), which re-ranks the stored candidates without a lookup run
+when a member's own number changed, and waits until the detail, the lookup
+summary and the identity read are all at the saved revision and value revision.
+Meanwhile the bar says the draft is being saved, then that the saved numbers and
+the update range are being checked, in its one polite status, which also says
+a settled save-only and a return to adjusting; the confirmation
+says the stored candidates were compared again only when the save changed a
+number and the run completed with candidates, and otherwise that the saved
+numbers and the update range were checked. When the save advanced the value revision (its re-rank applied
+release values), every item that was not noted is kept unselected by an
+explicit choice and the confirmation says that extra release data was found and
+not added; when a noted item gained a hold or an identity row that needs an
+answer, the page returns to editing with that row shown instead (owner rules,
+Catalog Visibility and Administration). A refused save keeps the unsaved values
+and shows its message as an alert at the bar (said there only, never again at
+the top of the page; when another administrator's save made the edits
+conflicting, the editing section keeps only its button to load the saved
+version, and loading it ends the refusal, as the values it kept are gone: the
+alert goes, the primary updates again and the save-only button shows only for
+new edits), whose primary, relabelled **Retry preparing the
+confirmation** ("重试准备确认") and keeping the focus, retries the
+preparation; a save whose outcome is unknown keeps its intent, and the bar's
+**Retry original operation** sends the same save again, after which the page
+returns to editing with the draft saved, so the update is requested again.
+Saving the draft alone, the bar's secondary button, saves the same way without
+preparing. While that save runs its button stays, held (`aria-disabled`) and
+described by the progress, so a focus on it stays; once it saved with nothing
+left to save, or its outcome is unknown, the button goes and the focus it held
+moves to the primary, while a refused one keeps its button and the focus. The
+bar's one polite status stays mounted: it says the progress, then **Saved to
+private draft** or that going back kept the draft saved. The unknown view's own
+sentence is a polite status too, so a query that finds the review still
+unapplied is announced.
+
+The confirmation is inline above the bar, a region named as a dialog but not
+modal, with the focus on its back button, which its summary sentence describes,
+and the page's other controls disabled. Shown after the editing section, it
+scrolls into view when it opens (to its nearest edge, clear of the bar through
+the scroll container's padding, so a tall one shows its top). It names the Album, says the draft is
+saved and checked and how many changes update the original Album after the
+final confirmation, lists one compact row per affected Track (its title with its
+new Disc and Track Number, and a neutral title change, "标题修改") and per Album
+value, then one line for the members whose Credits change; on a long Album (25
+or more tracks) the numbers that fill empty values and the title changes are one
+line each ("填写 44 首曲目的碟号与曲号"), while a number that replaces a stored
+value keeps its own row. The full original and new values follow behind a
+disclosure (**Full original / new values · N**, rendered when opened), then the
+Artists and Organizations to be reused or created, and that artwork, audio and
+visibility stay unchanged. The bar then holds **Back to adjust** ("返回调整")
+and **Confirm update (N)** ("确认更新（N 项）"). It stays in view, disabled, while applying. Going
+back keeps the saved draft, says that it does and that the original Album is
+unchanged, and focuses the primary button. The bar's primary confirms the
+update with its count, waiting with its reason once the detail moved past the
+frozen item, and sends, from the frozen item,
 `{expectedRevision, fields, memberCredits, preselections, musicBrainzIds,
 expectedValueRevision}`: the selected fields and members, and only the
 preselections and ID writes of the identities a selected list or label owns. A
-`409` refusal (a new candidate or ID holder, a decided record or ID changed, a
-lookup application unseen) reads the review, its summary and its identity rows
-again, so a row that needs an answer is shown in the same review, and keeps
-nothing to retry. The steps' **Review changes to apply** count and their third
-step's are this step's own count of selected changes, so they always equal its
-**Update original Album (N)**; the Review step's empty state offers this step
-without a count. Luna's Artist and label suggestions appear only in a hint panel
-of the
-Review step, which can keep the current values (rejecting a suggestion) but
+`409` refusal for a new candidate or ID holder, a decided record or ID changed
+or a lookup application unseen (`ADMIN_IMPORT_REVIEW_REQUIRED`,
+`ADMIN_IMPORT_DUPLICATE_STALE`, `ADMIN_CATALOG_REVIEW_IDENTITY_CHANGED`,
+`ADMIN_IMPORT_REVISION_CONFLICT`, `ADMIN_IMPORT_FIELD_CONFLICT`) returns to
+editing and reads the review, its summary and its identity rows again, so a row
+that needs an answer is shown in the same review, and keeps nothing to retry;
+active Luna AI or lookup has its own message. Only
+`409 ADMIN_CATALOG_REVIEW_SOURCE_CHANGED`, or a detail read whose source is not
+current, leads to the stale view: the header, that this completion is out of
+date and cannot overwrite content saved later, the old draft read-only behind a
+disclosure, **Discard completion**, and as the bar's only button opening the
+latest Album to start a new completion, or the queue when the source is
+unavailable; the stale draft is never submitted again. An apply whose outcome is
+unknown shows the unknown view in place of the editing section: that a lost
+connection does not mean the update failed, the frozen compact rows (kept in the
+workspace buffer, so a remount shows them too), and the note that it checks the same operation
+and never updates twice ("不会重复更新"). The bar's primary checks the result by
+reading the review again; when the review shows the update applied by this
+operation, the same operation is sent again, which replays its stored receipt,
+and the applied view follows; when it shows the review applied by another
+operation (another tab), the applied view follows without sending anything;
+when its source is no longer current, the stale view follows. Any other read of
+the review (refreshing its status, returning to the tab) that shows it applied or
+its source no longer current settles an unknown save or apply the same way,
+without sending anything, so Discard completion is available again in the stale
+view. Only while the
+review is still unapplied and current does its secondary, **Retry the same
+operation** ("重试同一次操作"), send the same operation again, and the view then
+says the original Album is not updated yet. When the page's own update leads to
+the stale, unknown or applied view, the focus moves to the view's heading; a
+review opened in one of them leaves the focus where it is. Luna's Artist and label suggestions appear only in a hint panel of the
+Luna AI section, which can keep the current values (rejecting a suggestion) but
 never adopts one or changes a Credit; acting on a hint is a separate catalog
 Credit edit.
 
-A review's lookup summary (`CatalogReviewSummary.tsx`) presents what the server
-decides. Its statuses and next steps are the import summary's
+A review's lookup parts (the status line, `CatalogReviewStatus.tsx`; the lookup
+details, `CatalogReviewLookupDetails.tsx`; the name box,
+`CatalogReviewLookupAnother.tsx`) present what the server decides. Their
+statuses and next steps are the import summary's
 (`lookupNextStep.ts`, shared with `ImportSummary.tsx`, and refined as below), in
 the review's own words where the import's wording names files, tags or the
 import: before a
 review's first run it says lookup has not run, with the name box next, and where
 lookup is not configured (`lookupAvailable` false) it says so and offers neither
-a retry nor the name box. It reads `GET /catalog-reviews/:id/lookup` for each
+a retry nor the name box (nor **Look up another name**); after an ended run
+whose sentence would name the free retry or the name box, the status line keeps
+its headline and says lookup is not configured instead (the superseded, tie,
+single-choice and applied lines name neither and stay). After an iTunes-only
+result was applied the headline names the applied release and one sentence says
+it is iTunes-only, not checked against MusicBrainz or without a MusicBrainz
+release, with its values flagged for checking. The status line reads
+`GET /catalog-reviews/:id/lookup`, which the details and the name box share, for each
 review revision and, while online, every 3 seconds while a lookup is queued or
 running or waits on a busy source and every 10 seconds while it waits out an
 outage, and the identity rows (`GET /catalog-reviews/:id/candidates`) for each
-revision and `valueRevision`. Its name box, candidate chooser and identity rows
+revision and `valueRevision`. The name box, candidate chooser and identity rows
 load as their own chunks, the first two shared with the import page, and the
 chooser loads its pairing panel (`CandidatePairing.tsx`) as another only when it
 is opened. The name box sends `POST /catalog-reviews/:id/lookup`, with `artist`
-only when the Artist field is not empty, and refuses a link in either field in
+only when the Artist field is not empty and is not the prefilled primary
+Artists' byline while those Artists are the names the server searches without
+one (the summary's `primaryArtists`, or any before the review is captured), so a
+lookup never searches Artists other than the ones shown, and refuses a link in either field in
 place, **Retry lookup** sends `/lookup/retry`, candidate previews load from `GET
 /catalog-reviews/:id/lookup/candidates/:key/artwork`, choosing a release or
 **Use none of these** sends `/lookup/choose`, the pairing panel reads `GET
@@ -1719,44 +2031,45 @@ no candidate from another entry and every save leaves it out. Each lookup
 refusal has its own message, as on the import page, and reads the summary and
 its identity rows again.
 
-Where the shared next step is no match (`lookup.no_match`), or no match with the
-iTunes fallback unavailable (`lookup.itunes_unavailable`, which then adds that a
-matching release may be missing from the list), the review refines it in
-`reviewLookupStatus.ts`. The review summary imports it, and so does the chooser
-shared with the import page, which loads it with its own chunk but never calls
-it there, so `lookupNextStep.ts` and the import page's initial chunks stay
-unchanged. It takes the first cause that applies. An Album without members says
-that its tracks cannot confirm a release and how many releases have a matching
-name, which choosing brings in with every row without a file, and, when the run
-named no Artist (none was submitted and the Album has no primary Artist entry),
-that adding one narrows the results. Otherwise it looks at the releases the
-tracks fit: the possible matches (below), else the other unverified candidates,
-saying that their titles differ from the name searched. It names the first of
-them and the cause. When one of those releases pairs with the members in exactly
+The review's status line (`reviewStatusLine.ts`, pure, loaded only with the
+status line's chunk) gives one headline and one sentence, the first that
+applies. Luna AI running beside an active lookup reads **Free lookup and Luna AI
+are both running**, saying to wait for the lookup and to wait for or stop Luna
+AI; Luna AI alone (queued or running) reads **Luna AI is analyzing**, saying the
+draft can be checked meanwhile, and keeps whether the name box is next. A queued
+or running run names its phase and counts (below), saying the draft can be
+checked and edited meanwhile. A run that did not finish (retrying, MusicBrainz's
+retries run out, stopped, incomplete, unavailable or superseded) reads
+**Metadata lookup has not finished**, with why (below) or that the free retry,
+or the checked numbers, can be next. Without a run it reads **Metadata lookup
+has not run**, with the name box next, or, where lookup is not configured, the
+shared not-configured sentence. A completed run reads **Lookup complete · N
+possible releases**, N as on the reference releases. Where the shared next step
+is no match (`lookup.no_match`, or `lookup.itunes_unavailable` with the iTunes
+fallback unavailable), the sentence says why no edition is confirmed, the first
+cause that applies, looking at the releases the tracks fit (the possible
+matches, below, else the other unverified candidates): an Album without tracks,
+which no release can confirm by its tracks (the name box next); members without
+a duration, or members that pair in more than one way with every duration
+known, where the next step is updating the numbers the titles propose when they
+give every member a Disc and Track Number (see **Numbers proposed from titles**
+below; owner rules, next-step bullet), and otherwise another name or manual
+editing (the name box next; pairing by hand stays on the possible match's card,
+see **Pair tracks by hand** below); or a release the tracks pair with in exactly
 one way (by their own numbers, the positions their titles or original filenames
-start with, or durations within half a second), nothing asks for numbers: the
-step is using that release, which a member without a duration, or a paired
-release track without one, left unconfirmed. Otherwise it is a member without a
-duration, where saving numbers alone cannot make a release match, so the step is
-entering the Disc and Track Numbers, saving, then choosing a release, which
-brings in its expected tracklist and track details through the single pairing
-the numbers make; or members that pair with it in more than one way, every
-duration known, where entering the numbers and saving compares again for free.
-Entering the numbers is the next step, with **Fill Disc and Track Numbers from
-titles** as the summary's only primary button, only when no release the tracks
-fit pairs with them in exactly one way, the titles give every member a Disc and
-Track Number (see below) and the draft still lacks one of them (owner rules,
-next-step bullet). Where the titles give Track Numbers alone, the fill follows
-the name box as a plain button, and the cause, like the one for titles without
-positions, says that another name can be looked up, the tracks paired by hand
-with a possible match where one is listed (see **Pair tracks by hand** below),
-or the numbers entered in **Edit draft**. Anything else is a real no match,
-which says so without naming a paid step; **Use Luna AI (paid)** stays the
-page's secondary button after the summary. A release this run applied for its
-Album values only (`applied.pairs` null) whose pairing a saved number has since
-made single replaces the applied status with one saying that using it again
-brings in its tracklist and track details, and the track Artists section says
-the same in place of its no-pairing line.
+start with, or durations within half a second) that an unknown duration left
+unused, where using it under Reference releases is next and nothing asks for
+numbers. A tie, an offered release and a run that applied none keep their own
+review sentence. Anything else that found nothing to confirm (a real no match,
+no release, nothing to search) reads **No release found to confirm**, with
+another name or the checked numbers next, and names no paid step; **Use Luna AI
+(paid)** stays a secondary button after the alternatives. An applied release
+names itself (the shared applied status) and, where a saved number has since
+made the pairing of a release applied for its Album values only
+(`applied.pairs` null) single, says that using it again under Reference releases
+brings in its tracklist, which the track Artists section says in place of its
+no-pairing line; else, while members have no duration, how many tracks'
+durations are still unverified.
 
 A possible match is an unverified candidate whose normalized title equals the
 normalized Album name the run searched (the submitted Album name, else the saved
@@ -1778,19 +2091,24 @@ MusicBrainz, reading Artist and label aliases), with its done and total counts
 when the total is not zero. Only that text is the polite status. The time waited
 or run (m:ss from `startedAt` to the later of the summary's last read and
 `updatedAt`, so a client clock behind the server's still counts, never below
-0:00) follows it outside the status, so a poll does not announce it. A view
+0:00) leads the status line's Details log, open while a run is active, outside
+the polite status, so a poll does not announce it. A view
 without `progress` keeps the shared active status. A retrying run says whether
 its source (`timeline.retry.source`: MusicBrainz, or iTunes while the fallback
 retries) had too many requests (`sourceBusy`) or is unavailable
 (`sourceUnavailable`), when it retries (`at`, as a time in the interface
-language) and which automatic retry that is (`attempt` of `limit`), followed by
-**Retry lookup**; a view without `timeline.retry` keeps the shared retrying
+language) and which automatic retry that is (`attempt` of `limit`), with
+**Retry lookup** in the lookup details; a view without `timeline.retry` keeps the shared retrying
 status. Once MusicBrainz's automatic retries ran out with nothing matched, the
 status says whether there were too many requests or it stayed unavailable, with
 **Retry lookup**, and names no paid step.
-Queued, running and retrying runs add **Lookup keeps running if you leave this
-page.** on the same line, after the status; a dot parts the time from the
-status, directly after a full-width closing bracket, and from that note. While a
+Queued and running runs add **Lookup keeps running if you leave this page.** to
+the log after the time, on the same line. While a run is active the log stays
+short, as in the design: that line, the MusicBrainz or iTunes wait when the run
+stalls, and only the step in progress (else the last one reached), so the
+proposals stay in the first screen. After a run the log holds its record (the
+time taken, the searches sent and the releases examined), the names it searched
+and every step; it starts hidden after a completed or superseded run. While a
 run is queued, running or retrying, submitting the name box first asks (**This
 stops the current lookup and starts a new one with the name above.**, with
 **Stop and look up again** and **Cancel**), since the server replaces an active
@@ -1803,9 +2121,9 @@ A stopped run says why, with **Retry lookup**: the account that started it no
 longer has administrator access (`permissionLost`), or it ran past its time
 limit (`grantExpired`). A run that ended because the review's source was no
 longer current (`superseded`) offers no retry, which the server refuses while
-the source is not current (owner rules, next-step bullet), and its brief on the
-step bar, the workbench card and the Album page offers none either; the name box
-stays open to look up again. When the Album changed, **Open the Album to start a
+the source is not current (owner rules, next-step bullet), and its brief in the
+status line, the workbench card and the Album page offers none either; the name
+box opens by itself to look up again. When the Album changed, **Open the Album to start a
 new completion** links to the Album page in the retry's place, and when the
 Album or a track is no longer ready, the source notice above the summary
 explains it.
@@ -1820,7 +2138,21 @@ started yet)** or, for a step a run that ended never reached, ○ **(not run)**,
 and – **(skipped)**, or – alone where the step's own words say why. A search
 names what it searched by (Album name and Artist, Album name only, song name and
 Artist, song name only) with the text and Artist name it sent, or reads **Search
-by name** where its text is not shown. The Track-title row names the titles it
+by name** where its text is not shown. A run that searched the review's captured
+import evidence lists those rows first, never with a value: **Look up the
+release by the release ID from the import** (or **… in the file tags**),
+**Search by the barcode in the file tags** and **Search by the catalogue number
+in the file tags**; in such a run a Track-title row that was not needed reads
+**not needed (a matching release was already found)**, and one whose searches
+the identifier searches crowded out under the query bound (`noRoom`) reads
+**not run (the searches by the import's identifiers used the search limit)**.
+These words are Web-only `web-admin` copy (`admin.lookup_evidence.*`) in their
+own chunk (`LookupEvidence.tsx`, loaded only for such a run, which reads the
+scoped bundle through `adminWebMessages.ts`); the row marks stay runtime copy.
+When that chunk or bundle cannot load, those rows and the chosen line below
+render nothing, and one alert above the list says the workbench was updated,
+with **Reload page**. The
+Track-title row names the titles it
 searched (as planned while undecided; those the run may not have sent follow in
 a second row) or, from `timeline.trackTitleSearch`, why none was searched: not
 needed because the name searches found a matching release; skipped because the
@@ -1837,7 +2169,9 @@ aliases (4 of 4 lookups)**. An iTunes row whose stage left results out of the
 comparison (`partial`) adds a line that iTunes returned many Albums, so only the
 first 4 were checked on MusicBrainz, and a bridge row with titles adds that they
 came back from iTunes as other Albums for the names searched, so their
-MusicBrainz releases are among the releases found. While a run is queued, running or retrying the steps show open after the
+MusicBrainz releases are among the releases found; where they came back only
+for the captured barcode (`byBarcode`), the line says so instead
+(`admin.lookup_evidence.bridge_note_barcode`, through the same chunk). While a run is queued, running or retrying the steps show open after the
 status; while it is running and the page has seen no new step
 (`timeline.updatedAt`) for more than 5 seconds of its own clock (from the read
 that first brought that step to the summary's last read), a line above them says
@@ -1847,30 +2181,34 @@ behind it never shows or hides the line, and a page opened during a long wait
 shows it from its first read more than 5 seconds later. Once a run ended, the
 steps fold under **Lookup log: took N s · N searches · N releases found**
 (**took N min N s** from a minute; from `timeline.startedAt` to `completedAt`,
-else the last step; the title searches done, the Track titles of a done row
-once sent and the iTunes searches its iTunes row counts as done, never a search
-the run may not have sent nor the bridge's checks, so the count matches the
-rows; every candidate, as **Releases found** counts them), which opens on
-request.
+else the last step; the identifier and title searches done, the Track titles of
+a done row once sent and the iTunes searches its iTunes row counts as done,
+never a search the run may not have sent nor the bridge's checks, so the count
+matches the rows; every candidate, as **Releases found** counts them), which
+opens on request.
 
 After a run that completed with no issue, a line before the folded steps names
 the searches it sent whose text is shown, in order (**This lookup searched for
 "X" · Artist, then "X" alone, then …**), never one the run may not have sent; a
 run that completed after MusicBrainz's retries ran out (issue `sourceBusy` or
 `sourceUnavailable`) may not have sent its searches and shows no such line.
-After a completed run the name box also folds under **Didn't find it? Look up
-another name**, a disclosure reachable by keyboard that keeps the box mounted
-and prefilled, unless the status makes the box the next step: no release,
-nothing to search, no release the tracks fit (also when iTunes was unavailable),
-an Album without members, or Disc and Track Numbers needed where filling them
-from the titles is not the next step (owner rules, next-step bullet). The box
-stays open before any run, while a run is queued, running or retrying, and after
-a run that ended otherwise. It folds as it mounts, and also when a run completes
-while the page is open, but then only while the box is untouched (its name,
-Artist and kind as mounted, no question open and the focus outside it), so a box
-the administrator is using never folds. It unfolds whenever the status makes it
-the next step again, as after saved numbers whose free comparison still finds no
-single pairing.
+After a completed run whose release this run applied as its preselection by a
+captured identifier, a line under the status, shown also while the log is
+folded (other releases can still be listed as matching), says which one chose
+it: **Chosen automatically: the MusicBrainz release ID applied when these files
+were imported.**, or the MusicBrainz release ID, barcode or catalogue number in
+the tags of every file.
+The name box (`CatalogReviewLookupAnother.tsx`) is not part of these steps. It
+sits under the page's row of alternatives, opened by **Look up another name**,
+and is unmounted while closed. Its Cancel button closes it and returns focus to
+that control. It opens by itself only where the status line makes it the next
+step: no release, where the box carries the hint "可尝试去掉副标题"; nothing to
+search; no release the tracks fit, also when iTunes was unavailable; an Album
+without members; Disc and Track Numbers needed where the titles propose none;
+no run yet; or a run superseded. It stays closed by default while a run is
+queued, running or retrying, and after any other result. The administrator's
+choice to open or close it holds for that run. A new run drops that choice, so
+the status line decides again.
 
 The review chooser (the import chooser is unchanged) lists, while the run has no
 matching group, **Possible matches** open, one card per release naming its
@@ -1898,7 +2236,7 @@ could not be fetched. The missing-file row count appears only when the pairing
 is single or the Album has no members (its rows without a file are shown only on
 admin pages); otherwise the card says that using the release writes Album values
 only, with no expected tracklist or track details, except on a possible match
-whose choice sits under **Other options**, which says so there, and **Where each track sits on
+that writes Album values only, and **Where each track sits on
 the release** shows only for a single pairing of an Album with members. A card
 whose pairing the
 positions or the half-second tier made single (`pairedBy`) also says, as a
@@ -1907,33 +2245,34 @@ positions the saved titles start with, as **(1-01 and 1-02)**, or the first and
 last when there are more than three), **Paired by: the track numbers in the file
 names** or **Paired by: the closest durations**, and while any candidate carries
 it the unknown-Disc-Number disclosure stays out. On a possible match with
-members whose pairing is not single, **Use this release** moves under **Other
-options** as **Use Album values only (title, Artists, label, release date)**
-with that warning, enabled exactly when the plain button would be, and each
-other edition in that state is offered for its Album values only too; the card
-also offers **Pair tracks by hand** (below), in one spaced row with the fill
-where the card offers it, before **Other options**. While no
-possible match pairs with the members in exactly one way, the first such card
-offers **Fill Disc and Track Numbers from titles** with a hint naming
-how many members get a number (saving then compares again for free or, where a
-member has no duration, lets the release be used for its tracklist) in place of
-the unknown-Disc-Number disclosure, or, where nothing can be filled from the
-titles, says that the tracks can be paired with it by hand or the numbers
-entered in **Edit draft**. The candidate this run chose without a pairing
+members whose pairing is not single, **Use this release** becomes **Use Album
+values only** ("使用专辑资料"), the card's first button, enabled exactly when the
+plain button would be, and each other edition in that state is offered for its
+Album values only too; **Pair tracks by hand** (below) follows it as the second
+button. Such a card gives no hint of its own: the status line names the next
+step (checking the numbers proposed from titles, or the name box), and while the
+titles propose numbers for such a match the unknown-Disc-Number disclosure stays
+out. Where every possible match is such a card, the **Reference releases** note
+says the track pairing is not confirmed, nothing needs deciding now and these
+actions use Album values only and bring in no tracklist ("暂无法确认曲目对应，
+无需现在决定。…"); otherwise it says what using a release writes. The candidate this run chose without a pairing
 (`applied.pairs` null) whose pairing is now single offers **Use this release
 again (with track details)** on its card, a primary button where it is not
 folded, and, while the run has matching groups,
 also above the folded list; choosing it again computes its values anew, so it
 brings in the paired member values and the expected tracklist. Where the run's
 only matching group of a partial comparison is offered, or a tie needs an
-answer, the review chooser does not repeat the summary's status sentence: it
+answer, the review chooser does not repeat the status line's sentence: it
 only names the region with it. The offered release's card names its editions and
 lets each other one be chosen, as a possible match's does, and its **Use this
 release** is the primary button, since choosing it is the next step; **Use none
 of these** stays a plain button.
 
-**Fill Disc and Track Numbers from titles** is offered only when the saved
-titles give positions exactly as Track-title searches read them
+**Numbers proposed from titles** (`catalogReviewProposal.ts`) are derived on
+every render, never stored, from the titles the review captured
+(`source.tracks[].title`), never from draft titles, so a cleaned or edited title
+never changes them, as it never changes the pairing hints. They read positions
+exactly as Track-title searches read them
 (`src/administration/lookup/lookupTitlePositions.ts`; the Web test repeats the
 rows of `test/administration/lookupTitlePositions.test.ts`): every member's
 title, whitespace collapsed and trimmed, starts with a position of one form,
@@ -1945,17 +2284,58 @@ or more members, and a lone member only with a Disc Number and a Track Number
 written with a leading zero, so a lone "7 Rings", "1-2 Punch" or "1.5 Seconds"
 never counts, nor does `01_` or `12) `; titles that all start with increasing
 numbers, such as "24 Hours" before "99 Luftballons", read as positions, the same
-known limit as on the server. A saved number that disagrees with its own title,
-titles on several discs where a member's Disc Number cannot be filled (the
-review captured none for it), or no empty number left offer nothing, so filling
-never makes two members claim one position. It writes only the empty numbers, a
-Disc Number only where the review captured one, into the **Edit draft** tab as
-unsaved values, switches to that tab, says there for how many tracks it filled
-numbers until the next edit or save, and focuses **Save completion draft**; the
-administrator checks them and saves through the ordinary review save, which
-re-ranks the stored candidates without a lookup run. They are the
-administrator's own numbers: they constrain pairing and reach the catalog only
-when the review is applied.
+known limit as on the server. Each member's row records why it stops the
+proposal: no position (as "1999 X" or "Disc2-03"), a form unlike the others, a
+position not above the previous one, a number that disagrees with its own title
+(any non-empty draft number, captured, saved or filled by lookup), or titles on several discs where its Disc Number cannot be filled (the
+review captured none for it). Any of these proposes nothing for the whole Album,
+so a proposal never makes two members claim one position, and the page names
+the flagged members in text, never by color alone; a gap in a disc's Track
+Numbers is only noted. Otherwise every empty Disc and Track Number gets its
+title's number, a Disc Number only where the review captured one; a number the
+member already has, captured, saved or filled by lookup, is never replaced.
+Numbers from titles giving both are selected in the update range; Track Numbers
+from titles giving them alone are unselected and marked as read from the titles
+only, to be checked (owner rules, Catalog Visibility and Administration).
+
+The editing section's table (`CatalogReviewProposalTable.tsx`, its own chunk) has a visible column header ("曲目 / 标题" and "碟号 /
+曲号", or only "曲号" where no Disc Number was captured) and lists each member with its captured title (a cleaned
+or edited draft title after an arrow), and its Disc and Track Number inputs as
+one pair joined by "/" beside the title at every width (also on a phone), each
+showing the draft value, else the proposal. When any captured number is not
+empty, a column gives the original numbers and each cell is marked as filling an
+empty value or replacing a non-empty one (the original struck through), so a
+replacement is never unmarked; otherwise one note says every original number is
+empty. A cell's mark and its row's notes (such as a Track Number read from the
+title only) also describe its inputs (`aria-describedby`), so a screen reader
+says them with the field. Inputs accept Disc 1–999 and Track 1–9999, as the review save does. A
+pending proposal is not an unsaved edit: it starts nothing, keeps the lookup and
+Luna AI controls usable and is not given to Luna; a typed number is an edit.
+Requesting the update, or saving the draft alone, saves the selected proposed
+numbers in the same ordinary review save as the edits (`PATCH
+/catalog-reviews/:id`), which re-ranks the stored candidates without a lookup
+run; from then on they are the administrator's own numbers: they constrain
+pairing and reach the catalog only when the review is applied. An unselected
+proposal, such as a Track Number read from titles giving it alone, is never
+saved: it stays a proposal, derived again on the next render, and never
+constrains pairing or the re-rank. On a long Album (25 members or more, up to the
+review's 100), one line sums up the members, discs and proposed range of
+positions; rows with a flag, a replacing value or an edit stay open first, and
+uniform fills sit in one disclosure per disc naming its disc and track count,
+whose inputs keep their values while folded. A re-render keeps the focus on the
+same input.
+
+Beside the table, an optional checkbox, off by default and offered only while
+the titles give a proposal, also removes each member's position from its draft
+title: exactly the position and separator Track-title searches strip, as
+`1.01.雪の華` becomes `雪の華`. It never changes a title the administrator
+edited, and turning it off restores the other captured titles. The cleaned
+titles are unsaved edits, listed in the update range under Track titles and
+selected when the checkbox is turned on, since turning it on chooses them (owner
+rules, Catalog Visibility and Administration), and each is marked as replacing
+its title, the original struck through; a cleaned title
+can be applied only with its member's Disc and Track Number, or when the member
+already has both.
 
 **Pair tracks by hand** opens the pairing panel (`CandidatePairing.tsx`, its own
 chunk; one that cannot load asks for a reload in its place) for that card's
@@ -1978,7 +2358,7 @@ not, closest first, each read as `1-1 Title · 3:35.64 · differs by 0.02 s`
 (**same duration** under 0.005 seconds, **duration unknown** without one). A
 member's own Disc or Track Number (captured from the catalog or saved by the
 administrator) restricts its list to the release tracks at that number, and the
-panel cannot change it: its copy says to change it in **Edit draft** to pair the
+panel cannot change it: its copy says to change it by manual editing to pair the
 member differently. A member that every complete pairing gives the same release
 track starts on it, saying **Only 1-2 "Title" can pair with this track**; the
 others start on **Choose a release track**. A release track another member took
@@ -2224,8 +2604,9 @@ Catalog review routes (relative to `/api/admin/v1`):
   the Album's first label Credit; whether every primary and featured Artist
   Credit is shown, for the Album and each member (a Credit left out as a
   repeated name, in any letter case, makes its list incomplete, so lookup marks
-  it `notApplicable` and applying never writes it); and the Album's expected
-  tracklist rows. The draft gains those rows and each member's shown primary and
+  it `notApplicable` and applying never writes it); the Album's expected
+  tracklist rows; and its import evidence (below). The draft gains those rows
+  and each member's shown primary and
   featured Artist Credits as entries (keyed per member); the Album's entries and
   label are rebuilt from the Credits read then, keeping the keys of unchanged
   Credits, and carry the records' MusicBrainz IDs; and each source track that
@@ -2233,6 +2614,39 @@ Catalog review routes (relative to `/api/admin/v1`):
   where it showed none. Admission adds no receipt and advances the revision
   once, when it converts, and a format-3 review is only checked again, never
   captured again.
+- Import evidence. In the transaction that captures a review for lookup, the
+  server reads the completed imports (`purpose` `import`, or a legacy import
+  without `purpose`; `media.publication.state` `complete`) whose
+  `media.publication.albumId` is the Album and whose published tracks name a
+  member, through the required partial index `admin_import_published_album`
+  (see [Runtime](../architecture/runtime.md); the Album ID term also states
+  `$type: 'string'`, since MongoDB uses a partial index only for a query that
+  implies its filter), at most 101 within 3 seconds,
+  and, by `_id`, only the `applied` of their `adminImportLookups` records. An
+  Album without members reads nothing. Provenance holds when every member is a
+  published track (`media.publication.tracks[]` with `reused` stored as
+  `false`) of exactly one of those imports whose asset for that slot is `ready`
+  or `deleted` and whose MediaTrack still passes the byte checks local MP3
+  conversion makes before it reports a local result removable
+  (`adminImportPublishedMedia.ts`): the asset's SHA-256 and byte length equal
+  the MediaTrack's `mediaByteHash` for its active audio key, with a well-formed
+  etag and version that agree with its media representation's key, etag,
+  version and length, for any import actor and any audio content type. A
+  member an import reused, one uploaded through Content Manager, one whose
+  media local MP3 conversion replaced, or one no completed import published
+  breaks provenance. With provenance the capture stores `importEvidence
+  {releaseId, tagReleaseId, barcode, catalogNumber}`: `releaseId` is the
+  release every contributing import applied when they all applied the same
+  MusicBrainz release (choice `preselected` or `chosen`, never an iTunes-only
+  application or `none`), and `tagReleaseId`, `barcode` (GTIN digits) and
+  `catalogNumber` are the values every member's version-2 tags carry with one
+  value, each checked as `lookupIdentifiers.ts` checks an import's; a missing,
+  invalid or disagreeing value is `null` on its own. It is `null` without
+  provenance and when every field is `null`, and absent on a capture stored
+  before this release. It is written once with the capture, so later changes
+  to the imports or their lookup records never reach the review; no detail,
+  list, eligibility, lookup view or candidate read projects it, and it never
+  reaches Luna's context.
 - `GET /catalog-reviews/:id/lookup` (the Web review summary reads it, polling
   while a run is active, and calls the two routes after it):
   `200 {lookup, revision, valueRevision, summary}`, read in
@@ -2240,7 +2654,7 @@ Catalog review routes (relative to `/api/admin/v1`):
   see [Lookup routes](#lookup-routes)), `valueRevision` is the detail's (the
   Web reads the detail again when it is newer; reload admin Web tabs across
   deploy or rollback), and `summary` is
-  `{waiting: {lookup, analysis}, needsAnswer: {tie, conflicts}, lookupAvailable}`:
+  `{waiting: {lookup, analysis}, needsAnswer: {tie, conflicts}, lookupAvailable, primaryArtists}`:
   `waiting.lookup` while the run can still send a request (queued, running or
   retrying, within its grant, while lookup is available; read from the run
   itself, never from the review's gate), `waiting.analysis` while Luna is
@@ -2248,8 +2662,12 @@ Catalog review routes (relative to `/api/admin/v1`):
   lookup answers the view's `needsAnswer` lists (a tie and each unanswered
   conflict of the applied candidate that still differs, those on member Artist
   entries and the expected tracklist included; identity rows are read from
-  `GET /catalog-reviews/:id/candidates`), and
-  whether this server's configuration lets lookup run. An applied review reads
+  `GET /catalog-reviews/:id/candidates`),
+  whether this server's configuration lets lookup run, and the names of the
+  Album's shown primary Artist Credits as the review captured them, which a
+  name submitted without `artist` is searched with (empty before the review is
+  captured for lookup, and when there are more than 100 or one is longer than
+  1000 characters; the only part of the capture the read sends). An applied review reads
   too; an import or a bad id is `404 ADMIN_CATALOG_REVIEW_NOT_FOUND`, and the
   import lookup routes never find a review.
 - `POST /catalog-reviews/:id/lookup` `{operationId, expectedRevision, kind,
@@ -2696,6 +3114,85 @@ reusable definitions and order. Each placement includes bounded `name`,
 (`ready`, `missing` or `unsupported`) display metadata. The Page digest binds
 that resolved metadata, so a referenced name/source change requires fresh
 confirmation. A named target is write-fenced with the visibility mutation.
+The Web Page manager lists Home, Library, Search and Video and reads only the
+selected slug. Its controls show the selected Page's confirmed count and a dash
+for the other Pages; they do not prefetch private Pages. Search is a functional
+page with query-driven results and no configured placements. Video has exactly
+one Grid placement with its own configuration editor. Home and Library
+placements remain in saved order,
+with distinct Carousel/Grid/List icons, optional source text, Public/Hidden
+status, visible reference warnings and inline, copyable reference IDs. Both
+visibility directions require a confirmation that names the captured placement,
+shows its transition and preserves the reusable-definition scope. A newer
+**Page** revision disables that approval and explains how to review again.
+During an uncertain write, account-fenced in-memory context retains the original
+placement name, position and action across refreshes and Page switches; only
+the original command is retryable. A definite conflict offers refresh/review.
+Submitting returns keyboard focus to the same row's enabled Details control;
+cancelling returns it to the initiating action. Clipboard results are fenced by
+account/view, reference identity and attempt, so an older copy cannot mark a
+newly refreshed reference as copied. New Page-only copy is generated from the
+canonical locale sources into the release-packaged `web-admin` localization
+namespace; existing v1/v2 translation bundles remain unchanged.
+
+`GET /pages/videos/grid` returns `{ grid: { revision, defaultView, items } }`.
+Each item contains only `id`, `title`, `coverUrl` and `creator`; the complete
+eligible public-Video membership is bound into the revision. `PATCH` on the
+same path accepts `{ operationId, expectedRevision, defaultView, videoIds }`,
+where `defaultView` is `grid` or `immersive` and `videoIds` is the complete
+unique permutation of the reviewed Videos. It returns the same Grid snapshot
+and `receipt.operationId`. Complete-order editing admits at most 5,000 eligible
+Videos and refuses larger snapshots with `ADMIN_VIDEO_GRID_CAPACITY`; public
+browsing has no corresponding catalog-size cap. Only this PATCH route admits a
+192 KiB JSON body; other catalog writes retain their 64 KiB limit.
+An administrator edits one local draft, reviews its
+default display and complete order, then confirms the save. A stale revision
+requires a new review. Uncertain outcomes retain the frozen draft and original
+operation identity for exact retry through the existing administrator command
+channel. The first save atomically creates the `videos` Page, its single Grid
+placement and its `publicVideos` collection; GET does not initialize records.
+This source keeps automatic membership and uses stored references only for
+priority ordering. New eligible Videos append, unavailable Videos are excluded
+on every read, and normal content deletion removes stored references. No media
+or S3 object is created, replaced or deleted by a Grid configuration write.
+The dedicated editor does not use top-level placement visibility or reorder
+endpoints. Native Home and Library contracts remain unchanged.
+
+`POST /pages/:slug/reorder` saves an explicitly approved complete Page order as
+`{ itemIds, expectedRevision, operationId }` and returns the same allowlisted
+`page` snapshot plus `receipt.operationId`. It uses the existing actor-bound
+catalog mutation receipts: replay checks precede revision validation, and reusing
+an operation ID with different parameters is rejected. The raw stored membership,
+not a filtered projection, must match one complete unique permutation. Unique
+legacy definition-ID fallbacks are persisted as placement IDs during this write;
+unidentifiable or ambiguous records require configuration repair. The transaction
+fences reviewed existing references and commits contiguous order values and the
+receipt together. It does not change visibility, definitions or storage objects.
+The older index-based Content Manager reorder endpoint is not used by Web.
+
+The Web order mode disables Page switching and manual refresh, replaces row
+visibility/details actions with a drag handle and quiet 44-pixel move buttons,
+and supports keyboard arrows on each handle. Native drag presents a floating row
+and an empty slot while adjacent rows shift; no insertion line or duplicate
+"moved" badge is shown. Position changes remain local until confirmation of the
+complete new order. A stale confirmation offers Cancel adjustment and Refresh
+and adjust again; it cannot leave an apparently saveable stale draft. During
+submission the modal is locked and shows its pending button; confirmed success
+exits the mode and announces that the order was saved.
+
+Order and visibility share `AdminCommand` on the existing `page:${slug}` channel.
+An uncertain order appears in a top-of-page notice with an expandable frozen
+complete order, Refresh status and Retry original operation. The list below
+continues to show current reads. Refreshes never replace the retained intent or
+settle it merely because the server order happens to match. Definite conflicts
+offer cancellation or refresh and adjustment, without an original-operation
+retry. Account and administrator-access fences apply to recovery and delayed
+refreshes. Order writes invalidate open visibility approvals through the same
+whole-Page revision and retain the existing listener cursor invalidation rules.
+The approved Page layout including order adjustment adds about 2.5 KiB gzip of route-specific CSS; the
+aggregate emitted-CSS budget is 42.5 KiB, including the later Video workbench
+and immersive listener view additions. The 152 KiB initial JavaScript budget,
+font/image limits and lazy loading of administrator styles stay in place.
 `/artwork` and `/media`
 are private previews with current-source and current-role stream revocation.
 Unknown commit responses retry the original intent; stale revisions require
@@ -2710,7 +3207,7 @@ administrator Tracks read shows it as `expected`, matched to the members, and
 `PATCH /catalog/album/:id` clears it. An existing-Album review admitted to
 metadata lookup captures a copy of its rows (see the catalog review routes),
 which lookup may fill, or propose another as a conflict, in the review's
-private draft (its lookup summary shows them with their missing-file rows);
+private draft (its lookup details show them with their missing-file rows);
 only applying that review, through its **Update original Album** confirmation
 (`POST /catalog-reviews/:id/apply`), sets or replaces it.
 `GET /imports/:id/lookup` also
@@ -3098,6 +3595,27 @@ roll back to:
   eligibility route as not found and refuses a creation body with `another` as
   invalid input; its strict Web schema refuses the identity read's `selection`
   and `keptTracklist`. Reload open admin Web tabs across deploy or rollback.
+- The review page's action bar, inline confirmation and outcome views (the v3
+  review page) raise no floor: they call only the routes and send only the
+  bodies the release before them already admits. The review lookup read adds
+  `summary.primaryArtists`, which a Web tab opened before this release cannot
+  parse (its summary is strict); this release's Web reads a summary without it
+  as an empty list, as before the review is captured. They retire the Web-only
+  `admin.catalog_review.*` keys of the removed step bar, modal confirmation and
+  Fill Disc and Track Numbers button (`view_changes_plain`, `steps_label`,
+  `steps_ready`, every `step_*` key, `apply_confirm_copy`, `fill_numbers` and
+  `fill_numbers_done`), which no native client packages. The other keys the
+  removed tabs, Update tab, modal confirmation, draft form and suggestion empty
+  states used (`draft_tab`, `review_tab`, `apply_tab`, `view_changes`,
+  `save_draft`, `save_draft_first`, `draft_saved`, `apply_title`, `apply_copy`,
+  `apply_confirm`, `no_changes`, `selected` and every `empty_*` key) stay
+  in the bundles, unused on the Web, because the iOS and Android packaged
+  bundles still contain them (see [Localization](localization.md)). A Web tab
+  opened before this release keeps its active bundle instead of accepting this
+  release's remote bundle, which lacks the retired keys; after a rollback, a Web
+  client's cached bundle from this release is refused once for lacking the
+  newer keys, so it shows English until the older bundle loads. Reload open
+  admin Web tabs across deploy or rollback.
 - Discarding Album completions raises no floor. The release before it has no
   discard route (its Web shows a generic error), never reads tombstones, because
   its review, import and lookup queries filter `purpose` and its Luna claim
@@ -3291,7 +3809,7 @@ roll back to:
   comparison's `pairedBy` out of a review's lookup view, which this Web reads as
   no lookup steps, no searched names and no pairing note: the summary then shows
   the earlier progress line and the shared retrying status, while the stopped
-  and exhausted copy, the name-box fold and the hidden superseded retry still
+  and exhausted copy, the name box opening by itself and the hidden superseded retry still
   work (they read the run's state and issue and the review's source), with the
   Album link but no steps. A Web tab opened before them cannot parse a review
   view carrying either key, so reload open admin Web tabs after deploying or
@@ -3513,6 +4031,50 @@ roll back to:
   them, which lacks the `admin.append_rows.*` keys. After deploying them, a Web
   client's cached bundle from before them is refused once for lacking those
   keys, so it shows English until the new bundle loads.
+- Imports created for an Album need no floor of their own; no collection, index,
+  approval format or publication commit changes. Such an import stores the
+  server-only `createdForAlbumId` beside an ordinary Album reuse decision (the
+  shape every release reads), and a release before them ignores that field: it
+  runs automatic metadata lookup for the import once its uploads complete (the
+  append still applies no Album values), lists the Album as a candidate only
+  while the draft's title matches it (the draft starts with the Album's title,
+  so it normally still does), so a reuse whose Album changed can be chosen again
+  only then, and sends no `summary.forAlbum`, so numbering is never the
+  summary's next step. It reads candidates without the Album the import was
+  created for, which changes no preselection except through the member match
+  limit: when that Album is not the append target, its member matches count
+  toward the limit here and not there, so an approval and a commit made on
+  different sides of the deploy can, only when the limit is reached, refuse
+  preselected appended files as an identity conflict that asks for a fresh
+  review. It refuses a create body carrying `targetAlbumId` as
+  `400 ADMIN_IMPORT_INVALID_INPUT` before receipt lookup and never replays one,
+  so retry a targeted create whose response was lost only after rolling forward
+  again; a project it already created stays readable and publishable there, and
+  it has no `GET /imports/album-targets/:albumId`, so this Web's targeted create
+  page shows a read failure. Creates without the key keep their fingerprints and
+  replay as before. A Web tab opened before them cannot parse a summary carrying
+  `forAlbum`, sent only for imports this release's Web created, so that import's
+  summary shows an error until the tab is reloaded. Their copy is
+  release-packaged `web-admin` copy: no runtime key is added, removed or moved,
+  so the runtime bundles and native clients are unchanged.
+- Import evidence in existing-Album reviews needs no floor of its own; no
+  document is migrated and no approval format changes. The release before it
+  ignores a capture's `importEvidence` (its capture check reads only the Album
+  and members), so its submitted runs plan no identifier and its rankings and
+  re-ranks compare none: the next re-rank there (a number save or a choice)
+  ranks without them, so a tie an identifier broke here can be a tie again,
+  while values already applied stay. A run planned here and retried there
+  repeats its stored identifier queries, which its run step and iTunes stage
+  handle as for an import, and its timeline lists no identifier step. A review
+  captured before this release, or while rolled back, keeps no import
+  evidence after rolling forward, since a capture is never taken again; a new
+  completion of the Album captures it. Its index revision is older, so it
+  verifies its own indexes and leaves `admin_import_published_album` in place.
+  A Web tab opened before this release cannot parse a timeline with an
+  identifier step and asks for a reload; reload open admin Web tabs across
+  deploy or rollback. Every runtime key and its variables are unchanged; the
+  new `admin.lookup_evidence.*` words are `web-admin` copy packaged with the
+  Web release, so no remote bundle changes.
 - Credit join phrases and Disc Numbers have their own floor in the
   [catalog Credit rollout runbook](../deployment/catalog-credit-rollout-runbook.md#join-phrase-and-disc-number-rollback-floor).
 
@@ -3527,7 +4089,7 @@ to the catalog (see the catalog review routes
 above and Existing-Album reviews under Lookup runs and Value application).
 [Routes](#lookup-routes) and the `metadataLookup` capability expose them; the
 import's Review and publish summary (see the import page above) and an
-existing-Album review's Metadata lookup summary are their Web controls.
+existing-Album review's status line, lookup details and name box are their Web controls.
 MusicBrainz is the primary source; only when it returns no matching candidate
 is the iTunes
 Search API queried and the names it shows searched again in MusicBrainz (see
@@ -3650,7 +4212,9 @@ below). The source layer, the jobs and their routes live in
   Archive listings yield image IDs, flags, types and sizes, never URLs.
 - **Planning and ranking.** Both are pure. The planner turns embedded
   identifiers shared by every file (release MBID, barcode, catalogue number and,
-  for one file, an ISRC), then album or song text, then a cleaned folder name
+  for one file, an ISRC; for an existing-Album review, those of its captured
+  import evidence: the release ID the imports applied, else the tag release ID
+  (only one release ID is planned), never an ISRC), then album or song text, then a cleaned folder name
   into at most six MusicBrainz queries, in that order, so the cap drops
   trailing fallbacks first. It never accepts file names. Submitted text and a
   submitted Artist name are only normalized (NFC, collapsed whitespace), so a
@@ -3665,7 +4229,9 @@ below). The source layer, the jobs and their routes live in
     search asks for a page of 100 releases, so popular Albums with many
     editions still offer their plausible editions to that admission; a
     recording search asks for 25 recordings. Media counts and release-group
-    browse are not used.
+    browse are not used. A review's identifier queries precede its title
+    searches and count among the six, so a review with import evidence leaves
+    less room for title fallbacks and Track-title searches.
   - Album text plans the credited search (with the album-artist name or label
     term, or the folder's "Artist - Album" split) and the bare search, then
     fallbacks in the normalized spelling: the credited search respelled, then
@@ -3883,7 +4449,13 @@ below). The source layer, the jobs and their routes live in
     is its release's audio tracks, else its search summary's audio media, else
     a reported total, and an unknown count could be anything; a release or
     summary whose every medium is video or data has none and can hide no
-    group. After the identifier rules, while `exact` holds, the one matching
+    group. In a review the identifier rules read its captured import evidence,
+    every member carrying the same values (`catalogReviewFileEvidence`), and
+    run first: the one matching candidate an identifier matches alone is
+    preselected (`releaseId`, `barcode` or `catalogNumber`) even beside other
+    matching groups, and an identifier never changes a candidate's status, so
+    an unverified or non-matching release is never preselected by it. After
+    the identifier rules, while `exact` holds, the one matching
     group whose release has exactly as many audio tracks as members is
     preselected (`exactTrackCount`) even beside matching groups with more
     tracks; otherwise the only matching group of a complete comparison is
@@ -4008,8 +4580,9 @@ below). The source layer, the jobs and their routes live in
   and it leaves nothing out, so the comparison stays as complete as the searches
   left it, and a lone matching group, such as one a later saved Disc or Track
   Number makes, is then preselected rather than offered. Imports never skip it.
-- **Requests.** First, for a valid barcode every file shares (a placeholder,
-  meaning an all-zero, malformed or bad-check-digit GTIN, is never sent),
+- **Requests.** First, for a valid barcode every file shares, or a review's
+  captured barcode (a placeholder, meaning an all-zero, malformed or
+  bad-check-digit GTIN, is never sent),
   `lookup?upc=<digits>&entity=song` in at most two storefronts chosen by the
   GS1 prefix of its GTIN-14 (digits 2 to 4): `jp` then `us` for 450–459 and
   490–499, `kr` then `us` for 880, `tw` then `us` for 471, otherwise `us` then
@@ -4281,7 +4854,13 @@ database, what the step stores and which request comes next.
   review captured it, with its first usable shown primary Artist name) or a
   submitted name, with the submitted Artist name in place of that primary Artist
   name when one was given, and it compares in subset mode (a release may have
-  more audio tracks than the Album has members). Searches and bridge searches
+  more audio tracks than the Album has members). A review whose capture holds
+  `importEvidence` gives its identifiers to every run's plan, automatic or
+  submitted, ahead of the title searches, and a retry repeats the stored
+  queries, so it repeats them too; a barcode also gives the iTunes stage its
+  UPC requests. Its rankings and re-ranks read the identifiers from the
+  capture, never from the run's input, which stores none, and the identifier
+  rule runs before `exactTrackCount`. Searches and bridge searches
   admit releases by audio track count, fewest extra tracks first, then unknown
   counts, then those with fewer tracks than members, and pending details are
   fetched in that order. Beside `searchComplete`, which for a review means that
@@ -4364,9 +4943,15 @@ database, what the step stores and which request comes next.
 - **Automatic runs.** The confirmation that completes the file set queues a
   run: the upload of the last selected audio file (or a replay of its intent),
   or a reconciliation ("Check again") that itself confirms the last upload.
-  Creating an import queues nothing, because none of its files is confirmed
-  yet. A reconciliation that finds the file already ready, cover and
-  embedded-artwork slots, typing, saving, reading, listing, decisions,
+  Creating an import queues nothing, because none of its files is confirmed yet.
+  An import created for an Album (`createdForAlbumId`) takes none of these
+  triggers: there a completing confirmation or reconciliation reconciles the
+  stored run's files (superseding an active run or marking stale files) and
+  re-ranks a completed run, but never queues a run or spends the folder-name
+  allowance (outcome `forAlbum`); its submitted and retried runs and its
+  candidate choices work as in any import. A reconciliation that finds the file
+  already ready, cover and embedded-artwork slots, typing, saving, reading,
+  listing, decisions,
   candidates, adoption, cover selection, analysis and navigation never run
   lookup, and a format-1 project's conversion never does either. Existing-Album
   reviews never take these triggers: their one automatic run is the catalog
@@ -4387,8 +4972,9 @@ database, what the step stores and which request comes next.
   Artist name.
 - **File set.** A run binds each manifest slot's confirmed upload. Once the set
   is complete again after a change, the next completing confirmation reruns,
-  within the limit. Removing or replacing a bound file supersedes an active run
-  (in the staged-cleanup transaction) or lists the file in a finished run's
+  within the limit, except in an import created for an Album. Removing or
+  replacing a bound file supersedes an active run (in the staged-cleanup
+  transaction) or lists the file in a finished run's
   `staleSlotIds`, without reverting values. A file confirmed after a run
   started is newly known, not stale.
 - **Grants.** Each run holds a one-hour grant:
@@ -4754,11 +5340,17 @@ only, and absent when the run's start or last-step time is unreadable or outside
 those years, or the run planned no search (it completed at once with `noQuery`,
 which its status explains): `steps`, at most 12 in run order, each with a `kind`
 and a `state` (`done`, `unconfirmed`, `active`, `pending` or `skipped`). First
-come at most 6 title searches (`albumArtist` and `album` for a release search by
-the Album name with or without an Artist name, `songArtist` and `song` for a
-recording search by a submitted song name; a search by barcode, catalogue
-number, release ID, ISRC or folder name, and a respelled fallback, whose sending
-the record does not keep, are never listed): `active` at `queryIndex` while the
+come the searches of the review's captured import evidence, in plan order:
+`releaseId` (the release lookup, with `from` `import` for the release the
+imports applied or `tags` for the release ID in their files' tags), `barcode`
+and `catalogNumber` (release searches), only while the capture holds that
+identifier and never with `texts`, counts or a value; then the title searches
+(`albumArtist` and `album` for a release search by the Album name with or
+without an Artist name, `songArtist` and `song` for a recording search by a
+submitted song name), at most 6 steps together (a search by an ISRC, folder
+name or an identifier the capture does not hold, and a respelled fallback,
+whose sending the record does not keep, are never listed). Each takes its
+state from `queryIndex`: `active` at it while the
 run searches, `done` below it (or `unconfirmed`, below), `pending` while the
 search phase lasts or after a run ended in it, and `skipped` once the run moved
 on without sending it (the candidate bound). Then, where the plan holds
@@ -4768,7 +5360,10 @@ below); then `details`, `itunes`, `bridge` and `aliases` with `done` and `total`
 `total` at most 100). `itunes` also carries `partial: true` when its stage left a
 plausible result out of the comparison (its result bound of 4, or a collection
 lookup iTunes never answered; the stage's `complete` is false), which makes the
-run's comparison partial. `itunes` is `skipped`, without counts, when its stage is
+run's comparison partial. `bridge` also carries `byBarcode: true` when it has
+`texts` and every result its titled answered searches came from was answered by
+an iTunes UPC lookup of the captured barcode (the result keeps that barcode),
+not by a name search. `itunes` is `skipped`, without counts, when its stage is
 unavailable and in a complete run without a stage (the fallback was not needed,
 the review skip applied or the run had no iTunes request); `bridge` is listed
 only with a readable stage or while the run is not complete. A step's `texts` (1
@@ -4798,19 +5393,26 @@ track number like file names), `fileName` (titles equal to or shaped like their
 file names), `generic` (generic, digit-only or instrumental titles) or
 `noneDistinct` (no title distinctive enough: repeated, the Album title or
 submitted name, too light, too light to search without an Artist name, or
-skipped for different reasons). It is absent for an Album without members and
-for a run an earlier release planned without the Track-title searches this
-release would plan. `retry` is `null` except while the run waits for an
-automatic retry with a readable `retryAt`: then `at`, the `source` retried
-(`itunes` in the `itunes` phase, else `musicbrainz`), `attempt` (that source's
-stored failed attempts, 1 to `limit`) and `limit` (3). `startedAt`, `updatedAt`
-and `completedAt` (`null` while active or unreadable) are the run's times. Some
-ends of a run move `queryIndex` past searches it may never have sent, and the
-record does not keep which were sent, so such a search is `unconfirmed`, never
+skipped for different reasons); and `noRoom` when the plan for the run's input
+without the captured identifiers' searches would hold a Track-title search, so
+those searches used its room under the query bound of 6. It is absent for an
+Album without members, for a plan without a title search (an Album title that
+cannot be searched), and for a run an earlier release planned without the
+Track-title searches this release would plan. A Web tab loaded before
+`noRoom` or `byBarcode` existed cannot read a view that carries them and asks
+for a reload, as for the identifier steps. `retry` is `null` except while
+the run waits for an automatic retry with a readable `retryAt`: then `at`, the
+`source` retried (`itunes` in the `itunes` phase, else `musicbrainz`), `attempt`
+(that source's stored failed attempts, 1 to `limit`) and `limit` (3).
+`startedAt`, `updatedAt` and `completedAt` (`null` while active or unreadable)
+are the run's times. Some ends of a run move `queryIndex` past searches it may
+never have sent, and the record does not keep which were sent, so such a search
+is `unconfirmed`, never
 `done`: in a plan with Track-title searches, once the title searches are over
 with the search partial (`searchComplete` not true, which the candidate bound of
-15 also leaves), every title search after the plan's first; in a plan without
-them whose search is partial, every title search after the first once
+15 also leaves), every identifier or title search after the plan's first; in
+a plan without them whose search is partial, every such search after the first
+once
 MusicBrainz's retries ran out after the search phase (which moves `queryIndex`
 past the plan); when MusicBrainz's retries ran out while the run searched (it
 ended in the `search` phase, or its iTunes stage started with reason
@@ -4826,7 +5428,9 @@ An import's view never carries these keys, and a run with the `catalog` input
 has no import view. The Web parses a review's view with its own strict schema
 (`reviewLookupViewSchema` in `importLookupApi.ts`, read through
 `catalogReviewLookupApi.ts`), which admits exactly these keys beyond the import
-view's, so the import page still refuses them.
+view's, so the import page still refuses them. A Web tab opened before the
+identifier steps refuses a timeline that carries one and asks for a reload;
+reload admin Web tabs across deploy or rollback.
 
 The `summary` is the import's Review and publish state, computed by
 `src/administration/import/adminImportSummary.ts` from the same snapshot:
@@ -4845,8 +5449,12 @@ project's two runs and 22 calls and of the deployment's 220 calls today),
 `lookupAvailable` (whether this server's configuration lets lookup run),
 `identityAnswers` (the identity rows of the saved draft that neither a saved
 decision nor a preselection answers, read with the same candidates as Review)
-and, only where it applies, `appendTracklist` (below).
-The lookup view's `needsAnswer` remains the list of lookup answers Publish waits
+and, only where it applies, `appendTracklist` (below) and `forAlbum` (the ID of
+the Album an import was created for, sent only for such an import: it runs no
+automatic lookup, Review's Album row offers that Album whatever the decision,
+and the Web makes the numbering its next step once no upload is waiting). The
+lookup
+view's `needsAnswer` remains the list of lookup answers Publish waits
 for. A stored manifest in a shape this release does not know is read through its
 sanitized view. The publish transaction rechecks all of it; an upload still in
 flight, or a file a published track needs without a confirmed upload, is
@@ -4896,7 +5504,8 @@ publication confirmation. The approval and the publication commit never read
 
 - To MusicBrainz, only the planner's URLs under `https://musicbrainz.org/ws/2/`:
   the shared album text and album-artist names, or a one-file import's title
-  and artist; shared identifiers that pass their format checks; a submitted
+  and artist; shared identifiers that pass their format checks, for an
+  existing-Album review those of its captured import evidence; a submitted
   name and any submitted Artist name; for an existing-Album review, the
   Album's saved title as the review captured it, without a trailing `／` or
   `/` and primary Artist name, with its first usable shown
@@ -4929,7 +5538,8 @@ publication confirmation. The approval and the publication commit never read
   attempt): the run's search term (its text and credited artist, a submitted
   Artist name included while both fit the 200-character term, never a
   respelling or a Track title), the fixed storefront code, the digits of a
-  valid barcode every file shares (never a placeholder such as all zeros), and
+  valid barcode every file shares, or a review's captured barcode (never a
+  placeholder such as all zeros), and
   collection IDs from earlier results of the same run. To the iTunes artwork
   hosts, only the rewritten path of an iTunes-only candidate's stored artwork
   address.
@@ -4937,8 +5547,9 @@ publication confirmation. The approval and the publication commit never read
   the same import's or review's lookup candidates (a staged cover or a
   preview; a review only previews), and the
   archive.org redirects they lead to.
-- A review never sends its original filenames, folders, labels, catalog IDs or
-  identifiers, and sends at most two saved Track titles (without a guarded
+- A review never sends its original filenames, folders, labels or catalog
+  IDs, sends no identifier but those of its captured import evidence, and
+  sends at most two saved Track titles (without a guarded
   leading position or a trailing version or featuring note; a title named
   like its file is sent only without its position, never as the filename)
   only to MusicBrainz, as above. Its ranking reads the original filenames'
@@ -4966,3 +5577,126 @@ publication confirmation. The approval and the publication commit never read
   hosts): no cookie, authorization or referrer.
 - Stored records contain no URL except an iTunes-only candidate's validated
   artwork address (and its lookup cover job's), which is never projected.
+
+
+## Original Video projects
+
+The Video entry extends the existing workbench. Audio Album imports, existing
+Album completion, local MP3 conversion, catalog and Page management keep their
+existing routes and authorization. Native apps remain listener-only. Video
+projects use `/api/admin/v1/video-projects`; they never reuse the Audio-only
+Album import schema. Their list, detail, previews and mutations are fenced to
+the initiating account and its current persisted administrator role.
+
+After publication, the completed task reads the current MediaTrack through the
+administrator catalog API. The catalog snapshot includes an allowlisted
+`mediaType` of `audio` or `video` for MediaTracks; clients accept its absence as
+legacy Audio. Video previews use native video controls and protected artwork,
+while Audio previews retain native audio controls. Both use the current account
+viewer and saved revision and stop when their account, role or source changes.
+Video does not offer the Audio-only MP3 conversion entry.
+
+Published Video artwork uses the existing catalog cover upload, confirmation,
+replacement, cancellation and reconciliation endpoints. The frame picker reads
+the protected published media, so the original local file and private upload
+staging objects are unnecessary. A captured JPEG retains its source catalog
+revision through upload and confirmation; an unknown transfer retries the same
+bytes and operation, and a newer source never silently rebases the approval.
+Video catalog revisions bind the active media identity as well as editable
+metadata, while historical Audio revision recipes remain unchanged. Clearing
+own artwork retains the canonical Album/placeholder fallback. The completed
+task's upload history stays immutable and its current artwork is reread from
+the catalog after replacement or clearing.
+
+The private staging prerequisite is the same independently verified
+`FINITUDE_ADMIN_IMPORT_PRIVATE_STORAGE_READY` and `ADMIN_IMPORT_S3_BUCKET_NAME`
+configuration used for import media. A source or processing object in that bucket
+is not a publicly playable MediaTrack. The Video capability reports admission,
+size limit and accepted extensions without exposing buckets, object keys or
+configuration secrets. The Web shows unavailable admission with its explanation
+rather than offering a fake upload.
+
+The instance identity needs put, head/get, exact-version get and delete on the
+private `video-projects/` prefix, and put/get/exact-version get/delete for its
+publication copies under the catalog's `video/` and `images/` prefixes. In IAM
+terms these include `s3:PutObject`, `s3:GetObject`, `s3:GetObjectVersion`,
+`s3:DeleteObject` and `s3:DeleteObjectVersion` on the bounded object resources.
+The private bucket must be distinct from the catalog bucket, deny anonymous
+access and have no public/CDN delivery. A browser never receives its locations
+or credentials. Do not set the readiness assertion merely because a bucket
+name or private object ACL exists; independently verify the bucket policy and
+unauthenticated access.
+
+One multipart source is sent to the project's `/source` endpoint with its frozen
+`Idempotency-Key` and `If-Match`. The server reserves an object record before PUT,
+records the original filename, length and digest, and uses a never-reused key.
+An unknown response is reconciled through `/source/reconcile` against that same
+operation; it is never a reason to blindly create another upload. Confirmed
+uploads queue real server work. An explicit processing retry reuses those bytes.
+The Web transport shows indeterminate transfer while the authenticated request
+is in flight; processing percentages come only from actual decoder progress.
+
+The processor reads the exact private object version into an isolated temporary
+directory. It admits actual MOV-family bytes with one main H.264 or HEVC video
+stream, excluding attached pictures, and at most one audio stream. Current
+bounds are two hours, 8192 pixels per side, 8192 × 4320 decoded pixels, 16 total
+streams, eight audio channels and the configured Video byte limit. Unsupported
+or ambiguous layouts stay recoverable as an explained processing failure. It
+fully decodes selected streams before accepting a result; metadata parsing alone
+never establishes readiness. Local tool processes use no shell, inherit no
+service credentials, allow only file/pipe protocols and MOV demuxing, and have
+bounded threads, allocations, output, diagnostics and execution time. One main
+Video processing operation runs per process; database worker leases fence
+cross-process retries and publication.
+
+The accepted playback profiles are AVC Baseline/Main/High in 8-bit 4:2:0, or
+HEVC Main/Main10 in 4:2:0 with an `hvc1` MP4 sample entry, with AAC or no audio.
+HEVC is not automatically transcoded. A compliant movie with an incompatible
+container, ancillary streams or metadata is remuxed with stream copy and
+fast-start MP4. Only incompatible encoded streams are adapted: a compliant main
+movie is copied when only audio needs AAC encoding. AAC adaptation retains the
+source channel count; no automatic downmix is requested. Actual main-video
+adaptation uses the explicitly configured H.264 encoder, preserves resolution
+and frame timing, and is validated by a second full decode. `libx264` uses CRF 18
+and the medium preset; an explicitly selected macOS VideoToolbox encoder uses
+quality 65. An unavailable encoder is an operational failure and leaves the
+confirmed source available for retry. The existing pinned LGPL room-audio build
+supports decoding and remuxing; main-video encoding additionally requires a
+configured build providing the selected encoder. Never claim that a decoder-only
+installation performed a transcode.
+
+Default artwork prefers the actual attached still over a frame. The fallback
+uses min(2 seconds, 10% duration), then the first decodable frame. JPEG candidates
+are fully decoded, resized within 1280 pixels, stripped of metadata and kept in
+the same traceable private lifecycle as custom images. Cover errors are separate
+from media validation. Manual frame selection reads the actual movie stream,
+not an attached still; explicit custom/selected cover choices take precedence
+over late automatic results. The shared artwork transform budget also applies.
+
+Publication freezes the current revision, safe reference revisions and approval
+digest. Only the approved exact source/output/cover identities may be copied
+and atomically attached to the fixed MediaTrack identity. A lost publication
+acknowledgement is retried through the original operation and never transfers
+the source again. One active `video/` object is exposed after the catalog commit;
+private processing originals and detached outputs have no public stream route.
+Cleanup outcomes remain separate from successful publication. Cancellation and
+cleanup preserve unknown and failed object identities until exact deletion is
+confirmed. Account deletion retains the existing shared-provenance rule and
+cannot erase unfinished private project storage evidence.
+
+Video cleanup explicitly deletes the recorded S3 version, including the literal
+`null` version from an acknowledged unversioned upload. It does not combine that
+request with `If-Match`: S3 [conditional delete evaluation applies only to the
+current object](https://docs.aws.amazon.com/AmazonS3/latest/userguide/conditional-deletes.html).
+Never-reused, conditional-PUT keys prevent null-version replacement by another
+Video operation. The worker verifies the bound identity before deletion and exact
+version absence afterward; omitting the version could instead create a delete
+marker after a bucket versioning change. Failed or uncertain deletion remains
+traceable and retryable through the original lifecycle record.
+
+Portable real-codec tests use tiny synthetic color/tone fixtures under
+`test/fixtures/video/` and injected private storage for lifecycle integration.
+
+The fixed stream selection/copy behavior follows the [FFmpeg command
+documentation](https://ffmpeg.org/ffmpeg.html); the restricted input protocols
+follow the [protocol whitelist contract](https://ffmpeg.org/ffmpeg-protocols.html).

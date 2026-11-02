@@ -5,8 +5,8 @@ import { installPrivateListenerRoutes } from './support/privateRoutes';
 import { expect, test } from './support/test';
 import { expectSignedInVisualShellReady } from './support/visual';
 
-/** Checks the actual pointer target before clicking, without locator auto-scrolling. */
-const clickReachableControl = async (page: Page, control: Locator) => {
+/** Checks the actual pointer target without locator auto-scrolling. */
+const expectReachableControl = async (control: Locator) => {
   const bounds = await control.evaluate((element) => {
     const box = element.getBoundingClientRect();
     const sidebar = element.closest('aside')!.getBoundingClientRect();
@@ -27,11 +27,17 @@ const clickReachableControl = async (page: Page, control: Locator) => {
   });
   expect(bounds.inside).toBe(true);
   expect(bounds.unobscured).toBe(true);
+  return bounds;
+};
+
+/** Clicks the pointer target only after proving the complete control is reachable. */
+const clickReachableControl = async (page: Page, control: Locator) => {
+  const bounds = await expectReachableControl(control);
   await page.mouse.click(bounds.x, bounds.y);
 };
 
 for (const width of [844, 1280]) {
-  test(`short ${width}×390 sidebar keeps language, Playlist and Together reachable`, async ({ page }, testInfo) => {
+  test(`short ${width}×390 sidebar keeps language, Playlist, Video and Together reachable`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 390 });
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await installPrivateListenerRoutes(page);
@@ -74,6 +80,7 @@ for (const width of [844, 1280]) {
     await page.mouse.move(bounds.x + 3, bounds.y + bounds.height / 2);
     await page.mouse.wheel(0, -1000);
     await expect.poll(() => sidebar.evaluate((element) => element.scrollTop)).toBe(0);
+    await expectReachableControl(sidebar.getByRole('link', { name: 'Video', exact: true }));
     await clickReachableControl(page, sidebar.getByRole('link', { name: 'Together' }));
     await expect(page).toHaveURL(/\/finitude\/social$/);
     await expect(page.getByRole('heading', { level: 1, name: 'Listen together' })).toBeVisible();

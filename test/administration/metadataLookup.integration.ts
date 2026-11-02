@@ -41,6 +41,7 @@
  *   - saves, decisions, candidates and analysis succeed while a run is queued, running or unavailable
  *   - a project closed or deleted after queueing supersedes its run without a request, and a lock during a request discards its answer
  *   - removing a bound file while its request is in flight supersedes the run in the cleanup and discards the late answer
+ *   - an import created for an Album never runs an automatic lookup after an upload, a reconciliation, a changed file set or a submitted run, while a submitted name and its retry still run
  *   - a bound file replaced without lookup bookkeeping, as by a release before lookup jobs, is caught by the worker and by the next trigger
  *   - a refused query is skipped and a refused release lookup leaves its candidate incomplete, while the run completes
  *   - a timed-out or unexpected failure is retried after 30 seconds, a throttled one within seconds, a refused gate keeps a longer Retry-After up to a minute, and busy answers through every retry end the run busy
@@ -49,7 +50,7 @@
  *   - a run whose stored progress cannot be advanced is retried after its lease and stays bounded by its grant
  *   - a manual retry replaces a run waiting for an automatic retry and waits for the gate, and a retry past the grant ends the run unavailable
  *   - a release-ID query answered by a merged release keeps the fetched release under its current ID and ranks it
- *   - a fetched release stores each track's own artist credit, one equal to the release's as the marker, and no response carries one
+ *   - a fetched release keeps raw track credits private while the administrator sees bounded usable track Artist choices
  *   - a submitted run's first 503 with Retry-After 0 is retried as busy within seconds and then waits, never 30 seconds
  *   - a matching MusicBrainz release sends nothing to iTunes
  *   - iTunes unavailable while MusicBrainz answered: the run retries iTunes automatically, blocking Publish, then completes with MusicBrainz's answer and iTunes unavailable
@@ -96,6 +97,7 @@ import { randomUUID } from 'node:crypto';
 import { after, before, beforeEach, test } from 'node:test';
 import { Collection, ObjectId } from 'mongodb';
 import { getDatabaseClient, getDb } from '../../src/infrastructure/database';
+import { searchListenerContent } from '../../src/services/listener/listenerContentService';
 import { startMongoReplicaSet, type MongoReplicaSetHarness } from '../support/mongoReplicaSet';
 import { AdminImportError, type AdminImportResponse, type ImportEmbeddedTagsV2 } from '../../src/administration/import/adminImportContract';
 import sharp from 'sharp';
@@ -882,6 +884,29 @@ test('removing a bound file while its request is in flight supersedes the run in
     assert.deepEqual([await lookup(item.id), (await stored(item.id)).lookupGate!.fence, fixture.requests.length], [superseded, 3, 1]);
 });
 
+test('an import created for an Album never runs an automatic lookup after an upload, a reconciliation, a changed file set or a submitted run, while a submitted name and its retry still run', async () => {
+    const id = await seeded(2, syntheticAlbum), forAlbum = { queued: false, run: null, reason: 'forAlbum' };
+    await projects().updateOne({ _id: new ObjectId(id) }, { $set: { createdForAlbumId: new ObjectId().toHexString() } });
+    assert.deepEqual(await requestAutomaticMetadataLookup(by, id, 'upload'), forAlbum);
+    assert.deepEqual(await requestAutomaticMetadataLookup(byOther, id, 'reopen'), forAlbum);
+    assert.deepEqual([await lookup(id), (await stored(id)).lookupGate], [null, undefined]);
+    // A submitted name runs, and a confirmation after it still queues nothing.
+    const submitted = await queue(byOther, id, submit('Typed Album'));
+    assert.deepEqual([submitted.run, submitted.grantSource, submitted.automatic], [1, 'submit', false]);
+    assert.deepEqual(await requestAutomaticMetadataLookup(by, id, 'upload'), forAlbum);
+    // Replacing a bound file still supersedes the active run, but queues no automatic one.
+    await projects().updateOne({ _id: new ObjectId(id), 'media.assets.slotId': (await stored(id)).manifest.files[0].slotId },
+        { $set: { 'media.assets.$.operationId': randomUUID(), 'media.assets.$.sha256': 'f'.repeat(64) } });
+    assert.deepEqual(await requestAutomaticMetadataLookup(by, id, 'upload'), forAlbum);
+    assert.deepEqual([(await lookup(id))!.run, (await lookup(id))!.state, (await lookup(id))!.issue], [1, 'superseded', 'fileSetChanged']);
+    // A retry of the ended run still runs, under its own grant.
+    const retried = await queue(byOther, id, () => ({ kind: 'retry', actorId: byOther, operationId: randomUUID() }));
+    assert.deepEqual([retried.run, retried.grantSource, retried.automatic], [2, 'retry', false]);
+    // Any other import still runs its automatic lookup.
+    const control = await seeded(2, syntheticAlbum);
+    assert.deepEqual(await requestAutomaticMetadataLookup(by, control, 'upload'), { queued: true, run: 1, reason: 'queued' });
+});
+
 test('a bound file replaced without lookup bookkeeping, as by a release before lookup jobs, is caught by the worker and by the next trigger', async () => {
     const replace = (id: string, slotId: string) => projects().updateOne({ _id: new ObjectId(id), 'media.assets.slotId': slotId },
         { $set: { 'media.assets.$.operationId': randomUUID(), 'media.assets.$.sha256': 'f'.repeat(64) } });
@@ -1094,7 +1119,7 @@ test('a release-ID query answered by a merged release keeps the fetched release 
     assert.deepEqual([record.ranking!.preselection?.candidateKey, record.ranking!.preselection?.basis], [`musicbrainz:${mbid(2)}`, 'onlyMatchingGroup']);
 });
 
-test('a fetched release stores each track\'s own artist credit, one equal to the release\'s as the marker, and no response carries one', async () => {
+test('a fetched release keeps raw track credits private while the administrator sees bounded usable track Artist choices', async () => {
     const releaseId = '00000000-0000-4000-8000-000000000020', lengths = [200_000, 210_000, 220_000, 230_000, 240_000, 250_000];
     const id = await seeded(6, index => v2({ album: 'Synthetic Album', albumArtists: ['Synthetic Ensemble'], durationMs: lengths[index] }));
     await requestAutomaticMetadataLookup(by, id, 'upload');
@@ -1107,8 +1132,35 @@ test('a fetched release stores each track\'s own artist credit, one equal to the
     // Read back from MongoDB: the marker, a credit of its own, and no credit where MusicBrainz gave none or an invalid one.
     assert.deepEqual(record.candidates[0].release!.media[0].tracks.map(track => typeof track.artistCredit === 'string' || track.artistCredit === undefined
         ? track.artistCredit ?? null : track.artistCredit.map(credit => credit.name)), ['release', ['Synthetic A', 'Synthetic B'], ['Various Artists'], null, null, null]);
-    const responses = [await getAdminImport(by, id), await listAdminImports(by, {}), await getAdminImportLookup(by, id)].map(value => JSON.stringify(value));
-    for (const response of responses) for (const text of ['Synthetic B', 'Various Artists', '000000000a02', '000000000a03', 'artistCredit']) assert.equal(response.includes(text), false, text);
+    const detail = await getAdminImport(by, id), inventory = await listAdminImports(by, {}), reviewed = await getAdminImportLookup(by, id);
+    const artists = [
+        { name: 'Synthetic A', role: 'primary', joinPhrase: ' feat. ', musicBrainzId: '00000000-0000-4000-8000-000000000a02' },
+        { name: 'Synthetic B', role: 'featured', joinPhrase: null, musicBrainzId: '00000000-0000-4000-8000-000000000a03' }
+    ];
+    // The release choice and publication summary expose only usable, bounded entries, not the fetched artist-credit objects.
+    assert.deepEqual(reviewed.lookup!.groups[0].proposal.trackArtists, [{ discNumber: 1, trackNumber: 2, artists }]);
+    const slotId = detail.item.manifest.files[1].slotId;
+    assert.deepEqual(reviewed.summary.trackArtists!.map(track => ({ slotId: track.slotId, entries: track.entries.map(({ key: _key, identity: _identity, ...entry }) => entry) })), [{ slotId, entries: artists }]);
+    assert.deepEqual(reviewed.summary.trackIdentities!.map(({ name, musicBrainzId, slotIds }) => ({ name, musicBrainzId, slotIds })),
+        artists.map(({ name, musicBrainzId }) => ({ name, musicBrainzId, slotIds: [slotId] })));
+    assert.deepEqual(reviewed.summary.inheritsAlbum, detail.item.manifest.files.slice(2).map(file => file.slotId));
+    for (const response of [detail, inventory].map(value => JSON.stringify(value))) {
+        for (const text of ['Synthetic B', '000000000a02', '000000000a03']) assert.equal(response.includes(text), false, text);
+    }
+    for (const response of [detail, inventory, reviewed].map(value => JSON.stringify(value))) {
+        for (const text of ['Various Artists', 'Synthetic Broken', 'Synthetic Member 51', '000000000b01', '000000000c33', 'artistCredit', 'artist-credit', '"recordingId":', '"artistId":']) {
+            assert.equal(response.includes(text), false, text);
+        }
+    }
+    // Lookup still publishes nothing: private staged identities never enter the public listener response.
+    const publicSearch = await searchListenerContent('Synthetic');
+    assert.deepEqual([publicSearch.artists, publicSearch.albums, publicSearch.audioTracks], [[], [], []]);
+    assert.equal(JSON.stringify(publicSearch).includes('musicBrainzId'), false);
+    const listener = new ObjectId();
+    await getDb()!.collection('users').insertOne({ _id: listener, role: 'user', email: 'track-credit-listener@example.test' });
+    for (const read of [() => getAdminImport(listener.toHexString(), id), () => listAdminImports(listener.toHexString(), {}), () => getAdminImportLookup(listener.toHexString(), id)]) {
+        await assert.rejects(read(), code('ADMIN_IMPORT_ADMIN_REQUIRED'));
+    }
 });
 
 test('a submitted run\'s first 503 with Retry-After 0 is retried as busy within seconds and then waits, never 30 seconds', async () => {
@@ -1443,7 +1495,8 @@ test('a review run end to end on fixtures: only the saved title and primary Arti
     const read = await getCatalogReviewLookup(by, id);
     assert.deepEqual([read.revision, read.valueRevision, read.lookup!.input, read.lookup!.preselection?.basis, read.lookup!.candidates.map(candidate => [candidate.status, candidate.comparison?.subset?.missingTrackCount]),
         read.summary], [doc.revision, 1, { trigger: 'catalog', submitted: null }, 'exactTrackCount', [['matching', 0], ['matching', 1], ['notMatching', null]],
-        { waiting: { lookup: false, analysis: false }, needsAnswer: { tie: false, conflicts: slots.map(slot => `tracks.${slot}.title`) }, lookupAvailable: true }]);
+        { waiting: { lookup: false, analysis: false }, needsAnswer: { tie: false, conflicts: slots.map(slot => `tracks.${slot}.title`) }, lookupAvailable: true,
+            primaryArtists: ['Synthetic Ensemble'] }]);
     // Its timeline names the title search by the review's own title and Artist name; the Track titles were not needed, so their row
     // shows none of them, and no filename ever shows.
     assert.deepEqual([read.lookup!.timeline!.steps[0], read.lookup!.timeline!.trackTitleSearch, read.lookup!.timeline!.steps.find(step => step.kind === 'trackTitle')],
@@ -1731,7 +1784,7 @@ test('the review lookup summary reads a tie between matching groups, analysis in
         creditedRelease(mbid(1), [200_000, 210_000]), retitled(creditedRelease(mbid(2), [200_000, 210_000]), 'Synthetic Album (Deluxe)'), aliasAnswer(mbid(30), 'Synthetic Ensemble')]).musicBrainz });
     const tied = await getCatalogReviewLookup(by, id);
     assert.deepEqual([tied.lookup!.state, tied.lookup!.preselection, tied.lookup!.candidates.map(candidate => candidate.status), tied.summary], ['complete', null, ['matching', 'matching'],
-        { waiting: { lookup: false, analysis: false }, needsAnswer: { tie: true, conflicts: [] }, lookupAvailable: true }]);
+        { waiting: { lookup: false, analysis: false }, needsAnswer: { tie: true, conflicts: [] }, lookupAvailable: true, primaryArtists: ['Synthetic Ensemble'] }]);
     // The read is allowlisted: no fence, grant, bound file set, stored query, capture or source evidence. It reads the capture's
     // credits so the timeline can name the Artist its first search sent, yet nothing else of the capture (its Credit and record
     // IDs, completeness, attribution or time) reaches the wire.
@@ -1753,6 +1806,10 @@ test('the review lookup summary reads a tie between matching groups, analysis in
     await projects().updateOne({ _id: new ObjectId(id) }, { $set: { 'analysis.chunks': [{ ...inflight, state: 'unknown' }] } });
     assert.equal((await getCatalogReviewLookup(by, id)).summary.waiting.analysis, false);
     assert.deepEqual((await getCatalogReviewLookup(by, id, unconfigured)).summary, { ...tied.summary, lookupAvailable: false });
+    // A captured primary Artist name beyond the summary's bound sends no names at all, never a partial list.
+    await projects().updateOne({ _id: new ObjectId(id) }, { $set: { 'catalogCapture.album.credits.$[credit].subject.name': 'S'.repeat(1001) } },
+        { arrayFilters: [{ 'credit.role': 'primary', 'credit.subjectType': 'artist' }] });
+    assert.deepEqual((await getCatalogReviewLookup(by, id)).summary.primaryArtists, []);
 });
 
 test('a review saved in a newer format admits no lookup request and its queued run ends superseded without a request, while its lookup still reads', async () => {

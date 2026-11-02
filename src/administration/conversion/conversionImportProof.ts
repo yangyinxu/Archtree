@@ -1,9 +1,9 @@
 import { ObjectId, type ClientSession } from 'mongodb';
 import { getDb } from '../../infrastructure/database';
-import { activeMediaObjectKeyForTrack, activeMediaTypeForTrack } from '../../utils/mediaStorageKey';
-import { isAudioObjectKeyForTrack, readyAudioStorageFilter } from '../../utils/audioStorageKey';
+import { readyAudioStorageFilter } from '../../utils/audioStorageKey';
+import { publishedImportMedia } from '../import/adminImportPublishedMedia';
 import { readAdminCatalogRecord, withCurrentAdministrator } from '../catalog/adminCatalogService';
-import { CONVERSION_MAX_BYTES, CONVERSION_MAX_FILES, conversionDigest, conversionEtag, conversionFail, conversionId, conversionOperationId } from './conversionContract';
+import { CONVERSION_MAX_BYTES, CONVERSION_MAX_FILES, conversionDigest, conversionFail, conversionId, conversionOperationId } from './conversionContract';
 import { defaultConversionStorage, type ConversionObjectStorage } from './conversionStorage';
 
 export interface ConversionImportReady {
@@ -33,22 +33,19 @@ async function capture(actor: string, projectId: string, session: ClientSession)
         // Confirmed stage cleanup retains the approved hash; it does not invalidate the installed canonical bytes.
         const asset = doc.media?.assets?.find((asset: any) => asset.slotId === member.slotId && ['ready', 'deleted'].includes(asset.state));
         const track = byId.get(member.id);
-        const hash = track?.mediaByteHash, representation = track?.mediaRepresentation;
-        const key = track && activeMediaObjectKeyForTrack(track);
-        if (!asset || !track || activeMediaTypeForTrack(track) !== 'audio' || !key || !isAudioObjectKeyForTrack(key, member.id)
-            || track.contentType !== 'audio/mpeg' || hash?.algorithm !== 'sha256' || hash.value !== asset.sha256
-            || !/^[a-f0-9]{64}$/.test(hash.value) || hash.byteLength !== asset.byteLength || hash.objectKey !== key
-            || !Number.isSafeInteger(hash.byteLength) || hash.byteLength <= 0 || hash.byteLength > CONVERSION_MAX_BYTES || !conversionEtag(hash.etag)
-            || hash.versionId !== null && (typeof hash.versionId !== 'string' || !hash.versionId || hash.versionId.length > 1024 || /[\r\n]/.test(hash.versionId))
-            || hash.etag !== representation?.etag || hash.versionId !== representation?.versionId
-            || representation?.objectKey !== key || representation.byteLength !== asset.byteLength) continue;
-        proofs.push({ slotId: member.slotId, trackId: member.id, sha256: hash.value, byteLength: hash.byteLength, key,
-            etag: hash.etag, versionId: hash.versionId, fingerprint: conversionDigest([key, representation, hash, track.albumId, track.uploadStatus, track.publicationStatus]) });
+        // The byte checks are shared with existing-Album review evidence; conversion adds the MP3 type and its byte cap.
+        const media = publishedImportMedia(member.id, asset, track, { contentType: value => value === 'audio/mpeg', maxBytes: CONVERSION_MAX_BYTES });
+        if (!media || !track) continue;
+        proofs.push({ slotId: member.slotId, trackId: member.id, sha256: media.sha256, byteLength: media.byteLength, key: media.key, etag: media.etag, versionId: media.versionId,
+            fingerprint: conversionDigest([media.key, track.mediaRepresentation, track.mediaByteHash, track.albumId, track.uploadStatus, track.publicationStatus]) });
     }
     return { publicationOperationId: publication.operationId as string, proofs };
 }
 
-/** A staged object alone is not disposal proof: the same bytes must be the currently published canonical MP3. */
+/**
+ * A staged object alone is not disposal proof: the same bytes must be the currently published canonical MP3 of the actor's own
+ * import (publishedImportMedia, whose byte checks existing-Album review evidence shares).
+ */
 export async function getConversionImportReady(actor: string, projectId: string, storage: ConversionObjectStorage = defaultConversionStorage,
     selectedSlots?: readonly string[]): Promise<ConversionImportReady> {
     if (!conversionId(projectId)) return conversionFail(400, 'ADMIN_CONVERSION_INVALID_INPUT');

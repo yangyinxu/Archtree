@@ -3,8 +3,8 @@
  *   Types: ReviewDraft
  *   Functions: fixture, slot, mbid, manifestOf, tags, project, draftOf, track, synthetic, stored, intent,
  *              valuesOf, entry, completed, timed, code, copy, ownEntries, holderId, identity, decided,
- *              itunesStored, localizedStage, reviewDraftOf, reviewRelease, reviewKey, lookupEntry,
- *              aliasContext, none, pathsOf
+ *              trackEntry, featuring, guestCredit, itunesStored, localizedStage, reviewDraftOf, reviewRelease,
+ *              reviewKey, lookupEntry, aliasContext, none, pathsOf
  *   Constants: guard, recorded, importId, actor, other, now, mzstatic
  * Tests
  *   - a release supplies its title, credit-ordered entries with join phrases and MusicBrainz IDs, first label with its ID, group first-release date and each file's title, Disc and Track
@@ -35,7 +35,9 @@
  *   - an ID another entry already carries is never added to a second entry; the differing first entry is an ID conflict
  *   - an administrator save wins over IDs lookup added or removed meanwhile: a base without them is current, the save keeps them, and a real difference still conflicts
  *   - answering lookup on an ID conflict writes the release's IDs; the run's aliases join the names found for each ID
- *   - track credits never change the values an import application writes, the candidate IDs it reads or the names it finds
+ *   - an import application writes each paired file's own track Artist entries, automatic, beside unchanged values, candidate IDs and Album entries
+ *   - another candidate replaces an import's track Artist entries as a whole, none clears them with their origins, and a list no application wrote is cleared too
+ *   - a track without a usable credit gets no entries, and lists past the byte bound or the track-only identity bound are left out, so those tracks take the Album's Artists
  *   - the identity state an application needs is every fetched candidate's credited IDs and the records explicit decisions reuse
  *   - a release with front artwork queues its cover staging under the intent's actor and grant, as a change that never bumps valueRevision
  *   - the worker's preselection stages under the run's grant, while a re-rank and a choice stage under a fresh grant of the administrator acting
@@ -783,20 +785,80 @@ test('answering lookup on an ID conflict writes the release\'s IDs; the run\'s a
     assert.deepEqual(lookupAnswersNeeded(answered, doc, { append: false }).conflicts, []);
 });
 
-test('track credits never change the values an import application writes, the candidate IDs it reads or the names it finds', () => {
+test('an import application writes each paired file\'s own track Artist entries, automatic, beside unchanged values, candidate IDs and Album entries', () => {
     const guest = { name: 'Synthetic Guest', joinPhrase: ' feat. ', artistId: mbid(3), artistName: 'Synthetic Guest' };
     const plain = synthetic(1);
     const credited = synthetic(1, { media: [{ position: 1, format: 'CD', tracks: [{ ...track(1, 'First Song'), artistCredit: 'release' as const },
         { ...track(2, 'Second Song'), artistCredit: [guest, { name: 'Track Lead Spelling', joinPhrase: '', artistId: mbid(1), artistName: 'Track Lead Spelling' }] }] }] });
     assert.deepEqual(valuesOf(project(2, timed), credited), valuesOf(project(2, timed), plain));
     assert.deepEqual(lookupCandidateIds({ candidates: [stored(credited)] }), lookupCandidateIds({ candidates: [stored(plain)] }));
-    // Applying the preselection writes the same draft, origins and found names: a track's other spelling of the lead adds no name.
-    const applied = (release: MusicBrainzRelease) => {
-        const doc = project(2, timed), result = applyPreselectedLookup(doc, completed(doc, [stored(release)]), now);
-        return { changed: result.changed, values: result.record.applied!.values, draft: doc.draft, origins: doc.draftOrigins, names: doc.musicBrainzNames };
-    };
-    assert.deepEqual(applied(credited), applied(plain));
-    assert.ok(!/Synthetic Guest|Track Lead Spelling/.test(JSON.stringify(applied(credited))));
+    const apply = (release: MusicBrainzRelease) => { const doc = project(2, timed); return { doc, result: applyPreselectedLookup(doc, completed(doc, [stored(release)]), now) }; };
+    const withCredits = apply(credited), without = apply(plain);
+    // The first track's credit is stored as the release's, so its entries are the release's; the second has its own. Keys are
+    // derived per slot, IDs come from the release, and both values are automatic.
+    assert.deepEqual(draftOf(withCredits.doc).tracks.map(item => item.artists), [
+        [trackEntry(0, 'Synthetic Lead', 'primary', ' & ', mbid(1)), trackEntry(0, 'Synthetic Second', 'primary', null, mbid(2))],
+        [trackEntry(1, 'Synthetic Guest', 'primary', ' feat. ', mbid(3)), trackEntry(1, 'Track Lead Spelling', 'featured', null, mbid(1))]]);
+    assert.deepEqual([withCredits.doc.draftOrigins![`tracks:${slot(0)}:artists`], withCredits.doc.draftOrigins![`tracks:${slot(1)}:artists`]], ['automatic', 'automatic']);
+    assert.ok([`tracks.${slot(0)}.artists`, `tracks.${slot(1)}.artists`].every(target => withCredits.result.record.applied!.paths.includes(target as never)));
+    // Every other value, the recorded values and the revision are those of the same release without track credits.
+    assert.deepEqual(draftOf(withCredits.doc).album, draftOf(without.doc).album);
+    assert.deepEqual(withCredits.result.record.applied!.values, without.result.record.applied!.values);
+    assert.equal(withCredits.doc.valueRevision, without.doc.valueRevision);
+    assert.ok(draftOf(without.doc).tracks.every(item => !('artists' in item)) && !Object.keys(without.doc.draftOrigins!).some(name => /^tracks:.+:artists$/.test(name)));
+    // Applying the same candidate again writes nothing.
+    const revision = withCredits.doc.valueRevision, again = applyLookupCandidate(withCredits.doc, withCredits.result.record.applied, stored(credited), intent());
+    assert.deepEqual([again.application.paths, withCredits.doc.valueRevision], [[], revision]);
+});
+
+/** A track Artist entry an import application writes: its key derived from the import, the slot and the name. */
+const trackEntry = (slotIndex: number, name: string, role: ImportArtistEntry['role'] = 'primary', joinPhrase: string | null = null, musicBrainzId: string | null = null): ImportArtistEntry =>
+    ({ key: derivedEntryKey({ importId, slotId: slot(slotIndex), lookupEntry: name.normalize('NFC').toLowerCase() }), name, role, joinPhrase, musicBrainzId });
+/** A synthetic release whose second track credits `credit` and whose first track's credit is the release's. */
+const featuring = (id: number, credit: LookupArtistCredit[]) => synthetic(id, { media: [{ position: 1, format: 'CD', tracks: [{ ...track(1, 'First Song'), artistCredit: 'release' as const },
+    { ...track(2, 'Second Song'), artistCredit: credit }] }] });
+const guestCredit = (id = 3): LookupArtistCredit[] => [{ name: 'Synthetic Lead', joinPhrase: ' feat. ', artistId: mbid(1), artistName: 'Synthetic Lead' },
+    { name: `Synthetic Guest ${id}`, joinPhrase: '', artistId: mbid(id), artistName: `Synthetic Guest ${id}` }];
+
+test('another candidate replaces an import\'s track Artist entries as a whole, none clears them with their origins, and a list no application wrote is cleared too', () => {
+    const doc = project(2, timed), first = chooseLookupCandidate(doc, completed(doc, [stored(featuring(1, guestCredit(3))), stored(featuring(2, guestCredit(4)))]),
+        { run: 1, candidateKey: `musicbrainz:${mbid(1)}`, actorId: actor, operationId: mbid(701) }, now);
+    assert.equal(draftOf(doc).tracks[1].artists![1].name, 'Synthetic Guest 3');
+    const second = chooseLookupCandidate(doc, first, { run: 1, candidateKey: `musicbrainz:${mbid(2)}`, actorId: actor, operationId: mbid(702) }, now);
+    assert.deepEqual(draftOf(doc).tracks[1].artists!.map(item => [item.name, item.role, item.musicBrainzId]), [['Synthetic Lead', 'primary', mbid(1)], ['Synthetic Guest 4', 'featured', mbid(4)]]);
+    assert.ok(second.applied!.paths.includes(`tracks.${slot(1)}.artists` as never));
+    chooseLookupCandidate(doc, second, { run: 1, candidateKey: null, actorId: actor, operationId: mbid(703) }, now);
+    assert.ok(draftOf(doc).tracks.every(item => !('artists' in item)));
+    assert.ok(!Object.keys(doc.draftOrigins!).some(name => /^tracks:.+:artists$/.test(name)));
+    // A stored list that no application wrote (another release, a hand edit of the document) is removed by the next application.
+    const stale = project(2, timed);
+    draftOf(stale).tracks[0].artists = [trackEntry(0, 'Stale Name')];
+    applyPreselectedLookup(stale, completed(stale, [stored(synthetic(1))]), now);
+    assert.ok(draftOf(stale).tracks.every(item => !('artists' in item)));
+});
+
+test('a track without a usable credit gets no entries, and lists past the byte bound or the track-only identity bound are left out, so those tracks take the Album\'s Artists', () => {
+    const placeholder = synthetic(1, { media: [{ position: 1, format: 'CD', tracks: [{ ...track(1, 'First Song'), artistCredit: [{ name: 'Various Artists', joinPhrase: '', artistId: '89ad4ac3-39f7-470e-963a-56509c546377', artistName: 'Various Artists' }] },
+        { ...track(2, 'Second Song') }] }] });
+    const doc = project(2, timed);
+    applyPreselectedLookup(doc, completed(doc, [stored(placeholder)]), now);
+    assert.ok(draftOf(doc).tracks.every(item => !('artists' in item)));
+    // Twenty-one files whose tracks each credit a different guest: the twenty-first guest passes the track-only identity bound.
+    const count = 21, wide = synthetic(1, { trackCount: count, media: [{ position: 1, format: 'CD', tracks: Array.from({ length: count }, (_unused, index) =>
+        ({ ...track(index + 1, `Song ${index + 1}`, 200_000 + (index + 1) * 10_000), artistCredit: guestCredit(200 + index) })) }] });
+    const many = project(count, index => tags({ durationMs: 200_000 + (index + 1) * 10_000 }));
+    chooseLookupCandidate(many, completed(many, [stored(wide)]), { run: 1, candidateKey: `musicbrainz:${mbid(1)}`, actorId: actor, operationId: mbid(704) }, now);
+    const lists = draftOf(many).tracks.map(item => item.artists);
+    assert.equal(lists.filter(Boolean).length, DRAFT_V2_LIMITS.trackIdentities);
+    assert.equal(lists[count - 1], undefined);
+    // Lists together stay within their byte bound: ten tracks crediting the same twenty long names leave the later tracks without entries.
+    const long: LookupArtistCredit[] = Array.from({ length: 20 }, (_unused, at) => ({ name: `${'N'.repeat(190)} ${at}`, joinPhrase: at === 19 ? '' : ', ', artistId: mbid(1000 + at), artistName: 'x' }));
+    const heavy = synthetic(1, { trackCount: 10, media: [{ position: 1, format: 'CD', tracks: Array.from({ length: 10 }, (_unused, index) =>
+        ({ ...track(index + 1, `Song ${index + 1}`, 200_000 + (index + 1) * 10_000), artistCredit: long })) }] });
+    const big = project(10, index => tags({ durationMs: 200_000 + (index + 1) * 10_000 }));
+    chooseLookupCandidate(big, completed(big, [stored(heavy)]), { run: 1, candidateKey: `musicbrainz:${mbid(1)}`, actorId: actor, operationId: mbid(705) }, now);
+    const written = draftOf(big).tracks.filter(item => item.artists);
+    assert.ok(written.length > 0 && written.length < 10 && written.reduce((sum, item) => sum + Buffer.byteLength(JSON.stringify(item.artists)), 0) <= DRAFT_V2_LIMITS.trackArtistBytes);
 });
 
 test('the identity state an application needs is every fetched candidate\'s credited IDs and the records explicit decisions reuse', () => {

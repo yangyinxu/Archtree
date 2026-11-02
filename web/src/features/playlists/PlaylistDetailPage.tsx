@@ -4,13 +4,13 @@
  *   Default: PlaylistDetailPage
  * Internal
  *   Types: MemberMutationScope, MemberMutationContext, ReorderVariables, RemoveVariables
- *   Functions: durationSeconds, memberMutationMessage
+ *   Functions: memberMutationMessage
  *   Constants: AddSoundtracksDialog, ActionMenu, PlaylistDeleteDialog, PlaylistNameDialog
  * @end-catalog */
 
-import { lazy, Suspense, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
+import { Fragment, lazy, Suspense, useEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from 'react';
 import { useMutation, useQuery, useQueryClient, type Query } from '@tanstack/react-query';
-import { ListMusic, Play, Plus } from 'lucide-react';
+import { CirclePlus, ListMusic } from 'lucide-react';
 import { Link, useNavigate, useParams } from 'react-router';
 
 import { ApiError } from '../../api/client';
@@ -29,8 +29,18 @@ import {
 } from '../../api/playlists';
 import { browserSessionQuery } from '../../api/session';
 import { focusMainContent } from '../../app/focusMainContent';
-import { neutralArtworkTone, useArtworkTone, useMainPaneTone } from '../../artwork/useArtworkTone';
+import { neutralArtworkTone, useArtworkTone } from '../../artwork/useArtworkTone';
 import { Artwork } from '../../components/Artwork';
+import { CompactCatalogHeader } from '../../components/CompactCatalogHeader';
+import { DetailHero, DetailHeroSkeleton } from '../../components/DetailHero';
+import h from '../../components/DetailHero.module.css';
+import { Icon } from '../../components/Icon';
+import { LinkedByline } from '../../components/LinkedByline';
+import { ShuffleToggle } from '../../components/ShuffleToggle';
+import { TrackTable } from '../../components/TrackTable';
+import { playerStore } from '../../player';
+import { usePlaybackContext } from '../../player/usePlaybackContext';
+import { formatTotalDuration, totalDurationSeconds } from '../catalog/totalDuration';
 import { launchPlaylistPlayback } from '../playback/launchPlayback';
 import {
   commitPlaylistDetail,
@@ -55,15 +65,6 @@ const PlaylistDeleteDialog = lazy(() => import('./PlaylistDialogs').then((module
 const PlaylistNameDialog = lazy(() => import('./PlaylistDialogs').then((module) => ({
   default: module.PlaylistNameDialog
 })));
-
-const durationSeconds = (duration: string | null) => {
-  if (!duration) return null;
-  const parts = duration.split(':').map(Number);
-  if (parts.length < 2 || parts.length > 3 || parts.some((part) => !Number.isFinite(part) || part < 0)) {
-    return null;
-  }
-  return parts.reduce((total, part) => total * 60 + part, 0);
-};
 
 const memberMutationMessage = (error: unknown, t: LocalizationContextValue['t']) => {
   if (!(error instanceof ApiError)) return t('playlist.error.change_unconfirmed');
@@ -124,7 +125,8 @@ export const PlaylistDetailPage = () => {
   const session = useQuery(browserSessionQuery());
   const viewerId = session.data?.user.id ?? '';
   const playlistQuery = useQuery(playlistDetailQuery(viewerId, playlistId));
-  const renameTriggerRef = useRef<HTMLButtonElement>(null);
+  const heroRef = useRef<HTMLElement>(null);
+  const heroPlayRef = useRef<HTMLButtonElement>(null);
   const addTriggerRef = useRef<HTMLButtonElement>(null);
   const moreTriggerRef = useRef<HTMLButtonElement>(null);
   const memberHeadingRef = useRef<HTMLHeadingElement>(null);
@@ -243,15 +245,14 @@ export const PlaylistDetailPage = () => {
   }, [playlistId, viewerId]);
 
   const playlist = playlistQuery.data;
+  // Like the Album page, the opaque header paints the tone, so the main pane stays untinted.
   const tone = useArtworkTone(playlist?.artworkUrl) ?? neutralArtworkTone;
-  useMainPaneTone(tone.pane);
   const readyTracks = useMemo(() => playlist?.items.flatMap((item) => (
     item.availability === 'ready' && item.audioTrack ? [item.audioTrack] : []
   )) ?? [], [playlist]);
-  const knownDuration = useMemo(() => readyTracks.reduce<number | null>((total, track) => {
-    const seconds = durationSeconds(track.duration);
-    return seconds === null || total === null ? null : total + seconds;
-  }, 0), [readyTracks]);
+  const readyTrackIds = useMemo(() => readyTracks.map((track) => track.id), [readyTracks]);
+  const playback = usePlaybackContext(readyTrackIds);
+  const knownDuration = useMemo(() => totalDurationSeconds(readyTracks), [readyTracks]);
   const mutationPending = removeMutation.isPending || reorderMutation.isPending;
 
   const memberActionRef = (itemId: string) => {
@@ -320,9 +321,7 @@ export const PlaylistDetailPage = () => {
       </div></div>
     );
   }
-  if (playlistQuery.isPending) {
-    return <div className={styles.page}><div aria-busy="true" className={styles.state}>{t('playlist.detail.opening')}</div></div>;
-  }
+  if (playlistQuery.isPending) return <DetailHeroSkeleton label={t('playlist.detail.opening')} />;
   if (playlistQuery.isError) {
     const notFound = playlistQuery.error instanceof ApiError && playlistQuery.error.status === 404;
     return (
@@ -338,218 +337,232 @@ export const PlaylistDetailPage = () => {
       </div></div>
     );
   }
-  if (!playlist) {
-    return <div className={styles.page}><div aria-busy="true" className={styles.state}>{t('playlist.detail.opening')}</div></div>;
-  }
+  if (!playlist) return <DetailHeroSkeleton label={t('playlist.detail.opening')} />;
 
   const summary = playlistSummaryFromDetail(playlist);
-  const duration = knownDuration !== null && knownDuration > 0
-    ? (() => {
-        const hours = Math.floor(knownDuration / 3600);
-        const minutes = Math.floor((knownDuration % 3600) / 60);
-        return hours > 0
-          ? t('playlist.duration.hours', { hours, minutes })
-          : t('playlist.duration.minutes', { minutes: Math.max(1, minutes) });
-      })()
-    : '';
+  const name = playlist.name;
+  const unavailableCount = playlist.itemCount - readyTracks.length;
+  // Hero and compact Play reflect this Playlist's ready queue: Pause while it plays, resume while
+  // it is paused; otherwise Play starts from the first ready member.
+  const heroPlaying = playback.matches && playback.status === 'playing';
+  const togglePlay = () => {
+    if (heroPlaying) playerStore.pause();
+    else if (playback.matches && playback.status === 'paused') void playerStore.play();
+    else void launchPlaylistPlayback(playlistId, readyTracks, viewerId);
+  };
+  const pauseLabel = t('player.action.pause');
 
   return (
-    <div className={styles.page}>
-      <header className={styles.detailHeader}>
-        <Artwork
-          alt={t('playlist.artwork_alt', { name: playlist.name })}
-          className={styles.playlistArtwork}
-          fetchPriority="high"
-          kind="audioTrack"
-          loading="eager"
-          sizes="(max-width: 640px) 9rem, 14rem"
-          src={playlist.artworkUrl}
-        />
-        <div className={styles.detailCopy}>
-          <p className={styles.eyebrow}>{t('playlist.detail.private')}</p>
-          <h1 title={playlist.name}>{playlist.name}</h1>
-          <p className={styles.detailMetadata}>
-            {t('playlist.item_count', { count: playlist.itemCount })}
-            {duration ? ` · ${duration}` : ''}
-            {readyTracks.length !== playlist.itemCount
-              ? ` · ${t('playlist.detail.unavailable_count', {
-                  count: playlist.itemCount - readyTracks.length
-                })}`
-              : ''}
-          </p>
-          <div className={styles.detailActions}>
+    <>
+      <CompactCatalogHeader
+        heroPlayRef={heroPlayRef}
+        heroRef={heroRef}
+        onPlay={togglePlay}
+        playDisabled={readyTracks.length === 0}
+        playing={heroPlaying}
+        playLabel={heroPlaying ? pauseLabel : t('playlist.detail.play_label', { name })}
+        title={name}
+        tone={tone.pane}
+      />
+      <div className={h.page}>
+        <DetailHero
+          actions={<>
             <button
-              aria-label={t('common.action.play')}
-              className={styles.playButton}
+              aria-label={heroPlaying ? pauseLabel : t('common.action.play')}
+              className={h.play}
               disabled={readyTracks.length === 0}
-              onClick={() => { void launchPlaylistPlayback(readyTracks, viewerId); }}
+              onClick={togglePlay}
+              ref={heroPlayRef}
               title={readyTracks.length === 0
                 ? t('playlist.detail.play_unavailable')
-                : t('playlist.detail.play_label', { name: playlist.name })}
+                : t('playlist.detail.play_label', { name })}
               type="button"
             >
-              <Play aria-hidden="true" fill="currentColor" focusable="false" />
+              <Icon name={heroPlaying ? 'pause' : 'play'} />
             </button>
-            <button className={styles.secondaryButton} disabled={mutationPending} onClick={() => setDialog('add')} ref={addTriggerRef} type="button">
-              <Plus aria-hidden="true" /> {t('playlist.action.add_tracks')}
+            <ShuffleToggle disabled={readyTracks.length < 2} />
+            <button
+              aria-label={t('playlist.action.add_tracks')}
+              className={h.iconAction}
+              disabled={mutationPending}
+              onClick={() => setDialog('add')}
+              ref={addTriggerRef}
+              title={t('playlist.action.add_tracks')}
+              type="button"
+            >
+              <CirclePlus aria-hidden="true" focusable="false" />
             </button>
-            <button className={styles.secondaryButton} disabled={mutationPending} onClick={() => setDialog('rename')} ref={renameTriggerRef} type="button">{t('playlist.action.rename')}</button>
-            <Suspense fallback={null}>
-              <ActionMenu
-                items={[{
-                  label: t('playlist.action.delete'),
-                  destructive: true,
-                  disabled: mutationPending,
-                  restoreFocus: false,
-                  onSelect: () => setDialog('delete')
-                }]}
-                label={t('playlist.actions.more_for', { name: playlist.name })}
-                triggerRef={moreTriggerRef}
-              />
-            </Suspense>
-          </div>
-        </div>
-      </header>
+            <span className={h.iconSlot}>
+              <Suspense fallback={null}>
+                <ActionMenu
+                  items={[
+                    { label: t('playlist.action.rename'), disabled: mutationPending, restoreFocus: false, onSelect: () => setDialog('rename') },
+                    {
+                      label: t('playlist.action.delete'),
+                      destructive: true,
+                      disabled: mutationPending,
+                      restoreFocus: false,
+                      onSelect: () => setDialog('delete')
+                    }
+                  ]}
+                  label={t('playlist.actions.more_for', { name })}
+                  triggerRef={moreTriggerRef}
+                />
+              </Suspense>
+            </span>
+          </>}
+          artwork={<Artwork
+            alt={t('playlist.artwork_alt', { name })}
+            className={h.artwork}
+            fetchPriority="high"
+            kind="audioTrack"
+            loading="eager"
+            sizes="(max-width: 520px) 12rem, (max-width: 720px) 10rem, 15rem"
+            src={playlist.artworkUrl}
+          />}
+          byline={[
+            t('playlist.item_count', { count: playlist.itemCount }),
+            knownDuration ? formatTotalDuration(knownDuration, t) : null,
+            unavailableCount > 0 && t('playlist.detail.unavailable_count', { count: unavailableCount })
+          ].filter(Boolean).map((part, index) => <Fragment key={index}>{index > 0 && ' • '}{part}</Fragment>)}
+          eyebrow={t('playlist.detail.private')}
+          heroRef={heroRef}
+          title={name}
+          tone={tone.hero}
+        />
 
-      {visibleFeedback && (
-        <p className={visibleFeedback.kind === 'error' ? styles.feedbackError : styles.feedbackSuccess} role={visibleFeedback.kind === 'error' ? 'alert' : 'status'}>
-          {visibleFeedback.message}
-        </p>
-      )}
-      <p aria-atomic="true" aria-live="polite" className="visually-hidden">{visibleMovementAnnouncement}</p>
-
-      <section aria-labelledby="playlist-soundtracks-title" className={styles.memberSection}>
-        <div className={styles.sectionHeading}>
-          <div>
-            <p className={styles.eyebrow}>{t('playlist.detail.in_playlist')}</p>
-            <h2 id="playlist-soundtracks-title" ref={memberHeadingRef} tabIndex={-1}>{t('common.label.mediatracks')}</h2>
-          </div>
-          <p>{playlist.items.length > 0
-            ? t('playlist.detail.items_copy')
-            : t('playlist.detail.empty_copy')}</p>
-        </div>
-        {playlist.items.length === 0 ? (
-          <div className={styles.emptyState}>
-            <ListMusic aria-hidden="true" />
-            <h3>{t('playlist.detail.empty_title')}</h3>
-            <p>{t('playlist.detail.empty_copy')}</p>
-            <button className={styles.primaryButton} onClick={() => setDialog('add')} type="button">{t('playlist.action.add_tracks')}</button>
-          </div>
-        ) : (
-          <>
-            <div aria-hidden="true" className={styles.memberTableHeader}>
-              <span>#</span>
-              <span className={styles.memberTitleHeading}>{t('playlist.detail.table.title')}</span>
-              <span>{t('playlist.detail.table.duration')}</span>
-              <span />
-            </div>
-            <ol aria-label={t('playlist.detail.members_label', { name: playlist.name })} className={styles.memberList}>
-            {playlist.items.map((item, index) => {
-              const track = item.audioTrack;
-              const title = track?.title || t('playlist.detail.unavailable_title');
-              return (
-                <li className={`${styles.memberRow} ${!track ? styles.unavailableRow : ''}`} key={item.itemId}>
-                  <button
-                    aria-label={track
-                      ? t('content.play.label', { title })
-                      : t('playlist.detail.cannot_play', { title })}
-                    className={styles.memberPrimary}
-                    disabled={!track}
-                    onClick={() => {
-                      if (track) void launchPlaylistPlayback(readyTracks, viewerId, track.id);
-                    }}
-                    type="button"
-                  >
-                    <span className={styles.memberPosition}>{index + 1}</span>
-                    <Artwork alt="" className={styles.memberArtwork} kind="audioTrack" sizes="3.25rem" src={track?.artworkUrl} />
-                    <span className={styles.memberCopy}>
-                      <span title={title}>{title}</span>
-                      <span>{track
-                        ? [track.artistNames.join(', '), track.albumTitle].filter(Boolean).join(' · ') || t('common.label.mediatrack')
-                        : t('playlist.detail.unavailable_copy')}</span>
-                    </span>
-                    <span className={styles.memberDuration}>{track?.duration || '—'}</span>
-                  </button>
-                  <span className={styles.memberMenu}>
-                    <Suspense fallback={null}>
-                      <ActionMenu
-                        items={[
-                          { label: t('playlist.action.move_up'), disabled: mutationPending || index === 0, onSelect: () => moveItem(item.itemId, -1) },
-                          { label: t('playlist.action.move_down'), disabled: mutationPending || index === playlist.items.length - 1, onSelect: () => moveItem(item.itemId, 1) },
-                          {
-                            label: t('playlist.action.remove'),
-                            destructive: true,
-                            disabled: mutationPending,
-                            restoreFocus: false,
-                            onSelect: () => {
-                              focusAfterMemberRemoval(item.itemId);
-                              const signature = `remove:${playlist.revision}:${item.itemId}`;
-                              const idempotencyKey = mutationKeysRef.current.get(signature)
-                                ?? createPlaylistIdempotencyKey();
-                              mutationKeysRef.current.set(signature, idempotencyKey);
-                              removeMutation.mutate({
-                                viewerId, playlistId, operation: ++mutationOperationRef.current,
-                                itemId: item.itemId,
-                                revision: playlist.revision,
-                                idempotencyKey,
-                                signature
-                              });
-                            }
-                          }
-                        ]}
-                        label={t('playlist.actions.for', { name: title })}
-                        triggerRef={memberActionRef(item.itemId)}
-                      />
-                    </Suspense>
-                  </span>
-                </li>
-              );
-            })}
-            </ol>
-          </>
+        {visibleFeedback && (
+          <p className={visibleFeedback.kind === 'error' ? styles.feedbackError : styles.feedbackSuccess} role={visibleFeedback.kind === 'error' ? 'alert' : 'status'}>
+            {visibleFeedback.message}
+          </p>
         )}
-      </section>
+        <p aria-atomic="true" aria-live="polite" className="visually-hidden">{visibleMovementAnnouncement}</p>
 
-      {visibleDialog === 'rename' && (
-        <Suspense fallback={null}>
-          <PlaylistNameDialog
-            key={viewerId}
-            mode="rename"
-            onClose={() => setDialog(null)}
-            onConfirmed={() => setDialog(null)}
-            playlist={summary}
-            returnFocusRef={renameTriggerRef}
-            viewerId={viewerId}
-          />
-        </Suspense>
-      )}
-      {visibleDialog === 'add' && (
-        <Suspense fallback={null}>
-          <AddSoundtracksDialog
-            key={viewerId}
-            onClose={() => setDialog(null)}
-            playlist={playlist}
-            returnFocusRef={addTriggerRef}
-            viewerId={viewerId}
-          />
-        </Suspense>
-      )}
-      {visibleDialog === 'delete' && (
-        <Suspense fallback={null}>
-          <PlaylistDeleteDialog
-            key={viewerId}
-            onClose={() => setDialog(null)}
-            onDeleted={() => {
-              navigate('/playlists', { replace: true });
-              focusMainContent();
-            }}
-            playlist={summary}
-            returnFocusRef={moreTriggerRef}
-            viewerId={viewerId}
-          />
-        </Suspense>
-      )}
-    </div>
+        <section aria-labelledby="playlist-soundtracks-title" style={{ '--tt-sticky-top': '4rem' } as CSSProperties}>
+          {/* Hidden over a list; shown above the empty state, where it is the removal focus fallback. */}
+          <h2
+            className={playlist.items.length > 0 ? 'visually-hidden' : styles.emptyHeading}
+            id="playlist-soundtracks-title"
+            ref={memberHeadingRef}
+            tabIndex={-1}
+          >{t('common.label.mediatracks')}</h2>
+          {playlist.items.length === 0 ? (
+            <div className={styles.emptyState}>
+              <ListMusic aria-hidden="true" />
+              <h3>{t('playlist.detail.empty_title')}</h3>
+              <p>{t('playlist.detail.empty_copy')}</p>
+              <button className={styles.primaryButton} onClick={() => setDialog('add')} type="button">{t('playlist.action.add_tracks')}</button>
+            </div>
+          ) : (
+            <TrackTable
+              albumHeading={t('common.label.album')}
+              durationHeading={t('playlist.detail.table.duration')}
+              label={t('playlist.detail.members_label', { name: playlist.name })}
+              rows={playlist.items.map((item, index) => {
+                const track = item.audioTrack;
+                const title = track?.title || t('playlist.detail.unavailable_title');
+                const state = track && track.id === playback.currentId ? playback.status : null;
+                return {
+                  key: item.itemId,
+                  title,
+                  byline: !track
+                    ? t('playlist.detail.unavailable_copy')
+                    : track.artistNames.length > 0 && <LinkedByline credits={track.credits} text={track.artistNames.join(', ')} />,
+                  artworkUrl: track?.artworkUrl,
+                  album: track?.albumId
+                    ? <Link to={`/albums/${encodeURIComponent(track.albumId)}`}>{track.albumTitle}</Link>
+                    : track?.albumTitle,
+                  duration: track?.duration ?? null,
+                  state,
+                  disabled: !track,
+                  playLabel: !track
+                    ? t('playlist.detail.cannot_play', { title })
+                    : state === 'playing' ? t('player.action.pause') : t('content.play.label', { title }),
+                  onActivate: () => {
+                    if (!track) return;
+                    if (state === 'playing') playerStore.pause();
+                    else if (state === 'paused' && playback.matches) void playerStore.play();
+                    else void launchPlaylistPlayback(playlistId, readyTracks, viewerId, track.id);
+                  },
+                  menu: <Suspense fallback={null}>
+                    <ActionMenu
+                      items={[
+                        { label: t('playlist.action.move_up'), disabled: mutationPending || index === 0, onSelect: () => moveItem(item.itemId, -1) },
+                        { label: t('playlist.action.move_down'), disabled: mutationPending || index === playlist.items.length - 1, onSelect: () => moveItem(item.itemId, 1) },
+                        {
+                          label: t('playlist.action.remove'),
+                          destructive: true,
+                          disabled: mutationPending,
+                          restoreFocus: false,
+                          onSelect: () => {
+                            focusAfterMemberRemoval(item.itemId);
+                            const signature = `remove:${playlist.revision}:${item.itemId}`;
+                            const idempotencyKey = mutationKeysRef.current.get(signature)
+                              ?? createPlaylistIdempotencyKey();
+                            mutationKeysRef.current.set(signature, idempotencyKey);
+                            removeMutation.mutate({
+                              viewerId, playlistId, operation: ++mutationOperationRef.current,
+                              itemId: item.itemId,
+                              revision: playlist.revision,
+                              idempotencyKey,
+                              signature
+                            });
+                          }
+                        }
+                      ]}
+                      label={t('playlist.actions.for', { name: title })}
+                      triggerRef={memberActionRef(item.itemId)}
+                    />
+                  </Suspense>
+                };
+              })}
+              titleHeading={t('playlist.detail.table.title')}
+              variant="playlist"
+            />
+          )}
+        </section>
+
+        {visibleDialog === 'rename' && (
+          <Suspense fallback={null}>
+            <PlaylistNameDialog
+              key={viewerId}
+              mode="rename"
+              onClose={() => setDialog(null)}
+              onConfirmed={() => setDialog(null)}
+              playlist={summary}
+              returnFocusRef={moreTriggerRef}
+              viewerId={viewerId}
+            />
+          </Suspense>
+        )}
+        {visibleDialog === 'add' && (
+          <Suspense fallback={null}>
+            <AddSoundtracksDialog
+              key={viewerId}
+              onClose={() => setDialog(null)}
+              playlist={playlist}
+              returnFocusRef={addTriggerRef}
+              viewerId={viewerId}
+            />
+          </Suspense>
+        )}
+        {visibleDialog === 'delete' && (
+          <Suspense fallback={null}>
+            <PlaylistDeleteDialog
+              key={viewerId}
+              onClose={() => setDialog(null)}
+              onDeleted={() => {
+                navigate('/playlists', { replace: true });
+                focusMainContent();
+              }}
+              playlist={summary}
+              returnFocusRef={moreTriggerRef}
+              viewerId={viewerId}
+            />
+          </Suspense>
+        )}
+      </div>
+    </>
   );
 };
 

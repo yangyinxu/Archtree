@@ -40,6 +40,7 @@
     "start": "cross-env NODE_ENV=production tsx src/app.ts",
     "dev": "cross-env NODE_ENV=develop tsx src/app.ts",
     "dev:web": "npm run dev --workspace @archtree/finitude-web",
+    "dev:all": "node scripts/dev-all.mjs",
     "dev:auth-rotation": "cross-env NODE_ENV=develop ACCESS_TOKEN_SECONDS=5 tsx src/app.ts",
     "demo:social": "tsx scripts/demo-social.ts",
     "build:engineering": "node scripts/build-engineering.mjs",

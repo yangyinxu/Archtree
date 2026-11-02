@@ -3,6 +3,7 @@
  *   Constants: album, audioTrack
  * Tests
  *   - accepts the discriminated listener content contract
+ *   - personal Video bylines use the existing wire fields and discard private account associations
  *   - strips unrecognized fields and rejects artists inside Home music sections
  *   - validates and rejoins a Grid/List page in configured order
  *   - rejects incomplete and out-of-order Grid/List pages and strips unknown fields
@@ -54,6 +55,16 @@ test('accepts the discriminated listener content contract', () => {
     title: 'Home',
     sections: [{ id: 'quiet', title: 'Quiet hours', presentation: 'carousel', items: [album, audioTrack] }]
   }).sections[0].items).toHaveLength(2);
+});
+
+test('personal Video bylines use the existing wire fields and discard private account associations', () => {
+  for (const displayByline of ['个人发布', 'Lorem Film']) {
+    const item = { ...audioTrack, artistNames: [], credits: [], attributionStatus: 'unknown', displayByline };
+    const parsed = contentSummarySchema.parse({ ...item, personalAttribution: { ownerId: 'private-owner', publicName: displayByline }, email: 'private@example.test' });
+    expect(parsed).toEqual(item);
+    if (parsed.contentType !== 'audioTrack') throw new Error('Expected a Video MediaTrack summary.');
+    expect(contentByline(parsed)).toBe(displayByline);
+  }
 });
 
 test('strips unrecognized fields and rejects artists inside Home music sections', () => {

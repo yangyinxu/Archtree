@@ -22,7 +22,7 @@
  *   - member Credits: a conflict kept is never applied and an unanswered one waits; a used one replaces legacy Credits of the Artists it names and keeps every other Credit
  *   - a member whose track credits only a placeholder, or nothing, keeps no Credits even when the Album gains its first primary Artist
  *   - a write failing late in the apply, or Credit writes turned off, leaves no record, ID, Credit, tracklist or receipt behind; the same apply is then admitted once
- *   - the identity candidate read queries 40 Artist names for an import and up to the review's bound when asked
+ *   - the identity candidate read queries 60 Artist names for an import and up to the review's bound when asked
  *   - a track-only artist the catalog keeps under an alias lookup found is a name candidate needing an answer, never a preselected create
  *   - an Album without members takes a chosen candidate's expected tracklist with every row a missing-file row
  *   - records an applied review creates or records an ID on reach listener Artist, Organization, Album and Search responses without a MusicBrainz ID, crediting the Album
@@ -602,14 +602,14 @@ test('a write failing late in the apply, or Credit writes turned off, leaves no 
     assert.deepEqual(await applyCatalogReview(String(actor), id, body), applied);
 }));
 
-test('the identity candidate read queries 40 Artist names for an import and up to the review\'s bound when asked', async () => {
-    const names = Array.from({ length: 45 }, (_unused, index) => `Bounded Artist ${index + 1}`);
+test('the identity candidate read queries 60 Artist names for an import and up to the review\'s bound when asked', async () => {
+    const names = Array.from({ length: 65 }, (_unused, index) => `Bounded Artist ${index + 1}`);
     await db().collection('artists').insertMany(names.map(name => ({ name, lifecycleStatus: 'ready' })));
     const draft: ImportDraftV2 = { album: { title: '', artists: names.map((name, index) => ({ key: `0000000e-0000-4000-8000-${String(index).padStart(12, '0')}`, name, role: 'primary', joinPhrase: null, musicBrainzId: null })),
         label: null, releaseDate: null, visibility: 'public' }, tracks: [] };
     const read = (artistNameLimit?: number) => withImportAdmin(String(actor), session => importIdentityCandidates({ manifest: { rootLabel: '', files: [] }, draft, assets: [], decisions: [],
         ...(artistNameLimit ? { artistNameLimit } : {}) }, session));
-    assert.deepEqual([(await read()).items.length, (await read(512)).items.length], [40, 45]);
+    assert.deepEqual([(await read()).items.length, (await read(512)).items.length], [60, 65]);
 });
 
 test('a track-only artist the catalog keeps under an alias lookup found is a name candidate needing an answer, never a preselected create', () => withLookup(async () => {

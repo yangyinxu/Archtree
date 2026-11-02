@@ -32,6 +32,11 @@ export default defineConfig(({ command, mode }) => ({
         manualChunks: (id) => {
           // The renderer has no application imports and can be cached across listener changes.
           if (/\/node_modules\/(react|react-dom|scheduler)\//.test(id)) return 'react-runtime';
+          // Optional Video chunks share copy/style dictionaries without importing their parent page.
+          if (id.endsWith('/web/src/features/videos/videoText.ts')
+            || id.endsWith('/web/src/features/videos/VideosPage.module.css')
+            || id.includes('/localization/generated/web-listener/bundles/')) return 'video-presentation-shared';
+          if (id.endsWith('/web/src/features/videos/VideoPreviewCard.module.css')) return 'video-card-styles';
           // Shared helpers must not make the room runtime eagerly load the social identity page.
           return id.endsWith('/web/src/features/social/SocialPage.module.css')
             || id.endsWith('/web/src/api/socialSchemas.ts')

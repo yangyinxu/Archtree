@@ -11,7 +11,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { AdminImportError, importEnabled, objectId, uuid } from '../administration/import/adminImportContract';
 import { importPrivateStorageReady } from '../administration/import/adminImportMediaTypes';
-import { createAdminImport, getAdminImport, listAdminImports, editAdminImport, analyzeAdminImport, adoptAdminImportSuggestions, decideAdminImportDuplicates, cancelAdminImportAnalysis, adminImportDuplicateCandidates } from '../administration/import/adminImportService';
+import { createAdminImport, getAdminImport, listAdminImports, editAdminImport, analyzeAdminImport, adoptAdminImportSuggestions, decideAdminImportDuplicates, cancelAdminImportAnalysis, adminImportDuplicateCandidates, getAdminImportAlbumTarget } from '../administration/import/adminImportService';
 import { requireAdmin, requireAuth, requireCurrentAccountViewer, type AuthenticatedRequest } from '../middleware/authMiddleware';
 import { runRequestWork, onRequestWorkComplete } from '../services/platform/serverLifecycleService';
 import { maxAudioUploadMb, requireUploadSize } from '../middleware/audioUpload';
@@ -57,6 +57,8 @@ export function createAdminImportRouter(storage: ImportObjectStorage = defaultIm
     };
     router.get('/imports', asyncHandler(run((actor, req) => listAdminImports(actor, req.query))));
     router.post('/imports', asyncHandler(run((actor, req) => createAdminImport(actor, req.body), 201)));
+    // The create page's read of the Album an import would add files to; `/imports/:id` matches one segment, so the paths never clash.
+    router.get('/imports/album-targets/:albumId', asyncHandler(run((actor, req) => getAdminImportAlbumTarget(actor, req.params.albumId))));
     router.get('/imports/:id', asyncHandler(run((actor, req) => getAdminImport(actor, req.params.id))));
     router.patch('/imports/:id', asyncHandler(run((actor, req) => editAdminImport(actor, req.params.id, req.body))));
     router.post('/imports/:id/analyze', asyncHandler(run((actor, req) => analyzeAdminImport(actor, req.params.id, req.body), 202)));

@@ -171,6 +171,8 @@ export interface PlayerPlaybackEvent {
 export interface PlayerStore {
   getSnapshot(): PlayerSnapshot;
   getServerSnapshot(): PlayerSnapshot;
+  /** Local page controls must not reuse transport commands while a room owns the player. */
+  isRoomPlaybackActive(): boolean;
   subscribe(listener: () => void): () => void;
   subscribePlaybackEvents(listener: (event: PlayerPlaybackEvent) => void): () => void;
   /** Explicit gesture marker; remote effects and natural advancement never call this method. */

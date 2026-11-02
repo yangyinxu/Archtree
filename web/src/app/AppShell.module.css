@@ -76,6 +76,7 @@
   gap: 0.65rem;
   justify-self: start;
   letter-spacing: -0.025em;
+  max-width: 100%;
   min-width: 0;
   text-decoration: none;
 }
@@ -438,6 +439,11 @@
     overflow-y: auto;
   }
 
+  /* Five 44px navigation targets still fit before the scrollable Playlist section. */
+  .navigation {
+    gap: 0;
+  }
+
   /* Preserve Playlist height so it cannot overlap the scrollable language footer. */
   .sidebar > section {
     flex: none;
@@ -499,7 +505,9 @@
     display: grid;
     grid-column: 1;
     grid-row: 4;
-    grid-template-columns: repeat(4, 1fr);
+    /* One equal column per destination, whether Together is offered or not. */
+    grid-auto-columns: minmax(0, 1fr);
+    grid-auto-flow: column;
     min-height: var(--mobile-nav-height);
     padding:
       0.25rem

@@ -4,8 +4,8 @@
  *          .sectionHeader, .sectionTitle, .sectionHint, .cardGrid, .moodCard, .cardTitle, .cardMeta, .panel,
  *          .panelTitle, .panelCopy, .searchForm, .chipList, .chip, .searchResults, .resultGroups,
  *          .resultHeading, .resultGrid, .organizationResult, .compactState, .textButton, .formCard, .error,
- *          .identityMeta, .view, .viewButton, .workbenchLink, .menu
- * Media queries: (min-width: 768px); (forced-colors: active); (max-width: 640px); (max-width:767px)
+ *          .identityMeta
+ * Media queries: (min-width: 768px); (forced-colors: active); (max-width: 640px)
  * @end-catalog */
 
 .page {
@@ -384,15 +384,4 @@
   .moodCard {
     scroll-snap-align: start;
   }
-}
-
-/* The shell view switch is eager; workspace presentation remains in its lazy route. */
-.view { position:relative; display:flex; align-items:center; gap:.35rem; flex-shrink:0}
-.viewButton,.workbenchLink { font-size:.8rem; padding:.45rem .6rem}
-.viewButton { width:7rem; line-height:1.2}
-.workbenchLink { display:flex; align-items:center; justify-content:center; width:2.75rem}
-.workbenchLink span { display:none}
-.workbenchLink svg { width:1.2rem; height:1.2rem}
-.menu { position:absolute; right:0; top:100%; min-width:12rem; display:grid; z-index:60; padding:.5rem; background:var(--color-surface-raised)}
-@media(max-width:767px) { .viewButton { width:6.6rem}
 }

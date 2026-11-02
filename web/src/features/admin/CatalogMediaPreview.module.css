@@ -1,0 +1,8 @@
+/* Native Video keeps its full moving image and controls within either administrator detail view. */
+.video {
+  background: #000;
+  display: block;
+  max-height: 65vh;
+  object-fit: contain;
+  width: 100%;
+}

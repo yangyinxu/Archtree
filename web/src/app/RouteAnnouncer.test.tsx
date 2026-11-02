@@ -7,6 +7,8 @@ afterEach(cleanup);
 test.each([
   ['/admin/imports', 'Workbench'],
   ['/admin/imports/new', 'Upload new Album'],
+  ['/admin/videos/new', 'Video'],
+  ['/admin/videos/111111111111111111111111', 'Video'],
   ['/admin/imports/111111111111111111111111', 'Album import'],
   ['/admin/catalog-reviews/111111111111111111111111', 'Album completion'],
   ['/admin/catalog', 'Catalog'],
@@ -15,6 +17,7 @@ test.each([
   ['/admin/catalog/audioTrack/111111111111111111111111', 'Edit catalog content'],
   ['/admin/catalog/organization/111111111111111111111111', 'Edit catalog content'],
   ['/admin/pages', 'Page items'],
+  ['/videos', 'Video'],
   ['/missing-listener-page', 'Page not found']
 ])('announces %s using its matching title', async (path, title) => {
   render(<MemoryRouter initialEntries={[path]}><RouteAnnouncer /></MemoryRouter>);

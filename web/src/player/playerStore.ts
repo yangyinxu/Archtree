@@ -695,6 +695,7 @@ export const createPlayerStore = (
   const store: PlayerStore = {
     getSnapshot: () => snapshot,
     getServerSnapshot: () => snapshot,
+    isRoomPlaybackActive: () => room !== null,
     subscribe: (listener) => {
       if (destroyed) return () => undefined;
       listeners.add(listener);

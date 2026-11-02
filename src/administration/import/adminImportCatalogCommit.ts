@@ -2,19 +2,20 @@
  * Exports
  *   Types: ImportApprovedIdentities
  *   Functions: importPublicationConflict, requireImportPublicationReady, requireCurrentApproval,
- *              freezeImportIdentities, importAlbumCredits, importNewAlbumTrackCredits,
+ *              freezeImportIdentities, importAlbumCredits, importNewAlbumTrackCredits, importTrackEntryCredits,
  *              importAppendedTrackCredits, assertImportReusedRecordsReady, commitImportCatalogGraph
  * Internal
  *   Types: CommitGraph, LegacyValues
- *   Functions: reviewRequired, stale, oid, date, storedSimpleDate, albumPrimaryIds, decided, exactHolder,
- *              idWrite, validIdWrite, frozenIdentities, legacyCommitValues, draftV2CommitValues, legacyCredits,
- *              newArtist, legacyGraph, approvedGraph
+ *   Functions: reviewRequired, stale, oid, date, storedSimpleDate, decided, exactHolder, idWrite, validIdWrite,
+ *              frozenIdentities, legacyCommitValues, draftV2CommitValues, legacyCredits, newArtist,
+ *              legacyGraph, approvedGraph
  *   Constants: conflict
  * @end-catalog */
 
 /**
  * Import publication identities and the catalog graph they commit. An approval freezes which Artists and which label
- * Organization the publication credits (format 3) and which MusicBrainz ID each of them records or replaces; the worker's single
+ * Organization the publication credits (format 3; format 4 also the Artists only Tracks credit and each such Track's entries) and
+ * which MusicBrainz ID each of them records or replaces; the worker's single
  * transaction later writes the Album and its Credits, new Artists and Organization, those IDs, Tracks, cover and the publication
  * receipt together. Formats 1 and 2 commit exactly as before and write no ID. Owner rules live in docs/business-rules.md
  * (Administrator Album Imports).
@@ -22,7 +23,7 @@
 import { ObjectId, type ClientSession } from 'mongodb';
 import { getDatabaseClient, getDb } from '../../infrastructure/database';
 import { catalogSearchProjection } from '../../utils/catalogSearch';
-import { inheritedAlbumPrimaryCredits, legacyAlbumArtistIdsFromCredits, legacyTrackArtistIdsFromCredits, normalizeCatalogCredits, normalizeStoredCatalogCredits, validateAttribution, type CatalogCredit } from '../../models/catalogCredit';
+import { inheritedAlbumPrimaryCredits, legacyTrackArtistIdsFromCredits, normalizeCatalogCredits, validateAttribution, type CatalogCredit } from '../../models/catalogCredit';
 import { requireCatalogCreditWrites } from '../../config/catalogCreditRollout';
 import { readyArtistLifecycleFilter, touchReadyArtistReferences } from '../../services/catalog/artistReferenceFenceService';
 import { readyAlbumLifecycleFilter, touchReadyAlbumReferences } from '../../services/catalog/albumReferenceFenceService';
@@ -31,12 +32,16 @@ import { touchReadyAudioTrackReferences } from '../../services/audio/audioTrackR
 import { readyAudioStorageFilter } from '../../utils/audioStorageKey';
 import { sortTrackIdsByDiscAndTrackNumber } from '../../services/catalog/albumTrackLinkService';
 import { checkAdminWorker } from '../adminWorkerLifecycle';
-import { AdminImportError, importEnabled, objectId, type ImportCandidatesResponse, type ImportDate, type ImportDraft } from './adminImportContract';
+import { AdminImportError, importEnabled, objectId, uuid, type ImportCandidatesResponse, type ImportDate, type ImportDraft } from './adminImportContract';
 import { isMusicBrainzIdDuplicateKey, keepableMusicBrainzId } from '../../utils/musicBrainzId';
 import { musicBrainzIdWriteFor } from './adminImportMusicBrainzIds';
 import { importCandidateProjection, importCandidateRevision, importCollection, importPurposeFilter, touchImportAdmin, type AdminImportDocument } from './adminImportService';
 import { assertImportPreselectionsCurrent, serializeImportIdentityCommits } from './adminImportIdentity';
-import { importPrivateStorageReady, importPublicationFormat, type ImportMusicBrainzIdWriteFrozen, type ImportPublication, type ImportPublicationArtist, type ImportPublicationLabel } from './adminImportMediaTypes';
+import { importAlbumPrimaryIds } from './adminImportAlbumTarget';
+import {
+    importPrivateStorageReady, importPublicationFormat, type ImportMusicBrainzIdWriteFrozen, type ImportPublication, type ImportPublicationArtist, type ImportPublicationLabel, type ImportPublicationTrackArtists,
+    type ImportPublicationTrackIdentity
+} from './adminImportMediaTypes';
 import { boundArtistDecision, boundLabelDecision, type ImportArtistEntry, type ImportDecisionV2, type ImportDraftV2 } from './adminImportDraft';
 import { newArtistRecord, newLabelOrganizationRecord } from '../catalog/adminNewCatalogRecords';
 
@@ -65,8 +70,6 @@ const storedSimpleDate = (value: unknown) => {
     const validYear = part(year, 9999), validMonth = part(month, 12);
     return validYear === null ? {} : date({ year: validYear, month: validMonth, day: validMonth === null ? null : part(day, 31) });
 };
-/** The ordered primary Artist IDs of stored Album Credits, or null when the stored list cannot be read. */
-const albumPrimaryIds = (credits: unknown): string[] | null => { try { return legacyAlbumArtistIdsFromCredits(normalizeStoredCatalogCredits(credits)); } catch { return null; } };
 const decided = (decision: ImportDecisionV2 | undefined): decision is ImportDecisionV2 => decision?.action === 'reuse' || decision?.action === 'replace' || decision?.action === 'create-distinct';
 /** The ready record of `kind` holding `id` among the review's candidates (null without candidates or an ID). */
 const exactHolder = (candidates: ImportCandidatesResponse | undefined, kind: 'artist' | 'organization', id: string | null) =>
@@ -81,7 +84,8 @@ const idWrite = (input: Parameters<typeof musicBrainzIdWriteFor>[0]): ImportMusi
 /** Format-3 identities an approval freezes (spread into the publication); artistId and newArtist mirror the first Artist. */
 export type ImportApprovedIdentities = Pick<ImportPublication, 'artistId' | 'newArtist'> & { artists: ImportPublicationArtist[]; label: ImportPublicationLabel | null };
 /**
- * Freezes the Artists and label a reviewed approval credits. A new Album credits each draft entry in order through its bound
+ * Freezes the Artists and label a reviewed approval credits (an import passes its identity draft, so each track-only identity's
+ * synthetic entry freezes like an Album entry). A new Album credits each draft entry in order through its bound
  * decision (reuse or replace at the reviewed revision, or a new identity) and the label through its own; two entries never reuse
  * one Artist. Each also freezes the MusicBrainz ID it records or replaces (musicBrainzIdWriteFor, `candidates` naming the ready
  * holder of each ID; without them no holder is known); two Artists recording one ID need review again. An append credits the
@@ -91,7 +95,7 @@ export async function freezeImportIdentities(draft: ImportDraftV2, decisions: re
     candidates?: ImportCandidatesResponse): Promise<ImportApprovedIdentities> {
     const db = getDb()!; const artists: ImportPublicationArtist[] = []; let label: ImportPublicationLabel | null = null;
     if (targetAlbum) {
-        const primaries = albumPrimaryIds(targetAlbum.credits);
+        const primaries = importAlbumPrimaryIds(targetAlbum.credits);
         if (!primaries?.length) throw new AdminImportError(409, 'ADMIN_IMPORT_APPEND_PRIMARY_REQUIRED');
         if (await db.collection('artists').countDocuments({ _id: { $in: primaries.map(oid) }, ...readyArtistLifecycleFilter }, { session }) !== primaries.length) throw stale();
         artists.push(...primaries.map(artistId => ({ entryKey: null, artistId, newArtist: false, candidateRevision: null })));
@@ -159,6 +163,15 @@ export function importNewAlbumTrackCredits(albumCredits: readonly CatalogCredit[
         return [{ ...kept, ...(joinPhrase !== undefined && primary(albumCredits[index + 1]) ? { joinPhrase } : {}) }];
     }));
 }
+/**
+ * A selected Track's Credits from its approved entries in order: each entry an Artist Credit of its role with the `creditId` an Album
+ * Credit of that Artist and role takes, keeping its join phrase only while another entry follows (a byline ignores a trailing
+ * phrase). May throw CatalogCreditValidationError.
+ */
+export function importTrackEntryCredits(entries: readonly { role: 'primary' | 'featured'; joinPhrase: string | null; artistId: string }[]): CatalogCredit[] {
+    return normalizeCatalogCredits(entries.map((entry, order) => ({ creditId: `import_${entry.role}_${entry.artistId}`, subjectType: 'artist', subjectId: entry.artistId, role: entry.role, order,
+        ...(entry.joinPhrase && order < entries.length - 1 ? { joinPhrase: entry.joinPhrase } : {}) })));
+}
 /** An appended MediaTrack inherits the target Album's primary Artist Credits in its order, keeping a phrase only before another inherited Credit. */
 export function importAppendedTrackCredits(trackId: string, targetAlbumCredits: unknown): CatalogCredit[] {
     return normalizeCatalogCredits(inheritedAlbumPrimaryCredits(trackId, targetAlbumCredits));
@@ -174,14 +187,32 @@ const validIdWrite = (write: unknown, reused: boolean) => {
     const { musicBrainzId, replaces } = write as Record<string, unknown>;
     return keepableMusicBrainzId(musicBrainzId) === musicBrainzId && (replaces === null || (reused && keepableMusicBrainzId(replaces) === replaces && replaces !== musicBrainzId));
 };
-/** The frozen format-3 identities, or a conflict when the stored approval is inconsistent (so it mints nothing). */
-function frozenIdentities(publication: ImportPublication): { artists: ImportPublicationArtist[]; label: ImportPublicationLabel | null } {
+/**
+ * The frozen format-3 or format-4 identities, or a conflict when the stored approval is inconsistent (so it mints nothing). Format
+ * 4 is a new Album's: each track-only identity has a distinct UUID handle no Album Artist uses, a name, a keepable ID or none, a
+ * valid write and an Artist no other frozen identity names; each Track list names a distinct new publication Track and holds 1 to 20
+ * entries with a primary, each naming a frozen Artist once; and every track-only identity is credited by some list.
+ */
+function frozenIdentities(publication: ImportPublication): { artists: ImportPublicationArtist[]; label: ImportPublicationLabel | null; trackIdentities: ImportPublicationTrackIdentity[];
+    trackArtists: ImportPublicationTrackArtists[] } {
     const artists = publication.artists ?? [], label = publication.label ?? null;
     const valid = artists.length > 0 && artists.every(artist => objectId(artist.artistId) && typeof artist.newArtist === 'boolean' && (artist.entryKey === null || typeof artist.entryKey === 'string')
         && (artist.candidateRevision === null || typeof artist.candidateRevision === 'string') && validIdWrite(artist.musicBrainzIdWrite, artist.newArtist === false));
     if (!valid || new Set(artists.map(artist => artist.artistId)).size !== artists.length || publication.artistId !== artists[0].artistId || !objectId(publication.albumId)
         || (label !== null && (!objectId(label.organizationId) || typeof label.newOrganization !== 'boolean' || !validIdWrite(label.musicBrainzIdWrite, label.newOrganization === false)))) throw conflict();
-    return { artists, label };
+    if (importPublicationFormat(publication) !== 4) return { artists, label, trackIdentities: [], trackArtists: [] };
+    const trackIdentities = publication.trackIdentities ?? [], trackArtists = publication.trackArtists ?? [], albumKeys = new Set(artists.map(artist => artist.entryKey));
+    const identitiesValid = trackIdentities.every(identity => uuid(identity.entryKey) && !albumKeys.has(identity.entryKey) && typeof identity.name === 'string' && identity.name.length >= 1
+        && identity.name.length <= 200 && (identity.musicBrainzId === null || keepableMusicBrainzId(identity.musicBrainzId) === identity.musicBrainzId) && objectId(identity.artistId)
+        && typeof identity.newArtist === 'boolean' && (identity.candidateRevision === null || typeof identity.candidateRevision === 'string') && validIdWrite(identity.musicBrainzIdWrite, identity.newArtist === false));
+    const frozen = new Set([...artists, ...trackIdentities].map(artist => artist.artistId)), slots = new Set(publication.tracks.filter(track => !track.reused).map(track => track.slotId));
+    const listsValid = trackArtists.every(list => slots.has(list.slotId) && list.entries.some(entry => entry.role === 'primary') && list.entries.every(entry => (entry.role === 'primary' || entry.role === 'featured')
+        && typeof entry.name === 'string' && (entry.joinPhrase === null || typeof entry.joinPhrase === 'string') && frozen.has(entry.artistId))
+        && new Set(list.entries.map(entry => entry.artistId)).size === list.entries.length);
+    if (!publication.newAlbum || !identitiesValid || !listsValid || new Set(trackIdentities.map(identity => identity.entryKey)).size !== trackIdentities.length
+        || frozen.size !== artists.length + trackIdentities.length || new Set(trackArtists.map(list => list.slotId)).size !== trackArtists.length
+        || trackIdentities.some(identity => !trackArtists.some(list => list.entries.some(entry => entry.artistId === identity.artistId)))) throw conflict();
+    return { artists, label, trackIdentities, trackArtists };
 }
 /**
  * Worker preflight before any copy: every record the approval reuses is still ready, or a catalog conflict. A reused Track of any
@@ -192,11 +223,12 @@ export async function assertImportReusedRecordsReady(publication: ImportPublicat
     if (reusedTracks.some(track => !objectId(track.id))) throw conflict();
     const tracks = reusedTracks.map(track => oid(track.id));
     if (tracks.length && await db.collection('audioTracks').countDocuments({ _id: { $in: tracks }, albumId: publication.albumId, ...readyAudioStorageFilter }, { session }) !== tracks.length) throw conflict();
-    if (importPublicationFormat(publication) !== 3) {
+    const format = importPublicationFormat(publication);
+    if (format !== 3 && format !== 4) {
         if (!publication.newArtist && !await db.collection('artists').findOne({ _id: oid(publication.artistId), ...readyArtistLifecycleFilter }, { session, projection: { _id: 1 } })) throw conflict();
         return;
     }
-    const { artists, label } = frozenIdentities(publication), reused = artists.filter(artist => !artist.newArtist).map(artist => oid(artist.artistId));
+    const { artists, label, trackIdentities } = frozenIdentities(publication), reused = [...artists, ...trackIdentities].filter(artist => !artist.newArtist).map(artist => oid(artist.artistId));
     if (reused.length && await db.collection('artists').countDocuments({ _id: { $in: reused }, ...readyArtistLifecycleFilter }, { session }) !== reused.length) throw conflict();
     if (label && !label.newOrganization && !await db.collection('organizations').findOne({ _id: oid(label.organizationId), ...readyOrganizationLifecycleFilter }, { session, projection: { _id: 1 } })) throw conflict();
     if (!publication.newAlbum && !await db.collection('albums').findOne({ _id: oid(publication.albumId), ...readyAlbumLifecycleFilter }, { session, projection: { _id: 1 } })) throw conflict();
@@ -246,18 +278,22 @@ async function legacyGraph(publication: ImportPublication, format: 1 | 2, sessio
 }
 
 /**
- * Format 3. Every read precedes the first write, so an unavailable or changed record is a catalog conflict before any fence
+ * Formats 3 and 4. Every read precedes the first write, so an unavailable or changed record is a catalog conflict before any fence
  * helper runs. Every frozen preselection is then rechecked against fresh candidates (a candidate that appeared since approval is
- * an identity conflict), and the identity fence serializes this commit against every other format-3 import commit (formats 1
- * and 2 do not write it). A new Album creates its Credits in draft order, new Artists and a new label Organization with the
- * draft's visibility and their frozen MusicBrainz IDs, and gives primaries (only) the Album in albumIds; reused records are
+ * an identity conflict), and the identity fence serializes this commit against every other format-3 or format-4 import commit
+ * (formats 1 and 2 do not write it). A new Album creates its Credits in draft order, new Artists and a new label Organization with
+ * the draft's visibility and their frozen MusicBrainz IDs, and gives primaries (only) the Album in albumIds. Each Track a format-4
+ * approval lists takes Credits built from its own entries (importTrackEntryCredits) and every other Track the Album's primary
+ * Credits (importNewAlbumTrackCredits); an Artist only Tracks credit is never credited on the Album and never gains albumIds. Reused
+ * records are
  * fenced and otherwise unchanged, except for a frozen ID write, applied only while the record still holds what the review saw
  * (none, which includes a stored value that is no keepable ID, or the ID it replaces; its revision check already proved it
  * unchanged). An append changes no Artist, Organization,
  * Album value or Credit and writes no ID: its tracks inherit the target Album's primary Credits and release date.
  */
 async function approvedGraph(publication: ImportPublication, doc: AdminImportDocument, session: ClientSession): Promise<CommitGraph> {
-    const db = getDb()!, snapshot = publication.snapshot as ImportDraftV2, { artists, label } = frozenIdentities(publication), reused = artists.filter(artist => !artist.newArtist);
+    const db = getDb()!, snapshot = publication.snapshot as ImportDraftV2, { artists, label, trackIdentities, trackArtists } = frozenIdentities(publication);
+    const reused = [...artists, ...trackIdentities].filter(artist => !artist.newArtist);
     let existingAlbum: Record<string, any> | null = null;
     if (!publication.newAlbum) { existingAlbum = await db.collection('albums').findOne({ _id: oid(publication.albumId) }, { session, projection: importCandidateProjection }); if (!existingAlbum || importCandidateRevision(existingAlbum) !== publication.albumRevision) throw conflict(); }
     const rows = reused.length ? await db.collection('artists').find({ _id: { $in: reused.map(artist => oid(artist.artistId)) }, ...readyArtistLifecycleFilter }, { session, projection: importCandidateProjection }).toArray() : [];
@@ -266,7 +302,7 @@ async function approvedGraph(publication: ImportPublication, doc: AdminImportDoc
     const trackCredits = new Map<string, CatalogCredit[]>();
     let albumCredits: CatalogCredit[] = [];
     if (existingAlbum) {
-        const primaries = albumPrimaryIds(existingAlbum.credits);
+        const primaries = importAlbumPrimaryIds(existingAlbum.credits);
         if (label || !primaries?.length || reused.length !== artists.length || primaries.length !== artists.length || primaries.some((id, index) => artists[index].artistId !== id || artists[index].entryKey !== null)) throw conflict();
         try { for (const track of publication.tracks) if (!track.reused) trackCredits.set(track.id, importAppendedTrackCredits(track.id, existingAlbum.credits)); } catch { throw conflict(); }
     } else {
@@ -276,10 +312,14 @@ async function approvedGraph(publication: ImportPublication, doc: AdminImportDoc
             if (!organization || label.candidateRevision === null || importCandidateRevision(organization) !== label.candidateRevision) throw conflict();
         }
         try { albumCredits = importAlbumCredits(snapshot.album.artists, artists, label); validateAttribution('documented', albumCredits); } catch { throw conflict(); }
-        const credits = importNewAlbumTrackCredits(albumCredits);
-        for (const track of publication.tracks) trackCredits.set(track.id, credits);
+        const credits = importNewAlbumTrackCredits(albumCredits), lists = new Map(trackArtists.map(list => [list.slotId, list.entries]));
+        for (const track of publication.tracks) {
+            const entries = lists.get(track.slotId);
+            if (!entries) { trackCredits.set(track.id, credits); continue; }
+            try { const own = importTrackEntryCredits(entries); validateAttribution('documented', own); trackCredits.set(track.id, own); } catch { throw conflict(); }
+        }
     }
-    await assertImportPreselectionsCurrent(publication, { manifest: doc.manifest, assets: doc.media?.assets ?? [] }, session);
+    await assertImportPreselectionsCurrent(publication, { manifest: doc.manifest, assets: doc.media?.assets ?? [], albumTarget: doc.createdForAlbumId ?? null }, session);
     await serializeImportIdentityCommits(session);
     if (existingAlbum) await touchReadyAlbumReferences([publication.albumId], session);
     if (reused.length) await touchReadyArtistReferences(reused.map(artist => artist.artistId), session);
@@ -294,6 +334,10 @@ async function approvedGraph(publication: ImportPublication, doc: AdminImportDoc
             await db.collection(collection).updateOne({ _id: oid(id) }, { $set: { musicBrainzId: write.musicBrainzId } }, { session });
         };
         for (const artist of reused) await recordId('artists', artist.artistId, artist.musicBrainzIdWrite);
+        // An Artist only Tracks credit is created with the draft's visibility and no albumIds; a reused one only gains its ID write.
+        for (const identity of trackIdentities.filter(artist => artist.newArtist)) {
+            await db.collection('artists').insertOne(newArtist(identity.artistId, identity.name, [], publication.actorId, snapshot.album.visibility, identity.musicBrainzIdWrite?.musicBrainzId ?? null), { session });
+        }
         if (label && !label.newOrganization) await recordId('organizations', label.organizationId, label.musicBrainzIdWrite);
         const entries = new Map(snapshot.album.artists.map(entry => [entry.key, entry]));
         for (const artist of artists.filter(artist => artist.newArtist)) {
@@ -317,7 +361,7 @@ async function approvedGraph(publication: ImportPublication, doc: AdminImportDoc
 
 /**
  * Commits the approved catalog graph and the publication receipt in one transaction; S3 work never holds a Mongo transaction.
- * An approval format this release does not know is refused before any catalog write. A format-3 preselection that no longer holds
+ * An approval format this release does not know is refused before any catalog write. A format-3 or format-4 preselection that no longer holds
  * aborts the transaction (ADMIN_IMPORT_IDENTITY_CONFLICT, needs attention): nothing is minted, and the copied objects stay recorded
  * in the publication for cancellation and cleanup. A MusicBrainz ID that another record of its kind took since review (another
  * publication, an existing-catalog edit, or a holder that was not ready) is refused by the unique index and is the same identity
@@ -333,7 +377,7 @@ export async function commitImportCatalogGraph(id: string, worker: string, signa
             if (format === null) throw new AdminImportError(409, 'ADMIN_IMPORT_PUBLICATION_UNSUPPORTED');
             checkAdminWorker(signal); await touchImportAdmin(publication.actorId, session); requireImportPublicationReady(); requireCurrentApproval(publication);
             if (publication.tracks.some(track => track.state !== 'ready') || (publication.cover && publication.cover.state !== 'ready')) throw conflict();
-            const graph = format === 3 ? await approvedGraph(publication, doc, session) : await legacyGraph(publication, format, session), { existingAlbum, album } = graph;
+            const graph = format === 3 || format === 4 ? await approvedGraph(publication, doc, session) : await legacyGraph(publication, format, session), { existingAlbum, album } = graph;
             const cover = publication.coverId ? { coverArtId: publication.coverId, coverArtUrl: `/content/images/${publication.coverId}` } : { coverArtUrl: '' };
             if (!existingAlbum) await db.collection('albums').insertOne({ _id: oid(publication.albumId), title: album.title, ...cover, audioTrackIds: publication.tracks.map(track => track.id), releaseDate: date(album.releaseDate), createdBy: publication.actorId, visibility: album.visibility, lifecycleStatus: 'ready', lifecycleUpdatedAt: new Date(), lifecycleError: null, referenceRevision: 0, credits: graph.albumCredits, attributionStatus: 'documented', creditRevision: 1, ...catalogSearchProjection(album.title) }, { session });
             for (const track of publication.tracks) {

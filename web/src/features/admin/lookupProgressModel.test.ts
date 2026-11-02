@@ -1,6 +1,6 @@
 import type { ReviewLookupView } from './importLookupApi';
-import { pairingLookupResponse, pairingRunningTimeline, pairingTimeline } from './catalogReviewLookupFixtures.testSupport';
-import { gateWaitSeconds, lookupRecord, searchedTexts } from './lookupProgressModel';
+import { pairingApplication, pairingEditions, pairingLookupResponse, pairingRunningTimeline, pairingTimeline } from './catalogReviewLookupFixtures.testSupport';
+import { evidenceBasis, gateWaitSeconds, identifierStep, lookupRecord, searchedTexts } from './lookupProgressModel';
 
 /** The pure reading of a review run's timeline: the names searched, the record and the wait since the last step. Synthetic names. */
 const lookup = (extra: Partial<ReviewLookupView> = {}): ReviewLookupView => ({ ...pairingLookupResponse().lookup!, timeline: pairingTimeline(), ...extra });
@@ -42,4 +42,27 @@ test('a wait shows only while a run is running and this page has seen no new ste
     gateWaitSeconds(view('running', '2026-10-22T01:25:10.000Z'), seenAt + 6_000, seenAt)]).toEqual([null, null, 6]);
   expect([gateWaitSeconds(view('queued'), seenAt + 60_000, seenAt), gateWaitSeconds(view('retrying'), seenAt + 60_000, seenAt), gateWaitSeconds(view('complete'), seenAt + 60_000, seenAt),
     gateWaitSeconds({ ...view('running'), timeline: undefined }, seenAt + 60_000, seenAt)]).toEqual([null, null, null, null]);
+});
+
+test('a done search of the captured import evidence counts as a search, and none the run may not have sent', () => {
+  const steps = pairingTimeline().steps;
+  const counted = (identifiers: NonNullable<ReviewLookupView['timeline']>['steps']) => lookupRecord(lookup({ timeline: pairingTimeline({ steps: [...identifiers, ...steps] }) }))!.searches;
+  expect(counted([{ kind: 'releaseId', state: 'done', from: 'import' }, { kind: 'barcode', state: 'done' }, { kind: 'catalogNumber', state: 'unconfirmed' }])).toBe(9);
+  expect(['releaseId', 'barcode', 'catalogNumber', 'album', 'trackTitle'].map(kind => identifierStep({ kind, state: 'done' } as never))).toEqual([true, true, true, false, false]);
+});
+
+test('the identifier that chose the applied release is named only for this run\'s preselection, a release ID by where it came from', () => {
+  const key = pairingEditions[0];
+  const view = (basis: string, extra: { choice?: 'preselected' | 'chosen'; run?: number; preselected?: string | null; from?: 'import' | 'tags' | null } = {}) => {
+    const from = extra.from === undefined ? 'import' : extra.from, preselected = extra.preselected === undefined ? basis : extra.preselected;
+    return lookup({ preselection: preselected === null ? null : { candidateKey: key, basis: preselected as never, artistMismatch: false, notChecked: false },
+      applied: { ...pairingApplication(key, true), choice: extra.choice ?? 'preselected', basis: basis as never, run: extra.run ?? 3 },
+      timeline: pairingTimeline({ steps: [...(from ? [{ kind: 'releaseId' as const, state: 'done' as const, from }] : []), ...pairingTimeline().steps] }) });
+  };
+  expect([evidenceBasis(view('releaseId')), evidenceBasis(view('releaseId', { from: 'tags' })), evidenceBasis(view('barcode')), evidenceBasis(view('catalogNumber'))])
+    .toEqual(['releaseIdImport', 'releaseIdTags', 'barcode', 'catalogNumber']);
+  // Another basis, a chosen release, an earlier run's application, a preselection since changed, or a release ID without its step names nothing.
+  for (const other of [view('onlyMatchingGroup'), view('exactTrackCount'), view('chosen', { choice: 'chosen' }), view('releaseId', { run: 2 }), view('releaseId', { preselected: null }),
+    view('releaseId', { preselected: 'barcode' }), view('releaseId', { from: null })]) expect(evidenceBasis(other)).toBeNull();
+  expect(evidenceBasis(lookup())).toBeNull();
 });

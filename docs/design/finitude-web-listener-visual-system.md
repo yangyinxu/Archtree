@@ -206,8 +206,9 @@ artwork.
 - A media card's Play action is a filled circular accent control anchored to
   the artwork's bottom-right corner. It slides up 8 px and fades in on hover or
   focus, grows to 1.04× under the pointer, and shrinks to 0.96× while pressed.
-  MediaTrack cards keep the whole card as their one Play target, with the
-  control as its visual affordance. Album cards keep the card as a link to the
+  Standard MediaTrack cards keep the whole card as their one Play target, with
+  the control as its visual affordance. Immersive Video cards instead expose
+  separate controls as described below. Album cards keep the card as a link to the
   Album and expose Play as a separate sibling button, never nested inside the
   link. The separate Album Play button is omitted when the device has no hover
   or has any touch pointer, so an invisible control can never capture a tap
@@ -222,7 +223,25 @@ artwork.
   inside the card, and never starts with Reduce Motion, forced colors, touch,
   Save-Data, or a hidden page. With motion previews enabled it plays the
   dedicated preview clip, looping the whole clip from its start, and a Video
-  without one keeps its artwork.
+  without one keeps its artwork. Immersive cards additionally expose an
+  explicit muted Preview toggle for keyboard and touch use, including Reduce
+  Motion. It preserves the forced-colors, Save-Data, slow-connection, hidden-page,
+  and single-preview restrictions. Changing browsing view or pressing Escape
+  stops it without affecting the shared player.
+- The Video page defaults to wide cards: artwork and preview crop to 16:9 with
+  `object-fit: cover`, in a Grid whose columns are at least 16rem of artwork
+  (one column on phones). A compact segmented control selects this Grid or an
+  immersive view over the same Videos. The selected view survives reloads as a
+  device-local display preference.
+- Immersive Video cards use approximately 10:13 frames, with full-bleed media,
+  legibility shading, a small square artwork and title/byline header, and a
+  separate lower Preview, options, Save, and white Play or Pause action row.
+  The cards form two columns on wide layouts and one column on phones. Controls
+  remain discoverable without hover and retain the white keyboard focus outline.
+  Their options offer contain fitting, cover fitting, and horizontal crop
+  positioning. These are local presentation choices, not media edits, and a
+  missing preview retains the artwork. Other collection surfaces keep their
+  existing square cards.
 - Rows highlight across their complete surface, including trailing controls,
   without creating overlapping actions.
 - Primary play and pause glyphs are filled transport icons on the same solid

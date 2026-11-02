@@ -27,6 +27,15 @@ const startMobilePlayback = async (page: Page) => {
 test.describe('touch and orientation reflow', () => {
   test.use({ hasTouch: true });
 
+  test('shows the row Save without hover on touch devices', async ({ page }) => {
+    // Wide enough that the narrow-pane rule, which also shows row controls, does not apply.
+    await page.setViewportSize({ width: 1_280, height: 800 });
+    await page.goto(`/finitude/albums/${catalogIds.album}`);
+    const save = page.getByRole('button', { name: 'Play First Light' }).locator('..')
+      .getByRole('button', { name: 'Save to Library' });
+    await expect(save.locator('xpath=ancestor::span[parent::div][1]')).toHaveCSS('opacity', '1');
+  });
+
   test('keeps touch targets and the active player intact from portrait to landscape', async ({ page }) => {
     test.info().annotations.push({
       type: 'manual-gate',

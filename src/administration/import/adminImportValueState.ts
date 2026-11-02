@@ -3,8 +3,8 @@
  *   Types: ReviewOnlyDraftPath, ImportDraftPath, ImportDraftChange, ImportAutomaticValue, ImportAutomaticSkip
  *   Functions: parseDraftPath, draftValueAt, setDraftValue, parseDraftValue, boundedJson, boundDraftChanges,
  *              parseDraftChanges, originOf, applyAdministratorChanges, applyAutomaticValues,
- *              markAdministratorValues, draftV2Paths, importAutomationMarkers, draftWithinSizeLimit,
- *              convertLegacyImportProject, storedDraftV2
+ *              markAdministratorValues, draftV2Paths, importAutomationMarkers, importCappedDraft,
+ *              draftWithinSizeLimit, convertLegacyImportProject, storedDraftV2
  * Internal
  *   Types: TrackField, Target
  *   Functions: reloadRequired, locate, boundedValue, isRecord, idPath, idItems, withoutIds, mergeStoredIds,
@@ -28,7 +28,10 @@ import type { AdminImportDocument } from './adminImportService';
 import { isCompanyLikeName } from '../lookup/lookupQueryPlanner';
 
 type TrackField = 'title' | 'discNumber' | 'trackNumber';
-/** Paths only a format-3 catalog review holds: the Album's expected tracklist rows and each member's track Artist entries. */
+/**
+ * Paths no field save writes: the Album's expected tracklist rows (a format-3 catalog review's only) and each track's Artist entries
+ * (a format-3 review's members', or an import's, which only metadata lookup value application writes).
+ */
 export type ReviewOnlyDraftPath = 'album.expectedTracklist' | `tracks.${string}.artists`;
 export type ImportDraftPath = 'album.title' | 'album.artists' | 'album.label' | 'album.releaseDate' | 'album.visibility' | `tracks.${string}.${TrackField}` | ReviewOnlyDraftPath;
 export type ImportDraftChange = { path: ImportDraftPath; base: unknown; value: unknown };
@@ -41,7 +44,8 @@ const trackFields = ['title', 'discNumber', 'trackNumber'] as const;
 
 /**
  * Only the Draft v2 value paths of this manifest; anything else (including prototype keys) is invalid input. The review-only paths
- * (`album.expectedTracklist`, `tracks.<slotId>.artists`) are admitted only with `reviewPaths`, which only catalog-review writers pass.
+ * (`album.expectedTracklist`, `tracks.<slotId>.artists`) are admitted only with `reviewPaths`, which only catalog-review writers pass:
+ * an import's track Artist entries are never typed.
  */
 export function parseDraftPath(raw: unknown, manifest: ImportManifest, options: { reviewPaths?: boolean } = {}): ImportDraftPath {
     if (typeof raw !== 'string' || raw.length > 80) return invalidImport();
@@ -193,12 +197,12 @@ export type ImportAutomaticSkip = { path: ImportDraftPath; reason: 'administrato
  * would grow the draft past the 48 KB cap is reverted alone. Callers (adminImportAutomation.ts) bump `valueRevision`, never
  * receipts or `revision`. `context.introduce` names the MusicBrainz IDs a lookup application takes from its response.
  * `options.cappedDraft` is the part of the draft the cap measures (a review's leaves out its Artist entries, label and expected
- * tracklist); without it the whole draft is measured.
+ * tracklist); without it the draft is measured without its tracks' Artist entries (importCappedDraft).
  */
 export function applyAutomaticValues(target: Target, values: readonly ImportAutomaticValue[], context: ImportDraftParseContext = {},
     options: { cappedDraft?: (draft: ImportDraftV2) => unknown } = {}) {
     const written: ImportDraftPath[] = [], skipped: ImportAutomaticSkip[] = [];
-    const measured = () => draftBytes(options.cappedDraft ? options.cappedDraft(target.draft) : target.draft);
+    const measured = () => draftBytes(options.cappedDraft ? options.cappedDraft(target.draft) : importCappedDraft(target.draft));
     for (const { path, seen, value } of values) {
         const current = draftValueAt(target.draft, path);
         if (!emptyValue(current) && originOf(target.draftOrigins, path) === 'administrator') { skipped.push({ path, reason: 'administrator' }); continue; }
@@ -217,7 +221,8 @@ export function applyAutomaticValues(target: Target, values: readonly ImportAuto
 export const markAdministratorValues = (origins: ImportDraftOrigins, paths: readonly string[]) => { for (const path of paths) origins[originKey(path)] = 'administrator'; };
 /**
  * Every value path of a draft: the five album values, then three per track. A format-3 review's draft also lists its expected
- * tracklist after the album values and each track's Artist entries after its three values; an import draft holds neither.
+ * tracklist after the album values, and a track holding Artist entries (every member of a format-3 review; an import's track while
+ * applied metadata lookup wrote some) lists them after its three values.
  */
 export const draftV2Paths = (draft: ImportDraftV2): ImportDraftPath[] => [
     ...albumFields.map(field => `album.${field}` as const), ...(hasOwn(draft.album, 'expectedTracklist') ? ['album.expectedTracklist' as const] : []),
@@ -244,8 +249,21 @@ export function importAutomationMarkers(draft: ImportDraftV2, origins: ImportDra
     return { automaticPaths, lookupPaths, possibleLabelEntryKeys: artists ? draft.album.artists.filter(entry => isCompanyLikeName(entry.name)).map(entry => entry.key) : [],
         tagOnly: { artists, label } };
 }
-/** The 48 KB cap binds only a change that grows the draft, so a converted draft near the cap stays editable. */
-export const draftWithinSizeLimit = (before: unknown, after: unknown) => { const size = draftBytes(after); return size <= DRAFT_V2_LIMITS.bytes || size <= draftBytes(before); };
+/**
+ * The part of a draft-shaped value the 48 KB cap measures: each track without its Artist entries (an import's are written only by
+ * value application, within their own bound, DRAFT_V2_LIMITS.trackArtistBytes); anything that is not draft-shaped is measured whole.
+ */
+export function importCappedDraft(value: unknown): unknown {
+    if (!isRecord(value) || !Array.isArray(value.tracks) || !value.tracks.some(track => isRecord(track) && hasOwn(track, 'artists'))) return value;
+    return { ...value, tracks: value.tracks.map(track => { if (!isRecord(track)) return track; const { artists: _artists, ...rest } = track; return rest; }) };
+}
+/**
+ * The 48 KB cap binds only a change that grows the draft, so a converted draft near the cap stays editable. Track Artist entries never
+ * count (importCappedDraft).
+ */
+export const draftWithinSizeLimit = (before: unknown, after: unknown) => {
+    const size = draftBytes(importCappedDraft(after)); return size <= DRAFT_V2_LIMITS.bytes || size <= draftBytes(importCappedDraft(before));
+};
 
 /**
  * Stores a v1 import project as Draft v2 before its first admitted change (never on a replay, cleanup or cancellation): the

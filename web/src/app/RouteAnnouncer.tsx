@@ -9,6 +9,7 @@ const titleKeyFor = (pathname: string): MessageKey => {
     return 'route.title.search';
   }
   if (pathname === '/library') return 'route.title.library';
+  if (pathname === '/videos') return 'common.label.video';
   if (pathname === '/social') return 'social.title';
   if (pathname === '/social/shares') return 'music_shares.title';
   if (/^\/social\/invitations(?:\/[^/]+)?$/.test(pathname)) return 'room.invitations';
@@ -25,6 +26,7 @@ const titleKeyFor = (pathname: string): MessageKey => {
   if (/^\/admin\/catalog\/(album|artist|audioTrack|organization)\/[a-f0-9]{24}$/.test(pathname)) return 'admin.catalog.edit';
   if (pathname === '/admin/pages') return 'admin.catalog.pages';
   if (pathname === '/admin/imports/new') return 'admin.workbench.new';
+  if (/^\/admin\/videos\/(new|[a-f0-9]{24})$/.test(pathname)) return 'common.label.video';
   if (/^\/admin\/imports\/[a-f0-9]{24}$/.test(pathname)) return 'admin.route.title.import';
   if (/^\/admin\/catalog-reviews\/[a-f0-9]{24}$/.test(pathname)) return 'admin.catalog_review.title';
   if (pathname === '/admin' || pathname.startsWith('/admin/')) return 'admin.workbench.title';

@@ -8,9 +8,10 @@
  * Internal
  *   Types: TextResult, EntryAgreement, AddedId
  *   Functions: stale, emptyValue, emptyFor, slotOf, isRecord, isEntryLike, valueAt, lookupText,
- *              lookupEntryList, lookupArtistEntries, idOf, itemsOf, foundNames, storedValues, storedConflicts,
- *              offerKey, idPath, withLookupIds, freshGrant, bumpValueRevision, keepFoundNames,
- *              applicationFields, restoreApplicationFields, rerankEvidence, shownAmbiguous
+ *              lookupEntryList, lookupArtistEntries, importTrackArtistValues, writeImportTrackArtists, idOf,
+ *              itemsOf, foundNames, storedValues, storedConflicts, offerKey, idPath, withLookupIds, freshGrant,
+ *              bumpValueRevision, keepFoundNames, applicationFields, restoreApplicationFields, rerankEvidence,
+ *              shownAmbiguous
  *   Constants: lookupPath, invisible, idsIn, noContext, LABEL, APPLICATION_FIELDS
  * @end-catalog */
 
@@ -29,15 +30,18 @@
  * track values, the expected tracklist and each paired member's track Artist entries only through a single pairing of its members
  * with the release's tracks, Artist entries compared under the review agreement rules (lookupReviewValues.ts, entries a release
  * appends after the agreeing saved Album entries filled), a date that only adds precision a conflict marked so, and no cover or
- * file-tag values; its draft cap leaves out the Artist entries, label and expected tracklist. Owner rules: docs/business-rules.md
- * (Administrator Metadata Lookup).
+ * file-tag values; its draft cap leaves out the Artist entries, label and expected tracklist. An import also takes each positionally
+ * paired file's track Artist entries from its release track's own credit (importTrackArtistValues): always automatic, replaced as a
+ * whole by every application (another candidate or none clears them), never a conflict and never given to Luna. Owner rules:
+ * docs/business-rules.md (Administrator Metadata Lookup).
  */
 import { normalizeJoinPhrase } from '../../models/catalogCredit';
 import { AdminImportError, invalidImport, parseImportDate } from '../import/adminImportContract';
 import { importTagValues } from '../import/adminImportAutomation';
 import { noteLookupCoverApplication } from '../import/adminImportCoverAutomation';
 import {
-    DRAFT_V2_LIMITS, derivedEntryKey, foldImportName, hasOwn, originKey, retainBoundDecisions, sameDraftValue, type ImportArtistEntry, type ImportDecisionV2, type ImportDraftV2, type ImportLabelEntry
+    DRAFT_V2_LIMITS, derivedEntryKey, foldImportName, hasOwn, importIdentityDraft, importTrackArtistPlan, originKey, parseArtistEntries, retainBoundDecisions, sameDraftValue, type ImportArtistEntry,
+    type ImportDecisionV2, type ImportDraftV2, type ImportLabelEntry
 } from '../import/adminImportDraft';
 import { catalogReviewCappedDraft } from '../import/adminImportDraftCompat';
 import { mergeImportLocalizedNames } from '../import/adminImportLocalizedNames';
@@ -52,7 +56,7 @@ import { METADATA_LOOKUP_JOB_LIMITS, type MusicBrainzRelease } from './lookupCon
 import { normalizeItunesId, normalizeMusicBrainzId } from './lookupIdentifiers';
 import { lookupLocalizedGroups, storedItunesStage } from './lookupItunesStage';
 import {
-    lookupSubsetAssignment, lookupTrackAssignment, lookupTrackCredit, proposalForRelease, type LocalFileEvidence, type LookupProposal
+    lookupSubsetAssignment, lookupTrackArtistAssignment, lookupTrackAssignment, lookupTrackCredit, proposalForRelease, type LocalFileEvidence, type LookupProposal
 } from './lookupRanking';
 import { catalogReviewFileEvidence, isCatalogReviewLookup } from './lookupReviewEvidence';
 import {
@@ -276,6 +280,49 @@ export function reviewCandidateValues(release: MusicBrainzRelease, doc: AdminImp
 }
 
 /**
+ * The track Artist entries an import's fetched release offers its files, in draft track order: only when the release's track count
+ * equals the file count (lookupTrackArtistAssignment), each paired file's entries from its own release track's credit (a credit
+ * stored as the release's is the release's), under the rules of the Album's entries (lookupEntryList; keys derived from the import,
+ * the slot and the name), and only a list holding a primary entry. A track whose credit is not usable gets none. Pure.
+ */
+function importTrackArtistValues(release: MusicBrainzRelease, files: readonly LocalFileEvidence[], draft: ImportDraftV2, importId: string): { slotId: string; entries: ImportArtistEntry[] }[] {
+    const pairs = new Map((lookupTrackArtistAssignment(release, files) ?? []).map(pair => [pair.slotId, pair.artists])), values: { slotId: string; entries: ImportArtistEntry[] }[] = [];
+    for (const track of Array.isArray(draft.tracks) ? draft.tracks : []) {
+        const artists = isRecord(track) ? pairs.get(track.slotId) : undefined;
+        if (!artists || 'reason' in artists) continue;
+        const list = lookupEntryList(artists.artists, [], { importId, slotId: track.slotId });
+        if (!('reason' in list) && list.entries.some(entry => entry.role === 'primary')) values.push({ slotId: track.slotId, entries: list.entries });
+    }
+    return values;
+}
+/**
+ * Replaces every track Artist entry list of an import draft with `values`, all or nothing per list: each existing list and its origin
+ * is removed first (so another candidate, none, or a list written by any earlier release is cleared), then each value that parses
+ * (its IDs introduced from the release) is written as automatic while the lists together stay within
+ * DRAFT_V2_LIMITS.trackArtistBytes, and last the lists of tracks over the identity bound (importTrackArtistPlan) are removed again.
+ * Returns the paths whose stored list changed.
+ */
+function writeImportTrackArtists(draft: ImportDraftV2, origins: Record<string, unknown>, values: readonly { slotId: string; entries: ImportArtistEntry[] }[]): ImportDraftPath[] {
+    const tracks = (Array.isArray(draft.tracks) ? draft.tracks : []).filter(isRecord) as ImportDraftV2['tracks'];
+    const before = new Map(tracks.map(track => [track.slotId, JSON.stringify(track.artists ?? null)]));
+    const clear = (track: ImportDraftV2['tracks'][number]) => { delete track.artists; delete origins[originKey(`tracks.${track.slotId}.artists`)]; };
+    for (const track of tracks) clear(track);
+    let bytes = 0;
+    for (const { slotId, entries } of values) {
+        const track = tracks.find(item => item.slotId === slotId);
+        if (!track) continue;
+        let parsed: ImportArtistEntry[];
+        try { parsed = parseArtistEntries(entries, [], { introduce: lookupValueIds(entries) }); } catch (error) { if (error instanceof AdminImportError) continue; throw error; }
+        const size = Buffer.byteLength(JSON.stringify(parsed));
+        if (bytes + size > DRAFT_V2_LIMITS.trackArtistBytes) continue;
+        bytes += size; track.artists = parsed; origins[originKey(`tracks.${slotId}.artists`)] = 'automatic';
+    }
+    const over = new Set(importTrackArtistPlan(draft).overBound);
+    for (const track of tracks) if (over.has(track.slotId)) clear(track);
+    return tracks.filter(track => JSON.stringify(track.artists ?? null) !== before.get(track.slotId)).map(track => `tracks.${track.slotId}.artists` as ImportDraftPath);
+}
+
+/**
  * Whether the current value says what lookup would write, MusicBrainz IDs aside: Artist entries (the Album's or a review member's)
  * by count, then per position the folded name, role and join phrase; the label by folded name; anything else exactly.
  */
@@ -341,7 +388,8 @@ export function lookupDecisionRecords(doc: Pick<AdminImportDocument, 'decisions'
 }
 /**
  * Names found for each credited ID of a release: credited and canonical names, the first label's name, and the run's aliases. With
- * `tracks` (a review, whose members' entries agree through them), also those of every track's own credit, each name once per ID.
+ * `tracks` (a review, whose members' entries agree through them, or an import, whose track-only identities read them), also those
+ * of every track's own credit, each name once per ID.
  */
 function foundNames(release: MusicBrainzRelease | null | undefined, aliases: ReadonlyMap<string, readonly string[]>, options: { tracks?: boolean } = {}): Map<string, string[]> {
     const found = new Map<string, string[]>();
@@ -438,7 +486,9 @@ const bumpValueRevision = (doc: AdminImportDocument) => { doc.valueRevision = (N
  * Archive's or an iTunes-only candidate's, is staged under the intent's grant) or none (noteLookupCoverApplication), without
  * bumping `valueRevision`. An iTunes-only application records `source` and, when MusicBrainz could not rule it out, `notChecked`.
  * Applying the same candidate again writes nothing, except that a cover staging of it that failed, was skipped or ran past its
- * grant is queued again under the intent's grant.
+ * grant is queued again under the intent's grant. An import's track Artist entries are then replaced as a whole by this candidate's
+ * (importTrackArtistValues, writeImportTrackArtists; none for no candidate), and its found and localized names also cover the
+ * track-only identities they credit (importIdentityDraft).
  *
  * An existing-Album review differs where its rules do: its values come from reviewCandidateValues and its application records
  * their `pairs`. It first restores the saved Album entries the previous application extended (`kept`), while the list is still as
@@ -492,6 +542,8 @@ export function applyLookupCandidate(doc: AdminImportDocument, previous: LookupA
         return entryKey === null ? isRecord(value) && value.musicBrainzId === id : Array.isArray(value) && value.some(entry => isRecord(entry) && entry.key === entryKey && entry.musicBrainzId === id);
     };
     const found = review ? foundNames(candidate?.release, context.aliases, { tracks: true }) : null;
+    // An import's names also cover its track Artist entries' IDs, which its track-only identities carry.
+    const identityNames = (value: ImportDraftV2) => review ? value : importIdentityDraft(value);
     const supplied: { values: LookupAppliedValue[]; flagged: LookupValueFlag[]; pairs: LookupSubsetPair[] | null } = !candidate?.release ? { values: [], flagged: [], pairs: null }
         : review ? reviewCandidateValues(candidate.release, doc, basis, found!, { strictPairing: intent.strictPairing === true })
             : { ...lookupCandidateValues(candidate.release, lookupFileEvidence(doc), draft, doc._id.toHexString()), pairs: null };
@@ -641,6 +693,9 @@ export function applyLookupCandidate(doc: AdminImportDocument, previous: LookupA
     removeEarlierIds(new Set(result.written));
     // An emptied value is never marked automatic: it is simply empty again.
     for (const path of result.written) if (emptyValue(draftValueAt(draft, path))) delete origins[originKey(path)];
+    // An import's track Artist entries are replaced as a whole: this candidate's, or none.
+    const trackPaths = review ? [] : writeImportTrackArtists(draft, origins,
+        candidate?.release ? importTrackArtistValues(candidate.release, lookupFileEvidence(doc), draft, doc._id.toHexString()) : []);
     const flagged: LookupValueFlag[] = [...supplied.flagged];
     for (const skip of result.skipped) {
         if (suppliedPaths.has(skip.path) && (skip.reason === 'size' || skip.reason === 'invalid')) flagged.push({ path: skip.path, reason: skip.reason === 'size' ? 'size' : 'format' });
@@ -672,17 +727,17 @@ export function applyLookupCandidate(doc: AdminImportDocument, previous: LookupA
     }
     // A review counts a path as changed only when its final value differs, so applying the same candidate again writes nothing.
     const paths = review ? [...new Set([...result.written, ...idChanged, ...restored, ...appended])].filter(path => !sameDraftValue(draftValueAt(draft, path), draftValueAt(before!, path)))
-        : [...new Set([...result.written, ...idChanged])];
+        : [...new Set([...result.written, ...idChanged, ...trackPaths])];
     const valuesChanged = paths.length > 0;
     if (valuesChanged) {
         if (Array.isArray(doc.decisions)) doc.decisions = retainBoundDecisions(kept, draft);
         bumpValueRevision(doc);
         doc.updatedAt = intent.now;
     }
-    const names = mergeImportMusicBrainzNames(doc.musicBrainzNames, found ?? foundNames(candidate?.release, context.aliases), draft, { review });
+    const names = mergeImportMusicBrainzNames(doc.musicBrainzNames, found ?? foundNames(candidate?.release, context.aliases, { tracks: true }), identityNames(draft), { review });
     let namesChanged = !sameDraftValue(names, doc.musicBrainzNames ?? []);
     if (namesChanged) doc.musicBrainzNames = names;
-    const localized = mergeImportLocalizedNames(doc.localizedNames, Array.isArray(context.localized) ? context.localized : [], draft, { review });
+    const localized = mergeImportLocalizedNames(doc.localizedNames, Array.isArray(context.localized) ? context.localized : [], identityNames(draft), { review });
     if (!sameDraftValue(localized, doc.localizedNames ?? [])) { doc.localizedNames = localized; namesChanged = true; }
     // A review's identity rows bind member entries and find candidates by these names: a confirmation read before they changed is stale.
     if (review && namesChanged && !valuesChanged) bumpValueRevision(doc);
@@ -717,7 +772,7 @@ function keepFoundNames(doc: AdminImportDocument, record: MetadataLookupRecord, 
         const names = mergeImportMusicBrainzNames(doc.musicBrainzNames, reviewRecordFoundNames(record, candidate?.release), draft, { review: true });
         if (!sameDraftValue(names, doc.musicBrainzNames ?? [])) { doc.musicBrainzNames = names; changed = true; }
     }
-    const localized = mergeImportLocalizedNames(doc.localizedNames, Array.isArray(context.localized) ? context.localized : [], draft, { review });
+    const localized = mergeImportLocalizedNames(doc.localizedNames, Array.isArray(context.localized) ? context.localized : [], review ? draft : importIdentityDraft(draft), { review });
     if (!sameDraftValue(localized, doc.localizedNames ?? [])) { doc.localizedNames = localized; changed = true; }
     if (review && changed) bumpValueRevision(doc);
     return changed;
@@ -920,9 +975,10 @@ export function resolveLookupConflicts(doc: AdminImportDocument, record: Metadat
     if (!draftWithinSizeLimit(capped(before), capped(draft))) invalidImport();
     if (Array.isArray(doc.decisions)) doc.decisions = retainBoundDecisions(doc.decisions, draft);
     const release = Array.isArray(record.candidates) ? record.candidates.find(item => item?.key === applied.candidateKey)?.release : null;
-    const names = mergeImportMusicBrainzNames(doc.musicBrainzNames, foundNames(release, lookupFetchedAliases(record), { tracks: review }), draft, { review });
+    const identities = review ? draft : importIdentityDraft(draft);
+    const names = mergeImportMusicBrainzNames(doc.musicBrainzNames, foundNames(release, lookupFetchedAliases(record), { tracks: true }), identities, { review });
     if (!sameDraftValue(names, doc.musicBrainzNames ?? [])) doc.musicBrainzNames = names;
-    const localized = mergeImportLocalizedNames(doc.localizedNames, lookupLocalizedGroups(record), draft, { review });
+    const localized = mergeImportLocalizedNames(doc.localizedNames, lookupLocalizedGroups(record), identities, { review });
     if (!sameDraftValue(localized, doc.localizedNames ?? [])) doc.localizedNames = localized;
     return { ...record, applied: { ...applied, conflicts, values, ...(musicBrainzIds.length ? { musicBrainzIds } : {}) }, updatedAt: now };
 }

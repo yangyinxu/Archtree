@@ -4,10 +4,11 @@
  * Internal
  *   Functions: canonicalJson, sorted, assertSorted, readCanonicalJson, assertRecord, hasExactKeys,
  *              canonicalLocaleTag, validateLocaleName, inferMessageVariables, validateCatalog,
- *              validateLocaleMessages, canonicalLocale, revisionFor, atomicWrite, expectedGeneratedFiles,
- *              runCli
+ *              validateLocaleMessages, canonicalLocale, revisionFor, bundleFor, atomicWrite,
+ *              expectedGeneratedFiles, optionalDirectoryEntries, managedGeneratedFiles, runCli
  *   Constants: repositoryRoot, supportedDeliveryTargets, supportedVariableTypes, maxLocaleBytes,
- *              maxMessageKeys, maxLegacyMessageKeys, maxMessageKeyLength, maxMessageLength, maxLocaleNameLength
+ *              maxCatalogMessageKeys, maxMessageKeys, maxLegacyMessageKeys, maxMessageKeyLength,
+ *              maxMessageLength, maxLocaleNameLength
  * @end-catalog */
 
 import { createHash } from 'node:crypto';
@@ -21,10 +22,13 @@ const repositoryRoot = path.resolve(fileURLToPath(new URL('..', import.meta.url)
 const supportedDeliveryTargets = new Set([
   'runtime',
   'ios-system',
-  'android-system'
+  'android-system',
+  'web-admin',
+  'web-listener'
 ]);
 const supportedVariableTypes = new Set(['string', 'number', 'date', 'time']);
 const maxLocaleBytes = 256 * 1024;
+const maxCatalogMessageKeys = 4_000;
 const maxMessageKeys = 2_000;
 const maxLegacyMessageKeys = 1_000;
 const maxMessageKeyLength = 160;
@@ -175,8 +179,8 @@ const validateCatalog = (catalog) => {
   }
   const messages = assertRecord(root.messages, 'catalog.json messages');
   const keys = Object.keys(messages);
-  if (keys.length === 0 || keys.length > maxMessageKeys) {
-    throw new Error(`catalog.json must contain 1–${maxMessageKeys} messages.`);
+  if (keys.length === 0 || keys.length > maxCatalogMessageKeys) {
+    throw new Error(`catalog.json must contain 1–${maxCatalogMessageKeys} messages.`);
   }
   assertSorted(keys, 'catalog.json message keys');
 
@@ -197,6 +201,12 @@ const validateCatalog = (catalog) => {
       throw new Error(`catalog entry ${key} contains invalid delivery targets.`);
     }
     assertSorted(entry.delivery, `catalog entry ${key} delivery targets`);
+    if (entry.delivery.includes('web-admin') && !key.startsWith('admin.')) {
+      throw new Error(`catalog entry ${key} must use the admin namespace for web-admin delivery.`);
+    }
+    if (entry.delivery.includes('web-listener') && !key.startsWith('videos.')) {
+      throw new Error(`catalog entry ${key} must use the videos namespace for web-listener delivery.`);
+    }
     const variables = assertRecord(entry.variables, `catalog entry ${key} variables`);
     const variableNames = Object.keys(variables);
     assertSorted(variableNames, `catalog entry ${key} variables`);
@@ -262,7 +272,20 @@ const revisionFor = (messages) => {
   return `sha256-${digest}`;
 };
 
-/** Validates canonical sources and returns deterministic runtime artifacts. */
+/** Bounds each delivery independently so authoring growth cannot expand a published wire contract. */
+const bundleFor = (locale, messages, delivery) => {
+  const count = Object.keys(messages).length;
+  if (count === 0 || count > maxMessageKeys) {
+    throw new Error(`The ${delivery} localization namespace must contain 1–${maxMessageKeys} messages.`);
+  }
+  const bundle = { schemaVersion: 1, locale, revision: revisionFor(messages), messages };
+  if (Buffer.byteLength(canonicalJson(bundle), 'utf8') > maxLocaleBytes) {
+    throw new Error(`The ${locale} ${delivery} localization bundle exceeds ${maxLocaleBytes} bytes.`);
+  }
+  return bundle;
+};
+
+/** Validates canonical sources and returns deterministic runtime and release-packaged artifacts. */
 export const buildLocalizationArtifacts = async (root = repositoryRoot) => {
   const localizationRoot = path.join(root, 'localization');
   const catalog = await readCanonicalJson(
@@ -282,6 +305,8 @@ export const buildLocalizationArtifacts = async (root = repositoryRoot) => {
   }
 
   const bundles = new Map();
+  const webAdminBundles = new Map();
+  const webListenerBundles = new Map();
   for (const [index, filename] of filenames.entries()) {
     const locale = sourceLocales[index];
     const messages = validateLocaleMessages(
@@ -292,13 +317,19 @@ export const buildLocalizationArtifacts = async (root = repositoryRoot) => {
     const runtimeMessages = Object.fromEntries(Object.keys(messages)
       .filter((key) => catalogMessages[key].delivery.includes('runtime'))
       .map((key) => [key, messages[key]]));
-    const revision = revisionFor(runtimeMessages);
-    bundles.set(locale, {
-      schemaVersion: 1,
-      locale,
-      revision,
-      messages: runtimeMessages
-    });
+    bundles.set(locale, bundleFor(locale, runtimeMessages, 'v2 runtime'));
+    const webAdminMessages = Object.fromEntries(Object.keys(messages)
+      .filter((key) => catalogMessages[key].delivery.includes('web-admin'))
+      .map((key) => [key, messages[key]]));
+    if (Object.keys(webAdminMessages).length) {
+      webAdminBundles.set(locale, bundleFor(locale, webAdminMessages, 'web-admin'));
+    }
+    const webListenerMessages = Object.fromEntries(Object.keys(messages)
+      .filter((key) => catalogMessages[key].delivery.includes('web-listener'))
+      .map((key) => [key, messages[key]]));
+    if (Object.keys(webListenerMessages).length) {
+      webListenerBundles.set(locale, bundleFor(locale, webListenerMessages, 'web-listener'));
+    }
   }
 
   if (!bundles.has('en-US')) throw new Error('The required en-US fallback locale is missing.');
@@ -322,7 +353,13 @@ export const buildLocalizationArtifacts = async (root = repositoryRoot) => {
   }));
   return {
     manifest: manifestFor(bundles), bundles,
-    legacy: { manifest: manifestFor(legacyBundles), bundles: legacyBundles }
+    legacy: { manifest: manifestFor(legacyBundles), bundles: legacyBundles },
+    webAdmin: webAdminBundles.size
+      ? { manifest: manifestFor(webAdminBundles), bundles: webAdminBundles }
+      : undefined,
+    webListener: webListenerBundles.size
+      ? { manifest: manifestFor(webListenerBundles), bundles: webListenerBundles }
+      : undefined
   };
 };
 
@@ -335,16 +372,42 @@ const atomicWrite = async (filePath, contents) => {
 
 const expectedGeneratedFiles = (artifacts, root) => {
   const generatedRoot = path.join(root, 'localization', 'generated');
-  return new Map([
-    [path.join(generatedRoot, 'manifest.json'), canonicalJson(artifacts.manifest)],
-    ...[...artifacts.bundles].map(([locale, bundle]) => [
-      path.join(generatedRoot, 'bundles', `${locale}.json`), canonicalJson(bundle)
-    ]),
-    [path.join(generatedRoot, 'legacy', 'manifest.json'), canonicalJson(artifacts.legacy.manifest)],
-    ...[...artifacts.legacy.bundles].map(([locale, bundle]) => [
-      path.join(generatedRoot, 'legacy', 'bundles', `${locale}.json`), canonicalJson(bundle)
+  const groups = [
+    [generatedRoot, artifacts],
+    [path.join(generatedRoot, 'legacy'), artifacts.legacy],
+    [path.join(generatedRoot, 'web-admin'), artifacts.webAdmin],
+    [path.join(generatedRoot, 'web-listener'), artifacts.webListener]
+  ];
+  return new Map(groups.flatMap(([directory, representation]) => representation ? [
+    [path.join(directory, 'manifest.json'), canonicalJson(representation.manifest)],
+    ...[...representation.bundles].map(([locale, bundle]) => [
+      path.join(directory, 'bundles', `${locale}.json`), canonicalJson(bundle)
     ])
-  ]);
+  ] : []));
+};
+
+/** An absent optional delivery group has no files; unexpected I/O errors still fail the build. */
+const optionalDirectoryEntries = async (directory) => {
+  try {
+    return await readdir(directory);
+  } catch (error) {
+    if (error.code === 'ENOENT') return [];
+    throw error;
+  }
+};
+
+/** Enumerates only generated manifests and locale JSON, including a retired optional namespace. */
+const managedGeneratedFiles = async (root) => {
+  const generatedRoot = path.join(root, 'localization', 'generated');
+  const files = [];
+  for (const directory of [generatedRoot, path.join(generatedRoot, 'legacy'), path.join(generatedRoot, 'web-admin'), path.join(generatedRoot, 'web-listener')]) {
+    if ((await optionalDirectoryEntries(directory)).includes('manifest.json')) files.push(path.join(directory, 'manifest.json'));
+    const bundleRoot = path.join(directory, 'bundles');
+    for (const filename of await optionalDirectoryEntries(bundleRoot)) {
+      if (filename.endsWith('.json')) files.push(path.join(bundleRoot, filename));
+    }
+  }
+  return files;
 };
 
 /** Writes only deterministic localization artifacts and removes stale bundle files. */
@@ -353,11 +416,8 @@ export const writeLocalizationArtifacts = async (root = repositoryRoot) => {
   const expectedFiles = expectedGeneratedFiles(artifacts, root);
   for (const [filePath, contents] of expectedFiles) await atomicWrite(filePath, contents);
 
-  for (const bundleRoot of [path.join(root, 'localization', 'generated', 'bundles'), path.join(root, 'localization', 'generated', 'legacy', 'bundles')]) {
-    for (const filename of await readdir(bundleRoot)) {
-      const filePath = path.join(bundleRoot, filename);
-      if (filename.endsWith('.json') && !expectedFiles.has(filePath)) await unlink(filePath);
-    }
+  for (const filePath of await managedGeneratedFiles(root)) {
+    if (!expectedFiles.has(filePath)) await unlink(filePath);
   }
   return artifacts;
 };
@@ -377,12 +437,9 @@ export const checkLocalizationArtifacts = async (root = repositoryRoot) => {
       throw new Error(`Generated localization artifact is stale: ${path.relative(root, filePath)}`);
     }
   }
-  for (const bundleRoot of [path.join(root, 'localization', 'generated', 'bundles'), path.join(root, 'localization', 'generated', 'legacy', 'bundles')]) {
-    for (const filename of await readdir(bundleRoot)) {
-      const filePath = path.join(bundleRoot, filename);
-      if (filename.endsWith('.json') && !expectedFiles.has(filePath)) {
-        throw new Error(`Generated localization artifact is stale: ${path.relative(root, filePath)}`);
-      }
+  for (const filePath of await managedGeneratedFiles(root)) {
+    if (!expectedFiles.has(filePath)) {
+      throw new Error(`Generated localization artifact is stale: ${path.relative(root, filePath)}`);
     }
   }
   return artifacts;

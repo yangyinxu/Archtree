@@ -188,8 +188,27 @@ test('preserves one media element, queue, and elapsed time through every shell p
   await page.getByRole('link', { name: 'Search' }).click();
   await expect(page).toHaveURL(/\/finitude\/search$/);
   activeTime = await expectActiveMedia(page, initialProbe.identity, activeTime, videoPath);
-  await expect(page.getByRole('main')).toBeHidden();
+  // Listener navigation shows the requested page; the same Video continues in the right panel.
+  await expect(page.getByRole('main')).toBeVisible();
+  await expect(theater).toHaveCount(0);
+  await expect(aside.getByRole('img', { name: 'First Light video' })).toBeVisible();
   await expect(player).toContainText('First Light');
+  await aside.getByRole('button', { name: 'Enter video fullscreen' }).click();
+  await expect.poll(async () => (await readMediaProbe(page)).controls).toBe(true);
+  expect(await readMediaProbe(page)).toMatchObject({ identity: initialProbe.identity, sourcePath: videoPath });
+  await page.evaluate(() => {
+    document.dispatchEvent(new Event('fullscreenchange'));
+  });
+  await expect.poll(async () => (await readMediaProbe(page)).controls).toBe(false);
+  const videoToggle = player.getByRole('button', { name: 'Video', exact: true });
+  await expect(videoToggle).toHaveAttribute('aria-pressed', 'false');
+  // Selecting the panel Video returns it to the theater.
+  await aside.getByRole('button', { name: 'First Light video', exact: true }).click();
+  await expect(theater).toBeVisible();
+  await expect(page.getByRole('main')).toBeHidden();
+  await expect(videoToggle).toHaveAttribute('aria-pressed', 'true');
+  await expect(videoToggle).toBeFocused();
+  activeTime = await expectActiveMedia(page, initialProbe.identity, activeTime, videoPath);
   await page.goBack();
   await expect(page).toHaveURL(new RegExp(`/finitude/albums/${catalogIds.album}$`));
   activeTime = await expectActiveMedia(page, initialProbe.identity, activeTime, videoPath);
@@ -237,6 +256,14 @@ test('preserves one media element, queue, and elapsed time through every shell p
   await expectStableMedia(page, initialProbe.identity, sentinelTime, videoPath);
   await page.goBack();
   await expect(page).toHaveURL(new RegExp(`/finitude/albums/${catalogIds.album}$`));
+  await expectStableMedia(page, initialProbe.identity, sentinelTime, videoPath);
+
+  // The player-bar title returns to the Album this queue was launched from.
+  await page.getByRole('link', { name: 'Search' }).click();
+  await expect(page).toHaveURL(/\/finitude\/search$/);
+  await player.getByRole('link', { name: 'First Light', exact: true }).click();
+  await expect(page).toHaveURL(new RegExp(`/finitude/albums/${catalogIds.album}$`));
+  await expect(page.getByRole('main')).toBeVisible();
   await expectStableMedia(page, initialProbe.identity, sentinelTime, videoPath);
 
   await page.setViewportSize({ width: 799, height: 800 });
@@ -308,7 +335,7 @@ test('keeps real Audio and Video playback alive through dedicated Admin transiti
   expect(initial.count).toBe(1); expect(initial.sourcePath).toBe(videoPath);
   const enterAdmin = async () => {
     await page.getByRole('button', { name: 'Current view: User', exact: true }).click();
-    await page.getByRole('button', { name: 'Admin', exact: true }).click();
+    await page.getByRole('menuitemradio', { name: 'Admin', exact: true }).click();
     await page.getByRole('banner').getByRole('link', { name: 'Workbench', exact: true }).click();
     await expect(page).toHaveURL(/\/finitude\/admin\/imports$/);
     await expect(page.getByRole('main').getByRole('heading', { name: 'Workbench', exact: true })).toBeVisible();
@@ -323,7 +350,7 @@ test('keeps real Audio and Video playback alive through dedicated Admin transiti
   };
   const returnUser = async () => {
     await page.getByRole('button', { name: 'Current view: Admin', exact: true }).click();
-    await page.getByRole('button', { name: 'User', exact: true }).click();
+    await page.getByRole('menuitemradio', { name: 'User', exact: true }).click();
     await expect(page).toHaveURL(/\/finitude\/?$/);
     await expect(page.getByRole('navigation', { name: 'Primary', exact: true }).first()).toBeVisible();
     await expect(player).toBeVisible();

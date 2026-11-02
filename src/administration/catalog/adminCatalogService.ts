@@ -4,13 +4,13 @@
  *   Classes: AdminCatalogError
  *   Functions: adminCatalogKind, adminCatalogEditableFields, adminCatalogItemRevision,
  *              withCurrentAdministrator, readAdminCatalogRecord, adminCatalogSnapshot, getAdminCatalogItem,
- *              listAdminCatalog, editAdminCatalogItem, getAdminPage, editAdminPageItem
+ *              listAdminCatalog, editAdminCatalogItem, pageSnapshot, getAdminPage, editAdminPageItem
+ *   Constants: adminCatalogMutation
  * Internal
  *   Types: CatalogReceipt
  *   Functions: hasOwn, fail, id, record, exact, date, text, visibility, revision, hasStoredDiscNumber,
  *              hasStoredMusicBrainzId, storedDiscNumber, storedMusicBrainzId, musicBrainzIdField,
- *              stateForRevision, parseFields, assertHiddenDelivery, receipts, parseMutation, replay, receipt,
- *              pageSnapshot
+ *              stateForRevision, parseFields, assertHiddenDelivery, receipts, parseMutation, replay, receipt
  *   Constants: configs, fields
  * @end-catalog */
 
@@ -22,6 +22,7 @@ import { orderedAlbumTrackIds } from '../../services/catalog/albumTrackLinkServi
 import { readyArtistLifecycleFilter } from '../../services/catalog/artistReferenceFenceService';
 import { readyOrganizationLifecycleFilter } from '../../services/catalog/organizationReferenceFenceService';
 import { readyAudioStorageFilter } from '../../utils/audioStorageKey';
+import { activeMediaContentTypeForTrack, activeMediaObjectKeyForTrack, activeMediaTypeForTrack } from '../../utils/mediaStorageKey';
 import { catalogSearchFilter, withCatalogSearchUpdate } from '../../utils/catalogSearch';
 import { normalizeJoinPhrase, normalizeStoredCatalogCredits } from '../../models/catalogCredit';
 import { embeddedDiscNumber } from '../../services/audio/audioMetadataService';
@@ -31,6 +32,7 @@ import { replaceCatalogCreditsWithinTransaction } from '../../services/catalog/c
 import { requireCatalogCreditWrites } from '../../config/catalogCreditRollout';
 import { pageItemIdentity } from '../../utils/pageItemIdentity';
 import { touchAvailablePageItemReferences } from '../../services/content/pageReferenceLifecycleService';
+import { systemAdminPage } from '../../services/content/videoPageService';
 import { parseImportDate, cleanText, uuid, type ImportDate } from '../import/adminImportContract';
 import { adminCatalogArtworkSource } from './adminCatalogArtworkSource';
 import { isMusicBrainzIdDuplicateKey, keepableMusicBrainzId, normalizeMusicBrainzId } from '../../utils/musicBrainzId';
@@ -102,6 +104,15 @@ const stateForRevision = (kind: AdminCatalogKind, doc: any) => ({
     fields: fields(kind, doc), rawMetadata: [doc.title, doc.name, doc.bio, doc.description, doc.birthDate, doc.releaseDate, doc.credits, doc.attributionStatus, doc.trackNumber, doc.organizationType, ...(hasStoredDiscNumber(doc) ? [doc.discNumber] : []), ...(hasStoredMusicBrainzId(doc) ? [doc.musicBrainzId] : []), ...(hasStoredExpectedTracklist(doc) ? [doc.expectedTracklist] : [])], visibility: doc.visibility ?? 'public', coverArtId: doc.coverArtId ?? null,
     coverArtUrl: doc.coverArtUrl ?? null, artistIds: doc.artistIds ?? null, albumId: doc.albumId ?? null,
     audioTrackIds: doc.audioTrackIds ?? null, creditRevision: doc.creditRevision ?? null,
+    ...(hasOwn(doc, 'personalAttribution') ? { personalAttribution: doc.personalAttribution } : {}),
+    // Video frame approvals bind the bytes they previewed. Historical Audio revision recipes remain stable for admitted imports.
+    ...(kind === 'audioTrack' && activeMediaTypeForTrack(doc) === 'video' ? { videoSource: {
+        mediaType: 'video', key: activeMediaObjectKeyForTrack(doc), contentType: activeMediaContentTypeForTrack(doc),
+        representation: doc.mediaRepresentation == null ? null : {
+            revision: doc.mediaRepresentation.revision, objectKey: doc.mediaRepresentation.objectKey,
+            byteLength: doc.mediaRepresentation.byteLength, etag: doc.mediaRepresentation.etag, versionId: doc.mediaRepresentation.versionId
+        }
+    } } : {}),
     adminRevision: doc.adminRevision ?? 0, lifecycleStatus: doc.lifecycleStatus ?? null,
     publicationStatus: doc.publicationStatus ?? null, uploadStatus: doc.uploadStatus ?? null
 });
@@ -141,6 +152,8 @@ export const adminCatalogSnapshot = async (kind: AdminCatalogKind, doc: any, ses
     return { kind, id: ownerId, revision: revision(stateForRevision(kind, doc)), visibility: visibility(doc.visibility), effectiveVisibility,
         fields: shown, coverUrl: artwork ? `/api/admin/v1/catalog/${kind}/${ownerId}/artwork` : null,
         mediaUrl: kind === 'audioTrack' ? `/api/admin/v1/catalog/audioTrack/${ownerId}/media` : null,
+        // The persisted collection also owns Video; playback controls use the same canonical kind as listener delivery.
+        ...(kind === 'audioTrack' ? { mediaType: activeMediaTypeForTrack(doc) } : {}),
         capabilities: { editing: true, visibility: true } };
 };
 
@@ -228,6 +241,9 @@ const receipt = async (actor: string, body: { operationId: string }, fingerprint
     await receipts().insertOne({ actor, operationId: body.operationId, fingerprint, result, expiresAt: new Date(Date.now() + 7 * 86_400_000) }, { session });
 };
 
+/** Page composition mutations share catalog validation and actor-scoped transaction receipts. */
+export const adminCatalogMutation = { parse: parseMutation, fingerprint: revision, replay, receipt };
+
 /**
  * Partial metadata patches never reassign media, replace memberships, or mutate a reused entity implicitly. An Album's expected
  * tracklist is never a field: a top-level `clearExpectedTracklist: true` removes a stored one at the captured revision.
@@ -297,7 +313,7 @@ export const editAdminCatalogItem = (actor: string, kind: AdminCatalogKind, rawI
 };
 
 /** Resolves bounded display metadata privately so an approval identifies the actual placement. */
-const pageSnapshot = async (page: any, session: ClientSession) => {
+export const pageSnapshot = async (page: any, session: ClientSession) => {
     const sourceItems = Array.isArray(page.items) ? page.items : [];
     if (sourceItems.length > 1000) fail(409, 'ADMIN_PAGE_ITEMS_LIMIT');
     const referenceIds = (carousel: boolean): string[] => [...new Set<string>(sourceItems
@@ -327,6 +343,7 @@ const pageSnapshot = async (page: any, session: ClientSession) => {
         references: items.map((item: any) => [item.itemId, item.name, item.sourceMode, item.referenceStatus]) }), items };
 };
 export const getAdminPage = (actor: string, slug: string) => withCurrentAdministrator(actor, async session => {
+    if (slug === 'videos' || slug === 'search') return { page: await systemAdminPage(slug, session) };
     if (!['home', 'library'].includes(slug)) return fail(400, 'ADMIN_CATALOG_INVALID_INPUT');
     const page = await getDb()!.collection('pages').findOne({ slug }, { session });
     if (!page) return fail(404, 'ADMIN_CATALOG_NOT_FOUND');

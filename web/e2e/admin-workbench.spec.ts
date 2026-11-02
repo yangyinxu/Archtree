@@ -7,11 +7,14 @@
  *              publishFromSummary, expectLunaAfterLookup, noOverflow
  * Tests
  *   - admin explicitly opens workbench, adopts only selected suggestion, and User view hides private project
+ *   - administrator view survives reload and revisits after capability verification, while an explicit User choice stays selected
+ *   - a remembered administrator view cannot reopen private projects after current permission is refused
  *   - cancelled cover cleanup remains reachable when the owner disappears, without restoring private metadata
  *   - reopening a visited catalog owner after a confirmed deletion drops its old buffer and cancels with a null revision
  *   - an unconfirmed publication can be cancelled and reviewed while exact cleanup keeps a new approval locked
  *   - ordinary account has no admin switch and requests no admin data
  *   - mobile administrator control and workbench remain accessible without horizontal overflow
+ *   - the view menu supports keyboard selection and dismissal within desktop and narrow mobile viewports
  *   - private upload retries the same multipart operation and publication waits for confirmed completion
  *   - existing catalog edits and Page placement visibility require separate explicit approvals
  *   - a cover uploaded from this computer on an Album page is staged once, confirmed in the existing dialog and replaces the cover, while a GIF is refused locally
@@ -34,6 +37,8 @@
  *   - an image every file shares is chosen automatically until the administrator chooses, and the summary and confirmation show the choice
  *   - a release with front artwork shows a protected preview, Publish waits while its cover is staged, and the staged lookup cover is then chosen automatically and published
  *   - an iTunes-only result applied after MusicBrainz stayed unavailable is marked iTunes only and not checked against MusicBrainz, its values stay flagged, and it publishes after one confirmation
+ *   - an Album page adds files to that Album: the create page shows the target and sends targetAlbumId, and lands on the new import
+ *   - an import created for an Album makes numbering its primary next step once uploads are confirmed
  *   - an append to an Album with an expected tracklist shows each file's row and flags, numbers the files in one field save, lists the rows in the confirmation, and reflows at 320 px
  * @end-catalog */
 
@@ -43,7 +48,7 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { applyDraftChanges, artistEntry, capabilities, detail, entryKey, labelEntry, lookupResponse, projectId, session, slotId, slotTwo, viewer } from '../src/features/admin/adminFixtures.testSupport';
-import { albumId, albumRevision, catalogAlbum, catalogAlbumTracks, reviewEligibility } from '../src/features/admin/catalogReviewFixtures.testSupport';
+import { albumId, albumRevision, catalogAlbum, catalogAlbumTracks, catalogAlbumTracksWithExpected, reviewEligibility } from '../src/features/admin/catalogReviewFixtures.testSupport';
 import sharp from 'sharp';
 
 /** The file part of one queued multipart upload, so mocked assets carry the real length and SHA-256. */
@@ -209,9 +214,65 @@ test('admin explicitly opens workbench, adopts only selected suggestion, and Use
   await page.getByRole('heading', { name: 'Suggested Album', exact: true }).scrollIntoViewIfNeeded();
   await page.screenshot({ path: '/tmp/finitude-admin-workbench-review.png', fullPage: true });
   await page.getByRole('button', { name: 'Current view: Admin' }).click();
-  await page.getByRole('button', { name: 'User', exact: true }).click();
+  await page.getByRole('menuitemradio', { name: 'User', exact: true }).click();
   await expect(page).toHaveURL(/\/finitude\/?$/);
   await expect(page.getByRole('heading', { name: 'Suggested Album' })).toHaveCount(0);
+});
+
+test('administrator view survives reload and revisits after capability verification, while an explicit User choice stays selected', async ({ page }) => {
+  const writes = await setup(page);
+  await page.goto('/finitude/admin/imports');
+  await page.getByRole('button', { name: 'Switch to Admin view' }).click();
+  await expect(page.getByRole('link', { name: 'Synthetic Album', exact: true })).toBeVisible();
+
+  let release!: () => void;
+  const verification = new Promise<void>(resolve => { release = resolve; });
+  let checking = false, projectReads = 0;
+  page.on('request', request => { if (new URL(request.url()).pathname === '/api/admin/v1/imports') projectReads++; });
+  await page.route('**/api/admin/v1/capabilities', async route => {
+    checking = true;
+    await verification;
+    await route.fulfill({ json: capabilities, headers: { 'X-Finitude-Account-Viewer': viewer, 'Cache-Control': 'no-store' } });
+  });
+  await page.reload();
+  try {
+    await expect.poll(() => checking).toBe(true);
+    await expect(page.getByRole('button', { name: /Current view:/ })).toHaveCount(0);
+    await expect(page.getByRole('link', { name: 'Synthetic Album', exact: true })).toHaveCount(0);
+    expect(projectReads).toBe(0);
+  } finally { release(); }
+  await expectStandaloneAdministration(page, 'Current view: Admin');
+  await expect(page.getByRole('link', { name: 'Synthetic Album', exact: true })).toBeVisible();
+  await page.goto('/finitude/admin/imports/new');
+  await expectStandaloneAdministration(page, 'Current view: Admin');
+  await expect(page.getByRole('button', { name: 'Switch to Admin view' })).toHaveCount(0);
+
+  await page.getByRole('button', { name: 'Current view: Admin' }).click();
+  await page.getByRole('menuitemradio', { name: 'User', exact: true }).click();
+  await expect(page).toHaveURL(/\/finitude\/?$/);
+  await page.reload();
+  await expect(page.getByRole('button', { name: 'Current view: User' })).toBeVisible();
+  await page.goto('/finitude/admin/imports');
+  await expectStandaloneAdministration(page, 'Current view: User');
+  await expect(page.getByRole('button', { name: 'Switch to Admin view' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Synthetic Album', exact: true })).toHaveCount(0);
+  expect(writes).toHaveLength(0);
+});
+
+test('a remembered administrator view cannot reopen private projects after current permission is refused', async ({ page }) => {
+  await setup(page);
+  await page.goto('/finitude/admin/imports');
+  await page.getByRole('button', { name: 'Switch to Admin view' }).click();
+  await expect(page.getByRole('link', { name: 'Synthetic Album', exact: true })).toBeVisible();
+  let projectReads = 0;
+  page.on('request', request => { if (new URL(request.url()).pathname === '/api/admin/v1/imports') projectReads++; });
+  await page.route('**/api/admin/v1/capabilities', route => route.fulfill({ status: 403, json: { code: 'ADMIN_REQUIRED' }, headers: { 'X-Finitude-Account-Viewer': viewer, 'Cache-Control': 'no-store' } }));
+  await page.reload();
+  await expect(page.getByText('Switch to Admin view to open the workbench. Current administrator access is required.')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Try again' })).toBeVisible();
+  await expect(page.getByRole('button', { name: /Current view:/ })).toHaveCount(0);
+  await expect(page.getByRole('link', { name: 'Synthetic Album', exact: true })).toHaveCount(0);
+  expect(projectReads).toBe(0);
 });
 
 test('cancelled cover cleanup remains reachable when the owner disappears, without restoring private metadata', async ({ page }, testInfo) => {
@@ -241,7 +302,7 @@ test('cancelled cover cleanup remains reachable when the owner disappears, witho
   await expect(page.getByText('The cover change is cancelled. Unused image cleanup still needs attention.').first()).toBeVisible();
   expect(writes[0].body.expectedRevision).toBe(item.revision);expect(writes[0].body.operationId).not.toBe(original);
   await page.goto('/finitude/admin/catalog');
-  await page.getByRole('button',{name:'Switch to Admin view'}).click();
+  await expect(page.getByRole('button', { name: 'Current view: Admin' })).toBeVisible();
   await page.getByRole('button',{name:'Artists',exact:true}).click();
   await page.locator('summary').filter({hasText:'Recover cover operations for an item'}).click();
   await page.getByRole('textbox',{name:'Known catalog item ID'}).fill(id);
@@ -404,6 +465,50 @@ test('mobile administrator control and workbench remain accessible without horiz
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
   await page.screenshot({ path: '/tmp/finitude-admin-workbench-mobile.png', fullPage: true });
+});
+
+test('the view menu supports keyboard selection and dismissal within desktop and narrow mobile viewports', async ({ page }) => {
+  await setup(page);
+  await page.goto('/finitude/admin/imports');
+  await page.getByRole('button', { name: 'Switch to Admin view' }).click();
+  for (const width of [1440, 320]) {
+    await page.setViewportSize({ width, height: 900 });
+    const trigger = page.getByRole('button', { name: 'Current view: Admin' });
+    const brandBounds = await page.getByRole('banner').getByRole('link', { name: 'Finitude home', exact: true }).boundingBox();
+    const triggerBounds = await trigger.boundingBox();
+    expect(brandBounds!.x + brandBounds!.width).toBeLessThanOrEqual(triggerBounds!.x);
+    await trigger.focus();
+    await trigger.press('ArrowDown');
+    const menu = page.getByRole('menu');
+    const admin = menu.getByRole('menuitemradio', { name: 'Admin', exact: true });
+    const user = menu.getByRole('menuitemradio', { name: 'User', exact: true });
+    await expect(admin).toBeFocused();
+    await expect(admin).toHaveAttribute('aria-checked', 'true');
+    await expect(user).toHaveAttribute('aria-checked', 'false');
+    await admin.press('ArrowDown');
+    await expect(user).toBeFocused();
+    await user.press('Home');
+    await expect(admin).toBeFocused();
+    await admin.press('End');
+    await expect(user).toBeFocused();
+    await user.press('Escape');
+    await expect(menu).toHaveCount(0);
+    await expect(trigger).toBeFocused();
+    await trigger.click();
+    await expect(admin).toBeFocused();
+    const bounds = await menu.boundingBox();
+    expect(bounds!.x).toBeGreaterThanOrEqual(0);
+    expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width);
+    expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+    await page.screenshot({ path: `/tmp/finitude-admin-view-menu-${width === 320 ? 'mobile' : 'desktop'}.png`, fullPage: true });
+    await admin.press('Shift+Tab');
+    await expect(menu).toHaveCount(0);
+    await expect(trigger).toBeFocused();
+    await trigger.click();
+    await page.getByRole('button', { name: 'Refresh status', exact: true }).click();
+    await expect(menu).toHaveCount(0);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  }
 });
 
 
@@ -572,7 +677,7 @@ test('one approval uploads files sequentially and leaving Admin view stops after
   await expect(page.getByRole('textbox', { name: 'Folder or Album context' })).toHaveValue('Synthetic Folder');
   await page.getByRole('button', { name: 'Create import and upload files' }).click();
   await expect.poll(() => server.uploads.length).toBe(1);
-  await page.getByRole('button', { name: 'Current view: Admin' }).click(); await page.getByRole('button', { name: 'User', exact: true }).click();
+  await page.getByRole('button', { name: 'Current view: Admin' }).click(); await page.getByRole('menuitemradio', { name: 'User', exact: true }).click();
   await expect(page).toHaveURL(/\/finitude\/?$/);
   release(); await page.waitForTimeout(300); expect(server.uploads).toHaveLength(1);
   await page.goBack(); await page.getByRole('button', { name: 'Switch to Admin view' }).click();
@@ -1268,6 +1373,85 @@ test('an iTunes-only result applied after MusicBrainz stayed unavailable is mark
   await page.getByRole('dialog').getByRole('button', { name: 'Publish Album', exact: true }).click();
   await expect.poll(() => server.writes.map(write => write.action)).toEqual(['publish']);
   expect(server.writes[0].body).toEqual(expect.objectContaining({ approvalDigest: expect.any(String), decisions: item.decisions }));
+});
+
+test('an Album page adds files to that Album: the create page shows the target and sends targetAlbumId, and lands on the new import', async ({ page }) => {
+  await setup(page); const server = await createRoutes(page);
+  const headers = { 'X-Finitude-Account-Viewer': viewer, 'Cache-Control': 'no-store' }, artistId = '5'.repeat(24);
+  const album = { ...catalogAlbum(), fields: { ...catalogAlbum().fields, attributionStatus: 'documented' as const,
+    credits: [{ creditId: 'synthetic_primary', subjectType: 'artist' as const, subjectId: artistId, role: 'primary' as const, order: 0 }] } };
+  // Registered after createRoutes, so these answer first; anything else falls back to it and to setup.
+  await page.route('**/api/admin/v1/**', async route => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === `/api/admin/v1/catalog/album/${albumId}`) return route.fulfill({ json: { item: album }, headers });
+    if (path === `/api/admin/v1/catalog/album/${albumId}/tracks`) return route.fulfill({ json: catalogAlbumTracksWithExpected(), headers });
+    if (path === `/api/admin/v1/catalog/album/${albumId}/cover-operations`) return route.fulfill({ json: { items: [] }, headers });
+    if (path === `/api/admin/v1/catalog/artist/${artistId}`) return route.fulfill({ json: { item: { ...catalogAlbum(), id: artistId, kind: 'artist', fields: { name: 'Synthetic Ensemble', bio: '', birthDate: null, musicBrainzId: null } } }, headers });
+    if (path === '/api/admin/v1/catalog-reviews/eligibility') return route.fulfill({ json: reviewEligibility(), headers });
+    if (path === `/api/admin/v1/imports/album-targets/${albumId}`) return route.fulfill({ json: { albumId, refusal: null,
+      album: { title: 'Synthetic catalog Album', primaryArtists: ['Synthetic Ensemble'], coverUrl: null, missingRows: 1 } }, headers });
+    return route.fallback();
+  });
+  await page.goto(`/finitude/admin/catalog/album/${albumId}`); await page.getByRole('button', { name: 'Switch to Admin view' }).click();
+  const tracks = page.getByRole('region', { name: 'Tracks', exact: true });
+  await expect(tracks.getByRole('link', { name: 'Upload missing files', exact: true })).toHaveAttribute('href', `/finitude/admin/imports/new?album=${albumId}`);
+  await page.getByRole('link', { name: 'Add files to this Album', exact: true }).click();
+  await expect(page).toHaveURL(new RegExp(`/finitude/admin/imports/new\\?album=${albumId}$`));
+  await expect(page.getByRole('heading', { name: 'Add files to an existing Album', exact: true })).toBeVisible();
+  const card = page.getByRole('region', { name: 'Target Album', exact: true });
+  await expect(card.getByText('Synthetic catalog Album', { exact: true })).toBeVisible();
+  await expect(card.getByText('1 row of its expected tracklist has no file yet.', { exact: true })).toBeVisible();
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+  await page.setViewportSize({ width: 320, height: 900 }); expect(await noOverflow(page)).toBe(true);
+  await page.locator('input[type=file]').nth(1).setInputFiles([{ name: 'Song.mp3', mimeType: 'audio/mpeg', buffer: Buffer.alloc(120, 7) }]);
+  await page.getByRole('button', { name: 'Create import and upload files', exact: true }).click();
+  await expect.poll(() => server.created.length).toBe(1);
+  expect(server.created[0]).toMatchObject({ targetAlbumId: albumId }); expect(server.created[0]).not.toHaveProperty('draft');
+  await expect.poll(() => server.uploads.length).toBe(1);
+  await expect(page).toHaveURL(new RegExp(`/finitude/admin/imports/${projectId}$`));
+});
+
+test('an import created for an Album makes numbering its primary next step once uploads are confirmed', async ({ page }) => {
+  await setup(page);
+  const item = uploadedProject(), [first, second] = item.draft.tracks, target = '3'.repeat(24);
+  Object.assign(first, { discNumber: null, trackNumber: null }); Object.assign(second, { title: '', discNumber: null, trackNumber: null });
+  item.decisions = [{ scope: 'album', slotId: null, entryKey: null, boundName: null, action: 'reuse', candidateId: target, candidateRevision: 'r-album' }];
+  const tracklist = { albumId: target, durationToleranceMs: 3000,
+    rows: [{ discNumber: 1, trackNumber: 1, title: 'Opening', durationMs: null, filled: true }, { discNumber: 1, trackNumber: 2, title: 'Second Row', durationMs: 200_000, filled: false },
+      { discNumber: 1, trackNumber: 3, title: 'Third Row', durationMs: 300_000, filled: false }],
+    files: [{ slotId: first.slotId, durationMs: 200_500, durationPrecisionMs: 0, appended: true }, { slotId: second.slotId, durationMs: 300_000, durationPrecisionMs: 0, appended: true }],
+    numbering: [{ slotId: first.slotId, discNumber: 1, trackNumber: 2, title: null }, { slotId: second.slotId, discNumber: 1, trackNumber: 3, title: 'Third Row' }] };
+  const changes = [{ path: `tracks.${first.slotId}.discNumber`, base: null, value: 1 }, { path: `tracks.${first.slotId}.trackNumber`, base: null, value: 2 },
+    { path: `tracks.${second.slotId}.discNumber`, base: null, value: 1 }, { path: `tracks.${second.slotId}.trackNumber`, base: null, value: 3 }, { path: `tracks.${second.slotId}.title`, base: '', value: 'Third Row' }];
+  const server = await summaryProject(page, item, (state, action, body) => {
+    expect([action, body]).toEqual(['', { operationId: expect.any(String), expectedRevision: state.item.revision, changes }]);
+    state.item = { ...state.item, draft: applyDraftChanges(state.item.draft, body.changes) };
+    state.summary = { append: true, forAlbum: target, appendTracklist: { ...tracklist, numbering: [] } };
+    return 'edit';
+  });
+  server.summary = { append: true, forAlbum: target, appendTracklist: tracklist, waiting: { uploads: true, lookup: false, cover: false, analysis: false } };
+  await page.goto(`/finitude/admin/imports/${projectId}`); await page.getByRole('button', { name: 'Switch to Admin view' }).click();
+  const next = summaryRegion(page).getByText('Next step: number these files from the Album\'s expected tracklist. Their Disc and Track Numbers change only when you choose to.', { exact: true });
+  await expect(summaryRegion(page).getByText('Metadata lookup has not run for these files. Look up a name below, or use Luna AI (paid).', { exact: true })).toBeVisible();
+  const rows = summaryRegion(page).getByRole('region', { name: 'Album\'s expected tracklist', exact: true });
+  const number = rows.getByRole('button', { name: 'Number from the Album\'s expected tracklist', exact: true });
+  const luna = summaryRegion(page).getByRole('button', { name: 'Use Luna AI (paid)', exact: true });
+  const classes = async (button: typeof number) => (await button.getAttribute('class') ?? '').split(/\s+/).filter(Boolean);
+  // While an upload waits the button is an ordinary secondary one, styled like the paid Luna AI button.
+  await expect(number).toBeVisible(); await expect(next).toHaveCount(0);
+  expect(await classes(number)).toEqual(await classes(luna));
+  // Once every upload is confirmed it is the next step: primary, under its line, and still waiting for a click.
+  server.summary = { append: true, forAlbum: target, appendTracklist: tracklist };
+  await page.reload(); await expect(page.getByRole('button', { name: 'Current view: Admin' })).toBeVisible();
+  await expect(next).toBeVisible();
+  const lunaClasses = await classes(luna);
+  expect((await classes(number)).filter(name => !lunaClasses.includes(name))).not.toEqual([]);
+  expect(server.writes).toEqual([]);
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+  await page.setViewportSize({ width: 320, height: 900 }); expect(await noOverflow(page)).toBe(true);
+  await number.click();
+  await expect.poll(() => server.writes.map(write => write.action)).toEqual(['']);
+  await expect(number).toHaveCount(0); await expect(next).toHaveCount(0);
 });
 
 test('an append to an Album with an expected tracklist shows each file\'s row and flags, numbers the files in one field save, lists the rows in the confirmation, and reflows at 320 px', async ({ page }) => {

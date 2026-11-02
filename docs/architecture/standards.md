@@ -82,7 +82,7 @@ of the domain it changes, not into the root.
 | `avatar/` | Profile avatar storage and mutation lifecycle. |
 | `audio/` | Audio object storage, metadata, publication recovery, reconciliation, remediation. |
 | `image/` | Cover-art storage, variants, image object lifecycle and reconciliation. |
-| `media/` | MediaTrack representations, byte-range delivery, video metadata, S3 usage summaries. |
+| `media/` | MediaTrack representations, byte-range delivery, Video metadata and durable administrator Video upload/processing lifecycles, S3 usage summaries. |
 | `catalog/` | Albums, Artists, Organizations, credits, visibility, search backfill, deletion leases, and their reference fences. |
 | `content/` | Pages, page items, and content-reference reconciliation. |
 | `listener/` | Listener content projections, telemetry, artist follows, followed-artist releases. |
@@ -113,7 +113,7 @@ placing it in a neighbor that does not own it.
 | --- | --- |
 | `app/` | Shell, router, session coordination, layout preferences. |
 | `api/` | Typed HTTP clients and zod response schemas, one module per server API area. |
-| `features/<feature>/` | Route pages and feature-specific components, hooks, and CSS Modules (`account`, `admin`, `catalog`, `home`, `library`, `playback`, `playlists`, `search`, `social`). |
+| `features/<feature>/` | Route pages and feature-specific components, hooks, and CSS Modules (`account`, `admin`, `catalog`, `home`, `library`, `playback`, `playlists`, `search`, `social`, `videos`). |
 | `components/` | Reusable presentational components shared by two or more features. |
 | `player/` | The single audio/video player store and playback recovery. |
 | `localization/`, `telemetry/`, `artwork/`, `styles/` | Cross-cutting client concerns. |

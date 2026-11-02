@@ -240,14 +240,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .carousel {
-    scroll-behavior: auto;
-  }
-
-  .carouselControl {
-    transition: none;
-  }
-
+  /* Global reduced motion already makes transitions instant and scrolling immediate. */
   .carouselControl:active,
   .carouselFrame:hover .carouselControl,
   .carouselFrame:focus-within .carouselControl,
