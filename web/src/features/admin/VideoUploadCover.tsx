@@ -26,6 +26,7 @@ export function VideoUploadCover({ project, draft, localUrl, disabled, onImage, 
         {draft.coverChoice !== 'none' && <button className={common.button} type="button" disabled={disabled} onClick={() => onChoice('none')}>{t('video.cover_none')}</button>}
       </div><input ref={image} hidden type="file" accept="image/jpeg,image/png,image/webp" disabled={disabled} onChange={event => { if (event.target.files?.[0]) onImage(event.target.files[0]); event.target.value = ''; }} />
     </div></div>
+    {['queued', 'running'].includes(project.frame.state) && <p role="status">{t('video.cover')} · {t(`video.state_${project.frame.state}`)}</p>}
     {project.frame.state === 'failed' && <p role="status">{t('video.frame_failed')}</p>}
     {!localUrl && <p className={styles.help}>{t('video.frame_local_needed')}</p>}
     {picking && localUrl && <Suspense fallback={<p role="status">{t('common.loading')}</p>}><VideoFramePicker url={localUrl} onClose={() => setPicking(false)} onChoose={time => { onFrame(time); setPicking(false); }} /></Suspense>}

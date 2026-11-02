@@ -5636,6 +5636,16 @@ cleanup preserve unknown and failed object identities until exact deletion is
 confirmed. Account deletion retains the existing shared-provenance rule and
 cannot erase unfinished private project storage evidence.
 
+Video cleanup explicitly deletes the recorded S3 version, including the literal
+`null` version from an acknowledged unversioned upload. It does not combine that
+request with `If-Match`: S3 [conditional delete evaluation applies only to the
+current object](https://docs.aws.amazon.com/AmazonS3/latest/userguide/conditional-deletes.html).
+Never-reused, conditional-PUT keys prevent null-version replacement by another
+Video operation. The worker verifies the bound identity before deletion and exact
+version absence afterward; omitting the version could instead create a delete
+marker after a bucket versioning change. Failed or uncertain deletion remains
+traceable and retryable through the original lifecycle record.
+
 Portable real-codec tests use tiny synthetic color/tone fixtures under
 `test/fixtures/video/` and injected private storage for lifecycle integration.
 

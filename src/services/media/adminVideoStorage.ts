@@ -96,8 +96,12 @@ export const defaultAdminVideoStorage: AdminVideoStorage = {
     },
     async delete(projectId, asset, signal) {
         if (!asset.etag) throw new Error('Unknown video version cannot be deleted');
+        // S3 conditional DELETE evaluates only the current object and rejects If-Match with
+        // a version. Exact versions, including null, avoid creating delete markers after
+        // bucket versioning changes. Never-reused conditional PUT keys and the worker's
+        // identity-bound HEAD before/after deletion fence these lifecycle objects.
         await bounded(30_000, signal, async requestSignal => { await getS3().send(new DeleteObjectCommand({ Bucket: asset.bucket, Key: asset.key,
-            VersionId: asset.versionId ?? 'null', IfMatch: asset.etag! }), { abortSignal: requestSignal }); });
+            VersionId: asset.versionId ?? 'null' }), { abortSignal: requestSignal }); });
     },
     async readCover(projectId, asset, signal) {
         if (asset.byteLength > 10 * 1024 * 1024 || asset.kind !== 'cover' || !asset.etag) throw new Error('Invalid video cover');

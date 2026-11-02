@@ -9,6 +9,7 @@
  *   - edited details save first and only their acknowledged server snapshot enters confirmation
  *   - unknown source outcomes reconcile the original operation without sending another source
  *   - failed processing retries server work without re-uploading the confirmed original
+ *   - running processing shows its current extraction step and measured progress
  *   - failed publication reuses its original approval operation without transmitting media
  *   - an unavailable server never opens the native source picker or creates a private task
  *   - a restored receiving cover ingress reconciles the original cover operation before allowing new edits
@@ -103,6 +104,27 @@ test('failed processing retries server work without re-uploading the confirmed o
   await waitFor(() => expect(writes).toHaveLength(1));
   expect(writes[0]).toMatchObject({ path: `/video-projects/${videoProjectId}/processing/retry`, body: { expectedRevision: 3 } });
   expect(writes[0].body).not.toHaveProperty('file');
+});
+
+test('running processing shows its current extraction step and measured progress', async () => {
+  current = { ...current, stage: 'validate', approvalDigest: null, processing: { ...current.processing, state: 'running', step: 'cover', progress: 75 } };
+  mount();
+  expect(await screen.findByText('video.step_cover')).toBeInTheDocument();
+  expect(screen.getByRole('progressbar', { name: 'video.stage_2' })).toHaveAttribute('value', '75');
+});
+
+test.each(['ready', 'failed', 'queued', 'cancelled', 'published', 'frame'] as const)('%s processing does not present a retained extraction step as active work', async scenario => {
+  current.processing = { ...current.processing, step: 'cover', progress: 100 };
+  if (scenario === 'failed' || scenario === 'queued') current.processing.state = scenario;
+  if (scenario === 'failed') current.processing.issue = 'processing_failed';
+  if (scenario === 'cancelled') { current.stage = 'cancelled'; current.processing.state = 'running'; current.publication.state = 'cancelled'; }
+  if (scenario === 'published') { current.stage = 'complete'; current.publication.state = 'complete'; }
+  if (scenario === 'frame') current.frame.state = 'running';
+  mount(); await screen.findByDisplayValue('Synthetic Video');
+  expect(screen.queryByText('video.step_cover')).not.toBeInTheDocument();
+  expect(screen.queryByRole('progressbar', { name: 'video.stage_2' })).not.toBeInTheDocument();
+  if (scenario === 'failed') expect(screen.getByText('video.processing_issue_retry')).toBeInTheDocument();
+  expect(writes).toEqual([]);
 });
 
 test('failed publication reuses its original approval operation without transmitting media', async () => {
