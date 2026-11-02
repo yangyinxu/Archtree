@@ -6,6 +6,8 @@
  *   Variables: defaults, states, seekNeedsEvent, onChoose, created
  * Tests
  *   - metadata and a decoded frame settled before mount enable frame selection without another media event
+ *   - a published-media capture returns the decoded JPEG without dispatching a private-project timestamp
+ *   - published-media decode failure uses its supplied recovery text without suggesting another original upload
  *   - an already decoded current frame is retained rather than reset to the automatic candidate
  *   - metadata and seek events finish normally without resetting a manual selection on repeated metadata
  *   - a decode error settled before mount stops loading and a changed URL receives independent state
@@ -69,6 +71,23 @@ test('metadata and a decoded frame settled before mount enable frame selection w
   await waitFor(() => expect(screen.getByRole('button', { name: 'video.frame_use' })).toBeEnabled());
   expect(screen.queryByText('common.loading')).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'video.frame_use' })); expect(onChoose).toHaveBeenCalledWith(2);
+});
+
+test('a published-media capture returns the decoded JPEG without dispatching a private-project timestamp', async () => {
+  const onCapture = vi.fn();
+  render(<VideoFramePicker url="/api/admin/v1/catalog/audioTrack/synthetic/media?viewer=synthetic" onClose={vi.fn()} onChoose={onChoose} onCapture={onCapture} />);
+  await waitFor(() => expect(screen.getByRole('button', { name: 'video.frame_use' })).toBeEnabled());
+  fireEvent.click(screen.getByRole('button', { name: 'video.frame_use' }));
+  expect(onCapture).toHaveBeenCalledWith(expect.objectContaining({ blob: expect.any(Blob), time: 2, duration: 22.016, width: 1280, height: 720 }));
+  expect(onChoose).not.toHaveBeenCalled();
+});
+
+test('published-media decode failure uses its supplied recovery text without suggesting another original upload', () => {
+  defaults.readyState = 0; defaults.duration = NaN; defaults.error = { code: 4 } as MediaError;
+  render(<VideoFramePicker url="blob:unsupported-published" onClose={vi.fn()} onChoose={onChoose} unavailableMessage="Synthetic published playback recovery" />);
+  expect(screen.getByText('Synthetic published playback recovery')).toBeInTheDocument();
+  expect(screen.queryByText('video.preview_unavailable')).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'video.frame_use' })).toBeDisabled();
 });
 
 test('an already decoded current frame is retained rather than reset to the automatic candidate', async () => {

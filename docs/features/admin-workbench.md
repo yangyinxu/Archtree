@@ -5560,6 +5560,26 @@ projects use `/api/admin/v1/video-projects`; they never reuse the Audio-only
 Album import schema. Their list, detail, previews and mutations are fenced to
 the initiating account and its current persisted administrator role.
 
+After publication, the completed task reads the current MediaTrack through the
+administrator catalog API. The catalog snapshot includes an allowlisted
+`mediaType` of `audio` or `video` for MediaTracks; clients accept its absence as
+legacy Audio. Video previews use native video controls and protected artwork,
+while Audio previews retain native audio controls. Both use the current account
+viewer and saved revision and stop when their account, role or source changes.
+Video does not offer the Audio-only MP3 conversion entry.
+
+Published Video artwork uses the existing catalog cover upload, confirmation,
+replacement, cancellation and reconciliation endpoints. The frame picker reads
+the protected published media, so the original local file and private upload
+staging objects are unnecessary. A captured JPEG retains its source catalog
+revision through upload and confirmation; an unknown transfer retries the same
+bytes and operation, and a newer source never silently rebases the approval.
+Video catalog revisions bind the active media identity as well as editable
+metadata, while historical Audio revision recipes remain unchanged. Clearing
+own artwork retains the canonical Album/placeholder fallback. The completed
+task's upload history stays immutable and its current artwork is reread from
+the catalog after replacement or clearing.
+
 The private staging prerequisite is the same independently verified
 `FINITUDE_ADMIN_IMPORT_PRIVATE_STORAGE_READY` and `ADMIN_IMPORT_S3_BUCKET_NAME`
 configuration used for import media. A source or processing object in that bucket

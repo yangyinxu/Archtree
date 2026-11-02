@@ -4,7 +4,7 @@
  * Internal
  *   Types: DraftBuffer
  *   Functions: sourceFileKey, bytes, NewVideo, VideoProjectPage
- *   Constants: VideoUploadDialogs, VideoUploadMetadata
+ *   Constants: VideoUploadDialogs, PublishedVideoProject, VideoUploadMetadata
  * @end-catalog */
 
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
@@ -27,6 +27,7 @@ import common from './adminStyles';
 import styles from './VideoUpload.module.css';
 
 const VideoUploadDialogs = lazy(() => import('./VideoUploadDialogs'));
+const PublishedVideoProject = lazy(() => import('./PublishedVideoProject'));
 // The source task's read can begin before optional metadata and catalog-search code is needed.
 const VideoUploadMetadata = lazy(() => import('./VideoUploadMetadata').then(module => ({ default: module.VideoUploadMetadata })));
 
@@ -94,6 +95,10 @@ function VideoProjectPage({ id }: { id: string }) {
     const url = URL.createObjectURL(file); setLocalUrl(url); return () => URL.revokeObjectURL(url);
   }, [file]);
   useEffect(() => {
+    if (project?.publication.state !== 'complete') return;
+    adminWorkspace.forget(sourceFileKey(id)); setFile(null);
+  }, [project?.publication.state, id]);
+  useEffect(() => {
     if (!mutation.result) return;
     accept(mutation.result.item);
     if (purpose.current === 'save' || purpose.current === 'review') setEdit({ saved: mutation.result.item.draft, draft: { ...mutation.result.item.draft } });
@@ -105,12 +110,16 @@ function VideoProjectPage({ id }: { id: string }) {
   }, [mutation.result]);
   const change = (patch: Partial<VideoDraft>) => { setApproval(null); setEdit(previous => previous ? { ...previous, draft: { ...previous.draft, ...patch } } : previous); };
   if (!project || !edit) return <section className={common.page}><AdminNav /><h1 className={common.title}>{t('video.new')}</h1><p role={query.isError ? 'alert' : 'status'}>{t(query.isError ? 'common.error' : 'common.loading')}</p>{query.isError && <button className={common.button} onClick={() => void query.refetch()}>{t('common.retry')}</button>}</section>;
-  const draft = edit.draft, published = project.publication.state === 'complete', cancelled = project.stage === 'cancelled';
+  if (project.publication.state === 'complete') return <Suspense fallback={<p role="status">{t('common.loading')}</p>}><PublishedVideoProject project={project}>
+    {mutation.error && <div role="alert"><p>{t(`common.${mutation.error}`)}</p>{mutation.intent && <button className={common.button} type="button" disabled={!online} onClick={mutation.command.retry}>{t('common.retry_operation')}</button>}</div>}
+    {project.publication.cleanupPending && <button className={common.button} type="button" disabled={!online || mutation.running || Boolean(mutation.intent)} onClick={() => mutation.command.run(`${videoPath(id)}/cleanup`, { expectedRevision: project.revision }, 'POST')}>{t('video.cleanup_retry')}</button>}
+  </PublishedVideoProject></Suspense>;
+  const draft = edit.draft, cancelled = project.stage === 'cancelled';
   const working = ['queued', 'running'].includes(project.processing.state) || ['queued', 'running'].includes(project.frame.state) || ['queued', 'running'].includes(project.publication.state);
   // Persisted step/progress remain recovery evidence after processing stops.
   const processingRunning = project.processing.state === 'running' && !cancelled;
   const unknownSource = ['pending', 'unknown'].includes(project.source.status);
-  const locked = !online || transfer.running || recovering || readingCover || mutation.running || Boolean(mutation.intent) || working || published || cancelled;
+  const locked = !online || transfer.running || recovering || readingCover || mutation.running || Boolean(mutation.intent) || working || cancelled;
   const changes = Object.fromEntries(Object.entries(draft).filter(([key, value]) => value !== project.draft[key as keyof VideoDraft]));
   const dirty = Object.keys(changes).length > 0;
   const coverUnknown = project.covers.find(cover => cover.state === 'unknown');
@@ -158,29 +167,28 @@ function VideoProjectPage({ id }: { id: string }) {
     else if (project.publication.state === 'failed') { if (dirty || requiresNewApproval) review(); else void recoverPublication(); }
     else review();
   };
-  const phaseStates = ['ready', published ? 'ready' : project.source.status, project.processing.state, project.publication.state];
+  const phaseStates = ['ready', project.source.status, project.processing.state, project.publication.state];
   const primaryDisabled = locked || project.source.status !== 'ready' && !unknownSource && !capability?.enabled || project.source.status === 'ready' && project.processing.state !== 'failed' && !(project.publication.state === 'failed' && !dirty && !requiresNewApproval) && (!(ready || canRefreshApproval) || !valid);
   return <section className={common.page}><AdminNav /><Link className={common.back} to="/admin/imports?source=videos">{t('common.back')}</Link>
     <header className={common.header}><div><h1 className={common.title}>{t('video.new')}</h1><p className={common.muted}>{t('video.intro')}</p></div><button className={common.button} type="button" disabled={query.isFetching || !online} onClick={() => void query.refetch()}>{t('common.refresh')}</button></header>
     <div className={styles.layout}><section><h2>{t('video.file_processing')}</h2><div className={styles.file}><FileVideo size={38} aria-hidden="true" /><div><strong>{project.source.filename}</strong><p>{bytes(project.source.byteLength)}</p></div><button className={common.button} type="button" disabled={!file && (locked || unknownSource || Boolean(transfer.intent))} onClick={() => file ? setPreview(true) : picker.current?.click()}>{t(file ? 'video.preview' : 'video.reselect')}</button><input ref={picker} hidden type="file" accept=".mp4,.mov,.m4v,video/mp4,video/quicktime,video/x-m4v" disabled={locked || unknownSource || Boolean(transfer.intent)} onChange={event => { select(event.target.files?.[0]); event.target.value = ''; }} /></div>
       <div className={styles.notice}><strong>{t('video.original_supported')}</strong><p className={styles.help}>{t('video.original_help')}</p></div>
       {unknownSource && <p role="status">{t('video.unknown_help')}</p>}
-      {!capability?.enabled && !published && <p role="status">{t('video.unavailable')}</p>}
+      {!capability?.enabled && <p role="status">{t('video.unavailable')}</p>}
       {project.processing.facts && <p className={styles.help}>{project.processing.facts.durationSeconds.toFixed(1)} s · {project.processing.facts.width} × {project.processing.facts.height} · {project.processing.facts.videoCodec}{project.processing.facts.audioCodec ? ` / ${project.processing.facts.audioCodec}` : ''}</p>}
       {transfer.running && <div role="status"><p>{t('video.transmitting')}</p><progress aria-label={t('video.transmitting')} /></div>}
       <ol className={styles.stages}>{phaseStates.map((state, index) => <li className={styles.stage} key={index}>{['ready', 'complete'].includes(state) ? <CheckCircle2 size={22} aria-hidden="true" /> : ['pending', 'queued', 'running'].includes(state) ? <Loader2 size={22} aria-hidden="true" /> : <Circle size={22} aria-hidden="true" />}<div><h3>{t(`video.stage_${index}`)}</h3><p>{t(`video.state_${state}`)}</p>{index === 2 && <p>{t(`video.plan_${project.processing.plan}`)}</p>}{index === 2 && processingRunning && project.processing.step && <p>{t(`video.step_${project.processing.step}`)}</p>}{index === 2 && project.processing.progress !== null && processingRunning && <progress max={100} value={project.processing.progress} aria-label={t('video.stage_2')} />}</div></li>)}</ol>
       {project.processing.state === 'failed' && <p role="status">{t(`video.processing_issue_${videoProcessingIssue(project.processing.issue)}`)}</p>}{project.publication.state === 'failed' && <p role="status">{t(requiresNewApproval ? 'video.publication_review_needed' : 'video.publication_failed')}</p>}
-      {published && <div className={styles.notice}><strong>{t(project.publication.cleanupPending ? 'video.published_cleanup' : 'video.published')}</strong>{project.publication.mediaTrackId && <p><Link className={common.link} to={`/admin/catalog/audioTrack/${project.publication.mediaTrackId}`}>{t('video.manage')}</Link></p>}</div>}
       {cancelled && <p role="status">{t('video.cancelled')}</p>}
       {project.publication.cleanupPending && <button className={common.button} type="button" disabled={!online || mutation.running || Boolean(mutation.intent)} onClick={() => mutation.command.run(`${videoPath(id)}/cleanup`, { expectedRevision: project.revision }, 'POST')}>{t('video.cleanup_retry')}</button>}
     </section><div><Suspense fallback={<p role="status">{t('common.loading')}</p>}><VideoUploadMetadata draft={draft} project={project} disabled={locked || Boolean(coverPending)} onChange={change} /></Suspense><VideoUploadCover project={project} draft={draft} localUrl={localUrl} disabled={locked || !capability?.enabled || unknownSource || Boolean(transfer.intent) || Boolean(coverPending)} onImage={selected => void uploadCover(selected)} onChoice={coverChoice => change({ coverChoice })} onFrame={timeSeconds => mutation.command.run(`${videoPath(id)}/cover-frame`, { expectedRevision: project.revision, timeSeconds }, 'POST')} />
-      {dirty && !published && !cancelled && <button type="button" className={common.button} disabled={locked || !valid || Boolean(coverPending) || Boolean(transfer.intent)} onClick={() => { purpose.current = 'save'; mutation.command.run(videoPath(id), { expectedRevision: project.revision, patch: changes }); }}>{t('video.save')}</button>}
+      {dirty && !cancelled && <button type="button" className={common.button} disabled={locked || !valid || Boolean(coverPending) || Boolean(transfer.intent)} onClick={() => { purpose.current = 'save'; mutation.command.run(videoPath(id), { expectedRevision: project.revision, patch: changes }); }}>{t('video.save')}</button>}
     </div></div>
     {(error || transfer.error) && <p role="alert">{t(error ?? `video.transfer_${transfer.error}`)}</p>}
     {coverPending && coverOperation && <div role="status"><p>{t('video.cover_unknown')}</p><button className={common.button} type="button" disabled={transfer.running || !online} onClick={() => void transfer.reconcile(coverOperation, coverUnknown?.id, true)}>{t('video.cover_reconcile')}</button></div>}
     {mutation.error && <div role="alert"><p>{t(`common.${mutation.error}`)}</p>{mutation.intent && <button className={common.button} type="button" disabled={!online} onClick={mutation.command.retry}>{t('common.retry_operation')}</button>}</div>}
     {!online && <p role="status">{t('common.offline')}</p>}
-    <footer className={styles.footer}><div className={common.actions}>{!published && !cancelled && <button type="button" className={`${common.button} ${common.primary}`} disabled={primaryDisabled} onClick={primary}>{t(primaryLabel)}</button>}<Link className={common.link} to="/admin/imports?source=videos">{t('video.workbench')}</Link><Link className={common.link} to="/admin/videos/new">{t('video.another')}</Link>{!published && !cancelled && <button type="button" className={common.button} disabled={locked || unknownSource || Boolean(transfer.intent)} onClick={() => setCancelling(true)}>{t('video.cancel')}</button>}</div><p className={styles.help}>{t('video.private_help')}</p>{!valid && <p role="status">{t('video.metadata_required')}</p>}</footer>
+    <footer className={styles.footer}><div className={common.actions}>{!cancelled && <button type="button" className={`${common.button} ${common.primary}`} disabled={primaryDisabled} onClick={primary}>{t(primaryLabel)}</button>}<Link className={common.link} to="/admin/imports?source=videos">{t('video.workbench')}</Link><Link className={common.link} to="/admin/videos/new">{t('video.another')}</Link>{!cancelled && <button type="button" className={common.button} disabled={locked || unknownSource || Boolean(transfer.intent)} onClick={() => setCancelling(true)}>{t('video.cancel')}</button>}</div><p className={styles.help}>{t('video.private_help')}</p>{!valid && <p role="status">{t('video.metadata_required')}</p>}</footer>
     {(approval || cancelling || preview && localUrl) && <Suspense fallback={<p role="status">{t('common.loading')}</p>}><VideoUploadDialogs
       approval={approval} current={project} disabled={locked} ready={ready} cancelling={cancelling} previewUrl={preview ? localUrl : null}
       onClose={() => { setApproval(null); setCancelling(false); setPreview(false); }}

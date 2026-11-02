@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "locale": "zh-Hans",
-  "revision": "sha256-cqdd9TZTlE6M-01qCk1mR9-ZMP1UupyjylMSnKr4zvg",
+  "revision": "sha256-Fr9mA8dl7HF8eVku6AkDkJRBL03-xexHoiRitTGopfM",
   "messages": {
     "admin.album_import.add": "向此专辑添加文件",
     "admin.album_import.append_note": "这些文件会成为此专辑的新曲目，并采用专辑的主要艺术家、曲目顺序和可见度。专辑自身的标题、艺术家、厂牌、封面和可见度保持不变。",
@@ -179,6 +179,9 @@
     "admin.video.publication_review_needed": "关联资料已改变或批准已过期。请重新查看当前发布资料并确认，无需重新上传原视频。",
     "admin.video.published": "视频发布已完成",
     "admin.video.published_cleanup": "发布已完成 · 暂存清理待完成",
+    "admin.video.published_help": "可在此播放已发布的视频并更新封面；发布资料可进入目录修改。",
+    "admin.video.published_preview": "私密视频预览",
+    "admin.video.published_preview_unavailable": "这台设备无法解码已发布的视频以选帧。可直接上传封面图片，或使用支持此视频的浏览器。",
     "admin.video.queue": "视频上传任务",
     "admin.video.queue_all": "全部",
     "admin.video.queue_cancelled": "已取消",
@@ -192,6 +195,7 @@
     "admin.video.reconcile": "核对原上传结果",
     "admin.video.recovery_unknown": "操作结果尚未确认，请先刷新任务，再重试原操作。",
     "admin.video.reference_unavailable": "关联身份或专辑已不可用，请调整选择后重新确认发布资料。",
+    "admin.video.refresh_published": "刷新视频",
     "admin.video.reselect": "重新选择同一本机文件",
     "admin.video.reselect_mismatch": "请选择与任务记录名称、大小相同的文件；其他视频请另建任务。",
     "admin.video.review": "确认发布资料",
@@ -226,6 +230,7 @@
     "admin.video.unavailable": "此服务器暂未开放视频上传。",
     "admin.video.unknown_help": "上传结果待核对，请先核对原操作，暂不能替换或重新上传文件。",
     "admin.video.upload_original": "上传原视频",
+    "admin.video.upload_record": "原始上传记录",
     "admin.video.video_entry_help": "上传原视频，跟进处理，确认后发布。",
     "admin.video.visibility": "发布后视频可见度",
     "admin.video.workbench": "返回工作台"

@@ -9686,6 +9686,27 @@
       ],
       "variables": {}
     },
+    "admin.video.published_help": {
+      "description": "Administrator published Video: Play the published video and update its cover here. Open the catalog to edit its publication details.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.published_preview": {
+      "description": "Protected administrator preview of the current published Video.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.published_preview_unavailable": {
+      "description": "Administrator published Video: This device cannot decode this published video for frame selection. Upload a cover image or use a browser that supports this video.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
     "admin.video.queue": {
       "description": "Administrator Video upload: Video upload tasks",
       "delivery": [
@@ -9772,6 +9793,13 @@
     },
     "admin.video.reference_unavailable": {
       "description": "Administrator Video upload: A referenced identity or Album is no longer available. Update the selection and review publication again.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.refresh_published": {
+      "description": "Administrator published Video: Refresh video",
       "delivery": [
         "web-admin"
       ],
@@ -10010,6 +10038,13 @@
     },
     "admin.video.upload_original": {
       "description": "Administrator Video upload: Upload original video",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.upload_record": {
+      "description": "Administrator published Video: Original upload record",
       "delivery": [
         "web-admin"
       ],

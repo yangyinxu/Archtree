@@ -1822,6 +1822,18 @@ The wire protocol and operational bounds are documented in
   selectable representation. A draft or partially copied output is never a
   public MediaTrack. Successful publication with pending cleanup remains a
   successful publication and reports cleanup separately.
+- A completed upload remains a record of its original confirmation. Its
+  published-content view plays the current ready MediaTrack as Video and allows
+  administrators to upload replacement artwork, choose a decoded frame from
+  the published playback object, or clear its own artwork to use the normal
+  Album/placeholder fallback. These actions use the existing catalog artwork
+  confirmation and recovery lifecycle; they do not reopen the upload or
+  require its cleaned private original. Current playback and artwork follow
+  the saved catalog content rather than the historical upload snapshot.
+- A frame chosen from published playback captures that saved media identity
+  and catalog revision. Staging the image alone changes no published artwork;
+  replacement requires a separate confirmation. A changed source, stale
+  revision, account or role refuses that confirmation without rebasing it.
 - Create, replace, cancel, retry and reconciliation retain every source,
   adapted output, cover and publication-copy identity until its attachment or
   exact deletion is confirmed. Cancellation fences active/late workers before

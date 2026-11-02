@@ -5,10 +5,10 @@ import { captureVideoFrame, videoCandidateTime, type VideoFrame } from './videoF
 import common from './adminStyles';
 import styles from './VideoUpload.module.css';
 
-interface VideoFramePickerProps { url: string; onClose: () => void; onChoose: (time: number) => void }
+interface VideoFramePickerProps { url: string; onClose: () => void; onChoose: (time: number) => void; onCapture?: (frame: VideoFrame) => void; unavailableMessage?: string }
 
 /** Each source owns its decoded state and pending captures, including media that settled before mount. */
-function VideoFramePickerSource({ url, onClose, onChoose }: VideoFramePickerProps) {
+function VideoFramePickerSource({ url, onClose, onChoose, onCapture, unavailableMessage }: VideoFramePickerProps) {
   const t = useAdminDeliveryText(['video.']), video = useRef<HTMLVideoElement>(null), close = useRef<HTMLButtonElement>(null);
   const sequence = useRef(0), active = useRef(false), initialized = useRef(false), previewUrl = useRef<string | null>(null);
   const [duration, setDuration] = useState(0), [time, setTime] = useState(0), [frame, setFrame] = useState<(VideoFrame & { url: string }) | null>(null);
@@ -75,8 +75,8 @@ function VideoFramePickerSource({ url, onClose, onChoose }: VideoFramePickerProp
       onTimeUpdate={() => { if (video.current && !video.current.paused) setTime(video.current.currentTime); }} onError={fail} />
     <label className={common.field}>{t('video.frame_time')} · {time.toFixed(2)} / {duration.toFixed(2)}<input className={styles.range} type="range" min={0} max={Math.max(0, duration - .01)} step={.01} value={time} disabled={!duration || error} onChange={event => seek(Number(event.target.value))} /></label>
     {frame && <img className={styles.video} src={frame.url} alt={t('video.frame_preview')} />}
-    {loading && <p role="status">{t('common.loading')}</p>}{error && <p role="status">{t('video.preview_unavailable')}</p>}
-    <div className={common.dialogActions}><button ref={close} type="button" className={common.button} onClick={onClose}>{t('common.cancel')}</button><button type="button" className={`${common.button} ${common.primary}`} disabled={!frame || !selectable || loading || playing || error || Math.abs(frame.time - time) > .05} onClick={() => { if (frame && selectable) onChoose(frame.time); }}>{t('video.frame_use')}</button></div>
+    {loading && <p role="status">{t('common.loading')}</p>}{error && <p role="status">{unavailableMessage ?? t('video.preview_unavailable')}</p>}
+    <div className={common.dialogActions}><button ref={close} type="button" className={common.button} onClick={onClose}>{t('common.cancel')}</button><button type="button" className={`${common.button} ${common.primary}`} disabled={!frame || !selectable || loading || playing || error || Math.abs(frame.time - time) > .05} onClick={() => { if (frame && selectable) { if (onCapture) onCapture(frame); else onChoose(frame.time); } }}>{t('video.frame_use')}</button></div>
   </ModalDialog>;
 }
 

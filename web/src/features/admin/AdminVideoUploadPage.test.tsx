@@ -11,6 +11,7 @@
  *   - failed processing retries server work without re-uploading the confirmed original
  *   - running processing shows its current extraction step and measured progress
  *   - failed publication reuses its original approval operation without transmitting media
+ *   - completed tasks retain private cleanup recovery independently of current catalog cover editing
  *   - an unavailable server never opens the native source picker or creates a private task
  *   - a restored receiving cover ingress reconciles the original cover operation before allowing new edits
  *   - reconciliation 404 retains immutable cover bytes while the original request may still be receiving
@@ -33,6 +34,7 @@ vi.mock('./AdminAccess', () => ({
   useAdminText: () => (key: string) => key, readCapabilities: vi.fn()
 }));
 vi.mock('./adminPageText', () => ({ useAdminDeliveryText: () => (key: string) => key }));
+vi.mock('./PublishedVideoProject', () => ({ default: ({ children }: { children?: ReactNode }) => <><h1>video.published</h1>{children}</> }));
 vi.mock('./useAdminOnline', () => ({ useOnline: () => true }));
 vi.mock('./adminTransport', () => ({ adminEndpointRequest: vi.fn(), ADMIN_IMPORT_RELOAD_REQUIRED: 'ADMIN_IMPORT_RELOAD_REQUIRED' }));
 
@@ -120,7 +122,9 @@ test.each(['ready', 'failed', 'queued', 'cancelled', 'published', 'frame'] as co
   if (scenario === 'cancelled') { current.stage = 'cancelled'; current.processing.state = 'running'; current.publication.state = 'cancelled'; }
   if (scenario === 'published') { current.stage = 'complete'; current.publication.state = 'complete'; }
   if (scenario === 'frame') current.frame.state = 'running';
-  mount(); await screen.findByDisplayValue('Synthetic Video');
+  mount();
+  if (scenario === 'published') await screen.findByRole('heading', { name: 'video.published' });
+  else await screen.findByDisplayValue('Synthetic Video');
   expect(screen.queryByText('video.step_cover')).not.toBeInTheDocument();
   expect(screen.queryByRole('progressbar', { name: 'video.stage_2' })).not.toBeInTheDocument();
   if (scenario === 'failed') expect(screen.getByText('video.processing_issue_retry')).toBeInTheDocument();
@@ -132,6 +136,16 @@ test('failed publication reuses its original approval operation without transmit
   mount(); fireEvent.click(await screen.findByRole('button', { name: 'video.publication_retry' }));
   await waitFor(() => expect(writes).toHaveLength(1));
   expect(writes[0]).toEqual({ path: `/video-projects/${videoProjectId}/publication/retry`, body: { operationId: videoOperationId } });
+});
+
+test('completed tasks retain private cleanup recovery independently of current catalog cover editing', async () => {
+  current.stage = 'complete'; current.publication = { ...current.publication, state: 'complete', cleanupPending: true };
+  mount(); await screen.findByRole('heading', { name: 'video.published' });
+  fireEvent.click(screen.getByRole('button', { name: 'video.cleanup_retry' }));
+  await waitFor(() => expect(writes).toHaveLength(1));
+  expect(writes[0].path).toBe(`/video-projects/${videoProjectId}/cleanup`);
+  expect(writes[0].body.expectedRevision).toBe(current.revision);
+  expect(writes[0].body).not.toHaveProperty('file');
 });
 
 test('an unavailable server never opens the native source picker or creates a private task', async () => {

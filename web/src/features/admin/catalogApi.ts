@@ -15,7 +15,7 @@ const musicBrainzId = z.string().regex(/^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{1
 const common = { id, revision, visibility: z.enum(['public', 'hidden']), effectiveVisibility: z.enum(['public', 'hidden']), coverUrl: z.string().nullable(), mediaUrl: z.string().nullable(), capabilities: z.object({ editing: z.boolean(), visibility: z.boolean() }).strict() };
 export const catalogItemSchema = z.discriminatedUnion('kind', [
   z.object({ ...common, kind: z.literal('album'), fields: z.object(sharedFields).strict() }).strict(),
-  z.object({ ...common, kind: z.literal('audioTrack'), fields: z.object({ ...sharedFields, discNumber: z.number().int().min(1).max(999).nullable(), trackNumber: z.number().int().positive().nullable() }).strict() }).strict(),
+  z.object({ ...common, kind: z.literal('audioTrack'), mediaType: z.enum(['audio', 'video']).optional(), fields: z.object({ ...sharedFields, discNumber: z.number().int().min(1).max(999).nullable(), trackNumber: z.number().int().positive().nullable() }).strict() }).strict(),
   z.object({ ...common, kind: z.literal('artist'), fields: z.object({ name: z.string(), bio: z.string(), birthDate: importDateSchema.nullable(), musicBrainzId }).strict() }).strict(),
   z.object({ ...common, kind: z.literal('organization'), fields: z.object({ name: z.string(), description: z.string(), organizationType: z.enum(['label', 'publisher', 'distributor', 'archive', 'broadcaster', 'studio', 'other']), musicBrainzId }).strict() }).strict()
 ]).refine(item => (item.coverUrl === null || item.coverUrl === `/api/admin/v1/catalog/${item.kind}/${item.id}/artwork`)

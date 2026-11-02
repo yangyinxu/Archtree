@@ -22,6 +22,7 @@ import { orderedAlbumTrackIds } from '../../services/catalog/albumTrackLinkServi
 import { readyArtistLifecycleFilter } from '../../services/catalog/artistReferenceFenceService';
 import { readyOrganizationLifecycleFilter } from '../../services/catalog/organizationReferenceFenceService';
 import { readyAudioStorageFilter } from '../../utils/audioStorageKey';
+import { activeMediaContentTypeForTrack, activeMediaObjectKeyForTrack, activeMediaTypeForTrack } from '../../utils/mediaStorageKey';
 import { catalogSearchFilter, withCatalogSearchUpdate } from '../../utils/catalogSearch';
 import { normalizeJoinPhrase, normalizeStoredCatalogCredits } from '../../models/catalogCredit';
 import { embeddedDiscNumber } from '../../services/audio/audioMetadataService';
@@ -103,6 +104,14 @@ const stateForRevision = (kind: AdminCatalogKind, doc: any) => ({
     coverArtUrl: doc.coverArtUrl ?? null, artistIds: doc.artistIds ?? null, albumId: doc.albumId ?? null,
     audioTrackIds: doc.audioTrackIds ?? null, creditRevision: doc.creditRevision ?? null,
     ...(hasOwn(doc, 'personalAttribution') ? { personalAttribution: doc.personalAttribution } : {}),
+    // Video frame approvals bind the bytes they previewed. Historical Audio revision recipes remain stable for admitted imports.
+    ...(kind === 'audioTrack' && activeMediaTypeForTrack(doc) === 'video' ? { videoSource: {
+        mediaType: 'video', key: activeMediaObjectKeyForTrack(doc), contentType: activeMediaContentTypeForTrack(doc),
+        representation: doc.mediaRepresentation == null ? null : {
+            revision: doc.mediaRepresentation.revision, objectKey: doc.mediaRepresentation.objectKey,
+            byteLength: doc.mediaRepresentation.byteLength, etag: doc.mediaRepresentation.etag, versionId: doc.mediaRepresentation.versionId
+        }
+    } } : {}),
     adminRevision: doc.adminRevision ?? 0, lifecycleStatus: doc.lifecycleStatus ?? null,
     publicationStatus: doc.publicationStatus ?? null, uploadStatus: doc.uploadStatus ?? null
 });
@@ -142,6 +151,8 @@ export const adminCatalogSnapshot = async (kind: AdminCatalogKind, doc: any, ses
     return { kind, id: ownerId, revision: revision(stateForRevision(kind, doc)), visibility: visibility(doc.visibility), effectiveVisibility,
         fields: shown, coverUrl: artwork ? `/api/admin/v1/catalog/${kind}/${ownerId}/artwork` : null,
         mediaUrl: kind === 'audioTrack' ? `/api/admin/v1/catalog/audioTrack/${ownerId}/media` : null,
+        // The persisted collection also owns Video; playback controls use the same canonical kind as listener delivery.
+        ...(kind === 'audioTrack' ? { mediaType: activeMediaTypeForTrack(doc) } : {}),
         capabilities: { editing: true, visibility: true } };
 };
 

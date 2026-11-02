@@ -7,6 +7,9 @@
  *   - partial catalog edits preserve private personal attribution and stale signature changes reject confirmation
  *   - malformed legacy editor values become bounded repairable fields without rewriting source records
  *   - admin snapshots deny ordinary users, anonymous and revoked roles and expose allowlisted fields
+ *   - catalog detail and inventory expose the canonical Video kind while legacy Audio stays compatible
+ *   - malformed persisted media kinds remain unavailable rather than selecting an administrator player
+ *   - a changed published Video source rejects its earlier cover confirmation before reserving storage work
  *   - metadata patches detect legacy changes and replay the exact saved intent
  *   - visibility needs only the admin role, inherits without storing cascades, and rejects external-art migration gaps
  *   - Credits updates retain the canonical primary Artist membership and reject arbitrary fields
@@ -52,6 +55,7 @@ import { Carousel } from '../../src/models/carousel';
 import { getS3 } from '../../src/infrastructure/s3';
 import { Readable } from 'node:stream';
 import { legacyCatalogArtwork } from '../../src/administration/catalog/adminLegacyArtwork';
+import { clearAdminCatalogCover } from '../../src/administration/catalog/adminCatalogCoverService';
 import { startMongoReplicaSet, type MongoReplicaSetHarness } from '../support/mongoReplicaSet';
 
 let harness: MongoReplicaSetHarness, server: Server, base = '', token = '', userToken = '';
@@ -122,6 +126,51 @@ test('admin snapshots deny ordinary users, anonymous and revoked roles and expos
     await db().collection('users').updateOne({ _id: admin }, { $set: { role: 'user' } });
     assert.equal((await request(path)).status, 403);
     await assert.rejects(getAdminCatalogItem(admin.toHexString(), 'album', album.toHexString()), code('ADMIN_PERMISSION_REQUIRED'));
+});
+
+test('catalog detail and inventory expose the canonical Video kind while legacy Audio stays compatible', async () => {
+    const path = `/api/admin/v1/catalog/audioTrack/${track}`;
+    const legacy = await request(path); assert.equal(legacy.status, 200);
+    assert.equal((await legacy.json()).item.mediaType, 'audio');
+    await db().collection('audioTracks').updateOne({ _id: track }, { $set: {
+        mediaType: 'video', contentType: 'video/mp4', s3Key: `video/${track}/${new ObjectId()}`,
+        personalAttribution: { ownerId: admin.toHexString(), publicName: 'Synthetic Film' }
+    } });
+    const response = await request(path); assert.equal(response.status, 200);
+    const item = (await response.json()).item;
+    assert.equal(item.mediaType, 'video'); assert.equal('mediaType' in item.fields, false);
+    assert.equal(item.mediaUrl, `/api/admin/v1/catalog/audioTrack/${track}/media`);
+    assert.equal(JSON.stringify(item).includes('personalAttribution'), false);
+    assert.equal(JSON.stringify(item).includes('s3Key'), false);
+    const inventory = await listAdminCatalog(admin.toHexString(), 'audioTrack', {});
+    assert.equal(inventory.items.find(value => value.id === track.toHexString())?.mediaType, 'video');
+    const albumItem = (await getAdminCatalogItem(admin.toHexString(), 'album', album.toHexString())).item;
+    assert.equal('mediaType' in albumItem, false);
+});
+
+test('malformed persisted media kinds remain unavailable rather than selecting an administrator player', async () => {
+    for (const mediaType of ['VIDEO', 'other', 1, ['video'], { type: 'video' }]) {
+        await db().collection('audioTracks').updateOne({ _id: track }, { $set: { mediaType, s3Key: `video/${track}/${new ObjectId()}` } });
+        assert.equal((await request(`/api/admin/v1/catalog/audioTrack/${track}`)).status, 404);
+        await assert.rejects(getAdminCatalogItem(admin.toHexString(), 'audioTrack', track.toHexString()), code('ADMIN_CATALOG_NOT_FOUND'));
+        assert.equal((await listAdminCatalog(admin.toHexString(), 'audioTrack', {})).items.some(value => value.id === track.toHexString()), false);
+    }
+});
+
+test('a changed published Video source rejects its earlier cover confirmation before reserving storage work', async () => {
+    const objectKey = `video/${track}/${new ObjectId()}`;
+    const mediaRepresentation = { revision: `mr_${'a'.repeat(32)}`, objectKey, byteLength: 100, etag: '"synthetic-first"', versionId: null };
+    await db().collection('audioTracks').updateOne({ _id: track }, { $set: { mediaType: 'video', s3Key: objectKey, mediaRepresentation } });
+    const initial = (await getAdminCatalogItem(admin.toHexString(), 'audioTrack', track.toHexString())).item;
+    const count = await db().collection('adminCatalogCoverOperations').countDocuments();
+    await db().collection('audioTracks').updateOne({ _id: track }, { $set: { 'mediaRepresentation.etag': '"synthetic-replaced"' } });
+    const changed = (await getAdminCatalogItem(admin.toHexString(), 'audioTrack', track.toHexString())).item;
+    assert.notEqual(changed.revision, initial.revision);
+    await assert.rejects(clearAdminCatalogCover(admin.toHexString(), 'audioTrack', track.toHexString(), {
+        operationId: randomUUID(), expectedRevision: initial.revision
+    }), code('ADMIN_CATALOG_REVISION_CONFLICT'));
+    assert.equal(await db().collection('adminCatalogCoverOperations').countDocuments(), count);
+    assert.equal((await db().collection('audioTracks').findOne({ _id: track }))?.adminRevision, undefined);
 });
 
 test('metadata patches detect legacy changes and replay the exact saved intent', async () => {

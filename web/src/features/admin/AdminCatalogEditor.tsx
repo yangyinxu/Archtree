@@ -25,6 +25,7 @@ import type { CatalogEditSnapshot } from './CatalogEditConfirmation';
 import catalogStyles from '../catalog/CatalogPages.module.css';
 import styles from './adminStyles';
 import heroStyles from './AdminCatalogEditor.module.css';
+import { CatalogMediaPreview } from './CatalogMediaPreview';
 const CatalogCover = lazy(() => import('./CatalogCover').then(module => ({ default: module.CatalogCover })));
 const CatalogFields = lazy(() => import('./CatalogFields').then(module => ({ default: module.CatalogFields })));
 const CatalogReviewStart = lazy(() => import('./CatalogReviewStart').then(module => ({ default: module.CatalogReviewStart })));
@@ -49,7 +50,6 @@ export function AdminCatalogEditor({ kind, id }: { kind: CatalogKind; id: string
   const [tracksRevision, setTracksRevision] = useState<string | null>(null);
   // Whether the latest command sent was a clear, whose refusal means the rows it named may be gone or replaced.
   const clearSent = useRef(false);
-  const media = useRef<HTMLAudioElement>(null);
   const client = useQueryClient();
   const queryKey = ['admin-imports', access.viewerId, access.epoch, access.generation, 'catalog', kind, id];
   const matches = (value: { item: CatalogItem }) => value.item.kind === kind && value.item.id === id;
@@ -71,7 +71,6 @@ export function AdminCatalogEditor({ kind, id }: { kind: CatalogKind; id: string
     setTracksRevision(revision);
   }, [query.data?.item.revision]);
   useEffect(() => { if (mutation.error === 'conflict' && clearSent.current) setTracksRefresh(value => value + 1); }, [mutation.error]);
-  useEffect(() => { const element = media.current; return () => { if (element) { element.pause(); element.removeAttribute('src'); element.load(); } }; }, [edit?.base.mediaUrl]);
   const locked = mutation.running || Boolean(mutation.intent) || !online;
   // Draft values retain their captured revision; live admission capabilities never come from that old snapshot.
   const canEdit = Boolean(query.data?.item.capabilities.editing && access.catalogEditing);
@@ -91,6 +90,8 @@ export function AdminCatalogEditor({ kind, id }: { kind: CatalogKind; id: string
   // Historical cover cancellation reviews the latest saved owner independently of an unsaved metadata baseline.
   const coverItem = missing ? null : query.data?.item ? { ...query.data.item, capabilities: { editing: canEdit, visibility: canChangeVisibility } } : item ?? null;
   const saved = item ? coverItem : null;
+  // Media follows the latest confirmed owner, even while metadata edits retain an older baseline.
+  const previewItem = item && !missing ? query.data?.item : null;
   const title = saved ? catalogName(saved) || sharedText(catalogFallbacks[saved.kind]) : t('catalog.edit');
   // The same test as the append refusal: an Album without a primary Artist Credit cannot be appended to.
   const primaryArtistCredit = saved?.kind === 'album' ? Boolean(saved.fields.credits?.some(credit => credit.subjectType === 'artist' && credit.role === 'primary')) : undefined;
@@ -117,7 +118,7 @@ export function AdminCatalogEditor({ kind, id }: { kind: CatalogKind; id: string
           {kind === 'album' && <div className={heroStyles.completion}><Suspense fallback={null}><CatalogReviewStart item={item!} disabled={locked || conflict || Boolean(edit?.dirty)}
             note={edit?.dirty ? t('catalog_review.save_first') : undefined} /></Suspense></div>}
           <div className={heroStyles.secondary}>
-            {(kind === 'album' || kind === 'audioTrack') && access.conversion && !edit?.dirty && !conflict && <Link className={styles.link} to={`/admin/conversions?${kind === 'album' ? 'album' : 'track'}=${id}`}>{t('conversion.existing')}</Link>}
+            {(kind === 'album' || kind === 'audioTrack' && !(saved.kind === 'audioTrack' && saved.mediaType === 'video')) && access.conversion && !edit?.dirty && !conflict && <Link className={styles.link} to={`/admin/conversions?${kind === 'album' ? 'album' : 'track'}=${id}`}>{t('conversion.existing')}</Link>}
             {/* Adding files appends to the saved Album, which needs imports and a primary Artist Credit; hidden, as conversion is,
                 while the Album has unsaved edits or a save conflict. */}
             {kind === 'album' && access.imports && primaryArtistCredit && !edit?.dirty && !conflict && <Suspense fallback={null}><CatalogAlbumFilesLink id={id} /></Suspense>}
@@ -131,7 +132,7 @@ export function AdminCatalogEditor({ kind, id }: { kind: CatalogKind; id: string
     {mutation.error && <div className={styles.error} role="alert"><p>{t(`common.${mutation.error}`)}</p>{mutation.intent && <button className={styles.button} onClick={mutation.command.retry}>{t('common.retry_operation')}</button>}</div>}
     {item && edit && <>
       <p className={styles.notice}>{t(canEdit ? 'catalog.direct_edit_copy' : 'catalog.readonly')}</p>
-      {item.mediaUrl && <audio ref={media} aria-label={t('catalog.preview')} controls preload="none" src={`${item.mediaUrl}?viewer=${encodeURIComponent(access.viewerId)}`} style={{ maxWidth: '100%' }} />}
+      <CatalogMediaPreview item={previewItem ?? null} refresh={artworkRefresh} />
       {conflict && <div className={styles.error} role="alert"><p>{t('common.conflict')}</p><details><summary>{t('review.saved_version')}</summary><pre className={styles.rawDraft}>{JSON.stringify(query.data!.item.fields, null, 2)}</pre></details><button className={styles.button} onClick={() => { const next = query.data!.item; setEdit({ base: next, fields: next.fields, visibility: next.visibility, dirty: false }); }}>{t('review.load_saved')}</button></div>}
       <form className={styles.panel} id="catalog-details" onSubmit={event => { event.preventDefault(); if (!locked && !conflict) {
         const patch = catalogPatch(edit.base, edit.fields, edit.visibility);
