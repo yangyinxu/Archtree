@@ -82,7 +82,7 @@ of the domain it changes, not into the root.
 | `avatar/` | Profile avatar storage and mutation lifecycle. |
 | `audio/` | Audio object storage, metadata, publication recovery, reconciliation, remediation. |
 | `image/` | Cover-art storage, variants, image object lifecycle and reconciliation. |
-| `media/` | MediaTrack representations, byte-range delivery, video metadata, S3 usage summaries. |
+| `media/` | MediaTrack representations, byte-range delivery, Video metadata and durable administrator Video upload/processing lifecycles, S3 usage summaries. |
 | `catalog/` | Albums, Artists, Organizations, credits, visibility, search backfill, deletion leases, and their reference fences. |
 | `content/` | Pages, page items, and content-reference reconciliation. |
 | `listener/` | Listener content projections, telemetry, artist follows, followed-artist releases. |

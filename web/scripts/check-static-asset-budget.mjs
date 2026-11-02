@@ -8,7 +8,8 @@ export const staticAssetBudgets = Object.freeze({
   // headers, the shell search typeahead, the approved Page placements/order modes, and the
   // Album/Playlist detail redesign (shared DetailHero, compact header and track table).
   // Its isolated administrator stylesheet totals about 2.5 KiB and loads only on that route.
-  cssGzipBytes: 39 * 1024,
+  // The additive administrator Video task/workbench styles add about 1 KiB gzip and stay lazy.
+  cssGzipBytes: 40.5 * 1024,
   fontBytes: 128 * 1024,
   imageBytes: 256 * 1024,
   individualImageBytes: 128 * 1024

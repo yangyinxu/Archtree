@@ -38,6 +38,7 @@ import { createAdminCatalogRouter } from './routes/adminCatalogRoutes';
 import { createAdminCatalogReviewRouter } from './routes/adminCatalogReviewRoutes';
 import { createAdminConversionRouter } from './routes/adminConversionRoutes';
 import { createAdminMotionPreviewRouter } from './routes/adminMotionPreviewRoutes';
+import { createAdminVideoRouter } from './routes/adminVideoRoutes';
 import { createPortfolioAdminRouter } from './routes/portfolioAdminRoutes';
 import { createAccountPageRouter } from './routes/accountPageRoutes';
 import {
@@ -262,6 +263,7 @@ export const createApp = (options: CreateAppOptions = {}): Application => {
   app.use('/api/admin/v1', createAdminConversionRouter());
   // Mounted before the catalog router, whose guards apply to every path it receives.
   app.use('/api/admin/v1', createAdminMotionPreviewRouter());
+  app.use('/api/admin/v1', createAdminVideoRouter());
   app.use('/api/admin/v1', createAdminCatalogRouter());
 
   // Authenticate paid Naruto requests before accepting their bounded JSON bodies.

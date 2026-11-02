@@ -23,6 +23,7 @@ and Finitude clients. Update it whenever an agreed business rule changes.
 - [Web Listener](#web-listener)
 - [Background and System Playback](#background-and-system-playback)
 - [Offline Downloads](#offline-downloads)
+- [Administrator Video Uploads](#administrator-video-uploads)
 - [Administrator Album Imports](#administrator-album-imports)
 - [Administrator Metadata Lookup](#administrator-metadata-lookup)
 - [Web Administrator Local MP3 Conversion](#web-administrator-local-mp3-conversion)
@@ -1735,6 +1736,99 @@ The wire protocol and operational bounds are documented in
   its MediaTrack or Album, and unsaving content does not remove its download.
 - A local audio asset may be owned by multiple device-local download entries.
   Removing one entry must not delete an asset still owned by another entry.
+
+## Administrator Video Uploads
+
+- Video upload is an additional administrator workbench workflow. Album upload,
+  Album import and completion queues, local MP3 conversion, catalog and Page
+  management, and the legacy Content Manager remain available. A Video project
+  is distinct from an Audio Album import and from replacing an existing
+  MediaTrack's active object. Native clients remain listener-only.
+- Each Video project is private and belongs to the authenticated initiating
+  administrator. Every project read, edit, source operation, preview and retry
+  checks that account and its current administrator role. Project IDs and file
+  IDs never grant access. Work in progress is durable; browser navigation and
+  reopening do not publish or silently restart an uncertain transfer.
+- A Video can explicitly belong to the current account without an Artist,
+  Organization or Album. Alternatively, the administrator chooses an existing
+  Artist or Organization, or explicitly records that attribution is unknown.
+  Album membership is independently optional and does not silently change that
+  attribution. These choices do not create placeholder catalog identities.
+- A personal public signature is optional and must be explicitly entered and
+  included in final publication confirmation. A blank signature displays
+  `个人发布`. Never derive a public signature from an email, private profile,
+  avatar or account identifier. The account relationship is private; public
+  allowlisted responses expose only the confirmed display byline. Personal
+  attribution does not add a User as a Catalog Credit or extend the existing
+  `documented`/`unknown` Catalog Credit status contract. With no Catalog Credits,
+  that status remains unknown while the personal display byline is independent.
+- Personal Video attribution does not change the existing account-deletion
+  rule for shared catalog provenance: an account that still owns such evidence
+  cannot be deleted. Unfinished private tasks and unconfirmed storage cleanup
+  must first be resolved without removing their only lifecycle evidence.
+- Admit original MP4, MOV and M4V files with actual H.264 or HEVC video without
+  requiring the browser to decode or transcode them. A filename, declared MIME
+  type, operating-system label or local preview failure never establishes the
+  encoded format or invalidates an otherwise admissible source. Silent Video
+  sources are supported. Ambiguous main streams or unsupported layouts require
+  an explained decision rather than silently choosing a different movie.
+- Transfer the original bytes privately before server processing. Report
+  transfer, complete source validation, necessary playback adaptation, final
+  publication and unfinished cleanup separately. Only actual work may advance
+  progress; byte transfer reaching its end does not mean the Video is ready or
+  published. Local preview failure leaves original upload and manual artwork
+  available and explains the device limitation.
+- The playback policy accepts MP4 carrying H.264/AVC 8-bit 4:2:0 or HEVC
+  Main/Main10 4:2:0 with an `hvc1` sample entry, with AAC or no audio. Compatible
+  HEVC does not require transcoding. Container, extra streams or metadata may
+  require a container-only remux while retaining the encoded movie. Other
+  admitted layouts may require an explicitly reported adaptation to the
+  supported profile. Preserve source resolution, orientation and content; do
+  not apply an undisclosed resize, downmix or quality change. Decoder support
+  varies across browsers and devices; admission never promises universal local
+  playback. An unavailable processor or encoder is a retryable operational
+  condition, not evidence that the uploaded original is invalid.
+- Select the main movie explicitly from validated stream metadata. An attached
+  still image is artwork, not a second main Video. Do not project camera tags,
+  location, device payloads, original local paths or free-form decoder output
+  into catalog metadata, public responses or logs. Remuxed/adapted playback
+  objects discard ancillary device/data streams and source metadata.
+- Offer a visible default cover: prefer a validated embedded still, otherwise
+  a frame at min(2 seconds, 10% duration), with a first-decodable-frame fallback.
+  Offer choosing another frame, uploading a custom image, restoring the default,
+  or explicitly using Album artwork/the normal placeholder. A failed automatic
+  cover does not invalidate the confirmed Video or repeat its transfer. All
+  stored covers undergo full image validation and metadata stripping.
+- A manual cover selection wins over automatic work. Source and cover operation
+  identities fence late results; an old source or earlier automatic result
+  never overwrites a newer source or manual choice. Publication confirmation
+  displays the actual cover and its origin, not a generic thumbnail.
+- Saving publication details or navigating never publishes. Final confirmation
+  freezes title, attribution, public signature, Album, visibility, exact source,
+  active output and cover identity/revision, and current catalog references.
+  A relevant edit or stale reference invalidates that approval instead of
+  rebasing it. Cancelling confirmation preserves the private task and completed
+  media work. Choosing another search query and dismissing a catalog selector
+  also preserves its committed selection.
+- Each source upload reserves a never-reused object identity and operation
+  before storage I/O. An unknown transfer outcome retains that same operation;
+  reconciliation verifies its exact recorded identity before another transfer
+  or replacement is permitted. Retry of server processing reuses the confirmed
+  private original. Retry of publication reuses the validated media and frozen
+  publication operation and never requires another source transfer.
+- Publication promotes exactly one active playback object to one ready
+  MediaTrack under the existing transactional reference and visibility fences.
+  The private original is processing/recovery evidence, not another publicly
+  selectable representation. A draft or partially copied output is never a
+  public MediaTrack. Successful publication with pending cleanup remains a
+  successful publication and reports cleanup separately.
+- Create, replace, cancel, retry and reconciliation retain every source,
+  adapted output, cover and publication-copy identity until its attachment or
+  exact deletion is confirmed. Cancellation fences active/late workers before
+  cleanup; failed or uncertain deletion remains traceable and retryable.
+  Account or role loss stops new private work and cannot authorize publication
+  or erase storage evidence. The Database and S3 Lifecycle rules apply to all
+  of these objects.
 
 ## Administrator Album Imports
 

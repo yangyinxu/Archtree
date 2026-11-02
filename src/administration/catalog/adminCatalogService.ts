@@ -102,6 +102,7 @@ const stateForRevision = (kind: AdminCatalogKind, doc: any) => ({
     fields: fields(kind, doc), rawMetadata: [doc.title, doc.name, doc.bio, doc.description, doc.birthDate, doc.releaseDate, doc.credits, doc.attributionStatus, doc.trackNumber, doc.organizationType, ...(hasStoredDiscNumber(doc) ? [doc.discNumber] : []), ...(hasStoredMusicBrainzId(doc) ? [doc.musicBrainzId] : []), ...(hasStoredExpectedTracklist(doc) ? [doc.expectedTracklist] : [])], visibility: doc.visibility ?? 'public', coverArtId: doc.coverArtId ?? null,
     coverArtUrl: doc.coverArtUrl ?? null, artistIds: doc.artistIds ?? null, albumId: doc.albumId ?? null,
     audioTrackIds: doc.audioTrackIds ?? null, creditRevision: doc.creditRevision ?? null,
+    ...(hasOwn(doc, 'personalAttribution') ? { personalAttribution: doc.personalAttribution } : {}),
     adminRevision: doc.adminRevision ?? 0, lifecycleStatus: doc.lifecycleStatus ?? null,
     publicationStatus: doc.publicationStatus ?? null, uploadStatus: doc.uploadStatus ?? null
 });

@@ -7,5 +7,8 @@ export const capabilitySchema = z.object({
   catalog: z.object({ editing: z.boolean(), visibility: z.boolean() }).strict(),
   localMp3Conversion: z.object({ enabled: z.boolean(), readSources: z.boolean(), replace: z.boolean(), preset: z.literal('mp3-320'), maxFiles: z.literal(100) }).strict().optional(),
   // Optional so an older server still parses; this server always sends it.
-  metadataLookup: z.object({ available: z.boolean() }).strict().optional()
+  metadataLookup: z.object({ available: z.boolean() }).strict().optional(),
+  videoUploads: z.object({ enabled: z.boolean(), maxFileBytes: z.number().int().positive(),
+    acceptedExtensions: z.array(z.enum(['mp4', 'mov', 'm4v'])).length(3).refine(values => values.join(',') === 'mp4,mov,m4v')
+  }).strict().optional()
 }).strict();

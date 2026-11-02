@@ -31,6 +31,7 @@ import { embeddedDiscNumber } from '../services/audio/audioMetadataService';
 import { requireCatalogCreditWrites } from '../config/catalogCreditRollout';
 import type { SoundtrackVideoAsset } from './soundtrackVideoAsset';
 import type { MediaRepresentation } from './mediaRepresentation';
+import { createPersonalAttribution, PersonalAttributionValidationError, type PersonalAttribution } from './personalAttribution';
 import {
     type MediaType
 } from '../utils/mediaStorageKey';
@@ -136,6 +137,8 @@ export class AudioTrack {
     contentReferenceRevision: number;
     credits?: CatalogCredit[];
     attributionStatus?: AttributionStatus;
+    /** Private personal association; only its explicitly approved signature may be projected publicly. */
+    personalAttribution?: PersonalAttribution;
     creditRevision?: number;
     referenceCleanupStatus?: AudioReferenceCleanupStatus;
     referenceCleanupUpdatedAt?: Date;
@@ -189,6 +192,12 @@ export class AudioTrack {
 
     // save an audio track to the mongodb database
     save() {
+        if (this.personalAttribution !== undefined) {
+            this.personalAttribution = createPersonalAttribution(this.personalAttribution.ownerId, this.personalAttribution.publicName);
+            if (this.attributionStatus !== 'unknown' || !Array.isArray(this.credits) || this.credits.length !== 0) {
+                throw new PersonalAttributionValidationError();
+            }
+        }
         if (this.credits !== undefined || this.attributionStatus !== undefined) {
             requireCatalogCreditWrites();
             this.credits = normalizeCatalogCredits(this.credits ?? []);
@@ -211,6 +220,9 @@ export class AudioTrack {
             );
             this.albumId = albumIds[0] ?? '';
             await touchActiveAccount(this.createdBy, session);
+            if (this.personalAttribution?.ownerId && this.personalAttribution.ownerId !== this.createdBy) {
+                await touchActiveAccount(this.personalAttribution.ownerId, session);
+            }
             Object.assign(this, catalogSearchProjection(this.title));
             return db!
                 .collection(collectionId)

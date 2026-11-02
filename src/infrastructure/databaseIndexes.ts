@@ -12,6 +12,7 @@ import type { Db, CreateIndexesOptions, IndexSpecification, Document } from 'mon
 import { catalogSearchCollections } from '../utils/catalogSearch';
 import { adminImportIndexes } from '../administration/import/adminImportService';
 import { adminConversionIndexes } from '../administration/conversion/conversionService';
+import { adminVideoIndexes } from '../models/adminVideoProject';
 import { metadataLookupIndexes } from '../administration/lookup/lookupContract';
 import { adminImportLookupCoverIndexes } from '../administration/import/adminImportMediaTypes';
 import { MUSICBRAINZ_ID_INDEX_NAMES, musicBrainzIdPartialFilter } from '../utils/musicBrainzId';
@@ -31,6 +32,7 @@ export const databaseIndexes: Array<{
   }> = [
     ...adminImportIndexes,
     ...adminConversionIndexes,
+    ...adminVideoIndexes,
     ...metadataLookupIndexes,
     // Optional: the lookup cover pass's claim stays correct without it, so it needs no required-index revision.
     ...adminImportLookupCoverIndexes,

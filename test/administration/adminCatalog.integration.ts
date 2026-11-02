@@ -4,6 +4,7 @@
  *   Constants: admin, user, album, artist, track, flags, previous
  *   Variables: harness, server, base, token, userToken
  * Tests
+ *   - partial catalog edits preserve private personal attribution and stale signature changes reject confirmation
  *   - malformed legacy editor values become bounded repairable fields without rewriting source records
  *   - admin snapshots deny ordinary users, anonymous and revoked roles and expose allowlisted fields
  *   - metadata patches detect legacy changes and replay the exact saved intent
@@ -81,6 +82,22 @@ beforeEach(async () => {
 after(async () => {
     await new Promise<void>(resolve => server?.close(() => resolve())); await harness?.stop();
     for (const key of flags) { if (previous[key] === undefined) delete process.env[key]; else process.env[key] = previous[key]; }
+});
+
+test('partial catalog edits preserve private personal attribution and stale signature changes reject confirmation', async () => {
+    const personalAttribution = { ownerId: admin.toHexString(), publicName: 'Lorem Film' };
+    await db().collection('audioTracks').updateOne({ _id: track }, { $set: { credits: [], attributionStatus: 'unknown', personalAttribution } });
+    const initial = (await getAdminCatalogItem(admin.toHexString(), 'audioTrack', track.toHexString())).item;
+    assert.equal(JSON.stringify(initial).includes('personalAttribution'), false);
+    const saved = await editAdminCatalogItem(admin.toHexString(), 'audioTrack', track.toHexString(), {
+        operationId: randomUUID(), expectedRevision: initial.revision, fields: { title: 'Lorem Edited Video' }
+    });
+    assert.deepEqual((await db().collection('audioTracks').findOne({ _id: track }))?.personalAttribution, personalAttribution);
+    await db().collection('audioTracks').updateOne({ _id: track }, { $set: { 'personalAttribution.publicName': 'Ipsum Film' } });
+    await assert.rejects(editAdminCatalogItem(admin.toHexString(), 'audioTrack', track.toHexString(), {
+        operationId: randomUUID(), expectedRevision: saved.item.revision, fields: { title: 'Stale update' }
+    }), code('ADMIN_CATALOG_REVISION_CONFLICT'));
+    assert.equal((await db().collection('audioTracks').findOne({ _id: track }))?.title, 'Lorem Edited Video');
 });
 
 test('malformed legacy editor values become bounded repairable fields without rewriting source records', async () => {

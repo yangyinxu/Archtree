@@ -21,6 +21,8 @@ below default closed; the flags among them accept only the literal `true`:
 | `ADMIN_IMPORT_S3_BUCKET_NAME` | Dedicated private staging bucket, distinct from `S3_BUCKET_NAME` |
 | `FINITUDE_ADMIN_IMPORT_PRIVATE_STORAGE_READY` | Operator assertion that the staging bucket denies public/CDN access |
 | `FINITUDE_MOTION_PREVIEWS_ENABLED` | Show the Motion preview panel for Video MediaTracks and serve public motion previews |
+| `VIDEO_FFMPEG_PATH`, `VIDEO_FFPROBE_PATH` | Optional absolute media-tool paths for main Video processing; otherwise use the installed room-audio tool directory or `PATH` |
+| `VIDEO_H264_ENCODER` | `libx264` (default) or explicitly configured `h264_videotoolbox` when an admitted main stream needs AVC adaptation; compliant AVC/HEVC streams are copied |
 
 An existing Album review needs no staging bucket; starting Luna also requires
 the imports flag and configured provider, and its metadata lookup the imports
@@ -481,6 +483,7 @@ previews, import/catalog/Page editors or upload controls.
   - [Value application](#value-application)
   - [Lookup routes](#lookup-routes)
   - [What lookup sends](#what-lookup-sends)
+- [Original Video projects](#original-video-projects)
 <!-- @end-catalog -->
 
 ## Device-local MP3 conversion
@@ -5546,3 +5549,96 @@ publication confirmation. The approval and the publication commit never read
   hosts): no cookie, authorization or referrer.
 - Stored records contain no URL except an iTunes-only candidate's validated
   artwork address (and its lookup cover job's), which is never projected.
+
+
+## Original Video projects
+
+The Video entry extends the existing workbench. Audio Album imports, existing
+Album completion, local MP3 conversion, catalog and Page management keep their
+existing routes and authorization. Native apps remain listener-only. Video
+projects use `/api/admin/v1/video-projects`; they never reuse the Audio-only
+Album import schema. Their list, detail, previews and mutations are fenced to
+the initiating account and its current persisted administrator role.
+
+The private staging prerequisite is the same independently verified
+`FINITUDE_ADMIN_IMPORT_PRIVATE_STORAGE_READY` and `ADMIN_IMPORT_S3_BUCKET_NAME`
+configuration used for import media. A source or processing object in that bucket
+is not a publicly playable MediaTrack. The Video capability reports admission,
+size limit and accepted extensions without exposing buckets, object keys or
+configuration secrets. The Web shows unavailable admission with its explanation
+rather than offering a fake upload.
+
+The instance identity needs put, head/get, exact-version get and delete on the
+private `video-projects/` prefix, and put/get/exact-version get/delete for its
+publication copies under the catalog's `video/` and `images/` prefixes. In IAM
+terms these include `s3:PutObject`, `s3:GetObject`, `s3:GetObjectVersion`,
+`s3:DeleteObject` and `s3:DeleteObjectVersion` on the bounded object resources.
+The private bucket must be distinct from the catalog bucket, deny anonymous
+access and have no public/CDN delivery. A browser never receives its locations
+or credentials. Do not set the readiness assertion merely because a bucket
+name or private object ACL exists; independently verify the bucket policy and
+unauthenticated access.
+
+One multipart source is sent to the project's `/source` endpoint with its frozen
+`Idempotency-Key` and `If-Match`. The server reserves an object record before PUT,
+records the original filename, length and digest, and uses a never-reused key.
+An unknown response is reconciled through `/source/reconcile` against that same
+operation; it is never a reason to blindly create another upload. Confirmed
+uploads queue real server work. An explicit processing retry reuses those bytes.
+The Web transport shows indeterminate transfer while the authenticated request
+is in flight; processing percentages come only from actual decoder progress.
+
+The processor reads the exact private object version into an isolated temporary
+directory. It admits actual MOV-family bytes with one main H.264 or HEVC video
+stream, excluding attached pictures, and at most one audio stream. Current
+bounds are two hours, 8192 pixels per side, 8192 × 4320 decoded pixels, 16 total
+streams, eight audio channels and the configured Video byte limit. Unsupported
+or ambiguous layouts stay recoverable as an explained processing failure. It
+fully decodes selected streams before accepting a result; metadata parsing alone
+never establishes readiness. Local tool processes use no shell, inherit no
+service credentials, allow only file/pipe protocols and MOV demuxing, and have
+bounded threads, allocations, output, diagnostics and execution time. One main
+Video processing operation runs per process; database worker leases fence
+cross-process retries and publication.
+
+The accepted playback profiles are AVC Baseline/Main/High in 8-bit 4:2:0, or
+HEVC Main/Main10 in 4:2:0 with an `hvc1` MP4 sample entry, with AAC or no audio.
+HEVC is not automatically transcoded. A compliant movie with an incompatible
+container, ancillary streams or metadata is remuxed with stream copy and
+fast-start MP4. Only incompatible encoded streams are adapted: a compliant main
+movie is copied when only audio needs AAC encoding. AAC adaptation retains the
+source channel count; no automatic downmix is requested. Actual main-video
+adaptation uses the explicitly configured H.264 encoder, preserves resolution
+and frame timing, and is validated by a second full decode. `libx264` uses CRF 18
+and the medium preset; an explicitly selected macOS VideoToolbox encoder uses
+quality 65. An unavailable encoder is an operational failure and leaves the
+confirmed source available for retry. The existing pinned LGPL room-audio build
+supports decoding and remuxing; main-video encoding additionally requires a
+configured build providing the selected encoder. Never claim that a decoder-only
+installation performed a transcode.
+
+Default artwork prefers the actual attached still over a frame. The fallback
+uses min(2 seconds, 10% duration), then the first decodable frame. JPEG candidates
+are fully decoded, resized within 1280 pixels, stripped of metadata and kept in
+the same traceable private lifecycle as custom images. Cover errors are separate
+from media validation. Manual frame selection reads the actual movie stream,
+not an attached still; explicit custom/selected cover choices take precedence
+over late automatic results. The shared artwork transform budget also applies.
+
+Publication freezes the current revision, safe reference revisions and approval
+digest. Only the approved exact source/output/cover identities may be copied
+and atomically attached to the fixed MediaTrack identity. A lost publication
+acknowledgement is retried through the original operation and never transfers
+the source again. One active `video/` object is exposed after the catalog commit;
+private processing originals and detached outputs have no public stream route.
+Cleanup outcomes remain separate from successful publication. Cancellation and
+cleanup preserve unknown and failed object identities until exact deletion is
+confirmed. Account deletion retains the existing shared-provenance rule and
+cannot erase unfinished private project storage evidence.
+
+Portable real-codec tests use tiny synthetic color/tone fixtures under
+`test/fixtures/video/` and injected private storage for lifecycle integration.
+
+The fixed stream selection/copy behavior follows the [FFmpeg command
+documentation](https://ffmpeg.org/ffmpeg.html); the restricted input protocols
+follow the [protocol whitelist contract](https://ffmpeg.org/ffmpeg-protocols.html).

@@ -48,7 +48,7 @@ import {
 } from '../catalog/albumReferenceFenceService';
 import { AttributionStatus } from '../../models/catalogCredit';
 import { artistAlbumSection, validStoredCredits } from '../catalog/artistAlbumClassificationService';
-import { catalogDisplayByline, displayBylineField, toBylineCredit } from '../catalog/catalogByline';
+import { catalogDisplayByline, displayBylineField, personalDisplayByline, toBylineCredit } from '../catalog/catalogByline';
 import { Carousel } from '../../models/carousel';
 import { catalogCreditRollout } from '../../config/catalogCreditRollout';
 import { pageItemIdentity } from '../../utils/pageItemIdentity';
@@ -157,7 +157,8 @@ const audioTrackProjection = {
     videoAsset: 1,
     releaseDate: 1,
     credits: 1,
-    attributionStatus: 1
+    attributionStatus: 1,
+    personalAttribution: 1
 };
 const readyAudioFilter = readyAudioStorageFilter;
 
@@ -465,7 +466,9 @@ const createCatalogContext = async (
     return { albumsById, tracksById, artistsById, artists, organizationsById };
 };
 
-const creditProjectionForOwner = (owner: any, context: CatalogContext) => {
+const creditProjectionForOwner = (owner: any, context: CatalogContext, personal = false) => {
+    const byline = personal ? personalDisplayByline(owner) : null;
+    if (byline) return { credits: [], displayByline: byline, attributionStatus: 'unknown' as const };
     const credits = validStoredCredits(owner);
     if (!credits) return {};
     const resolved = credits.map((credit) => ({
@@ -482,13 +485,13 @@ const creditProjectionForOwner = (owner: any, context: CatalogContext) => {
         role: credit.role,
         order: credit.order
     }] : []);
-    const byline = catalogDisplayByline(
+    const catalogByline = catalogDisplayByline(
         owner.attributionStatus as AttributionStatus,
         resolved.map(({ credit, name }) => toBylineCredit(credit, name))
     );
     return {
         credits: publicCredits,
-        ...displayBylineField(byline),
+        ...displayBylineField(catalogByline),
         attributionStatus: owner.attributionStatus as AttributionStatus
     };
 };
@@ -553,13 +556,13 @@ const toAudioTrackSummary = (
         id: String(track._id),
         title: normalizeText(track?.title),
         artworkUrl: resolvedCoverArtUrl(track) || resolvedCoverArtUrl(album),
-        artistNames,
+        artistNames: personalDisplayByline(track) === null ? artistNames : [],
         albumId,
         albumTitle: album ? normalizeText(album.title) || null : null,
         duration: normalizeText(track?.duration) || null,
         mediaType: activeMediaTypeForTrack(track),
         streamUrl: `/content/mediaTrack/stream/${encodeURIComponent(String(track._id))}`,
-        ...creditProjectionForOwner(track, context)
+        ...creditProjectionForOwner(track, context, true)
     };
 };
 

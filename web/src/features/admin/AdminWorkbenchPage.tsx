@@ -3,7 +3,7 @@
  *   Functions: AdminWorkbenchPage
  * Internal
  *   Functions: Workbench
- *   Constants: CatalogReviewDiscard
+ *   Constants: CatalogReviewDiscard, VideoWorkbenchEntries, VideoUploadQueue
  * @end-catalog */
 
 import { lazy, Suspense, useRef, useState, type ComponentProps, type ComponentType } from 'react';
@@ -23,6 +23,8 @@ import styles from './adminStyles';
 /** A discard action whose chunk cannot load (a deploy replaced it) is left out; the card's links stay, and a reload restores it. */
 const CatalogReviewDiscard = lazy<ComponentType<ComponentProps<typeof Discard>>>(() => import('./CatalogReviewDiscard')
   .then(module => ({ default: module.CatalogReviewDiscard }), () => ({ default: () => null })));
+const VideoWorkbenchEntries = lazy(() => import('./VideoUploadEntry').then(module => ({ default: module.VideoWorkbenchEntries })));
+const VideoUploadQueue = lazy(() => import('./VideoUploadQueue').then(module => ({ default: module.VideoUploadQueue })));
 
 /**
  * Separate private queues share filters; source navigation never admits analysis or catalog writes. An unfinished Album
@@ -38,13 +40,13 @@ const CatalogReviewDiscard = lazy<ComponentType<ComponentProps<typeof Discard>>>
  * page's own change runs or is unconfirmed.
  */
 function Workbench() {
-  const t = useAdminText(), { locale } = useLocalization();
+  const t = useAdminText(), { locale, t: sharedText } = useLocalization();
   const access = useAdminAccess();
   const online = useOnline();
   const when = (value: string) => new Date(value).toLocaleString(locale, { dateStyle: 'medium', timeStyle: 'short' });
   const [location, setLocation] = useSearchParams();
-  const source = location.get('source') === 'catalogReviews' ? 'catalogReviews' : 'imports';
-  const setSource = (value: 'imports' | 'catalogReviews') => setLocation(previous => {
+  const source = location.get('source') === 'videos' ? 'videos' : location.get('source') === 'catalogReviews' ? 'catalogReviews' : 'imports';
+  const setSource = (value: 'imports' | 'catalogReviews' | 'videos') => setLocation(previous => {
     const next = new URLSearchParams(previous);
     if (value === 'imports') next.delete('source'); else next.set('source', value);
     return next;
@@ -97,15 +99,16 @@ function Workbench() {
   const lookupFilter = source === 'catalogReviews' && lookupOnly, unfiltered = filter === 'all' && !mine && !submitted && !lookupFilter;
   return <section className={styles.page}><AdminNav />
     <header className={styles.header}><div><h1 className={styles.title}>{t('workbench.title')}</h1><div className={styles.actions}>
-      <button className={styles.button} type="button" disabled={query.isFetching || !online} onClick={() => void query.refetch()}>{t('common.refresh')}</button>
+      {source !== 'videos' && <button className={styles.button} type="button" disabled={query.isFetching || !online} onClick={() => void query.refetch()}>{t('common.refresh')}</button>}
       <Link className={styles.link} to="/admin/catalog">{t('workbench.manage_albums')}</Link>
-      <Link className={styles.link} to="/admin/conversions">{t('conversion.title')}</Link>
-      {access.imports && <Link className={`${styles.link} ${styles.primary}`} to="/admin/imports/new">{t('workbench.new')}</Link>}
     </div></div></header>
+    <Suspense fallback={null}><VideoWorkbenchEntries /></Suspense>
     <div className={styles.filters} role="group" aria-label={t('workbench.source')}>
       <button className={styles.filter} type="button" aria-pressed={source === 'imports'} onClick={() => setSource('imports')}>{t('workbench.import_source')}</button>
       <button className={styles.filter} type="button" aria-pressed={source === 'catalogReviews'} onClick={() => setSource('catalogReviews')}>{t('workbench.review_source')}</button>
+      <button className={styles.filter} type="button" aria-pressed={source === 'videos'} onClick={() => setSource('videos')}>{sharedText('common.label.video')}</button>
     </div>
+    {source === 'videos' ? <Suspense fallback={<p role="status">{t('common.loading')}</p>}><VideoUploadQueue /></Suspense> : <>
     <div className={styles.filters} aria-label={t('workbench.title')}>
       {filters.map(value => <button type="button" className={styles.filter} aria-pressed={value === filter && !(lookupFilter && value === 'all')} key={value} onClick={() => { setFilter(value); setLookupOnly(false); }}>
         {t(source === 'catalogReviews' && value === 'awaitingReview' ? 'workbench.review_unfinished'
@@ -163,6 +166,7 @@ function Workbench() {
       </li>;
     })}</ul>
     {query.hasNextPage && <button className={styles.button} disabled={query.isFetchingNextPage || !online} onClick={() => void query.fetchNextPage()}>{t('workbench.more')}</button>}
+    </>}
   </section>;
 }
 export const AdminWorkbenchPage = () => <AdminGate><Workbench /></AdminGate>;

@@ -1,0 +1,96 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import childProcess, { type ChildProcess } from 'node:child_process';
+import { EventEmitter } from 'node:events';
+import { syncBuiltinESMExports } from 'node:module';
+import { PassThrough } from 'node:stream';
+import { inspectVideoProbe, processVideoSource, VideoProcessingError } from '../../src/services/media/videoProcessingService';
+import { runVideoProcess } from '../../src/services/media/videoProcessRunner';
+
+const video = { index: 0, codec_type: 'video', codec_name: 'hevc', codec_tag_string: 'hvc1', profile: 'Main 10', pix_fmt: 'yuv420p10le', width: 3840, height: 2160 };
+const audio = { index: 1, codec_type: 'audio', codec_name: 'aac', channels: 2 };
+const probe = (streams: unknown[] = [video, audio], tags: Record<string, string> = { major_brand: 'isom' }) => ({ streams, format: { format_name: 'mov,mp4,m4a,3gp,3g2,mj2', duration: '22.016', tags } });
+const issue = (code: string) => (error: unknown) => error instanceof VideoProcessingError && error.code === code;
+
+test('compatible HEVC Main10 in hvc1 MP4 is accepted without forced transcoding', () => {
+    assert.equal(inspectVideoProbe(probe()).plan, 'direct');
+    assert.equal(inspectVideoProbe(probe([{ ...video, codec_tag_string: 'hev1' }, audio])).plan, 'remux');
+    assert.equal(inspectVideoProbe(probe([video, audio], { major_brand: 'qt  ' })).plan, 'remux');
+});
+
+test('a DJI-like attached still and data streams never become the primary movie', () => {
+    const source = inspectVideoProbe(probe([
+        { index: 5, codec_type: 'video', codec_name: 'mjpeg', width: 960, height: 540, disposition: { attached_pic: 1 } },
+        { index: 4, codec_type: 'data' }, video, audio,
+    ], { major_brand: 'isom', location: 'private-fixture' }));
+    assert.equal(source.video.index, 0); assert.equal(source.picture?.index, 5); assert.equal(source.plan, 'remux');
+});
+
+test('silent video is admitted and an incompatible decoded profile alone requires adaptation', () => {
+    assert.equal(inspectVideoProbe(probe([video])).audio, null);
+    assert.equal(inspectVideoProbe(probe([{ ...video, codec_name: 'h264', profile: 'High', pix_fmt: 'yuv420p' }])).plan, 'direct');
+    assert.equal(inspectVideoProbe(probe([{ ...video, codec_name: 'h264', profile: 'High 10', pix_fmt: 'yuv420p10le' }])).plan, 'transcode');
+    assert.equal(inspectVideoProbe(probe([video, { ...audio, codec_name: 'pcm_s16le' }])).plan, 'transcode');
+});
+
+test('ambiguous main streams, oversized dimensions and durations fail bounded admission', () => {
+    for (const value of [probe([video, { ...video, index: 2 }]), probe([video, audio, { ...audio, index: 3 }]),
+        probe([{ ...video, width: 16384 }]), { ...probe(), format: { ...probe().format, duration: '7201' } }, probe([{ ...video, width: '3840' }])]) {
+        assert.throws(() => inspectVideoProbe(value), issue('unsupported_layout'));
+    }
+    assert.throws(() => inspectVideoProbe(probe([video, { ...audio, index: 0 }])), issue('invalid_source'));
+    assert.throws(() => inspectVideoProbe({ ...probe(), format: { format_name: 'hls', duration: '22' } }), issue('invalid_source'));
+});
+
+test('media tool runner strips inherited secrets and maps encoder absence to a retryable fixed code', async context => {
+    let captured: any;
+    context.mock.method(childProcess, 'spawn', (_binary: string, _args: string[], options: unknown) => {
+        captured = options;
+        const child = Object.assign(new EventEmitter(), { stdout: new PassThrough(), stderr: new PassThrough(), kill() { return true; } });
+        setImmediate(() => { child.stderr.write("Unknown encoder 'libx264' /private/source.mov\n"); child.emit('close', 1); });
+        return child as unknown as ChildProcess;
+    });
+    syncBuiltinESMExports(); context.after(() => { context.mock.restoreAll(); syncBuiltinESMExports(); });
+    await assert.rejects(runVideoProcess('ffmpeg', ['-version']), error => issue('processor_unavailable')(error)
+        && (error as Error).message === 'processor_unavailable');
+    assert.equal(captured.shell, false); assert.deepEqual(Object.keys(captured.env).sort(), ['LANG', 'LC_ALL', 'PATH']);
+});
+
+test('abort stops the media child and preserves cancellation instead of claiming invalid bytes', async context => {
+    let killed = false;
+    context.mock.method(childProcess, 'spawn', () => {
+        const child = Object.assign(new EventEmitter(), { stdout: new PassThrough(), stderr: new PassThrough(), kill() {
+            killed = true; setImmediate(() => child.emit('close', null)); return true;
+        } });
+        return child as unknown as ChildProcess;
+    });
+    syncBuiltinESMExports(); context.after(() => { context.mock.restoreAll(); syncBuiltinESMExports(); });
+    const controller = new AbortController(), pending = runVideoProcess('ffmpeg', [], { signal: controller.signal });
+    controller.abort(); await assert.rejects(pending, error => (error as Error).name === 'AbortError'); assert.equal(killed, true);
+});
+
+test('the initial untrusted probe has pixel, allocation and thread limits before its input', async context => {
+    let captured: string[] = [];
+    context.mock.method(childProcess, 'spawn', (_binary: string, args: string[]) => {
+        captured = args;
+        const child = Object.assign(new EventEmitter(), { stdout: new PassThrough(), stderr: new PassThrough(), kill() { return true; } });
+        setImmediate(() => { child.stdout.write('{}'); child.emit('close', 0); });
+        return child as unknown as ChildProcess;
+    });
+    syncBuiltinESMExports(); context.after(() => { context.mock.restoreAll(); syncBuiltinESMExports(); });
+    await assert.rejects(processVideoSource({ inputPath: '/tmp/private-source.mov', workDirectory: '/tmp' }), issue('invalid_source'));
+    for (const option of ['-max_alloc', '-max_pixels', '-threads', '-protocol_whitelist', '-format_whitelist', '-max_streams']) {
+        assert.ok(captured.indexOf(option) >= 0 && captured.indexOf(option) < captured.length - 1);
+    }
+});
+
+test('output I/O failures stay operational and never accuse a validated original of corruption', async context => {
+    context.mock.method(childProcess, 'spawn', () => {
+        const child = Object.assign(new EventEmitter(), { stdout: new PassThrough(), stderr: new PassThrough(), kill() { return true; } });
+        setImmediate(() => { child.stderr.write('Could not open /private/source.mov: No space left on device\n'); child.emit('close', 1); });
+        return child as unknown as ChildProcess;
+    });
+    syncBuiltinESMExports(); context.after(() => { context.mock.restoreAll(); syncBuiltinESMExports(); });
+    await assert.rejects(runVideoProcess('ffmpeg', [], { failureCode: 'processing_failed' }), issue('processing_failed'));
+    await assert.rejects(runVideoProcess('ffmpeg', []), error => issue('processing_failed')(error) && !(error as Error).message.includes('/private'));
+});

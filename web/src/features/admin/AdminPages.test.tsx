@@ -492,7 +492,7 @@ test('workbench refresh stays in its header while personal filtering remains wit
   mount('/admin/imports'); await screen.findByText('No new Album imports yet. Upload music for a new Album, or choose an existing Album to edit or complete.');
   const header = screen.getByRole('heading', { name: 'Workbench' }).closest('header')!;
   expect(within(header).getByRole('button', { name: 'Refresh status' })).toBeVisible();
-  expect(within(header).getByRole('link', { name: 'Upload new Album' })).toBeVisible();
+  expect(await screen.findByRole('link', { name: 'Upload new Album' })).toHaveAttribute('href', '/admin/imports/new');
   expect(within(header).getByRole('link', { name: 'Edit or complete existing Album' })).toHaveAttribute('href', '/admin/catalog');
   const search = screen.getByRole('textbox', { name: 'Search projects' }).closest('form')!;
   expect(within(search).queryByRole('button', { name: 'Refresh status' })).not.toBeInTheDocument();
@@ -672,7 +672,7 @@ test('Lookup needs you counts the loaded cards whose lookup asks for something a
   // All does not show as chosen while it is on.
   expect(screen.getByRole('button', { name: 'All (4)' })).toHaveAttribute('aria-pressed', 'false');
   expect(pressed()).toEqual(['Album completions', 'Lookup needs you (2)']);
-  expect(screen.getAllByRole('heading', { level: 2 }).map(heading => heading.textContent)).toEqual(['Possible completion', 'Answers completion']);
+  expect(within(screen.getByRole('list')).getAllByRole('heading', { level: 2 }).map(heading => heading.textContent)).toEqual(['Possible completion', 'Answers completion']);
   // It narrows the loaded cards without another read.
   expect(reads.length).toBe(before);
   items = items.map(item => ({ ...item, lookup: brief('complete', 'applied') }));
@@ -740,7 +740,7 @@ test('another filter turns Lookup needs you off and shows that filter\'s cards',
   mount('/admin/imports?source=catalogReviews');
   const chip = await screen.findByRole('button', { name: 'Lookup needs you (1)' });
   fireEvent.click(chip);
-  expect(screen.getAllByRole('heading', { level: 2 }).map(heading => heading.textContent)).toEqual(['Possible completion']);
+  expect(within(screen.getByRole('list')).getAllByRole('heading', { level: 2 }).map(heading => heading.textContent)).toEqual(['Possible completion']);
   fireEvent.click(screen.getByRole('button', { name: /^All \(/ }));
   expect(await screen.findByRole('heading', { name: 'Settled completion' })).toBeVisible();
   expect(screen.getByRole('button', { name: 'Lookup needs you (1)' })).toHaveAttribute('aria-pressed', 'false');
@@ -756,12 +756,12 @@ test('a chosen filter other than All stays chosen beside Lookup needs you, which
   await waitFor(() => expect(reads.some(path => path.includes('/catalog-reviews?') && path.includes('filter=awaitingReview'))).toBe(true));
   const before = reads.length;
   fireEvent.click(await screen.findByRole('button', { name: 'Lookup needs you (1)' }));
-  expect(screen.getAllByRole('heading', { level: 2 }).map(heading => heading.textContent)).toEqual(['Possible completion']);
+  expect(within(screen.getByRole('list')).getAllByRole('heading', { level: 2 }).map(heading => heading.textContent)).toEqual(['Possible completion']);
   expect(pressed()).toEqual(['Album completions', 'Unfinished (2)', 'Lookup needs you (1)']);
   expect(reads.length).toBe(before);
   // Turning it off shows that filter's cards again.
   fireEvent.click(screen.getByRole('button', { name: 'Lookup needs you (1)' }));
-  expect(screen.getAllByRole('heading', { level: 2 }).map(heading => heading.textContent)).toEqual(['Settled completion', 'Possible completion']);
+  expect(within(screen.getByRole('list')).getAllByRole('heading', { level: 2 }).map(heading => heading.textContent)).toEqual(['Settled completion', 'Possible completion']);
   expect(pressed()).toEqual(['Album completions', 'Unfinished (2)']);
 });
 

@@ -100,6 +100,12 @@ export const deleteListenerAccountData = async (
                     }
                 }
 
+                // Unpublished Video sources and uncertain storage writes retain their only cleanup evidence.
+                const privateVideo = await db.collection('adminVideoProjects').findOne({ actorId: canonicalUserId, $or: [
+                    { cleanupComplete: { $ne: true } }, { cancelled: { $ne: true }, 'publication.state': { $ne: 'complete' } }
+                ] }, { session, projection: { _id: 1 } });
+                if (privateVideo) throw new AccountDeletionBlockedError('sharedProvenance');
+
                 const user = await db.collection('users').findOne(
                     { _id: userObjectId },
                     { session, projection: { avatarAssetId: 1 } }
@@ -140,6 +146,9 @@ export const deleteListenerAccountData = async (
                         { session }
                     );
                 }
+                // Completed cleanup has no private object left; any published bytes remain traced by their catalog owner.
+                await db.collection('adminVideoProjects').deleteMany({ actorId: canonicalUserId, cleanupComplete: true,
+                    $or: [{ cancelled: true }, { 'publication.state': 'complete' }] }, { session });
                 const deleted = await db.collection('users').deleteOne(
                     {
                         _id: userObjectId,

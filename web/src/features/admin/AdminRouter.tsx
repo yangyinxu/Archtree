@@ -9,6 +9,7 @@ const AdminPagesPage = lazy(() => import('./AdminPagesPage').then(module => ({ d
 const AdminImportPage = lazy(() => import('./AdminImportPage').then(module => ({ default: module.AdminImportPage })));
 const AdminCatalogReviewPage = lazy(() => import('./AdminCatalogReviewPage').then(module => ({ default: module.AdminCatalogReviewPage })));
 const AdminConversionsPage = lazy(() => import('./AdminConversionsPage').then(module => ({ default: module.AdminConversionsPage })));
+const AdminVideoUploadPage = lazy(() => import('./AdminVideoUploadPage').then(module => ({ default: module.AdminVideoUploadPage })));
 
 /** The lazy route family keeps administrator code outside the ordinary listener route graph. */
 function AdminRoute() {
@@ -16,6 +17,9 @@ function AdminRoute() {
   if (pathname === '/admin/catalog') return <AdminCatalogPage />;
   if (pathname === '/admin/pages') return <AdminPagesPage />;
   if (pathname === '/admin/conversions') return <AdminConversionsPage />;
+  if (pathname === '/admin/videos/new') return <AdminVideoUploadPage />;
+  const video = /^\/admin\/videos\/([a-f0-9]{24})$/.exec(pathname);
+  if (video) return <AdminVideoUploadPage projectId={video[1]} />;
   const catalog = /^\/admin\/catalog\/(album|artist|audioTrack|organization)\/([a-f0-9]{24})$/.exec(pathname);
   if (catalog) return <AdminCatalogPage kind={catalog[1] as CatalogKind} id={catalog[2]} />;
   if (pathname === '/admin/imports/new') return <AdminCreateImportPage />;

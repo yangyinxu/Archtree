@@ -9117,6 +9117,925 @@
       ],
       "variables": {}
     },
+    "admin.video.album": {
+      "description": "Administrator Video upload: Album (optional)",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.album_entry_help": {
+      "description": "Administrator Video upload: Upload an Album’s audio files and review its catalog details.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.album_hidden": {
+      "description": "Administrator Video upload: This Album is hidden, so the Video remains unavailable to listeners even with public Video visibility.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.album_visibility_help": {
+      "description": "Administrator Video upload: An associated Album’s visibility also controls whether this Video is available to listeners.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.another": {
+      "description": "Administrator Video upload: Upload another video",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.attribution": {
+      "description": "Administrator Video upload: Video attribution",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.attribution_catalog": {
+      "description": "Administrator Video upload: Artist / Organization",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.attribution_catalog_help": {
+      "description": "Administrator Video upload: Associate an existing Artist or Organization without creating a placeholder identity.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.attribution_self": {
+      "description": "Administrator Video upload: My own work",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.attribution_self_help": {
+      "description": "Administrator Video upload: Owned by your account. No Artist or Album is required.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.attribution_unknown": {
+      "description": "Administrator Video upload: Not yet documented",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.attribution_unknown_help": {
+      "description": "Administrator Video upload: Explicitly record unknown attribution without inventing an Artist.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.cancel": {
+      "description": "Administrator Video upload: Cancel this private task",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.cancel_confirm": {
+      "description": "Administrator Video upload: Confirm cancellation",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.cancel_help": {
+      "description": "Administrator Video upload: Cancel this task and request cleanup of its staged files. Failed cleanup stays traceable and can be retried.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.cancelled": {
+      "description": "Administrator Video upload: Task cancelled",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.choose": {
+      "description": "Administrator Video upload: Choose original video",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.cleanup_retry": {
+      "description": "Administrator Video upload: Retry cleanup",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.confirm": {
+      "description": "Administrator Video upload: Confirm Video publication",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.confirm_help": {
+      "description": "Administrator Video upload: The original is private and processing is complete. Confirm the captured details before publication.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.confirm_hidden": {
+      "description": "Administrator Video upload: Confirm save as hidden",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.confirm_publish": {
+      "description": "Administrator Video upload: Confirm publication",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.continue": {
+      "description": "Administrator Video upload: Continue task",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.conversion_entry_help": {
+      "description": "Administrator Video upload: Convert supported lossless audio locally without changing the existing catalog.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.cover": {
+      "description": "Administrator Video upload: Video cover",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.cover_automatic": {
+      "description": "Administrator Video upload: Use automatic cover",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.cover_frame": {
+      "description": "Administrator Video upload: Choose a Video frame",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.cover_help": {
+      "description": "Administrator Video upload: The server generates an automatic cover from this Video. You can replace it with an image or a selected frame.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.cover_inherited": {
+      "description": "Administrator Video upload: Inherited Album artwork",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.cover_none": {
+      "description": "Administrator Video upload: Use Album cover or default image",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.cover_pending": {
+      "description": "Administrator Video upload: No cover available yet",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.cover_placeholder": {
+      "description": "Administrator Video upload: Default image",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.cover_preview": {
+      "description": "Administrator Video upload: Selected Video cover",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.cover_published": {
+      "description": "Administrator Video upload: confirmed catalog cover after staged candidates are cleaned up.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.cover_reconcile": {
+      "description": "Administrator Video upload: Reconcile cover upload",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.cover_unknown": {
+      "description": "Administrator Video upload: The cover upload is unconfirmed. Refresh the task and reconcile its original operation before uploading another image.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.cover_upload": {
+      "description": "Administrator Video upload: Upload image",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.create_help": {
+      "description": "Administrator Video upload: Choosing a file creates a private task without uploading its bytes. Upload original video starts the transfer separately.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.file_invalid": {
+      "description": "Administrator Video upload: Choose an MP4, MOV or M4V video no larger than {size}.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {
+        "size": "string"
+      }
+    },
+    "admin.video.file_processing": {
+      "description": "Administrator Video upload: File and processing",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.frame_failed": {
+      "description": "Administrator Video upload: This frame could not be extracted. The video is retained; choose another frame or upload an image.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.frame_local_needed": {
+      "description": "Administrator Video upload: Reselect the original locally to preview and choose a frame; uploading an image is always optional.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.frame_preview": {
+      "description": "Administrator Video upload: Current decoded frame",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.frame_time": {
+      "description": "Administrator Video upload: Frame time (seconds)",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.frame_use": {
+      "description": "Administrator Video upload: Use this frame",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.hidden_help": {
+      "description": "Administrator Video upload: Hidden content remains accessible only to administrators.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.intro": {
+      "description": "Administrator Video upload: Upload the original privately, follow server processing, then confirm publication.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.local_preview": {
+      "description": "Administrator Video upload: Local preview",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.local_preview_help": {
+      "description": "Administrator Video upload: This preview uses your local original only; it does not represent the server output.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.lookup_close": {
+      "description": "Administrator Video upload: Close choices",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.lookup_empty": {
+      "description": "Administrator Video upload: No matching ready content. Try another name.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.lookup_open": {
+      "description": "Administrator Video upload: Open choices",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.manage": {
+      "description": "Administrator Video upload: Manage confirmed MediaTrack",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.metadata": {
+      "description": "Administrator Video upload: Publication details",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.metadata_required": {
+      "description": "Administrator Video upload: Enter a title and select an identity when catalog attribution is chosen. An Album is optional.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.new": {
+      "description": "Administrator Video upload: Upload Video",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.no_album": {
+      "description": "Administrator Video upload: No Album · publish independently",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.original_help": {
+      "description": "Administrator Video upload: MP4, MOV and M4V originals, including H.264 and HEVC/H.265, need no local conversion. The server checks playback compatibility after upload.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.original_supported": {
+      "description": "Administrator Video upload: Upload the original directly",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.personal": {
+      "description": "Administrator Video upload: Personal publication",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.plan_direct": {
+      "description": "Administrator Video upload: The original passes playback validation without re-encoding.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.plan_pending": {
+      "description": "Administrator Video upload: Playback compatibility is checked after source upload.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.plan_remux": {
+      "description": "Administrator Video upload: Adapting the container while preserving video encoding.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.plan_transcode": {
+      "description": "Administrator Video upload: Adapting playback only where required; the original stays traceable.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.preview": {
+      "description": "Administrator Video upload: Preview local video",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.preview_unavailable": {
+      "description": "Administrator Video upload: This device cannot preview the video. You can upload an image for its cover and continue uploading the original. Local playback support does not determine source acceptance.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.private_help": {
+      "description": "Administrator Video upload: The upload remains private until a separate publication confirmation. An uncertain result is reconciled before any new transfer.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.processing_failed": {
+      "description": "Administrator Video upload: The original is retained. Retry server processing without uploading it again.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.processing_issue_busy": {
+      "description": "Administrator Video upload: The server is processing another video. The original is retained; retry shortly without uploading it again.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.processing_issue_invalid": {
+      "description": "Administrator Video upload: The source could not be validated or uses an unsupported track layout. Keep this task for reference and choose another file in a new task.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.processing_issue_retry": {
+      "description": "Administrator Video upload: Processing did not finish. The original is retained; reconcile any uncertain upload, then retry server processing without re-uploading.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.processing_issue_timeout": {
+      "description": "Administrator Video upload: Processing exceeded its time limit. The original is retained; retry processing without uploading it again.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.processing_issue_unavailable": {
+      "description": "Administrator Video upload: Server video processing is currently unavailable. The original is retained; retry when the service is available.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.processing_retry": {
+      "description": "Administrator Video upload: Retry processing · no re-upload",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.public_name": {
+      "description": "Administrator Video upload: Public byline (optional)",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.public_name_help": {
+      "description": "Administrator Video upload: Only this explicit byline is public. Leave blank to show Personal publication.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.publication_failed": {
+      "description": "Administrator Video upload: Media processing succeeded; publication failed separately. Retry publication without uploading again.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.publication_retry": {
+      "description": "Administrator Video upload: Retry publication · no re-upload",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.publication_review_needed": {
+      "description": "Administrator Video upload: The references changed or the approval expired. Review the current publication details and confirm again; the original does not need to be uploaded again.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.published": {
+      "description": "Administrator Video upload: Video publication complete",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.published_cleanup": {
+      "description": "Administrator Video upload: Publication complete · temporary cleanup pending",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.queue": {
+      "description": "Administrator Video upload: Video upload tasks",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.queue_all": {
+      "description": "Administrator Video upload: All",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.queue_cancelled": {
+      "description": "Administrator Video upload: Cancelled",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.queue_cleanup": {
+      "description": "Administrator Video upload: Cleanup pending",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.queue_complete": {
+      "description": "Administrator Video upload: Published",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.queue_empty": {
+      "description": "Administrator Video upload: No Video tasks match this filter.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.queue_failed": {
+      "description": "Administrator Video upload: Needs attention",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.queue_progress": {
+      "description": "Administrator Video upload: In progress",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.queue_review": {
+      "description": "Administrator Video upload: Awaiting confirmation",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.queue_unknown": {
+      "description": "Administrator Video upload: Outcome unconfirmed",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.reconcile": {
+      "description": "Administrator Video upload: Reconcile original upload",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.recovery_unknown": {
+      "description": "Administrator Video upload: The operation result is not yet confirmed. Refresh this task before retrying the same operation.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.reference_unavailable": {
+      "description": "Administrator Video upload: A referenced identity or Album is no longer available. Update the selection and review publication again.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.reselect": {
+      "description": "Administrator Video upload: Select the same local file",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.reselect_mismatch": {
+      "description": "Administrator Video upload: Choose the same filename and size as this task. Create another task to upload a different video.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.review": {
+      "description": "Administrator Video upload: Review and publish",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.review_again": {
+      "description": "Administrator Video upload: Review publication again",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.save": {
+      "description": "Administrator Video upload: Save details",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.stage_0": {
+      "description": "Administrator Video upload: File selection",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.stage_1": {
+      "description": "Administrator Video upload: Original upload",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.stage_2": {
+      "description": "Administrator Video upload: Server validation and adaptation",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.stage_3": {
+      "description": "Administrator Video upload: Publication",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.stale": {
+      "description": "Administrator Video upload: The saved details or references changed. Close this dialog and review the current version.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.state_cancelled": {
+      "description": "Administrator Video upload: Cancelled",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.state_complete": {
+      "description": "Administrator Video upload: Complete",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.state_deleted": {
+      "description": "Administrator Video upload: Removed",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.state_failed": {
+      "description": "Administrator Video upload: Needs attention",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.state_idle": {
+      "description": "Administrator Video upload: Not started",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.state_pending": {
+      "description": "Administrator Video upload: Awaiting confirmation",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.state_queued": {
+      "description": "Administrator Video upload: Queued",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.state_ready": {
+      "description": "Administrator Video upload: Complete",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.state_running": {
+      "description": "Administrator Video upload: In progress",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.state_unknown": {
+      "description": "Administrator Video upload: Outcome unconfirmed",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.step_adapt": {
+      "description": "Administrator Video upload: Preparing the single playback object",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.step_cover": {
+      "description": "Administrator Video upload: Extracting default cover",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.step_inspect": {
+      "description": "Administrator Video upload: Inspecting container and codecs",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.step_validate": {
+      "description": "Administrator Video upload: Validating complete decoding",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.subject": {
+      "description": "Administrator Video upload: Artist / Organization",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.title": {
+      "description": "Administrator Video upload: Video title",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.transfer_conflict": {
+      "description": "Administrator Video upload: The task changed. Refresh it before trying again.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.transfer_error": {
+      "description": "Administrator Video upload: The transfer was refused. Refresh the task and check current permission.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.transfer_file": {
+      "description": "Administrator Video upload: The file was not accepted. Check its format and size; the task remains private.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.transfer_unknown": {
+      "description": "Administrator Video upload: Transfer outcome is unknown. Reconcile the original operation before sending bytes again.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.transmitting": {
+      "description": "Administrator Video upload: Transferring original bytes… Awaiting server confirmation.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.unavailable": {
+      "description": "Administrator Video upload: Video uploads are not available on this server.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.unknown_help": {
+      "description": "Administrator Video upload: The upload result is unconfirmed. Reconcile the original operation before replacing or uploading files.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.upload_original": {
+      "description": "Administrator Video upload: Upload original video",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.video_entry_help": {
+      "description": "Administrator Video upload: Upload an original Video, follow processing and confirm publication.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.visibility": {
+      "description": "Administrator Video upload: Video visibility after publication",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.workbench": {
+      "description": "Administrator Video upload: Return to workbench",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
     "admin.view.admin": {
       "description": "Administrator workbench: view admin.",
       "delivery": [
