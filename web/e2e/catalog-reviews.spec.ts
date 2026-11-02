@@ -1574,7 +1574,8 @@ for (const variant of localizedViewports) {
     const chip = page.getByRole('button', { name: `${label('admin.workbench.review_lookup')} (2)`, exact: true });
     const all = page.getByRole('button', { name: `${label('admin.workbench.all')} (3)`, exact: true });
     await chip.click(); await expect(chip).toHaveAttribute('aria-pressed', 'true');
-    await expect(page.getByRole('heading', { level: 2 })).toHaveText(['Synthetic possible completion', 'Synthetic answered completion']);
+    // The filter applies to queue cards; the independent upload-entry headings stay visible.
+    await expect(page.getByRole('listitem').getByRole('heading', { level: 2 })).toHaveText(['Synthetic possible completion', 'Synthetic answered completion']);
     // All does not show as chosen meanwhile: it looks like any chip that is not pressed.
     await expect(all).toHaveAttribute('aria-pressed', 'false');
     const background = (locator: Locator) => locator.evaluate(element => getComputedStyle(element).backgroundColor);
