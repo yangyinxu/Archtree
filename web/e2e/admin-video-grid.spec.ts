@@ -173,6 +173,7 @@ test('a refused stale Video Grid save requires a refreshed draft and a new appro
   await changeVideoGrid(page); server.fail('conflict');
   await page.getByRole('button', { name: 'Save order', exact: true }).click();
   await page.getByRole('dialog').getByRole('button', { name: 'Confirm save order', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: 'Save video Grid?', exact: true })).toHaveCount(0);
   const warning = page.getByRole('alert');
   await expect(warning).toContainText('The Video Grid changed.');
   await expect(page.getByRole('button', { name: 'Retry original operation', exact: true })).toHaveCount(0);
