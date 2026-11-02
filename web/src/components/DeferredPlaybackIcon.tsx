@@ -1,10 +1,11 @@
 import {
-  Maximize2, MonitorPlay, PanelRight, Pause, Play, Repeat1, Repeat2, Shuffle,
+  AudioLines, Clock3, Maximize2, MonitorPlay, PanelRight, Pause, Play, Repeat1, Repeat2, Shuffle,
   SkipBack, SkipForward, Volume2, VolumeX, type LucideIcon, type LucideProps
 } from 'lucide-react';
 import type { PlaybackIconName } from './Icon';
 
 const icons: Record<PlaybackIconName, LucideIcon> = {
+  'audio-lines': AudioLines, clock: Clock3,
   expand: Maximize2, 'panel-right': PanelRight, pause: Pause, play: Play, previous: SkipBack,
   repeat: Repeat2, 'repeat-one': Repeat1, shuffle: Shuffle, next: SkipForward, video: MonitorPlay, volume: Volume2, 'volume-off': VolumeX
 };

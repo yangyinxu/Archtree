@@ -43,7 +43,7 @@ test('the playing row shows bars and Pause on its current button', async () => {
   const pause = screen.getByRole('button', { name: 'Pause' });
   expect(pause.closest('li')).toHaveAttribute('data-playback-state', 'playing');
   expect(pause).toHaveAttribute('aria-current', 'true');
-  expect(pause.querySelector('.lucide-audio-lines')).toBeInTheDocument();
+  await expect.poll(() => pause.querySelector('.lucide-audio-lines')).toBeInTheDocument();
   await expect.poll(() => pause.querySelector('.lucide-pause')).toBeInTheDocument();
 });
 

@@ -21,6 +21,12 @@ Production CSS Modules use compact scoped identifiers; development and test
 builds retain readable defaults. Exported module keys and style declarations are
 unchanged.
 
+Restart the `npm run dev` process after changing server code or configuration;
+rebuilding the listener bundle does not restart that process. On an unavailable
+Home page, **Try again** first retries a failed browser-session load, then loads
+Home for the resolved viewer. When the session already succeeded, it retries
+only Home and retains that session.
+
 To test MediaTrack replacement locally, sign in as an administrator at
 `http://localhost:8080/content/manage`, create or select a MediaTrack, and use
 the rendered **Replace with Audio** or **Replace with Video** form. Video input

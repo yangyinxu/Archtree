@@ -7,7 +7,6 @@
  * @end-catalog */
 
 import type { ReactNode } from 'react';
-import { AudioLines, Clock3 } from 'lucide-react';
 
 import { Artwork } from './Artwork';
 import { Icon } from './Icon';
@@ -58,7 +57,7 @@ export const TrackTable = ({ variant, label, titleHeading, albumHeading, duratio
       <span>{titleHeading}</span>
       {variant === 'playlist' && <span className={styles.headerAlbum}>{albumHeading}</span>}
       <span className={styles.headerDuration} title={durationHeading}>
-        <Clock3 aria-hidden="true" focusable="false" size={16} />
+        <Icon name="clock" size={16} strokeWidth={2} />
       </span>
     </div>
     <ol aria-label={label} className={styles.list}>
@@ -81,7 +80,7 @@ export const TrackTable = ({ variant, label, titleHeading, albumHeading, duratio
             <span aria-hidden="true" className={styles.indexNumber}>{index + 1}</span>
             {!row.disabled && <Icon className={styles.indexIcon} name={row.state === 'playing' ? 'pause' : 'play'} size={16} />}
             {row.state === 'playing' && (
-              <AudioLines aria-hidden="true" className={styles.trackPlaybackBars} focusable="false" strokeWidth={1.9} />
+              <Icon className={styles.trackPlaybackBars} name="audio-lines" />
             )}
           </button>
           <div className={styles.titleCell}>
