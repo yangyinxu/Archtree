@@ -31,17 +31,28 @@ The Web-only `/finitude/videos` route reads `GET /api/listener/v1/videos` throug
 `web/src/api/listenerVideos.ts`. It adds a new response envelope without changing
 the existing Home, Search, Album, or native wire shapes. The service reuses the
 public MediaTrack visibility join before sorting and limiting, so a hidden or
-unavailable assigned Album cannot leak through pagination. Pages sort canonical
-ObjectIds descending, read at most 49 records to return at most 48, and carry the
-last returned ID as the continuation cursor. Each continuation rechecks current
-access; an inserted newer ID does not shift the traversal. The Web decoder bounds
+unavailable assigned Album cannot leak through pagination. The Video Page owns
+one Grid definition with the server-backed `publicVideos` source. Its saved
+Video references define priority order; newly eligible Videos follow by
+publication time, falling back to creation time and ObjectId timestamp, with
+ObjectId as a stable tie-breaker. Before the first approved configuration, the fallback remains
+newest first. Public reads scan only eligible identities and publication times
+to establish the order, then load full summary fields for at most 48 selected
+Videos. Eligibility is checked again on that bounded read; a disappearing member
+returns a stale-snapshot refusal. Each page includes the configured `defaultView`.
+Opaque continuation cursors bind the effective eligible order and configuration;
+an order or membership change returns `409 stale_video_cursor`, and the Web
+listener offers a fresh first-page read instead of silently mixing snapshots.
+The Web decoder bounds
 pages and cursors, rejects Audio and duplicate members, and strips additive fields
 before query caching. This remains public online browsing, with no download or
 browser-local media lifecycle.
 
-The Video page keeps its default 16:9 Grid and offers an immersive 10:13 card
-view over the same paginated query. The view preference is device-local display
-state, not account or catalog data. Changing the view only replaces the browse
+The Video page offers a 16:9 Grid and an immersive 10:13 card view over the same
+paginated query. The administrator chooses the default display; an explicit
+device-local view preference takes precedence and is independent of the account.
+When no valid local preference exists, an asynchronously loaded default applies.
+Changing the view only replaces the browse
 presentation; it does not recreate the shared player, launch a queue, or record
 playback activity. Immersive cards compose independent Preview, Save, framing,
 and Play or Pause controls rather than nesting buttons inside the ordinary

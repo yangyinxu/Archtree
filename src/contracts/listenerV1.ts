@@ -101,6 +101,7 @@ export interface ListenerHomeSection {
     items: ListenerHomeItem[];
 }
 
+/** Legacy/native page-scoped collection routes; the Web Video Grid has its own browsing contract. */
 export type ListenerPageSlug = 'home' | 'library';
 
 /** A stable ordered reference into one page-scoped collection response. */
@@ -172,8 +173,9 @@ export interface ListenerTrack {
     audioTrack: ListenerAudioTrackSummary;
 }
 
-/** One newest-first page of ready public Video MediaTracks; nextCursor is opaque to clients. */
+/** One snapshot-bound page of ready public Videos, using the administrator's default card view. */
 export interface ListenerVideos {
     items: ListenerAudioTrackSummary[];
     nextCursor: string | null;
+    defaultView: 'grid' | 'immersive';
 }

@@ -304,7 +304,7 @@ export const cleanupDeletedContentReferences = async (
                 orderedManualItemCleanup(contentType, referenceIds) as any
             ),
             db.collection('contentCollections').updateMany(
-                { mode: curatedDefinitionMode, items: { $elemMatch: matchingItem } },
+                { $or: [{ mode: curatedDefinitionMode }, { mode: 'dynamic', dynamicSource: 'publicVideos' }], items: { $elemMatch: matchingItem } },
                 orderedManualItemCleanup(contentType, referenceIds) as any
             )
         );

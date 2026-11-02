@@ -54,6 +54,14 @@ export const touchAvailablePageItemReferences = async (
         }
         throw new PageItemReferenceUnavailableError();
     });
+    const videoGridReferences = normalizedItems.filter(item => item.itemType === 'grid' || item.itemType === 'list');
+    if (videoGridReferences.length) {
+        const reserved = await getDb()!.collection('contentCollections').findOne({
+            _id: { $in: videoGridReferences.map(item => new ObjectId(String((item as any).collectionId))) }, dynamicSource: 'publicVideos'
+        }, { session, projection: { _id: 1 } });
+        // The singleton Video source is configured through its own guarded command, never attached elsewhere.
+        if (reserved) throw new PageItemReferenceUnavailableError();
+    }
     const carouselIds = [...new Set(normalizedItems
         .filter((item) => item.itemType === 'carousel')
         .map((item) => String(item.carouselId)))];
@@ -131,6 +139,9 @@ const deleteTargetAndDetachPages = async (
     try {
         await session.withTransaction(async () => {
             await touchActiveAccount(canonicalUpdatedBy, session);
+            if (targetType === 'contentCollection' && await getDb()!.collection(collectionName).findOne({
+                _id: targetObjectId, dynamicSource: 'publicVideos'
+            }, { session, projection: { _id: 1 } })) throw new PageItemReferenceUnavailableError();
             const fenced = await getDb()!.collection(collectionName).updateOne(
                 { _id: targetObjectId },
                 { $inc: { referenceRevision: 1 } },

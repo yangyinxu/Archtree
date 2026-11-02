@@ -1535,13 +1535,19 @@ The wire protocol and operational bounds are documented in
   limits until the preview stops. A card that cannot tell whether previews are
   enabled shows no preview.
 - The Web listener's primary navigation includes a Video page beside Home and
-  Library. It is filled automatically, not curated: it lists every ready,
-  published, publicly visible Video MediaTrack, newest first, a page at a time.
-  Its default Grid uses 16:9 cards; listeners may select an immersive view of
+  Library. Its single configured Grid includes every ready, published, publicly
+  visible Video MediaTrack, a page at a time. Administrators can manually order
+  these Videos and choose the default Grid or immersive display. Until the
+  first configuration is saved, Videos appear newest first; saving captures
+  the complete current order, and newly eligible Videos append at the end in
+  deterministic catalog order. Hidden, unavailable, deleted or Audio
+  MediaTracks never become visible through a saved order. Grid uses 16:9
+  cards; listeners may select an immersive view of
   approximately 10:13 cards showing the same Videos, with overlaid artwork,
   title, attribution, and separate Preview, Save, options, and Play or Pause
-  controls. The selected view is a device-local presentation preference,
-  independent of the account. Switching views never changes the shared player,
+  controls. An explicitly selected view is a device-local presentation preference,
+  independent of the account, and takes precedence over the administrator's
+  default. Switching views never changes the shared player,
   queue, elapsed time, or playback activity. An immersive card's full-frame,
   fill, and horizontal framing controls change only that card's local display;
   they never edit media, artwork, metadata, or the stored preview. A missing or
@@ -2674,7 +2680,9 @@ The wire protocol and operational bounds are documented in
 - Grid and List definitions each have one source mode: manual or dynamic.
   Manual definitions contain explicitly curated content references; dynamic
   definitions resolve items from a declared source and cannot be manually
-  edited, reordered, or mixed with manual references.
+  edited, reordered, or mixed with manual references, except for the Video
+  page's public-Video source: its membership remains automatic while its
+  presentation default and complete Video order are administrator-controlled.
 - Content Manager administrators can add, remove, and reorder albums in a
   manual Grid. The initial manual Grid contract is album-only.
 - Content Manager shows every page's configured Carousel, Grid, and List items
@@ -2682,6 +2690,12 @@ The wire protocol and operational bounds are documented in
   Missing or unsupported references remain visible as warnings rather than
   disappearing from the page summary.
 - Web Page management uses a compact ordered list with inline reference details.
+  It lists Home, Library, Search and Video. Search is a functional page whose
+  query-driven results have no configured placements. Video has exactly one
+  Grid placement; its configuration changes the Videos inside that Grid,
+  rather than reordering top-level Page placements. Reading an unconfigured
+  Video page does not create persistent content; the first approved save
+  creates the Page and its Grid together.
   It reads only the selected Page and shows its confirmed placement count; the
   unselected Page's count remains unknown until selected. Visibility approval
   identifies the exact placement and is invalidated by any change to the Page
@@ -2717,6 +2731,16 @@ The wire protocol and operational bounds are documented in
   dynamic list.
 - Dynamic Grid and List definitions expose only source configuration, filters,
   sort, and page size in Content Manager; their resolved items are read-only.
+  The Web Video Grid has a dedicated editor with drag handles, keyboard arrows
+  and Move up/Move down controls. Its default display and Video order form one
+  local draft and require explicit review before saving. Cancelling writes
+  nothing. Saving validates the complete membership and configuration against
+  its admitted snapshot; a detected edit or membership change requires a fresh
+  review. Videos becoming eligible after that snapshot append automatically.
+  An uncertain save retains its exact approved payload and operation
+  identity across Page switches and refreshes. A confirmed save persists the
+  Page, Grid and receipt together. Sorting invalidates existing Video cursors;
+  a stale traversal must restart explicitly from the first page.
 - A server-backed manual Grid or List is read through its parent Page item with
   a bounded opaque cursor. The cursor is bound to the Page item, collection,
   Page, collection, and ready-content visibility revisions, and—when the parent

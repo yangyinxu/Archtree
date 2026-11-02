@@ -2,10 +2,10 @@
  * Exports
  *   Classes: ListenerCollectionPageError
  *   Functions: getListenerHome, getListenerCollectionPage, searchListenerContent, getListenerAlbum,
- *              getListenerArtist, getListenerOrganization, getListenerAudioTrack, isListenerVideoCursor,
+ *              getListenerArtist, getListenerOrganization, getListenerAudioTrack, summarizeListenerVideos,
  *              listListenerVideos, sanitizeListenerLibraryPage, listListenerLibrary, getListenerRecentlyPlayed
  *   Constants: maximumListenerCollectionPageSize, defaultListenerCollectionPageSize,
- *              maximumListenerVideoPageSize, defaultListenerVideoPageSize
+ *              maximumListenerVideoPageSize, defaultListenerVideoPageSize, isListenerVideoCursor
  *   Re-exports: * from '../../contracts/listenerV1'
  * Internal
  *   Types: ListenerContentRef, CatalogContext, OrderedListenerPageItem, OrderedCollectionRef,
@@ -53,6 +53,7 @@ import { Carousel } from '../../models/carousel';
 import { catalogCreditRollout } from '../../config/catalogCreditRollout';
 import { pageItemIdentity } from '../../utils/pageItemIdentity';
 import { getJwtSecret } from '../auth/authSessionService';
+import { decodeVideoGridCursor, encodeVideoGridCursor, isVideoGridCursor, readVideoGridPageTracks, readVideoGridState, VideoPageError } from '../content/videoPageService';
 
 import type {
     ListenerDate,
@@ -1200,31 +1201,35 @@ export const getListenerAudioTrack = async (audioTrackId: string): Promise<Liste
     return { audioTrack: toAudioTrackSummary(track, context) };
 };
 
-/** Cursors are bounded canonical IDs; whitespace and structured values are never query operators. */
-export const isListenerVideoCursor = (value: string) => /^[0-9a-fA-F]{24}$/.test(value);
+/** Cursors are bounded signed snapshot tokens; structured values are never query operators. */
+export const isListenerVideoCursor = isVideoGridCursor;
+
+/** Shares the allowlisted Video card projection with administrator ordering reviews. */
+export const summarizeListenerVideos = async (tracks: any[]) => {
+    const context = await createCatalogContext([], tracks);
+    return tracks.map(track => toAudioTrackSummary(track, context));
+};
 
 /**
- * Lists ready, published, publicly visible Video MediaTracks newest first. The cursor is the
- * last returned MediaTrack ID, so newer IDs inserted between reads do not shift later pages.
- * Visibility and readiness are checked again before every page is sorted or limited.
+ * Lists the configured Video Grid with newly eligible Videos appended after saved order.
+ * Every continuation checks its complete visibility/order snapshot before returning a slice.
  */
 export const listListenerVideos = async (limit: number, cursor?: string): Promise<ListenerVideos> => {
     const boundedLimit = Math.max(1, Math.min(Math.floor(limit), maximumListenerVideoPageSize));
-    const tracks = await findPublicAudioTracks({
-        ...readyAudioFilter,
-        mediaType: 'video',
-        _id: { $type: 'objectId', ...(cursor ? { $lt: toObjectId(cursor.toLowerCase()) } : {}) }
-    })
-        .project(audioTrackProjection)
-        .sort({ _id: -1 })
-        .limit(boundedLimit + 1)
-        .maxTimeMS(queryTimeoutMs)
-        .toArray();
-    const page = tracks.slice(0, boundedLimit);
-    const context = await createCatalogContext([], page);
+    const anchor = cursor ? decodeVideoGridCursor(cursor) : null;
+    const state = await readVideoGridState();
+    if (anchor && (anchor.revision !== state.revision || String(state.tracks[anchor.index]?._id) !== anchor.id)) {
+        throw new VideoPageError(409, 'stale_video_cursor');
+    }
+    const start = anchor ? anchor.index + 1 : 0;
+    const page = state.tracks.slice(start, start + boundedLimit);
+    const last = page[page.length - 1];
+    const tracks = await readVideoGridPageTracks(page.map(track => String(track._id)));
     return {
-        items: page.map((track) => toAudioTrackSummary(track, context)),
-        nextCursor: tracks.length > boundedLimit ? String(page[page.length - 1]._id).toLowerCase() : null
+        items: await summarizeListenerVideos(tracks),
+        defaultView: state.defaultView,
+        nextCursor: state.tracks.length > start + boundedLimit && last
+            ? encodeVideoGridCursor(state.revision, start + page.length - 1, String(last._id)) : null
     };
 };
 

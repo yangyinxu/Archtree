@@ -4,13 +4,24 @@ import type { Request, Response } from 'express';
 
 import { videos } from '../../src/controllers/listenerController';
 import { isListenerVideoCursor } from '../../src/services/listener/listenerContentService';
+import { decodeVideoGridCursor, encodeVideoGridCursor } from '../../src/services/content/videoPageService';
 
-test('Video cursors accept only bounded ObjectIds without trimming or query syntax', () => {
-    assert.equal(isListenerVideoCursor('0123456789abcdef01234567'), true);
-    assert.equal(isListenerVideoCursor('0123456789ABCDEF01234567'), true);
-    for (const cursor of ['', ' 0123456789abcdef01234567 ', 'x'.repeat(2_049), '{"$lt":"id"}', 'bad-id']) {
+test('Video cursors admit only bounded snapshot tokens without trimming or query syntax', () => {
+    assert.equal(isListenerVideoCursor('vg1.abc.' + 'a'.repeat(43)), true);
+    for (const cursor of ['', '0123456789abcdef01234567', '0123456789ABCDEF01234567', ' vg1.abc.' + 'a'.repeat(43), 'x'.repeat(2_049), '{"$lt":"id"}', 'bad-id']) {
         assert.equal(isListenerVideoCursor(cursor), false);
     }
+});
+
+test('Video cursor signatures bind the exact revision and anchor and reject tampering', (t) => {
+    const previous = process.env.JWT_SECRET;
+    process.env.JWT_SECRET = 'video-cursor-unit-test-secret';
+    t.after(() => { if (previous === undefined) delete process.env.JWT_SECRET; else process.env.JWT_SECRET = previous; });
+    const revision = 'cr_' + 'a'.repeat(43), id = '0123456789abcdef01234567';
+    const token = encodeVideoGridCursor(revision, 2, id);
+    assert.deepEqual(decodeVideoGridCursor(token), { revision, index: 2, id });
+    const tampered = token.slice(0, -1) + (token.endsWith('a') ? 'b' : 'a');
+    assert.throws(() => decodeVideoGridCursor(tampered), (error: any) => error.code === 'invalid_video_cursor');
 });
 
 test('Videos rejects untrusted query structures before accessing the catalog', async () => {

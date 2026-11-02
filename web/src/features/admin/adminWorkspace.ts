@@ -20,7 +20,9 @@ export interface AdminWorkspaceState {
 /** Error code for a response that an outdated Web bundle cannot parse; never retried as the same intent. */
 export const ADMIN_RELOAD_REQUIRED = 'ADMIN_RELOAD_REQUIRED';
 
-let state: AdminWorkspaceState = { viewerId: '', epoch: -1, authorized: false, mode: 'user', generation: 0, authority: 0, imports: false, analysis: false, catalogEditing: false, catalogVisibility: false, conversion: false, reloadRequired: false };
+/** Startup and account/permission resets create the same empty workspace with fresh authority counters. */
+const initialState = (generation = 0, authority = 0): AdminWorkspaceState => ({ viewerId: '', epoch: -1, authorized: false, mode: 'user', generation, authority, imports: false, analysis: false, catalogEditing: false, catalogVisibility: false, conversion: false, reloadRequired: false });
+let state = initialState();
 const listeners = new Set<() => void>();
 /** Private editing buffers survive view/route changes, never an account or permission change. */
 const buffers = new Map<string, unknown>();
@@ -31,7 +33,7 @@ export const adminWorkspace = {
   subscribe(listener: () => void) { listeners.add(listener); return () => { listeners.delete(listener); }; },
   reset() {
     buffers.clear();
-    state = { viewerId: '', epoch: -1, authorized: false, mode: 'user', generation: state.generation + 1, authority: state.authority + 1, imports: false, analysis: false, catalogEditing: false, catalogVisibility: false, conversion: false, reloadRequired: false };
+    state = initialState(state.generation + 1, state.authority + 1);
     emit();
   },
   suspend() {

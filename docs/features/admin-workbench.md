@@ -3114,9 +3114,12 @@ reusable definitions and order. Each placement includes bounded `name`,
 (`ready`, `missing` or `unsupported`) display metadata. The Page digest binds
 that resolved metadata, so a referenced name/source change requires fresh
 confirmation. A named target is write-fenced with the visibility mutation.
-The Web Page manager reads only the selected slug. Its neutral Home/Library
-controls show the selected Page's confirmed count and a dash for the other Page;
-they do not prefetch a second private Page. Placements remain in saved order,
+The Web Page manager lists Home, Library, Search and Video and reads only the
+selected slug. Its controls show the selected Page's confirmed count and a dash
+for the other Pages; they do not prefetch private Pages. Search is a functional
+page with query-driven results and no configured placements. Video has exactly
+one Grid placement with its own configuration editor. Home and Library
+placements remain in saved order,
 with distinct Carousel/Grid/List icons, optional source text, Public/Hidden
 status, visible reference warnings and inline, copyable reference IDs. Both
 visibility directions require a confirmation that names the captured placement,
@@ -3131,6 +3134,30 @@ account/view, reference identity and attempt, so an older copy cannot mark a
 newly refreshed reference as copied. New Page-only copy is generated from the
 canonical locale sources into the release-packaged `web-admin` localization
 namespace; existing v1/v2 translation bundles remain unchanged.
+
+`GET /pages/videos/grid` returns `{ grid: { revision, defaultView, items } }`.
+Each item contains only `id`, `title`, `coverUrl` and `creator`; the complete
+eligible public-Video membership is bound into the revision. `PATCH` on the
+same path accepts `{ operationId, expectedRevision, defaultView, videoIds }`,
+where `defaultView` is `grid` or `immersive` and `videoIds` is the complete
+unique permutation of the reviewed Videos. It returns the same Grid snapshot
+and `receipt.operationId`. Complete-order editing admits at most 5,000 eligible
+Videos and refuses larger snapshots with `ADMIN_VIDEO_GRID_CAPACITY`; public
+browsing has no corresponding catalog-size cap. Only this PATCH route admits a
+192 KiB JSON body; other catalog writes retain their 64 KiB limit.
+An administrator edits one local draft, reviews its
+default display and complete order, then confirms the save. A stale revision
+requires a new review. Uncertain outcomes retain the frozen draft and original
+operation identity for exact retry through the existing administrator command
+channel. The first save atomically creates the `videos` Page, its single Grid
+placement and its `publicVideos` collection; GET does not initialize records.
+This source keeps automatic membership and uses stored references only for
+priority ordering. New eligible Videos append, unavailable Videos are excluded
+on every read, and normal content deletion removes stored references. No media
+or S3 object is created, replaced or deleted by a Grid configuration write.
+The dedicated editor does not use top-level placement visibility or reorder
+endpoints. Native Home and Library contracts remain unchanged.
+
 `POST /pages/:slug/reorder` saves an explicitly approved complete Page order as
 `{ itemIds, expectedRevision, operationId }` and returns the same allowlisted
 `page` snapshot plus `receipt.operationId`. It uses the existing actor-bound

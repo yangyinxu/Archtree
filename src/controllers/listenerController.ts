@@ -38,6 +38,7 @@ import { catalogCreditRollout } from '../config/catalogCreditRollout';
 import { isArtistFollowEnabled, supportsArtistFollowHome } from '../config/artistFollowRollout';
 import { socialRollout } from '../config/socialRollout';
 import { isMotionPreviewEnabled } from '../config/motionPreviewRollout';
+import { VideoPageError } from '../services/content/videoPageService';
 
 const setPublicCatalogCache = (res: Response) => {
     // Visibility can change without changing an asset URL or a viewer's account.
@@ -130,7 +131,7 @@ export const audioTrack = async (req: Request, res: Response) => {
     return res.status(200).json(result);
 };
 
-/** Returns one newest-first page of public Videos; only limit and a bounded ID cursor are accepted. */
+/** Returns configured public Videos with bounded snapshot cursors and explicit stale recovery. */
 export const videos = async (req: Request, res: Response) => {
     if (Object.keys(req.query).some((key) => key !== 'limit' && key !== 'cursor')) {
         return res.status(400).json({ code: 'invalid_video_query', message: 'Videos accept only limit and cursor.' });
@@ -143,10 +144,14 @@ export const videos = async (req: Request, res: Response) => {
         return res.status(400).json({ code: 'invalid_video_cursor', message: 'Videos cursor is invalid.' });
     }
     setPublicCatalogCache(res);
-    return res.status(200).json(await listListenerVideos(
-        rawLimit === undefined ? defaultListenerVideoPageSize : Number(rawLimit),
-        rawCursor
-    ));
+    try {
+        return res.status(200).json(await listListenerVideos(
+            rawLimit === undefined ? defaultListenerVideoPageSize : Number(rawLimit), rawCursor
+        ));
+    } catch (error) {
+        if (error instanceof VideoPageError) return res.status(error.statusCode).json({ code: error.code });
+        throw error;
+    }
 };
 
 /** Returns one strict, page-scoped Grid/List slice without exposing its definition document. */

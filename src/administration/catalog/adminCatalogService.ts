@@ -32,6 +32,7 @@ import { replaceCatalogCreditsWithinTransaction } from '../../services/catalog/c
 import { requireCatalogCreditWrites } from '../../config/catalogCreditRollout';
 import { pageItemIdentity } from '../../utils/pageItemIdentity';
 import { touchAvailablePageItemReferences } from '../../services/content/pageReferenceLifecycleService';
+import { systemAdminPage } from '../../services/content/videoPageService';
 import { parseImportDate, cleanText, uuid, type ImportDate } from '../import/adminImportContract';
 import { adminCatalogArtworkSource } from './adminCatalogArtworkSource';
 import { isMusicBrainzIdDuplicateKey, keepableMusicBrainzId, normalizeMusicBrainzId } from '../../utils/musicBrainzId';
@@ -342,6 +343,7 @@ export const pageSnapshot = async (page: any, session: ClientSession) => {
         references: items.map((item: any) => [item.itemId, item.name, item.sourceMode, item.referenceStatus]) }), items };
 };
 export const getAdminPage = (actor: string, slug: string) => withCurrentAdministrator(actor, async session => {
+    if (slug === 'videos' || slug === 'search') return { page: await systemAdminPage(slug, session) };
     if (!['home', 'library'].includes(slug)) return fail(400, 'ADMIN_CATALOG_INVALID_INPUT');
     const page = await getDb()!.collection('pages').findOne({ slug }, { session });
     if (!page) return fail(404, 'ADMIN_CATALOG_NOT_FOUND');

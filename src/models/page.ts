@@ -26,7 +26,7 @@ import {
 const collectionId = 'pages';
 const maximumPageItems = 100;
 
-// v1 page surfaces are fixed to Home and Library.
+// Legacy/native composition mutations remain Home/Library; Web system Videos use videoPageService.
 export type PageSlug = 'home' | 'library';
 
 export interface CarouselPageItemRef {
@@ -131,7 +131,7 @@ const mutatePageItems = async (
     return result;
 };
 
-// Page stores top-level composition for one screen (home/library).
+// Page manages legacy/native Home/Library composition; the Web Video singleton uses its dedicated service.
 export class Page {
     slug: PageSlug;
     title: string;

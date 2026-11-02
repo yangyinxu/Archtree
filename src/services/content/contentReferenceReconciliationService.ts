@@ -88,7 +88,7 @@ export const reconcileContentReferences = async () => {
             .sort({ _id: 1 }).limit(limit + 1).maxTimeMS(10_000).toArray(),
         db.collection('carousels').find().project({ mode: 1 })
             .sort({ _id: 1 }).limit(limit + 1).maxTimeMS(10_000).toArray(),
-        db.collection('contentCollections').find().project({ mode: 1, presentation: 1 })
+        db.collection('contentCollections').find().project({ mode: 1, presentation: 1, dynamicSource: 1 })
             .sort({ _id: 1 }).limit(limit + 1).maxTimeMS(10_000).toArray(),
         db.collection('pages').find().project({ slug: 1 })
             .sort({ _id: 1 }).limit(limit + 1).maxTimeMS(10_000).toArray(),
@@ -302,7 +302,7 @@ export const reconcileContentReferences = async () => {
             }
         }
     }
-    for (const collection of scannedContentCollections.filter(item => item.mode === 'manual')) {
+    for (const collection of scannedContentCollections.filter(item => item.mode === 'manual' || item.dynamicSource === 'publicVideos')) {
         for (const item of referencesFor(collectionItemReferences, collection._id)) {
             queueTypedContentReference(item?.contentType, item?.contentId);
         }
@@ -735,7 +735,7 @@ export const reconcileContentReferences = async () => {
         contentId: string;
         order: number | null;
     }> = [];
-    for (const collection of scannedContentCollections.filter(item => item.mode === 'manual')) {
+    for (const collection of scannedContentCollections.filter(item => item.mode === 'manual' || item.dynamicSource === 'publicVideos')) {
         for (const item of referencesFor(collectionItemReferences, collection._id)) {
             const contentExists = catalogContentExists(item?.contentType, item?.contentId);
             if (contentExists) continue;

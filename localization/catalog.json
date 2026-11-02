@@ -8093,6 +8093,20 @@
       ],
       "variables": {}
     },
+    "admin.pages.search": {
+      "description": "Administrator Page management: search.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.search_copy": {
+      "description": "Administrator Page management: search copy.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
     "admin.pages.subtitle": {
       "description": "Administrator Page placements: subtitle.",
       "delivery": [
@@ -8102,6 +8116,97 @@
     },
     "admin.pages.updating": {
       "description": "Administrator Page placements: updating.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.video_capacity": {
+      "description": "Administrator Video Grid complete-order capacity refusal.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.video_confirm_copy": {
+      "description": "Administrator Page management: video confirm copy.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.video_confirm_title": {
+      "description": "Administrator Page management: video confirm title.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.video_copy": {
+      "description": "Administrator Page management: video copy.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.video_default": {
+      "description": "Administrator Page management: video default.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.video_edit": {
+      "description": "Administrator Page management: video edit.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.video_grid": {
+      "description": "Administrator Page management: video grid.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.video_immersive": {
+      "description": "Administrator Page management: video immersive.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.video_saved": {
+      "description": "Administrator Page management: video saved.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.video_scope": {
+      "description": "Administrator Page management: video scope.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.video_stale": {
+      "description": "Administrator Page management: video stale.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.video_unknown": {
+      "description": "Administrator Page management: video unknown.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.pages.videos": {
+      "description": "Administrator Page management: videos.",
       "delivery": [
         "web-admin"
       ],

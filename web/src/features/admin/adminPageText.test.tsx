@@ -32,10 +32,10 @@ test('Page counts use the scoped English plural rules for zero, one and several 
 test('an active locale change replaces Page copy and its cached number format without remounting the hook', async () => {
   const { result, rerender } = await mountText();
   await waitFor(() => expect(result.current).toEqual(expect.any(Function)));
-  expect(result.current('pages.subtitle')).toBe('Manage placements on Home and Library.');
+  expect(result.current('pages.subtitle')).toBe('Manage the pages in listener navigation.');
   expect(result.current('pages.item_count', { count: 1 })).toBe('1 item');
   localization.locale = 'zh-Hans'; await act(async () => rerender());
-  await waitFor(() => expect(result.current('pages.subtitle')).toBe('管理首页与资料库的展示位置。'));
+  await waitFor(() => expect(result.current('pages.subtitle')).toBe('管理听众导航中的页面。'));
   expect(result.current('pages.item_count', { count: 1 })).toBe('1 个项目');
   expect(result.current('pages.confirm_stale')).toBe('此页面已更新。请关闭弹窗，刷新并重新核对后确认。');
   localization.locale = 'en-US'; await act(async () => rerender());
@@ -46,7 +46,7 @@ test('a locale without release-packaged Page copy uses the complete English fall
   localization.locale = 'fr-FR';
   const { result } = await mountText();
   await waitFor(() => expect(result.current).toEqual(expect.any(Function)));
-  expect(result.current('pages.subtitle')).toBe('Manage placements on Home and Library.');
+  expect(result.current('pages.subtitle')).toBe('Manage the pages in listener navigation.');
   expect(result.current('pages.item_count', { count: 1234 })).toBe('1,234 items');
   expect(result.current('pages.load_error')).toBe('Unable to load page items. Try again.');
 });

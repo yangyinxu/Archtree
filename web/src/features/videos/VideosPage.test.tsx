@@ -12,6 +12,8 @@
  *   - retains loaded Videos when loading more fails and retries the same cursor
  *   - rejects a malformed mixed Audio and Video response instead of showing Audio cards
  *   - preserves rendered Videos when refresh fails and explains how to retry
+ *   - uses the server default after the initial response while an explicit Grid preference wins
+ *   - a stale Video cursor offers an explicit restart from the configured first page
  * @end-catalog */
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -222,4 +224,35 @@ test('preserves rendered Videos when refresh fails and explains how to retry', a
   await user.click(screen.getByRole('button', { name: 'Try again' }));
   expect(await screen.findByRole('button', { name: /Lorem Video 2/ })).toBeInTheDocument();
   expect(screen.queryByRole('button', { name: /Lorem Video 1/ })).not.toBeInTheDocument();
+});
+
+test('uses the server default after the initial response while an explicit Grid preference wins', async () => {
+  videoResponses(() => json({ items: [video(1)], nextCursor: null, defaultView: 'immersive' }));
+  const first = renderVideos();
+  expect(await screen.findByRole('list', { name: 'Video previews' })).toBeInTheDocument();
+  expect(localStorage.getItem(videoBrowseViewKey)).toBeNull();
+  first.unmount();
+  localStorage.setItem(videoBrowseViewKey, 'grid');
+  videoResponses(() => json({ items: [video(1)], nextCursor: null, defaultView: 'immersive' }));
+  const { container } = renderVideos();
+  expect(await screen.findByRole('button', { name: /Play Lorem Video 1/ })).toBeInTheDocument();
+  expect(container.querySelector('[data-presentation="grid"]')).not.toBeNull();
+  expect(screen.queryByRole('list', { name: 'Video previews' })).not.toBeInTheDocument();
+});
+
+test('a stale Video cursor offers an explicit restart from the configured first page', async () => {
+  const user = userEvent.setup();
+  const reads = videoResponses(
+    () => json({ items: [video(1)], nextCursor: 'old-cursor' }),
+    () => json({ message: 'Changed', code: 'stale_video_cursor' }, 409),
+    () => json({ items: [video(2)], nextCursor: null })
+  );
+  renderVideos();
+  await user.click(await screen.findByRole('button', { name: 'Load more' }));
+  expect(await screen.findByRole('alert')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: /Play Lorem Video 1/ })).toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: 'Try again' }));
+  expect(await screen.findByRole('button', { name: /Play Lorem Video 2/ })).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /Play Lorem Video 1/ })).not.toBeInTheDocument();
+  expect(reads.map(path => new URL(path, 'https://example.invalid').searchParams.get('cursor'))).toEqual([null, 'old-cursor', null]);
 });

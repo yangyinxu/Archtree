@@ -10,7 +10,12 @@ test('Videos strips additive fields before returning public summaries to the cac
   expect(listenerVideosSchema.parse({
     items: [{ ...video, s3Key: 'private-storage-key', createdBy: 'private-owner' }],
     nextCursor: null, internalState: true
-  })).toEqual({ items: [video], nextCursor: null });
+  })).toEqual({ items: [video], nextCursor: null, defaultView: 'grid' });
+});
+
+test('Videos accepts the configured default display and rejects unsupported defaults', () => {
+  expect(listenerVideosSchema.parse({ items: [video], nextCursor: null, defaultView: 'immersive' }).defaultView).toBe('immersive');
+  expect(listenerVideosSchema.safeParse({ items: [video], nextCursor: null, defaultView: 'carousel' }).success).toBe(false);
 });
 
 test('Videos rejects Audio, repeated members, oversized pages, and an empty continuation', () => {

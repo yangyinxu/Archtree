@@ -3,8 +3,8 @@
  *   Functions: AdminPagesPage
  * Internal
  *   Types: PageSlug, PlacementTarget
- *   Functions: eligibleOrder, Pages, PageItems
- *   Constants: PageOrderList, PageOrderNotice, PageOrderApproval
+ *   Functions: loadPageOrder, eligibleOrder, Pages, PageItems
+ *   Constants: PageOrderList, PageOrderNotice, PageOrderApproval, AdminVideoGrid
  * @end-catalog */
 
 import { lazy, Suspense, useEffect, useId, useRef, useState } from 'react';
@@ -23,9 +23,11 @@ import { useAdminCommand } from './useAdminCommand';
 import shared from './adminStyles';
 import styles from './AdminPagesPage.module.css';
 
-const PageOrderList = lazy(() => import('./PageOrderList').then(module => ({ default: module.PageOrderList })));
-const PageOrderNotice = lazy(() => import('./PageOrderList').then(module => ({ default: module.PageOrderNotice })));
-const PageOrderApproval = lazy(() => import('./PageOrderList').then(module => ({ default: module.PageOrderApproval })));
+const loadPageOrder = () => import('./PageOrderList');
+const PageOrderList = lazy(() => loadPageOrder().then(module => ({ default: module.PageOrderList })));
+const PageOrderNotice = lazy(() => loadPageOrder().then(module => ({ default: module.PageOrderNotice })));
+const PageOrderApproval = lazy(() => loadPageOrder().then(module => ({ default: module.PageOrderApproval })));
+const AdminVideoGrid = lazy(() => import('./AdminVideoGrid'));
 
 type PageSlug = AdminPage['slug'];
 /** An ambiguous legacy identity cannot enter a local draft through either entry or refresh. */
@@ -52,6 +54,7 @@ function PageItems({ slug, onSelect }: { slug: PageSlug; onSelect: (value: PageS
   const [operationOrder, setOperationOrder] = useState(() => adminWorkspace.buffer<PageOrderReview>(orderKey) ?? null);
   const [draft, setDraft] = useState<PageOrderReview | null>(null), [orderConfirm, setOrderConfirm] = useState(false);
   const [dragging, setDragging] = useState(false), [saved, setSaved] = useState(false);
+  const [videoEditing, setVideoEditing] = useState(false);
   const orderAction = useRef<HTMLButtonElement>(null), orderRecovery = useRef<HTMLButtonElement>(null);
   const active = useRef(true), refreshAttempt = useRef(0);
   useEffect(() => { active.current = true; return () => { active.current = false; refreshAttempt.current++; }; }, []);
@@ -88,9 +91,11 @@ function PageItems({ slug, onSelect }: { slug: PageSlug; onSelect: (value: PageS
   const orderStale = Boolean(draft && (draft.revision !== query.data?.page.revision || orderFailure && command.error === 'conflict'));
   useEffect(() => { if (orderConfirm && orderStale) orderRecovery.current?.focus(); }, [orderConfirm, orderStale]);
   const page = query.data?.page;
-  const canOrder = Boolean(page && eligibleOrder(page));
+  const systemPage = slug === 'search' || slug === 'videos';
+  const pageTitle = (value: PageSlug) => t((value === 'home' || value === 'library' ? 'catalog.' : 'pages.') + value);
+  const canOrder = Boolean(!systemPage && page && eligibleOrder(page));
   // Several placements sharing one legacy identity keep the entry visible but disabled, with the reason.
-  const orderAmbiguous = Boolean(page && page.items.length > 1 && !canOrder), orderUnavailable = useId();
+  const orderAmbiguous = Boolean(!systemPage && page && page.items.length > 1 && !canOrder), orderUnavailable = useId();
   const presentation = { text: t, styles, renderIcon: (item: AdminPage['items'][number], size: number) => <PagePlacementTypeIcon item={item} size={size} /> };
   const changed = draft ? draft.items.filter((item, index) => draft.originalIds[index] !== item.itemId).length : 0;
   /** Begins from a confirmed snapshot, never an uncertain operation's frozen payload. */
@@ -118,7 +123,11 @@ function PageItems({ slug, onSelect }: { slug: PageSlug; onSelect: (value: PageS
   const conflictActions = <><button type="button" ref={orderRecovery} className={styles.refresh} disabled={query.isFetching} onClick={cancelOrder}>{t('pages.order_cancel')}</button>
     <button type="button" className={styles.refresh} disabled={query.isFetching} onClick={() => void restartOrder()}>{t('pages.order_restart')}</button></>;
   // A later refresh or write supersedes the previous save confirmation.
-  const refresh = <button type="button" className={styles.refresh} disabled={query.isFetching || Boolean(draft)} onClick={() => { setSaved(false); void query.refetch(); }}>
+  const refresh = <button type="button" className={styles.refresh} disabled={query.isFetching || Boolean(draft) || videoEditing} onClick={() => {
+    setSaved(false); void query.refetch();
+    if (slug === 'videos') void client.refetchQueries({ predicate: candidate => candidate.queryKey[0] === 'admin-imports'
+      && candidate.queryKey[1] === access.viewerId && candidate.queryKey.at(-1) === 'video-grid' });
+  }}>
     <RefreshCw size={17} aria-hidden className={query.isFetching && query.data ? styles.spinning : undefined} />
     {t(query.isFetching && query.data ? 'pages.refreshing' : 'common.refresh')}
   </button>;
@@ -127,8 +136,8 @@ function PageItems({ slug, onSelect }: { slug: PageSlug; onSelect: (value: PageS
 
   return <>
     <div className={styles.controls}><div className={styles.tabs}>
-      {(['home', 'library'] as const).map(value => <button type="button" key={value} className={styles.tab} aria-label={t('catalog.' + value)} aria-pressed={slug === value} disabled={Boolean(draft)} onClick={() => onSelect(value)}>
-        {t('catalog.' + value)}<span aria-hidden className={styles.count}>{slug === value && query.data ? query.data.page.items.length : '—'}</span>
+      {(['home', 'library', 'search', 'videos'] as const).map(value => <button type="button" key={value} className={styles.tab} aria-label={pageTitle(value)} aria-pressed={slug === value} disabled={Boolean(draft) || videoEditing} onClick={() => onSelect(value)}>
+        {pageTitle(value)}<span aria-hidden className={styles.count}>{slug === value && query.data ? query.data.page.items.length : '—'}</span>
       </button>)}
     </div><div className={styles.controlActions}>
       {!orderFailure && !(operationOrder && command.intent && !draft) && command.error !== 'conflict' && refresh}
@@ -137,7 +146,7 @@ function PageItems({ slug, onSelect }: { slug: PageSlug; onSelect: (value: PageS
         : !draft && (canOrder || orderAmbiguous) && <button type="button" ref={orderAction} className={styles.refresh} aria-describedby={orderAmbiguous ? orderUnavailable : undefined}
           disabled={!canOrder || locked || query.isFetching || orderFailure || !access.catalogEditing} onClick={() => { if (page) beginOrder(page); }}>{t('pages.order_adjust')}</button>}
     </div></div>
-    <div className={styles.overview}><h2>{draft ? t('pages.order_heading', { count: changed }) : <>{t('catalog.' + slug)}{query.data && <> · {t('pages.item_count', { count: query.data.page.items.length })}</>}</>}</h2><p>{t(draft ? 'pages.order_hint' : 'pages.order')}</p></div>
+    <div className={styles.overview}><h2>{draft ? t('pages.order_heading', { count: changed }) : <>{pageTitle(slug)}{query.data && slug !== 'search' && <> · {t('pages.item_count', { count: query.data.page.items.length })}</>}</>}</h2>{!systemPage && <p>{t(draft ? 'pages.order_hint' : 'pages.order')}</p>}</div>
     {!draft && orderAmbiguous && <p id={orderUnavailable} className={styles.refreshStatus}>{t('pages.order_identity')}</p>}
     {saved && <p className={styles.refreshStatus} role="status">{t('pages.order_saved')}</p>}
     {draft && orderStale && !orderConfirm && !orderFailure && <div className={styles.notice} role="alert"><p>{t('pages.order_stale')}</p><div className={styles.noticeActions}>{conflictActions}</div></div>}
@@ -155,15 +164,20 @@ function PageItems({ slug, onSelect }: { slug: PageSlug; onSelect: (value: PageS
       {command.intent && <button type="button" className={styles.refresh} disabled={command.running} onClick={command.command.retry}>{t('common.retry_operation')}</button>}
       {command.error === 'conflict' && refresh}
     </div>}
-    {draft ? <Suspense fallback={<p className={styles.state} role="status">{t('common.loading')}</p>}><PageOrderList {...presentation} renderVisibility={item => <PagePlacementVisibility item={item} />} renderMetadata={item => <><PagePlacementMetadata item={item} /><PageReferenceWarning item={item} /></>} review={draft} disabled={locked || orderStale || orderConfirm} onDragging={setDragging} onChange={items => setDraft(current => current ? { ...current, items } : current)} /></Suspense> : query.data && (query.data.page.items.length ? <ol className={styles.list} aria-label={t('pages.order_current')}>
+    {slug === 'search' && query.data && <p className={styles.state}>{t('pages.search_copy')}</p>}
+    {slug === 'videos' && query.data?.page.items[0] && <Suspense fallback={<p role="status">{t('common.loading')}</p>}><AdminVideoGrid
+      styles={styles} gridIcon={size => <PagePlacementTypeIcon item={query.data.page.items[0]} size={size} />}
+      metadata={<PagePlacementMetadata item={query.data.page.items[0]} />} visibility={<PagePlacementVisibility item={query.data.page.items[0]} />}
+      onEditing={setVideoEditing} /></Suspense>}
+    {!systemPage && (draft ? <Suspense fallback={<p className={styles.state} role="status">{t('common.loading')}</p>}><PageOrderList {...presentation} renderVisibility={item => <PagePlacementVisibility item={item} />} renderMetadata={item => <><PagePlacementMetadata item={item} /><PageReferenceWarning item={item} /></>} review={draft} disabled={locked || orderStale || orderConfirm} onDragging={setDragging} onChange={items => setDraft(current => current ? { ...current, items } : current)} /></Suspense> : query.data && (query.data.page.items.length ? <ol className={styles.list} aria-label={t('pages.order_current')}>
       {query.data.page.items.map((item, index) => <PagePlacementRow key={orderAmbiguous ? item.itemId + ':' + index : item.itemId} item={item} index={index} locked={locked || orderFailure}
         pending={command.running && operationTarget?.item.itemId === item.itemId}
         onChange={(opener, fallback) => {
           returnFocus.current = opener; pendingFocus.current = fallback;
           setTarget({ item, index, visibility: item.visibility === 'public' ? 'hidden' : 'public', revision: query.data.page.revision });
         }} />)}
-    </ol> : <p className={styles.state}>{t('pages.empty')}</p>)}
-    <footer className={styles.footer}><div><p>{t(draft || operationOrder ? 'pages.order_scope' : 'pages.scope')}</p><p>{t('pages.confirm_hint')}</p></div></footer>
+    </ol> : <p className={styles.state}>{t('pages.empty')}</p>))}
+    {!systemPage && <footer className={styles.footer}><div><p>{t(draft || operationOrder ? 'pages.order_scope' : 'pages.scope')}</p><p>{t('pages.confirm_hint')}</p></div></footer>}
     {draft && orderConfirm && <Suspense fallback={<p role="status">{t('common.loading')}</p>}><PageOrderApproval {...presentation} review={draft} page={t('catalog.' + slug)} stale={orderStale}
       initialFocusRef={cancel} returnFocusRef={orderAction} closeDisabled={command.running} onClose={() => setOrderConfirm(false)}
       actions={orderStale ? conflictActions : <>

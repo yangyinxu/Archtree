@@ -8,8 +8,10 @@
  *   - Videos pages continue from the issued cursor without repeating items
  *   - Videos rejects unknown parameters, malformed limits, and malformed cursors
  *   - Videos rechecks inherited visibility and source readiness on every continuation
- *   - inserting a newer Video never shifts or repeats an in-progress traversal
+ *   - inserting a newer Video invalidates an in-progress traversal explicitly
  *   - Videos bounds default and requested pages while excluding malformed persisted identities
+ *   - Video pagination scans only ordering fields across the catalog and bounds metadata hydration to its requested page
+ *   - a Video hidden between membership scanning and bounded hydration fails explicitly without returning a shifted page
  * @end-catalog */
 
 import assert from 'node:assert/strict';
@@ -148,6 +150,7 @@ test('Videos lists only ready public Video MediaTracks newest first with safe DT
     assert.equal(response.headers.get('cache-control'), 'private, no-store');
     assert.deepEqual(body.items.map((item: any) => item.title), ['Newest Video', 'Middle Video', 'Oldest Video']);
     assert.equal(body.nextCursor, null);
+    assert.equal(body.defaultView, 'grid');
     assert.deepEqual(body.items[0], {
         contentType: 'audioTrack',
         id: ids.newestVideo.toString(),
@@ -167,7 +170,7 @@ test('Videos pages continue from the issued cursor without repeating items', asy
     const first = await readVideos('?limit=2');
     assert.equal(first.response.status, 200);
     assert.deepEqual(first.body.items.map((item: any) => item.title), ['Newest Video', 'Middle Video']);
-    assert.equal(first.body.nextCursor, ids.middleVideo.toString());
+    assert.match(first.body.nextCursor, /^vg1\./);
 
     const second = await readVideos(`?limit=2&cursor=${first.body.nextCursor}`);
     assert.equal(second.response.status, 200);
@@ -204,19 +207,21 @@ test('Videos rechecks inherited visibility and source readiness on every continu
         await db.collection('audioTracks').updateOne({ _id: ids.middleVideo }, { $set: { uploadStatus: 'ready' } });
     });
     const first = await readVideos('?limit=1');
-    assert.equal(first.body.nextCursor, ids.newestVideo.toString());
+    assert.match(first.body.nextCursor, /^vg1\./);
 
     await db.collection('albums').updateOne({ _id: ids.album }, { $set: { visibility: 'hidden' } });
     const hidden = await readVideos(`?limit=1&cursor=${first.body.nextCursor}`);
-    assert.deepEqual(hidden.body.items.map((item: any) => item.title), ['Middle Video']);
-    assert.equal(hidden.body.nextCursor, null);
+    assert.equal(hidden.response.status, 409);
+    assert.equal(hidden.body.code, 'stale_video_cursor');
+    assert.deepEqual((await readVideos()).body.items.map((item: any) => item.title), ['Middle Video']);
 
     await db.collection('audioTracks').updateOne({ _id: ids.middleVideo }, { $set: { uploadStatus: 'deleting' } });
     const deleting = await readVideos(`?cursor=${first.body.nextCursor}`);
-    assert.deepEqual(deleting.body, { items: [], nextCursor: null });
+    assert.equal(deleting.response.status, 409);
+    assert.deepEqual((await readVideos()).body, { items: [], nextCursor: null, defaultView: 'grid' });
 });
 
-test('inserting a newer Video never shifts or repeats an in-progress traversal', async (t) => {
+test('inserting a newer Video invalidates an in-progress traversal explicitly', async (t) => {
     const collection = getDb()!.collection('audioTracks');
     const first = await readVideos('?limit=2');
     const addedId = new ObjectId();
@@ -224,8 +229,8 @@ test('inserting a newer Video never shifts or repeats an in-progress traversal',
     await collection.insertOne(videoTrack(addedId, 'Added After First Page'));
 
     const next = await readVideos(`?limit=2&cursor=${first.body.nextCursor}`);
-    assert.deepEqual(next.body.items.map((item: any) => item.title), ['Oldest Video']);
-    assert.equal(next.body.nextCursor, null);
+    assert.equal(next.response.status, 409);
+    assert.equal(next.body.code, 'stale_video_cursor');
     const reloaded = await readVideos('?limit=1');
     assert.equal(reloaded.body.items[0].id, addedId.toString());
 });
@@ -255,4 +260,56 @@ test('Videos bounds default and requested pages while excluding malformed persis
     assert.equal(combined.length, 55);
     assert.equal(new Set(combined.map((item: any) => item.id)).size, 55);
     assert.equal(combined.some((item: any) => item.title === 'Malformed Identity'), false);
+});
+
+test('Video pagination scans only ordering fields across the catalog and bounds metadata hydration to its requested page', async (t) => {
+    const database = getDb()!, original = database.collection;
+    const pipelines: any[][] = [];
+    (database as any).collection = function(name: string, ...args: any[]) {
+        const target = (original as any).call(this, name, ...args);
+        if (name === 'audioTracks') {
+            const aggregate = target.aggregate.bind(target);
+            target.aggregate = (pipeline: any[], options: any) => { pipelines.push(pipeline); return aggregate(pipeline, options); };
+        }
+        return target;
+    };
+    t.after(() => { database.collection = original; });
+    const result = await readVideos('?limit=2'); assert.equal(result.response.status, 200);
+    assert.equal(pipelines.length, 2);
+    assert.deepEqual(pipelines[0].at(-1), { $project: { _id: 1, publicationUpdatedAt: 1, createdAt: 1 } });
+    const selectedIds = pipelines[1][0].$match.$and[0]._id.$in;
+    assert.equal(selectedIds.length, 2);
+    assert.ok(pipelines[1].some(stage => stage.$limit === 2));
+    assert.equal(pipelines[1].at(-1).$project.title, 1);
+});
+
+test('a Video hidden between membership scanning and bounded hydration fails explicitly without returning a shifted page', async (t) => {
+    const database = getDb()!, original = database.collection;
+    let changed = false;
+    (database as any).collection = function(name: string, ...args: any[]) {
+        const target = (original as any).call(this, name, ...args);
+        if (name === 'audioTracks') {
+            const aggregate = target.aggregate.bind(target);
+            target.aggregate = (pipeline: any[], options: any) => {
+                const cursor = aggregate(pipeline, options);
+                if (!changed && pipeline.at(-1)?.$project?.title === undefined) {
+                    const toArray = cursor.toArray.bind(cursor);
+                    cursor.toArray = async () => {
+                        const found = await toArray(); changed = true;
+                        await original.call(database, 'audioTracks').updateOne({ _id: ids.newestVideo }, { $set: { visibility: 'hidden' } });
+                        return found;
+                    };
+                }
+                return cursor;
+            };
+        }
+        return target;
+    };
+    t.after(async () => {
+        database.collection = original;
+        await database.collection('audioTracks').updateOne({ _id: ids.newestVideo }, { $unset: { visibility: '' } });
+    });
+    const result = await readVideos('?limit=2');
+    assert.equal(changed, true); assert.equal(result.response.status, 409);
+    assert.equal(result.body.code, 'stale_video_cursor');
 });

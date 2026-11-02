@@ -7,10 +7,11 @@
  * @end-catalog */
 
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
-import { lazy, Suspense, useMemo } from 'react';
+import { lazy, Suspense, useMemo, useState } from 'react';
 import { Grid2X2, PanelsTopLeft } from 'lucide-react';
 
 import { getListenerVideos, listenerVideosQueryKey } from '../../api/listenerVideos';
+import { ApiError } from '../../api/client';
 import { browserSessionQuery } from '../../api/session';
 // The Grid reuses PageSection, not ContentCard alone, so the shared card chunk is not split for this route.
 import { PageSection } from '../../components/PageSection';
@@ -34,14 +35,17 @@ const VideoPreviewGrid = lazy(() => import('./VideoPreviewGrid').catch(() => ({ 
 export const VideosPage = () => {
   const { t, locale } = useLocalization();
   const text = videoTextFor(locale, formatLocalizedMessage);
-  const [view, chooseView] = useVideosView();
+  const [restartGeneration, setRestartGeneration] = useState(0);
   const viewerId = useQuery(browserSessionQuery()).data?.user.id;
   const videos = useInfiniteQuery({
-    queryKey: listenerVideosQueryKey,
+    queryKey: restartGeneration ? [...listenerVideosQueryKey, restartGeneration] : listenerVideosQueryKey,
     queryFn: ({ pageParam, signal }) => getListenerVideos(pageParam, signal),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined
   });
+  const [view, chooseView] = useVideosView(videos.data?.pages[0]?.defaultView);
+  // A changed order or visibility snapshot cannot continue through its old cursor.
+  const restartRequired = videos.error instanceof ApiError && videos.error.status === 409;
   const title = t('common.label.video');
   const items = useMemo(() => videos.data?.pages.flatMap((page) => page.items) ?? [], [videos.data]);
 
@@ -100,10 +104,10 @@ export const VideosPage = () => {
               <button
                 className={`${pageStyles.button} ${pageStyles.buttonSecondary}`}
                 disabled={videos.isFetchingNextPage}
-                onClick={() => { void videos.fetchNextPage(); }}
+                onClick={() => { if (restartRequired) setRestartGeneration(value => value + 1); else void videos.fetchNextPage(); }}
                 type="button"
               >
-                {videos.isFetchingNextPage ? t('common.state.loading_more') : t('common.action.load_more')}
+                {videos.isFetchingNextPage ? t('common.state.loading_more') : restartRequired ? t('common.action.try_again') : t('common.action.load_more')}
               </button>
             </div>
           )}
