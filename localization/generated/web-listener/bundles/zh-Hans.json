@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "locale": "zh-Hans",
+  "revision": "sha256-qvY1W7-gcWO8oUqv2baLtTmmcl4NiOucVsyz20w4n4Q",
+  "messages": {
+    "videos.card.fill": "铺满卡片",
+    "videos.card.frame_position": "调整构图",
+    "videos.card.frame_position_label": "{title}的横向构图位置",
+    "videos.card.full_frame": "显示完整画面",
+    "videos.card.left": "左侧",
+    "videos.card.options": "{title}的操作",
+    "videos.card.right": "右侧",
+    "videos.preview.action": "预览{title}",
+    "videos.preview.active": "预览中",
+    "videos.preview.label": "预览",
+    "videos.preview.list": "竖版视频预览",
+    "videos.preview.stop": "停止预览{title}",
+    "videos.view.grid": "网格",
+    "videos.view.immersive": "沉浸预览",
+    "videos.view.label": "视频浏览方式"
+  }
+}

@@ -1,0 +1,95 @@
+import { useCallback, useEffect, useRef, useState } from 'react';
+
+import type { VideoPreviewIntent } from '../../components/CardVideoPreview';
+
+type PreviewRequest = { source: string; intent: VideoPreviewIntent };
+
+/**
+ * Owns only immersive-card intent. Media policy, one-preview ownership and failure memory remain
+ * in the lazy CardVideoPreview, so ordinary listener cards keep their existing small hover hook.
+ */
+export const useVideoCardPreview = (source: string | null) => {
+  const [request, setRequest] = useState<PreviewRequest | null>(null);
+  const sourceRef = useRef(source);
+  const requestRef = useRef(request);
+  const timer = useRef(0);
+  sourceRef.current = source;
+  requestRef.current = request;
+
+  const stop = useCallback(() => {
+    window.clearTimeout(timer.current);
+    setRequest(null);
+  }, []);
+
+  const toggle = useCallback(() => {
+    window.clearTimeout(timer.current);
+    const currentSource = sourceRef.current;
+    if (!currentSource || document.visibilityState === 'hidden') return;
+    setRequest((current) => current?.source === currentSource
+      ? null
+      : { source: currentSource, intent: 'explicit' });
+  }, []);
+
+  useEffect(() => {
+    stop();
+    return stop;
+  }, [source, stop]);
+
+  /** Native boundaries exclude portaled dialogs and preserve explicit touch previews after a tap. */
+  const cardRef = useCallback((element: HTMLElement | null) => {
+    if (!element) return undefined;
+    const enter = (event: PointerEvent) => {
+      if (event.pointerType !== 'mouse' || requestRef.current?.intent === 'explicit') return;
+      const enteredSource = sourceRef.current;
+      if (!enteredSource || document.visibilityState === 'hidden') return;
+      window.clearTimeout(timer.current);
+      timer.current = window.setTimeout(() => {
+        if (sourceRef.current === enteredSource && document.visibilityState !== 'hidden') {
+          setRequest({ source: enteredSource, intent: 'hover' });
+        }
+      }, 500);
+    };
+    const leave = (event: PointerEvent) => {
+      if (event.pointerType === 'touch' && requestRef.current?.intent === 'explicit') return;
+      stop();
+    };
+    const press = (event: PointerEvent) => {
+      if (!(event.target instanceof Element) || !event.target.closest('[data-preview-trigger]')) stop();
+    };
+    const focusOut = (event: FocusEvent) => {
+      if (!(event.relatedTarget instanceof Node) || !element.contains(event.relatedTarget)) stop();
+    };
+    const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') stop(); };
+    const hidden = () => { if (document.visibilityState === 'hidden') stop(); };
+    const observer = typeof IntersectionObserver === 'function'
+      ? new IntersectionObserver(([entry]) => {
+        if (!entry.isIntersecting || entry.intersectionRatio < 0.25) stop();
+      }, { threshold: 0.25 })
+      : null;
+    observer?.observe(element);
+    element.addEventListener('pointerenter', enter);
+    element.addEventListener('pointerleave', leave);
+    element.addEventListener('pointerdown', press);
+    element.addEventListener('focusout', focusOut);
+    document.addEventListener('keydown', escape);
+    document.addEventListener('visibilitychange', hidden);
+    return () => {
+      window.clearTimeout(timer.current);
+      observer?.disconnect();
+      element.removeEventListener('pointerenter', enter);
+      element.removeEventListener('pointerleave', leave);
+      element.removeEventListener('pointerdown', press);
+      element.removeEventListener('focusout', focusOut);
+      document.removeEventListener('keydown', escape);
+      document.removeEventListener('visibilitychange', hidden);
+    };
+  }, [stop]);
+
+  return {
+    active: Boolean(source) && request?.source === source,
+    intent: request?.intent ?? 'hover',
+    cardRef,
+    stop,
+    toggle
+  };
+};

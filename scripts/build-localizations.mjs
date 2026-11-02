@@ -23,7 +23,8 @@ const supportedDeliveryTargets = new Set([
   'runtime',
   'ios-system',
   'android-system',
-  'web-admin'
+  'web-admin',
+  'web-listener'
 ]);
 const supportedVariableTypes = new Set(['string', 'number', 'date', 'time']);
 const maxLocaleBytes = 256 * 1024;
@@ -203,6 +204,9 @@ const validateCatalog = (catalog) => {
     if (entry.delivery.includes('web-admin') && !key.startsWith('admin.')) {
       throw new Error(`catalog entry ${key} must use the admin namespace for web-admin delivery.`);
     }
+    if (entry.delivery.includes('web-listener') && !key.startsWith('videos.')) {
+      throw new Error(`catalog entry ${key} must use the videos namespace for web-listener delivery.`);
+    }
     const variables = assertRecord(entry.variables, `catalog entry ${key} variables`);
     const variableNames = Object.keys(variables);
     assertSorted(variableNames, `catalog entry ${key} variables`);
@@ -281,7 +285,7 @@ const bundleFor = (locale, messages, delivery) => {
   return bundle;
 };
 
-/** Validates canonical sources and returns deterministic runtime artifacts. */
+/** Validates canonical sources and returns deterministic runtime and release-packaged artifacts. */
 export const buildLocalizationArtifacts = async (root = repositoryRoot) => {
   const localizationRoot = path.join(root, 'localization');
   const catalog = await readCanonicalJson(
@@ -302,6 +306,7 @@ export const buildLocalizationArtifacts = async (root = repositoryRoot) => {
 
   const bundles = new Map();
   const webAdminBundles = new Map();
+  const webListenerBundles = new Map();
   for (const [index, filename] of filenames.entries()) {
     const locale = sourceLocales[index];
     const messages = validateLocaleMessages(
@@ -318,6 +323,12 @@ export const buildLocalizationArtifacts = async (root = repositoryRoot) => {
       .map((key) => [key, messages[key]]));
     if (Object.keys(webAdminMessages).length) {
       webAdminBundles.set(locale, bundleFor(locale, webAdminMessages, 'web-admin'));
+    }
+    const webListenerMessages = Object.fromEntries(Object.keys(messages)
+      .filter((key) => catalogMessages[key].delivery.includes('web-listener'))
+      .map((key) => [key, messages[key]]));
+    if (Object.keys(webListenerMessages).length) {
+      webListenerBundles.set(locale, bundleFor(locale, webListenerMessages, 'web-listener'));
     }
   }
 
@@ -345,6 +356,9 @@ export const buildLocalizationArtifacts = async (root = repositoryRoot) => {
     legacy: { manifest: manifestFor(legacyBundles), bundles: legacyBundles },
     webAdmin: webAdminBundles.size
       ? { manifest: manifestFor(webAdminBundles), bundles: webAdminBundles }
+      : undefined,
+    webListener: webListenerBundles.size
+      ? { manifest: manifestFor(webListenerBundles), bundles: webListenerBundles }
       : undefined
   };
 };
@@ -361,7 +375,8 @@ const expectedGeneratedFiles = (artifacts, root) => {
   const groups = [
     [generatedRoot, artifacts],
     [path.join(generatedRoot, 'legacy'), artifacts.legacy],
-    [path.join(generatedRoot, 'web-admin'), artifacts.webAdmin]
+    [path.join(generatedRoot, 'web-admin'), artifacts.webAdmin],
+    [path.join(generatedRoot, 'web-listener'), artifacts.webListener]
   ];
   return new Map(groups.flatMap(([directory, representation]) => representation ? [
     [path.join(directory, 'manifest.json'), canonicalJson(representation.manifest)],
@@ -385,7 +400,7 @@ const optionalDirectoryEntries = async (directory) => {
 const managedGeneratedFiles = async (root) => {
   const generatedRoot = path.join(root, 'localization', 'generated');
   const files = [];
-  for (const directory of [generatedRoot, path.join(generatedRoot, 'legacy'), path.join(generatedRoot, 'web-admin')]) {
+  for (const directory of [generatedRoot, path.join(generatedRoot, 'legacy'), path.join(generatedRoot, 'web-admin'), path.join(generatedRoot, 'web-listener')]) {
     if ((await optionalDirectoryEntries(directory)).includes('manifest.json')) files.push(path.join(directory, 'manifest.json'));
     const bundleRoot = path.join(directory, 'bundles');
     for (const filename of await optionalDirectoryEntries(bundleRoot)) {

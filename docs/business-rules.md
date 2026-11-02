@@ -1228,6 +1228,9 @@ The wire protocol and operational bounds are documented in
   session, remote localization request, writable cache, or prior launch. A raw
   localization key, missing-variable marker, or blank translation is never
   listener-facing fallback copy.
+- Web-only feature copy packaged with its page follows the active application
+  language and includes readable packaged `en-US` fallback. It does not require
+  a remote translation request or writable cache and changes with a Web release.
 - Startup uses the valid last-known-good bundle for the resolved language, or
   packaged `en-US` when no such bundle exists. Every client checks for a newer
   published translation in the background on cold launch and does not block
@@ -1517,10 +1520,15 @@ The wire protocol and operational bounds are documented in
   Shuffle/Repeat state, or system media controls, and never records Recently
   Played, listening status, telemetry, or social activity. Only one card
   previews at a time; leaving the card, hiding the page, or the MediaTrack
-  becoming current playback stops it and releases its request. Previews are
-  skipped with Reduce Motion, forced colors, Save-Data, slow connections, and
-  touch or hover-less pointers, and a failed preview is not retried in that
-  page session. While motion previews are enabled, the card reads only the
+  becoming current playback stops it and releases its request. Automatic
+  previews are skipped with Reduce Motion, forced colors, Save-Data, slow
+  connections, and touch or hover-less pointers. An immersive Video card also
+  offers an explicit muted Preview toggle for pointer, keyboard, and touch
+  users, including listeners who prefer Reduce Motion. Explicit previews still
+  respect forced colors, Save-Data, slow connections, and the same visibility,
+  lifecycle, and single-preview limits. Escape or changing the Video browsing
+  view stops any preview. A failed preview is not retried in that page session.
+  While motion previews are enabled, the card reads only the
   MediaTrack's motion preview, loops that whole clip from its start, and a
   Video without one keeps its artwork; while they are disabled, the card reads
   the public stream, so its one request shares the listener's media delivery
@@ -1528,11 +1536,20 @@ The wire protocol and operational bounds are documented in
   enabled shows no preview.
 - The Web listener's primary navigation includes a Video page beside Home and
   Library. It is filled automatically, not curated: it lists every ready,
-  published, publicly visible Video MediaTrack, newest first, as a Grid of
-  16:9 cards loaded a page at a time. Audio MediaTracks never appear there, and
-  a Video leaves it as soon as it stops being ready, published, or public. Its
-  cards play, pause, and preview exactly like other Video MediaTrack cards.
-  Native clients have no Video page yet.
+  published, publicly visible Video MediaTrack, newest first, a page at a time.
+  Its default Grid uses 16:9 cards; listeners may select an immersive view of
+  approximately 10:13 cards showing the same Videos, with overlaid artwork,
+  title, attribution, and separate Preview, Save, options, and Play or Pause
+  controls. The selected view is a device-local presentation preference,
+  independent of the account. Switching views never changes the shared player,
+  queue, elapsed time, or playback activity. An immersive card's full-frame,
+  fill, and horizontal framing controls change only that card's local display;
+  they never edit media, artwork, metadata, or the stored preview. A missing or
+  unavailable preview keeps the artwork and does not prevent normal playback.
+  Audio MediaTracks never appear there, and a Video leaves it as soon as it
+  stops being ready, published, or public. Its cards use the same shared player
+  and normal standalone Play and Pause policy as other Video MediaTrack cards.
+  Native clients have no Video page or immersive card preview yet.
 - A Web MediaTrack card whose MediaTrack is currently playing offers Pause in
   place of Play. Pause keeps the queue and elapsed time and adds no Recently
   Played activity. Once paused, the card's Play action launches that MediaTrack

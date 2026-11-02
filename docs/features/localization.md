@@ -110,6 +110,11 @@ localization/
       bundles/
         en-US.json
         zh-Hans.json
+    web-listener/
+      manifest.json
+      bundles/
+        en-US.json
+        zh-Hans.json
 ```
 
 `catalog.json` contains translator context and the variable contract. Locale
@@ -202,7 +207,7 @@ translators one authoritative definition for every message:
 ```
 
 Every catalog entry declares one or more delivery targets: `runtime`,
-`web-admin`, `ios-system`, or `android-system`. Delivery metadata controls
+`web-admin`, `web-listener`, `ios-system`, or `android-system`. Delivery metadata controls
 generated output; it does not create another translation value. A shared platform-owned message
 may target both native systems. System-delivered messages do not accept runtime
 variables unless the target platform resource format explicitly supports and
@@ -212,8 +217,10 @@ The authoring catalog is bounded to 4,000 messages independently of each
 delivery representation. `runtime` retains the 2,000-message v2 limit, while
 the legacy listener projection retains its 1,000-message limit. `web-admin`
 accepts only `admin.*` keys and has its own 2,000-message and 256-KiB bundle
-limits. Assigning new Web-only administrator copy to this target does not add
-it to an existing public runtime bundle. Never move an already published
+limits. The release-packaged `web-listener` target initially accepts only
+`videos.*` keys and has the same independent 2,000-message and 256-KiB limits.
+Assigning new Web-only copy to either scoped target does not add it to an
+existing public runtime bundle. Never move an already published
 `runtime` key to another target while a supported client may still package it.
 
 The initial variable types are `string`, `number`, `date`, and `time`. Add a
@@ -294,6 +301,19 @@ delivery groups. Native synchronization continues to copy only the runtime
 manifest and `en-US` fallback, so a change confined to scoped copy leaves those
 files unchanged.
 
+New Video browsing copy uses `web-listener` delivery. The generator writes its
+manifest and complete locale packs under `localization/generated/web-listener/`.
+The lazy Video feature packages these small reviewed locale maps with its route,
+selects the active application locale, and falls back to packaged `en-US` for
+an unsupported locale. Its reader shares the plain ICU formatter and named
+variables with runtime copy without adding keys to v1, v2, or the native
+fallbacks. It needs no remote localization request, additional startup chunk,
+or writable cache. Its copy and style dictionaries use explicit shared release
+chunks so optional Video controls never import the parent page's dependency graph.
+Existing runtime keys retain their current delivery and
+values. An absent `web-listener` group produces no files, and generation/checking
+removes or rejects its retired and stale files just like the other groups.
+
 Until migration is complete, existing native resource systems remain valid:
 
 - iOS continues using `Localizable.xcstrings` for views not yet migrated.
@@ -316,12 +336,15 @@ network-delivered file responsible for text the operating system may need
 before either app has launched without creating a second translation source.
 
 For the current sibling-repository layout, maintainers run
-`npm run localization:sync-native` after editing canonical translations. The
+`npm run localization:sync-native` after editing canonical runtime translations. The
 command first regenerates reviewed server artifacts, then copies the manifest
 and complete `en-US` runtime fallback into both native projects. Custom checkout
 locations use `-- --ios-root <path> --android-root <path>`. Platform-owned
 String Catalog and Android resource outputs remain generated only from keys
 assigned to their corresponding delivery targets.
+A change confined to scoped Web copy needs no native synchronization when the
+existing runtime manifest and bundles remain byte-identical; verify that
+boundary before handing off the change.
 
 ## Language preference and matching
 
@@ -426,8 +449,8 @@ The existing v1 endpoints serve that independently revised listener namespace
 with a 1,000-message bound. This preserves existing native readers without
 changing their accepted schema or silently discarding keys. Native clients that
 consume the complete catalog use v2 and package the full generated fallback.
-The Web-only `web-admin` artifacts are release assets, not a new API namespace;
-they are never included in the v1 or v2 response.
+The Web-only `web-admin` and `web-listener` artifacts are release assets, not
+new API namespaces; they are never included in the v1 or v2 response.
 
 The manifest response is intentionally small:
 

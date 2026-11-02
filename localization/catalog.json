@@ -16341,6 +16341,119 @@
       "variables": {
         "title": "string"
       }
+    },
+    "videos.card.fill": {
+      "description": "Video card option that cover-fits media to fill the portrait card.",
+      "delivery": [
+        "web-listener"
+      ],
+      "variables": {}
+    },
+    "videos.card.frame_position": {
+      "description": "Visible label for the immersive Video card horizontal crop-position control.",
+      "delivery": [
+        "web-listener"
+      ],
+      "variables": {}
+    },
+    "videos.card.frame_position_label": {
+      "description": "Accessible label for the horizontal crop-position slider of a named Video card.",
+      "delivery": [
+        "web-listener"
+      ],
+      "variables": {
+        "title": "string"
+      }
+    },
+    "videos.card.full_frame": {
+      "description": "Video card option that contains the complete media frame within the portrait card.",
+      "delivery": [
+        "web-listener"
+      ],
+      "variables": {}
+    },
+    "videos.card.left": {
+      "description": "Left endpoint of the immersive Video card crop-position control.",
+      "delivery": [
+        "web-listener"
+      ],
+      "variables": {}
+    },
+    "videos.card.options": {
+      "description": "Accessible disclosure label for the local presentation options of a named Video card.",
+      "delivery": [
+        "web-listener"
+      ],
+      "variables": {
+        "title": "string"
+      }
+    },
+    "videos.card.right": {
+      "description": "Right endpoint of the immersive Video card crop-position control.",
+      "delivery": [
+        "web-listener"
+      ],
+      "variables": {}
+    },
+    "videos.preview.action": {
+      "description": "Accessible action that starts a named Video card muted decorative preview.",
+      "delivery": [
+        "web-listener"
+      ],
+      "variables": {
+        "title": "string"
+      }
+    },
+    "videos.preview.active": {
+      "description": "Visible action while an immersive Video card muted decorative preview is active.",
+      "delivery": [
+        "web-listener"
+      ],
+      "variables": {}
+    },
+    "videos.preview.label": {
+      "description": "Visible action that starts an immersive Video card muted decorative preview.",
+      "delivery": [
+        "web-listener"
+      ],
+      "variables": {}
+    },
+    "videos.preview.list": {
+      "description": "Accessible label for the immersive Video card collection.",
+      "delivery": [
+        "web-listener"
+      ],
+      "variables": {}
+    },
+    "videos.preview.stop": {
+      "description": "Accessible action that stops a named Video card muted decorative preview.",
+      "delivery": [
+        "web-listener"
+      ],
+      "variables": {
+        "title": "string"
+      }
+    },
+    "videos.view.grid": {
+      "description": "Video page selector for the traditional landscape-card grid.",
+      "delivery": [
+        "web-listener"
+      ],
+      "variables": {}
+    },
+    "videos.view.immersive": {
+      "description": "Video page selector for immersive portrait preview cards.",
+      "delivery": [
+        "web-listener"
+      ],
+      "variables": {}
+    },
+    "videos.view.label": {
+      "description": "Accessible label for the Video page browsing-view selector.",
+      "delivery": [
+        "web-listener"
+      ],
+      "variables": {}
     }
   }
 }

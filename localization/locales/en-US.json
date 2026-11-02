@@ -2229,5 +2229,20 @@
   "video.fullscreen.action": "Enter video fullscreen",
   "video.fullscreen.player_label": "{title} fullscreen video player",
   "video.fullscreen.title": "Fullscreen",
-  "video.surface.label": "{title} video"
+  "video.surface.label": "{title} video",
+  "videos.card.fill": "Fill card",
+  "videos.card.frame_position": "Frame position",
+  "videos.card.frame_position_label": "Frame position for {title}",
+  "videos.card.full_frame": "Show full frame",
+  "videos.card.left": "Left",
+  "videos.card.options": "{title} options",
+  "videos.card.right": "Right",
+  "videos.preview.action": "Preview {title}",
+  "videos.preview.active": "Previewing",
+  "videos.preview.label": "Preview",
+  "videos.preview.list": "Video previews",
+  "videos.preview.stop": "Stop previewing {title}",
+  "videos.view.grid": "Grid",
+  "videos.view.immersive": "Immersive preview",
+  "videos.view.label": "Video browsing view"
 }

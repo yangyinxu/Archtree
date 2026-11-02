@@ -3163,7 +3163,8 @@ retry. Account and administrator-access fences apply to recovery and delayed
 refreshes. Order writes invalidate open visibility approvals through the same
 whole-Page revision and retain the existing listener cursor invalidation rules.
 The approved Page layout including order adjustment adds about 2.5 KiB gzip of route-specific CSS; the
-aggregate emitted-CSS budget is 38 KiB. The 150 KiB initial JavaScript budget,
+aggregate emitted-CSS budget is 42.5 KiB, including the later Video workbench
+and immersive listener view additions. The 152 KiB initial JavaScript budget,
 font/image limits and lazy loading of administrator styles stay in place.
 `/artwork` and `/media`
 are private previews with current-source and current-role stream revocation.

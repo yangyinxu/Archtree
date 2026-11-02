@@ -39,6 +39,28 @@ pages and cursors, rejects Audio and duplicate members, and strips additive fiel
 before query caching. This remains public online browsing, with no download or
 browser-local media lifecycle.
 
+The Video page keeps its default 16:9 Grid and offers an immersive 10:13 card
+view over the same paginated query. The view preference is device-local display
+state, not account or catalog data. Changing the view only replaces the browse
+presentation; it does not recreate the shared player, launch a queue, or record
+playback activity. Immersive cards compose independent Preview, Save, framing,
+and Play or Pause controls rather than nesting buttons inside the ordinary
+whole-card Play target. Save retains the existing authenticated account boundary.
+Framing controls affect only CSS fitting and horizontal positioning; the public
+DTO and stored media, artwork, and preview objects do not change.
+
+The immersive Preview toggle reuses the shared single-preview intent and media
+source machinery. Explicit activation can serve keyboard, touch, and Reduce
+Motion users without enabling automatic previews for them. Forced colors,
+Save-Data, slow connections, unknown preview rollout state, and the existing
+failure suppression still retain artwork. View changes, Escape, leaving the
+card, a hidden page, or formal playback stop the decorative preview and release
+its request. Formal Play continues through the normal standalone launch policy.
+The feature's new `videos.*` interface messages use the generated, release-owned
+`web-listener` locale packs. They do not expand the public localization API or
+native fallback key sets; the delivery contract remains in
+[localization.md](../features/localization.md).
+
 ### Compatibility policy
 
 - Finitude Web's public catalog and collection schemas discard unknown additive

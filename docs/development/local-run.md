@@ -14,8 +14,11 @@ second process with `npm run dev:web`, then open
 prefix permanently redirect to the equivalent `/finitude` path. The Web build
 measures every initial route's unique compressed JavaScript and fails if any
 route exceeds the reviewed 152 KiB gzip budget. It also caps the complete
-emitted stylesheet payload at 40.5 KiB gzip (including the lazy administrator
-Video task/workbench styles), emitted fonts at 128 KiB, bundled
+emitted stylesheet payload at 42.5 KiB gzip (including the lazy administrator
+Video task/workbench styles and the approved immersive Video cards). The
+immersive card stylesheet is about 1.7 KiB gzip and loads with that view; the
+compact view switch shares the Video route's presentation chunk. The remaining
+limits are emitted fonts at 128 KiB, bundled
 images at 256 KiB total, and any one bundled image at 128 KiB. Catalog artwork
 continues to load through listener DTOs rather than being bundled into the app.
 Production CSS Modules use compact scoped identifiers; development and test

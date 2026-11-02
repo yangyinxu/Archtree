@@ -3,7 +3,7 @@
  *   Types: Environment
  *   Classes: TestPointerEvent
  *   Functions: trackWithSource, configure, renderCards, card, hover, restPastIntent, previewIn, previewMounted,
- *              loadMetadata
+ *              loadMetadata, renderRequestedPreview
  *   Constants: videoTrack
  * Tests
  *   - a mouse resting on a Video card starts a muted preview that never touches the shared player
@@ -19,11 +19,17 @@
  *   - a disallowed preview never reads the presentation flags
  *   - a failed presentation-flag read shows no preview, never the stream, and is not re-requested per hover
  *   - a dedicated clip loops whole from its start, unlike the full stream
+ *   - a connection policy change stops an active explicit preview and releases its request
+ *   - an explicit request with failed presentation flags stops without falling back to the stream
+ *   - an explicit preview cannot retry a source that failed earlier in the page session
+ *   - an explicit preview takes the same single-preview ownership as a hover preview
+ *   - enabling Reduce Motion stops an already-running automatic preview
+ *   - changing an onReady callback does not restart the media source
  * @end-catalog */
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import type { ReactNode } from 'react';
+import { useCallback, useState, type ReactNode } from 'react';
 import { MemoryRouter } from 'react-router';
 
 import type { AudioTrackSummary } from '../api/contentSchemas';
@@ -31,6 +37,7 @@ import { playerStore } from '../player';
 import { presentationCapabilitiesQueryKey } from '../api/presentationCapabilities';
 import { seedListenerCapabilities } from '../test/listenerCapabilities';
 import { ContentCard } from './ContentCard';
+import CardVideoPreview, { type VideoPreviewIntent } from './CardVideoPreview';
 
 const videoTrack: AudioTrackSummary = {
   contentType: 'audioTrack',
@@ -124,6 +131,28 @@ const previewMounted = async (element: Element) => {
 const loadMetadata = (video: HTMLVideoElement, duration: number) => {
   Object.defineProperty(video, 'duration', { configurable: true, value: duration });
   fireEvent(video, new Event('loadedmetadata'));
+};
+
+/** Models the parent unmounting a preview when the lazy media layer rejects or releases it. */
+const renderRequestedPreview = (id: string, options: {
+  intent?: VideoPreviewIntent;
+  motionPreviews?: boolean | null;
+  onReady?: () => void;
+} = {}) => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  if (options.motionPreviews !== null) {
+    client.setQueryData(presentationCapabilitiesQueryKey, { contractVersion: 1, motionPreviews: options.motionPreviews ?? false });
+  }
+  const onStop = vi.fn();
+  const RequestedPreview = () => {
+    const [active, setActive] = useState(true);
+    const stop = useCallback(() => { onStop(); setActive(false); }, []);
+    return active ? <CardVideoPreview className="preview" intent={options.intent ?? 'explicit'}
+      mediaTrackId={id} onReady={options.onReady} onStop={stop}
+      streamUrl={`/content/mediaTrack/stream/${id}`} /> : null;
+  };
+  const view = render(<QueryClientProvider client={client}><RequestedPreview /></QueryClientProvider>);
+  return { ...view, onStop };
 };
 
 beforeAll(async () => {
@@ -410,4 +439,145 @@ test('a dedicated clip loops whole from its start, unlike the full stream', asyn
   video.currentTime = 6.4;
   fireEvent(video, new Event('ended'));
   expect(video.currentTime).toBe(0);
+});
+
+test.each([
+  ['a touch-only device', { hover: false }],
+  ['Reduce Motion', { reducedMotion: true }],
+  ['Reduce Motion on a touch-only device', { hover: false, reducedMotion: true }]
+])('an explicit muted preview is available with %s without touching playback', async (_label, environment) => {
+  const { media, fetchMock } = configure(environment);
+  const launch = vi.spyOn(playerStore, 'launchStandalone');
+  const notePlaybackIntent = vi.spyOn(playerStore, 'notePlaybackIntent');
+  const onReady = vi.fn();
+  const { container, onStop } = renderRequestedPreview(`explicit-${_label}`, { onReady, motionPreviews: true });
+  await waitFor(() => expect(container.querySelector('video')).not.toBeNull());
+  const video = container.querySelector('video')!;
+  expect(video.muted).toBe(true);
+  expect(video.getAttribute('src')).toContain('/content/mediaTrack/motion-preview/');
+  loadMetadata(video, 6);
+  expect(media.play).toHaveBeenCalledTimes(1);
+  expect(onReady).not.toHaveBeenCalled();
+  fireEvent(video, new Event('playing'));
+  expect(onReady).toHaveBeenCalledTimes(1);
+  expect(onStop).not.toHaveBeenCalled();
+  expect(launch).not.toHaveBeenCalled();
+  expect(notePlaybackIntent).not.toHaveBeenCalled();
+  expect(fetchMock).not.toHaveBeenCalled();
+});
+
+test.each([
+  ['forced colors', { forcedColors: true }],
+  ['Save-Data', { saveData: true }],
+  ['a slow connection', { effectiveType: '3g' }]
+])('an explicit request still skips %s before reading flags or media', async (_label, environment) => {
+  const { fetchMock } = configure(environment);
+  const setSource = vi.spyOn(HTMLMediaElement.prototype, 'src', 'set');
+  const { container, onStop } = renderRequestedPreview(`denied-${_label}`, { motionPreviews: null });
+  await waitFor(() => expect(onStop).toHaveBeenCalled());
+  expect(container.querySelector('video')).toBeNull();
+  expect(setSource).not.toHaveBeenCalled();
+  expect(fetchMock).not.toHaveBeenCalled();
+});
+
+test('a connection policy change stops an active explicit preview and releases its request', async () => {
+  const { media } = configure();
+  const connection = Object.assign(new EventTarget(), { saveData: false, effectiveType: '4g' });
+  Object.defineProperty(navigator, 'connection', { configurable: true, value: connection });
+  const { container, onStop } = renderRequestedPreview('connection-changed');
+  await waitFor(() => expect(container.querySelector('video')).not.toBeNull());
+  const video = container.querySelector('video')!;
+  loadMetadata(video, 60);
+  const removeSource = vi.spyOn(video, 'removeAttribute');
+  connection.saveData = true;
+  act(() => connection.dispatchEvent(new Event('change')));
+  expect(onStop).toHaveBeenCalled();
+  expect(container.querySelector('video')).toBeNull();
+  expect(removeSource).toHaveBeenCalledWith('src');
+  expect(media.pause).toHaveBeenCalled();
+});
+
+test('an explicit request with failed presentation flags stops without falling back to the stream', async () => {
+  const { fetchMock } = configure();
+  fetchMock.mockRejectedValue(new TypeError('Failed to fetch'));
+  const setSource = vi.spyOn(HTMLMediaElement.prototype, 'src', 'set');
+  const { container, onStop } = renderRequestedPreview('explicit-unknown', { motionPreviews: null });
+  await waitFor(() => expect(onStop).toHaveBeenCalled());
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  expect(container.querySelector('video')).toBeNull();
+  expect(setSource).not.toHaveBeenCalled();
+});
+
+test('an explicit preview cannot retry a source that failed earlier in the page session', async () => {
+  configure();
+  const first = renderRequestedPreview('explicit-failed');
+  await waitFor(() => expect(first.container.querySelector('video')).not.toBeNull());
+  fireEvent(first.container.querySelector('video')!, new Event('error'));
+  expect(first.container.querySelector('video')).toBeNull();
+  first.unmount();
+  const setSource = vi.spyOn(HTMLMediaElement.prototype, 'src', 'set');
+  const second = renderRequestedPreview('explicit-failed');
+  await waitFor(() => expect(second.onStop).toHaveBeenCalled());
+  expect(second.container.querySelector('video')).toBeNull();
+  expect(setSource).not.toHaveBeenCalled();
+});
+
+test('an explicit preview takes the same single-preview ownership as a hover preview', async () => {
+  configure();
+  const hoverPreview = renderRequestedPreview('hover-owner', { intent: 'hover' });
+  await waitFor(() => expect(hoverPreview.container.querySelector('video')).not.toBeNull());
+  const explicitPreview = renderRequestedPreview('explicit-owner');
+  await waitFor(() => expect(explicitPreview.container.querySelector('video')).not.toBeNull());
+  expect(hoverPreview.onStop).toHaveBeenCalled();
+  expect(hoverPreview.container.querySelector('video')).toBeNull();
+  expect(document.querySelectorAll('video[data-video-preview]')).toHaveLength(1);
+});
+
+test('enabling Reduce Motion stops an already-running automatic preview', async () => {
+  configure();
+  const listeners = new Map<string, Set<() => void>>();
+  let reducedMotion = false;
+  vi.stubGlobal('matchMedia', (query: string) => ({
+    get matches() {
+      return query === '(hover: hover) and (pointer: fine)'
+        || (query === '(prefers-reduced-motion: reduce)' && reducedMotion);
+    },
+    addEventListener: (_event: string, callback: () => void) => {
+      if (!listeners.has(query)) listeners.set(query, new Set());
+      listeners.get(query)!.add(callback);
+    },
+    removeEventListener: (_event: string, callback: () => void) => listeners.get(query)?.delete(callback)
+  }));
+  const { container, onStop } = renderRequestedPreview('reduced-after-start', { intent: 'hover' });
+  await waitFor(() => expect(container.querySelector('video')).not.toBeNull());
+  reducedMotion = true;
+  act(() => listeners.get('(prefers-reduced-motion: reduce)')!.forEach((listener) => listener()));
+  expect(onStop).toHaveBeenCalled();
+  expect(container.querySelector('video')).toBeNull();
+});
+
+test('changing an onReady callback does not restart the media source', async () => {
+  const { media } = configure();
+  const client = new QueryClient();
+  client.setQueryData(presentationCapabilitiesQueryKey, { contractVersion: 1, motionPreviews: false });
+  const onStop = vi.fn();
+  const firstReady = vi.fn();
+  const renderPreview = (onReady: () => void) => <QueryClientProvider client={client}>
+    <CardVideoPreview className="preview" intent="explicit" mediaTrackId="stable-ready" onReady={onReady}
+      onStop={onStop} streamUrl="/content/mediaTrack/stream/stable-ready" />
+  </QueryClientProvider>;
+  const view = render(renderPreview(firstReady));
+  await waitFor(() => expect(view.container.querySelector('video')).not.toBeNull());
+  const video = view.container.querySelector('video')!;
+  loadMetadata(video, 60);
+  fireEvent(video, new Event('playing'));
+  expect(firstReady).toHaveBeenCalledTimes(1);
+  const sourceWrites = vi.spyOn(HTMLMediaElement.prototype, 'src', 'set');
+  const secondReady = vi.fn();
+  view.rerender(renderPreview(secondReady));
+  expect(view.container.querySelector('video')).toBe(video);
+  expect(sourceWrites).not.toHaveBeenCalled();
+  expect(media.pause).not.toHaveBeenCalled();
+  fireEvent(video, new Event('playing'));
+  expect(secondReady).toHaveBeenCalledTimes(1);
 });
