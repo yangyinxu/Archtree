@@ -136,10 +136,16 @@ or video classifier touches.
   otherwise. Responses are `private, no-cache`. The admission class
   `motionPreview` never queues and never uses the playback reserve.
 - `GET /api/listener/v1/presentation-capabilities` returns
-  `{"contractVersion":1,"motionPreviews":boolean}` so the Web card chooses the
-  dedicated clip, or the public stream while previews are disabled. If the
-  card cannot read it, it shows no preview and does not ask again on every
-  hover.
+  `{"contractVersion":1,"motionPreviews":boolean}` so a Web hover preview chooses
+  the dedicated muted clip when the listener selected a muted default, or the
+  public stream while motion previews are disabled. Default audible hover also
+  uses the public stream because dedicated clips contain no audio. If the card
+  cannot read it, it shows no preview and does not ask again on every hover. Explicit activation of an immersive card's Preview
+  sound control uses the original public Video stream for its bounded sample,
+  because a dedicated motion clip has no audio. Muting that sample retains the
+  same stream; it does not alter the motion-preview format, storage lifecycle,
+  or public gate. This full-stream request uses ordinary listener media-delivery
+  limits rather than the separate `motionPreview` admission class.
 
 ## Delete
 

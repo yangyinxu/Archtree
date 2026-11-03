@@ -3,16 +3,19 @@
  *   Types: VideoPreviewIntent, CardVideoPreviewProps
  *   Functions: CardVideoPreview
  * Internal
- *   Types: NetworkInformationLike, PreviewVideoProps
- *   Functions: UnavailableMotionPreviewSource, videoPreviewAllowed, isMediaFailure, PreviewVideo
+ *   Types: NetworkInformationLike, PreviewVideoProps, PreviewSource, PreviewLayerState, PreviewLayerController,
+ *          PreviewLayerProps
+ *   Functions: UnavailableMotionPreviewSource, videoPreviewAllowed, isMediaFailure, PreviewVideo, PreviewLayer
  *   Constants: MotionPreviewSource, previewStartFraction, previewMaximumStartSeconds, previewWindowSeconds,
- *              loopLeadSeconds, slowConnectionTypes, failedSources
+ *              loopLeadSeconds, slowConnectionTypes, failedSources, previewFadeMs, previewLoadTimeoutMs
  *   Variables: stopActivePreview
  * @end-catalog */
 
-import { lazy, Suspense, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 
-import type { MotionPreviewSourceProps } from './MotionPreviewSource';
+import { readVideoPreviewMuted } from '../features/videos/videoPreviewPreferences';
+
+import type { MotionPreviewSourceProps, PreviewPlaybackControls } from './MotionPreviewSource';
 
 /** Releases explicit intent if an old tab can no longer fetch the source-selection chunk. */
 function UnavailableMotionPreviewSource({ onUnavailable }: MotionPreviewSourceProps) {
@@ -50,13 +53,19 @@ export interface CardVideoPreviewProps {
   /** Placement and reveal styles, owned by the card so the preview needs no stylesheet of its own. */
   className: string;
   mediaTrackId: string;
-  /** The public stream, used only while dedicated motion previews are disabled. */
+  /** The public stream, also used for explicit auditions so the source retains its audio. */
   streamUrl: string;
   /** Asks the card to unmount the preview: it is not allowed here, it failed, or the page hid. */
   onStop: () => void;
   intent?: VideoPreviewIntent;
+  /** Overrides the listener's default preview sound preference for this active card. */
+  muted?: boolean;
+  /** Reports decoded audio state or a browser/policy downgrade to a continuing muted preview. */
+  onMuted?: (muted: boolean) => void;
   /** Reports actual media playback, not a pending flag/source request. */
   onReady?: () => void;
+  /** Clears ready UI only when a new source is loading, never for a sound-only toggle. */
+  onLoading?: () => void;
 }
 
 interface PreviewVideoProps {
@@ -66,7 +75,12 @@ interface PreviewVideoProps {
   fromStart: boolean;
   onStop: () => void;
   intent: VideoPreviewIntent;
+  muted: boolean;
+  onMuted?: (muted: boolean) => void;
+  playback: PreviewPlaybackControls;
   onReady?: () => void;
+  /** Clears ready UI only when a new source is loading, never for a sound-only toggle. */
+  onLoading?: () => void;
 }
 
 /**
@@ -94,7 +108,9 @@ const isMediaFailure = (error: unknown) => {
  * lets the presentation flags choose between the dedicated motion preview and the public stream.
  * A disallowed preview asks the card to stop before it reads the flags or any media.
  */
-export default function CardVideoPreview({ className, mediaTrackId, streamUrl, onStop, intent = 'hover', onReady }: CardVideoPreviewProps) {
+export default function CardVideoPreview({ className, mediaTrackId, streamUrl, onStop, intent = 'hover', muted, onMuted, onReady, onLoading }: CardVideoPreviewProps) {
+  const [preferredMuted] = useState(readVideoPreviewMuted);
+  const effectiveMuted = muted ?? preferredMuted;
   const [allowed, setAllowed] = useState(() => videoPreviewAllowed(intent));
 
   useEffect(() => {
@@ -124,9 +140,11 @@ export default function CardVideoPreview({ className, mediaTrackId, streamUrl, o
   if (!allowed) return null;
   return (
     <Suspense fallback={null}>
-      <MotionPreviewSource mediaTrackId={mediaTrackId} onUnavailable={onStop} streamUrl={streamUrl}>
-        {(source, isClip) => (
-          <PreviewVideo className={className} fromStart={isClip} intent={intent} key={source} onReady={onReady} onStop={onStop} source={source} />
+      <MotionPreviewSource audible={!effectiveMuted} explicit={intent === 'explicit'}
+        mediaTrackId={mediaTrackId} onUnavailable={onStop} streamUrl={streamUrl}>
+        {(source, isClip, playback) => (
+          <PreviewVideo className={className} fromStart={isClip} intent={intent} muted={effectiveMuted}
+            onLoading={onLoading} onMuted={onMuted} onReady={onReady} onStop={onStop} playback={playback} source={source} />
         )}
       </MotionPreviewSource>
     </Suspense>
@@ -134,111 +152,352 @@ export default function CardVideoPreview({ className, mediaTrackId, streamUrl, o
 }
 
 /**
- * A decorative, muted preview drawn over a Video card's artwork. It owns its own media element,
+ * A card preview with its own sound preference and media element,
  * separate from the shared player, loops a bounded window, stops when the page hides or another card
  * starts a preview, and releases its request on unmount.
  */
-function PreviewVideo({ className, source, fromStart, onStop, intent, onReady }: PreviewVideoProps) {
+type PreviewSource = { source: string; fromStart: boolean };
+type PreviewLayerState = 'visible' | 'candidate' | 'outgoing';
+interface PreviewLayerController {
+  video: HTMLVideoElement;
+  decoded: boolean;
+  sound(audible: boolean): boolean;
+  stop(): void;
+}
+
+const previewFadeMs = 80;
+const previewLoadTimeoutMs = 4_000;
+
+/** One card owns all temporary layers; decoder handoff never creates another audible owner. */
+function PreviewVideo({ className, source, fromStart, onStop, intent, muted, playback, onMuted, onReady, onLoading }: PreviewVideoProps) {
+  const [visible, setVisible] = useState<PreviewSource>({ source, fromStart });
+  const [outgoing, setOutgoing] = useState<PreviewSource | null>(null);
+  const visibleRef = useRef(visible);
+  const layers = useRef(new Map<string, PreviewLayerController>());
+  const alive = useRef(true);
+  const loadTimer = useRef(0);
+  const retireTimer = useRef(0);
+  const latest = useRef({ source, fromStart, intent, muted, playback, onMuted, onStop, onReady, onLoading });
+  latest.current = { source, fromStart, intent, muted, playback, onMuted, onStop, onReady, onLoading };
+
+  const release = useCallback(() => {
+    alive.current = false;
+    window.clearTimeout(loadTimer.current);
+    window.clearTimeout(retireTimer.current);
+    layers.current.forEach(layer => layer.stop());
+  }, []);
+  const stop = useCallback(() => {
+    if (!alive.current) return;
+    release();
+    latest.current.onStop();
+  }, [release]);
+  const isAlive = useCallback(() => alive.current, []);
+  const currentIntent = useCallback(() => latest.current.intent, []);
+  const currentMuted = useCallback(() => latest.current.muted, []);
+  const currentSource = useCallback(() => latest.current.source, []);
+  const reportMuted = useCallback((key: string, actualMuted: boolean) => {
+    if (alive.current && key === latest.current.source) latest.current.onMuted?.(actualMuted);
+  }, []);
+  const register = useCallback((key: string, controller: PreviewLayerController) => {
+    layers.current.set(key, controller);
+    return () => { if (layers.current.get(key) === controller) layers.current.delete(key); };
+  }, []);
+  const fail = useCallback((failedSource: string) => {
+    if (!alive.current) return;
+    failedSources.add(failedSource);
+    if (failedSource === latest.current.source) stop();
+    else layers.current.get(failedSource)?.stop();
+  }, [stop]);
+
+  const activate = useCallback(() => {
+    const request = latest.current;
+    const layer = layers.current.get(request.source);
+    if (!alive.current || !layer || !layer.decoded && !request.muted) return;
+    if (!layer.sound(!request.muted)) { stop(); return; }
+    if (layer.decoded) request.onReady?.();
+  }, [stop]);
+  const decoded = useCallback((decodedSource: string) => {
+    const request = latest.current;
+    if (!alive.current || decodedSource !== request.source) return;
+    window.clearTimeout(loadTimer.current);
+    const previous = visibleRef.current;
+    if (previous.source !== decodedSource) {
+      const next = { source: request.source, fromStart: request.fromStart };
+      visibleRef.current = next;
+      setVisible(next);
+      setOutgoing(previous);
+      window.clearTimeout(retireTimer.current);
+      retireTimer.current = window.setTimeout(() => {
+        // Unmount owns release so a same-batch reversal can still reuse this live keyed decoder.
+        setOutgoing(current => current?.source === previous.source ? null : current);
+      }, previewFadeMs);
+    }
+    activate();
+  }, [activate]);
+
+  useLayoutEffect(() => {
+    alive.current = true;
+    stopActivePreview?.();
+    stopActivePreview = stop;
+    const unsubscribe = playback.subscribeToPlayback(stop);
+    const hidden = () => { if (document.visibilityState === 'hidden') stop(); };
+    document.addEventListener('visibilitychange', hidden);
+    return () => {
+      unsubscribe();
+      document.removeEventListener('visibilitychange', hidden);
+      if (stopActivePreview === stop) stopActivePreview = null;
+      release();
+    };
+  }, [playback, release, stop]);
+
+  useLayoutEffect(() => {
+    latest.current.onLoading?.();
+    window.clearTimeout(loadTimer.current);
+    window.clearTimeout(retireTimer.current);
+    // An outgoing layer is visual continuity only; it can never keep sound during replacement.
+    layers.current.forEach((layer, key) => { if (key !== source) layer.sound(false); });
+    // A rapid reversal may reuse the still-running outgoing decoder instead of requesting it again.
+    if (layers.current.get(source)?.decoded) { decoded(source); return undefined; }
+    const pendingSource = source;
+    loadTimer.current = window.setTimeout(() => {
+      if (alive.current && latest.current.source === pendingSource && !layers.current.get(pendingSource)?.decoded) fail(pendingSource);
+    }, previewLoadTimeoutMs);
+    return () => window.clearTimeout(loadTimer.current);
+  }, [decoded, fromStart, source, fail]);
+
+  // Intent and sound updates do not own the decoder, source, loop window, or elapsed position.
+  useLayoutEffect(activate, [activate, intent, muted]);
+
+  const target = { source, fromStart };
+  const requests = [
+    ...(outgoing && visible.source === source ? [{ ...outgoing, state: 'outgoing' as const }] : []),
+    { ...visible, state: 'visible' as const },
+    ...(visible.source !== source ? [{ ...target, state: 'candidate' as const }] : [])
+  ];
+  return <>{requests.map(request => <PreviewLayer className={className} currentIntent={currentIntent} currentMuted={currentMuted} currentSource={currentSource}
+    fromStart={request.fromStart} isAlive={isAlive} key={request.source} onDecoded={decoded} onFail={fail}
+    onMuted={reportMuted} onUnavailable={stop} playback={playback} register={register} source={request.source} state={request.state} />)}</>;
+}
+
+interface PreviewLayerProps {
+  className: string;
+  source: string;
+  fromStart: boolean;
+  state: PreviewLayerState;
+  currentIntent: () => VideoPreviewIntent;
+  currentMuted: () => boolean;
+  currentSource: () => string;
+  isAlive: () => boolean;
+  onDecoded: (source: string) => void;
+  onFail: (source: string) => void;
+  onUnavailable: () => void;
+  onMuted: (source: string, muted: boolean) => void;
+  playback: PreviewPlaybackControls;
+  register: (source: string, controller: PreviewLayerController) => () => void;
+}
+
+/** A source-bound decoder stays alive across intent changes and stages replacement frames silently. */
+function PreviewLayer({ className, source, fromStart, state, currentIntent, currentMuted, currentSource, isAlive, onDecoded, onFail, onMuted, onUnavailable, playback, register }: PreviewLayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [ready, setReady] = useState(false);
-  const readyCallback = useRef(onReady);
-  readyCallback.current = onReady;
 
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return undefined;
-    // Conditions can change while the presentation flags load, such as the page hiding.
-    if (failedSources.has(source) || !videoPreviewAllowed(intent)) {
-      onStop();
-      return undefined;
-    }
-    stopActivePreview?.();
-    stopActivePreview = onStop;
+    if (!isAlive()) return undefined;
+    if (failedSources.has(source)) { onFail(source); return undefined; }
+    if (!videoPreviewAllowed(currentIntent())) { onUnavailable(); return undefined; }
     let released = false;
+    let hasFrame = false;
+    let metadataSeen = false;
+    let frameRequest = 0;
+    let fadeRequest = 0;
+    let fadeEnd = 0;
+    let fadeUsesAnimation = false;
+    let hoverDenied = false;
+    let audibleReady = false;
+    let playGeneration = 0;
+    let manualGeneration = 0;
     let start = 0;
     let end = previewWindowSeconds;
-    setReady(false);
+    const baseVolume = video.volume;
     video.muted = true;
     video.defaultMuted = true;
     video.disablePictureInPicture = true;
     if ('disableRemotePlayback' in video) video.disableRemotePlayback = true;
 
-    const fail = () => {
-      if (released) return;
-      failedSources.add(source);
-      onStop();
-    };
-    const play = () => {
-      video.play()?.catch?.((error: unknown) => {
-        if (isMediaFailure(error)) fail();
-      });
-    };
-    const begin = () => {
-      const duration = video.duration;
-      if (!Number.isFinite(duration) || duration <= 0) {
-        start = 0;
-        end = previewWindowSeconds;
-      } else if (fromStart) {
-        start = 0;
-        end = duration;
-      } else {
-        start = Math.min(duration * previewStartFraction, previewMaximumStartSeconds);
-        end = Math.min(start + previewWindowSeconds, duration);
+    const cancelFade = () => {
+      if (fadeRequest) {
+        if (fadeUsesAnimation) window.cancelAnimationFrame(fadeRequest);
+        else window.clearTimeout(fadeRequest);
       }
-      video.currentTime = start;
-      play();
+      window.clearTimeout(fadeEnd);
+      fadeRequest = 0;
     };
-    const loopWindow = () => {
-      if (video.currentTime >= end - loopLeadSeconds) video.currentTime = start;
+    const silence = () => {
+      video.muted = true;
+      audibleReady = false;
+      cancelFade();
+      video.volume = baseVolume;
     };
-    const restart = () => {
-      video.currentTime = start;
-      play();
-    };
-    const reveal = () => {
+    const stopLayer = () => {
       if (released) return;
-      setReady(true);
-      readyCallback.current?.();
-    };
-    const stopWhenHidden = () => {
-      if (document.visibilityState === 'hidden') onStop();
-    };
-
-    video.addEventListener('loadedmetadata', begin);
-    video.addEventListener('timeupdate', loopWindow);
-    video.addEventListener('ended', restart);
-    video.addEventListener('playing', reveal);
-    video.addEventListener('error', fail);
-    document.addEventListener('visibilitychange', stopWhenHidden);
-    video.src = source;
-
-    return () => {
       released = true;
-      if (stopActivePreview === onStop) stopActivePreview = null;
-      video.removeEventListener('loadedmetadata', begin);
-      video.removeEventListener('timeupdate', loopWindow);
-      video.removeEventListener('ended', restart);
-      video.removeEventListener('playing', reveal);
-      video.removeEventListener('error', fail);
-      document.removeEventListener('visibilitychange', stopWhenHidden);
-      // Clearing the source aborts the in-flight range request instead of finishing the download.
+      silence();
+      if (frameRequest) video.cancelVideoFrameCallback?.(frameRequest);
       video.pause();
       video.removeAttribute('src');
       video.load();
     };
-  }, [fromStart, intent, onStop, source]);
+    const failLayer = () => { if (!released && isAlive()) onFail(source); };
+    const fallbackMuted = () => {
+      if (released || !isAlive()) return;
+      hoverDenied = true;
+      silence();
+      // A delayed automatic rejection may arrive after a new manual request began loading.
+      if (currentIntent() === 'hover') onMuted(source, true);
+      play();
+    };
+    const play = () => {
+      if (released || !isAlive() || !video.paused) return;
+      const requestedIntent = currentIntent();
+      const automaticAudible = requestedIntent === 'hover' && !video.muted;
+      const attempt = ++playGeneration;
+      const manualAtRequest = manualGeneration;
+      video.play()?.catch?.((error: unknown) => {
+        if (released || !isAlive() || attempt !== playGeneration) return;
+        if (!isMediaFailure(error)) return;
+        if (source !== currentSource()) { stopLayer(); return; }
+        // A decoded manual audition owns sound even if an older automatic promise settles late.
+        if (requestedIntent === 'hover' && manualAtRequest !== manualGeneration) return;
+        if (requestedIntent === 'hover' && (error as { name?: string })?.name === 'NotAllowedError') {
+          if (automaticAudible) fallbackMuted();
+          else onUnavailable();
+        }
+        else if (isMediaFailure(error)) failLayer();
+      });
+    };
+    const sound = (audible: boolean) => {
+      if (released || !isAlive()) return false;
+      if (!audible) { hoverDenied = false; silence(); onMuted(source, true); return true; }
+      const intent = currentIntent();
+      if (intent === 'hover' && hoverDenied) { silence(); onMuted(source, true); return true; }
+      if (!video.muted && audibleReady) {
+        if (intent === 'explicit') manualGeneration += 1;
+        return true;
+      }
+      if (!playback.beforeAudible(intent)) {
+        if (intent === 'explicit') return false;
+        hoverDenied = true;
+        silence();
+        onMuted(source, true);
+        return true;
+      }
+      hoverDenied = false;
+      audibleReady = true;
+      if (intent === 'explicit') manualGeneration += 1;
+      cancelFade();
+      video.volume = 0;
+      video.muted = false;
+      // Existing running video needs only its sound flag: play() would re-enter native transport.
+      play();
+      const began = performance.now();
+      const tick = () => {
+        if (released || !isAlive() || video.muted) return;
+        video.volume = baseVolume * Math.min(1, (performance.now() - began) / previewFadeMs);
+        if (video.volume < baseVolume) schedule();
+      };
+      const schedule = () => {
+        fadeUsesAnimation = typeof window.requestAnimationFrame === 'function';
+        fadeRequest = fadeUsesAnimation ? window.requestAnimationFrame(tick) : window.setTimeout(tick, 16);
+      };
+      schedule();
+      fadeEnd = window.setTimeout(() => {
+        if (!released && isAlive() && !video.muted) video.volume = baseVolume;
+        cancelFade();
+      }, previewFadeMs);
+      onMuted(source, false);
+      return true;
+    };
+    const controller: PreviewLayerController = {
+      video,
+      get decoded() { return hasFrame && !released; },
+      sound,
+      stop: stopLayer
+    };
+    const unregister = register(source, controller);
+    const revealFrame = () => {
+      if (released || !isAlive() || hasFrame || !metadataSeen || video.seeking || video.paused || video.readyState < 2) return;
+      hasFrame = true;
+      setReady(true);
+      onDecoded(source);
+    };
+    const requestFrame = () => {
+      if (released || !isAlive()) return;
+      if (hasFrame) { onDecoded(source); return; }
+      if (!metadataSeen || video.seeking || video.paused || video.readyState < 2 || frameRequest) return;
+      if (typeof video.requestVideoFrameCallback !== 'function') { revealFrame(); return; }
+      frameRequest = video.requestVideoFrameCallback((_now, metadata) => {
+        frameRequest = 0;
+        if (released || !isAlive()) return;
+        if (metadata.mediaTime + 0.1 < start) { requestFrame(); return; }
+        revealFrame();
+      });
+    };
+    const begin = () => {
+      metadataSeen = true;
+      const duration = video.duration;
+      if (!Number.isFinite(duration) || duration <= 0) { start = 0; end = previewWindowSeconds; }
+      else if (fromStart) { start = 0; end = duration; }
+      else { start = Math.min(duration * previewStartFraction, previewMaximumStartSeconds); end = Math.min(start + previewWindowSeconds, duration); }
+      if (Math.abs(video.currentTime - start) > 0.005) video.currentTime = start;
+      play();
+    };
+    const loopWindow = () => { if (!released && video.currentTime >= end - loopLeadSeconds) video.currentTime = start; };
+    const restart = () => { if (!released) { video.currentTime = start; play(); } };
+    const policyPause = () => {
+      // Some engines revoke an automatic audition on unmute rather than rejecting play().
+      if (!released && isAlive() && currentIntent() === 'hover' && !video.muted && !hoverDenied && !video.ended) fallbackMuted();
+    };
+    video.addEventListener('loadedmetadata', begin);
+    video.addEventListener('timeupdate', loopWindow);
+    video.addEventListener('ended', restart);
+    video.addEventListener('playing', requestFrame);
+    video.addEventListener('loadeddata', requestFrame);
+    video.addEventListener('seeked', requestFrame);
+    video.addEventListener('error', failLayer);
+    video.addEventListener('pause', policyPause);
+    video.src = source;
+    if (currentIntent() === 'hover' && !currentMuted()) {
+      if (playback.beforeAudible('hover')) {
+        // A nonzero gain makes this a real audible autoplay request; gain rises only after a frame.
+        video.volume = Math.min(baseVolume, 0.0001);
+        video.muted = false;
+      } else {
+        hoverDenied = true;
+        onMuted(source, true);
+      }
+      play();
+    } else if (currentIntent() === 'explicit') {
+      // Manual source handoff always stages silently until its first decoded frame.
+      play();
+    }
+    return () => {
+      stopLayer();
+      unregister();
+      video.removeEventListener('loadedmetadata', begin);
+      video.removeEventListener('timeupdate', loopWindow);
+      video.removeEventListener('ended', restart);
+      video.removeEventListener('playing', requestFrame);
+      video.removeEventListener('loadeddata', requestFrame);
+      video.removeEventListener('seeked', requestFrame);
+      video.removeEventListener('error', failLayer);
+      video.removeEventListener('pause', policyPause);
+    };
+  }, [currentIntent, currentMuted, currentSource, fromStart, isAlive, onDecoded, onFail, onMuted, onUnavailable, playback, register, source]);
 
-  return (
-    <video
-      aria-hidden="true"
-      className={className}
-      data-ready={ready || undefined}
-      data-video-preview=""
-      muted
-      playsInline
-      preload="metadata"
-      ref={videoRef}
-      tabIndex={-1}
-    />
-  );
+  return <video aria-hidden="true" className={className} data-ready={ready || undefined}
+    data-video-preview="" data-video-preview-candidate={state === 'candidate' ? '' : undefined}
+    data-preview-state={state} muted playsInline preload="metadata" ref={videoRef} tabIndex={-1}
+    style={{ opacity: ready && state === 'visible' ? 1 : 0, transition: `opacity ${previewFadeMs}ms linear` }} />;
 }

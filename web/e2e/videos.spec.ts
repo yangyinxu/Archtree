@@ -4,12 +4,13 @@
  *   - Videos keeps loaded cards after a continuation fails and retries its cursor
  *   - Videos explains its error and empty states without requiring authentication
  *   - Video cards pause the shared player and navigation preserves its source and elapsed time
- *   - wide Video cards offer decorative hover previews without starting playback
+ *   - wide Video cards offer configured muted hover previews without starting formal playback
+ *   - anonymous Preview settings persists the device muted default through reload
  *   - immersive Video cards remain usable across widths and keep frame controls separate from playback
  *   - keyboard preview is explicit with Reduce Motion and changing view releases it without playback activity
  *   - long Video metadata and active controls stay separated and inside a narrow immersive card
  *   - touch Video preview
- *     - an explicit tap starts and stops one muted immersive preview without launching the main player
+ *     - an explicit tap unmutes and mutes one continuing immersive preview without launching the main player
  * @end-catalog */
 
 import { mkdir } from 'node:fs/promises';
@@ -131,7 +132,8 @@ test('Video cards pause the shared player and navigation preserves its source an
   expect(api.calls.some((call) => call.pathname === '/content/me/recently-played')).toBe(false);
 });
 
-test('wide Video cards offer decorative hover previews without starting playback', async ({ page }) => {
+test('wide Video cards offer configured muted hover previews without starting formal playback', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('finitude:video-preview-muted', 'true'));
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await page.goto('/finitude/videos');
@@ -143,6 +145,28 @@ test('wide Video cards offer decorative hover previews without starting playback
   await expect(page.getByRole('region', { name: 'Now playing', exact: true }).getByText('Nothing playing')).toBeVisible();
   await page.mouse.move(0, 0);
   await expect(preview).toHaveCount(0);
+});
+
+test('anonymous Preview settings persists the device muted default through reload', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.goto('/finitude/videos');
+  const settings = page.getByRole('button', { name: 'Preview settings', exact: true });
+  await settings.click();
+  const muted = page.getByRole('checkbox', { name: 'Mute previews by default', exact: true });
+  await expect(page.getByText('Saved on this device. Applies to new previews.', { exact: true })).toBeVisible();
+  await expect(muted).not.toBeChecked();
+  await muted.check();
+  expect(await page.evaluate(() => localStorage.getItem('finitude:video-preview-muted'))).toBe('true');
+  await page.reload();
+  await settings.click();
+  await expect(muted).toBeChecked();
+  await muted.uncheck();
+  expect(await page.evaluate(() => localStorage.getItem('finitude:video-preview-muted'))).toBe('false');
+  await page.reload();
+  await settings.click();
+  await expect(muted).not.toBeChecked();
+  await expectNoUnownedAxeViolations(page, 'video-preview-settings');
 });
 
 test('immersive Video cards remain usable across widths and keep frame controls separate from playback', async ({ api, page }) => {
@@ -158,7 +182,7 @@ test('immersive Video cards remain usable across widths and keep frame controls 
     await page.mouse.move(0, 0);
     await page.getByRole('button', { name: 'Immersive preview', exact: true }).press('Escape');
     await expect(card.locator('video[data-video-preview]')).toHaveCount(0);
-    const startPreview = card.getByRole('button', { name: 'Preview First Light', exact: true });
+    const startPreview = card.getByRole('button', { name: 'Unmute preview for First Light', exact: true });
     await startPreview.focus();
     await startPreview.press('Enter');
     await expect(card.locator('video[data-video-preview]')).toHaveAttribute('data-ready', 'true');
@@ -178,7 +202,11 @@ test('immersive Video cards remain usable across widths and keep frame controls 
     await expect(card.getByRole('button', { name: 'First Light options', exact: true })).toBeVisible();
     await expect(card.getByRole('button', { name: 'Save to Library', exact: true })).toBeVisible();
   }
-  await card.getByRole('button', { name: 'Stop previewing First Light', exact: true }).click();
+  await card.getByRole('button', { name: 'Mute preview for First Light', exact: true }).click();
+  await expect(card.locator('video[data-video-preview]')).toHaveCount(1);
+  expect(await card.locator('video[data-video-preview]').evaluate(element => (element as HTMLVideoElement).muted)).toBe(true);
+  await page.keyboard.press('Escape');
+  await expect(card.locator('video[data-video-preview]')).toHaveCount(0);
 
   const options = card.getByRole('button', { name: 'First Light options', exact: true });
   await options.click();
@@ -212,13 +240,13 @@ test('keyboard preview is explicit with Reduce Motion and changing view releases
   const card = page.getByRole('list', { name: 'Video previews' }).locator('[data-video-preview-card]').first();
   await card.hover();
   await expect(card.locator('video[data-video-preview]')).toHaveCount(0);
-  const start = card.getByRole('button', { name: 'Preview First Light', exact: true });
+  const start = card.getByRole('button', { name: 'Unmute preview for First Light', exact: true });
   await start.focus();
   await start.press('Enter');
   const preview = card.locator('video[data-video-preview]');
   await expect(preview).toHaveAttribute('data-ready', 'true');
-  expect(await preview.evaluate(element => (element as HTMLVideoElement).muted)).toBe(true);
-  await expect(card.getByRole('button', { name: 'Stop previewing First Light', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  expect(await preview.evaluate(element => (element as HTMLVideoElement).muted)).toBe(false);
+  await expect(card.getByRole('button', { name: 'Mute preview for First Light', exact: true })).toHaveAttribute('aria-pressed', 'true');
   await page.getByRole('button', { name: 'Grid', exact: true }).click();
   await expect(page.locator('video[data-video-preview]')).toHaveCount(0);
   await expect(page.getByRole('region', { name: 'Now playing', exact: true }).getByText('Nothing playing')).toBeVisible();
@@ -239,14 +267,14 @@ test('long Video metadata and active controls stay separated and inside a narrow
   await page.goto('/finitude/videos');
   await page.getByRole('button', { name: 'Immersive preview', exact: true }).click();
   const card = page.locator(`[data-video-preview-card="${trackFixtures[0].id}"]`);
-  await card.getByRole('button', { name: /^Preview / }).click();
+  await card.getByRole('button', { name: /^Unmute preview for / }).click();
   await expect(card.locator('video[data-video-preview]')).toHaveAttribute('data-ready', 'true');
   await expect(card.getByRole('heading', { level: 2 })).toHaveText(title);
   await expect(async () => {
     const frame = await card.locator('[data-video-frame="portrait"]').boundingBox();
     const heading = await card.locator('header').boundingBox();
     const description = await card.getByText(longVideo.albumTitle, { exact: true }).locator('..').boundingBox();
-    const actions = await card.getByRole('button', { name: /^Stop previewing / }).locator('..').boundingBox();
+    const actions = await card.getByRole('button', { name: /^Mute preview for / }).locator('..').boundingBox();
     expect(frame).not.toBeNull();
     expect(heading).not.toBeNull();
     expect(description).not.toBeNull();
@@ -276,18 +304,23 @@ test('long Video metadata and active controls stay separated and inside a narrow
 test.describe('touch Video preview', () => {
   test.use({ hasTouch: true, isMobile: true, viewport: { width: 390, height: 844 } });
 
-  test('an explicit tap starts and stops one muted immersive preview without launching the main player', async ({ api, page }) => {
+  test('an explicit tap unmutes and mutes one continuing immersive preview without launching the main player', async ({ api, page }) => {
     await page.emulateMedia({ reducedMotion: 'no-preference' });
     await page.goto('/finitude/videos');
     await page.getByRole('button', { name: 'Immersive preview', exact: true }).tap();
     const card = page.getByRole('list', { name: 'Video previews' }).locator('[data-video-preview-card]').first();
     await expect(page.locator('video[data-video-preview]')).toHaveCount(0);
-    await card.getByRole('button', { name: 'Preview First Light', exact: true }).tap();
+    await card.getByRole('button', { name: 'Unmute preview for First Light', exact: true }).tap();
     const preview = card.locator('video[data-video-preview]');
     await expect(preview).toHaveAttribute('data-ready', 'true');
-    expect(await preview.evaluate(element => (element as HTMLVideoElement).muted)).toBe(true);
+    expect(await preview.evaluate(element => (element as HTMLVideoElement).muted)).toBe(false);
+    const source = await preview.getAttribute('src');
     await expect(page.locator('video[data-video-preview]')).toHaveCount(1);
-    await card.getByRole('button', { name: 'Stop previewing First Light', exact: true }).tap();
+    await card.getByRole('button', { name: 'Mute preview for First Light', exact: true }).tap();
+    await expect(preview).toHaveCount(1);
+    await expect(preview).toHaveAttribute('src', source!);
+    expect(await preview.evaluate(element => (element as HTMLVideoElement).muted)).toBe(true);
+    await page.keyboard.press('Escape');
     await expect(page.locator('video[data-video-preview]')).toHaveCount(0);
     await expect(page.getByRole('region', { name: 'Now playing', exact: true }).getByText('Nothing playing')).toBeVisible();
     expect(api.calls.some(call => call.pathname === '/content/me/recently-played')).toBe(false);

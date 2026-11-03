@@ -79,6 +79,8 @@ class TestPointerEvent extends MouseEvent {
 const configure = ({
   hover = true, reducedMotion = false, forcedColors = false, saveData = false, effectiveType = '4g'
 }: Environment = {}) => {
+  // These cases exercise the saved silent default; audible automatic behavior has its own suite.
+  localStorage.setItem('finitude:video-preview-muted', 'true');
   vi.stubGlobal('PointerEvent', TestPointerEvent);
   const queries: Record<string, boolean> = {
     '(hover: hover) and (pointer: fine)': hover,
@@ -92,8 +94,13 @@ const configure = ({
   })));
   Object.defineProperty(navigator, 'connection', { configurable: true, value: { saveData, effectiveType } });
   const media = {
-    play: vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined),
-    pause: vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => undefined),
+    play: vi.spyOn(HTMLMediaElement.prototype, 'play').mockImplementation(function (this: HTMLMediaElement) {
+      Object.defineProperty(this, 'paused', { configurable: true, value: false });
+      return Promise.resolve();
+    }),
+    pause: vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(function (this: HTMLMediaElement) {
+      Object.defineProperty(this, 'paused', { configurable: true, value: true });
+    }),
     load: vi.spyOn(HTMLMediaElement.prototype, 'load').mockImplementation(() => undefined)
   };
   const fetchMock = vi.fn();
@@ -130,6 +137,7 @@ const previewMounted = async (element: Element) => {
 };
 const loadMetadata = (video: HTMLVideoElement, duration: number) => {
   Object.defineProperty(video, 'duration', { configurable: true, value: duration });
+  Object.defineProperty(video, 'readyState', { configurable: true, value: 2 });
   fireEvent(video, new Event('loadedmetadata'));
 };
 
@@ -161,6 +169,7 @@ beforeAll(async () => {
 });
 
 afterEach(() => {
+  localStorage.removeItem('finitude:video-preview-muted');
   Reflect.deleteProperty(navigator, 'connection');
   Reflect.deleteProperty(document, 'visibilityState');
 });
@@ -454,7 +463,7 @@ test.each([
   await waitFor(() => expect(container.querySelector('video')).not.toBeNull());
   const video = container.querySelector('video')!;
   expect(video.muted).toBe(true);
-  expect(video.getAttribute('src')).toContain('/content/mediaTrack/motion-preview/');
+  expect(video.getAttribute('src')).toContain('/content/mediaTrack/stream/');
   loadMetadata(video, 6);
   expect(media.play).toHaveBeenCalledTimes(1);
   expect(onReady).not.toHaveBeenCalled();

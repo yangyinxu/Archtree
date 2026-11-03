@@ -21,8 +21,8 @@ test('a failed preview chunk releases the explicit toggle and preserves real pla
     <VideoPreviewCard item={item} onPlay={onPlay} saved={false} />
   </QueryClientProvider>);
   const user = userEvent.setup();
-  await user.click(screen.getByRole('button', { name: 'Preview Still a Video' }));
-  await waitFor(() => expect(screen.getByRole('button', { name: 'Preview Still a Video' })).toHaveAttribute('aria-pressed', 'false'));
+  await user.click(screen.getByRole('button', { name: 'Unmute preview for Still a Video' }));
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Unmute preview for Still a Video' })).toHaveAttribute('aria-pressed', 'false'));
   expect(container.querySelector('img')).toHaveAttribute('src', '/video.jpg');
   expect(container.querySelector('video')).toBeNull();
   await user.click(screen.getByRole('button', { name: 'Play Still a Video' }));

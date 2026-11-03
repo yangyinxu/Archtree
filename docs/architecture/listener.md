@@ -60,13 +60,52 @@ whole-card Play target. Save retains the existing authenticated account boundary
 Framing controls affect only CSS fitting and horizontal positioning; the public
 DTO and stored media, artwork, and preview objects do not change.
 
-The immersive Preview toggle reuses the shared single-preview intent and media
-source machinery. Explicit activation can serve keyboard, touch, and Reduce
-Motion users without enabling automatic previews for them. Forced colors,
-Save-Data, slow connections, unknown preview rollout state, and the existing
+The immersive Preview control reuses the single-preview intent and media-source
+machinery. New automatic previews request sound by default. The Video page's
+Preview settings stores `finitude:video-preview-muted` locally; only `"true"`
+selects a muted default. The preference applies when the next automatic preview
+starts and never changes an active preview or manual sound choice. Cross-tab
+storage events refresh the settings control. Explicit activation toggles the
+continuing preview's actual sound state. Keyboard, touch, and Reduce
+Motion users can use this control without enabling automatic previews. Forced
+colors, Save-Data, slow connections, unknown preview rollout state, and existing
 failure suppression still retain artwork. View changes, Escape, leaving the
-card, a hidden page, or formal playback stop the decorative preview and release
-its request. Formal Play continues through the normal standalone launch policy.
+card, a hidden page, or starting/resuming any formal playback stop the preview
+and release its request. Formal Play keeps the normal standalone launch policy.
+
+Dedicated motion clips contain no audio. An audible automatic preview or an
+explicitly activated card uses the original public Video stream with the existing
+bounded eight-second window (20% into the source, at most 30 seconds, clamped to its end), even when
+dedicated hover clips are enabled. A muted default can use the dedicated clip.
+Muting or autoplay denial retains an already selected full-stream source rather
+than switching back to a clip. The request shares normal listener media-delivery
+limits; no preview object, backend lifecycle, or native client contract changes.
+Sound state and preview intent do not own the lifetime of an existing media
+source. Upgrading the same stream from hover to explicit intent preserves the
+element, current time and buffer, and does not call `load()` or restart a running
+element with `play()`. A dedicated clip-to-stream transition stages a muted
+original while keeping the clip visible and moving, then reveals and enables
+sound only after the original has its first decoded frame. The old clip is
+released after the short visual handoff. Both elements share one card's preview
+ownership and are cancelled together; an original stream is requested only when
+it is the selected preview source.
+Uploaded clips have no verified original-timeline mapping, so the transition
+does not guess a matching source offset or pair unrelated clip video with source
+audio. Each original stream retains its own bounded preview window.
+The lazy source-selection boundary arbitrates sound with the shared player:
+automatic preview never pauses active local playback or a room-owned player.
+Explicit sound activation pauses local formal playback without replacing its
+item, queue, or timeline, and never resumes it automatically. Normal playback
+observations honestly reflect that main-player pause; preview media never
+becomes a listening-status or Recently Played source. A listening-room owner
+fence refuses audible preview rather than dispatching a room pause or silently
+leaving, and must be rechecked before unmuting after asynchronous source work.
+Starting or resuming shared playback stops card previews globally so both media
+elements cannot produce sound together. Audible autoplay begins with nonzero
+gain so browser policy is honored. A rejected play or policy pause falls back
+to the same moving stream muted, reports that actual state to the control, and
+permits a later explicit retry without marking the source as failed. It does
+not rewrite the saved default or repeatedly retry audible autoplay.
 The feature's new `videos.*` interface messages use the generated, release-owned
 `web-listener` locale packs. They do not expand the public localization API or
 native fallback key sets; the delivery contract remains in

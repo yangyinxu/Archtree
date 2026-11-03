@@ -3,7 +3,7 @@
  *   Functions: VideosPage
  * Internal
  *   Functions: GridFallback
- *   Constants: VideoPreviewGrid
+ *   Constants: VideoPreviewGrid, VideoPreviewSettings
  * @end-catalog */
 
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
@@ -30,6 +30,8 @@ const GridFallback = ({ items, onPlay }: VideoPreviewGridProps) => {
 };
 // Save/framing controls are optional route code; they do not expand the reviewed initial-JS budget.
 const VideoPreviewGrid = lazy(() => import('./VideoPreviewGrid').catch(() => ({ default: GridFallback })));
+// A stale optional settings chunk must not take down browsing or the shared player.
+const VideoPreviewSettings = lazy(() => import('./VideoPreviewSettings').catch(() => ({ default: () => <></> })));
 
 /** Shares one paginated Video collection between the compact Grid and immersive preview view. */
 export const VideosPage = () => {
@@ -53,13 +55,16 @@ export const VideosPage = () => {
     <div className={`${pageStyles.page} ${styles.page}`}>
       <header className={styles.header}>
         <h1 className={pageStyles.pageTitle}>{title}</h1>
-        <div aria-label={text('videos.view.label')} className={styles.viewSwitch} role="group">
-          <button aria-pressed={view === 'grid'} onClick={() => chooseView('grid')} type="button">
-            <Grid2X2 aria-hidden="true" size={17} />{text('videos.view.grid')}
-          </button>
-          <button aria-pressed={view === 'immersive'} onClick={() => chooseView('immersive')} type="button">
-            <PanelsTopLeft aria-hidden="true" size={18} />{text('videos.view.immersive')}
-          </button>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '.5rem', alignItems: 'center', maxWidth: '100%' }}>
+          <div aria-label={text('videos.view.label')} className={styles.viewSwitch} role="group">
+            <button aria-pressed={view === 'grid'} onClick={() => chooseView('grid')} type="button">
+              <Grid2X2 aria-hidden="true" size={17} />{text('videos.view.grid')}
+            </button>
+            <button aria-pressed={view === 'immersive'} onClick={() => chooseView('immersive')} type="button">
+              <PanelsTopLeft aria-hidden="true" size={18} />{text('videos.view.immersive')}
+            </button>
+          </div>
+          <Suspense fallback={null}><VideoPreviewSettings /></Suspense>
         </div>
       </header>
 

@@ -3,8 +3,12 @@
  *   Classes: TestPointerEvent
  *   Functions: Card, intent, rest
  * Tests
+ *   - a new device hovers with sound and its first sound-control click mutes the continuing request
+ *   - browser fallback changes the sound control without erasing the desired default or blocking manual retry
+ *   - a changed default affects the next hover while an active request keeps its current choice
  *   - a resting mouse creates hover intent and leaving cancels pending or active intent
- *   - a touch tap can toggle an explicit preview despite pointer boundaries and pointerdown
+ *   - touch taps alternate audible and muted explicit preview without stopping the visual preview
+ *   - clicking during a silent hover upgrades it to audible explicit intent instead of stopping it
  *   - Escape cancels both a delayed hover and an explicit preview without later restarting
  *   - hiding the page cancels delayed and explicit requests and disallows new requests
  *   - a source change or its removal invalidates requests and cancels pending timers
@@ -15,6 +19,7 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
 
 import { useVideoCardPreview } from './useVideoCardPreview';
+import { setVideoPreviewMuted } from './videoPreviewPreferences';
 
 /** Carries pointer type through JSDOM's native pointer-boundary listeners. */
 class TestPointerEvent extends MouseEvent {
@@ -29,8 +34,9 @@ class TestPointerEvent extends MouseEvent {
 /** Exposes intent only; media eligibility and actual playback belong to CardVideoPreview tests. */
 const Card = ({ source = '/video' }: { source?: string | null }) => {
   const preview = useVideoCardPreview(source);
-  return <><article data-testid="card" ref={preview.cardRef}>
+  return <><article data-testid="card" data-muted={preview.muted} data-actual-muted={preview.actualMuted} ref={preview.cardRef}>
     <button data-preview-trigger onClick={preview.toggle}>Preview</button>
+    <button data-preview-trigger onClick={() => preview.reportMuted(true)}>Browser muted</button>
     <button>Save</button>
     <output>{preview.active ? preview.intent : 'stopped'}</output>
   </article><button>Outside</button></>;
@@ -40,8 +46,47 @@ const intent = () => screen.getByRole('status').textContent;
 const rest = () => act(() => vi.advanceTimersByTime(510));
 
 beforeEach(() => {
+  setVideoPreviewMuted(true);
   vi.useFakeTimers();
   vi.stubGlobal('PointerEvent', TestPointerEvent);
+});
+
+test('a new device hovers with sound and its first sound-control click mutes the continuing request', () => {
+  setVideoPreviewMuted(false);
+  render(<Card />);
+  const card = screen.getByTestId('card');
+  fireEvent.pointerEnter(card, { pointerType: 'mouse' }); rest();
+  expect(intent()).toBe('hover');
+  expect(card).toHaveAttribute('data-muted', 'false');
+  fireEvent.click(screen.getByRole('button', { name: 'Preview' }));
+  expect(intent()).toBe('explicit');
+  expect(card).toHaveAttribute('data-muted', 'true');
+});
+
+test('browser fallback changes the sound control without erasing the desired default or blocking manual retry', () => {
+  setVideoPreviewMuted(false);
+  render(<Card />);
+  const card = screen.getByTestId('card');
+  fireEvent.pointerEnter(card, { pointerType: 'mouse' }); rest();
+  fireEvent.click(screen.getByRole('button', { name: 'Browser muted' }));
+  expect(card).toHaveAttribute('data-muted', 'false');
+  expect(card).toHaveAttribute('data-actual-muted', 'true');
+  fireEvent.click(screen.getByRole('button', { name: 'Preview' }));
+  expect(intent()).toBe('explicit');
+  expect(card).toHaveAttribute('data-muted', 'false');
+  expect(card).toHaveAttribute('data-actual-muted', 'false');
+});
+
+test('a changed default affects the next hover while an active request keeps its current choice', () => {
+  setVideoPreviewMuted(false);
+  render(<Card />);
+  const card = screen.getByTestId('card');
+  fireEvent.pointerEnter(card, { pointerType: 'mouse' }); rest();
+  setVideoPreviewMuted(true);
+  expect(card).toHaveAttribute('data-muted', 'false');
+  fireEvent.pointerLeave(card, { pointerType: 'mouse' });
+  fireEvent.pointerEnter(card, { pointerType: 'mouse' }); rest();
+  expect(card).toHaveAttribute('data-muted', 'true');
 });
 
 afterEach(() => {
@@ -60,11 +105,12 @@ test('a resting mouse creates hover intent and leaving cancels pending or active
   fireEvent.pointerEnter(card, { pointerType: 'mouse' });
   rest();
   expect(intent()).toBe('hover');
+  expect(card).toHaveAttribute('data-muted', 'true');
   fireEvent.pointerLeave(card, { pointerType: 'mouse' });
   expect(intent()).toBe('stopped');
 });
 
-test('a touch tap can toggle an explicit preview despite pointer boundaries and pointerdown', () => {
+test('touch taps alternate audible and muted explicit preview without stopping the visual preview', () => {
   render(<Card />);
   const button = screen.getByRole('button', { name: 'Preview' });
   const card = screen.getByTestId('card');
@@ -75,9 +121,31 @@ test('a touch tap can toggle an explicit preview despite pointer boundaries and 
   fireEvent.click(button);
   fireEvent.pointerLeave(card, { pointerType: 'touch' });
   expect(intent()).toBe('explicit');
+  expect(card).toHaveAttribute('data-muted', 'false');
   fireEvent.pointerDown(button, { pointerType: 'touch' });
   fireEvent.click(button);
-  expect(intent()).toBe('stopped');
+  expect(intent()).toBe('explicit');
+  expect(card).toHaveAttribute('data-muted', 'true');
+  fireEvent.pointerDown(button, { pointerType: 'touch' });
+  fireEvent.click(button);
+  expect(intent()).toBe('explicit');
+  expect(card).toHaveAttribute('data-muted', 'false');
+});
+
+test('clicking during a silent hover upgrades it to audible explicit intent instead of stopping it', () => {
+  render(<Card />);
+  const card = screen.getByTestId('card');
+  fireEvent.pointerEnter(card, { pointerType: 'mouse' });
+  rest();
+  expect(intent()).toBe('hover');
+  expect(card).toHaveAttribute('data-muted', 'true');
+  fireEvent.click(screen.getByRole('button', { name: 'Preview' }));
+  expect(intent()).toBe('explicit');
+  expect(card).toHaveAttribute('data-muted', 'false');
+  fireEvent.pointerEnter(card, { pointerType: 'mouse' });
+  rest();
+  expect(intent()).toBe('explicit');
+  expect(card).toHaveAttribute('data-muted', 'false');
 });
 
 test('Escape cancels both a delayed hover and an explicit preview without later restarting', () => {

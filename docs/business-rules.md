@@ -1519,26 +1519,53 @@ The wire protocol and operational bounds are documented in
   previous source's ranges when the MediaTrack changes. Buffered bytes do not
   imply an offline download or guaranteed continued availability.
 - On hover-capable Web devices with a fine pointer, a Video MediaTrack card may
-  show a short, muted, looping preview of that MediaTrack after a mouse rests on
-  it for about half a second. A preview is decoration, not playback: it uses its
-  own media element, never changes the shared player, queue, elapsed time,
-  Shuffle/Repeat state, or system media controls, and never records Recently
-  Played, listening status, telemetry, or social activity. Only one card
-  previews at a time; leaving the card, hiding the page, or the MediaTrack
-  becoming current playback stops it and releases its request. Automatic
-  previews are skipped with Reduce Motion, forced colors, Save-Data, slow
-  connections, and touch or hover-less pointers. An immersive Video card also
-  offers an explicit muted Preview toggle for pointer, keyboard, and touch
-  users, including listeners who prefer Reduce Motion. Explicit previews still
-  respect forced colors, Save-Data, slow connections, and the same visibility,
-  lifecycle, and single-preview limits. Escape or changing the Video browsing
-  view stops any preview. A failed preview is not retried in that page session.
-  While motion previews are enabled, the card reads only the
-  MediaTrack's motion preview, loops that whole clip from its start, and a
-  Video without one keeps its artwork; while they are disabled, the card reads
-  the public stream, so its one request shares the listener's media delivery
-  limits until the preview stops. A card that cannot tell whether previews are
-  enabled shows no preview.
+  show a short, looping preview after a mouse rests on it for about half a
+  second. New automatic previews request sound by default. The Video page's
+  Preview settings offers Mute previews by default, saved on the device and
+  independent of the account. Changing it affects the next new automatic
+  preview, not one already playing or a manual sound choice. Automatic preview
+  never interrupts local or listening-room playback: if the shared player is
+  already playing or room-owned, it remains silent or does not start. Browser
+  autoplay restrictions may also leave it silent; its control reports the
+  actual sound state and offers explicit activation without changing the saved
+  preference. Autoplay denial is not a failed source and does not prevent a
+  later user-initiated attempt.
+- A card preview uses its own media element and is never a queue item. Automatic
+  preview does not change the shared player, queue, elapsed time, Shuffle/Repeat
+  state, or system media controls. Card previews never record their own
+  Recently Played, listening status, telemetry, or social activity. Only one
+  card previews at a time; leaving the card or hiding the page stops it and
+  releases its request. Starting or resuming any shared-player playback stops
+  every card preview. Automatic previews are skipped with Reduce Motion, forced
+  colors, Save-Data, slow connections, and touch or hover-less pointers. Escape
+  or changing the Video browsing view stops any preview. A failed media source
+  is not retried in that page session. A card that cannot tell whether motion
+  previews are enabled shows no preview.
+- Audible previews use a bounded eight-second window of the original public
+  Video stream. When the saved default is muted and motion previews are enabled,
+  automatic preview instead loops the dedicated audio-free clip from its start;
+  a Video without one keeps its artwork. When motion previews are disabled,
+  muted preview also uses the original public stream. Original-stream requests
+  share normal listener media-delivery limits until stopped. After requesting
+  sound or explicitly activating Preview, the card retains the original stream
+  even if muted again or blocked by autoplay policy.
+- An immersive Video card's Preview control toggles the continuing preview's
+  sound, if present. A browser-muted preview offers a click to enable sound.
+  This explicit control works with pointer, keyboard, and touch, including
+  Reduce Motion, while respecting forced colors, Save-Data, slow connections,
+  and the same visibility, lifecycle, and single-preview limits. Enabling sound
+  on an already playing source preserves its current position and buffered media
+  without reloading or seeking. If a silent clip must change to the original
+  stream, the clip continues moving until the original has a decoded frame
+  ready; then the card transitions to the original picture and sound. Explicit
+  sound activation pauses local shared-player playback without changing its
+  queue, item, position, Shuffle, or Repeat, and never automatically resumes it
+  when the preview is muted or stopped. The actual main-player pause retains
+  its normal stopped-state observations; the preview itself creates no playback
+  activity. Audible preview is unavailable while a listening room owns the
+  player: the control explains that the listener must leave the room first,
+  and never pauses the shared room or leaves it silently. Preview and shared
+  playback must never produce sound at the same time. This behavior is Web-only.
 - The Web listener's primary navigation includes a Video page beside Home and
   Library. Its single configured Grid includes every ready, published, publicly
   visible Video MediaTrack, a page at a time. Administrators can manually order

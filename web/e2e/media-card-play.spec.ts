@@ -6,8 +6,8 @@
  *   - Album card Play stays hidden at rest, appears on keyboard focus, and starts the Album without leaving Home
  *   - Album card Play is revealed by hover and remains visible in forced colors
  *   - the playing MediaTrack card keeps a Pause control and an accent title until paused
- *   - a mouse resting on a Video card plays a muted preview without touching the shared player
- *   - with motion previews enabled, a Video card plays its dedicated clip instead of the stream
+ *   - a mouse resting on a Video card honors muted previews without touching the shared player
+ *   - with muted motion previews enabled, a Video card plays its dedicated clip instead of the stream
  *   - with a touch pointer
  *     - Album cards open the Album and offer no separate card Play
  * @end-catalog */
@@ -106,7 +106,8 @@ test('the playing MediaTrack card keeps a Pause control and an accent title unti
   await expect(main.getByRole('button', { name: 'Pause Night Window' })).toHaveCount(0);
 });
 
-test('a mouse resting on a Video card plays a muted preview without touching the shared player', async ({ page }) => {
+test('a mouse resting on a Video card honors muted previews without touching the shared player', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('finitude:video-preview-muted', 'true'));
   await installMediaCardHome(page);
   await page.setViewportSize({ width: 1_440, height: 900 });
   await page.emulateMedia({ reducedMotion: 'no-preference' });
@@ -137,7 +138,8 @@ test('a mouse resting on a Video card plays a muted preview without touching the
   await expect(videoCard.locator('video[data-video-preview]')).toHaveCount(0);
 });
 
-test('with motion previews enabled, a Video card plays its dedicated clip instead of the stream', async ({ api, page }) => {
+test('with muted motion previews enabled, a Video card plays its dedicated clip instead of the stream', async ({ api, page }) => {
+  await page.addInitScript(() => localStorage.setItem('finitude:video-preview-muted', 'true'));
   await installMediaCardHome(page);
   await page.route('**/api/listener/v1/presentation-capabilities', (route) => route.fulfill({
     status: 200, contentType: 'application/json', body: JSON.stringify({ contractVersion: 1, motionPreviews: true })

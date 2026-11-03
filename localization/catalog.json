@@ -16501,7 +16501,7 @@
       "variables": {}
     },
     "videos.preview.action": {
-      "description": "Accessible action that starts a named Video card muted decorative preview.",
+      "description": "Accessible action that starts or unmutes a named Video card preview with sound.",
       "delivery": [
         "web-listener"
       ],
@@ -16510,14 +16510,21 @@
       }
     },
     "videos.preview.active": {
-      "description": "Visible action while an immersive Video card muted decorative preview is active.",
+      "description": "Visible status while an immersive Video card preview is playing with sound.",
+      "delivery": [
+        "web-listener"
+      ],
+      "variables": {}
+    },
+    "videos.preview.enable_sound": {
+      "description": "Visible recovery action when browser policy or existing playback keeps an automatic preview muted.",
       "delivery": [
         "web-listener"
       ],
       "variables": {}
     },
     "videos.preview.label": {
-      "description": "Visible action that starts an immersive Video card muted decorative preview.",
+      "description": "Visible Video preview action; its icon and accessible label describe the requested sound state.",
       "delivery": [
         "web-listener"
       ],
@@ -16531,13 +16538,34 @@
       "variables": {}
     },
     "videos.preview.stop": {
-      "description": "Accessible action that stops a named Video card muted decorative preview.",
+      "description": "Accessible action that mutes a named Video card preview without stopping its visual loop.",
       "delivery": [
         "web-listener"
       ],
       "variables": {
         "title": "string"
       }
+    },
+    "videos.settings.help": {
+      "description": "Explains that preview sound defaults are device-local and apply to new previews.",
+      "delivery": [
+        "web-listener"
+      ],
+      "variables": {}
+    },
+    "videos.settings.mute": {
+      "description": "Checkbox choosing silent automatic previews instead of the default audible hover.",
+      "delivery": [
+        "web-listener"
+      ],
+      "variables": {}
+    },
+    "videos.settings.title": {
+      "description": "Video page preview settings button and dialog title.",
+      "delivery": [
+        "web-listener"
+      ],
+      "variables": {}
     },
     "videos.view.grid": {
       "description": "Video page selector for the traditional landscape-card grid.",

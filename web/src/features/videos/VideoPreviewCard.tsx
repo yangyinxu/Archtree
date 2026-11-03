@@ -7,11 +7,12 @@
  *   Constants: CardVideoPreview, VideoFrameOptions
  * @end-catalog */
 
-import { lazy, Suspense, useCallback, useEffect, useId, useRef, useState, type ComponentType, type CSSProperties } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useId, useRef, useState, useSyncExternalStore, type ComponentType, type CSSProperties } from 'react';
 import { MoreHorizontal, Pause, Play, VolumeX } from 'lucide-react';
 
 import { contentByline, type AudioTrackSummary } from '../../api/contentSchemas';
 import { Artwork } from '../../components/Artwork';
+import { Icon } from '../../components/Icon';
 import type { CardVideoPreviewProps } from '../../components/CardVideoPreview';
 import { formatLocalizedMessage, useLocalization } from '../../localization/LocalizationProvider';
 import { playerStore, usePlayingTrackId } from '../../player';
@@ -49,7 +50,9 @@ export const VideoPreviewCard = ({ item, viewerId, saved, onPlay }: VideoPreview
   const title = item.title.trim() || t('content.title.untitled_track');
   const byline = contentByline(item);
   const playing = usePlayingTrackId() === item.id;
+  const roomActive = useSyncExternalStore(playerStore.subscribe, playerStore.isRoomPlaybackActive, () => false);
   const preview = useVideoCardPreview(!playing && item.mediaType === 'video' ? item.streamUrl : null);
+  const audible = preview.active && !preview.actualMuted;
   const [ready, setReady] = useState(false);
   const [optionsOpen, setOptionsOpen] = useState(false);
   const [fit, setFit] = useState<'cover' | 'contain'>('cover');
@@ -58,6 +61,7 @@ export const VideoPreviewCard = ({ item, viewerId, saved, onPlay }: VideoPreview
   const titleId = useId();
   const trigger = useRef<HTMLButtonElement>(null);
   const markReady = useCallback(() => setReady(true), []);
+  const markLoading = useCallback(() => setReady(false), []);
   const stop = useCallback(() => { setReady(false); preview.stop(); }, [preview.stop]);
 
   useEffect(() => { if (!preview.active) setReady(false); }, [preview.active]);
@@ -74,8 +78,8 @@ export const VideoPreviewCard = ({ item, viewerId, saved, onPlay }: VideoPreview
       <div className={styles.frame} data-video-frame="portrait" style={frameStyle}>
         <Artwork alt="" className={styles.background} kind="audioTrack" sizes="(max-width: 600px) 100vw, 32rem" src={item.artworkUrl} />
         {preview.active && <Suspense fallback={null}>
-          <CardVideoPreview className={styles.preview} intent={preview.intent} mediaTrackId={item.id}
-            onReady={markReady} onStop={stop} streamUrl={item.streamUrl} />
+          <CardVideoPreview className={styles.preview} intent={preview.intent} mediaTrackId={item.id} muted={preview.muted}
+            onLoading={markLoading} onMuted={preview.reportMuted} onReady={markReady} onStop={stop} streamUrl={item.streamUrl} />
         </Suspense>}
         <div aria-hidden="true" className={styles.shade} />
         <header className={styles.heading}>
@@ -91,11 +95,13 @@ export const VideoPreviewCard = ({ item, viewerId, saved, onPlay }: VideoPreview
           {metadata && <span title={metadata}>{metadata}</span>}
         </div>
         <div className={styles.actions}>
-          <button aria-label={text(preview.active ? 'videos.preview.stop' : 'videos.preview.action', { title })}
-            aria-pressed={preview.active} className={styles.previewButton} data-preview-trigger=""
-            onClick={preview.toggle} type="button">
-            {ready ? <Pause aria-hidden="true" size={16} /> : <VolumeX aria-hidden="true" size={17} />}
-            <span>{text(ready ? 'videos.preview.active' : 'videos.preview.label')}</span>
+          <button aria-label={text(audible ? 'videos.preview.stop' : 'videos.preview.action', { title })}
+            aria-pressed={audible} className={styles.previewButton} data-preview-trigger=""
+            disabled={playing || roomActive} onClick={preview.toggle}
+            title={roomActive ? t('content.album.play_room_active', { title }) : undefined} type="button">
+            {audible ? <Icon name="volume" size={17} /> : <VolumeX aria-hidden="true" size={17} />}
+            <span>{text(ready && audible ? 'videos.preview.active'
+              : ready && preview.active && !preview.muted ? 'videos.preview.enable_sound' : 'videos.preview.label')}</span>
           </button>
           <span className={styles.spacer} />
           <button aria-controls={optionsOpen ? optionsId : undefined} aria-expanded={optionsOpen}

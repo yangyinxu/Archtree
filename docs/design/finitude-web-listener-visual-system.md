@@ -216,18 +216,28 @@ artwork.
 - The MediaTrack card that is currently playing keeps its control visible as a
   filled Pause glyph, colors its title with the accent, exposes
   `aria-current`, and pauses on activation.
-- A Video MediaTrack card that a mouse rests on for 500 ms fades a muted,
+- A Video MediaTrack card that a mouse rests on for 500 ms fades an
   `object-fit: cover` preview over its artwork (300 ms, under the Play
   control). It loops an 8 s window starting 20% in (at most 30 s), clamped to
-  the clip's end, is hidden from assistive technology, stops on any press
-  inside the card, and never starts with Reduce Motion, forced colors, touch,
-  Save-Data, or a hidden page. With motion previews enabled it plays the
-  dedicated preview clip, looping the whole clip from its start, and a Video
-  without one keeps its artwork. Immersive cards additionally expose an
-  explicit muted Preview toggle for keyboard and touch use, including Reduce
-  Motion. It preserves the forced-colors, Save-Data, slow-connection, hidden-page,
-  and single-preview restrictions. Changing browsing view or pressing Escape
-  stops it without affecting the shared player.
+  the clip's end, is hidden from assistive technology, and stops when another
+  card action is pressed. Automatic preview never starts with Reduce Motion,
+  forced colors, touch, Save-Data, or a hidden page. With motion previews enabled
+  and a muted default, it plays the dedicated audio-free clip, looping the whole
+  clip from its start; a Video without one keeps its artwork. New automatic
+  previews request sound by default using the original Video stream. The Video
+  page's Preview settings offers a device-local Mute previews by default
+  checkbox, unchecked initially; changes apply to new previews. Browser-blocked
+  sound keeps moving silently and shows Click for sound, without changing that
+  preference. Automatic preview never interrupts an active main or room player.
+  Immersive cards additionally expose a Preview sound control for keyboard and touch use, including Reduce Motion. Activating
+  it toggles the continuing preview's sound, using the original stream when
+  audio is requested. The control preserves the
+  forced-colors, Save-Data, slow-connection, hidden-page, and single-preview
+  restrictions. Explicitly enabling sound pauses local formal playback, preserving
+  its queue and position and never resuming it automatically. It is unavailable
+  while a listening room owns the player and explains the leave-room action.
+  Changing browsing view or pressing Escape stops the preview; starting or
+  resuming formal playback stops all card previews before sound can overlap.
 - The Video page defaults to wide cards: artwork and preview crop to 16:9 with
   `object-fit: cover`, in a Grid whose columns are at least 16rem of artwork
   (one column on phones). A compact segmented control selects this Grid or an
