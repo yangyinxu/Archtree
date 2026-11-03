@@ -3,12 +3,15 @@
  *   Functions: setup, enter
  * Tests
  *   - MOV original admission, unknown transfer and processing/publication retries keep one source upload
+ *   - original upload shows measured completion while a real receiver has not yet confirmed the source
+ *   - server validation displays the measured current-step percentage and keeps unknown progress indeterminate
  *   - Album lookup dismisses without losing its choice and the production Video form is accessible at 320 px
  *   - workbench retains Album upload and MP3 conversion beside Video, while unavailable storage is explicit
  *   - an ordinary account never reads or opens private Video projects
  * @end-catalog */
 
 import { expect, test, type Page } from '@playwright/test';
+import { createServer } from 'node:http';
 import AxeBuilder from '@axe-core/playwright';
 import sharp from 'sharp';
 import { capabilities, session, viewer } from '../src/features/admin/adminFixtures.testSupport';
@@ -114,6 +117,84 @@ test('MOV original admission, unknown transfer and processing/publication retrie
   expect(flow.uploads).toHaveLength(1); expect(flow.publications()).toBe(1);
   await page.getByRole('button', { name: 'Retry cleanup', exact: true }).click();
   await expect(page.getByText('Video publication complete', { exact: true })).toBeVisible();
+});
+
+test('original upload shows measured completion while a real receiver has not yet confirmed the source', async ({ page }, testInfo) => {
+  const flow = await setup(page, { fresh: true });
+  let releaseResponse!: () => void, confirmReceived!: () => void;
+  const responseGate = new Promise<void>(resolve => { releaseResponse = resolve; });
+  const received = new Promise<void>(resolve => { confirmReceived = resolve; });
+  const operations: string[] = [];
+  let byteLength = 0, receivedViewer: string | string[] | undefined;
+  // The browser sends real bytes to a local receiver; only its receipt is held, so progress is not simulated.
+  const receiver = createServer((request, response) => {
+    request.on('data', (chunk: Buffer) => { byteLength += chunk.byteLength; });
+    request.once('end', () => {
+      const operationId = String(request.headers['idempotency-key']); operations.push(operationId);
+      receivedViewer = request.headers['x-finitude-account-viewer'];
+      confirmReceived();
+      void responseGate.then(() => {
+        const item = flow.current();
+        const confirmed: VideoProject = { ...item, stage: 'validate', revision: item.revision + 1,
+          source: { ...item.source, status: 'ready', operationId },
+          processing: { ...item.processing, state: 'queued' } };
+        flow.set(confirmed);
+        response.writeHead(200, { 'Content-Type': 'application/json', 'X-Finitude-Account-Viewer': viewer, 'Cache-Control': 'no-store' });
+        response.end(JSON.stringify({ schemaVersion: 1, item: confirmed, receipt: { operationId, revision: confirmed.revision } }));
+      });
+    });
+  });
+  try {
+    await new Promise<void>((resolve, reject) => { receiver.once('error', reject); receiver.listen(0, '127.0.0.1', resolve); });
+    const address = receiver.address();
+    if (!address || typeof address === 'string') throw new Error('The synthetic upload receiver did not bind a TCP port.');
+    await page.route(`**/api/admin/v1/video-projects/${videoProjectId}/source`, route => route.continue({ url: `http://127.0.0.1:${address.port}/source` }));
+    await enter(page, '/finitude/admin/videos/new');
+    await page.locator('input[type=file]').setInputFiles({ name: 'synthetic-original.MOV', mimeType: 'video/quicktime', buffer: Buffer.from('not-a-movie!') });
+    await expect(page).toHaveURL(new RegExp(`/videos/${videoProjectId}$`));
+    await page.getByRole('button', { name: 'Upload original video', exact: true }).click();
+    await received;
+    const progress = page.getByRole('progressbar', { name: 'Transferring original bytes… Awaiting server confirmation.', exact: true });
+    await expect(progress).toHaveAttribute('value', '100');
+    await expect(page.getByText('100%', { exact: true })).toBeVisible();
+    await expect(page.getByText('Bytes transferred. Waiting for server confirmation.', { exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Reconcile original upload', exact: true })).toBeDisabled();
+    expect(receivedViewer).toBe(viewer); expect(byteLength).toBeGreaterThan(12); expect(operations).toHaveLength(1); expect(flow.current().source.status).toBe('idle');
+    await page.screenshot({ path: testInfo.outputPath('video-upload-awaiting-receipt.png'), fullPage: true });
+    releaseResponse();
+    await expect(progress).toHaveCount(0);
+    await expect.poll(() => flow.current().source.status).toBe('ready');
+    expect(operations).toHaveLength(1);
+  } finally {
+    releaseResponse();
+    receiver.closeAllConnections();
+    await new Promise<void>((resolve, reject) => receiver.close(error => error ? reject(error) : resolve()));
+  }
+});
+
+test('server validation displays the measured current-step percentage and keeps unknown progress indeterminate', async ({ page }, testInfo) => {
+  const flow = await setup(page);
+  flow.set({ ...flow.current(), stage: 'validate', approvalDigest: null,
+    processing: { ...flow.current().processing, state: 'running', step: 'validate', progress: 37 } });
+  await enter(page);
+  const progress = page.getByRole('progressbar', { name: 'Server validation and adaptation', exact: true });
+  await expect(page.getByText('Validating complete decoding', { exact: true })).toBeVisible();
+  await expect(progress).toHaveAttribute('value', '37');
+  await expect(page.getByText('37%', { exact: true })).toBeVisible();
+  flow.set({ ...flow.current(), processing: { ...flow.current().processing, progress: 68 } });
+  await expect(progress).toHaveAttribute('value', '68');
+  await expect(page.getByText('68%', { exact: true })).toBeVisible();
+  await expect(page.getByText('37%', { exact: true })).toHaveCount(0);
+  await page.setViewportSize({ width: 320, height: 844 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  const accessibility = await new AxeBuilder({ page }).analyze();
+  expect(accessibility.violations.filter(issue => ['critical', 'serious'].includes(issue.impact ?? ''))).toEqual([]);
+  await progress.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: testInfo.outputPath('video-server-progress-mobile.png'), fullPage: true });
+  flow.set({ ...flow.current(), processing: { ...flow.current().processing, step: 'cover', progress: null } });
+  await expect(page.getByText('Extracting default cover', { exact: true })).toBeVisible();
+  await expect(progress).not.toHaveAttribute('value');
+  await expect(page.getByText('68%', { exact: true })).toHaveCount(0);
 });
 
 test('Album lookup dismisses without losing its choice and the production Video form is accessible at 320 px', async ({ page }, testInfo) => {

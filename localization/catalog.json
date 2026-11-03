@@ -9735,6 +9735,13 @@
       ],
       "variables": {}
     },
+    "admin.video.processing_progress_help": {
+      "description": "Clarifies that decoder percentages measure the current server processing step.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
     "admin.video.processing_retry": {
       "description": "Administrator Video upload: Retry processing · no re-upload",
       "delivery": [
@@ -9884,6 +9891,13 @@
     },
     "admin.video.reconcile": {
       "description": "Administrator Video upload: Reconcile original upload",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.reconciling": {
+      "description": "Status while reading the original Video transfer outcome without resending bytes.",
       "delivery": [
         "web-admin"
       ],
@@ -10120,8 +10134,22 @@
       ],
       "variables": {}
     },
+    "admin.video.transfer_waiting": {
+      "description": "Bytes reached the server, but its receipt has not yet confirmed admission.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
     "admin.video.transmitting": {
       "description": "Administrator Video upload: Transferring original bytes… Awaiting server confirmation.",
+      "delivery": [
+        "web-admin"
+      ],
+      "variables": {}
+    },
+    "admin.video.transmitting_cover": {
+      "description": "Status for the independently measured Video cover image transfer.",
       "delivery": [
         "web-admin"
       ],

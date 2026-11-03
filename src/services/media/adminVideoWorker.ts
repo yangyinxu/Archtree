@@ -105,7 +105,7 @@ async function processProject(claimed: AdminVideoProject, dependencies: AdminVid
     const controller = new AbortController(), workSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
     let progressWrites = Promise.resolve(); let lastWrite = 0; let lastStage: string | undefined; let progressFailure: unknown;
     try {
-        await checkpoint(claimed, async current => { current.processing.state = 'running'; current.processing.issue = null; current.processing.step = 'inspect'; });
+        await checkpoint(claimed, async current => { current.processing.state = 'running'; current.processing.issue = null; current.processing.step = 'inspect'; current.processing.progress = null; });
         await storage.download(claimed._id.toHexString(), source, inputPath, signal);
         const result = await (dependencies.process ?? processVideoSource)({ inputPath, workDirectory: directory, signal: workSignal, onProgress: event => {
             if (Date.now() - lastWrite < 1_000 && event.progress !== 100 && !event.plan && lastStage === event.stage) return;

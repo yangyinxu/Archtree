@@ -1834,7 +1834,11 @@ The wire protocol and operational bounds are documented in
   transfer, complete source validation, necessary playback adaptation, final
   publication and unfinished cleanup separately. Only actual work may advance
   progress; byte transfer reaching its end does not mean the Video is ready or
-  published. Local preview failure leaves original upload and manual artwork
+  published. Show measured transfer percentages and byte counts while uploading,
+  then explicitly wait for server confirmation. Server validation and adaptation
+  show measured percentages for the current step, including any complete output
+  revalidation; work without a measured total remains indeterminate.
+  Local preview failure leaves original upload and manual artwork
   available and explains the device limitation.
 - The playback policy accepts MP4 carrying H.264/AVC 8-bit 4:2:0 or HEVC
   Main/Main10 4:2:0 with an `hvc1` sample entry, with AAC or no audio. Compatible

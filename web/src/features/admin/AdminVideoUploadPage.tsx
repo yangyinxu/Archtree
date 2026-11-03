@@ -20,6 +20,7 @@ import { useAdminCommand } from './useAdminCommand';
 import { useOnline } from './useAdminOnline';
 import { useVideoCapabilities } from './useVideoCapabilities';
 import { VideoUploadCover } from './VideoUploadCover';
+import { VideoProcessingProgress, VideoTransferProgress } from './VideoUploadProgress';
 import { videoProcessingIssue, videoPublicationNeedsReview } from './videoFailure';
 import { useVideoTransfer } from './useVideoTransfer';
 import { readVideoProject, videoMutationSchema, videoPath, videoResponseSchema, type VideoDraft, type VideoProject } from './videoUploadApi';
@@ -176,8 +177,8 @@ function VideoProjectPage({ id }: { id: string }) {
       {unknownSource && <p role="status">{t('video.unknown_help')}</p>}
       {!capability?.enabled && <p role="status">{t('video.unavailable')}</p>}
       {project.processing.facts && <p className={styles.help}>{project.processing.facts.durationSeconds.toFixed(1)} s · {project.processing.facts.width} × {project.processing.facts.height} · {project.processing.facts.videoCodec}{project.processing.facts.audioCodec ? ` / ${project.processing.facts.audioCodec}` : ''}</p>}
-      {transfer.running && <div role="status"><p>{t('video.transmitting')}</p><progress aria-label={t('video.transmitting')} /></div>}
-      <ol className={styles.stages}>{phaseStates.map((state, index) => <li className={styles.stage} key={index}>{['ready', 'complete'].includes(state) ? <CheckCircle2 size={22} aria-hidden="true" /> : ['pending', 'queued', 'running'].includes(state) ? <Loader2 size={22} aria-hidden="true" /> : <Circle size={22} aria-hidden="true" />}<div><h3>{t(`video.stage_${index}`)}</h3><p>{t(`video.state_${state}`)}</p>{index === 2 && <p>{t(`video.plan_${project.processing.plan}`)}</p>}{index === 2 && processingRunning && project.processing.step && <p>{t(`video.step_${project.processing.step}`)}</p>}{index === 2 && project.processing.progress !== null && processingRunning && <progress max={100} value={project.processing.progress} aria-label={t('video.stage_2')} />}</div></li>)}</ol>
+      {transfer.running && (transfer.progress ? <VideoTransferProgress progress={transfer.progress} kind={transfer.intent?.kind ?? 'source'} /> : <p role="status">{t('video.reconciling')}</p>)}
+      <ol className={styles.stages}>{phaseStates.map((state, index) => <li className={styles.stage} key={index}>{['ready', 'complete'].includes(state) ? <CheckCircle2 size={22} aria-hidden="true" /> : ['pending', 'queued', 'running'].includes(state) ? <Loader2 size={22} aria-hidden="true" /> : <Circle size={22} aria-hidden="true" />}<div><h3>{t(`video.stage_${index}`)}</h3><p>{t(`video.state_${state}`)}</p>{index === 2 && <p>{t(`video.plan_${project.processing.plan}`)}</p>}{index === 2 && processingRunning && project.processing.step && <p>{t(`video.step_${project.processing.step}`)}</p>}{index === 2 && processingRunning && <VideoProcessingProgress progress={project.processing.progress} />}</div></li>)}</ol>
       {project.processing.state === 'failed' && <p role="status">{t(`video.processing_issue_${videoProcessingIssue(project.processing.issue)}`)}</p>}{project.publication.state === 'failed' && <p role="status">{t(requiresNewApproval ? 'video.publication_review_needed' : 'video.publication_failed')}</p>}
       {cancelled && <p role="status">{t('video.cancelled')}</p>}
       {project.publication.cleanupPending && <button className={common.button} type="button" disabled={!online || mutation.running || Boolean(mutation.intent)} onClick={() => mutation.command.run(`${videoPath(id)}/cleanup`, { expectedRevision: project.revision }, 'POST')}>{t('video.cleanup_retry')}</button>}

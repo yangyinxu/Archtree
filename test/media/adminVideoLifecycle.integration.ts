@@ -9,6 +9,7 @@
  *   - unknown source upload reconciles its original intent without a second upload
  *   - Chinese multipart names normalize before fingerprinting and lost-response replay
  *   - processing failure retries the confirmed source without requiring browser bytes
+ *   - durable progress preserves decoder completion and subsequent step resets in order
  *   - unknown processed output is recovered by exact identity instead of rerunning or resending processing
  *   - a stale confirmation writes no approval, and changed references after approval permit fresh review without upload
  *   - publication acknowledgement loss reuses a fixed track and exact copied object
@@ -166,6 +167,38 @@ test('processing failure retries the confirmed source without requiring browser 
     assert.equal(failed.item.processing.issue, 'processor_unavailable'); assert.equal(failed.item.source.status, 'ready');
     await retryAdminVideoProcessing(actor.toHexString(), current.item.id, intent(failed.item.revision)); await step();
     assert.equal((await getAdminVideoProject(actor.toHexString(), current.item.id)).item.stage, 'review'); assert.equal(storage.puts, 1);
+});
+
+test('durable progress preserves decoder completion and subsequent step resets in order', async () => {
+    const current = await uploaded(), id = current.item.id;
+    // A restarted worker must not show the previous decoder's percentage during source retrieval.
+    await videoProjects().updateOne({ _id: new ObjectId(id) }, { $set: { 'processing.state': 'running', 'processing.step': 'validate', 'processing.progress': 88 } });
+    const observed: { stage: string | null; progress: number | null }[] = [];
+    const expected = [
+        { stage: 'validate', progress: 23, plan: 'remux' }, { stage: 'validate', progress: 100 },
+        { stage: 'adapt', progress: 0 }, { stage: 'adapt', progress: 100 },
+        { stage: 'validate', progress: 0 }, { stage: 'validate', progress: 100 }, { stage: 'cover', progress: null }
+    ] as const;
+    await step({ process: async options => {
+        const restarted = await getAdminVideoProject(actor.toHexString(), id);
+        assert.equal(restarted.item.processing.step, 'inspect'); assert.equal(restarted.item.processing.progress, null);
+        for (const event of expected) {
+            options.onProgress?.(event);
+            const deadline = Date.now() + 5_000;
+            let processing = restarted.item.processing;
+            while (Date.now() < deadline) {
+                processing = (await getAdminVideoProject(actor.toHexString(), id)).item.processing;
+                if (processing.step === event.stage && processing.progress === event.progress) break;
+                await new Promise(resolve => setTimeout(resolve, 10));
+            }
+            assert.equal(processing.state, 'running'); assert.equal(processing.step, event.stage); assert.equal(processing.progress, event.progress);
+            observed.push({ stage: processing.step, progress: processing.progress });
+        }
+        return processor(options);
+    } });
+    assert.deepEqual(observed, expected.map(({ stage, progress }) => ({ stage, progress })));
+    const ready = await getAdminVideoProject(actor.toHexString(), id);
+    assert.equal(ready.item.processing.state, 'ready'); assert.equal(ready.item.processing.progress, 100); assert.equal(storage.puts, 1);
 });
 
 test('unknown processed output is recovered by exact identity instead of rerunning or resending processing', async () => {

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { apiRequest, ApiError } from '../../api/client';
+import { apiRequest, ApiError, type ApiRequestOptions } from '../../api/client';
 import { ADMIN_RELOAD_REQUIRED, adminWorkspace } from './adminWorkspace';
 
 const id = z.string().regex(/^[a-f0-9]{24}$/);
@@ -17,7 +17,7 @@ export const ADMIN_IMPORT_RELOAD_REQUIRED = 'ADMIN_IMPORT_RELOAD_REQUIRED';
  * The strict schema is applied here, after transport, so an outdated bundle becomes a reload request rather
  * than an unconfirmed operation; a caller's own receipt check never reaches this state.
  */
-export async function adminEndpointRequest<T>(path: string, schema: z.ZodType<T>, init: RequestInit = {}, guard = adminWorkspace.capture()): Promise<T> {
+export async function adminEndpointRequest<T>(path: string, schema: z.ZodType<T>, init: ApiRequestOptions = {}, guard = adminWorkspace.capture()): Promise<T> {
   if (!adminWorkspace.current(guard)) throw new DOMException('Admin view changed', 'AbortError');
   let raw: unknown;
   try {

@@ -5633,8 +5633,16 @@ records the original filename, length and digest, and uses a never-reused key.
 An unknown response is reconciled through `/source/reconcile` against that same
 operation; it is never a reason to blindly create another upload. Confirmed
 uploads queue real server work. An explicit processing retry reuses those bytes.
-The Web transport shows indeterminate transfer while the authenticated request
-is in flight; processing percentages come only from actual decoder progress.
+The Web transport measures multipart bytes with browser upload events and shows
+a numeric percentage plus transferred/total bytes when the total is known.
+Byte completion stays at 100% while waiting for the matching server receipt; it
+never establishes source readiness or publication. Reconciliation has its own
+status and never presents itself as another transfer. Progress and responses
+retain the existing account, administrator-view and immutable-operation fences.
+Processing percentages come only from actual decoder progress and are displayed
+as numeric progress for the current server step, including full validation of
+an adapted output. A new step starts its own measurement; inspection, cover
+extraction and other work without a measured total remain indeterminate.
 
 The processor reads the exact private object version into an isolated temporary
 directory. It admits actual MOV-family bytes with one main H.264 or HEVC video

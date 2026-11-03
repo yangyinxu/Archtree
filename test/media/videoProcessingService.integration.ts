@@ -16,11 +16,13 @@ test('real H264 MOV remux strips source metadata and fully validates the unchang
     const directory = await mkdtemp(join(tmpdir(), 'archtree-video-integration-'));
     try {
         const inputPath = fixture('h264-with-tags.mov'), original = digest(await readFile(inputPath));
-        const progress: string[] = [];
-        const result = await processVideoSource({ inputPath, workDirectory: directory, onProgress(event) { progress.push(event.stage); } });
+        const progress: { stage: string; progress: number | null }[] = [];
+        const result = await processVideoSource({ inputPath, workDirectory: directory, onProgress(event) { progress.push(event); } });
         assert.equal(result.plan, 'remux'); assert.equal(result.videoCodec, 'h264'); assert.equal(result.audioCodec, 'aac');
         assert.equal(result.width, 160); assert.equal(result.height, 96); assert.ok(Math.abs(result.durationSeconds - 1) < .1);
-        assert.ok(progress.includes('validate') && progress.includes('adapt')); assert.ok(result.cover);
+        assert.ok(progress.some(event => event.stage === 'validate') && progress.some(event => event.stage === 'adapt')); assert.ok(result.cover);
+        assert.equal(progress.filter(event => event.stage === 'validate' && event.progress === 100).length, 2, 'both full decodes report confirmed completion');
+        assert.ok(progress.some(event => event.stage === 'validate' && event.progress !== null && event.progress > 0 && event.progress < 100));
         const metadata = JSON.parse(await runVideoProcess('ffprobe', ['-v', 'error', '-show_format', '-show_streams', '-of', 'json', result.outputPath]));
         assert.ok(!metadata.format.tags.location); assert.equal(metadata.streams.length, 2);
         assert.equal(digest(await readFile(inputPath)), original);

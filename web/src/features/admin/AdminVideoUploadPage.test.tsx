@@ -10,6 +10,7 @@
  *   - unknown source outcomes reconcile the original operation without sending another source
  *   - failed processing retries server work without re-uploading the confirmed original
  *   - running processing shows its current extraction step and measured progress
+ *   - server steps without a measured total remain visibly indeterminate
  *   - failed publication reuses its original approval operation without transmitting media
  *   - completed tasks retain private cleanup recovery independently of current catalog cover editing
  *   - an unavailable server never opens the native source picker or creates a private task
@@ -113,6 +114,14 @@ test('running processing shows its current extraction step and measured progress
   mount();
   expect(await screen.findByText('video.step_cover')).toBeInTheDocument();
   expect(screen.getByRole('progressbar', { name: 'video.stage_2' })).toHaveAttribute('value', '75');
+  expect(screen.getByText('75%')).toBeInTheDocument();
+});
+
+test('server steps without a measured total remain visibly indeterminate', async () => {
+  current = { ...current, stage: 'validate', approvalDigest: null, processing: { ...current.processing, state: 'running', step: 'inspect', progress: null } };
+  mount(); await screen.findByText('video.step_inspect');
+  expect(screen.getByRole('progressbar', { name: 'video.stage_2' })).not.toHaveAttribute('value');
+  expect(screen.queryByText(/%/)).not.toBeInTheDocument();
 });
 
 test.each(['ready', 'failed', 'queued', 'cancelled', 'published', 'frame'] as const)('%s processing does not present a retained extraction step as active work', async scenario => {

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { ApiResponseTransport, UploadProgress } from '../../api/client';
 import { adminEndpointRequest, type AdminGuard } from './adminTransport';
 
 const id = z.string().regex(/^[a-f0-9]{24}$/);
@@ -53,9 +54,14 @@ export function videoUploadRequest(file: Blob, filename: string, intent: string,
 export const readVideoProject = (projectId: string, signal?: AbortSignal) => adminEndpointRequest(videoPath(projectId), videoResponseSchema.refine(result => result.item.id === projectId), { signal });
 
 /** Only a matching server receipt confirms a transfer; losing the response leaves its original intent intact. */
-export async function uploadVideoFile(projectId: string, kind: 'source' | 'covers', file: Blob, filename: string, intent: string, expectedRevision: number, guard: AdminGuard) {
+export async function uploadVideoFile(projectId: string, kind: 'source' | 'covers', file: Blob, filename: string, intent: string, expectedRevision: number, guard: AdminGuard, onUploadProgress?: (progress: UploadProgress) => void) {
+  const responseTransport: ApiResponseTransport | undefined = onUploadProgress ? async (path, init, headers, assertCurrent) => {
+    const { uploadResponse } = await import('../../api/uploadResponse');
+    assertCurrent?.();
+    return uploadResponse(path, init, headers, onUploadProgress, assertCurrent);
+  } : undefined;
   const result = await adminEndpointRequest(`${videoPath(projectId)}/${kind}`, videoMutationSchema.refine(result => result.item.id === projectId),
-    { method: 'POST', ...videoUploadRequest(file, filename, intent, expectedRevision) }, guard);
+    { method: 'POST', ...videoUploadRequest(file, filename, intent, expectedRevision), responseTransport }, guard);
   if (result.receipt.operationId !== intent) throw new Error('Unconfirmed video transfer');
   return result;
 }

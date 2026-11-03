@@ -88,6 +88,7 @@ async function decode(path: string, source: InspectedVideoSource, signal?: Abort
     } });
     if (!ended || finalTime < source.durationSeconds - .5
         || finalTime > source.durationSeconds + 1) throw new VideoProcessingError('invalid_source');
+    onProgress?.({ stage: 'validate', progress: 100 });
 }
 
 /** Optional cover failure stays separate from successful media validation. */
@@ -163,7 +164,9 @@ export async function processVideoSource(options: { inputPath: string; workDirec
             if (Math.abs(output.durationSeconds - source.durationSeconds) > .5 || output.probe.streams.length !== 1 + Number(Boolean(source.audio))
                 || !output.videoCompatible || output.audio && output.audio.codec_name !== 'aac'
                 || output.video.codec_name === 'hevc' && output.video.codec_tag_string !== 'hvc1') throw new VideoProcessingError('processing_failed');
-            await decode(outputPath, output, signal);
+            // Output validation is another full decode; expose its own measured work instead of a stalled adaptation bar.
+            onProgress?.({ stage: 'validate', progress: 0 });
+            await decode(outputPath, output, signal, onProgress);
         }
         onProgress?.({ stage: 'cover', progress: null });
         const image = await cover(inputPath, source, workDirectory, signal), metadata = await inspect(outputPath, signal);
