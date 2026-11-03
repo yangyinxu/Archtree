@@ -216,6 +216,10 @@ artwork.
 - The MediaTrack card that is currently playing keeps its control visible as a
   filled Pause glyph, colors its title with the accent, exposes
   `aria-current`, and pauses on activation.
+- Album and Playlist track rows show animated accent bars while playing.
+  Hover on a hover-capable device or keyboard-visible focus within the row
+  replaces the bars with Pause. Focus retained after a click or tap does not
+  hide the bars once the pointer leaves. Reduce Motion keeps the bars static.
 - A Video MediaTrack card that a mouse rests on for 500 ms fades an
   `object-fit: cover` preview over its artwork (300 ms, under the Play
   control). It loops an 8 s window starting 20% in (at most 30 s), clamped to

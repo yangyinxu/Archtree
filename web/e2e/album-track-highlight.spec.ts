@@ -3,9 +3,13 @@
  *   - highlights the complete Album track row through its Save column
  *   - reveals the trailing Save on row hover and keeps a saved MediaTrack visible at rest
  *   - shows the active Album track with animated bars and a highlighted Pause action
+ *   - restores Playlist playback bars after a row click without clearing pointer focus
+ *   - touch playback indicators
+ *     - shows playback bars immediately after tapping an Album row
  * @end-catalog */
 
 import { catalogIds } from './fixtures/catalog';
+import { privatePlaylistSummary, privateViewerId } from './fixtures/privateListener';
 import { expect, test } from './support/test';
 import { installDeterministicAudio } from './support/deterministicAudio';
 import { installPrivateListenerRoutes } from './support/privateRoutes';
@@ -81,8 +85,10 @@ test('shows the active Album track with animated bars and a highlighted Pause ac
   const pauseAction = trackRow.getByRole('button', { name: 'Pause' });
   const bars = pauseAction.locator('svg.lucide-audio-lines');
   const pauseIcon = pauseAction.locator('svg.lucide-pause');
-  await pauseAction.evaluate((element) => (element as HTMLElement).blur());
   await page.mouse.move(0, 0);
+  // Pointer focus remains after the click, but must not replace the playing indicator.
+  await expect(pauseAction).toBeFocused();
+  expect(await pauseAction.evaluate((element) => element.matches(':focus-visible'))).toBe(false);
   await expect(trackRow).toHaveAttribute('data-playback-state', 'playing');
   await expect(pauseAction).toHaveAttribute('aria-current', 'true');
   await expect(title).toHaveCSS('color', 'rgb(30, 215, 96)');
@@ -102,11 +108,81 @@ test('shows the active Album track with animated bars and a highlighted Pause ac
   ).toBe('none');
 
   await page.mouse.move(0, 0);
-  await pauseAction.focus();
+  await page.keyboard.press('Tab');
+  await page.keyboard.press('Shift+Tab');
+  await expect(pauseAction).toBeFocused();
+  expect(await pauseAction.evaluate((element) => element.matches(':focus-visible'))).toBe(true);
   await expect(bars).toHaveCSS('opacity', '0');
   await expect(pauseIcon).toHaveCSS('opacity', '1');
 
+  await page.keyboard.press('Space');
+  await expect(trackRow).toHaveAttribute('data-playback-state', 'paused');
+  await page.keyboard.press('Enter');
+  await expect(trackRow).toHaveAttribute('data-playback-state', 'playing');
+  await expect(pauseIcon).toHaveCSS('opacity', '1');
+  await page.keyboard.press('Shift+Tab');
+  await expect(pauseAction).not.toBeFocused();
+  await expect(bars).toHaveCSS('opacity', '1');
+  await expect(pauseIcon).toHaveCSS('opacity', '0');
+
   await pauseAction.click();
-  await expect(trackRow).not.toHaveAttribute('data-playback-state', 'playing');
-  await expect(trackRow.getByRole('button', { name: 'Play Night Window' })).toBeVisible();
+  await page.mouse.move(0, 0);
+  await expect(trackRow).toHaveAttribute('data-playback-state', 'paused');
+  const resumeAction = trackRow.getByRole('button', { name: 'Play Night Window' });
+  await expect(resumeAction).toBeFocused();
+  await expect(resumeAction.locator('span', { hasText: /^2$/ })).toHaveCSS('opacity', '1');
+  await expect(resumeAction.locator('span', { hasText: /^2$/ })).toHaveCSS('color', 'rgb(30, 215, 96)');
+  await resumeAction.click();
+  await page.mouse.move(0, 0);
+  await expect(trackRow).toHaveAttribute('data-playback-state', 'playing');
+  await expect(bars).toHaveCSS('opacity', '1');
+  await expect(pauseIcon).toHaveCSS('opacity', '0');
+});
+
+test('restores Playlist playback bars after a row click without clearing pointer focus', async ({ page }) => {
+  await installDeterministicAudio(page);
+  await installPrivateListenerRoutes(page);
+  await page.route('**/content/me/recently-played', (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json; charset=utf-8',
+    headers: { 'X-Finitude-Account-Viewer': privateViewerId },
+    body: JSON.stringify({ ...route.request().postDataJSON(), recorded: true })
+  }));
+  await page.setViewportSize({ width: 1_440, height: 900 });
+  await page.goto(`/finitude/playlists/${privatePlaylistSummary.id}`);
+
+  const trackRow = page.getByRole('main').locator('li').filter({ hasText: 'Night Window' }).first();
+  await trackRow.getByRole('button', { name: 'Play Night Window' }).click();
+  const pauseAction = trackRow.getByRole('button', { name: 'Pause' });
+  await page.mouse.move(0, 0);
+  await expect(pauseAction).toBeFocused();
+  await expect(trackRow).toHaveAttribute('data-playback-state', 'playing');
+  await expect(pauseAction.locator('svg.lucide-audio-lines')).toHaveCSS('opacity', '1');
+  await expect(pauseAction.locator('svg.lucide-pause')).toHaveCSS('opacity', '0');
+});
+
+test.describe('touch playback indicators', () => {
+  test.use({ hasTouch: true });
+
+  test('shows playback bars immediately after tapping an Album row', async ({ page }) => {
+    await installDeterministicAudio(page);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto(`/finitude/albums/${catalogIds.album}`);
+
+    const trackRow = page.getByRole('main').locator('li').filter({ hasText: 'Night Window' }).first();
+    await trackRow.getByRole('button', { name: 'Play Night Window' }).tap();
+    const pauseAction = trackRow.getByRole('button', { name: 'Pause' });
+    await expect(trackRow).toHaveAttribute('data-playback-state', 'playing');
+    await expect(pauseAction.locator('svg.lucide-audio-lines')).toHaveCSS('opacity', '1');
+    await expect(pauseAction.locator('svg.lucide-pause')).toHaveCSS('opacity', '0');
+
+    await pauseAction.tap();
+    await expect(trackRow).toHaveAttribute('data-playback-state', 'paused');
+    const resumeAction = trackRow.getByRole('button', { name: 'Play Night Window' });
+    await expect(resumeAction.locator('span', { hasText: /^2$/ })).toHaveCSS('opacity', '1');
+    await resumeAction.tap();
+    await expect(trackRow).toHaveAttribute('data-playback-state', 'playing');
+    await expect(pauseAction.locator('svg.lucide-audio-lines')).toHaveCSS('opacity', '1');
+    await expect(pauseAction.locator('svg.lucide-pause')).toHaveCSS('opacity', '0');
+  });
 });

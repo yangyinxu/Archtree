@@ -133,22 +133,21 @@
 .indexNumber,
 .indexIcon,
 .trackPlaybackBars {
-  transition:
-    opacity var(--motion-fast) var(--ease-standard),
-    transform var(--motion-fast) var(--ease-standard);
+  transition: opacity var(--motion-fast) var(--ease-standard);
 }
 
-.row:not([data-unavailable]):focus-within .indexNumber,
+/* Retained click or tap focus must not hide the bars after hover ends. */
+.row:not([data-unavailable]):has(:focus-visible) :is(.indexNumber, .trackPlaybackBars),
 .row[data-playback-state="playing"] .indexNumber {
   opacity: 0;
 }
 
-.row:not([data-unavailable]):focus-within .indexIcon {
+.row:not([data-unavailable]):has(:focus-visible) .indexIcon {
   opacity: 1;
 }
 
 @media (hover: hover) {
-  .row:not([data-unavailable]):hover .indexNumber {
+  .row:not([data-unavailable]):hover :is(.indexNumber, .trackPlaybackBars) {
     opacity: 0;
   }
 
@@ -175,12 +174,6 @@
 
 .trackPlaybackBars :global(path):nth-child(3n) {
   animation-delay: -480ms;
-}
-
-/* Pointer or keyboard highlight swaps the bars for Pause. */
-.row[data-playback-state="playing"]:is(:hover, :focus-within) .trackPlaybackBars {
-  opacity: 0;
-  transform: scale(0.78);
 }
 
 .titleCell {
