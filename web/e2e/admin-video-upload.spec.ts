@@ -127,8 +127,16 @@ test('Album lookup dismisses without losing its choice and the production Video 
   await page.getByRole('button', { name: 'Review and publish', exact: true }).click();
   await expect(page.getByRole('dialog')).toContainText('Synthetic catalog Album');
   await page.getByRole('dialog').getByRole('button', { name: 'Cancel', exact: true }).click();
+  const footer = page.locator('#main-content footer');
+  const surface = await page.locator('#main-content').evaluate(element => getComputedStyle(element.parentElement!).backgroundColor);
+  await expect(footer).toHaveCSS('background-color', surface);
+  await expect(footer).toHaveCSS('position', 'sticky');
+  await footer.scrollIntoViewIfNeeded();
   await page.screenshot({ path: testInfo.outputPath('video-form-desktop.png'), fullPage: true });
   await page.setViewportSize({ width: 320, height: 844 });
+  await expect(footer).toHaveCSS('background-color', surface);
+  await expect(footer).toHaveCSS('position', 'static');
+  await footer.scrollIntoViewIfNeeded();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   const accessibility = await new AxeBuilder({ page }).analyze();
   expect(accessibility.violations.filter(issue => ['critical', 'serious'].includes(issue.impact ?? ''))).toEqual([]);

@@ -15,7 +15,7 @@
 .stage progress{width:100%;accent-color:var(--color-accent)}
 .stage svg{flex:none;color:var(--color-accent)}
 .notice{margin:1rem 0;padding:1rem;background:var(--color-surface-raised);border-radius:.5rem}
-.footer{position:sticky;bottom:0;background:var(--color-canvas);border-top:1px solid var(--color-border);padding:1rem 0;z-index:2}
+.footer{position:sticky;bottom:0;background:var(--color-surface);border-top:1px solid var(--color-border);padding:1rem 0;z-index:2}
 .footer p{margin:.65rem 0 0}
 .lookup{position:relative}
 .lookupInput{position:relative}
