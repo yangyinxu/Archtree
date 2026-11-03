@@ -2,6 +2,7 @@ import { Artwork } from '../../components/Artwork';
 import type { useAdminText } from './AdminAccess';
 import type { CatalogItem, CatalogKind } from './catalogApi';
 import { reviewValueText } from './reviewValueText';
+import { useCatalogArtwork } from './useCatalogArtwork';
 import catalogStyles from '../catalog/CatalogPages.module.css';
 
 export const catalogLabels = { album: 'common.label.album', artist: 'common.label.artist', audioTrack: 'common.label.mediatrack', organization: 'common.label.organization' } as const;
@@ -21,8 +22,13 @@ export function catalogMetadata(item: CatalogItem, t: ReturnType<typeof useAdmin
 /** Reuses listener artwork geometry with private sources; Organizations retain their name mark. */
 export function CatalogArtwork({ item, viewerId, refresh, alt = '', detail = false }: { item: CatalogItem; viewerId: string; refresh: number; alt?: string; detail?: boolean }) {
   if (item.kind === 'organization') return <span aria-hidden="true" className={`${catalogStyles.organizationMark} ${detail ? catalogStyles.heroArtwork : ''}`}>{(Array.from(catalogName(item).trim())[0] || 'O').toUpperCase()}</span>;
-  return <Artwork key={`${item.revision}:${refresh}`} alt={alt} kind={item.kind}
+  return <CatalogCover key={`${item.kind}:${item.id}:${item.revision}:${refresh}`} item={item} viewerId={viewerId} alt={alt} detail={detail} />;
+}
+/** Catalog covers share a bounded private loader while retaining the listener artwork geometry. */
+function CatalogCover({ item, viewerId, alt, detail }: { item: Exclude<CatalogItem, { kind: 'organization' }>; viewerId: string; alt: string; detail: boolean }) {
+  const image = useCatalogArtwork(item.coverUrl, viewerId, detail);
+  return <Artwork ref={image.ref} alt={alt} kind={item.kind}
     className={detail ? item.kind === 'artist' ? catalogStyles.artistArtwork : catalogStyles.heroArtwork : undefined}
     loading={detail ? 'eager' : 'lazy'} fetchPriority={detail ? 'high' : undefined}
-    src={item.coverUrl ? `${item.coverUrl}?viewer=${encodeURIComponent(viewerId)}` : null} />;
+    src={image.src} />;
 }

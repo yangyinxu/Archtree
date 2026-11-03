@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type Ref } from 'react';
 import { Disc3, Music2, UserRound, type LucideIcon } from 'lucide-react';
 
 import type { ContentSummary } from '../api/contentSchemas';
@@ -14,6 +14,7 @@ const fallbackIcons: Record<ArtworkKind, LucideIcon> = {
 };
 
 export interface ArtworkProps {
+  ref?: Ref<HTMLSpanElement>;
   src?: string | null;
   alt: string;
   kind: ArtworkKind;
@@ -25,6 +26,7 @@ export interface ArtworkProps {
 
 /** Preserves artwork geometry and replaces missing or failed images predictably. */
 export const Artwork = ({
+  ref,
   src,
   alt,
   kind,
@@ -50,6 +52,7 @@ export const Artwork = ({
 
   return (
     <span
+      ref={ref}
       className={`${styles.artwork} ${kind === 'artist' ? styles.artist : ''} ${className}`.trim()}
       {...(!hasImage && alt ? { role: 'img', 'aria-label': alt } : {})}
       {...(!hasImage && !alt ? { 'aria-hidden': true } : {})}

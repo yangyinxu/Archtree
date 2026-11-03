@@ -12,9 +12,11 @@
  *              quietUnnumberedReview, handPairingServer, numberInputs, filledChanges, classList, quoted,
  *              escapedText, reenter, gappedLongAlbum, focusClear, expectFocusClear, padsBar, focusFromTop
  *   Constants: shots, localizedViewports, privateCoverPath, coverSvg, coverPalettes, privateCoverFixtures,
- *              remainingCatalogKinds
+ *              privateCoverRequests, remainingCatalogKinds
  *   Variables: locale
  * Tests
+ *   - eleven private Album covers load with two concurrent reads and recover from 429 after Retry-After
+ *   - a missing private Album cover receives no automatic retries
  *   - private Album covers disappear on User view or role loss and make no later private image reads
  *   - an existing-Album review looks up a typed name with an optional Artist and shows both again with its run, while the status line stays in the first screen before the proposed numbers
  *   - without metadata lookup the Album page creates a completion for manual editing, then opens it, and another one is an explicit choice
@@ -135,12 +137,14 @@ const coverPalettes = [['#122c3c', '#f3cda0', '#ca5e4b', '#213c4c', '#e59759'],
   ['#293242', '#d5e1e3', '#628eac', '#334a65', '#9bb8c0']];
 const privateCoverFixtures = coverPalettes.map(palette => sharp(Buffer.from(coverSvg.replace(/#[a-f0-9]{6}/g,
   color => palette[coverPalettes[0].indexOf(color)] ?? color))).png().toBuffer());
+// Displayed blob URLs must still have an observed, viewer-fenced private request for their exact owner.
+const privateCoverRequests = new WeakMap<Page, Set<string>>();
 /**
  * `lookupAvailable` false: the server runs no metadata lookup, so the Album page creates a completion for manual editing;
  * `ineligible`: why the Album cannot have a completion (none by default).
  */
 type CatalogPresentation = { title?: string; cover?: 'ready' | 'missing' | 'failed'; additionalAlbums?: number; albumTracks?: CatalogAlbumTracks; lookupAvailable?: boolean;
-  ineligible?: string };
+  ineligible?: string; artworkDelayMs?: number; artworkRefusals?: number; artworkRetryAfter?: string };
 const remainingCatalogKinds = ['artist', 'audioTrack', 'organization'] as const;
 type RemainingCatalogKind = typeof remainingCatalogKinds[number];
 
@@ -189,6 +193,9 @@ async function setup(page: Page, administrator = true, initialReleaseDate: { yea
   const credited = new Map<string, CatalogItem>();
   const lookupAvailable = presentation.lookupAvailable ?? true;
   const reads: string[] = [], writes: Write[] = [];
+  const coverRequests = new Set<string>(), coverAttempts = new Map<string, number>(), coverStarts = new Map<string, number[]>();
+  privateCoverRequests.set(page, coverRequests);
+  let activeCovers = 0, maximumActiveCovers = 0;
   const headers = { 'X-Finitude-Account-Viewer': viewer, 'Cache-Control': 'no-store' };
   await page.route('**/*', route => new URL(route.request().url()).hostname === '127.0.0.1' ? route.continue() : route.abort('blockedbyclient'));
   await page.route('**/auth/browser/session', route => route.fulfill({ json: { user: { ...session.user, role: administrator ? 'admin' : 'user' } } }));
@@ -232,8 +239,18 @@ async function setup(page: Page, administrator = true, initialReleaseDate: { yea
     const coverIndex = [album, ...extraAlbums, ...otherItems].findIndex(item => item.coverUrl === path);
     if (coverIndex >= 0) {
       expect(method).toBe('GET'); expect(new URL(request.url()).searchParams.get('viewer')).toBe(viewer);
-      if (denied || artworkFailed) return route.fulfill({ status: denied ? 403 : 404, body: '', headers });
-      return route.fulfill({ contentType: 'image/png', body: await privateCoverFixtures[coverIndex % privateCoverFixtures.length], headers });
+      expect(request.headers()['x-finitude-account-viewer']).toBe(viewer);
+      coverRequests.add(path);
+      const attempt = (coverAttempts.get(path) ?? 0) + 1;
+      coverAttempts.set(path, attempt); coverStarts.set(path, [...coverStarts.get(path) ?? [], Date.now()]);
+      maximumActiveCovers = Math.max(maximumActiveCovers, ++activeCovers);
+      try {
+        if (presentation.artworkDelayMs) await new Promise(resolve => setTimeout(resolve, presentation.artworkDelayMs));
+        if (denied || artworkFailed) return await route.fulfill({ status: denied ? 403 : 404, body: '', headers });
+        if (attempt <= (presentation.artworkRefusals ?? 0)) return await route.fulfill({ status: 429, body: '',
+          headers: { ...headers, 'Retry-After': presentation.artworkRetryAfter ?? '2' } });
+        return await route.fulfill({ contentType: 'image/png', body: await privateCoverFixtures[coverIndex % privateCoverFixtures.length], headers });
+      } finally { activeCovers--; }
     }
     expect(request.headers()['x-finitude-account-viewer']).toBe(viewer);
     if (denied) return route.fulfill({ status: 403, json: { code: 'ADMIN_REQUIRED' }, headers });
@@ -482,7 +499,8 @@ async function setup(page: Page, administrator = true, initialReleaseDate: { yea
     }
     throw new Error(`Unexpected synthetic administrator request: ${method} ${path}`);
   });
-  return { reads, writes, album: () => album, review: () => review, finish: () => { finishAnalysis = true; }, revoke: () => { denied = true; }, recoverArtwork: () => { artworkFailed = false; },
+  return { reads, writes, coverAttempts, coverStarts, maximumActiveCovers: () => maximumActiveCovers,
+    album: () => album, review: () => review, finish: () => { finishAnalysis = true; }, revoke: () => { denied = true; }, recoverArtwork: () => { artworkFailed = false; },
     ready: () => { created = true; }, changeSource: (reason: 'metadata' | 'media') => {
       if (reason === 'metadata') album = { ...album, revision: `cr_${'d'.repeat(43)}`, fields: { ...album.fields, title: 'Externally renamed Album' } };
       review = { ...review, sourceStatus: 'changed', capabilities: { ...review.capabilities, apply: false } };
@@ -721,18 +739,21 @@ async function reflow(page: Page) {
 
 async function expectDecodedPrivateCover(image: Locator, kind: Exclude<CatalogKind, 'organization'> = 'album') {
   await expect(image).toBeVisible();
+  await expect(image).toHaveJSProperty('tagName', 'IMG');
   await image.evaluate(element => (element as HTMLImageElement).decode());
   const evidence = await image.evaluate(element => {
     const value = element as HTMLImageElement, rect = value.getBoundingClientRect(), frame = value.parentElement!.getBoundingClientRect(), url = new URL(value.src);
+    const owner = new URL(value.closest('a[href]')?.getAttribute('href') ?? window.location.pathname, document.baseURI).pathname;
     return { width: rect.width, height: rect.height, naturalWidth: value.naturalWidth, naturalHeight: value.naturalHeight,
       frameWidth: frame.width, frameHeight: frame.height,
-      path: url.pathname, viewer: url.searchParams.get('viewer'), origin: url.origin, srcset: value.getAttribute('srcset') };
+      protocol: url.protocol, owner, origin: url.origin, srcset: value.getAttribute('srcset') };
   });
   expect(evidence.naturalWidth).toBe(640); expect(evidence.naturalHeight).toBe(640);
   expect(evidence.width).toBeGreaterThan(32); expect(Math.abs(evidence.width - evidence.height)).toBeLessThan(1);
   expect(Math.abs(evidence.frameWidth - evidence.frameHeight)).toBeLessThan(1);
-  expect(evidence.path).toMatch(new RegExp(`^/api/admin/v1/catalog/${kind}/[a-f0-9]{24}/artwork$`));
-  expect(evidence.viewer).toBe(viewer); expect(evidence.origin).toBe(new URL(image.page().url()).origin); expect(evidence.srcset).toBeNull();
+  expect(evidence.owner).toMatch(new RegExp(`/admin/catalog/${kind}/[a-f0-9]{24}$`));
+  expect(privateCoverRequests.get(image.page())?.has(`/api/admin/v1${evidence.owner.replace(/^\/finitude\/admin/, '')}/artwork`)).toBe(true);
+  expect(evidence.protocol).toBe('blob:'); expect(evidence.origin).toBe(new URL(image.page().url()).origin); expect(evidence.srcset).toBeNull();
   return evidence;
 }
 
@@ -768,8 +789,9 @@ for (const variant of localizedViewports) {
     await expect(page.getByRole('link', { name: label('admin.catalog_review.manual_edit'), exact: true })).toHaveCount(0);
     await expect(page.getByRole('button', { name: label('admin.catalog_review.create'), exact: true })).toHaveCount(0);
     await expect(page.getByRole('link', { name: label('admin.conversion.existing'), exact: true })).toHaveCount(0);
-    const galleryImages = page.getByRole('main').locator('li img'); await expect(galleryImages).toHaveCount(4);
-    for (const image of await galleryImages.all()) await expectDecodedPrivateCover(image);
+    const galleryEntries = page.getByRole('main').locator('li a'); await expect(galleryEntries).toHaveCount(4);
+    for (const entry of await galleryEntries.all()) { await entry.scrollIntoViewIfNeeded(); await expectDecodedPrivateCover(entry.locator('img')); }
+    await entry.scrollIntoViewIfNeeded();
     await capture(page, '20-cover-led-inventory', variant.width); await reflow(page);
     await entry.click();
     await expect(page.getByRole('heading', { name: title, level: 1, exact: true })).toBeVisible();
@@ -788,6 +810,64 @@ for (const variant of localizedViewports) {
     await capture(page, '21-cover-led-detail', variant.width); await reflow(page);
     await page.getByRole('link', { name: label('admin.catalog.back'), exact: true }).click();
     await expect(page).toHaveURL(/\/finitude\/admin\/catalog$/); await expect(entry).toBeVisible();
+    expect(api.writes).toEqual([]);
+  });
+}
+
+test('eleven private Album covers load with two concurrent reads and recover from 429 after Retry-After', async ({ page }) => {
+  await page.setViewportSize({ width: 1920, height: 1800 });
+  const api = await setup(page, true, null, { additionalAlbums: 10, artworkDelayMs: 100, artworkRefusals: 1, artworkRetryAfter: '1' });
+  await enter(page, '/finitude/admin/catalog');
+  const entries = page.getByRole('main').locator('li a'); await expect(entries).toHaveCount(11);
+  for (const entry of await entries.all()) {
+    await entry.scrollIntoViewIfNeeded();
+    await expectDecodedPrivateCover(entry.locator('img'));
+  }
+  expect(api.maximumActiveCovers()).toBe(2);
+  expect(api.coverAttempts.size).toBe(11);
+  for (const [path, attempts] of api.coverAttempts) {
+    expect(attempts).toBe(2);
+    const starts = api.coverStarts.get(path)!;
+    // The first response is delayed too; the retry may wait longer for another cover's request slot.
+    expect(starts[1] - starts[0]).toBeGreaterThanOrEqual(1_000);
+  }
+  await capture(page, '21-catalog-eleven-covers-recovered', 1920);
+  expect(api.writes).toEqual([]);
+});
+
+test('a missing private Album cover receives no automatic retries', async ({ page }) => {
+  const api = await setup(page, true, null, { cover: 'failed' });
+  await enter(page, `/finitude/admin/catalog/album/${albumId}`);
+  await expect.poll(() => api.coverAttempts.get(privateCoverPath)).toBe(1);
+  const artwork = page.getByRole('img', { name: label('content.album.cover_alt', { title: 'Synthetic catalog Album' }), exact: true });
+  await expect(artwork.locator('svg')).toHaveCount(1);
+  // Wait beyond a temporary failure's default retry delay; authoritative 404 remains a stable fallback.
+  await page.waitForTimeout(2_250);
+  expect(api.coverAttempts.get(privateCoverPath)).toBe(1);
+  await expect(page.locator('main img')).toHaveCount(0);
+  expect(api.writes).toEqual([]);
+});
+
+for (const phase of ['loading', 'retrying'] as const) {
+  test(`leaving Admin view cancels ${phase} private covers and their queued reads`, async ({ page }) => {
+    await page.setViewportSize({ width: 1920, height: 1800 });
+    const api = await setup(page, true, null, { additionalAlbums: 10, artworkDelayMs: phase === 'loading' ? 1_500 : 50,
+      artworkRefusals: phase === 'retrying' ? 100 : 0, artworkRetryAfter: '1' });
+    const aborted: string[] = [];
+    page.on('requestfailed', request => { if (/\/catalog\/album\/[a-f0-9]{24}\/artwork\?/.test(request.url())) aborted.push(request.url()); });
+    const refusal = phase === 'retrying' ? page.waitForResponse(response => response.url().includes('/artwork?') && response.status() === 429) : null;
+    await enter(page, '/finitude/admin/catalog');
+    await expect.poll(() => api.coverAttempts.size).toBeGreaterThanOrEqual(2);
+    if (refusal) await refusal;
+    await page.getByRole('button', { name: label('admin.view.current_admin'), exact: true }).click();
+    await page.getByRole('menuitemradio', { name: label('admin.view.user'), exact: true }).click();
+    await expect(page).toHaveURL(/\/finitude\/?$/);
+    const afterExit = api.reads.filter(path => /\/catalog\/album\/[a-f0-9]{24}\/artwork$/.test(path)).length;
+    await page.waitForTimeout(phase === 'loading' ? 1_750 : 1_250);
+    expect(api.reads.filter(path => /\/catalog\/album\/[a-f0-9]{24}\/artwork$/.test(path))).toHaveLength(afterExit);
+    await expect(page.locator('main img[src^="blob:"]')).toHaveCount(0);
+    if (phase === 'loading') expect(aborted.length).toBeGreaterThan(0);
+    expect(api.maximumActiveCovers()).toBeLessThanOrEqual(2);
     expect(api.writes).toEqual([]);
   });
 }
@@ -925,8 +1005,9 @@ for (const kind of remainingCatalogKinds) for (const variant of localizedViewpor
     if (kind === 'organization') {
       for (const organization of remainingCatalogItems(kind)) await expectOrganizationMark(page.getByRole('link', { name: catalogItemName(organization), exact: true }), catalogItemName(organization));
     } else {
-      const images = page.getByRole('main').locator('li img'); await expect(images).toHaveCount(4);
-      for (const image of await images.all()) await expectDecodedPrivateCover(image, kind);
+      const entries = page.getByRole('main').locator('li a'); await expect(entries).toHaveCount(4);
+      for (const entry of await entries.all()) { await entry.scrollIntoViewIfNeeded(); await expectDecodedPrivateCover(entry.locator('img'), kind); }
+      await entry.scrollIntoViewIfNeeded();
     }
     await capture(page, `23-${kind}-inventory`, variant.width); await reflow(page);
     await entry.click();
@@ -1034,6 +1115,7 @@ for (const variant of localizedViewports) {
     await expect(page.getByRole('textbox', { name: label('admin.field.title'), exact: true })).toHaveValue('Manually corrected synthetic Album');
     await expect(page.getByRole('textbox', { name: label('admin.field.artist_name'), exact: true })).toHaveAttribute('readonly', '');
     expect(api.writes.map(value => value.path)).toEqual([`/api/admin/v1/catalog/album/${albumId}`, '/api/admin/v1/catalog-reviews']);
+    await openNameBox(page);
     await expect(page.getByRole('textbox', { name: label('admin.lookup.name'), exact: true })).toHaveValue('Manually corrected synthetic Album');
     await capture(page, '05-review-draft', width); await reflow(page);
     const start = await expectStatusFirst(page);

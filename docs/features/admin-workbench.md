@@ -60,7 +60,14 @@ an authentication credential. Every preview requires the current admin session.
 Catalog snapshots expose only the protected `/catalog/:kind/:id/artwork` path,
 including supported legacy `coverArtUrl` records. A stored image preview requires
 the ready image lifecycle record to belong to the current ready owner and retain
-its exact reference. Legacy external artwork uses a credential-free HTTPS proxy:
+its exact reference. The Web catalog starts cover reads near the viewport and
+shares two in-flight requests, including the complete response body. Each read
+has a 15-second network deadline. Temporary `429`, `502`, `503` and `504`
+responses receive at most two retries, respecting `Retry-After`; cooldowns over
+30 seconds fall back to the normal placeholder until explicit refresh. Missing
+artwork is not retried automatically. Displayed bytes use temporary object URLs,
+with no persistent image cache; changing account, Admin view, source or revision
+cancels pending reads and revokes old URLs. Legacy external artwork uses a credential-free HTTPS proxy:
 only port 443, all DNS answers must be public unicast, the socket pins one checked
 answer, and TLS verifies the original hostname of each connection. A fixed
 application User-Agent identifies the image client without account information.
