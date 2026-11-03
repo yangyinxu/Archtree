@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "locale": "en-US",
-  "revision": "sha256-9ILJblUSbJpA2EXVNL-tFqupbz6vB35Gu98B_izpEkk",
+  "revision": "sha256-s8EoBz0A-8FJb3eLfbKtZiqMd9_wOreCe8Tam_tc7z4",
   "messages": {
     "videos.card.fill": "Fill card",
     "videos.card.frame_position": "Frame position",
@@ -9,6 +9,8 @@
     "videos.card.full_frame": "Show full frame",
     "videos.card.left": "Left",
     "videos.card.options": "{title} options",
+    "videos.card.pause": "Pause video: {title}",
+    "videos.card.play": "Play video: {title}",
     "videos.card.right": "Right",
     "videos.preview.action": "Unmute preview for {title}",
     "videos.preview.active": "Sound on",

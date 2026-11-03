@@ -248,6 +248,9 @@ artwork.
   separate lower Preview, options, Save, and white Play or Pause action row.
   The cards form two columns on wide layouts and one column on phones. Controls
   remain discoverable without hover and retain the white keyboard focus outline.
+  Clicking the image, title, or gaps between controls invokes the same Play/Pause
+  action as the white transport button. The image target is keyboard accessible;
+  Preview, Save, options, and framing remain independent actions.
   Their options offer contain fitting, cover fitting, and horizontal crop
   positioning. These are local presentation choices, not media edits, and a
   missing preview retains the artwork. Other collection surfaces keep their

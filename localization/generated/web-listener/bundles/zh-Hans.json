@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "locale": "zh-Hans",
-  "revision": "sha256-JSOf1mCSKIbuqoxprayqA8PJb2liRKhWKBcje7dmEjg",
+  "revision": "sha256-4In7UrxysajqaG0DD6HVtoAeX2f_aNmM3A7CnYCwfdY",
   "messages": {
     "videos.card.fill": "铺满卡片",
     "videos.card.frame_position": "调整构图",
@@ -9,6 +9,8 @@
     "videos.card.full_frame": "显示完整画面",
     "videos.card.left": "左侧",
     "videos.card.options": "{title}的操作",
+    "videos.card.pause": "暂停视频：{title}",
+    "videos.card.play": "播放视频：{title}",
     "videos.card.right": "右侧",
     "videos.preview.action": "开启{title}的预览声音",
     "videos.preview.active": "声音已开启",

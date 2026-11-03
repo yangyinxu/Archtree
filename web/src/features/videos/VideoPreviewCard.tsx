@@ -71,6 +71,12 @@ export const VideoPreviewCard = ({ item, viewerId, saved, onPlay }: VideoPreview
   }, []);
   const frameStyle = { '--video-fit': fit, '--video-position': `${position}%` } as CSSProperties;
   const metadata = [item.albumTitle, byline, item.duration].filter(Boolean).join(' · ');
+  // The image and transport control share the same standalone playback and preview cleanup.
+  const togglePlayback = () => {
+    stop();
+    if (playing) playerStore.pause();
+    else onPlay(item);
+  };
 
   return (
     <article aria-labelledby={titleId} className={styles.card} data-video-preview-card={item.id}
@@ -94,11 +100,15 @@ export const VideoPreviewCard = ({ item, viewerId, saved, onPlay }: VideoPreview
           {item.albumTitle && <p title={item.albumTitle}>{item.albumTitle}</p>}
           {metadata && <span title={metadata}>{metadata}</span>}
         </div>
-        <div className={styles.actions}>
+        <button aria-label={text(playing ? 'videos.card.pause' : 'videos.card.play', { title })}
+          data-video-open="" onClick={togglePlayback} title={title} type="button"
+          style={{ position: 'absolute', inset: 0, zIndex: 3, background: 'transparent', border: 0,
+            padding: 0, borderRadius: 'inherit', cursor: 'pointer', outlineOffset: '-4px' }} />
+        <div className={styles.actions} style={{ pointerEvents: 'none' }}>
           <button aria-label={text(audible ? 'videos.preview.stop' : 'videos.preview.action', { title })}
             aria-pressed={audible} className={styles.previewButton} data-preview-trigger=""
             disabled={playing || roomActive} onClick={preview.toggle}
-            title={roomActive ? t('content.album.play_room_active', { title }) : undefined} type="button">
+            style={{ pointerEvents: 'auto' }} title={roomActive ? t('content.album.play_room_active', { title }) : undefined} type="button">
             {audible ? <Icon name="volume" size={17} /> : <VolumeX aria-hidden="true" size={17} />}
             <span>{text(ready && audible ? 'videos.preview.active'
               : ready && preview.active && !preview.muted ? 'videos.preview.enable_sound' : 'videos.preview.label')}</span>
@@ -106,17 +116,15 @@ export const VideoPreviewCard = ({ item, viewerId, saved, onPlay }: VideoPreview
           <span className={styles.spacer} />
           <button aria-controls={optionsOpen ? optionsId : undefined} aria-expanded={optionsOpen}
             aria-haspopup="dialog" aria-label={text('videos.card.options', { title })}
-            className={styles.iconButton} onClick={() => { stop(); setOptionsOpen((open) => !open); }} ref={trigger} type="button">
+            className={styles.iconButton} onClick={() => { stop(); setOptionsOpen((open) => !open); }} ref={trigger}
+            style={{ pointerEvents: 'auto' }} type="button">
             <MoreHorizontal aria-hidden="true" size={24} />
           </button>
-          <span className={styles.saveSlot}><VideoCardSave compact saved={saved} target={{ contentType: 'audioTrack', contentId: item.id }} viewerId={viewerId} /></span>
+          <span className={styles.saveSlot} style={{ pointerEvents: 'auto' }}><VideoCardSave compact saved={saved} target={{ contentType: 'audioTrack', contentId: item.id }} viewerId={viewerId} /></span>
           <button aria-label={playing ? t('content.pause.label', { title }) : byline
             ? t('content.play.byline_label', { title, byline }) : t('content.play.label', { title })}
-            className={`${styles.play} ${playing ? styles.playing : ''}`} onClick={() => {
-              stop();
-              if (playing) playerStore.pause();
-              else onPlay(item);
-            }} type="button">
+            className={`${styles.play} ${playing ? styles.playing : ''}`} onClick={togglePlayback}
+            style={{ pointerEvents: 'auto' }} type="button">
             {playing ? <Pause aria-hidden="true" fill="currentColor" size={24} /> : <Play aria-hidden="true" fill="currentColor" size={24} />}
           </button>
         </div>

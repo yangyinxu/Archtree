@@ -16493,6 +16493,24 @@
         "title": "string"
       }
     },
+    "videos.card.pause": {
+      "description": "Accessible immersive Video image action that pauses the current Video without changing the queue.",
+      "delivery": [
+        "web-listener"
+      ],
+      "variables": {
+        "title": "string"
+      }
+    },
+    "videos.card.play": {
+      "description": "Accessible immersive Video image action that starts normal standalone playback.",
+      "delivery": [
+        "web-listener"
+      ],
+      "variables": {
+        "title": "string"
+      }
+    },
     "videos.card.right": {
       "description": "Right endpoint of the immersive Video card crop-position control.",
       "delivery": [

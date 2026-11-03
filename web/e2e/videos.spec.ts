@@ -4,6 +4,8 @@
  *   - Videos keeps loaded cards after a continuation fails and retries its cursor
  *   - Videos explains its error and empty states without requiring authentication
  *   - Video cards pause the shared player and navigation preserves its source and elapsed time
+ *   - immersive picture playback
+ *     - clicking the moving image launches Video and its native keyboard target preserves Pause position
  *   - wide Video cards offer configured muted hover previews without starting formal playback
  *   - anonymous Preview settings persists the device muted default through reload
  *   - immersive Video cards remain usable across widths and keep frame controls separate from playback
@@ -130,6 +132,88 @@ test('Video cards pause the shared player and navigation preserves its source an
     source: `/content/mediaTrack/stream/${trackFixtures[0].id}` });
   await expect(page.locator('video:not([data-video-preview])')).toHaveCount(1);
   expect(api.calls.some((call) => call.pathname === '/content/me/recently-played')).toBe(false);
+});
+
+test.describe('immersive picture playback', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript(() => {
+      localStorage.setItem('finitude:video-browse-view', 'immersive');
+      localStorage.setItem('finitude:video-preview-muted', 'true');
+    });
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+    await page.goto('/finitude/videos');
+  });
+
+  test('clicking the moving image launches Video and its native keyboard target preserves Pause position', async ({ page }) => {
+    const card = page.locator(`[data-video-preview-card="${trackFixtures[0].id}"]`);
+    await card.hover();
+    await expect(card.locator('video[data-video-preview]')).toHaveAttribute('data-ready', 'true');
+    const picture = (await card.locator('[data-video-frame="portrait"]').boundingBox())!;
+    await page.mouse.click(picture.x + picture.width / 2, picture.y + picture.height / 2);
+    const player = page.getByRole('region', { name: 'Now playing', exact: true });
+    await expect(player.getByRole('button', { name: 'Pause', exact: true })).toBeVisible();
+    await expect(page.getByRole('region', { name: 'First Light', exact: true })).toBeVisible();
+    await expect(page.locator('video[data-video-preview]')).toHaveCount(0);
+    await expect(page).toHaveURL(/\/finitude\/videos$/);
+    const media = await page.locator('video:not([data-video-preview])').elementHandle();
+    await expect.poll(() => media!.evaluate(element => (element as HTMLVideoElement).paused)).toBe(false);
+    await expect.poll(() => media!.evaluate(element => (element as HTMLVideoElement).readyState)).toBeGreaterThanOrEqual(1);
+    await media!.evaluate(element => { (element as HTMLVideoElement).dataset.pictureIdentity = 'shared-picture-player'; });
+    await expect(player.getByRole('button', { name: 'Next MediaTrack', exact: true })).toBeDisabled();
+
+    await page.getByRole('link', { name: 'Video', exact: true }).click();
+    const pausePicture = card.getByRole('button', { name: 'Pause video: First Light', exact: true });
+    await pausePicture.focus();
+    await media!.evaluate(element => {
+      (element as HTMLVideoElement).currentTime = 4.5;
+      element.dispatchEvent(new Event('timeupdate'));
+    });
+    await expect.poll(() => media!.evaluate(element => (element as HTMLVideoElement).seeking)).toBe(false);
+    await pausePicture.press('Space');
+    await expect(player.getByRole('button', { name: 'Play', exact: true })).toBeVisible();
+    const pausedTime = await media!.evaluate(element => (element as HTMLVideoElement).currentTime);
+    expect(pausedTime).toBeGreaterThanOrEqual(4.5);
+    await page.getByRole('button', { name: 'Grid', exact: true }).click();
+    await page.getByRole('button', { name: 'Immersive preview', exact: true }).click();
+    expect(await media!.evaluate(element => ({ connected: element.isConnected,
+      identity: (element as HTMLVideoElement).dataset.pictureIdentity,
+      paused: (element as HTMLVideoElement).paused, time: (element as HTMLVideoElement).currentTime,
+      source: new URL((element as HTMLVideoElement).src).pathname }))).toEqual({ connected: true,
+      identity: 'shared-picture-player', paused: true, time: pausedTime,
+      source: `/content/mediaTrack/stream/${trackFixtures[0].id}` });
+    await expect(player.getByRole('button', { name: 'Next MediaTrack', exact: true })).toBeDisabled();
+    const playPicture = card.getByRole('button', { name: 'Play video: First Light', exact: true });
+    await playPicture.focus();
+    await expect(playPicture).toBeFocused();
+    await playPicture.press('Enter');
+    await expect(player.getByRole('button', { name: 'Pause', exact: true })).toBeVisible();
+    await expect(page.getByRole('region', { name: 'First Light', exact: true })).toBeVisible();
+    await expect(page.locator('video[data-video-preview]')).toHaveCount(0);
+  });
+
+  for (const target of ['title', 'empty action-row gap'] as const) {
+    test(`clicking the immersive ${target} launches the shared Video`, async ({ page }) => {
+      const card = page.locator(`[data-video-preview-card="${trackFixtures[0].id}"]`);
+      await card.hover();
+      await expect(card.locator('video[data-video-preview]')).toHaveAttribute('data-ready', 'true');
+      let point: { x: number; y: number };
+      if (target === 'title') {
+        const title = (await card.getByRole('heading', { name: 'First Light', exact: true }).boundingBox())!;
+        point = { x: title.x + title.width / 2, y: title.y + title.height / 2 };
+      } else {
+        const preview = (await card.getByRole('button', { name: 'Unmute preview for First Light', exact: true }).boundingBox())!;
+        const options = (await card.getByRole('button', { name: 'First Light options', exact: true }).boundingBox())!;
+        expect(options.x - preview.x - preview.width).toBeGreaterThan(8);
+        point = { x: (preview.x + preview.width + options.x) / 2, y: options.y + options.height / 2 };
+      }
+      await page.mouse.click(point.x, point.y);
+      await expect(page.getByRole('region', { name: 'Now playing', exact: true })
+        .getByRole('button', { name: 'Pause', exact: true })).toBeVisible();
+      await expect(page.getByRole('region', { name: 'First Light', exact: true })).toBeVisible();
+      await expect(page.locator('video[data-video-preview]')).toHaveCount(0);
+    });
+  }
 });
 
 test('wide Video cards offer configured muted hover previews without starting formal playback', async ({ page }) => {
@@ -289,7 +373,7 @@ test('long Video metadata and active controls stay separated and inside a narrow
     }
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   }).toPass({ timeout: 5_000 });
-  const play = card.getByRole('button', { name: /^Play / });
+  const play = card.getByRole('button', { name: new RegExp(`^Play ${title} by `) });
   await play.focus();
   await expect(play).toBeFocused();
   await card.getByRole('button', { name: 'Save to Library', exact: true }).click();

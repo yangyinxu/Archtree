@@ -25,7 +25,8 @@ test('a failed preview chunk releases the explicit toggle and preserves real pla
   await waitFor(() => expect(screen.getByRole('button', { name: 'Unmute preview for Still a Video' })).toHaveAttribute('aria-pressed', 'false'));
   expect(container.querySelector('img')).toHaveAttribute('src', '/video.jpg');
   expect(container.querySelector('video')).toBeNull();
-  await user.click(screen.getByRole('button', { name: 'Play Still a Video' }));
+  expect(screen.getByRole('button', { name: 'Play Still a Video' })).toBeEnabled();
+  await user.click(screen.getByRole('button', { name: 'Play video: Still a Video' }));
   expect(onPlay).toHaveBeenCalledWith(item);
   expect(fetch).not.toHaveBeenCalled();
   expect(errors).not.toHaveBeenCalled();

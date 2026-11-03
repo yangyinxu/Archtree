@@ -1577,7 +1577,10 @@ The wire protocol and operational bounds are documented in
   cards; listeners may select an immersive view of
   approximately 10:13 cards showing the same Videos, with overlaid artwork,
   title, attribution, and separate Preview, Save, options, and Play or Pause
-  controls. An explicitly selected view is a device-local presentation preference,
+  controls. Activating the image or its overlaid title uses the same standalone
+  Play/Pause action as the transport button, including keyboard activation.
+  Preview, Save, options, and framing controls remain independent and never
+  trigger image playback. An explicitly selected view is a device-local presentation preference,
   independent of the account, and takes precedence over the administrator's
   default. Switching views never changes the shared player,
   queue, elapsed time, or playback activity. An immersive card's full-frame,

@@ -7,6 +7,7 @@
  *   - a hover-to-stream transition waits for actual playback while mute toggles preserve readiness
  *   - enabling sound on an already ready stream does not return the card to a loading label
  *   - uses real metadata and independent non-nested playback, preview, save and framing controls
+ *   - the playing image pauses through the keyboard without relaunching the Video
  *   - pauses the playing MediaTrack without relaunching it or changing its metadata
  *   - the preview control represents sound state and forwards mute changes without stopping the preview
  *   - room-owned playback disables preview sound without issuing a shared room pause
@@ -112,6 +113,33 @@ test('uses real metadata and independent non-nested playback, preview, save and 
   await user.click(screen.getByRole('button', { name: `Play ${item.title} by Documented Performer` }));
   expect(controls.stop).toHaveBeenCalled();
   expect(onPlay).toHaveBeenCalledWith(item);
+});
+
+test.each(['click', 'Enter', 'Space'])('the immersive image starts real playback with %s and stops its preview', async (activation) => {
+  controls.active = true;
+  const { container, onPlay } = renderCard();
+  const user = userEvent.setup();
+  const image = screen.getByRole('button', { name: `Play video: ${item.title}` });
+  expect(image).toHaveAttribute('data-video-open');
+  expect(container.querySelectorAll('button button')).toHaveLength(0);
+  if (activation === 'click') await user.click(image);
+  else {
+    image.focus();
+    await user.keyboard(activation === 'Enter' ? '{Enter}' : ' ');
+  }
+  expect(controls.stop).toHaveBeenCalled();
+  expect(onPlay).toHaveBeenCalledExactlyOnceWith(item);
+  expect(controls.toggle).not.toHaveBeenCalled();
+  expect(controls.pause).not.toHaveBeenCalled();
+});
+
+test('the playing image pauses through the keyboard without relaunching the Video', async () => {
+  controls.playingId = item.id;
+  const { onPlay } = renderCard();
+  screen.getByRole('button', { name: `Pause video: ${item.title}` }).focus();
+  await userEvent.setup().keyboard('{Enter}');
+  expect(controls.pause).toHaveBeenCalledTimes(1);
+  expect(onPlay).not.toHaveBeenCalled();
 });
 
 test('pauses the playing MediaTrack without relaunching it or changing its metadata', async () => {

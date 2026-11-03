@@ -56,7 +56,11 @@ Changing the view only replaces the browse
 presentation; it does not recreate the shared player, launch a queue, or record
 playback activity. Immersive cards compose independent Preview, Save, framing,
 and Play or Pause controls rather than nesting buttons inside the ordinary
-whole-card Play target. Save retains the existing authenticated account boundary.
+whole-card Play target. A sibling native image button covers the non-interactive
+media, title, and action-row gaps; it shares the transport's preview cleanup and
+standalone Play/Pause handler. Controls above it keep independent hit targets,
+without nested buttons or a card-level bubbling click handler. Save retains the
+existing authenticated account boundary.
 Framing controls affect only CSS fitting and horizontal positioning; the public
 DTO and stored media, artwork, and preview objects do not change.
 
