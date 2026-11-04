@@ -5,6 +5,8 @@
  *   - renders responsive navigation and exactly one persistent player surface
  *   - moves keyboard focus to main content from the skip link
  *   - toggles the read-only Now Playing pane without remounting the player
+ *   - restores the explicit Now Playing panel choice after a reload
+ *   - keeps the panel usable when browser storage rejects explicit choices
  *   - a direct signed-out Admin address uses the standalone shell while retaining the private gate
  *   - the management layout remains independent during authority suspension and identity reconciliation
  *   - round trips through management preserve the player queue, position and listener panel choice
@@ -51,6 +53,7 @@ import { readSearchHistory } from '../features/search/searchHistory';
 import { AppShell } from './AppShell';
 import { appRoutes } from './router';
 import { shellLayoutStorageKey } from './shellLayoutPreferences';
+import { nowPlayingPreferenceStorageKey } from './nowPlayingPreference';
 import shellStyles from './AppShell.module.css';
 import { playerStore, type PlayerQueueItem } from '../player';
 
@@ -164,6 +167,43 @@ test('toggles the read-only Now Playing pane without remounting the player', asy
   expect(screen.getByRole('region', { name: 'Now playing' })).toBe(player);
 });
 
+test('restores the explicit Now Playing panel choice after a reload', async () => {
+  const user = userEvent.setup();
+  const first = renderRoute('/');
+  await user.click(await screen.findByRole('button', { name: 'Hide Now Playing view' }));
+  expect(window.localStorage.getItem(nowPlayingPreferenceStorageKey)).toBe('false');
+  first.unmount();
+
+  const second = renderRoute('/');
+  const show = await screen.findByRole('button', { name: 'Show Now Playing view' });
+  expect(show).toHaveAttribute('aria-expanded', 'false');
+  await user.click(show);
+  expect(window.localStorage.getItem(nowPlayingPreferenceStorageKey)).toBe('true');
+  second.unmount();
+
+  renderRoute('/');
+  expect(await screen.findByRole('button', { name: 'Hide Now Playing view' }))
+    .toHaveAttribute('aria-expanded', 'true');
+});
+
+test('keeps the panel usable when browser storage rejects explicit choices', async () => {
+  const user = userEvent.setup();
+  const blocked = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+    throw new Error('blocked');
+  });
+  try {
+    renderRoute('/');
+    await user.click(await screen.findByRole('button', { name: 'Hide Now Playing view' }));
+    expect(screen.getByRole('button', { name: 'Show Now Playing view' }))
+      .toHaveAttribute('aria-expanded', 'false');
+    await user.click(screen.getByRole('button', { name: 'Show Now Playing view' }));
+    expect(screen.getByRole('button', { name: 'Hide Now Playing view' }))
+      .toHaveAttribute('aria-expanded', 'true');
+  } finally {
+    blocked.mockRestore();
+  }
+});
+
 test.each(['admin', 'user'] as const)('uses a standalone workspace on Admin addresses in %s view', async mode => {
   const { container } = renderAdminShell('/admin/catalog', mode);
   await screen.findByRole('button', { name: 'Current view: ' + (mode === 'admin' ? 'Admin' : 'User') });
@@ -261,6 +301,7 @@ test('ongoing Video retains its mounted surface without obscuring management con
 
 test('listener navigation minimizes the Video theater to the panel until the listener restores it', async () => {
   const user = userEvent.setup();
+  window.localStorage.setItem(nowPlayingPreferenceStorageKey, 'false');
   const item: PlayerQueueItem = { id: 'synthetic-video', title: 'Synthetic video', artworkUrl: '', artistNames: ['Synthetic artist'], mediaType: 'video', streamUrl: '' };
   const snapshot = { ...playerStore.getSnapshot(), queue: [item], currentIndex: 0, currentItem: item, status: 'playing' as const, currentTime: 42 };
   vi.spyOn(playerStore, 'getSnapshot').mockReturnValue(snapshot);
@@ -268,6 +309,7 @@ test('listener navigation minimizes the Video theater to the panel until the lis
   const theater = () => container.querySelector('[aria-labelledby="video-theater-title"]');
   await waitFor(() => expect(theater()).toBeInTheDocument());
   expect(screen.getByRole('main', { hidden: true })).toHaveAttribute('inert');
+  expect(container.querySelector('[data-now-playing-open="true"]')).toBeInTheDocument();
 
   // The brand points at the current Home address, which previously left the theater covering it.
   await user.click(screen.getByRole('link', { name: 'Finitude home' }));
@@ -299,6 +341,7 @@ test('listener navigation minimizes the Video theater to the panel until the lis
   await user.click(within(screen.getByRole('complementary', { name: 'Finitude Library' })).getByRole('link', { name: 'Search' }));
   expect(theater()).toBeNull();
   expect(screen.getByRole('main')).toHaveTextContent('Workspace content');
+  expect(window.localStorage.getItem(nowPlayingPreferenceStorageKey)).toBe('false');
 });
 
 test('resizes and restores wide panels without remounting the player', async () => {
@@ -376,6 +419,7 @@ test('removes panel separators when the compact shell takes control', async () =
       expect(screen.queryByRole('separator', { name: 'Resize Now Playing panel' }))
         .not.toBeInTheDocument();
     });
+    expect(window.localStorage.getItem(nowPlayingPreferenceStorageKey)).toBeNull();
   } finally {
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: originalWidth });
     fireEvent(window, new Event('resize'));

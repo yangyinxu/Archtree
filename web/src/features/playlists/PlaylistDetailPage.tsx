@@ -5,12 +5,11 @@
  * Internal
  *   Types: MemberMutationScope, MemberMutationContext, ReorderVariables, RemoveVariables
  *   Functions: memberMutationMessage
- *   Constants: AddSoundtracksDialog, ActionMenu, PlaylistDeleteDialog, PlaylistNameDialog
+ *   Constants: AddSoundtracksDialog, CompactCatalogHeader, ActionMenu, PlaylistDeleteDialog, PlaylistNameDialog
  * @end-catalog */
 
 import { Fragment, lazy, Suspense, useEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from 'react';
 import { useMutation, useQuery, useQueryClient, type Query } from '@tanstack/react-query';
-import { CirclePlus, ListMusic } from 'lucide-react';
 import { Link, useNavigate, useParams } from 'react-router';
 
 import { ApiError } from '../../api/client';
@@ -31,7 +30,6 @@ import { browserSessionQuery } from '../../api/session';
 import { focusMainContent } from '../../app/focusMainContent';
 import { neutralArtworkTone, useArtworkTone } from '../../artwork/useArtworkTone';
 import { Artwork } from '../../components/Artwork';
-import { CompactCatalogHeader } from '../../components/CompactCatalogHeader';
 import { DetailHero, DetailHeroSkeleton } from '../../components/DetailHero';
 import h from '../../components/DetailHero.module.css';
 import { Icon } from '../../components/Icon';
@@ -55,6 +53,9 @@ import {
 
 const AddSoundtracksDialog = lazy(() => import('./AddSoundtracksDialog').then((module) => ({
   default: module.AddSoundtracksDialog
+})));
+const CompactCatalogHeader = lazy(() => import('../../components/CompactCatalogHeader').then((module) => ({
+  default: module.CompactCatalogHeader
 })));
 const ActionMenu = lazy(() => import('../../components/ActionMenu').then((module) => ({
   default: module.ActionMenu
@@ -314,7 +315,7 @@ export const PlaylistDetailPage = () => {
   if (!session.data) {
     return (
       <div className={styles.page}><div className={styles.state}>
-        <ListMusic aria-hidden="true" />
+        <Icon name="list-music" strokeWidth={2} />
         <h1>{t('playlist.detail.signed_out_title')}</h1>
         <p>{t('playlist.detail.signed_out_copy')}</p>
         <Link className={styles.primaryButton} state={{ from: `/playlists/${playlistId}` }} to="/login">{t('common.action.log_in')}</Link>
@@ -326,7 +327,7 @@ export const PlaylistDetailPage = () => {
     const notFound = playlistQuery.error instanceof ApiError && playlistQuery.error.status === 404;
     return (
       <div className={styles.page}><div className={styles.state} role={notFound ? undefined : 'alert'}>
-        <ListMusic aria-hidden="true" />
+        <Icon name="list-music" strokeWidth={2} />
         <h1>{notFound ? t('playlist.detail.not_found_title') : t('playlist.detail.load_error_title')}</h1>
         <p>{notFound
           ? t('playlist.detail.not_found_copy')
@@ -354,16 +355,18 @@ export const PlaylistDetailPage = () => {
 
   return (
     <>
-      <CompactCatalogHeader
-        heroPlayRef={heroPlayRef}
-        heroRef={heroRef}
-        onPlay={togglePlay}
-        playDisabled={readyTracks.length === 0}
-        playing={heroPlaying}
-        playLabel={heroPlaying ? pauseLabel : t('playlist.detail.play_label', { name })}
-        title={name}
-        tone={tone.pane}
-      />
+      <Suspense fallback={null}>
+        <CompactCatalogHeader
+          heroPlayRef={heroPlayRef}
+          heroRef={heroRef}
+          onPlay={togglePlay}
+          playDisabled={readyTracks.length === 0}
+          playing={heroPlaying}
+          playLabel={heroPlaying ? pauseLabel : t('playlist.detail.play_label', { name })}
+          title={name}
+          tone={tone.pane}
+        />
+      </Suspense>
       <div className={h.page}>
         <DetailHero
           actions={<>
@@ -390,7 +393,7 @@ export const PlaylistDetailPage = () => {
               title={t('playlist.action.add_tracks')}
               type="button"
             >
-              <CirclePlus aria-hidden="true" focusable="false" />
+              <Icon name="circle-plus" strokeWidth={2} />
             </button>
             <span className={h.iconSlot}>
               <Suspense fallback={null}>
@@ -448,7 +451,7 @@ export const PlaylistDetailPage = () => {
           >{t('common.label.mediatracks')}</h2>
           {playlist.items.length === 0 ? (
             <div className={styles.emptyState}>
-              <ListMusic aria-hidden="true" />
+              <Icon name="list-music" strokeWidth={2} />
               <h3>{t('playlist.detail.empty_title')}</h3>
               <p>{t('playlist.detail.empty_copy')}</p>
               <button className={styles.primaryButton} onClick={() => setDialog('add')} type="button">{t('playlist.action.add_tracks')}</button>

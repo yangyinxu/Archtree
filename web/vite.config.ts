@@ -37,6 +37,8 @@ export default defineConfig(({ command, mode }) => ({
             || id.endsWith('/web/src/features/videos/VideosPage.module.css')
             || id.includes('/localization/generated/web-listener/bundles/')) return 'video-presentation-shared';
           if (id.endsWith('/web/src/features/videos/VideoPreviewCard.module.css')) return 'video-card-styles';
+          // Shared detail styles stay together when the compact header component loads lazily.
+          if (/\/web\/src\/components\/(CompactCatalogHeader|DetailHero|TrackTable)\.module\.css$/.test(id)) return 'catalog-detail-styles';
           // Shared helpers must not make the room runtime eagerly load the social identity page.
           return id.endsWith('/web/src/features/social/SocialPage.module.css')
             || id.endsWith('/web/src/api/socialSchemas.ts')

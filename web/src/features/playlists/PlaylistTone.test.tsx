@@ -88,7 +88,7 @@ test('tints the Playlist hero with the artwork tone and leaves the main pane unt
   const artwork = '/content/images/0000000000000000000000b7';
   const { main, unmount } = mount(artwork);
   const hero = (await screen.findByRole('heading', { level: 1, name: 'Quiet sequence' })).closest('header')!;
-  const bar = screen.getByText('Quiet sequence', { selector: 'span' }).parentElement!;
+  const bar = (await screen.findByText('Quiet sequence', { selector: 'span' })).parentElement!;
 
   expect(hero.style.getPropertyValue('--tone-color')).toBe(neutralArtworkTone.hero);
   expect(bar.style.getPropertyValue('--tone-color')).toBe(neutralArtworkTone.pane);

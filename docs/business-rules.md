@@ -1513,6 +1513,18 @@ The wire protocol and operational bounds are documented in
   state. Starting playback keeps the current route visible, and navigation
   inside the listener does not replace or restart that player. Audio and Video
   MediaTracks use that same player.
+- Web volume, mute, Shuffle, and Repeat choices survive refreshes and return
+  visits on the same browser profile. They are device-local preferences,
+  independent of the account, and remain through logout or account changes.
+  Saved volume and mute apply before the first stream can play. Restoring these
+  choices does not restore a queue, elapsed time, playback activity, or autoplay.
+  Room playback temporarily controls its own order without overwriting personal
+  Shuffle and Repeat choices; leaving the room restores those choices without
+  restoring the former queue. Invalid stored values use defaults, and unavailable
+  browser storage does not prevent controls from working for the current visit.
+- The Web listener remembers an explicit choice to open or close the desktop
+  Now Playing pane on the same browser profile. Temporary Video presentation
+  and responsive layout changes do not overwrite that choice.
 - Web player timelines distinguish elapsed playback, buffered streaming ranges,
   and the remaining unbuffered track. Compact and expanded surfaces use the
   same current source's buffer, preserve gaps after seeking, and clear the

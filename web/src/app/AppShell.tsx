@@ -23,6 +23,7 @@ import { Icon, type IconName } from '../components/Icon';
 import { SearchQueryProvider } from '../features/search/SearchQueryProvider';
 import { useSocialAvailability } from '../features/social/socialAvailability';
 import { RouteAnnouncer } from './RouteAnnouncer';
+import { readNowPlayingOpen, writeNowPlayingOpen } from './nowPlayingPreference';
 import { useLocalization } from '../localization/LocalizationProvider';
 import type { MessageKey } from '../localization/contract';
 import { playerStore, usePlayer } from '../player';
@@ -100,7 +101,7 @@ const AppShellContent = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const capabilities = useQuery(listenerCapabilitiesQuery());
-  const [nowPlayingOpen, setNowPlayingOpen] = useState(true);
+  const [nowPlayingOpen, setNowPlayingOpen] = useState(readNowPlayingOpen);
   const [widePanelResizersEnabled, setWidePanelResizersEnabled] = useState(false);
   const shellRef = useRef<HTMLDivElement>(null);
   const player = usePlayer(playerStore);
@@ -224,7 +225,11 @@ const AppShellContent = () => {
             nowPlayingOpen={effectiveNowPlayingOpen}
             onToggleNowPlaying={videoPlaying
               ? undefined
-              : () => setNowPlayingOpen((open) => !open)}
+              : () => {
+                  const open = !nowPlayingOpen;
+                  setNowPlayingOpen(open);
+                  writeNowPlayingOpen(open);
+                }}
             onTheaterMinimized={setTheaterMinimized}
             theaterMinimized={theaterMinimized}
           />

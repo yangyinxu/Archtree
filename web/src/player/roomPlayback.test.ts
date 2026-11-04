@@ -18,6 +18,7 @@
  *   - shared trace ignores stale/duplicate frames and preserves one source across membership and seek changes
  *   - explicit UI and MediaSession actions emit frozen expected-state intents without optimistic playback
  *   - room mode refuses unrelated browse queue launches and keeps shuffle/repeat and volume personal
+ *   - room transport preserves saved personal modes while persisting local volume and mute
  *   - natural completion cannot advance even while everyone can send Next, and emits no intent
  *   - a deliberate local pause survives remote play, selection, and delayed callbacks until explicit resync
  *   - immediate resync waits for the pending native seek before preparing the latest playing anchor
@@ -57,6 +58,7 @@
 
 import trace from '../../../contracts/social/prototype-v1/playback-trace.json';
 import { createPlayerStore } from './playerStore';
+import { createPlayerPreferencesPersistence } from './playerPreferences';
 import { RoomPlaybackActiveError } from './types';
 import type { PlayerAudio, PlayerMediaSession, PlayerMediaSessionAction, PlayerMediaSessionActionDetails, PlayerQueueItem } from './types';
 import type { RoomPlaybackOptions, RoomPlaybackState } from './roomPlayback';
@@ -591,6 +593,47 @@ test('room mode refuses unrelated browse queue launches and keeps shuffle/repeat
   room.detach();
   expect(store.isRoomPlaybackActive()).toBe(false);
   store.destroy();
+});
+
+test('room transport preserves saved personal modes while persisting local volume and mute', async () => {
+  let serialized: string | null = null;
+  const preferences = createPlayerPreferencesPersistence({
+    getItem: () => serialized,
+    setItem: (_key, value) => { serialized = value; }
+  });
+  preferences.write({ volume: 0.6, muted: false, shuffleEnabled: true, repeatMode: 'one' });
+  const audio = new RoomAudio();
+  const store = createPlayerStore({
+    preferences, audioFactory: () => audio, mediaSession: null,
+    roomPlaybackProbeFactory: createRoomPlaybackController
+  });
+  const freshAudioFactory = vi.fn(() => new RoomAudio());
+  let fresh: ReturnType<typeof createPlayerStore> | undefined;
+  try {
+    expect(store.getSnapshot()).toMatchObject({ shuffleEnabled: true, repeatMode: 'one' });
+    const room = store.attachRoomPlayback({
+      onIntent: vi.fn(), now: () => 10_000, visibility: null, pageLifecycle: null
+    });
+    await room.apply({ ...frame(0), status: 'paused', positionSeconds: 0, anchorMonotonicMs: 10_000 });
+    audio.ready();
+    expect(store.getSnapshot()).toMatchObject({ shuffleEnabled: false, repeatMode: 'off' });
+    store.setVolume(0.25);
+    store.setMuted(true);
+    expect(preferences.read()).toEqual({ volume: 0.25, muted: true, shuffleEnabled: true, repeatMode: 'one' });
+    room.detach();
+    expect(store.getSnapshot()).toMatchObject({
+      queue: [], currentItem: null, shuffleEnabled: true, repeatMode: 'one', volume: 0.25, muted: true
+    });
+    fresh = createPlayerStore({ preferences, audioFactory: freshAudioFactory, mediaSession: null });
+    expect(fresh.getSnapshot()).toMatchObject({
+      queue: [], currentItem: null, status: 'idle',
+      volume: 0.25, muted: true, shuffleEnabled: true, repeatMode: 'one'
+    });
+    expect(freshAudioFactory).not.toHaveBeenCalled();
+  } finally {
+    store.destroy();
+    fresh?.destroy();
+  }
 });
 
 test('natural completion cannot advance even while everyone can send Next, and emits no intent', async () => {

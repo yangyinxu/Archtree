@@ -23,6 +23,7 @@ import type {
 import { enqueueListenerTelemetry } from '../telemetry/client';
 import { classifyListenerRoute } from '../telemetry/routeClassifier';
 import { createMediaSessionAdapter } from './mediaSessionAdapter';
+import { createPlayerPreferencesPersistence, defaultPlayerPreferences, type PlayerPreferences } from './playerPreferences';
 import { canonicalOrder, copyQueue, currentCycleHistory, queueLaunchOrder, shuffledOrder } from './queueOrder';
 import { RoomPlaybackActiveError } from './types';
 import type { createRoomPlaybackController, RoomPlaybackState } from './roomPlayback';
@@ -83,12 +84,9 @@ const classifyMediaError = (code: number | undefined): PlayerErrorCode => {
   }
 };
 
-const initialSnapshot = (
-  volume: number,
-  muted: boolean,
-  shuffleEnabled: boolean,
-  repeatMode: PlayerRepeatMode
-): PlayerSnapshot => Object.freeze({
+const initialSnapshot = ({
+  volume, muted, shuffleEnabled, repeatMode
+}: PlayerPreferences): PlayerSnapshot => Object.freeze({
   queue: Object.freeze([]) as readonly PlayerQueueItem[],
   currentIndex: -1,
   currentItem: null,
@@ -133,18 +131,21 @@ export const createPlayerStore = (
   const listeners = new Set<() => void>();
   const playbackListeners = new Set<(event: PlayerPlaybackEvent) => void>();
   const boundAudioListeners = new Map<string, () => void>();
+  const savedPreferences = options.preferences?.read() ?? defaultPlayerPreferences;
+  const requestedVolume = options.initialVolume ?? savedPreferences.volume;
   const startingVolume = clamp(
-    Number.isFinite(options.initialVolume) ? options.initialVolume ?? 1 : 1,
+    Number.isFinite(requestedVolume) ? requestedVolume : 1,
     0,
     1
   );
 
-  let snapshot = initialSnapshot(
-    startingVolume,
-    options.initiallyMuted ?? false,
-    options.initiallyShuffleEnabled ?? false,
-    options.initialRepeatMode ?? 'off'
-  );
+  let localPreferences: PlayerPreferences = {
+    volume: startingVolume,
+    muted: options.initiallyMuted ?? savedPreferences.muted,
+    shuffleEnabled: options.initiallyShuffleEnabled ?? savedPreferences.shuffleEnabled,
+    repeatMode: options.initialRepeatMode ?? savedPreferences.repeatMode
+  };
+  let snapshot = initialSnapshot(localPreferences);
   let audio: PlayerAudio | null = null;
   let audioCreationAttempted = false;
   let bufferReader: typeof import('./bufferedRanges').default | undefined;
@@ -162,6 +163,17 @@ export const createPlayerStore = (
   let destroyed = false;
   let room: ReturnType<typeof createRoomPlaybackController> | null = null;
   let observedRoom: RoomPlaybackState | null = null;
+
+  /** Room transport overrides and clock events never replace the listener's local choices. */
+  const savePreferences = (patch: Partial<PlayerPreferences>) => {
+    const changes = { ...patch };
+    for (const key of Object.keys(changes) as Array<keyof PlayerPreferences>) {
+      if (changes[key] === localPreferences[key]) delete changes[key];
+    }
+    if (Object.keys(changes).length === 0) return;
+    localPreferences = { ...localPreferences, ...changes };
+    options.preferences?.write(changes);
+  };
 
   const observePlayback = (type: string, media = audio) => {
     if (destroyed) return;
@@ -356,10 +368,12 @@ export const createPlayerStore = (
       },
       volumechange: () => {
         if (destroyed) return;
-        updateSnapshot({
+        const preferences = {
           volume: clamp(Number.isFinite(target.volume) ? target.volume : snapshot.volume, 0, 1),
           muted: target.muted
-        });
+        };
+        savePreferences(preferences);
+        updateSnapshot(preferences);
       },
       error: () => {
         if (!snapshot.currentItem || destroyed) return;
@@ -829,6 +843,7 @@ export const createPlayerStore = (
         }
       }
 
+      savePreferences({ shuffleEnabled });
       updateSnapshot({ shuffleEnabled });
     },
     cycleRepeatMode: () => {
@@ -836,6 +851,7 @@ export const createPlayerStore = (
       const repeatMode: PlayerRepeatMode = snapshot.repeatMode === 'off'
         ? 'all'
         : snapshot.repeatMode === 'all' ? 'one' : 'off';
+      savePreferences({ repeatMode });
       updateSnapshot({ repeatMode });
     },
     setVolume: (volume) => {
@@ -848,6 +864,7 @@ export const createPlayerStore = (
           return;
         }
       }
+      savePreferences({ volume: nextVolume });
       updateSnapshot({ volume: nextVolume });
     },
     setMuted: (muted) => {
@@ -859,6 +876,7 @@ export const createPlayerStore = (
           return;
         }
       }
+      savePreferences({ muted });
       updateSnapshot({ muted });
     },
     toggleMute: () => store.setMuted(!snapshot.muted),
@@ -883,7 +901,13 @@ export const createPlayerStore = (
         },
         pause: pauseMedia,
         seek: seekMedia,
-        detach: () => { clearQueue(); room = null; observedRoom = null; }
+        detach: () => {
+          clearQueue(); room = null; observedRoom = null;
+          updateSnapshot({
+            shuffleEnabled: localPreferences.shuffleEnabled,
+            repeatMode: localPreferences.repeatMode
+          });
+        }
       }, roomOptions);
       const attachment = room.attachment;
       return { ...attachment, apply: async state => {
@@ -917,12 +941,7 @@ export const createPlayerStore = (
       destroyed = true;
       sourceGeneration += 1;
       playAttemptGeneration += 1;
-      snapshot = initialSnapshot(
-        snapshot.volume,
-        snapshot.muted,
-        snapshot.shuffleEnabled,
-        snapshot.repeatMode
-      );
+      snapshot = initialSnapshot(snapshot);
       upcomingOrder = undefined;
       notify();
 
@@ -962,6 +981,7 @@ export const createPlayerStore = (
 
 /** Shared browser runtime; its one video-capable media element is created lazily. */
 export const playerStore = createPlayerStore({
+  preferences: createPlayerPreferencesPersistence(),
   onPlaybackError: (event) => {
     enqueueListenerTelemetry({
       category: 'playback_error',

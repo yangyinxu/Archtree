@@ -8,6 +8,7 @@
  * @end-catalog */
 
 import type { MediaSessionArtworkSource } from '../artwork/artworkUrls';
+import type { PlayerPreferencesPersistence } from './playerPreferences';
 import type { createRoomPlaybackController, RoomPlaybackAttachment, RoomPlaybackOptions, RoomPlaybackState } from './roomPlayback';
 
 /** Refuses a local queue launch while an attached room owns the shared player. */
@@ -149,6 +150,8 @@ export interface PlayerMediaSession {
 }
 
 export interface CreatePlayerStoreOptions {
+  /** The browser singleton opts into persistence; isolated stores keep independent state. */
+  preferences?: PlayerPreferencesPersistence;
   audioFactory?: () => PlayerAudio;
   mediaSession?: PlayerMediaSession | null;
   mediaMetadataFactory?: (metadata: {

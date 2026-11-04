@@ -230,6 +230,21 @@ registration, snapshot publication, and cleanup; every system action delegates t
 that same store. It does not create a player or queue, and browser integration
 errors cannot escape into transport.
 
+`playerPreferences.ts` allowlists a versioned, device-local record under
+`finitude:player-preferences:v1` for volume, mute, Shuffle, and Repeat. The
+browser singleton opts into this adapter; isolated stores retain independent
+defaults. Hydration precedes lazy media creation, and only changed preferences
+write storage, including native media volume changes. Queue, content metadata,
+time, account identity, and credentials are never serialized. Room order
+overrides do not replace the retained local modes. Malformed fields fall back
+individually; denied or full storage leaves current-document controls usable.
+Each write merges only changed fields into the latest stored values, so an older
+tab changing Repeat cannot overwrite a newer tab's saved volume. An already-open
+tab keeps its own live output until the listener changes it or reloads.
+The shell separately stores explicit Now Playing visibility under
+`finitude:now-playing-open:v1`; responsive and Video-forced visibility never
+write that preference or change the stored panel widths.
+
 The store retains its derived upcoming queue array while queue identity, order,
 current entry, order position, and Repeat mode are unchanged. Media-clock updates
 still publish transport progress without allocating that array again.
@@ -237,8 +252,12 @@ still publish transport progress without allocating that array again.
 fields. The full player hook remains responsible for progress and transport UI.
 The active room-track composer is another lazy boundary: signed-out and inactive
 profile gates load their explanation before the larger composer.
+The Playlist detail page loads its compact scroll header independently of the
+initial hero and track list; its observer uses the same hero and playback action.
+The header, hero, and track-table styles share one CSS asset to preserve their
+combined compression when the component code loads separately.
 Music-share cards load their existing Save button on demand. The shared Icon
-keeps navigation and identity glyphs eager while deferring playback glyphs behind
+keeps navigation and identity glyphs eager while deferring playback and Playlist glyphs behind
 the same SVG dimensions and accessibility props. These boundaries retain the
 existing controls and the unchanged transitive JavaScript budget.
 

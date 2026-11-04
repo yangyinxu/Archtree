@@ -201,10 +201,17 @@ test('creates, renames, composes, reorders, plays, removes, and deletes one Play
   await page.getByRole('menuitem', { name: 'Move Up' }).click();
   await expect(page.locator('ol li').first()).toContainText('Night Window');
 
-  await page.getByRole('button', { name: 'Play Night Window' }).click();
+  const initialViewport = page.viewportSize()!;
+  // A short pane lets this two-member Playlist reveal its compact header without adding fixture rows.
+  await page.setViewportSize({ width: 1_280, height: 360 });
+  await page.getByRole('main').evaluate((element) => element.scrollTo({ top: element.scrollHeight }));
+  const compactPlay = page.getByRole('button', { name: 'Play Quiet order', exact: true });
+  await expect(compactPlay).toBeVisible();
+  await compactPlay.click();
   const player = page.getByRole('region', { name: 'Now playing' });
   await expect(player.getByText('Night Window', { exact: true })).toBeVisible();
   await expect.poll(() => activity).toEqual([{ contentType: 'audioTrack', contentId: trackFixtures[1].id }]);
+  await page.setViewportSize(initialViewport);
 
   await page.getByRole('button', { name: 'Actions for First Light' }).click();
   await page.getByRole('menuitem', { name: 'Remove from Playlist' }).click();
